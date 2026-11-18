@@ -1,0 +1,2850 @@
+{
+ "add_column": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "batch_format": "str",
+     "column": "str",
+     "occurrence_id": "str",
+     "program": "str",
+     "task_batch_rows": "int",
+     "task_group": "str",
+     "task_origin": "bool"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "AddColumnOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "AddColumnOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "chain_map_filter_map": {
+  "declarations": [
+   "callable",
+   "callable",
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "occurrence_id": "str",
+     "program": "str",
+     "task_batch_rows": "int",
+     "task_group": "str",
+     "task_origin": "bool"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "MapOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "occurrence_id": "str",
+     "program": "str",
+     "task_batch_rows": "int",
+     "task_group": "str",
+     "task_origin": "bool"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "FilterOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "occurrence_id": "str",
+     "program": "str",
+     "task_batch_rows": "int",
+     "task_group": "str",
+     "task_origin": "bool"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "MapOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "MapOp",
+   "FilterOp",
+   "MapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "decode_document": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "actor_binding_version": "int",
+     "catch": "tuple",
+     "concurrency": "int",
+     "execution": "str",
+     "hard_timeout": "NoneType",
+     "occurrence_id": "str",
+     "program": "str",
+     "queue_depth": "NoneType"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "AsyncMapOp",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "adapter"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "AsyncMapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "drop_columns": {
+  "declarations": [
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "columns": "tuple",
+     "occurrence_id": "str"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "DropColumnsOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "DropColumnsOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "exclude_keys": {
+  "declarations": [
+   "source",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "key_only": "bool",
+     "kind": "str",
+     "occurrence_id": "str",
+     "query": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "lance",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "query": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "lance",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "columns": "tuple",
+     "occurrence_id": "str"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "SelectColumnsOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "chunk_bytes": "int",
+     "how": "str",
+     "kind": "str",
+     "lance_key_source": "str",
+     "max_rows": "int",
+     "occurrence_id": "str",
+     "on": "tuple",
+     "op": "str",
+     "output": "str",
+     "payload_columns": "tuple",
+     "right_on": "tuple",
+     "suffix": "str"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "left",
+      "finite_complete",
+      "none"
+     ],
+     [
+      "right",
+      "finite_complete",
+      "none"
+     ]
+    ],
+    "kernel_kind": "exclude_keys",
+    "mergeable": false,
+    "node_kind": "relational",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [],
+  "source": "KeyedSource"
+ },
+ "fetch": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "catch": "tuple",
+     "concurrency": "int",
+     "execution": "str",
+     "hard_timeout": "NoneType",
+     "native_key": "str",
+     "native_operation": "str",
+     "occurrence_id": "str",
+     "program": "str",
+     "queue_depth": "int"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "AsyncMapOp",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "adapter"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "AsyncMapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "filter": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "occurrence_id": "str",
+     "program": "str",
+     "task_batch_rows": "int",
+     "task_group": "str",
+     "task_origin": "bool"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "FilterOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "FilterOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "flat_map": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "occurrence_id": "str",
+     "program": "str",
+     "task_batch_rows": "int",
+     "task_group": "str",
+     "task_origin": "bool"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "FlatMapOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "FlatMapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "group_batches": {
+  "declarations": [
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "chunk_bytes": "int",
+     "how": "str",
+     "kind": "str",
+     "max_rows": "int",
+     "occurrence_id": "str",
+     "on": "tuple",
+     "op": "str",
+     "output": "str",
+     "right_on": "tuple",
+     "suffix": "str"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "left",
+      "finite_complete",
+      "none"
+     ]
+    ],
+    "kernel_kind": "groups",
+    "mergeable": false,
+    "node_kind": "relational",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [],
+  "source": "KeyedSource"
+ },
+ "join": {
+  "declarations": [
+   "source",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "chunk_bytes": "int",
+     "how": "str",
+     "kind": "str",
+     "max_rows": "int",
+     "occurrence_id": "str",
+     "on": "tuple",
+     "op": "str",
+     "output": "str",
+     "right_on": "tuple",
+     "suffix": "str"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "left",
+      "finite_complete",
+      "none"
+     ],
+     [
+      "right",
+      "finite_complete",
+      "none"
+     ]
+    ],
+    "kernel_kind": "join",
+    "mergeable": false,
+    "node_kind": "relational",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [],
+  "source": "KeyedSource"
+ },
+ "limit": {
+  "declarations": [
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "limit": "int",
+     "occurrence_id": "str"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "LimitOp",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "LimitOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "lookup_lance": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "catch": "tuple",
+     "concurrency": "int",
+     "execution": "str",
+     "hard_timeout": "NoneType",
+     "occurrence_id": "str",
+     "program": "str",
+     "queue_depth": "int"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "AsyncMapOp",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "adapter"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "AsyncMapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "map": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "occurrence_id": "str",
+     "program": "str",
+     "task_batch_rows": "int",
+     "task_group": "str",
+     "task_origin": "bool"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "MapOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "MapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "map_async": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "catch": "tuple",
+     "concurrency": "int",
+     "execution": "str",
+     "hard_timeout": "NoneType",
+     "occurrence_id": "str",
+     "program": "str",
+     "queue_depth": "NoneType"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "AsyncMapOp",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "AsyncMapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "map_batches": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "batch_format": "str",
+     "batch_size": "NoneType",
+     "occurrence_id": "str",
+     "program": "str",
+     "zero_copy_batch": "bool"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "MapBatchesOp",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "MapBatchesOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "map_cached": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "catch": "tuple",
+     "concurrency": "int",
+     "execution": "str",
+     "hard_timeout": "NoneType",
+     "occurrence_id": "str",
+     "program": "str",
+     "queue_depth": "int"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "AsyncMapOp",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "adapter"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "AsyncMapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "map_class_factory": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "occurrence_id": "str",
+     "program": "str",
+     "task_batch_rows": "int",
+     "task_group": "str",
+     "task_origin": "bool"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "MapOp",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "auto_json"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "MapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "map_embeddings": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "concurrency": "int",
+     "flush_interval": "NoneType",
+     "inputs": "mappingproxy",
+     "max_batch": "int",
+     "model_contract": "mappingproxy",
+     "node_id": "str",
+     "occurrence_id": "str",
+     "output": "str",
+     "program": "str"
+    },
+    "effect": "journaled",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "embedding",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "remote_api",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "EmbeddingMapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "map_prompt": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "catch": "tuple",
+     "concurrency": "int",
+     "content_hash": "str",
+     "inputs": "mappingproxy",
+     "max_requests": "NoneType",
+     "model": "mappingproxy",
+     "node_id": "str",
+     "occurrence_id": "str",
+     "options": "mappingproxy",
+     "output": "str",
+     "outputs": "NoneType",
+     "program": "str",
+     "prompt_name": "str",
+     "response_format": "str"
+    },
+    "effect": "journaled",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "prompt",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "remote_api",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "OperatorLLMMapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "map_prompt_async": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "catch": "tuple",
+     "concurrency": "int",
+     "content_hash": "str",
+     "inputs": "mappingproxy",
+     "max_requests": "NoneType",
+     "model": "mappingproxy",
+     "node_id": "str",
+     "occurrence_id": "str",
+     "options": "mappingproxy",
+     "output": "str",
+     "outputs": "NoneType",
+     "program": "str",
+     "prompt_name": "str",
+     "response_format": "str"
+    },
+    "effect": "journaled",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "prompt",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "remote_api",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "AsyncMapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "map_stateful_instance": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "actor_binding_version": "int",
+     "occurrence_id": "str",
+     "program": "str",
+     "task_batch_rows": "int",
+     "task_group": "str",
+     "task_origin": "bool"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "MapOp",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "auto_json"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "MapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "parse_wikitext": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "actor_binding_version": "int",
+     "catch": "tuple",
+     "concurrency": "int",
+     "execution": "str",
+     "hard_timeout": "NoneType",
+     "occurrence_id": "str",
+     "program": "str",
+     "queue_depth": "NoneType"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "AsyncMapOp",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "adapter"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "AsyncMapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "prepend": {
+  "declarations": [
+   "callable",
+   "source",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "catch": "tuple",
+     "concurrency": "int",
+     "execution": "str",
+     "hard_timeout": "NoneType",
+     "max_row_bytes": "int",
+     "max_rows": "int",
+     "occurrence_id": "str",
+     "program": "str",
+     "queue_depth": "int"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ],
+     [
+      "prefix",
+      "finite_complete",
+      "none"
+     ]
+    ],
+    "kernel_kind": "StreamPrependOp",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "StreamPrependOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "random_sample": {
+  "declarations": [
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "fraction": "float",
+     "occurrence_id": "str",
+     "seed": "int"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "RandomSampleOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "RandomSampleOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "random_shuffle": {
+  "declarations": [
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "num_blocks": "NoneType",
+     "occurrence_id": "str",
+     "seed": "int",
+     "shuffle_order_version": "str"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "finite_complete",
+      "global"
+     ]
+    ],
+    "kernel_kind": "RandomShuffleOp",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "RandomShuffleOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "randomize_block_order": {
+  "declarations": [
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "occurrence_id": "str",
+     "seed": "int"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "finite_complete",
+      "global"
+     ]
+    ],
+    "kernel_kind": "RandomizeBlockOrderOp",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "RandomizeBlockOrderOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "range": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "count": "int",
+     "kind": "str",
+     "occurrence_id": "str"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "range",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "occurrence_id": "str",
+     "program": "str",
+     "task_batch_rows": "int",
+     "task_group": "str",
+     "task_origin": "bool"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "MapOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "MapOp"
+  ],
+  "source": "RangeSource"
+ },
+ "read_lance": {
+  "declarations": [
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "query": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "lance",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [],
+  "source": "LanceSource"
+ },
+ "reduce_by_key": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "chunk_bytes": "int",
+     "how": "str",
+     "kind": "str",
+     "max_rows": "int",
+     "occurrence_id": "str",
+     "on": "tuple",
+     "op": "str",
+     "output": "str",
+     "reducer_memory_v1": "mappingproxy",
+     "reducer_program": "str",
+     "right_on": "tuple",
+     "suffix": "str"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "left",
+      "finite_complete",
+      "none"
+     ]
+    ],
+    "kernel_kind": "reduce",
+    "mergeable": false,
+    "node_kind": "relational",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [],
+  "source": "KeyedSource"
+ },
+ "repartition": {
+  "declarations": [
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "keys": "NoneType",
+     "num_blocks": "int",
+     "occurrence_id": "str",
+     "shuffle": "bool",
+     "sort": "bool",
+     "target_num_rows_per_block": "NoneType"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "finite_complete",
+      "none"
+     ]
+    ],
+    "kernel_kind": "RepartitionOp",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "RepartitionOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "select_drop_rename": {
+  "declarations": [
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "columns": "tuple",
+     "occurrence_id": "str"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "SelectColumnsOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "names": "mappingproxy",
+     "occurrence_id": "str"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "RenameColumnsOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "SelectColumnsOp",
+   "RenameColumnsOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "sort": {
+  "declarations": [
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "boundaries": "NoneType",
+     "descending": "tuple",
+     "keys": "tuple",
+     "occurrence_id": "str"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "finite_complete",
+      "global"
+     ]
+    ],
+    "kernel_kind": "SortOp",
+    "mergeable": false,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "SortOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "terminal_count": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "occurrence_id": "str",
+     "program": "str",
+     "task_batch_rows": "int",
+     "task_group": "str",
+     "task_origin": "bool"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "MapOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "count",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "MapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "terminal_iter_rows": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "occurrence_id": "str",
+     "program": "str",
+     "task_batch_rows": "int",
+     "task_group": "str",
+     "task_origin": "bool"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "MapOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "iter_rows",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "MapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "terminal_materialize": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "occurrence_id": "str",
+     "program": "str",
+     "task_batch_rows": "int",
+     "task_group": "str",
+     "task_origin": "bool"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "MapOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "materialize",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "MapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "terminal_take_all": {
+  "declarations": [
+   "callable",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "occurrence_id": "str",
+     "program": "str",
+     "task_batch_rows": "int",
+     "task_group": "str",
+     "task_origin": "bool"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "MapOp",
+    "mergeable": true,
+    "node_kind": "transform",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take_all",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "MapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "terminal_take_zero": {
+  "declarations": [
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "items": "tuple",
+     "kind": "str",
+     "occurrence_id": "str",
+     "rows": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "items",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [
+   "MapOp"
+  ],
+  "source": "MaterializedSource"
+ },
+ "union": {
+  "declarations": [
+   "source",
+   "source"
+  ],
+  "nodes": [
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "kind": "str",
+     "occurrence_id": "str",
+     "reference": "NoneType",
+     "row_count": "int"
+    },
+    "effect": "pure",
+    "inputs": [],
+    "kernel_kind": "materialized",
+    "mergeable": false,
+    "node_kind": "source",
+    "resource_role": "io",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "inputs": "int",
+     "kind": "str",
+     "occurrence_id": "str"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "0",
+      "incremental",
+      "none"
+     ],
+     [
+      "1",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "union",
+    "mergeable": false,
+    "node_kind": "relational",
+    "resource_role": "cpu",
+    "state": "none"
+   },
+   {
+    "configuration": {
+     "arguments": "mappingproxy",
+     "kind": "str",
+     "occurrence_id": "str",
+     "terminal_memory": "mappingproxy"
+    },
+    "effect": "pure",
+    "inputs": [
+     [
+      "main",
+      "incremental",
+      "none"
+     ]
+    ],
+    "kernel_kind": "take",
+    "mergeable": false,
+    "node_kind": "terminal",
+    "resource_role": "cpu",
+    "state": "none"
+   }
+  ],
+  "ok": true,
+  "operations": [],
+  "source": "UnionSource"
+ }
+}
