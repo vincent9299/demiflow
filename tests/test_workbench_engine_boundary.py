@@ -46,6 +46,7 @@ PUBLIC = {
     'demiflow.execution.output_watch': {'OutputWatch'},
     'demiflow.execution.payload_limits': {'resolve_payload_bounds', 'stream_limits'},
     'demiflow.execution.plan_capture': {'build_logical_plan_view', 'capture_pipeline'},
+    'demiflow.execution.program_materials': {'program_prompt_materials'},
     'demiflow.execution.plan_facts': {'execution_instances'},
     'demiflow.execution.publication_facts': {
         'PreparedPublicationUnresolved', 'PublicationMismatch', 'admit_prepared_stage',
@@ -67,24 +68,8 @@ PUBLIC = {
         'compile_declared_dag', 'validate_logical_dag', 'validate_physical_execution_plan'},
 }
 
-STEP2 = 'step 2: publication inspection moves to execution.publication_facts'
-STEP3 = 'step 3: bounded read-only journal reader'
-STEP4 = 'step 4: sealed plan view and identity bridge reader'
-STEP5 = 'step 5: single engine launch entry'
-HEAD = 'unreviewed (added after b4396f8): node description should come from the engine'
-
-# (workbench file, engine module, imported name) -> why it is still allowed
-# Added on the newer integration base, audited separately: callsite capture
-# observes compiler frame locals. This presentation seam remains pending; it
-# must not be described as a stable public compiler API or a step 0-4 fix.
-PENDING_IMPORTS = {
-    ('graph/plan_callsite.py', 'demiflow.planning.dataflow_compile', 'capture_graph'): HEAD,
-    ('graph/plan_details.py', 'demiflow.data.plan', 'CallableSpec'): 'unreviewed (added after b4396f8): node description should come from the engine',
-    ('graph/plan_details.py', 'demiflow.data.plan', 'OperatorLLMMapOp'): 'unreviewed (added after b4396f8): node description should come from the engine',
-    ('graph/plan_details.py', 'demiflow.execution.dataflow_model_factory', 'CacheFactory'): 'unreviewed (added after b4396f8): node description should come from the engine',
-    ('graph/plan_details.py', 'demiflow.execution.dataflow_model_factory', 'PromptFactory'): 'unreviewed (added after b4396f8): node description should come from the engine',
-    ('graph/plan_details.py', 'demiflow.execution.dataflow_model_factory', 'RoutedPromptFactory'): 'unreviewed (added after b4396f8): node description should come from the engine',
-}
+# (workbench file, engine module, imported name) -> reason for an existing exception.
+PENDING_IMPORTS = {}
 
 # (workbench file, private attribute) -> exact number of uses still allowed
 PENDING_PRIVATE_ATTRIBUTES = {}

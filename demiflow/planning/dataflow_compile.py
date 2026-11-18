@@ -814,7 +814,7 @@ def _lower_request(request: ActionRequest) -> ActionRequest:
     return request
 
 
-def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None) -> CompiledDataflow:
+def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None, on_compiled=None) -> CompiledDataflow:
     """Capture the real source/plan/PlanInput topology into a v3 graph.
 
     ``inputs`` is a ``CompileInputs``: the executor defaults and report bindings
@@ -863,21 +863,29 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None) -> Com
     # Report-only: silent unless the configuration schema logger is enabled for DEBUG.
     from .dataflow_configuration import report_configuration
     report_configuration(graph)
-    return CompiledDataflow(graph=graph, declarations=declarations,
-                            report_bindings=tuple(capture.report_bindings),
-                            observation_labels=capture.observation_labels)
+    compiled = CompiledDataflow(graph=graph, declarations=declarations,
+                                report_bindings=tuple(capture.report_bindings),
+                                observation_labels=capture.observation_labels)
+    if on_compiled is not None:
+        # Final occurrence identities only: graph decoration/shared actors and
+        # validation have finished. No provenance allocation on execution paths.
+        from .dataflow_provenance import compiled_provenance
+        on_compiled(compiled_provenance(graph, sources=capture.alias_source, operations=capture.alias_op))
+    return compiled
 
 
-def lower_action(request: ActionRequest, *, bounds: Bounds, inputs=None) -> CompiledDataflow:
+def lower_action(request: ActionRequest, *, bounds: Bounds, inputs=None, on_compiled=None) -> CompiledDataflow:
     """Compile terminal collect/statistics/write semantics into the graph.
 
     The compiler's whole input is ``request``, ``bounds`` and ``inputs``
     (``execution.dataflow_compile_inputs.CompileInputs``). It reads nothing else
     from its surroundings; when ``inputs`` is omitted it is resolved once at entry.
+    ``on_compiled`` optionally observes bounded provenance after final validation;
+    it is not a semantic input and its result never enters the compiled contract.
     """
     definition = terminal_registry().get(request.kind)
     if definition is None:
         raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
     if request.kind == "write_datasink" and request.sink is None:
         raise _error("INVALID_CONTRACT", "write terminal requires a registered sink declaration")
-    return capture_graph(request, bounds=bounds, inputs=inputs)
+    return capture_graph(request, bounds=bounds, inputs=inputs, on_compiled=on_compiled)

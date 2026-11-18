@@ -57,36 +57,44 @@ class CapturedAction:
 
 
 class _Capture:
-    def __init__(self):
+    def __init__(self, on_compiled=None):
         self.result = None
         self.context = CompileContext()
+        self.on_compiled = on_compiled
 
     def intercept(self, request, *, policy, bounds):
         from ..planning.dataflow_compile import lower_action
         from .contracts.dataflow_errors import DataflowError
         if self.result is not None:
             raise DataflowError('UNSUPPORTED_CAPABILITY', 'construction caught the planning boundary; later actions cannot be guessed')
-        compiled = lower_action(request, bounds=bounds)
+        compiled = lower_action(request, bounds=bounds, on_compiled=self.on_compiled)
         self.result = CapturedAction(compiled, request.kind, request.provider, policy, bounds)
         raise _Captured()
 
 
-def capture_pipeline(entry, arguments) -> CapturedAction:
+def capture_pipeline(entry, arguments, *, on_compiled=None) -> CapturedAction:
     """Compile the exact first action request from a trusted callable and kwargs.
 
     The same make_action_request/resolve_action_runtime/lower_action functions
     are used by execution. No placeholder receipt, source snapshot, physical
     placement, worker or completion fact is produced. The returned graph covers
     one action, never a claim about the rest of an arbitrary Python program.
+    Optional host callback ``on_compiled(CompilationProvenance)`` runs once after
+    final graph validation, before unwinding the active SDK call. It receives
+    only bounded, process-local origin links; it never changes sealed identity.
+    Budget exhaustion is reported as unavailable provenance. Callback errors
+    propagate (capture context still resets); no success is fabricated.
     """
     from .contracts.dataflow_errors import DataflowError
     from .run_context import current_run
     if not callable(entry) or type(arguments) is not dict:
         raise TypeError('capture_pipeline requires a callable and keyword arguments')
+    if on_compiled is not None and not callable(on_compiled):
+        raise TypeError('on_compiled must be a callable or None')
     from .checked import current as current_checked
     if current_capture() is not None or current_run() is not None or current_checked() is not None:
         raise DataflowError('INVALID_CONTRACT', 'plan capture cannot nest inside execution or another capture')
-    capture = _Capture()
+    capture = _Capture(on_compiled)
     token = _CURRENT.set(capture)
     try:
         try:

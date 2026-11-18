@@ -16,7 +16,7 @@ def compile_code(tmp_path, text):
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
     sources={'flow.py':hashlib.sha256(path.read_bytes()).hexdigest()}
     with PlanCallsites(tmp_path,sources) as calls:
-        captured=capture_pipeline(module.run,{})
+        captured=capture_pipeline(module.run,{},on_compiled=calls.bind_compilation)
     details=build_plan_details(captured.compiled, sources=sources, root=tmp_path, callsites=calls, bounds=captured.bounds)
     return captured,details,module
 

@@ -22,17 +22,17 @@ class PlanCallsites:
     def __init__(self, root, sources):
         from demiflow.data.api import DataAPI
         from demiflow.data.dataset import Dataset, MaterializedDataset
-        from demiflow.planning.dataflow_compile import capture_graph
         self.root, self.sources = Path(root), sources
         self.codes = {v.__code__: (owner.__name__ + '.' + k, inspect.signature(v))
                       for owner in (DataAPI, Dataset, MaterializedDataset)
                       for k, v in vars(owner).items()
                       if not k.startswith('_') and type(v) is FunctionType}
-        self.compiler_code = capture_graph.__code__
         self.dataset_types = (Dataset, MaterializedDataset)
         self.locations, self.files, self.nodes, self.active = {}, {}, {}, {}
         self.api_definitions = {}
         self.retained_bytes = 0
+        self.compilation = None
+        self.unavailable = None
 
     def __enter__(self):
         self.previous = sys.getprofile()
@@ -143,9 +143,6 @@ class PlanCallsites:
             return
         if event != 'return':
             return
-        if frame.f_code is self.compiler_code and returned is not None:
-            self._bind_compiled(frame, returned)
-            return
         if frame.f_code not in self.codes:
             return
         location = self.active.pop(id(frame), None)
@@ -171,30 +168,33 @@ class PlanCallsites:
                 if id(operation) not in old_ids:
                     self._remember(operation, location)
 
-    def _bind_compiled(self, frame, compiled):
-        # Read the ORIGINAL compiler's object -> node map at its return. Never
-        # replay traversal/identity formulas, match by function name, or use a
-        # second compile. This private presentation seam is covered end-to-end.
-        capture = frame.f_locals.get('capture')
-        if capture is None or len(compiled.graph.nodes) > 256:
+    def bind_compilation(self, provenance):
+        """Consume the real compiler's final IDs, while the SDK action is active."""
+        if self.compilation is not None:
+            raise ValueError('Callsites already belong to a compilation')
+        self.compilation = (provenance.action_id, provenance.dag_id)
+        self.unavailable = provenance.unavailable
+        if self.unavailable is not None:
             return
-        nodes = {n.occurrence_id for n in compiled.graph.nodes}
-        mapping = list(capture.alias_source.items()) + [(key[1], index) for key, index in capture.alias_op.items()]
-        for object_id, index in mapping:
-            saved = self.locations.get(object_id)
-            if saved is not None and saved[0]() is not None and 0 <= index < len(capture.nodes):
-                occurrence = capture.nodes[index].occurrence_id
-                if occurrence in nodes:
-                    self.nodes[occurrence] = saved[1]
-        terminal = self._location(frame)
+        for binding in provenance.bindings:
+            saved = self.locations.get(binding.object_id)
+            if saved is not None and saved[0]() is not None:
+                self.nodes[binding.occurrence_id] = saved[1]
+        # Public API entry already froze the business call location/arguments.
+        # Nested SDK helpers reuse that location; never inspect compiler frames.
+        terminal = next(reversed(self.active.values()), None)
         if terminal is not None:
-            for occurrence in compiled.graph.terminals:
+            for occurrence in provenance.terminals:
                 self.nodes[occurrence] = terminal
+
+    def check_compilation(self, graph):
+        if self.compilation != (graph.action_id, graph.dag_id):
+            raise ValueError('Callsites do not belong to this compiled graph')
 
     def detail(self, occurrence):
         saved = self.nodes.get(occurrence)
         if saved is None:
-            return unavailable('该节点未记录直接的公开 API 调用（可能由引擎展开）；不会推测源码。')
+            return unavailable(self.unavailable or '该节点未记录直接的公开 API 调用（可能由引擎展开）；不会推测源码。')
         relative, (line, end_line, column, end_column), api, arguments = saved
         if relative not in self.files:
             path = self.root / relative
