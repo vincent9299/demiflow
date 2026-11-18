@@ -1,0 +1,167 @@
+"""``execution.run_reader`` read policy: bounded, read-only, no schema creation."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import sqlite3
+import subprocess
+import sys
+
+import pytest
+
+from demiflow.execution import run_reader
+from demiflow.execution.run_reader import RunReadError, open_journal, read_run
+from test_forge_history_admission import private_domain, run_fixture  # noqa: F401
+
+
+def _digests(directory):
+    return {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(Path(directory).iterdir()) if path.is_file()}
+
+
+def _row(target, sql, *parameters):
+    db = sqlite3.connect((target / 'run.sqlite').resolve().as_uri() + '?mode=ro', uri=True)
+    try:
+        return db.execute(sql, parameters).fetchone()
+    finally:
+        db.close()
+
+
+def test_every_read_leaves_the_journal_byte_identical(tmp_path):
+    target, _ = run_fixture(tmp_path)
+    before = _digests(target)
+    with read_run(target) as reader:
+        state, current = reader.state()
+        reader.tables(), reader.has_table('attempts'), reader.has_rows('action_events')
+        reader.manifest_identity(), reader.state_projection(), reader.attempt_state(current)
+        reader.document('execution_state', 65536), reader.runtime_summary()
+        if reader.has_table('node_observations') and reader.observations_supported():
+            reader.observation_revision(current), reader.observation_scope(current)
+            list(reader.observation_rows(current, limit=8)), reader.observation_summaries(current)
+        reader.action_sequence(current), reader.output_facts(current, 'action-1')
+        if reader.control_sequence(current) is not None:
+            list(reader.control_events(current))
+        with pytest.raises(sqlite3.OperationalError):
+            reader.db.execute('CREATE TABLE forged(value)')
+        with pytest.raises(sqlite3.OperationalError):
+            reader.db.execute("UPDATE execution_state SET document='{}'")
+    run_reader.storage_snapshot(target)
+    assert _digests(target) == before
+
+
+def test_state_readers_return_the_recorded_documents(tmp_path):
+    target, _ = run_fixture(tmp_path)
+    recorded = json.loads(_row(target, 'SELECT document FROM execution_state')[0])
+    with read_run(target) as reader:
+        assert reader.state() == (recorded, recorded['attempt'])
+        assert reader.state(recorded['attempt']) == (recorded, recorded['attempt'])
+        assert reader.document('execution_state', 65536) == recorded
+        selected, current = reader.state_projection()
+        assert selected == current and all(selected[key] == recorded.get(key) for key in selected)
+        row = _row(target, 'SELECT document FROM attempts WHERE attempt=?', recorded['attempt'])
+        assert reader.attempt_state(recorded['attempt']) == (json.loads(row[0]) if row else None)
+        assert reader.attempt_state(31) is None
+        with pytest.raises(RunReadError) as unknown:
+            reader.state(31)
+        assert unknown.value.code == 'not_found'
+        with pytest.raises(RunReadError) as unknown:
+            reader.state_projection(31)
+        assert unknown.value.code == 'not_found'
+        for invalid in (0, 33, '1', True):
+            with pytest.raises(RunReadError) as refused:
+                reader.state(invalid)
+            assert refused.value.code == 'invalid_request'
+        with pytest.raises(RunReadError) as oversized:
+            reader.document('execution_state', 4)
+        assert oversized.value.code == 'resource_limit'
+        for table in ('runtime_commits', 'sqlite_master', 'execution_state; DROP TABLE attempts'):
+            with pytest.raises(ValueError):
+                reader.document(table, 16)
+            with pytest.raises(ValueError):
+                reader.has_rows(table)
+
+
+def test_open_refuses_symlinks_missing_oversized_and_irregular_journals(tmp_path):
+    target, _ = run_fixture(tmp_path)
+    open_journal(target).close()
+    link = tmp_path / 'linked-run'
+    link.symlink_to(target, target_is_directory=True)
+    with pytest.raises(RunReadError, match='Symlink'):
+        open_journal(link)
+    with pytest.raises(RunReadError, match='unavailable'):
+        open_journal(tmp_path / 'absent')
+    copy = tmp_path / 'copy'
+    shutil.copytree(target, copy)
+    (copy / 'run.sqlite').unlink()
+    (copy / 'run.sqlite').symlink_to(target / 'run.sqlite')
+    with pytest.raises(RunReadError, match='Symlink'):
+        open_journal(copy)
+    (copy / 'run.sqlite').unlink()
+    (copy / 'run.sqlite').mkdir()
+    with pytest.raises(RunReadError, match='unavailable'):
+        open_journal(copy)
+    large = tmp_path / 'large'
+    shutil.copytree(target, large)
+    os.truncate(large / 'run.sqlite', run_reader.JOURNAL_BYTES + 1)
+    with pytest.raises(RunReadError, match='exceeds budget'):
+        open_journal(large)
+    assert (large / 'run.sqlite').stat().st_size == run_reader.JOURNAL_BYTES + 1
+
+
+def test_storage_snapshot_refuses_a_journal_replaced_during_open(tmp_path, monkeypatch):
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    target, _ = run_fixture(tmp_path)
+    original, changed = sqlite3.connect, []
+
+    def connect(*args, **kwargs):
+        if not changed:
+            changed.append(True)
+            (target / 'run.sqlite').rename(target / 'saved.sqlite')
+            shutil.copyfile(target / 'saved.sqlite', target / 'run.sqlite')
+        return original(*args, **kwargs)
+    monkeypatch.setattr(sqlite3, 'connect', connect)
+    descriptors = len(os.listdir('/proc/self/fd'))
+    with pytest.raises(RecoveryContractError, match='identity changed'):
+        run_reader.storage_snapshot(target)
+    assert changed and len(os.listdir('/proc/self/fd')) == descriptors
+
+
+def test_storage_snapshot_rejects_an_oversized_journal_before_any_sql(tmp_path, monkeypatch):
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    target, _ = run_fixture(tmp_path)
+    os.truncate(target / 'run.sqlite', run_reader.JOURNAL_BYTES + 1)
+    monkeypatch.setattr(sqlite3, 'connect', lambda *args, **kwargs: pytest.fail('SQLite was reached'))
+    with pytest.raises(RecoveryContractError, match='type/size exceeds budget'):
+        run_reader.storage_snapshot(target)
+    with pytest.raises(RunReadError, match='exceeds budget'):
+        open_journal(target)
+
+
+def test_reading_never_initializes_an_empty_journal(tmp_path):
+    (tmp_path / 'run.sqlite').write_bytes(b'')
+    with read_run(tmp_path, transaction=False) as reader:
+        assert reader.tables() == set()
+        assert reader.runtime_summary() is None and reader.control_sequence(1) is None
+        assert reader.document('manifest', 16) is None and not reader.has_rows('stages')
+    assert (tmp_path / 'run.sqlite').read_bytes() == b''
+    assert sorted(path.name for path in tmp_path.iterdir() if path.name.startswith('run.sqlite')) == ['run.sqlite']
+
+
+def test_a_deadline_interrupts_instead_of_waiting(tmp_path):
+    target, _ = run_fixture(tmp_path)
+    with pytest.raises(sqlite3.OperationalError, match='interrupted'):
+        with read_run(target, deadline=0.0) as reader:
+            reader.db.execute(
+                'WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<10000000) '
+                'SELECT count(*) FROM n').fetchone()
+
+
+@pytest.mark.parametrize('module', ['run_reader', 'sealed_plan_facts'])
+def test_reader_modules_do_not_load_hosts(module):
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run([sys.executable, '-I', '-B', '-c',
+        'import sys,importlib;sys.path.insert(0,sys.argv[1]);importlib.import_module("demiflow.execution."+sys.argv[2]);'
+        'assert not any(n.startswith(("demiflow.workbench","demiflow.forge")) for n in sys.modules)',
+        str(root), module], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr

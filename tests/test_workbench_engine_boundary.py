@@ -46,8 +46,13 @@ PUBLIC = {
     'demiflow.execution.recovery_identity': {'platform_identity'},
     'demiflow.execution.run_context': {'create_target_absent_binding'},
     'demiflow.execution.run_journal': {'OBSERVATION_COUNT', 'RunJournal'},
+    'demiflow.execution.run_reader': {
+        'JOURNAL_BYTES', 'RunReadError', 'RunReader', 'open_journal', 'read_run', 'storage_snapshot'},
     'demiflow.execution.run_telemetry': {'latest', 'observe'},
     'demiflow.execution.runtime_limits': {'DEFAULT_LIMITS'},
+    'demiflow.execution.sealed_plan_facts': {
+        'PlanContractError', 'identity_bridge', 'recovery_restriction', 'sealed_plan_binding',
+        'sealed_plan_view'},
     'demiflow.planning.dag': {
         'compile_declared_dag', 'validate_logical_dag', 'validate_physical_execution_plan'},
 }
