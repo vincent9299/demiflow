@@ -70,12 +70,18 @@ def _readonly_review_artifact(project, name, sha, observation, deadline):
                 limitation='Content is opaque to the reviewer; hash and size are evidence, not semantic data inspection')
 
 
-def _feedback(state, directory):
+def _feedback(state, directory, fingerprint):
     """Deterministic, bounded facts from real gates, for the same harness to fix."""
+    # Prior-candidate failures are historical facts, not instructions for this
+    # candidate. In particular an old uncertain verifier must not contaminate a
+    # later, explicitly requested development turn.
+    current = {key: record if record and record.get('fingerprint') == fingerprint else {}
+               for key in ('check', 'verification', 'review')
+               for record in [state.get(key)]}
     result = [dict(rule_id=text.split(' ', 1)[0] if text.startswith('DF-') else 'DF-07',
                    path=None, reason=text[:2048], evidence=[], allowed_next_action='fix_within_scope')
-              for text in (state.get('check') or {}).get('violations', [])[:24]]
-    for command in (state.get('verification') or {}).get('commands', []):
+              for text in current['check'].get('violations', [])[:24]]
+    for command in current['verification'].get('commands', []):
         if command.get('passed') is True:
             continue
         tail = ''
@@ -92,7 +98,7 @@ def _feedback(state, directory):
             evidence=[command['log']] if command.get('log') else [],
             allowed_next_action=('fix_within_scope' if command.get('failure') is None and
                 type(command.get('returncode')) is int and command['returncode'] > 0 else 'inspect_uncertain_execution')))
-    for rule, claim in (state.get('review') or {}).get('claims', {}).items():
+    for rule, claim in current['review'].get('claims', {}).items():
         if claim.get('status') == 'fail':
             result.append(dict(rule_id=rule, path=(claim.get('evidence') or [None])[0],
                                reason=claim['reason'][:2048], evidence=claim['evidence'][:8],
@@ -742,15 +748,24 @@ class ManagedTasks:
                       run_policy='observe', development_state='incomplete', gates={}, violations=[],
                       accepted_fingerprint=acceptance.get('fingerprint'), ready=False,
                       verification_source='live_tree_rechecked', changed=[], changed_total=0,
-                      truncated=False, feedback=[], execution_evidence={})
+                      truncated=False, feedback=[], execution_evidence={}, repairable=False)
         try:
             if _project_identity(self.project_root) != metadata['bound_contract']['project_identity']:
                 raise ForgeError('Physical project root changed from the original task baseline')
-            tree, readonly, _, fingerprint = tasks.current(project, state)
+            tree, readonly, _, fingerprint, observation = tasks.current(project, state, with_observation=True)
             result['source_fingerprint'] = fingerprint
             changed = changes(state['baseline'], tree)
             result.update(changed=_bounded(changed), changed_total=len(changed))
             result['truncated'] = len(result['changed']) != len(changed)
+            # This eligibility is deliberately narrower than ordinary stale
+            # evidence: authority/scope drift requires controller intervention.
+            # Reuse the same snapshots and scope semantics as the existing check.
+            repair_safe = (not changes(state['readonly_baseline'], readonly) and
+                all(any(within(name.rstrip('/'), write) for write in state['writes']) for name in changed) and
+                (not metadata['request']['contract'].get('require_context_binding') or
+                 'context_baseline' in metadata['bound_contract']) and
+                (observation.coverage is None or not any(
+                    observation.coverage[scope]['unverified_ranges'] for scope in ('tree', 'readonly'))))
             gates = {public: tasks.evidence_status(state[key], fingerprint)
                      for public, key in (('check', 'check'), ('verify', 'verification'), ('review', 'review'))}
             violations = list((state.get('check') or {}).get('violations', []))
@@ -758,15 +773,25 @@ class ManagedTasks:
             if verification:
                 logs = tasks.verification_log_problems(project, state, directory)
                 if logs:
+                    repair_safe = False
                     gates['verify'] = 'failed'
                     violations.extend(logs)
-                if verification.get('status') == 'running':
-                    gates['verify'] = 'unknown'
+                if verification.get('fingerprint') == fingerprint and (
+                        verification.get('status') == 'running' or verification.get('source_changed_during_tests')):
+                    repair_safe = False
+                    if verification.get('status') == 'running':
+                        gates['verify'] = 'unknown'
+                if verification.get('fingerprint') == fingerprint and verification.get('passed') is not True:
+                    failures = [c for c in verification.get('commands', []) if c.get('passed') is not True]
+                    repair_safe &= (verification.get('status') == 'failed' and bool(failures) and
+                        all(c.get('failure') is None and type(c.get('returncode')) is int and
+                            c['returncode'] > 0 for c in failures))
                 if gates['verify'] == 'passed':
                     expected = [c['id'] for c in project.pipeline(state['pipeline'])['verify']]
                     commands = verification.get('commands', [])
                     if ([c.get('id') for c in commands] != expected or
                             any(c.get('passed') is not True or c.get('log_base') != 'task' for c in commands)):
+                        repair_safe = False
                         gates['verify'] = 'failed'
                         violations.append('Verification evidence does not cover the fixed command definitions')
             review = state.get('review')
@@ -794,9 +819,11 @@ class ManagedTasks:
                         if reviewed.get('fingerprint') != review['fingerprint']:
                             raise ForgeError('Review input has a different candidate')
                 except (ForgeError, KeyError, TypeError, ValueError):
+                    repair_safe = False
                     gates['review'] = 'failed'
                     violations.append('Review is not a trusted independent result for this candidate')
             if _index_snapshot(self.project_root) != metadata['bound_contract']['staging']:
+                repair_safe = False
                 gates['check'] = 'failed'
                 violations.append('DF-01 Git staging changed from the original task baseline')
             unresolved = [n for n in state['notes'] if n['kind'] == 'question' and not n.get('resolved')]
@@ -821,20 +848,33 @@ class ManagedTasks:
                             identity = dict(backend=proof['backend'], implementation=proof['implementation'])
                             if self.review_authority.execution_identity is not None and identity != self.review_authority.execution_identity:
                                 status = 'stale'
+                                repair_safe = False
                             implementations.add((proof['backend'], proof['implementation']))
                         except (ForgeError, KeyError, TypeError, ValueError):
                             status = 'failed'
+                            repair_safe = False
                     result['execution_evidence'][phase] = status
                     execution_ok &= status == 'passed'
+                    if phase == 'developer' and status != 'passed':
+                        repair_safe = False
                 execution_ok &= len(implementations) == 1
+                repair_safe &= len(implementations) <= 1
                 if not execution_ok:
                     violations.append('Enforced execution requires current trusted developer and verifier completion evidence')
             if (tasks.current(project, state)[3] != fingerprint or stale or
                     _project_identity(self.project_root) != metadata['bound_contract']['project_identity']):
+                repair_safe = False
                 gates = {key: 'stale' for key in gates}
                 violations.append('Candidate changed; current evidence must be refreshed')
             result['gates'] = gates
-            result['feedback'] = _feedback(state, directory)
+            result['feedback'] = _feedback(state, directory, fingerprint)
+            current_failure = any(gates[gate] == 'failed' and record and
+                record.get('fingerprint') == fingerprint and record.get('passed') is False
+                for gate, key in (('check', 'check'), ('verify', 'verification'), ('review', 'review'))
+                for record in [state.get(key)])
+            result['repairable'] = bool(repair_safe and current_failure and not unresolved and
+                'unknown' not in gates.values() and result['feedback'] and
+                all(issue['allowed_next_action'] == 'fix_within_scope' for issue in result['feedback']))
             result['violations'] = _bounded([str(v)[:2048] for v in violations], count=64, byte_limit=16384)
             result['truncated'] |= len(result['violations']) != len(violations)
             result['ready'] = all(value == 'passed' for value in gates.values()) and not unresolved and execution_ok
@@ -853,7 +893,7 @@ class ManagedTasks:
                 result['development_state'] = 'review_pending'
         except (ForgeError, OSError, ValueError, KeyError, TypeError) as error:
             result.update(gates={key: 'stale' for key in ('check', 'verify', 'review')},
-                          development_state='stale', violations=[str(error)[:2048]], ready=False)
+                          development_state='stale', violations=[str(error)[:2048]], ready=False, repairable=False)
         return result
 
 

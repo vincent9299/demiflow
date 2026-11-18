@@ -256,6 +256,7 @@ def test_verifier_stderr_is_bounded_real_failure_feedback(managed):
     assert 'returncode=2' in result['feedback'][0]['reason']
     assert 'fixture failure: missing row' in result['feedback'][0]['reason']
     assert result['feedback'][0]['allowed_next_action']=='fix_within_scope'
+    assert result['repairable'] is True
     assert len(json.dumps(result['feedback']).encode())<=12*1024
 
 
@@ -270,6 +271,7 @@ def test_timed_out_verifier_is_uncertain_and_acceptance_checks_deadline(managed,
     result=api.verify('timeout',timeout_seconds=.1)
     assert result['gates']['verify']=='failed'
     assert result['feedback'][0]['allowed_next_action']=='inspect_uncertain_execution'
+    assert result['repairable'] is False
     with pytest.raises(ForgeError,match='deadline exhausted'):
         api.evaluate_acceptance('timeout',deadline=time.time()-1)
 
@@ -304,7 +306,7 @@ def test_actual_sandbox_timeout_exit_code_cannot_authorize_verifier_replay(manag
     outcome=run(dict(id='timeout',argv=[sys.executable,'-I','-B','-c','import time; time.sleep(3)'],env={},timeout=5),
         project,tmp_path/'short-sandbox',launch=launch)
     assert outcome['returncode']==124 and outcome['failure']=='sandbox_execution_incomplete'
-    assert _feedback(dict(verification=dict(commands=[outcome])),tmp_path)[0]['allowed_next_action']=='inspect_uncertain_execution'
+    assert _feedback(dict(verification=dict(fingerprint='candidate', commands=[outcome])),tmp_path,'candidate')[0]['allowed_next_action']=='inspect_uncertain_execution'
 
 
 def test_real_confined_developer_and_verifier_then_no_tools_review_accepts(tmp_path, monkeypatch):

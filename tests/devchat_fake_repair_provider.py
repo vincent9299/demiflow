@@ -53,9 +53,23 @@ for line in sys.stdin:
         mode = Path.home() / 'repair-mode'
         if message.startswith('repair-fixture:'):
             mode.write_text(message.split(':', 1)[1])
-            source.write_text('# repaired\n' if mode.read_text().startswith('review') else '# pending repair\n')
+            if mode.read_text() == 'followup-context':
+                with (root/'orders/README.md').open('a') as stream:
+                    stream.write('\nFollow-up requirement: preserve the original acceptance while extending its tests.\n')
+                with (root/'orders/tests/test_order.py').open('a') as stream:
+                    stream.write('# Follow-up fixture requirement is covered.\n')
+            elif mode.read_text() == 'followup-review':
+                source.write_text('# repaired\n# awaiting follow-up review\n')
+            else:
+                source.write_text('# repaired\n' if mode.read_text().startswith('review') else '# pending repair\n')
         elif mode.read_text() == 'success':
             source.write_text('# repaired\n')
+        elif mode.read_text() == 'followup-context':
+            assert 'Follow-up requirement: preserve the original acceptance' in (Path.home()/'received-context.txt').read_text()
+        elif mode.read_text() == 'followup-verifier':
+            source.write_text('# repaired\n# verified follow-up implementation\n')
+        elif mode.read_text() == 'followup-review':
+            source.write_text('# repaired\n# reviewed follow-up implementation\n')
         elif mode.read_text() == 'progress':
             with source.open('a') as stream: stream.write('# another unsuccessful attempt\n')
         elif mode.read_text() == 'review':

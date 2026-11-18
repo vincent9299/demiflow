@@ -231,6 +231,7 @@ def test_git_index_is_only_read_and_changes_block_acceptance(tmp_path):
     result = api.status('session')
     assert result['gates']['check'] == 'failed'
     assert any('Git staging changed' in item for item in result['violations'])
+    assert result['repairable'] is False
     assert result['ready'] is False
 
 
@@ -359,6 +360,7 @@ def test_ancestor_authority_change_invalidates_current_evidence(managed, mutatio
     stale = api.status('session')
     assert stale['development_state'] == 'stale'
     assert stale['source_fingerprint'] is None
+    assert stale['repairable'] is False
     assert stale['ready'] is False
     assert all(value != 'passed' for value in stale['gates'].values())
     with patch('demiflow.forge.development.tasks.run', side_effect=AssertionError('changed authority verification ran')):
@@ -380,6 +382,7 @@ def test_supplementary_authority_set_cannot_be_silently_rebound(managed, mutatio
     stale = api.status('session')
     assert stale['development_state'] == 'stale'
     assert stale['source_fingerprint'] is None
+    assert stale['repairable'] is False
     assert stale['ready'] is False
     saved = json.loads((api.store.root / 'session' / 'task.json').read_text())
     assert saved['managed']['bound_contract']['context_baseline'] == [authority_source(one)]
@@ -461,3 +464,118 @@ def test_managed_candidate10_keeps_all_flows_shared_evidence_and_local_history(m
         assert api.verify('session')['gates']['check'] == 'failed'
     assert local_path.read_bytes() == local_before
     assert not (project.control / 'tasks/session').exists()
+
+
+def test_current_failure_can_be_repaired_without_rebasing_old_acceptance(managed):
+    api, project, authority = managed
+    pass_gates(api, authority)
+    accepted = api.evaluate_acceptance('session')
+    path = api.store.root / 'session/task.json'
+    original = json.loads(path.read_text())
+    api.note('session', 'decision', 'Update the documentation for the second requirement', event_id='second-user-turn')
+    (project.root / 'orders/README.md').write_text('Updated DemiForge fixture documentation.\n')
+    failed = api.check('session')
+    assert failed['development_state'] == 'stale'
+    assert failed['gates'] == dict(check='failed', verify='stale', review='stale')
+    assert failed['repairable'] is True
+    assert failed['accepted_fingerprint'] == accepted['source_fingerprint']
+    assert [f['reason'] for f in failed['feedback']] == ['DF-01 context changed: refresh and read changed sources']
+    api.refresh_context('session', 'Read the authorized changed documentation')
+    pass_gates(api, authority)
+    final = api.evaluate_acceptance('session')
+    assert final['development_state'] == 'accepted'
+    assert final['source_fingerprint'] != accepted['source_fingerprint']
+    saved = json.loads(path.read_text())
+    for key in ('baseline', 'readonly_baseline', 'goal', 'writes'):
+        assert saved[key] == original[key]
+    assert saved['managed']['bound_contract'] == original['managed']['bound_contract']
+
+
+@pytest.mark.parametrize('prior', ['timeout', 'running', 'review_failure'])
+def test_previous_candidate_failures_do_not_contaminate_new_failure_feedback(managed, prior):
+    api, project, authority = managed
+    read_all(api)
+    if prior == 'review_failure':
+        value = claims(); value['DF-07']['status'] = 'fail'; value['DF-07']['reason'] = 'Old candidate failure'
+        fingerprint = api.check('session')['source_fingerprint']
+        receipt = authority.issue('session', fingerprint, value, provider='fixture', model='fixture',
+                                  session_id='reviewer', mode='no-tools')
+        api.record_review('session', fingerprint, value, receipt=receipt)
+    else:
+        with patch('demiflow.forge.development.tasks.run', return_value=dict(
+                id='fixture', passed=False, failure='timeout', output='old timeout')):
+            assert api.verify('session')['repairable'] is False
+        if prior == 'running':
+            with tasks.locked(api._project(), 'session') as (_, state):
+                state['verification']['status'] = 'running'
+            assert api.status('session')['repairable'] is False
+    api.note('session', 'decision', 'A new explicit request', event_id='new-request')
+    (project.root / 'orders/README.md').write_text('New authorized DemiForge documentation.\n')
+    current = api.check('session')
+    assert current['repairable'] is True
+    assert all(f['allowed_next_action'] == 'fix_within_scope' for f in current['feedback'])
+    assert [f['reason'] for f in current['feedback']] == ['DF-01 context changed: refresh and read changed sources']
+
+
+@pytest.mark.parametrize('violation', ['out_of_scope', 'readonly', 'corrupt_log', 'forged_review', 'expected_candidate'])
+def test_current_check_failure_does_not_make_protected_drift_repairable(tmp_path, violation):
+    root = tmp_path / 'project'; root.mkdir()
+    project = fixture(root)
+    (root / 'data').mkdir(); (root / 'data/input.txt').write_text('Protected data')
+    config = json.loads(project.path.read_text()); config['readonly'] = ['data']
+    project.path.write_text(json.dumps(config))
+    authority = ReviewAuthority()
+    api = ManagedTasks(tmp_path / 'state', 'fixture', root, review_authority=authority)
+    api.prepare_task('session', 'orders', 'Develop fixture', ['orders'], ['No production'],
+                     contract=dict(allow_tests=True, developer_session_id='developer'))
+    pass_gates(api, authority)
+    old = api.evaluate_acceptance('session')
+    (root / 'orders/README.md').write_text('Authorized update needing context refresh')
+    if violation == 'out_of_scope':
+        (root / 'AGENTS.md').write_text('Changed rules outside scope')
+    elif violation == 'readonly':
+        (root / 'data/input.txt').write_text('Unauthorized data mutation')
+    elif violation == 'corrupt_log':
+        state = json.loads((api.store.root / 'session/task.json').read_text())
+        (api.store.root / 'session' / state['verification']['commands'][0]['log']).write_text('Changed log')
+    elif violation == 'forged_review':
+        with tasks.locked(api._project(), 'session') as (_, state):
+            state['review']['receipt']['signature'] = 'forged'
+    current = api.check('session', expected_fingerprint=old['source_fingerprint'] if violation == 'expected_candidate' else None)
+    assert current['repairable'] is False
+    assert current['ready'] is False
+    assert current['accepted_fingerprint'] == old['accepted_fingerprint']
+
+
+def test_current_trusted_review_failure_is_repairable(managed):
+    api, _, authority = managed
+    pass_gates(api, authority)
+    accepted = api.evaluate_acceptance('session')
+    api.note('session', 'decision', 'Check the next requirement', event_id='next-request')
+    api.check('session'); api.verify('session')
+    fingerprint = api.status('session')['source_fingerprint']
+    value = claims(); value['DF-07']['status'] = 'fail'; value['DF-07']['reason'] = 'Add the requested test assertion'
+    receipt = authority.issue('session', fingerprint, value, provider='fixture', model='fixture',
+                              session_id='reviewer', mode='no-tools')
+    current = api.record_review('session', fingerprint, value, receipt=receipt)
+    assert current['repairable'] is True
+    assert current['accepted_fingerprint'] == accepted['accepted_fingerprint']
+    assert current['development_state'] == 'stale' and current['ready'] is False
+    assert [f['reason'] for f in current['feedback']] == ['Add the requested test assertion']
+
+
+def test_enforced_repair_requires_current_developer_receipt_and_backend(managed):
+    api, project, authority = managed
+    api.prepare_task('enforced', 'orders', 'Develop fixture', ['orders'], ['No production'],
+        contract=dict(allow_tests=True, developer_session_id='developer', require_enforcement=True))
+    read_all(api, 'enforced')
+    (project.root / 'orders/README.md').write_text('Updated DemiForge documentation')
+    current = api.check('enforced')
+    assert current['repairable'] is False
+    authority.execution_identity = dict(backend='fixture', implementation='v1')
+    receipt = authority.issue_execution('enforced', current['source_fingerprint'], phase='developer',
+        backend='fixture', implementation='v1', execution_id='completed-developer')
+    current = api.record_execution('enforced', current['source_fingerprint'], receipt=receipt)
+    assert current['repairable'] is True
+    authority.execution_identity = dict(backend='fixture', implementation='v2')
+    assert api.status('enforced')['repairable'] is False

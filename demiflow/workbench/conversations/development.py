@@ -154,7 +154,11 @@ def execute(config_path, tid):
     deadline = request_deadline(turn, deployment.limits)
 
     def failed(current, feedback=None, *, retryable=True):
-        value = projection(current)
+        # Historical acceptance and gate receipts remain stale after a new
+        # candidate. Only the domain can distinguish a current, repairable
+        # failure from invalid authority, scope, provenance or uncertain work.
+        repairable = retryable and current.get('repairable') is True
+        value = projection(current, state='failed' if repairable else None)
         feedback = feedback or current.get('feedback') or [dict(rule_id='development-gate', path=None,
             reason=str(reason)[:2048], evidence='', allowed_next_action='Repair only within the already authorized task scope')
             for reason in current.get('violations', [])[:4]]
@@ -165,8 +169,7 @@ def execute(config_path, tid):
             store.gate_state(tid, projection(current, state='unknown',
                 reason='Verification ended without a determinate result; it will not be automatically replayed'), phase='finished')
             return
-        protected = any(word in str(feedback).lower() for word in ('out-of-scope', 'readonly changed', 'staging changed', 'source set cannot'))
-        if turn.get('development_control') and retryable and not protected and value['state'] == 'failed':
+        if turn.get('development_control') and repairable:
             store.schedule_repair(tid, value, feedback)
         else:
             store.gate_state(tid, value, phase='finished')

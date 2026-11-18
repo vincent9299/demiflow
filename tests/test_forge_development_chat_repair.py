@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -101,6 +102,33 @@ def test_pending_repair_deadline_is_not_reset_on_reload(tmp_path):
     assert json.loads(reopened.turn(turn['id'])['development_control'])['repair_round'] == 0
 
 
+@pytest.mark.parametrize('repairable,action,expected', [
+    (True, 'fix_within_scope', 'repair_pending'),
+    (False, 'fix_within_scope', 'stale'),
+    (None, 'fix_within_scope', 'stale'),
+    (True, 'inspect_uncertain_execution', 'unknown'),
+])
+def test_current_failure_requires_explicit_domain_repairability(tmp_path, monkeypatch, repairable, action, expected):
+    from demiflow.workbench.conversations import development
+    root, store, session, turn = pending_repair(tmp_path)
+    store.update(turn['id'], gate_phase='claimed', gate_cleanup='pending')
+    current = dict(task_id=session['id'], source_fingerprint='current-candidate', accepted_fingerprint='old-candidate',
+        development_state='stale', changed_total=1, gates=dict(check='failed', verify='stale', review='stale'),
+        violations=['DF-01 context changed: refresh and read changed sources'], feedback=[dict(rule_id='DF-01',
+            reason='Current candidate requires refreshed context', path=None, evidence=[], allowed_next_action=action)])
+    if repairable is not None: current['repairable'] = repairable
+    class Tasks:
+        def status(self, *_): return current
+        def check(self, *_, **__): return current
+    monkeypatch.setattr(development, '_load', lambda *_: (SimpleNamespace(limits=store.limits), store,
+        store.turn(turn['id']), session, dict(allow_tests=True)))
+    monkeypatch.setattr(development, 'project_tasks', lambda *_: Tasks())
+    development.execute('unused', turn['id'])
+    saved = store.turn(turn['id'])
+    assert json.loads(saved['development'])['state'] == expected
+    assert saved['gate_phase'] == ('repair_pending' if expected == 'repair_pending' else 'finished')
+
+
 @pytest.fixture
 def independent_reviewer():
     """Actual one-shot HTTP protocol; deterministic response, no paid model."""
@@ -120,6 +148,8 @@ def independent_reviewer():
             assert material['original_goal'].startswith('repair-fixture:')
             assert material['verification']['verification_source'] == 'live_tree_rechecked'
             failed = material['original_goal'] in {'repair-fixture:review', 'repair-fixture:review-exhaust'} and '# reviewed' not in json.dumps(material['differences'])
+            if material['decisions'][-1]['text'] == 'repair-fixture:followup-review':
+                failed = '# reviewed follow-up implementation' not in json.dumps(material['differences'])
             claims = {f'DF-0{i}': dict(status='pass', reason='Fixture inspected the bound original goal and implementation',
                 evidence=['orders/operators/map.py']) for i in range(1, 8)}
             if failed:
@@ -225,6 +255,61 @@ def test_actual_restricted_developer_verifier_broker_and_review_acceptance(manag
         assert record['managed']['bound_contract']['request']['contract']['require_enforcement'] is True
         service.close(); service = Service(path)
         assert service.show('wfixture', sid)['turn']['development']['assurance'] == 'enforced'
+    finally: service.close()
+
+
+@pytest.mark.parametrize('failure,reviews', [('context', 1), ('verifier', 1), ('review', 2)])
+def test_restarted_accepted_session_repairs_new_context_and_accepts_again(managed_project, independent_reviewer, monkeypatch, tmp_path, failure, reviews):
+    from test_forge_development_runtime import combined_configuration
+    root, path, config = managed_project
+    repair_provider(root, path, config)
+    host = tmp_path/'host-partition'; host.mkdir()
+    host_config, _, _, domain, _ = combined_configuration(host, root, monkeypatch)
+    partition = json.loads(host_config.read_text())
+    config.update({key: partition[key] for key in ('state_root', 'runtime_domain', 'host_budget')})
+    domain.chmod(0o700)
+    endpoint, calls = independent_reviewer
+    monkeypatch.setenv('FIXTURE_REVIEW_KEY', 'offline-fixture-only')
+    config['mode'] = 'restricted'
+    config['limits']['turn_seconds'] = 45
+    config['providers']['codex'].update(base_url=endpoint, credential_env='FIXTURE_REVIEW_KEY')
+    path.write_text(json.dumps(config))
+    service = Service(path)
+    try:
+        sid = service.create_project('wfixture', root, 'create', 'codex')['id']
+        first = service.start_project('wfixture', root, sid, 'first', 0, 'repair-fixture:success')
+        first_saved, accepted = gate_done(service, first['id'], timeout=45)
+        assert accepted['state'] == 'accepted' and accepted['assurance'] == 'enforced', accepted
+        original = json.loads(task_file(service, sid).read_text())
+        first_history = first_saved['development']
+        first_fingerprint = accepted['accepted_fingerprint']
+        service.close(); service = Service(path)
+        assert service.show('wfixture', sid)['turn']['development']['state'] == 'accepted'
+        second = service.start_project('wfixture', root, sid, 'second', 1, 'repair-fixture:followup-'+failure)
+        saved, result = gate_done(service, second['id'], timeout=45)
+        assert result['state'] == 'accepted' and result['assurance'] == 'enforced', result
+        control = json.loads(saved['development_control'])
+        assert control['repair_round'] == 1 and control['review_attempts'] == reviews
+        assert control['deadline'] == saved['created'] + 45
+        assert len(control['segments']) == 2 and all(s['execution_assurance'] == 'enforced' for s in control['segments'])
+        assert result['accepted_fingerprint'] == result['source_fingerprint'] != first_fingerprint
+        assert result['gates'] == dict(check='passed', verify='passed', review='passed')
+        updated = json.loads(task_file(service, sid).read_text())
+        assert updated['baseline'] == original['baseline'] and updated['goal'] == original['goal']
+        assert updated['managed']['bound_contract'] == original['managed']['bound_contract']
+        assert len([note for note in updated['notes'] if note['kind'] == 'decision']) == 2
+        if failure == 'context': assert any(note['kind'] == 'context-refresh' for note in updated['notes'])
+        assert service.store.turn(first['id'])['development'] == first_history
+        assert len(calls) == 5 + reviews  # Four actual confined segments; one original plus fresh follow-up reviews.
+        review_inputs = [json.loads(call['input'].split('\n\n', 1)[1]) for call in calls if call['input'] != 'fixture development transport']
+        assert len(review_inputs) == 1 + reviews and len({item['fingerprint'] for item in review_inputs}) == len(review_inputs)
+        provider_calls = [json.loads(line) for line in (service.root/sid/'provider/provider-calls.jsonl').read_text().splitlines()]
+        assert len(provider_calls) == 4 and len({call['submission'] for call in provider_calls}) == 4
+        assert '不是新的真人授权' in provider_calls[-1]['message']
+        with service.store.connect() as db:
+            assert db.execute('SELECT count(*) FROM turns WHERE session=?', (sid,)).fetchone()[0] == 2
+        service.close(); service = Service(path)
+        assert service.show('wfixture', sid)['turn']['development']['state'] == 'accepted'
     finally: service.close()
 
 

@@ -60,6 +60,8 @@ DeepSeek 独立审阅使用自身固定的 `low` 推理等级，开发 CLI 保�
 
 检查或确定的 Review 失败可产生结构化反馈，原 harness 在原授权内继续修复。两次相同候选与同类失败停止；禁止绕过规范、改 verifier 或重建基线。未知发送、未知清理、验证超时/资源中止、取消不自动重放。
 
+同会话后续需求会使旧接受与旧门禁对当前候选失效，但不妨碍新的确定性失败进入续修。Forge 单独给出 `repairable`：仅当前指纹的失败、原 scope/readonly/coverage/staging/权威绑定与执行证明仍有效、且没有未知执行时为真。控制器只消费此结构化决定，不根据报错文字推测权限；旧失败反馈不冒充本轮失败，历史接受与原始基线保留。再次接受必须取得本候选的新验证与独立审阅。
+
 阶段包括 `preparing/developing/queued/checking/verifying/reviewing/repair_pending/repairing/stopping`。期间发送禁用、停止可用；停止阻止后续派发、自动批准及工具请求。`accepted/failed/stale/review_unavailable/not_applicable/cancelled/unknown` 的文字终态不能单独释放租约，必须有实际 cleanup。
 
 Service 复用 Store 的持久 gate/epoch/repair 状态，不新增调度账本。压缩保留原始消息与契约，不创造新用户目标。服务重启只恢复可证明的状态，不猜测不确定操作是否完成。
