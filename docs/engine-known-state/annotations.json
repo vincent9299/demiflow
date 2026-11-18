@@ -858,6 +858,20 @@
   {
    "match": {
     "lane": "historical",
+    "file": "tests/test_prompt_http_stream.py",
+    "function": "test_read_idle_and_total_timeouts_are_distinct"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "undetermined",
+    "by": null,
+    "required": null,
+    "note": "不稳定：在 74d2f99 上单独运行 3 次，2 次失败 1 次通过（见 supplementary）。v3 之前各代留下的测试，没有逐项分析。"
+   }
+  },
+  {
+   "match": {
+    "lane": "historical",
     "outcome": "failed"
    },
    "cause": null,
@@ -1062,6 +1076,44 @@
    "junit": "r2/231/result.xml",
    "junit_sha256": "b968fdaaeef702b9e0cc42143af739cb28bca605f00d12f8bbfd419e13a63735",
    "method": "直接运行：env-ray 的 python -m pytest，TMPDIR=/tmp，其余四个私有目录在 /tmp/demiflow-q<编号>/ 下；没有回执，只有 junit 文件"
+  },
+  {
+   "lane": "standard",
+   "nodeid": "tests/test_runtime_v3_residency_resources.py::test_unknown_exit_still_charges_and_blocks_replacement",
+   "outcome": "unstable",
+   "known_state": "基线的两次运行（并行一次、单路复跑一次）都通过，所以清单里没有它的记录",
+   "runs": {
+    "74d2f99": "15 次里 3 次失败",
+    "工具分支 ad38df2": "12 次里 5 次失败",
+    "批次 1 edbbeb2": "12 次里 4 次失败",
+    "批次 2 1d54257": "15 次里 6 次失败"
+   },
+   "failure": "AssertionError: assert 'UNCONFIRMED' == 'CONFIRMED'（进程退出的确认没有在 1 秒的期限内完成）",
+   "method": "单独运行这一个用例（标准环境，pytest，五个私有目录，没有回执），在未改动的 74d2f99 检出和分支检出上交替进行"
+  },
+  {
+   "lane": "historical",
+   "nodeid": "tests/test_queue_v2_transactions.py::test_public_workers_consume_before_seal_without_duplicate_effects[sqlite]",
+   "outcome": "unstable",
+   "known_state": "基线运行时通过，所以清单里没有它的记录",
+   "runs": {
+    "74d2f99": "3 次里 1 次失败",
+    "批次 2 1d54257": "3 次里 0 次失败"
+   },
+   "failure": "ArtifactDomainUnavailable: Unfinished artifacts are outside this worker reading domain",
+   "method": "单独运行这一个用例（标准环境，pytest，五个私有目录，没有回执），在未改动的 74d2f99 检出和分支检出上交替进行"
+  },
+  {
+   "lane": "historical",
+   "nodeid": "tests/test_prompt_http_stream.py::test_read_idle_and_total_timeouts_are_distinct",
+   "outcome": "unstable",
+   "known_state": "基线运行时失败，清单里有它的记录",
+   "runs": {
+    "74d2f99": "3 次里 2 次失败",
+    "批次 2 1d54257": "3 次里 1 次失败"
+   },
+   "failure": "见清单里的记录",
+   "method": "单独运行这一个用例（标准环境，pytest，五个私有目录，没有回执），在未改动的 74d2f99 检出和分支检出上交替进行"
   }
  ]
 }
