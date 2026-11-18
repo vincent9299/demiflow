@@ -104,7 +104,7 @@
     button('在算子目录中查看',()=>showPage('operators'),nodePanelTools);
     const nodeOutputs=button('查看本次输出',()=>changeMode('results'),nodePanelTools);nodeOutputs.hidden=true;
     button('关闭详情',()=>{detailOpen=false;updateActions();},nodePanelTools);
-    const inspectorDetails=details('输入输出与执行详情',nodePanel);inspectorDetails.append(inspector);nodePanel.prepend(nodePanelTools);
+    nodePanel.append(nodePanelTools,inspector);
     const checks=$('section',undefined,'wb-checks'),checkScopes=$('div',undefined,'wb-check-scopes'),checkGrid=$('div',undefined,'wb-check-grid'),checkIssues=$('div',undefined,'wb-check-issues'),checkCoverage=$('aside',undefined,'wb-check-coverage');checks.hidden=true;checkGrid.append(checkIssues,checkCoverage);checks.append(checkScopes,checkGrid);root.append(checks);
     const graphTools=$('div',undefined,'wb-graph-tools'),graphTitle=$('span','运行执行图'),graphHost=$('div',undefined,'wb-graph');
     graphTools.append(graphTitle);const tools=$('div');graphTools.append(tools);
@@ -148,7 +148,7 @@
     const bottom=$('section',undefined,'wb-source'),sourceHeader=$('div',undefined,'wb-source-header'),sourceTitle=$('strong','节点源码'),sourceTabs=$('div',undefined,'wb-source-tabs'),sourceBody=$('div',undefined,'wb-source-body');
     const sourceButtons=new Map();
     for(const[key,label]of [['callsite','API接口'],['configuration','输入'],['schema','输出'],['implementation','自定义算子代码'],['prompt','自定义 Prompt']])sourceButtons.set(key,button(label,async()=>{sourceKind=key;sourceOpen=true;sourceBody.hidden=false;sourceTabs.hidden=false;await loadSource();},sourceTabs));
-    sourceHeader.append(sourceTitle);const sourceToggle=button('收起代码',async()=>{sourceOpen=!sourceOpen;sourceBody.hidden=sourceTabs.hidden=!sourceOpen;sourceSequence++;disposeReaders(sourceBody);sourceBody.replaceChildren();if(sourceOpen)await loadSource();updateActions();},sourceHeader);bottom.append(sourceHeader,sourceTabs,sourceBody);inspectorDetails.before(bottom);
+    sourceHeader.append(sourceTitle);const sourceToggle=button('收起代码',async()=>{sourceOpen=!sourceOpen;sourceBody.hidden=sourceTabs.hidden=!sourceOpen;sourceSequence++;disposeReaders(sourceBody);sourceBody.replaceChildren();if(sourceOpen)await loadSource();updateActions();},sourceHeader);bottom.append(sourceHeader,sourceTabs,sourceBody);inspector.before(bottom);
     const results=$('section',undefined,'wb-results');results.hidden=true;root.append(results);
     const documents=details('当前项目检查与来源',checks);
     let projectInfoRendered=false,projectInfoPending=null,projectInfoDirty=false;
@@ -236,7 +236,7 @@
       nodePanel.hidden=codeShown||!detailOpen||operatorsActive;body.classList.toggle('wb-detail-open',!codeShown&&detailOpen&&!operatorsActive);
       nodeOutputs.hidden=!run||!run.outputs?.length;
       bottom.hidden=inspectorWhole&&!operatorsActive;
-      if(inspectorWhole)inspectorDetails.open=true;
+      inspector.hidden=!inspectorWhole;
       root.dataset.page=activePage;onPageChange(activePage);
       placeOperatorReader();
       runBar.hidden=!run||!!comparison;
@@ -380,7 +380,7 @@
       const selected=previewSelection?.key||data().selection?.key;
       const row=inDirectory?operatorRows.get(operatorKey||selected):null;
       const target=row?operatorViewer:nodePanel;
-      if(bottom.parentElement!==target){if(row)target.append(bottom);else inspectorDetails.before(bottom);}
+      if(bottom.parentElement!==target){if(row)target.append(bottom);else inspector.before(bottom);}
       if(row){if(row.content.parentElement!==operatorActions)operatorActions.replaceChildren(row.content);}
       else operatorActions.replaceChildren();
       operatorPlaceholder.hidden=!!row;
@@ -457,7 +457,7 @@
       const node=planPreview.dag.nodes.find(n=>n.occurrence_id===selection.occurrenceId&&n.logical_node_id===selection.logicalNodeId);
       const card=graphModel?.nodes.find(n=>n.key===selection.key);if(!node||!card)return;
       previewSelection=selection;operatorKey=data().mode==='operators'?card.key:null;graph.select(card.key);nodeJump.value=card.key;inspectorWhole=false;
-      if(!quiet)detailOpen=true;inspectorDetails.open=false;
+      if(!quiet)detailOpen=true;
       inspector.replaceChildren($('h3',card.title),$('span','编译计划 · 尚未运行','wb-tag'));
       inspector.append($('p','算子类型：'+node.op_kind,'wb-caption'));
       factLines(inspector,'输入端口',node.input_ports.map(port=>({label:port,value:'引擎输入端口',basis:'compile'})));
@@ -491,7 +491,7 @@
       basisLabel.textContent=(model.execution?'封存运行图':g.binding.basis_kind==='report'?'静态检查 · '+g.status+' · 尚无运行执行图':choice.label)+(scopeNode?' · 节点邻域':'');
       paintActionSelector(g,choice);
       paintAdvancedDiagnostics(g,choice,model);
-      graphLegend.textContent=model.execution?'箭头表示数据流向；点击算子查看源码与执行详情。':'这里只展示引擎执行计划；源码调用关系与静态检查报告不会作为替代图。';
+      graphLegend.textContent=model.execution?'箭头表示数据流向；点击算子查看 API 接口、输入、输出和自定义实现。':'这里只展示引擎执行计划；源码调用关系与静态检查报告不会作为替代图。';
       return model;
     }
     function afterGraphPaint(){
@@ -563,7 +563,7 @@
         return;
       }
       const member=selection.occurrenceId!==null?card.occurrences.find(o=>o.occurrenceId===selection.occurrenceId)||card.selection:card.selection;
-      if(!quiet){detailOpen=true;inspectorDetails.open=false;sourceOpen=true;sourceBody.hidden=sourceTabs.hidden=false;}
+      if(!quiet){detailOpen=true;sourceOpen=true;sourceBody.hidden=sourceTabs.hidden=false;}
       const isGroup=member.occurrenceId===null&&card.occurrences.length>1;
       const logical=member.logicalNodeId?{logical_node_id:member.logicalNodeId,occurrence_id:member.occurrenceId}:null;
       state.chooseNode(member.reportNodeId,logical);
@@ -833,7 +833,6 @@
         const text=$('div',undefined,'wb-pipeline-text');pipelineCode.append(text);
         mountText(text,value.text,{sourceOnly:true,compactSource:true,continuousSource:true});
         if(value.truncated)pipelineCode.append($('p','源码超过 64 KiB 展示上限，当前只显示开头，未将片段标为全文。','wb-caption'));
-        raw('来源摘要',{path:value.path,sha256:value.sha256},pipelineCode);
       }catch(error){if(valid()&&error.name!=='AbortError'){disposeReaders(pipelineCode);pipelineCode.replaceChildren($('p',error.message,'error-box'));}}
     }
     function materialTable(parent, headings, rows){
@@ -926,7 +925,6 @@
             if(value.truncated)sourceBody.append($('p','正文超过展示上限，当前只显示开头。','wb-caption'));
           }
           if(!kinds.includes('schema'))sourceBody.append($('p',node.source_views?.schema?.reason||'这份快照没有上游数据的 Schema 材料。','wb-caption'));
-          raw('来源摘要',{materials:values.map(v=>({kind:v.kind,sha256:v.sha256})),dag_id:basis.dag_id,occurrence_id:node.occurrence_id},advanced);
           sourceBody.append(advanced);
           return;
         }
@@ -955,7 +953,6 @@
           }
         }
         if(value.truncated)sourceBody.append($('p','正文超过 64 KiB 展示上限，当前只显示开头；摘要绑定完整原文。','wb-caption'));
-        raw('来源摘要',{sha256:value.sha256,dag_id:basis.dag_id,occurrence_id:node.occurrence_id},sourceBody);
       }catch(error){
         if(!valid()||error.name==='AbortError')return;
         disposeReaders(sourceBody);sourceBody.replaceChildren($('p',error.message?.includes('preview_expired')?'解析快照已过期，请点击“解析执行计划”重新读取。':error.message,'error-box'));

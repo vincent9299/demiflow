@@ -454,7 +454,6 @@
         block.append(document.createTextNode(part)); (sourcePage||content).append(block);
       }
       if(compact){
-        const basis=make('details',undefined,'reading-source-basis');basis.append(make('summary','原文信息'),make('p',coordinates+` · 本页 ${mounted} UTF-8 字节。`));content.append(basis);
         report((prefix?prefix+'；':'')+(pages===1?'源码完整显示。':'源码按页显示，共 '+pages+' 页。')+(offline?' 离线本地原文。':''));
       }else report((prefix ? prefix + '；已显示完整原文的当前页。' : '原文按页完整保留，可逐页查看与复制。') +
         ` 本页 ${mounted} UTF-8 字节。` + (offline ? ' 离线预览没有在线 worker 的 500 ms 超时保证。' : ''));
