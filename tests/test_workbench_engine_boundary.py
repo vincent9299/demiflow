@@ -29,9 +29,16 @@ ENGINE = re.compile(r'demiflow\.(execution|planning|data|pipeline)(\.|$)')
 PRIVATE_ATTRIBUTES = ('_connection', '_context', '_executor')
 
 PUBLIC = {
+    # Public SDK types; preview records their real calls without executing rows.
+    'demiflow.data.api': {'DataAPI'},
+    'demiflow.data.dataset': {'Dataset', 'MaterializedDataset'},
+    # Native metadata interpreters shared by drivers and host admission/readers.
+    'demiflow.execution.dataflow_schema': {'terminal_schema'},
+    'demiflow.execution.lance_sink': {'spec_from_identity'},
     'demiflow.execution': {'run_telemetry'},
     'demiflow.execution.artifacts': {'resolve_local_artifact'},
     'demiflow.execution.capabilities': {'VERSION', 'stream_residency'},
+    'demiflow.execution.dataflow_stage_facts': {'native_stage_commit', 'iter_native_stage_commits'},
     'demiflow.execution.datafusion': {'DataFusionOptions', 'DataFusionSession'},
     'demiflow.execution.output_watch': {'OutputWatch'},
     'demiflow.execution.payload_limits': {'resolve_payload_bounds', 'stream_limits'},
@@ -64,52 +71,27 @@ STEP5 = 'step 5: single engine launch entry'
 HEAD = 'unreviewed (added after b4396f8): node description should come from the engine'
 
 # (workbench file, engine module, imported name) -> why it is still allowed
+# Added on the newer integration base, audited separately: callsite capture
+# observes compiler frame locals. This presentation seam remains pending; it
+# must not be described as a stable public compiler API or a step 0-4 fix.
 PENDING_IMPORTS = {
-    ('runs/manager.py', 'demiflow.execution.commit', 'CommitCoordinator'): STEP2,
-    ('runs/manager.py', 'demiflow.execution.dataflow_sinks', 'inspect_native_write_receipt'): STEP2,
-    ('runs/manager.py', 'demiflow.execution.lance_sink', 'LanceSink'): STEP2,
-    ('runs/manager.py', 'demiflow.execution.lance_sink', 'spec_from_identity'): STEP2,
-    ('runs/manager.py', 'demiflow.execution.object_sink', 'ObjectRowsSink'): STEP2,
-    ('runs/manager.py', 'demiflow.execution.run_context', 'RunAction'): STEP2,
-    ('runs/native_stages.py', 'demiflow.execution.commit', 'CommitCoordinator'): STEP2,
-    ('runs/native_stages.py', 'demiflow.execution.dataflow_stage_facts', 'iter_native_stage_commits'): STEP2,
-    ('runs/native_stages.py', 'demiflow.execution.dataflow_stage_facts', 'native_stage_commit'): STEP2,
-    ('runs/native_stages.py', 'demiflow.execution.dataflow_stage_facts', 'stage_binding'): STEP2,
-    ('runs/native_stages.py', 'demiflow.execution.dataflow_stream_lance', '_BatchSink'): STEP2,
-    ('runs/native_stages.py', 'demiflow.execution.run_context', 'RunAction'): STEP2,
-    ('runs/native_stages.py', 'demiflow.execution.sealed_plans', 'read_plan_artifact'): STEP2,
-    ('runs/storage.py', 'demiflow.execution.object_resources', 'namespace_record'): STEP2,
-    ('runs/view.py', 'demiflow.execution.run_journal', '_node_document'): STEP3,
-    ('runs/view.py', 'demiflow.execution.run_journal', '_node_key'): STEP3,
-    ('runs/facts.py', 'demiflow.execution.dataflow_history', 'build_plan_view'): STEP4,
-    ('runs/facts.py', 'demiflow.execution.plan_interpreter', 'PlanContractError'): STEP4,
-    ('runs/facts.py', 'demiflow.execution.sealed_plans', 'load_sealed_plan'): STEP4,
-    ('runs/facts.py', 'demiflow.execution.sealed_plans', 'read_plan_artifact'): STEP4,
-    ('runs/worker.py', 'demiflow.execution.checked', 'CheckedExecution'): STEP5,
-    ('runs/worker.py', 'demiflow.execution.local_kernel', 'local_execution'): STEP5,
-    ('runs/worker.py', 'demiflow.execution.run_context', 'RunContext'): STEP5,
-    ('graph/plan_details.py', 'demiflow.data.plan', 'CallableSpec'): HEAD,
-    ('graph/plan_details.py', 'demiflow.data.plan', 'OperatorLLMMapOp'): HEAD,
-    ('graph/plan_details.py', 'demiflow.execution.dataflow_model_factory', 'CacheFactory'): HEAD,
-    ('graph/plan_details.py', 'demiflow.execution.dataflow_model_factory', 'PromptFactory'): HEAD,
-    ('graph/plan_details.py', 'demiflow.execution.dataflow_model_factory', 'RoutedPromptFactory'): HEAD,
+    ('graph/plan_callsite.py', 'demiflow.planning.dataflow_compile', 'capture_graph'): HEAD,
+    ('runs/worker.py', 'demiflow.execution.checked', 'CheckedExecution'): 'step 5: single engine launch entry',
+    ('runs/worker.py', 'demiflow.execution.local_kernel', 'local_execution'): 'step 5: single engine launch entry',
+    ('runs/worker.py', 'demiflow.execution.run_context', 'RunContext'): 'step 5: single engine launch entry',
+    ('graph/plan_details.py', 'demiflow.data.plan', 'CallableSpec'): 'unreviewed (added after b4396f8): node description should come from the engine',
+    ('graph/plan_details.py', 'demiflow.data.plan', 'OperatorLLMMapOp'): 'unreviewed (added after b4396f8): node description should come from the engine',
+    ('graph/plan_details.py', 'demiflow.execution.dataflow_model_factory', 'CacheFactory'): 'unreviewed (added after b4396f8): node description should come from the engine',
+    ('graph/plan_details.py', 'demiflow.execution.dataflow_model_factory', 'PromptFactory'): 'unreviewed (added after b4396f8): node description should come from the engine',
+    ('graph/plan_details.py', 'demiflow.execution.dataflow_model_factory', 'RoutedPromptFactory'): 'unreviewed (added after b4396f8): node description should come from the engine',
 }
 
 # (workbench file, private attribute) -> exact number of uses still allowed
-PENDING_PRIVATE_ATTRIBUTES = {
-    ('runs/manager.py', '_context'): 1,         # step 2
-    ('runs/native_stages.py', '_connection'): 1,  # step 2
-    ('runs/native_stages.py', '_context'): 1,   # step 2
-    ('runs/worker.py', '_executor'): 3,         # step 5
-}
+PENDING_PRIVATE_ATTRIBUTES = {('runs/worker.py', '_executor'): 3}  # step 5
+
 
 # workbench/runs file -> exact number of direct sqlite3.connect calls (step 3)
-PENDING_DIRECT_SQLITE = {
-    'runs/domain.py': 1,
-    'runs/requests.py': 1,
-    'runs/storage.py': 2,
-    'runs/view.py': 1,
-}
+PENDING_DIRECT_SQLITE = {}
 
 
 def _scan():

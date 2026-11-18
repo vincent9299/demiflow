@@ -1,16 +1,15 @@
 """Small read projections of native run facts; no reconciliation on GET."""
 
-from contextlib import closing
+from contextlib import ExitStack, contextmanager
 import base64
 import json
-import sqlite3
-import time
 
 from demiflow.workbench.runs import manager as runs
 from demiflow.forge.platform import bounded_json
 from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
 from demiflow.execution import run_telemetry
+from demiflow.execution.run_reader import RunReadError, read_run
 
 
 class ObservationResetRequired(ForgeError):
@@ -20,38 +19,28 @@ class ObservationResetRequired(ForgeError):
         self.reason=reason
 
 
-def _observation_revision(db,attempt):
-    """Hash native identity/sequence rows in the caller's read transaction.
-
-    reserve_nodes adds sequence=0 membership. observe_nodes only updates when
-    sequence increases, and terminal records cannot change. Hashing membership
-    as well as every sequence detects additions, updates, removals and restored
-    older metadata; it does not rely on a control-event or execution revision.
-    No new journal writer or telemetry producer is introduced.
-    """
-    import hashlib
-    from demiflow.execution.run_journal import OBSERVATION_COUNT
-    from demiflow.execution.run_journal import _node_key
-    digest=hashlib.sha256();count=0;total=0;sequence_total=0
-    for row in db.execute('SELECT action_id,node_id,occurrence,sequence,terminal FROM node_observations WHERE attempt=? ORDER BY action_id,node_id,occurrence',(attempt,)):
-        count+=1
-        if count>OBSERVATION_COUNT:
-            raise ForgeError('Observation metadata count exceeds native budget',code='resource_limit')
-        _node_key(*row[:3])
-        if type(row[3]) is not int or not 0<=row[3]<2**63 or row[4] not in (0,1):
-            raise ForgeError('Invalid native observation version')
-        sequence_total+=row[3]
-        raw=bounded_json(list(row),1024);total+=len(raw)
-        if total>1024**2:
-            raise ForgeError('Observation version scan exceeds 1MiB',code='resource_limit')
-        digest.update(raw);digest.update(b'\n')
-    return 'o'+digest.hexdigest(),count,sequence_total
+@contextmanager
+def _reading(root, run_id, *, deadline=None, cursor=None):
+    """Keep host errors and cursor resets around the engine read transaction."""
+    with ExitStack() as stack:
+        try:
+            target = runs.directory(root, run_id)
+            reader = stack.enter_context(read_run(target, deadline=deadline))
+        except (OSError, ForgeError, RunReadError) as exc:
+            if cursor:
+                raise ObservationResetRequired('history_unavailable') from exc
+            if isinstance(exc, RunReadError):
+                raise ForgeError(str(exc), code=exc.code or 'operation_rejected') from exc
+            raise
+        try:
+            yield target, reader
+        except RunReadError as exc:
+            raise ForgeError(str(exc), code=exc.code or 'operation_rejected') from exc
 
 
 def observations(root, run_id, *, attempt, node_id=None, action_id=None, cursor=None, limit=32):
     """One 96KiB occurrence page, pinned to an explicit observation revision."""
     from demiflow.execution.run_journal import OBSERVATION_COUNT
-    from demiflow.execution.run_journal import _node_document
     if type(limit) is not int or not 1<=limit<=64 or type(attempt) is not int:
         raise ForgeError('Invalid observation page',code='invalid_request')
     for value in (node_id,action_id):
@@ -72,75 +61,44 @@ def observations(root, run_id, *, attempt, node_id=None, action_id=None, cursor=
                 raise ValueError('Invalid position')
         except (ValueError,KeyError,TypeError,RecursionError) as exc:
             raise ObservationResetRequired('cursor_invalid') from exc
-    try:
-        target,connection=_connect(root,run_id)
-    except (OSError,ForgeError) as exc:
-        if cursor:raise ObservationResetRequired('history_unavailable') from exc
-        raise
-    with closing(connection) as db:
-        db.execute('BEGIN')
-        size=db.execute('SELECT length(CAST(document AS BLOB)) FROM manifest').fetchone()
-        if not size or size[0]>8*1024**2:
-            raise ForgeError('Run manifest exceeds native budget',code='resource_limit')
-        identity=db.execute("SELECT json_extract(document,'$.root'),json_extract(document,'$.run_id'),json_extract(document,'$.digest') FROM manifest").fetchone()
-        if not identity or identity[:2]!=(str(runs.Path(root).absolute()),run_id) or type(identity[2]) is not str or len(identity[2])!=64:
+    with _reading(root, run_id, cursor=cursor) as (target, reader):
+        identity=reader.manifest_identity()
+        if (identity['root'] != str(runs.Path(root).absolute()) or identity['run_id'] != run_id
+                or type(identity['digest']) is not str or len(identity['digest']) != 64):
             if cursor:raise ObservationResetRequired('sealed_identity_changed')
             raise ForgeError('Run observation seal belongs to a different project',code='conflict')
         control=runs.ws.read_control(runs.Path(root)/'workspace.json')
         binding=dict(workspace_id=runs.ws.workspace_id(root,control),project_root_digest=content_digest(str(runs.Path(root).absolute())),
-                     run_id=run_id,attempt=attempt,seal_digest=identity[2],node_id=node_id,action_id=action_id)
+                     run_id=run_id,attempt=attempt,seal_digest=identity['digest'],node_id=node_id,action_id=action_id)
         if decoded is not None and decoded['binding']!=binding:
             raise ObservationResetRequired('cursor_binding_changed')
-        columns={row[1] for row in db.execute('PRAGMA table_info(node_observations)')}
-        if 'attempt' not in columns:
+        if not reader.observations_supported():
             if cursor:raise ObservationResetRequired('historical_observation_contract')
             return dict(run_id=run_id,attempt=attempt,observations=[],availability='unsupported',
                         reason='historical_observation_contract',scope='correlated_node_observations',has_more=False)
-        try:_state(db,attempt)
-        except ForgeError as exc:
+        try:reader.state(attempt)
+        except RunReadError as exc:
             if cursor:raise ObservationResetRequired('attempt_history_unavailable') from exc
             raise
-        revision,count,_=_observation_revision(db,attempt)
+        revision,count,_=reader.observation_revision(attempt)
         if decoded is not None and decoded['observation_revision']!=revision:
             raise ObservationResetRequired('observations_changed')
         # Page credentials come only from the persisted producer observations.
         # A selected sealed plan is not evidence that a legacy row ran that plan.
-        scope_clauses=['attempt=?'];scope_values=[attempt]
-        for key,value in [('node_id',node_id),('action_id',action_id)]:
-            if value is not None:
-                scope_clauses.append(key+'=?');scope_values.append(value)
-        scope_fields=('plan_id','dag_id','plan_revision')
-        scope_query=','.join("json_extract(document,'$."+name+"')" for name in scope_fields)
-        scopes=db.execute('SELECT DISTINCT '+scope_query+' FROM node_observations WHERE '+
-                          ' AND '.join(scope_clauses)+' LIMIT 2',scope_values).fetchall()
-        page_scope=(dict(zip(scope_fields,scopes[0])) if len(scopes)==1
-                    and all(value is not None for value in scopes[0]) else None)
+        page_scope=reader.observation_scope(attempt, node_id=node_id, action_id=action_id)
         result=dict(format='demiflow_forge_node_observation_page_v1',run_id=run_id,attempt=attempt,
                     node_id=node_id,action_id=action_id,binding=binding,observation_revision=revision,
                     observations=[],availability='available',scope='correlated_node_observations',
                     cursor=None,has_more=False,coverage='one_page_at_observation_revision',attempt_observation_count=count)
         if page_scope is not None:
             result.update(page_scope)
-        clauses=['attempt=?'];values=[attempt]
-        for key,value in [('node_id',node_id),('action_id',action_id)]:
-            if value is not None:clauses.append(key+'=?');values.append(value)
-        if after is not None:
-            clauses.append('(action_id,node_id,occurrence)>(?,?,?)');values.extend(after)
-        sql=('SELECT action_id,node_id,occurrence,sequence,length(CAST(document AS BLOB)),'
-             'CASE WHEN length(CAST(document AS BLOB))<=8192 THEN document END FROM node_observations WHERE '+
-             ' AND '.join(clauses)+' ORDER BY action_id,node_id,occurrence LIMIT ?')
-        values.append(limit+1);rows=result['observations'];used=len(bounded_json(result,96*1024))+2064;last=after
-        for action,node,occurrence,sequence,length,raw in db.execute(sql,values):
-            if raw is None or length>8192:
-                raise ForgeError('Observation exceeds native record budget',code='resource_limit')
-            document=json.loads(raw);_node_document(document)
-            if document['sequence']!=sequence:
-                raise ForgeError('Observation document differs from its native sequence')
-            row=dict(document,action_id=action,node_id=node,occurrence=occurrence,sequence=sequence)
+        rows=result['observations'];used=len(bounded_json(result,96*1024))+2064;last=after
+        for row in reader.observation_rows(attempt, node_id=node_id, action_id=action_id,
+                                           after=after, limit=limit+1):
             size=len(bounded_json(row,16384))+1
             if len(rows)==limit or used+size>96*1024:
                 result['has_more']=True;break
-            rows.append(row);used+=size;last=[action,node,occurrence]
+            rows.append(row);used+=size;last=[row['action_id'],row['node_id'],row['occurrence']]
         if last:
             encoded=bounded_json(dict(v=1,binding=binding,observation_revision=revision,after=last),1536)
             result['cursor']=base64.urlsafe_b64encode(encoded).decode()
@@ -150,173 +108,72 @@ def observations(root, run_id, *, attempt, node_id=None, action_id=None, cursor=
         return result
 
 
-def _connect(root, run_id):
-    target = runs.directory(root, run_id)
-    path = target / "run.sqlite"
-    runs.ws.no_symlinks(path)
-    if not path.is_file() or path.stat().st_size > 64 * 1024**2:
-        raise ForgeError("Run journal unavailable or exceeds budget")
-    db = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)
-    db.execute("PRAGMA cache_size=-2048")
-    return target, db
+
 
 
 def context_facts(root, run_id, *, attempt=None, deadline=None):
-    """A <=4 KiB scalar projection, including historical attempts, without writes.
-
-SQLite parses at most the existing 8 MiB manifest/64 KiB state limits. Only
-bounded scalar projections cross into Python. No index refresh, reconciliation,
-event replay or producer startup occurs. This is an observation, not admission.
-    """
+    """A <=4 KiB projection of native facts. No reconciliation or code execution."""
     import re
     if attempt is not None and (type(attempt) is not int or not 1 <= attempt <= 32):
         raise ForgeError('Invalid attempt', code='invalid_request')
-    _, connection = _connect(root, run_id)
-    with closing(connection) as db:
-        if deadline is not None:
-            db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
-        db.execute('BEGIN')
-        row = db.execute("SELECT length(CAST(document AS BLOB)) FROM manifest LIMIT 1").fetchone()
-        if not row or row[0] > 8 * 1024**2:
-            raise ForgeError('Run manifest exceeds native budget', code='resource_limit')
-        identity = db.execute("SELECT json_extract(document,'$.root')=?, json_extract(document,'$.run_id')=?, "
-                              "substr(CAST(json_extract(document,'$.digest') AS BLOB),1,65), "
-                              "substr(CAST(json_extract(document,'$.format') AS BLOB),1,65) FROM manifest LIMIT 1",
-                              (str(runs.Path(root).absolute()), run_id)).fetchone()
-        if (not identity or identity[:2] != (1, 1) or not isinstance(identity[2], bytes)
-                or not re.fullmatch(rb'[0-9a-f]{64}', identity[2])):
+    with _reading(root, run_id, deadline=deadline) as (_, reader):
+        identity = reader.manifest_identity()
+        if (identity['root'] != str(runs.Path(root).absolute()) or identity['run_id'] != run_id
+                or type(identity['digest']) is not str
+                or not re.fullmatch(r'[0-9a-f]{64}', identity['digest'])
+                or type(identity['format']) is not str):
             raise ForgeError('Run context identity differs', code='conflict')
-        fields = ('attempt', 'revision', 'status', 'execution_stopped', 'cleanup', 'usage_complete', 'launch_phase', 'stop_phase')
-        projection = "json_object(" + ','.join("'" + key + "',json_extract(document,'$." + key + "')" for key in fields) + ')'
-
-        def state(table, where='', parameters=()):
-            # Table names and SQL come only from these two fixed branches.
-            row = db.execute('SELECT length(CAST(document AS BLOB)), substr(CAST(' + projection +
-                             ' AS BLOB),1,4097) FROM ' + table + where + ' LIMIT 1', parameters).fetchone()
-            if not row:
-                raise ForgeError('Unknown attempt', code='not_found')
-            if row[0] > 65536 or len(row[1]) > 4096:
-                raise ForgeError('Run context state exceeds budget', code='resource_limit')
-            return json.loads(row[1])
-
-        current = state('execution_state')
-        selected = current if attempt is None or attempt == current['attempt'] else state('attempts', ' WHERE attempt=?', (attempt,))
+        selected, current = reader.state_projection(attempt)
         result = dict(run_id=run_id, attempt=selected['attempt'], current_attempt=current['attempt'],
-                      historical=selected['attempt'] != current['attempt'], seal_digest=identity[2].decode(),
-                      source_format=identity[3].decode(), state=selected)
+                      historical=selected['attempt'] != current['attempt'], seal_digest=identity['digest'],
+                      source_format=identity['format'], state=selected)
         bounded_json(result, 4096)
         return result
 
 
-def _state(db, attempt):
-    if attempt is not None and (type(attempt) is not int or not 1 <= attempt <= 32):
-        raise ForgeError("Invalid attempt", code="invalid_request")
-    raw = db.execute("SELECT document FROM execution_state").fetchone()
-    if not raw or len(raw[0].encode()) > 65536:
-        raise ForgeError("Invalid run state")
-    current = json.loads(raw[0])
-    if attempt is not None and attempt != current.get("attempt"):
-        raw = db.execute(
-            "SELECT document FROM attempts WHERE attempt=?", (attempt,)
-        ).fetchone()
-        if not raw or len(raw[0].encode()) > 65536:
-            raise ForgeError("Unknown attempt", code="not_found")
-        return json.loads(raw[0]), current.get("attempt")
-    return current, current.get("attempt")
+
 
 
 def control_state(root, run_id):
-    target, connection = _connect(root, run_id)
-    with closing(connection) as db:
-        db.execute("BEGIN")
-        if not db.execute(
-            "SELECT 1 FROM sqlite_master WHERE name='runtime_summary'"
-        ).fetchone():
+    with _reading(root, run_id) as (target, reader):
+        summary = reader.runtime_summary()
+        if summary is None:
             return runs._load(root, run_id, detail="identity")[0:2]
-        raw = db.execute("SELECT document FROM runtime_summary").fetchone()[0]
-        if len(raw) > 65536:
-            raise ForgeError("Runtime projection exceeds budget")
-        summary = json.loads(raw)
         if (
             summary["root"] != str(runs.Path(root).absolute())
             or summary["run_id"] != run_id
         ):
             raise ForgeError("Run projection identity differs")
-        state, _ = _state(db, None)
+        state, _ = reader.state()
         return target, {"state": state, "managed": True}
 
 
 def snapshot(root, run_id, *, attempt=None, revision=None):
-    target, connection = _connect(root, run_id)
-    with closing(connection) as db:
-        db.execute("BEGIN")
-        if not db.execute(
-            "SELECT 1 FROM sqlite_master WHERE name='runtime_summary'"
-        ).fetchone():
+    with _reading(root, run_id) as (target, reader):
+        summary = reader.runtime_summary()
+        if summary is None:
             return dict(
                 run_id=run_id,
                 availability="unsupported",
                 reason="historical_runtime_contract",
             )
-        raw = db.execute("SELECT document FROM runtime_summary").fetchone()[0]
-        if len(raw.encode()) > 65536:
-            raise ForgeError("Runtime projection exceeds budget")
-        summary = json.loads(raw)
         if (
             summary["root"] != str(runs.Path(root).absolute())
             or summary["run_id"] != run_id
         ):
             raise ForgeError("Run projection identity differs")
-        state, current = _state(db, attempt)
+        state, current = reader.state(attempt)
         attempt = state["attempt"]
-        action_sequence = db.execute(
-            "SELECT coalesce(max(sequence),0) FROM action_events WHERE attempt=?",
-            (attempt,),
-        ).fetchone()[0]
-        observation_revision,observation_count,node_sequence=_observation_revision(db,attempt)
-        observations = []
-        # Scalar projection, not full 8 KiB node/evidence documents. The full
-        # graph remains explicitly available through the original detail API.
-        fields = (
-            "state",
-            "rows_input",
-            "rows_output",
-            "calls",
-            "errors",
-            "elapsed_s",
-            "timing_scope",
-        )
-        scope_fields = ("plan_id", "dag_id", "plan_revision", "occurrence_id")
-        query = "SELECT action_id,node_id,occurrence," + ",".join(
-            "json_extract(document,'$." + k + "')" for k in fields + scope_fields
-        )
-        query += " FROM node_observations WHERE attempt=? ORDER BY terminal,action_id,node_id,occurrence LIMIT 65"
-        for row in db.execute(query, (attempt,)):
-            observations.append(
-                dict(
-                    action_id=row[0],
-                    node_id=row[1],
-                    occurrence=row[2],
-                    **dict(zip(fields, row[3:3 + len(fields)])),
-                    **(dict(zip(scope_fields, row[3 + len(fields):]))
-                       if all(value is not None for value in row[3 + len(fields):]) else {}),
-                )
-            )
+        action_sequence = reader.action_sequence(attempt)
+        observation_revision,observation_count,node_sequence=reader.observation_revision(attempt)
+        observations = reader.observation_summaries(attempt)
         outputs = []
         for name, spec in summary["outputs"].items():
             # Required facts are projected separately from arbitrary action
             # values. Most recent committed attempt retains its own identity.
             facts = {}
             retained = None
-            query = """SELECT attempt,kind,json_extract(document,'$.status'),json_extract(document,'$.ref')
-                     FROM action_events WHERE attempt<=? AND action_id=?
-                     AND kind IN ('intent','receipt','recovered','stage_commit','stage_recovered','result','recovered_result')
-                     ORDER BY attempt DESC,sequence DESC LIMIT 256"""
-            candidates = {}
-            for a, kind, status, reference in db.execute(
-                query, (attempt, spec["action_id"])
-            ):
-                candidates.setdefault(a, {})[kind] = (status, reference)
+            candidates = reader.output_facts(attempt, spec["action_id"])
             facts = candidates.get(attempt, {})
             if not any(
                 k in facts
@@ -423,14 +280,11 @@ def snapshot(root, run_id, *, attempt=None, revision=None):
 def events(root, run_id, *, attempt=None, cursor=None, limit=100):
     if type(limit) is not int or not 1 <= limit <= 100:
         raise ForgeError("Invalid control event page size", code="invalid_request")
-    target, connection = _connect(root, run_id)
-    with closing(connection) as db:
-        db.execute("BEGIN")
-        state, _ = _state(db, attempt)
+    with _reading(root, run_id) as (target, reader):
+        state, _ = reader.state(attempt)
         attempt = state.get("attempt")
-        if not db.execute(
-            "SELECT 1 FROM sqlite_master WHERE name='control_events'"
-        ).fetchone():
+        high = reader.control_sequence(attempt)
+        if high is None:
             return dict(events=[], availability="unsupported")
         after = 0
         if cursor:
@@ -446,20 +300,13 @@ def events(root, run_id, *, attempt=None, cursor=None, limit=100):
                     code="conflict",
                 )
             after = int(parts[2])
-        high = db.execute(
-            "SELECT coalesce(max(sequence),0) FROM control_events WHERE attempt=?",
-            (attempt,),
-        ).fetchone()[0]
         if after > high:
             raise ForgeError(
                 "Control cursor is outside retained history", code="conflict"
             )
         rows = []
         size = 0
-        for sequence, raw in db.execute(
-            "SELECT sequence,document FROM control_events WHERE attempt=? AND sequence>? ORDER BY sequence LIMIT ?",
-            (attempt, after, limit),
-        ):
+        for sequence, raw in reader.control_events(attempt, after=after, limit=limit):
             size += len(raw.encode())
             if size > 120 * 1024:
                 break
@@ -477,9 +324,8 @@ def events(root, run_id, *, attempt=None, cursor=None, limit=100):
 
 
 def metrics(root, run_id, *, attempt=None, points=600, resolution="raw"):
-    target, connection = _connect(root, run_id)
-    with closing(connection) as db:
-        state, _ = _state(db, attempt)
+    with _reading(root, run_id) as (target, reader):
+        state, _ = reader.state(attempt)
     return run_telemetry.series(
         target, attempt=state.get("attempt"), points=points, resolution=resolution
     )

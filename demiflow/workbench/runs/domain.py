@@ -189,30 +189,22 @@ def _overlap(a, b):
 
 def _owner_finished(owner):
     from demiflow.workbench.runs import manager as runs
-    from demiflow.resources.process_observation import unit_stopped
+    from demiflow.execution.run_reader import RunReadError
 
     try:
         target = runs.directory(owner["root"], owner["run_id"])
-        path = target / "run.sqlite"
-        if not path.is_file() or path.stat().st_size > 64 * MiB:
+        from demiflow.execution.run_reader import read_run
+        with read_run(target) as reader:
+            state = reader.attempt_state(owner["attempt"])
+        if state is None:
             return False
-        db = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)
-        try:
-            row = db.execute(
-                "SELECT document FROM attempts WHERE attempt=?", (owner["attempt"],)
-            ).fetchone()
-            if not row or len(row[0]) > 65536:
-                return False
-            state = json.loads(row[0])
-        finally:
-            db.close()
         return (
             state["status"] in runs.TERMINAL
             and state.get("execution_stopped") is True
             and state.get("cleanup") == "complete"
             and runs.execution_stopped(target, state)
         )
-    except (OSError, ValueError, KeyError, sqlite3.Error):
+    except (OSError, ValueError, KeyError, sqlite3.Error, RunReadError):
         return False  # Missing/relocated evidence is not a free slot.
 
 

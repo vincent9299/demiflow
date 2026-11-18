@@ -1,14 +1,12 @@
 """Bounded durable prepare receipts. A request never receives a second run ID."""
 
 from contextlib import contextmanager
-from contextlib import closing
 import fcntl
 import json
 import os
 from pathlib import Path
 import re
 import shutil
-import sqlite3
 import time
 import uuid
 
@@ -211,54 +209,30 @@ def _incomplete_seal(target, identity, run_id, root):
     no_symlinks(path)
     if not path.is_file() or path.stat().st_size > 64 * 1024**2:
         raise ForgeError("Preparation journal exceeds budget")
-    with closing(
-        sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)
-    ) as db:
-        db.execute("PRAGMA cache_size=-2048")
-        db.execute("BEGIN")
-        tables = {
-            row[0]
-            for row in db.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' LIMIT 33"
-            )
-        }
-        if len(tables) > 32:
-            raise ForgeError("Preparation journal shape exceeds budget")
-
-        def document(table, maximum):
-            if table not in tables:
-                return None
-            row = db.execute(
-                f"SELECT substr(document,1,{maximum+1}) FROM {table} LIMIT 1"
-            ).fetchone()
-            if not row:
-                return None
-            if type(row[0]) is not str or len(row[0].encode()) > maximum:
-                raise ForgeError("Preparation control exceeds budget")
-            value = json.loads(row[0])
-            if type(value) is not dict:
-                raise ForgeError("Invalid preparation control")
-            return value
-
-        state = document("execution_state", 65536)
-        if state is not None:
-            if state.get("status") is not None:
-                return False
-            if state != {"status": None, "revision": 0, "attempt": 1}:
-                raise ForgeError("Unknown preparation state")
-        manifest = document("manifest", 8 * 1024**2)
-        if manifest is not None and (
-            manifest.get("prepare_request_id") != identity
-            or manifest.get("run_id") != run_id
-            or manifest.get("root") != str(Path(root).absolute())
-        ):
-            raise ForgeError("Preparation ownership differs")
-        for table in ("action_events", "completion", "stages", "activities"):
-            if (
-                table in tables
-                and db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
+    from demiflow.execution.run_reader import read_run, RunReadError
+    try:
+        with read_run(target) as reader:
+            tables = reader.tables()
+            if len(tables) > 32:
+                raise ForgeError("Preparation journal shape exceeds budget")
+            state = reader.document("execution_state", 65536)
+            if state is not None:
+                if state.get("status") is not None:
+                    return False
+                if state != {"status": None, "revision": 0, "attempt": 1}:
+                    raise ForgeError("Unknown preparation state")
+            manifest = reader.document("manifest", 8 * 1024**2)
+            if manifest is not None and (
+                manifest.get("prepare_request_id") != identity
+                or manifest.get("run_id") != run_id
+                or manifest.get("root") != str(Path(root).absolute())
             ):
-                raise ForgeError("Preparation contains execution facts")
+                raise ForgeError("Preparation ownership differs")
+            for table in ("action_events", "completion", "stages", "activities"):
+                if reader.has_rows(table):
+                    raise ForgeError("Preparation contains execution facts")
+    except RunReadError as exc:
+        raise ForgeError(str(exc), code=exc.code or 'operation_rejected') from exc
     return True
 
 

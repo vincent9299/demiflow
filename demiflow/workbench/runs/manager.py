@@ -1344,43 +1344,4 @@ def logs(root, run_id, *, offset=0, limit=65536, attempt=None):
                 truncated=offset<base or skipped>0,base_offset=base)
 
 
-def _native_execution_receipt(journal, action_id):
-    """Read-only projection using the same native sink inspection as the driver."""
-    from types import SimpleNamespace
-    from demiflow.execution.run_context import RunAction
-    from demiflow.execution.commit import CommitCoordinator
-    from demiflow.execution.lance_sink import LanceSink
-    from demiflow.lance.model import LanceWriteSpec
-    from demiflow.lance.schema import build_schema
-    binding = journal.recovery_identity()
-    if binding is None:
-        return None
-    action = journal.execution_action(action_id)
-    if action is None:
-        return None
-    facts = journal.execution_commits(action_id)
-    if facts and facts[-1]['intent']['sinks'] == ['write_lance']:
-        from demiflow.execution.dataflow_sinks import inspect_native_write_receipt
-        return inspect_native_write_receipt(journal, action_id)
-    if not facts or facts[-1]['prepared'] is None or facts[-1]['intent']['sinks'] != ['lance']:
-        return None
-    fact = facts[-1]
-    # The immutable native declaration holds the original spec. Schema is
-    # serialized as Arrow IPC, so no candidate code is imported to inspect it.
-    from demiflow.execution.lance_sink import spec_from_identity
-    spec = spec_from_identity(action['declaration']['sink'])
-    context = SimpleNamespace(directory=journal.directory, limits=binding['limits'],
-        journal=journal, ref=SimpleNamespace(run_id=binding['run_id']),
-        attempt=journal.execution_status()['attempt'], fence='observation-only')
-    native_action = RunAction(context, action_id, action['declaration'])
-    prepared = fact['prepared']['sinks']['lance']
-    sink = LanceSink(native_action, spec)
-    composite = type(prepared) is dict and {'objects', 'rows'} <= set(prepared)
-    if composite:
-        from demiflow.execution.object_sink import ObjectRowsSink
-        sink = ObjectRowsSink.for_inspection(native_action, sink, prepared)
-    receipt = sink.inspect(prepared,
-        CommitCoordinator(native_action)._context(fact['commit_id']))
-    if receipt is None:
-        return None
-    return receipt['data']['rows'] if composite else receipt['data']
+from demiflow.execution.publication_facts import inspect_write_receipt as _native_execution_receipt

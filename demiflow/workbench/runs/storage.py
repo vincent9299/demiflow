@@ -4,13 +4,11 @@ Logical object locations come from the checked resource closure. Physical
 namespaces and orphan decisions remain owned by the one native RunJournal.
 """
 
-from contextlib import closing
 import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
-import sqlite3
 import stat
 import time
 import uuid
@@ -20,139 +18,10 @@ from demiflow.forge.schema import ForgeError
 from demiflow.execution.run_journal import RunJournal
 
 
-def _storage_json(raw, *, characters=None):
-    """Bound decoded metadata before allocating JSON container objects."""
-    if raw is None:
-        return None
-    from demiflow.execution.recovery_contract import RecoveryContractError
-    depth = tokens = 0
-    quoted = escaped = False
-    for byte in raw:
-        if quoted:
-            if escaped:
-                escaped = False
-            elif byte == 92:
-                escaped = True
-            elif byte == 34:
-                quoted = False
-        elif byte == 34:
-            quoted = True
-            tokens += 1
-        elif byte in (91, 123):
-            depth += 1
-            tokens += 1
-        elif byte in (93, 125):
-            depth -= 1
-        elif byte in (44, 58):
-            tokens += 1
-        if depth > 64 or tokens > 524288:
-            raise RecoveryContractError('Historical JSON structural budget exceeded')
-    text = raw.decode('utf-8')
-    if characters is not None and len(text) > characters:
-        raise RecoveryContractError('Historical state exceeds budget')
-    def invalid_constant(value):
-        raise RecoveryContractError('Invalid historical JSON constant: ' + value)
-    value = json.loads(text, parse_constant=invalid_constant)
-    if type(value) is not dict:
-        raise RecoveryContractError('Invalid historical metadata document')
-    return value
 
 
-def storage_snapshot(directory):
-    """Bounded native ownership/control facts in a short read transaction.
 
-    No schema initialization or writer connection. Close the read transaction
-    before decoding or traversing storage. Optional runtime tables are absent
-    in old journals.
-    This is not a filesystem snapshot or a retained usage summary.
-    """
-    from demiflow.execution.recovery_contract import MAX_DOCUMENT_BYTES, RecoveryContractError
-
-    path = Path(directory) / "run.sqlite"
-
-    def file_identity():
-        info = path.stat(follow_symlinks=False)
-        if not stat.S_ISREG(info.st_mode) or info.st_size > 64 * 1024**2:
-            raise RecoveryContractError('Historical journal type/size exceeds budget')
-        return info.st_dev, info.st_ino
-
-    identity = file_identity()
-    with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro",
-                                 uri=True, timeout=0.1, cached_statements=8)) as db:
-        db.execute("PRAGMA cache_size=-2048")
-        try:
-            db.execute('BEGIN')
-            tables = {r[0] for r in db.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
-                "('manifest','execution_state','runtime_identity','runtime_object_roots') LIMIT 5")}
-            if 'execution_state' not in tables:
-                raise RecoveryContractError('Historical journal has no execution state table')
-
-            def document(table, maximum):
-                if table not in tables:
-                    return None
-                # Literal table names above; bound each BLOB before it is
-                # returned to Python, including corrupt oversized records.
-                rows = db.execute(
-                    f"SELECT CASE WHEN typeof(document)='text' THEN "
-                    f'substr(CAST(document AS BLOB),1,?) END FROM {table} LIMIT 2',
-                    (maximum + 1,)).fetchall()
-                if len(rows) > 1:
-                    raise RecoveryContractError('Ambiguous historical ' + table)
-                if not rows:
-                    return None
-                raw = rows[0][0]
-                if not isinstance(raw, bytes) or len(raw) > maximum:
-                    raise RecoveryContractError('Historical ' + table + ' exceeds byte budget')
-                return raw
-
-            state = document('execution_state', 4 * 65536)
-            records = []
-            if 'runtime_object_roots' in tables:
-                fields = ('root_id', 'logical_root', 'physical_root', 'run_id')
-                bounds = (64, 4096, 4096, 32)
-                projection = ','.join(
-                    f"CASE WHEN typeof({field})='text' THEN "
-                    f'substr(CAST({field} AS BLOB),1,{maximum + 1}) END'
-                    for field, maximum in zip(fields, bounds))
-                rows = db.execute('SELECT ' + projection + ' FROM runtime_object_roots LIMIT 65').fetchall()
-                if len(rows) > 64:
-                    raise RecoveryContractError('Object resource count exceeds ceiling')
-                for row in rows:
-                    if any(not isinstance(v, bytes) or len(v) > maximum
-                           for v, maximum in zip(row, bounds)):
-                        raise RecoveryContractError('Historical object root field exceeds byte budget')
-                    record = dict(zip(fields, (v.decode('utf-8') for v in row)))
-                    # Same aggregate record limit used by register_object_root.
-                    from demiflow.execution.recovery_contract import document as checked_document
-                    checked_document(record, 8192)
-                    records.append(record)
-                # Sort only the bounded result, never an untrusted entire
-                # table (legacy/corrupt schemas may lack the native index).
-                records.sort(key=lambda record: record['root_id'])
-            # Validate/hash complete documents, then retain only storage
-            # fields. No large source inventories live across traversal.
-            manifest = document('manifest', 8 * 1024**2)
-            binding = document('runtime_identity', MAX_DOCUMENT_BYTES)
-        finally:
-            if db.in_transaction:
-                db.rollback()
-    if file_identity() != identity:
-        raise RecoveryContractError('Historical journal identity changed')
-    # Decode after ending the short SQL read transaction. Even a bounded
-    # large document must not retain a reader lock during Python parsing.
-    def projected(raw, keys, *, characters=None):
-        value = _storage_json(raw, characters=characters)
-        if value is None:
-            return None, None
-        result = {key: value[key] for key in keys if key in value}
-        return result, hashlib.sha256(raw).hexdigest()
-
-    state, _ = projected(state, ('status', 'attempt'), characters=65536)
-    manifest, manifest_digest = projected(manifest, ('run_id', 'object_locations', 'report_digest'))
-    binding, identity_digest = projected(binding, ('run_id',))
-    return dict(state=state, manifest=manifest, identity=binding, object_roots=records,
-                manifest_digest=manifest_digest, identity_digest=identity_digest)
+from demiflow.execution.run_reader import read_run, storage_snapshot, RunReadError
 
 
 def object_locations(*, report=None, manifest=None, target=None):
@@ -198,17 +67,14 @@ def owned_objects(target, allowed=None):
     if not records:
         return []
     if allowed is None:
-        with closing(
-            sqlite3.connect(
-                journal.path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1
-            )
-        ) as db:
-            row = db.execute(
-                "SELECT substr(document,1,8388609) FROM manifest"
-            ).fetchone()
-        if not row or len(row[0].encode()) > 8 * 1024**2:
+        try:
+            with read_run(target) as reader:
+                manifest = reader.document('manifest', 8 * 1024**2)
+        except RunReadError as exc:
+            raise ForgeError(str(exc), code=exc.code or 'operation_rejected') from exc
+        if manifest is None:
             raise ForgeError("Historical run manifest exceeds budget")
-        allowed = object_locations(manifest=json.loads(row[0]), target=target)
+        allowed = object_locations(manifest=manifest, target=target)
     binding = journal.recovery_identity()
     return _checked_owned_objects(records, allowed, binding)
 
@@ -218,14 +84,11 @@ def _checked_owned_objects(records, allowed, binding):
     if not records:
         return []
     native_id = _native_run_id(binding)
-    from demiflow.execution.object_resources import namespace_record
-    from types import SimpleNamespace
-
-    context = SimpleNamespace(ref=SimpleNamespace(run_id=native_id))
+    from demiflow.execution.publication_facts import object_namespace
     paths = []
     for record in records:
         logical = record["logical_root"]
-        if logical not in allowed or record != namespace_record(context, logical):
+        if logical not in allowed or record != object_namespace(native_id, logical):
             raise ForgeError("Owned object namespace differs from checked locations")
         path = no_symlinks(Path(record["physical_root"]))
         if path not in paths:

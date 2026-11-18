@@ -731,8 +731,7 @@ def make_native_terminal_sink(spec, *, request, services, publication_reserved_b
 
 def inspect_native_write_receipt(journal, action_id):
     """Project a v3 native publication without starting code or changing history."""
-    from types import SimpleNamespace
-    from .commit import CommitCoordinator
+    from .publication_facts import observation_action, commit_write_context
     from .lance_sink import LanceSink, spec_from_identity
     from .sealed_plans import _v3_read_store
     from .dataflow_seal import load_dataflow
@@ -749,10 +748,7 @@ def inspect_native_write_receipt(journal, action_id):
         return None
     store, bounds = _v3_read_store(journal.directory, store_id=seal['physical_ref']['store_id'])
     graph, physical, _ = load_dataflow(journal.directory, action_id, store=store, bounds=bounds)
-    context = SimpleNamespace(directory=journal.directory, limits=binding['limits'],
-        journal=journal, ref=SimpleNamespace(run_id=binding['run_id']),
-        attempt=journal.execution_status()['attempt'], fence='observation-only')
-    native_action = RunAction(context, action_id, action['declaration'])
+    native_action = observation_action(journal, action_id, action['declaration'], binding)
     native = LanceSink(native_action, spec_from_identity(action['declaration']['sink']))
     sink = NativeTerminalSink(native=native, sink_id='write_lance', store=store,
         action=native_action, bounds=physical.bounds, configuration={})
@@ -761,7 +757,7 @@ def inspect_native_write_receipt(journal, action_id):
     if composite:
         from .object_sink import ObjectRowsSink
         sink = ObjectRowsSink.for_inspection(native_action, sink, prepared)
-    receipt = sink.inspect(prepared, CommitCoordinator(native_action)._context(fact['commit_id']))
+    receipt = sink.inspect(prepared, commit_write_context(native_action, fact['commit_id']))
     if receipt is None:
         return None
     data = receipt['data']['rows'] if composite else receipt['data']

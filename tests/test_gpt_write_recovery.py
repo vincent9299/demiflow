@@ -47,7 +47,7 @@ def _pause_native(tmp_path, monkeypatch, *, mode='create', fn=keep_row):
                          on=('value',) if mode == 'merge' else ())
     captured = {}
 
-    def stop(kernel, *, request, services):
+    def stop(kernel, *, request, services, publication_reserved_bytes=None, admit_publication=None):
         action = services.action
         intent = _intent(action.context, action.action_id, spec)
         action.context.journal.action_event(action.action_id, 'intent', intent)
@@ -398,11 +398,14 @@ def test_workbench_cancel_resume_golden(stopped_workbench):
             assert prepared['rows'] == receipt['rows'] == len(f['expected'])
             assert prepared['native'] is not None and receipt['native_receipt']['status'] == 'committed'
         else:
-            # A durable residency handoff may ACK empty progress; it is not a
-            # second native write and must not publish any target version.
-            assert prepared['rows'] == prepared['bytes'] == receipt['rows'] == receipt['bytes'] == 0
-            assert prepared['manifest']['partitions'] == [] and prepared['native'] is None
-            assert 'native_receipt' not in receipt
+            # Intermediate ACKs retain staged partitions for recovery. Only the
+            # final ACK publishes a native target version (checked below).
+            assert 0 <= prepared['rows'] == receipt['rows'] <= len(f['expected'])
+            assert prepared['bytes'] == receipt['bytes'] >= 0
+            partitions = prepared['manifest']['partitions']
+            assert sum(part['rows'] for part in partitions) == prepared['rows']
+            assert sum(part['bytes'] for part in partitions) == prepared['bytes']
+            assert prepared['native'] is None and 'native_receipt' not in receipt
     assert len(final) == 1 and final[0] == commits[-1]
     native = final[0]['receipts']['write_lance']['data']['native_receipt']['data']
     assert native['committed_version'] == 1

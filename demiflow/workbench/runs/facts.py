@@ -100,31 +100,20 @@ def read_sealed_plan(target, action_id):
     if type(action_id) is not str or not 1 <= len(action_id) <= 128:
         return _unavailable(action_id, 'invalid_action_id', 'action id is not a bounded string')
     try:
-        from demiflow.execution.run_journal import RunJournal
-        journal = RunJournal(target)
-        v3_marker = journal.source_binding(action_id + '-dataflow-sealed')
-        if v3_marker is not None:
-            # v3 native seal: read the original artifacts (no recompile) and project
-            # them through the single plan-view authority. History stays read-only.
-            from demiflow.execution.sealed_plans import load_sealed_plan
-            from demiflow.execution.dataflow_history import build_plan_view
-            bundle = load_sealed_plan(target, action_id)
-            view = build_plan_view(bundle['graph'], bundle['sealed'], bundle['physical'],
-                                   observations=())
-            return dict(available=True, version='v3', action_id=action_id,
-                        dag_id=bundle['graph'].dag_id, plan_id=bundle['physical'].plan_id,
-                        sealed_at=v3_marker.get('sealed_at') if type(v3_marker) is dict else None,
-                        plan_view=view,
-                        recovery_restriction=journal.source_binding(action_id + '-state-recovery-restriction'))
-        facts = journal.source_binding(action_id + '-sealed-plan')
+        from demiflow.execution.sealed_plan_facts import (
+            sealed_plan_view, sealed_plan_binding, recovery_restriction)
+        v3 = sealed_plan_view(target, action_id)
+        if v3 is not None:
+            return dict(available=True, **v3)
+        recorded = sealed_plan_binding(target, action_id)
+        facts = recorded['facts'] if recorded is not None else None
         if facts is None:
             return _unavailable(action_id, NO_FACTS, NO_FACTS_DETAIL)
         if type(facts) is not dict or facts.get('schema') != SCHEMA:
             return _unavailable(action_id, 'sealed_plan_facts_invalid', 'F1 schema is unsupported')
         # F1.run_id is the engine recovery identity (uuid), not the workbench
         # directory basename; bind it to this run's immutable engine identity.
-        binding = journal.recovery_identity()
-        engine_run_id = binding.get('run_id') if type(binding) is dict else None
+        engine_run_id = recorded['engine_run_id']
         if facts.get('run_id') != engine_run_id or facts.get('action_id') != action_id:
             return _unavailable(action_id, 'sealed_plan_facts_invalid', 'F1 run/action identity differs')
         for key in ('dag_id', 'plan_id', 'sealed_at', 'artifact_manifest_ref',
@@ -145,7 +134,7 @@ def read_sealed_plan(target, action_id):
                     plan_id=facts['plan_id'], sealed_at=facts['sealed_at'],
                     artifact_manifest_ref=facts['artifact_manifest_ref'],
                     logical_dag=logical_dag, physical_plan=physical,
-                    recovery_restriction=journal.source_binding(action_id + '-state-recovery-restriction'))
+                    recovery_restriction=recovery_restriction(target, action_id))
     except _CarrierError as exc:
         return _unavailable(action_id, exc.reason, str(exc)[:512])
     except ForgeError as exc:
@@ -179,22 +168,17 @@ def read_identity_bridge(target, action_id, *, dag_id, report_digest):
         return _bridge_unavailable('identity_bridge_invalid', 'action id is not a bounded string')
     if not _bounded_str(dag_id) or not _bounded_str(report_digest, 64):
         return _bridge_unavailable('identity_bridge_invalid', 'dag_id/report_digest identity is not bounded')
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.sealed_plan_facts import identity_bridge, PlanContractError
     try:
-        ref = RunJournal(target).source_binding(action_id + '-identity-bridge')
-    except (OSError, ValueError, ForgeError) as exc:
-        return _bridge_unavailable('identity_bridge_read_failed', str(exc)[:512])
-    if ref is None:
-        return _bridge_unavailable(NO_BRIDGE, NO_BRIDGE_DETAIL)
-    # B's reader/exception are imported lazily: historical runs carry no bridge
-    # ref, so this dependency is only touched when a real bridge exists.
-    from demiflow.execution.sealed_plans import read_plan_artifact
-    from demiflow.execution.plan_interpreter import PlanContractError
-    try:
-        bridge = read_plan_artifact(target, ref, max_bytes=MAX_IDENTITY_BRIDGE_BYTES)
+        recorded = identity_bridge(target, action_id, max_bytes=MAX_IDENTITY_BRIDGE_BYTES)
     except PlanContractError as exc:
         reason = _BRIDGE_REASON.get(exc.reason, 'identity_bridge_invalid')
         return _bridge_unavailable(reason, str(exc.detail)[:512])
+    except (OSError, ValueError, ForgeError) as exc:
+        return _bridge_unavailable('identity_bridge_read_failed', str(exc)[:512])
+    if recorded is None:
+        return _bridge_unavailable(NO_BRIDGE, NO_BRIDGE_DETAIL)
+    ref, bridge = recorded['ref'], recorded['bridge']
     if type(bridge) is not dict or bridge.get('schema') != BRIDGE_SCHEMA:
         return _bridge_unavailable('identity_bridge_invalid', 'identity bridge schema is unsupported')
     if (bridge.get('action_id') != action_id or bridge.get('dag_id') != dag_id

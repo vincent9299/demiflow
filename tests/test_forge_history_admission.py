@@ -493,14 +493,15 @@ def test_directory_descriptors_grow_with_depth_and_close(tmp_path, monkeypatch):
 
 def test_decode_does_not_hold_a_sql_read_transaction(tmp_path, monkeypatch):
     target, _ = run_fixture(tmp_path)
-    original = run_storage._storage_json
+    from demiflow.execution import run_reader
+    original = run_reader._bounded_object
     def decode(*args, **kwargs):
         # A real exclusive writer can enter while Python decodes the snapshot.
         with closing(sqlite3.connect(target / 'run.sqlite', timeout=0)) as db:
             db.execute('BEGIN EXCLUSIVE')
             db.rollback()
         return original(*args, **kwargs)
-    monkeypatch.setattr(run_storage, '_storage_json', decode)
+    monkeypatch.setattr(run_reader, '_bounded_object', decode)
     assert run_storage.storage_snapshot(target)['state']['status'] == 'prepared'
 
 

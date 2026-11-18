@@ -6,7 +6,7 @@ possibly old, large or hostile run directory needs the opposite, so hosts used
 to open ``run.sqlite`` themselves and query engine tables directly. This module
 owns those queries instead, next to the schema they depend on.
 
-Guarantees of every entry here:
+The open_journal / read_run path entries guarantee:
   * the file is opened ``mode=ro``; no schema is created and nothing is written;
   * a symlink anywhere in the journal path, a non-regular file or a journal
     above ``JOURNAL_BYTES`` is refused before SQLite sees it;
@@ -139,10 +139,10 @@ class RunReader:
             raise ValueError('Unsupported table')
         if not self.has_table(table):
             return None
-        row = self.db.execute(f'SELECT substr(document,1,?) FROM {table} LIMIT 1', (maximum + 1,)).fetchone()
+        row = self.db.execute(f'SELECT substr(CAST(document AS BLOB),1,?) FROM {table} LIMIT 1', (maximum + 1,)).fetchone()
         if not row:
             return None
-        if type(row[0]) is not str or len(row[0].encode()) > maximum:
+        if not isinstance(row[0], bytes) or len(row[0]) > maximum:
             raise RunReadError('Journal control document exceeds budget', code='resource_limit')
         value = json.loads(row[0])
         if type(value) is not dict:
@@ -175,20 +175,20 @@ class RunReader:
     def state(self, attempt=None):
         """``(state document, current attempt)``; a historical attempt reads ``attempts``."""
         _check_attempt(attempt)
-        raw = self.db.execute('SELECT document FROM execution_state').fetchone()
-        if not raw or len(raw[0].encode()) > _STATE_BYTES:
+        raw = self.db.execute('SELECT substr(CAST(document AS BLOB),1,65537) FROM execution_state LIMIT 1').fetchone()
+        if not raw or not isinstance(raw[0], bytes) or len(raw[0]) > _STATE_BYTES:
             raise RunReadError('Invalid run state')
         current = json.loads(raw[0])
         if attempt is not None and attempt != current.get('attempt'):
-            raw = self.db.execute('SELECT document FROM attempts WHERE attempt=?', (attempt,)).fetchone()
-            if not raw or len(raw[0].encode()) > _STATE_BYTES:
+            raw = self.db.execute('SELECT substr(CAST(document AS BLOB),1,65537) FROM attempts WHERE attempt=? LIMIT 1', (attempt,)).fetchone()
+            if not raw or not isinstance(raw[0], bytes) or len(raw[0]) > _STATE_BYTES:
                 raise RunReadError('Unknown attempt', code='not_found')
             return json.loads(raw[0]), current.get('attempt')
         return current, current.get('attempt')
 
     def attempt_state(self, attempt):
         """The recorded document of one attempt, or ``None`` when absent or oversized."""
-        row = self.db.execute('SELECT document FROM attempts WHERE attempt=?', (attempt,)).fetchone()
+        row = self.db.execute('SELECT substr(document,1,65537) FROM attempts WHERE attempt=? LIMIT 1', (attempt,)).fetchone()
         if not row or len(row[0]) > _STATE_BYTES:
             return None
         return json.loads(row[0])
@@ -218,10 +218,10 @@ class RunReader:
         """The managed-run summary document, or ``None`` for a pre-summary journal."""
         if not self.has_table('runtime_summary'):
             return None
-        raw = self.db.execute('SELECT document FROM runtime_summary').fetchone()[0]
-        if len(raw.encode()) > _STATE_BYTES:
+        row = self.db.execute('SELECT substr(CAST(document AS BLOB),1,65537) FROM runtime_summary LIMIT 1').fetchone()
+        if not row or not isinstance(row[0], bytes) or len(row[0]) > _STATE_BYTES:
             raise RunReadError('Runtime projection exceeds budget')
-        return json.loads(raw)
+        return json.loads(row[0])
 
     # -- node observations ---------------------------------------------------
     def observations_supported(self):
@@ -345,7 +345,7 @@ class RunReader:
     def control_events(self, attempt, *, after=0, limit=100):
         """``(sequence, raw JSON text)`` in order; the host applies its page byte budget."""
         return self.db.execute(
-            'SELECT sequence,document FROM control_events WHERE attempt=? AND sequence>? ORDER BY sequence LIMIT ?',
+            'SELECT sequence,substr(document,1,122881) FROM control_events WHERE attempt=? AND sequence>? ORDER BY sequence LIMIT ?',
             (attempt, after, limit))
 
 
@@ -393,6 +393,9 @@ def storage_snapshot(directory):
     No schema initialization or writer connection. Close the read transaction
     before decoding or traversing storage. Optional runtime tables are absent
     in old journals.
+    ``directory`` may be a host-pinned /proc/self/fd directory. The host owns
+    directory traversal; this entry rejects a symlink journal and checks its
+    inode before and after the read. Do not resolve away that pinned directory.
     This is not a filesystem snapshot or a retained usage summary.
     """
     path = Path(directory) / 'run.sqlite'
