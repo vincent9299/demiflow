@@ -63,10 +63,15 @@ def test_directory_real_source_prompt_config_graph_link_reload_and_narrow(origin
             prompt.locator(':scope > summary').click()
         prompt.locator(':scope > summary').click()
         expect(prompt.locator('.wb-source-body')).to_contain_text('{{ payload | json }}')
-        page.reload()
-        expect(page.locator('.wb-operator-row')).to_have_count(4)
-        expect(page.get_by_role('button', name='算子', exact=True)).to_have_attribute('aria-pressed', 'true')
-        expect(operator(page, '联合出题').locator('.wb-source-body')).to_contain_text('{{ payload | json }}')
+        # Reload re-compiles against current source. Await the real response,
+        # rather than treating the default 5 s DOM assertion as a compiler SLA.
+        for _ in range(2):
+            with page.expect_response(lambda r: r.url.endswith('/plan-preview')) as restored:
+                page.reload()
+            assert restored.value.status == 200, restored.value.text()
+            expect(page.locator('.wb-operator-row')).to_have_count(4)
+            expect(page.get_by_role('button', name='算子', exact=True)).to_have_attribute('aria-pressed', 'true')
+            expect(operator(page, '联合出题').locator('.wb-source-body')).to_contain_text('{{ payload | json }}')
         page.set_viewport_size({'width': 780, 'height': 1000})
         expect(operator(page, '联合出题').locator(':scope > summary')).to_be_visible()
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')

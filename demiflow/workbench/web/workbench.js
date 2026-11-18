@@ -1227,7 +1227,7 @@
           if(planPreview?.basis.digest===saved.digest){const card=graphModel?.nodes.find(n=>n.selection.occurrenceId===saved.occurrence);
             if(card){paintPreviewNode(card.selection);const node=planPreview.dag.nodes.find(n=>n.occurrence_id===saved.occurrence);
               if(node.source_views?.[saved.kind]?.available){sourceKind=saved.kind;await loadSource();}}}
-          if(planPreview&&saved.mode==='operators'){state.setMode('operators');operatorOpen=previewSelection?.key||null;paintOperators(graphModel);updateActions();}
+          if(planPreview&&saved.mode==='operators'){state.setMode('operators');operatorOpen=previewSelection?.key||null;paintOperators(graphModel);updateActions();savePreviewLocator();}
         }catch(error){if(error.name!=='AbortError')message('重新解析未完成：'+error.message,'error-box');}
       }
     }
