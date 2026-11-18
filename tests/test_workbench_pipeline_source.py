@@ -94,6 +94,7 @@ def test_pipeline_ui_read_call_code_config_and_whole_source(original, tmp_path, 
         expect(page.locator('.wb-pipeline-code')).to_be_visible()
         expect(page.locator('.wb-graph')).to_be_hidden()
         expect(page.locator('.wb-pipeline-text')).to_contain_text(CODE)
+        assert page.locator('.wb-pipeline-text .reading-source-page').text_content()==CODE
         expect(page.locator('.wb-pipeline-basis')).to_contain_text('解析时快照')
         for width in (1440, 780, 390):
             page.set_viewport_size({'width':width,'height':1000})

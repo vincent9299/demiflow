@@ -439,14 +439,19 @@
       const position = make('span', compact?`第 ${pageIndex + 1} / ${pages} 页`:coordinates);position.title=coordinates;
       if(compact&&pages===1)before.hidden=after.hidden=position.hidden=true;
       nav.append(before, position, after, copy); content.append(nav);
+      // Preserve the same per-page/per-chunk budgets and exact text boundaries,
+      // but allow source-file readers to display the chunks as one code block.
+      const continuous=compact&&options.continuousSource===true;
+      const sourcePage=continuous?make('pre',undefined,'reading-source-page'):null;
+      if(sourcePage)content.append(sourcePage);
       let mounted = 0;
       for (let i = pageIndex * limits.sourceChunks; i < Math.min(chunks, (pageIndex + 1) * limits.sourceChunks); i++) {
         const start = boundary(i * 4096), end = boundary((i + 1) * 4096);
         const part = source.slice(start, end), bytes = byteLength(part);
         if (bytes > limits.sourceChunkBytes || (mounted += bytes) > limits.sourceBytes) fail('bytes');
-        const block = make('pre', undefined, 'reading-source-chunk');
+        const block = make(continuous?'span':'pre', undefined, 'reading-source-chunk');
         block.dataset.from = String(start); block.dataset.to = String(end);
-        block.append(document.createTextNode(part)); content.append(block);
+        block.append(document.createTextNode(part)); (sourcePage||content).append(block);
       }
       if(compact){
         const basis=make('details',undefined,'reading-source-basis');basis.append(make('summary','原文信息'),make('p',coordinates+` · 本页 ${mounted} UTF-8 字节。`));content.append(basis);

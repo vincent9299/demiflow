@@ -136,3 +136,4 @@
 .wb-pipeline-code{min-width:0;padding:16px;border:1px solid var(--border,#d8e0ed);border-radius:10px;max-height:calc(100dvh - 200px);overflow:auto}
 .wb-pipeline-code[hidden],.wb-graph[hidden]{display:none}
 .wb-pipeline-code h3{margin:0 0 10px}.wb-pipeline-text{min-width:0}
+.wb-pipeline-code .reading-source-page{max-height:none;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;tab-size:4}

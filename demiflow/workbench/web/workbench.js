@@ -830,7 +830,7 @@
           ({compiled_snapshot:'解析时快照',sealed:'历史封存源码',report_bound:'报告绑定源码',current:'当前源码 · 尚未绑定执行计划'}[value.source_basis]||'绑定源码')
           +' · 入口文件'+(value.truncated?'（部分显示）':'全文')+'；引用的算子实现和 Prompt 可在对应节点查看。','wb-caption wb-pipeline-basis'));
         const text=$('div',undefined,'wb-pipeline-text');pipelineCode.append(text);
-        mountText(text,value.text,{sourceOnly:true,compactSource:true});
+        mountText(text,value.text,{sourceOnly:true,compactSource:true,continuousSource:true});
         if(value.truncated)pipelineCode.append($('p','源码超过 64 KiB 展示上限，当前只显示开头，未将片段标为全文。','wb-caption'));
         raw('来源摘要',{path:value.path,sha256:value.sha256},pipelineCode);
       }catch(error){if(valid()&&error.name!=='AbortError'){disposeReaders(pipelineCode);pipelineCode.replaceChildren($('p',error.message,'error-box'));}}

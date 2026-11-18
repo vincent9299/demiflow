@@ -56,8 +56,8 @@
     if(root)for(const img of root.querySelectorAll('img.case-image')){const url=img.getAttribute('src');if(blobs.delete(url)){mediaBytes-=blobSizes.get(url)||0;blobSizes.delete(url);URL.revokeObjectURL(url);}img.remove();}
     for (const reader of readers) if (!root || root.contains(reader.element)) {reader.dispose(); readers.delete(reader);}
   }
-  function mountText(parent, text, {sourceOnly=false, compactSource=false, resolveLink, defaultMode='preview'}={}) {
-    const reader=globalThis.ForgeReading.createTextReader({text, compactSource, defaultMode:sourceOnly?'source':defaultMode,
+  function mountText(parent, text, {sourceOnly=false, compactSource=false, continuousSource=false, resolveLink, defaultMode='preview'}={}) {
+    const reader=globalThis.ForgeReading.createTextReader({text, compactSource, continuousSource, defaultMode:sourceOnly?'source':defaultMode,
       identity:{epoch:viewEpoch, selection:selectionEpoch}, resolveLink, offline:!!offline});
     if(sourceOnly)reader.element.querySelector('.reading-toolbar').hidden=true;
     readers.add(reader);parent.append(reader.element);return reader;

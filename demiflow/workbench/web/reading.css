@@ -54,6 +54,7 @@
   padding-left: 16px;
 }
 .forge-reader .reader pre,
+.forge-reader .reading-source-page,
 .forge-reader .reading-source-chunk {
   background: var(--reading-code-surface, #f6f7f9);
   border: 1px solid var(--reading-border, var(--border, #dce0e7));
@@ -67,6 +68,10 @@
   white-space: pre;
 }
 .forge-reader .reading-source-chunk { tab-size: 4; }
+.forge-reader .reading-source-page > .reading-source-chunk {
+  display:inline;padding:0;margin:0;border:0;border-radius:0;background:transparent;
+  font:inherit;white-space:inherit;overflow:visible;
+}
 .forge-reader .reader :not(pre) > code {
   background: var(--reading-code-surface, #f6f7f9);
   border-radius: 3px;

@@ -220,3 +220,9 @@ Prompt/配置、搜索、键盘展开、刷新、配置切换、窄屏、迟到�
 现场证据位于原预览证据目录的 `pipeline-source-live-verification.json`、
 `pipeline-source-*.png`，覆盖标杆 47 节点 / 52 边、三个真实 read_lance 调用、整体源码、
 返回选中节点与 Prompt、四种宽度，以及历史七节点封存运行。发布沿用隔离预览 59866。
+
+
+截图复查补修：完整文件以连续代码块阅读，内部 4096 字符切片不再分成各自滚动的
+代码框。复用现有阅读器，保留原分页、每页 4 块 / 65536 字节和复制边界，不另建
+代码读取体系。Unicode、CRLF、跨切片、分页与复制 3 项阅读器测试及 Pipeline 页面
+重验通过（`/tmp/demiflow-pipeline-continuous.xml`）；本轮最终去重 22 项通过。

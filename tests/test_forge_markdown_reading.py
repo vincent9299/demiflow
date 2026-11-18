@@ -141,13 +141,13 @@ def opened(browser, **fixture_options):
             context.close()
 
 
-def mount(page, text, *, default_mode='preview', offline=False, compact_source=False):
-    page.evaluate('''({text, defaultMode, offline, compactSource}) => {
+def mount(page, text, *, default_mode='preview', offline=False, compact_source=False, continuous_source=False):
+    page.evaluate('''({text, defaultMode, offline, compactSource, continuousSource}) => {
       if (globalThis.reader) globalThis.reader.dispose();
-      globalThis.reader = ForgeReading.createTextReader({text, defaultMode, offline, compactSource,
+      globalThis.reader = ForgeReading.createTextReader({text, defaultMode, offline, compactSource, continuousSource,
         identity: {object:'fixture', generation:1}});
       document.getElementById('mount').replaceChildren(reader.element);
-    }''', {'text': text, 'defaultMode': default_mode, 'offline': offline, 'compactSource':compact_source})
+    }''', {'text': text, 'defaultMode': default_mode, 'offline': offline, 'compactSource':compact_source, 'continuousSource':continuous_source})
 
 
 def wait_mode(page, mode):
@@ -313,13 +313,15 @@ def test_bounded_large_message_is_measured_before_clone_and_no_partial_tree(brow
         }''')
 
 
-@pytest.mark.parametrize('compact_source',[False,True])
-def test_source_paging_preserves_all_characters_and_bounded_copy(browser,compact_source):
+@pytest.mark.parametrize('compact_source,continuous_source',[
+    pytest.param(False,False,id='False'),pytest.param(True,False,id='True'),
+    pytest.param(True,True,id='continuous')])
+def test_source_paging_preserves_all_characters_and_bounded_copy(browser,compact_source,continuous_source):
     # CRLF, tabs, NUL, combining marks, astral characters and repeated boundaries.
     text = ('空白\r\n\t😀e\u0301\x00 <>&' + '界' * 31) * 3100
     with opened(browser) as (page, _, _):
         page.evaluate("Object.defineProperty(navigator, 'clipboard', {value:{writeText:async text=>{globalThis.copied=text;}}})")
-        mount(page, text, default_mode='source',compact_source=compact_source)
+        mount(page, text, default_mode='source',compact_source=compact_source,continuous_source=continuous_source)
         portions = []
         while True:
             info = page.evaluate('''() => {
@@ -330,6 +332,8 @@ def test_source_paging_preserves_all_characters_and_bounded_copy(browser,compact
             }''')
             assert len(info['bytes']) <= 4 and max(info['bytes']) <= 16384 and sum(info['bytes']) <= 65536
             assert not info['split']
+            if continuous_source:
+                assert page.locator('.reading-source-page').text_content()==info['text']
             page.get_by_role('button', name='复制代码' if compact_source else '复制本页原文', exact=True).click()
             assert page.evaluate('copied') == info['text']
             portions.append(info['text'])
