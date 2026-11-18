@@ -15,32 +15,10 @@ from demiflow.forge.schema import ForgeError
 from . import workspace as ws
 from .discovery import discover
 
+from ..definition_contracts import signature, code_definition, prompt_definition
+
 MAX_SOURCE = 512 * 1024
 
-
-def signature(node):
-    """Literal defaults only: inspecting a signature cannot execute a default."""
-    args = node.args
-    positional = [*args.posonlyargs, *args.args]
-    defaults = [None] * (len(positional) - len(args.defaults)) + args.defaults
-    rows = []
-    for arg, default in [*zip(positional, defaults), *zip(args.kwonlyargs, args.kw_defaults)]:
-        if arg.arg in {'self', 'cls'}:
-            continue
-        row = dict(name=arg.arg, annotation=ast.unparse(arg.annotation) if arg.annotation else None,
-                   required=default is None, positional_only=arg in args.posonlyargs,
-                   default_known=False)
-        if default is not None:
-            row['default_expression'] = ast.unparse(default)
-            try:
-                value = ast.literal_eval(default)
-                bounded_json(value, 16384)
-                if type(value) in {str, int, float, bool, list, dict, type(None)}:
-                    row.update(default=value, default_known=True)
-            except (ValueError, TypeError, RecursionError):
-                pass
-        rows.append(row)
-    return rows
 
 
 def _safe_tree(raw):
@@ -60,11 +38,8 @@ def _items(path, raw, kind):
                 continue
             start = min([node.lineno, *(d.lineno for d in node.decorator_list)])
             body = ''.join(lines[start - 1:node.end_lineno])
-            entry = node if not isinstance(node, ast.ClassDef) else next((n for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == '__call__'), None)
-            yield dict(symbol=node.name, label=node.name, kind='code', source=body,
-                       line=start, end_line=node.end_lineno, description=ast.get_docstring(node) or '',
-                       parameters=signature(entry) if entry else [],
-                       returns=ast.unparse(entry.returns) if entry and entry.returns else None)
+            yield dict(code_definition(node, body), label=node.name,
+                       line=start, end_line=node.end_lineno)
     else:
         import yaml
         value = yaml.safe_load(text)
@@ -84,12 +59,8 @@ def _items(path, raw, kind):
             if type(name) is not str or type(item) is not dict:
                 raise ForgeError('Invalid named Prompt definition', code='invalid_request')
             body = yaml.safe_dump(item, allow_unicode=True, sort_keys=False)
-            yield dict(symbol=name, label=name, kind='prompt', source=body, line=None, end_line=None,
-                       description=item.get('description', ''), declared_version=item.get('version'),
-                       template=item.get('template'), messages=item.get('messages'),
-                       template_sha256=hashlib.sha256(item['template'].encode()).hexdigest() if type(item.get('template')) is str else None,
-                       model=item.get('model'), response_format=item.get('response_format'),
-                       output_schema=item.get('response_schema', item.get('json_schema', item.get('schema'))))
+            yield dict(prompt_definition(name, item), label=name, source=body, line=None, end_line=None,
+                       template_sha256=hashlib.sha256(item['template'].encode()).hexdigest() if type(item.get('template')) is str else None)
 
 
 def _files(root, declarations, kind):
@@ -135,7 +106,7 @@ def catalog(root):
                                 sha256=content_digest(item['source']), file_sha256=sources[relative])
                     item.pop('source')
                     # Large Prompt bodies belong to the selected detail, never the index.
-                    for field in ('template', 'messages', 'model', 'output_schema'): item.pop(field, None)
+                    for field in ('template', 'messages', 'model', 'output_schema', 'input_variables', 'defaults'): item.pop(field, None)
                     items.append(item)
                     if len(items) > 1024:
                         raise ForgeError('Definition count exceeds budget', code='resource_limit')

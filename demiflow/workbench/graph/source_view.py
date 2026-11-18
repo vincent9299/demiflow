@@ -74,8 +74,13 @@ def _public_prompt(raw, *, prompt=None):
         return projected
     def task(item):
         if type(item) is not dict:raise ForgeError('Invalid public prompt task',code='operation_rejected')
-        projected={k:v for k,v in item.items() if k in {'version','system','user','template','instructions'} and text(v) is not None}
+        projected={k:v for k,v in item.items() if k in {'version','system','user','template','instructions','input_mode','response_format'} and text(v) is not None}
         if 'model' in item:projected['model']=model(item['model'])
+        if type(item.get('schema_retries')) is int:projected['schema_retries']=item['schema_retries']
+        if type(item.get('message_limits')) is dict:
+            from .plan_details import safe_json
+            bounded_json(item['message_limits'],16384)
+            projected['message_limits']=safe_json(item['message_limits'])
         messages=item.get('messages')
         if type(messages) is list:
             if len(messages)>32:raise ForgeError('Too many prompt messages for preview',code='resource_limit')
@@ -86,6 +91,9 @@ def _public_prompt(raw, *, prompt=None):
         systemone=item.get('systemone')
         if type(systemone) is dict:
             projected['systemone']={k:v for k,v in systemone.items() if k in {'type','instructions'} and text(v) is not None}
+            each=systemone.get('for_each')
+            if type(each) is dict and text(each.get('input')) is not None:
+                projected['systemone']['for_each']={'input':each['input']}
         return projected
     container='prompts' if value['schema_version']=='demiflow_prompt_pack_v2' else 'tasks'
     definitions=value.get(container)
@@ -118,8 +126,11 @@ def get(root,*,graph_binding,node_id,kind,resource=None,logical_node_id=None,occ
                 historical=historical,read_only=True,availability='available',
                 source_basis='sealed' if historical else 'report_bound' if graph_binding['basis_kind']=='report' else 'current')
     if kind=='configuration':
+        from .plan_details import safe_json
         fields=[f for f in graph['parameters']['fields'] if node_id in f['affected_nodes']]
         return {**result,'kind':'configuration','fields':fields,
+                'wiring':safe_json(dict(api=node.get('api'), parameters=node.get('parameters', {}),
+                              parameter_origins=node.get('parameter_origins', {}), output_fields=node.get('fields', {}))),
                 'resources':node.get('source_resources',[]),
                 'note':'Public configuration fields; template configuration is not an actual model request.'}
     if kind=='prompt':
@@ -140,7 +151,9 @@ def get(root,*,graph_binding,node_id,kind,resource=None,logical_node_id=None,occ
         try:projection=_public_prompt(raw,prompt=node.get('parameters',{}).get('prompt'))
         except (ValueError,RecursionError) as exc:
             raise ForgeError('Prompt cannot be projected safely',code='operation_rejected') from exc
-        return {**result,'kind':'prompt','path':path,'sha256':expected,'public_projection':projection,
+        from demiflow.workbench.definition_contracts import prompt_definition
+        definitions = [prompt_definition(name, item) for name, item in projection.get('prompts', projection.get('tasks', {})).items()]
+        return {**result,'kind':'prompt','path':path,'sha256':expected,'public_projection':projection, 'definitions':definitions,
                 'note':'Prompt template only; runtime credentials and concrete model requests are not included.'}
     target=node.get('operator') if kind=='implementation' else None
     actual_kind='implementation' if target else 'callsite'
@@ -158,7 +171,32 @@ def get(root,*,graph_binding,node_id,kind,resource=None,logical_node_id=None,occ
             raise ForgeError('Sealed source digest differs',code='conflict')
     else:
         text=ws.source_text(root,path,expected_sha256=expected)['text']
-    return {**result,'kind':actual_kind,'path':path,'sha256':expected,
+    definition = None
+    if actual_kind == 'callsite' and node.get('api'):
+        from .api_definition import source_address, from_source
+        address = source_address(node['api'])
+        # A historical API is read from authenticated, sealed platform bytes.
+        # Never fill missing historical contracts with the current SDK.
+        if historical and address is not None:
+            from demiflow.workbench.runs import manager as runs
+            target_dir, value = runs._load(root, graph_binding['run_id'], detail='identity', attempt=graph_binding['attempt'])
+            facts = value['manifest'].get('platform', {})
+            evidence = next((item for item in facts.get('files', []) if item['path'] == address[0]), None)
+            if evidence:
+                sealed = target_dir / 'runtime/demiflow' / address[0]
+                ws.no_symlinks(sealed)
+                raw = read_bounded(sealed, min(facts['limits']['file_bytes'], 2 * 1024**2))
+                if hashlib.sha256(raw).hexdigest() != evidence['sha256']:
+                    raise ForgeError('Sealed API source differs', code='conflict')
+                definition = from_source(node['api'], raw)
+    elif actual_kind == 'implementation':
+        import ast
+        from demiflow.workbench.definition_contracts import code_definition
+        candidates = [n for n in ast.walk(ast.parse(text)) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                      and min([n.lineno, *(d.lineno for d in n.decorator_list)]) == line]
+        if len(candidates) == 1:
+            definition = code_definition(candidates[0], '')
+    return {**result,'kind':actual_kind,'path':path,'sha256':expected,'definition':definition,
             'reason':('source_callsite_only' if node['kind']=='source_call' else 'builtin_callsite_only') if kind=='implementation' and not target else None,
             **_excerpt(text,line,end)}
 

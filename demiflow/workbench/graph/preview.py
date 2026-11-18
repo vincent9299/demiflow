@@ -191,7 +191,7 @@ def _preview(root, *, entry, params=None):
         call = details.get(node['occurrence_id'], {}).get('callsite', {})
         if call.get('availability') == 'available':
             node['api_call'] = {k: call['metadata'][k] for k in ('api', 'summary')}
-        node['source_views'] = {kind: dict(available=detail['availability'] == 'available', reason=detail['reason'])
+        node['source_views'] = {kind: dict(available=detail['availability'] == 'available', referenced=detail.get('referenced', False), reason=detail['reason'])
                                 for kind, detail in details.get(node['occurrence_id'], {}).items()}
     bounded_json(value, 1024**2)
     value['pipeline_source'] = dict(available=pipeline['availability'] == 'available', path=pipeline['path'])

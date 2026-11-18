@@ -53,3 +53,19 @@
 .flow-arguments label{align-items:stretch;text-align:left}
 .flow-arguments label>span,.flow-arguments label>small{text-align:left}
 @media(max-width:600px){.op-browser{height:auto;overflow:visible}.op-viewer{overflow:visible}}
+
+/* Shared definitions stay readable in both the catalog and pipeline inspector. */
+.definition-reader{min-width:0;color:var(--op-ink,#263244)}
+.definition-meta{display:flex;gap:12px;color:#7d8799;font-size:12px;margin:0 0 14px}
+.definition-reader .definition-signature{background:#f7f9fd;border:0;padding:12px 14px;font-size:12px;line-height:1.7;max-height:none;white-space:pre-wrap;overflow-wrap:anywhere}
+.definition-reader h4,.wb-source-body>h4{font-size:13px;font-weight:600;margin:22px 0 10px}
+.definition-doc{font-size:13px;line-height:1.8;white-space:pre-wrap;color:#536176}
+.definition-note{font-size:12px;line-height:1.8;color:#7d8799}
+.definition-return{font:13px/1.8 ui-monospace,monospace;overflow-wrap:anywhere}
+.definition-table{overflow:auto;max-width:100%}.definition-table td{font-size:12px;white-space:pre-wrap;max-width:320px}
+.definition-schema{font-size:12px;max-height:none;line-height:1.8;background:#f8f9fc}
+.definition-contract{margin:12px 0 18px;padding:0;border:0}.definition-contract>summary{font-size:12px;color:#637496;cursor:pointer}
+.definition-source .reading-source-page,.definition-source .reading-source-chunk{white-space:pre-wrap!important;overflow-wrap:anywhere;max-height:none;border:0!important;line-height:1.85;font-size:13px}
+.definition-source .reading-source-nav{justify-content:flex-end}.definition-source .reading-source-nav button,.wb-downstream button{border:0;background:transparent;box-shadow:none;font-size:12px;color:#6279b6}
+.wb-downstream{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:18px 0}.wb-wiring-binding{font-size:13px;color:#536176}
+.wb-source-tabs button[hidden]{display:none}

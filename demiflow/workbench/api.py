@@ -38,6 +38,7 @@ ASSETS = Path(__file__).with_name("web")
 # One closed asset allowlist serves both live pages and self-contained reports.
 STATIC_ASSETS = {
     '/operator-browser.js': ('operator-browser.js', 'text/javascript; charset=utf-8'),
+    '/definition-reader.js': ('definition-reader.js', 'text/javascript; charset=utf-8'),
     '/flow-arguments.js': ('flow-arguments.js', 'text/javascript; charset=utf-8'),
     '/workbench-modern.css': ('workbench-modern.css', 'text/css; charset=utf-8'),
     "/": ("index.html", "text/html; charset=utf-8"),

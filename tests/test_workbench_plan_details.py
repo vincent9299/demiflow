@@ -24,6 +24,8 @@ def test_function_material_is_the_compiled_function_and_file_digest():
     assert value['availability'] == 'available' and value['sha256'] == digest
     assert value['text'].startswith('def meaningful_transform(row):')
     assert 'exact implementation' in value['text'] and 'def test_' not in value['text']
+    assert value['metadata']['definition']['signature'] == 'meaningful_transform(row)'
+    assert value['metadata']['definition']['returns'] is None
     stale = build_plan_details(compiled, sources={Path(__file__).name: '0' * 64}, root=root)
     assert stale[node.occurrence_id]['implementation']['availability'] == 'unavailable'
     assert details[node.occurrence_id]['prompt']['availability'] == 'unavailable'
@@ -43,6 +45,30 @@ def test_prompt_material_is_selected_compiled_template_not_reopened_path():
     assert value['metadata']['inputs'] == {'payload': 'item'}
     assert value['metadata']['max_requests'] == 1
     assert value['source_basis'] == 'compiled_snapshot'
+    contract = value['metadata']['definition']
+    assert contract['input_variables'] == [{'name': 'payload', 'type': 'json', 'required': True}]
+    assert contract['output_schema'] == dict(definition.response_schema)
+    assert contract['template'] == definition.template.source
+    assert 'inputs' not in contract  # Dataset field bindings belong to the call.
+
+
+def prompt_condition(row) -> bool:
+    raise AssertionError('Preview must not call a predicate')
+
+
+def test_prompt_node_retains_its_explicit_business_predicate_definition():
+    pack = parse_prompt_pack(PACK)
+    compiled = capture_pipeline(lambda: data.from_items([{'item': 'x'}]).map_prompt_async(
+        'enrich', config=pack, inputs={'payload': 'item'}, output='answer', when=prompt_condition,
+        max_requests=1).take_all(), {}).compiled
+    path = Path(__file__)
+    details = build_plan_details(compiled, sources={path.name:hashlib.sha256(path.read_bytes()).hexdigest()}, root=path.parent)
+    node = next(n for n in compiled.graph.nodes if n.kernel.kind == 'prompt')
+    code = details[node.occurrence_id]['implementation']
+    assert code['availability'] == 'available'
+    assert code['metadata']['definition']['returns'] == 'bool'
+    assert 'def prompt_condition(row)' in code['text']
+    assert details[node.occurrence_id]['prompt']['metadata']['definition']['symbol'] == 'enrich'
 
 
 def test_material_bounds_and_credential_fields():
@@ -77,3 +103,23 @@ def test_legal_deep_prompt_schema_degrades_material_without_discarding_graph():
     prompt = next(n for n in compiled.graph.nodes if n.kernel.kind == 'prompt')
     assert details[prompt.occurrence_id]['prompt']['availability'] == 'unavailable'
     assert '预算' in details[prompt.occurrence_id]['prompt']['reason']
+    assert details[prompt.occurrence_id]['prompt']['referenced']
+
+
+class PassiveActor:
+    def __init__(self):
+        raise AssertionError('material reads must not construct an actor')
+
+    async def __call__(self, row: dict) -> dict:
+        raise AssertionError('material reads must not execute a row')
+
+
+def test_actor_material_comes_from_bound_class_without_construction():
+    path = Path(__file__)
+    compiled = capture_pipeline(lambda: data.from_items([{'item': 'x'}]).map_async(PassiveActor).take_all(), {}).compiled
+    details = build_plan_details(compiled, sources={path.name: hashlib.sha256(path.read_bytes()).hexdigest()}, root=path.parent)
+    item = next(v['implementation'] for v in details.values() if v['implementation'].get('referenced'))
+    assert item['availability'] == 'available', item
+    assert item['text'].startswith('class PassiveActor:')
+    assert item['metadata']['definition']['signature'] == 'PassiveActor(row: dict) -> dict'
+    assert item['metadata']['definition']['parameters'][0]['name'] == 'row'

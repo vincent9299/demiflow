@@ -54,16 +54,7 @@
       const render=kind=>{
         for(const b of tabs.children)b.setAttribute('aria-pressed',String(b.dataset.tab===kind));
         disposeReaders(content);content.replaceChildren();
-        if(kind==='source'){mountText(content,detail.kind==='prompt'?(detail.template??JSON.stringify(detail.messages??{},null,2)):detail.source,{sourceOnly:true,compactSource:true});const status=content.querySelector('.reading-status');if(status?.textContent==='源码完整显示。')status.hidden=true;}
-        else{
-          if(detail.kind==='code'){
-            const table=el('table',null,'op-contract');const head=el('tr');for(const title of ['参数','类型','默认值'])head.append(el('th',title));table.append(head);
-            for(const f of detail.parameters||[]){const row=el('tr');row.append(el('td',f.name),el('td',f.annotation||'未声明'),el('td',f.required?'必填':f.default_expression??'未声明'));table.append(row);}content.append(table,el('p','输出：'+(detail.returns||'未声明静态返回类型'),'op-muted'));
-          }else{
-            const meta={版本:detail.declared_version,模型:detail.model,响应格式:detail.response_format,输出Schema:detail.output_schema};
-            content.append(el('pre',JSON.stringify(meta,null,2),'op-contract-source'));
-          }
-        }
+        DemiFlowDefinition.render(content,detail,{mountText,mode:kind==='source'?'source':'contract'});
       };
       for(const [kind,label]of [['source',detail.kind==='prompt'?'Prompt':'代码'],['contract','接口与默认值']]){const b=button(label,()=>render(kind),tabs);b.dataset.tab=kind;}
       render('source');
