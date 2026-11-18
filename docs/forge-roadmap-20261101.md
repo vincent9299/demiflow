@@ -8,7 +8,7 @@
 
 ## 当前推进顺序
 
-**2026-11-19 Harness 最终试用验收**：按真人明早试用要求，G2/B1/I1 已在指定 worktree 实现并经模块交叉 Review。现使用冻结代码验真实 DeepSeek CLI 修改、自动门禁/续修、独立模型 Review 和受限接受，并复验严格准入、旧记录及原试用入口。实施与边界见[契约](forge-development-harness-contract-20261118.md)。首次真实试跑暴露的只读 Lance 二进制审阅、临时 profile 清理竞态已补修；保留失败证据，不重写旧任务基线。当前仍需最终结果和预览切换确认，不能将“实现”与“已上线”混同。
+**2026-11-19 Harness 试用交付完成**：G2/B1/I1 已经交叉 Review、综合回归、实际内核/Chromium、真实 DeepSeek CLI 连续两轮及服务重启验收。试用入口 `http://localhost:59866/` 已运行指定 worktree 的 `20581ae`，项目“Forge 开发试用”；主仓未用于开发。原基线引擎元数据预算失败单独记录，不能声称全仓全绿；旧项目、Notebook 和对话历史保持。[试用交付记录](forge-development-harness-delivery-20261119.md)列实现、测试、真模型结果、限制及回退。当前待真人明早试用验收，不因此宣布其他产品分支完成；自动唤起关闭。
 
 **2026-11-18 本批 G1 已验收**：自动检查/验证、同任务原意图/来源/证据绑定、门禁生命周期与准确 UI、共同 CLI 启动入口已在迁移前验收；原先落主仓的位置错误现已纠正，改动已迁入指定 worktree，组合复验已通过，主仓本批改动已撤回；[详细证据与限制](forge-development-harness-g1-acceptance-20261118.md)。保持 trusted_local / 未防篡改；无安全独立 reviewer 就保持待审。完整 Review/修复、只读验证快照、L2 和 require 仍未交付，整体原意图不标完成。未修改运行服务或 staging。
 
