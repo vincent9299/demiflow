@@ -137,6 +137,7 @@
     "execution/kernels/operator.py",
     "execution/kernels/reducer_memory.py",
     "execution/kernels/shuffle_order.py",
+    "planning/dataflow_budget.py",
     "planning/dataflow_compile.py"
    ],
    "KEY": [
@@ -179,6 +180,7 @@
    "concurrency": [
     "execution/dataflow_model_observations.py",
     "execution/kernels/operator.py",
+    "planning/dataflow_budget.py",
     "planning/dataflow_compile.py",
     "planning/dataflow_finite_fusion.py",
     "planning/dataflow_fusion.py",
@@ -422,7 +424,7 @@
    ],
    "terminal_memory": [
     "execution/worker/dataflow_graph_runner.py",
-    "planning/dataflow_compile.py",
+    "planning/dataflow_budget.py",
     "planning/dataflow_place.py"
    ],
    "thread_attempt": [
@@ -453,7 +455,7 @@
     "planning/dataflow_compile.py"
    ],
    "input_carrier": [
-    "planning/dataflow_compile.py"
+    "planning/dataflow_budget.py"
    ],
    "keys": [
     "execution/kernels/operator.py",
@@ -482,7 +484,7 @@
     "planning/dataflow_compile.py"
    ],
    "output_carrier": [
-    "planning/dataflow_compile.py"
+    "planning/dataflow_budget.py"
    ],
    "payload_columns": [
     "planning/dataflow_compile.py"
@@ -509,7 +511,7 @@
     "planning/dataflow_compile.py"
    ],
    "terminal_memory": [
-    "planning/dataflow_compile.py"
+    "planning/dataflow_budget.py"
    ],
    "thread_attempt": [
     "execution/dataflow_seal.py"

@@ -46,7 +46,9 @@ from ..execution.contracts.dataflow_errors import DataflowError
 from ..execution.local_kernel import KeyedSource, PlanInput, UnionSource
 from ..execution.recovery_contract import identity
 from ..execution.recovery_identity import describe
-from ..resources.contracts import ResourceProfile
+from .dataflow_budget import (
+    codec_window, default_profile, fit_codec_windows, relational_profile, terminal_budget,
+)
 from .dataflow_registry import operator_registry, source_registry, terminal_registry
 
 _SCHEMA = "demiflow.dataflow_graph.v3"
@@ -263,68 +265,6 @@ def _source_kind(source: SourcePlan) -> str:
     raise _error("INVALID_CONTRACT", "unknown source plan: " + type(source).__name__)
 
 
-def _payload_workspace(bounds: Bounds, *, metadata_bytes=0) -> int:
-    """Provision codec room in a new plan without enlarging the run budget.
-
-    The old batch + row window can be smaller than one near-limit row's
-    typed-document/JSONL decode. Small nested tuple/list rows also retain
-    Python containers far larger than their encoded bytes: give their codec
-    a 128-KiB default target, in addition to the scalar/bytes copy window.
-    The runtime still measures actual
-    structure and rejects anything that cannot fit the sealed allocation.
-    Small runs retain their original batch/row minimum and may use a smaller
-    codec window, rather than losing all small-row execution capability.
-    """
-    payload = bounds.max_batch_bytes + bounds.max_row_bytes
-    control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
-    available = max(0, bounds.max_resident_bytes - control - metadata_bytes)
-    codec = max(128 * 1024, 6 * bounds.max_row_bytes + 4096)
-    return max(payload, min(codec, available))
-
-
-def _default_profile(operation: LogicalOp | None, *, bounds: Bounds, state="none",
-                     codec_workspace=True, concurrency=None) -> ResourceProfile:
-    # The run memory budget covers admitted data, separately from process RSS.
-    # Reserve the same working set used by physical residency, not a fixed
-    # per-stage 64 MiB allowance multiplied by pipeline length.
-    minimum = bounds.max_batch_bytes + bounds.max_row_bytes
-    working_set = _payload_workspace(bounds) if codec_workspace else minimum
-    options = getattr(operation, 'stream_options', None)
-    if concurrency is None:
-        concurrency = getattr(options, 'concurrency', getattr(operation, 'concurrency', 1))
-    working_set *= concurrency
-    minimum *= concurrency
-    if state != "none":
-        owners = concurrency if getattr(options, "callable_scope", None) == "worker" else 1
-        working_set += bounds.max_state_bytes * owners
-        minimum += bounds.max_state_bytes * owners
-    requests = {"cpu_millis": 1000, "memory_bytes": working_set}
-    native = getattr(operation, "native_options", None) if operation is not None else None
-    resources = getattr(native, "worker_resources", None) or {}
-    if isinstance(resources, Mapping):
-        import math
-        if "memory_bytes" in resources:
-            # An explicit worker limit remains authoritative. It must retain
-            # the original payload/state minimum; actual codec admission may
-            # reject a row that cannot fit it, without silently increasing it.
-            if resources["memory_bytes"] < minimum:
-                raise _error("RESOURCE_INFEASIBLE", "worker memory request is below the admitted working set")
-            requests["memory_bytes"] = resources["memory_bytes"]
-        if "cpu" in resources:
-            if resources["cpu"] <= 0:
-                raise _error("RESOURCE_INFEASIBLE", "workers require a positive CPU reservation")
-            requests["cpu_millis"] = math.ceil(resources["cpu"] * 1000)
-        if resources.get("gpu", 0):
-            gpu = resources["gpu"]
-            if not float(gpu).is_integer():
-                raise _error("UNSUPPORTED_CAPABILITY", "fractional GPU sharing is not declared by the device authority")
-            requests["accelerators"] = [{"type": "gpu", "count": int(gpu)}]
-        if resources.get("custom_resources"):
-            requests["custom"] = {key: {"amount": math.ceil(value * 1000), "unit": "milli"}
-                                  for key, value in resources["custom_resources"].items()}
-    return ResourceProfile(requests=requests)
-
-
 def _input_port(name: str, kind: str) -> InputPort:
     finite = kind in _FINITE_COMPLETE_KINDS or name in {"left", "right", "prefix"}
     ordering = "global" if kind in _ORDERING_KINDS else "none"
@@ -433,7 +373,7 @@ def compile_kernel_spec(
             queue_depth=stream_options.queue_depth,
             catch=[c.__module__ + '.' + c.__qualname__ for c in stream_options.catch])
     inputs = tuple(_input_port(name, kind) for name in definition.inputs)
-    profile = _default_profile(operation, bounds=bounds, state=state)
+    profile = default_profile(operation, bounds=bounds, state=state)
     if profile.requests.get("accelerators"):
         role, mergeable = "gpu", False
     return KernelSpec(
@@ -641,105 +581,9 @@ class _Capture:
         self.publication_windows: dict[int, tuple[int, int]] = {}
 
     def _remember_codec_window(self, index, operation=None):
-        resources = getattr(getattr(operation, 'native_options', None), 'worker_resources', None) or {}
-        if 'memory_bytes' in resources:
-            return  # An explicit user grant is never redistributed.
-        kernel = self.nodes[index].kernel
-        if kernel.kind in {'join', 'exclude_keys', 'reduce'}:
-            return  # These kernels own explicit copy/reducer working sets.
-        if kernel.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
-            from ..execution.dataflow_models import _model_profile
-            concurrency = kernel.configuration.get('concurrency', 1)
-            expected = _model_profile(kernel.resource_role, self.bounds, concurrency,
-                                      kernel.state, operation=operation)
-            minimum = _model_profile(kernel.resource_role, self.bounds, concurrency,
-                kernel.state, operation=operation, codec_workspace=False).requests['memory_bytes']
-            # Managed-service declarations may refine the accelerator profile;
-            # this planner only redistributes proven default memory slack.
-            matches = kernel.profile.requests['memory_bytes'] == expected.requests['memory_bytes']
-        else:
-            expected = _default_profile(operation, bounds=self.bounds, state=kernel.state)
-            minimum = _default_profile(operation, bounds=self.bounds, state=kernel.state,
-                                       codec_workspace=False).requests['memory_bytes']
-            matches = kernel.profile == expected
-        if not matches:
-            return  # Native models, reducers and other specialized grants retain their authority.
-        target = kernel.profile.requests['memory_bytes']
-        if target > minimum:
-            self.codec_windows[index] = (minimum, target)
-
-    def fit_codec_windows(self):
-        """Share only optional codec slack inside each incremental component.
-
-        Input/output/state and terminal index minima remain fully additive.
-        Finite-complete edges separate natural phases; no source is upgraded to
-        checkpointable and no existing sealed graph is passed through this code.
-        The physical solver still accounts for replicas, hosts and real grants;
-        actual typed codec allocations must still pass the runtime peak guard.
-        """
-        parents = list(range(len(self.nodes)))
-        def owner(index):
-            while parents[index] != index:
-                parents[index] = parents[parents[index]]
-                index = parents[index]
-            return index
-        for producer, _, consumer, port in self.edges:
-            spec = next(p for p in self.nodes[consumer].kernel.inputs if p.name == port)
-            if spec.requirement == 'incremental':
-                parents[owner(consumer)] = owner(producer)
-        groups = {}
-        for index in range(len(self.nodes)):
-            groups.setdefault(owner(index), []).append(index)
-        control = max(1, min(self.bounds.max_control_bytes, self.bounds.max_resident_bytes // 8))
-        available = self.bounds.max_resident_bytes - control
-        phased_publication = False
-        if self.publication_windows:
-            from fractions import Fraction
-            from ..execution.dataflow_publication_budget import FIELD
-            publication_min = max(v[0] for v in self.publication_windows.values())
-            publication_target = max(v[1] for v in self.publication_windows.values())
-            from ..execution.dataflow_publication_budget import phased
-            phased_publication = all(phased(self.nodes[i].kernel.configuration)
-                                     for i in self.publication_windows)
-            factor = Fraction(1)
-            for members in groups.values():
-                if phased_publication and not set(members).intersection(self.publication_windows):
-                    continue
-                targets = {i: self.nodes[i].kernel.profile.requests['memory_bytes'] for i in members}
-                minima = {i: self.codec_windows.get(i, (target, target))[0]
-                          for i, target in targets.items()}
-                demand = sum(targets.values()) - sum(minima.values()) + publication_target - publication_min
-                if demand:
-                    factor = min(factor, Fraction(max(0, available - sum(minima.values()) - publication_min), demand))
-            publication = publication_min + int((publication_target - publication_min) * factor)
-            for index in self.publication_windows:
-                node = self.nodes[index]
-                configuration = _plain(node.kernel.configuration)
-                configuration[FIELD]['resident_bytes'] = publication
-                self.nodes[index] = replace(node, kernel=replace(node.kernel, configuration=configuration))
-        for members in groups.values():
-            group_available = available - (publication if self.publication_windows and
-                (not phased_publication or set(members).intersection(self.publication_windows)) else 0)
-            targets = {i: self.nodes[i].kernel.profile.requests['memory_bytes'] for i in members}
-            adjustable = {i: self.codec_windows[i] for i in members if i in self.codec_windows
-                          and self.codec_windows[i][1] == targets[i]}
-            minima = {i: adjustable[i][0] if i in adjustable else targets[i] for i in members}
-            floor, desired = sum(minima.values()), sum(targets.values())
-            if not adjustable or desired <= group_available or floor > group_available:
-                continue
-            slack, demand = group_available - floor, desired - floor
-            for index, (minimum, target) in adjustable.items():
-                memory = minimum + (target - minimum) * slack // demand
-                node = self.nodes[index]
-                kernel = node.kernel
-                configuration = _plain(kernel.configuration)
-                if node.kind == 'terminal' and 'terminal_memory' in configuration:
-                    contract = configuration['terminal_memory']
-                    contract['payload_bytes'] = memory - contract['metadata_bytes']
-                self.nodes[index] = replace(node, kernel=replace(kernel,
-                    configuration=configuration,
-                    profile=replace(kernel.profile, requests={**kernel.profile.requests,
-                        'memory_bytes': memory})))
+        window = codec_window(self.nodes[index].kernel, operation, self.bounds)
+        if window is not None:
+            self.codec_windows[index] = window
 
     def _bind_report(self, index, key):
         if key is None or self.report is None:
@@ -816,7 +660,7 @@ class _Capture:
         kernel = KernelSpec(
             kind=kind, implementation_ref=None, configuration=_plain(semantic), inputs=(),
             state="none", effect="pure", resource_role="io",
-            profile=_default_profile(None, bounds=self.bounds), output_bound_bytes=self.bounds.max_row_bytes,
+            profile=default_profile(None, bounds=self.bounds), output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
         )
         index = self._add_node("source", kernel, semantic, {}, {"source_kind": kind}, None)
@@ -850,18 +694,7 @@ class _Capture:
             reducer = replace(reducer, runtime_contract=source.reducer_contract)
         code_identity = _callable_code_identity(reducer) if reducer is not None else {}
         inputs = tuple(_input_port(port, kind) for _, port in child_indices)
-        profile = _default_profile(None, bounds=self.bounds)
-        if kind in ('join', 'exclude_keys'):
-            requests = dict(profile.requests)
-            requests['memory_bytes'] = self.bounds.max_batch_bytes + 6 * self.bounds.max_row_bytes
-            profile = ResourceProfile(requests=requests, limits=profile.limits, requirements=profile.requirements)
-        reducer_memory = None
-        if kind == 'reduce':
-            from ..execution.kernels.reducer_memory import declare, resident_bytes, FIELD
-            reducer_memory = declare(source.initial, self.bounds)
-            profile = ResourceProfile(requests={**profile.requests,
-                'memory_bytes':resident_bytes(reducer_memory,self.bounds)},
-                limits=profile.limits,requirements=profile.requirements)
+        profile, reducer_memory = relational_profile(kind, source, self.bounds)
         kernel = KernelSpec(
             kind=kind, implementation_ref=None, configuration=_plain(semantic), inputs=inputs,
             state="none", effect="pure", resource_role="cpu",
@@ -869,7 +702,8 @@ class _Capture:
             mergeable=False,
         )
         if reducer_memory is not None:
-            kernel = replace(kernel,configuration={**_plain(kernel.configuration),FIELD:reducer_memory})
+            field, declared = reducer_memory
+            kernel = replace(kernel, configuration={**_plain(kernel.configuration), field: declared})
         if isinstance(source, KeyedSource) and source.kind == "exclude_keys":
             configuration = _plain(kernel.configuration)
             configuration.update(lance_key_source=self.nodes[child_indices[0][0]].occurrence_id,
@@ -940,7 +774,7 @@ class _Capture:
                 kernel = replace(kernel, configuration={**_plain(kernel.configuration),
                     'task_batch_rows': int(task_rows), 'task_group': group, 'task_origin': origin}, state=state,
                     mergeable=kernel.mergeable and state == 'none',
-                    profile=_default_profile(operation, bounds=self.bounds, state=state))
+                    profile=default_profile(operation, bounds=self.bounds, state=state))
             elif kernel.kind in {'SelectColumnsOp', 'DropColumnsOp', 'RenameColumnsOp', 'RandomSampleOp'}:
                 group = self.nodes[index].kernel.configuration.get('task_group')
                 if group is not None:
@@ -983,116 +817,20 @@ class _Capture:
         if definition is None:
             raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
         semantic = {"kind": request.kind, "arguments": _plain(request.arguments)}
-        # The first terminal block and its first forest root occupy 3 KiB
-        # while the input/output payload is still resident. Seal both windows
-        # into the original profile; do not borrow half of that payload grant.
-        payload = self.bounds.max_batch_bytes + self.bounds.max_row_bytes
-        # A larger index is optional. Keep the exact control reservation used
-        # by solve_residency and the whole live payload; cap only this new-plan
-        # metadata window by the remaining single-worker space. The original
-        # solver/provider still admit the resulting profile and historical
-        # sealed profiles are never recalculated here.
-        control = max(1, min(self.bounds.max_control_bytes, self.bounds.max_resident_bytes // 8))
-        metadata = min(self.bounds.max_state_bytes, max(3072, payload // 2),
-                       self.bounds.max_resident_bytes - control - payload)
-        if metadata < 3072:
-            raise _error("RESOURCE_INFEASIBLE", "terminal state budget cannot hold one block and root")
-        # Retain the already promised index capacity. Codec room uses only
-        # remaining capacity, never space borrowed from that index or control.
-        payload = _payload_workspace(self.bounds, metadata_bytes=metadata)
-        profile = _default_profile(None, bounds=self.bounds)
-        profile = replace(profile, requests={**profile.requests, "memory_bytes": payload + metadata})
-        configuration = {**semantic, "terminal_memory": {"payload_bytes": payload, "metadata_bytes": metadata}}
-        native_publication = request.kind in {'write_lance', 'write_file', 'write_datasink'}
-        if request.kind == 'write_datasink':
-            from ..execution.dataflow_native import publishes_natively
-            # Queue tasks were settled by their original authority already;
-            # this terminal only publishes the result manifest, without Arrow.
-            native_publication = publishes_natively(request.sink)
-        if native_publication:
-            from ..execution.dataflow_publication_budget import FIELD, SCHEMA
-            # A native consumer can still hold its previous yielded Arrow
-            # batch when asking this generator to decode the next record.
-            configuration[FIELD] = {'schema': SCHEMA,
-                'resident_bytes': _payload_workspace(self.bounds) + self.bounds.max_batch_bytes}
-        finite_producer = self.nodes[producer].kernel
-        phased_publication = (native_publication and finite_producer.effect == 'pure'
-            and bool(finite_producer.inputs)
-            and all(p.requirement == 'finite_complete' for p in finite_producer.inputs))
-        if phased_publication:
-            from ..execution.dataflow_publication_budget import PHASE_SCHEMA
-            configuration[FIELD]['schema'] = PHASE_SCHEMA
-        # A pure completed join can publish immutable typed row artifacts.
-        # Its terminal handles only the original bounded Record references;
-        # native hydration occurs later, under the single driver reservation.
-        # No user UDF/queue callback is placed across this carrier boundary.
-        compact = (request.kind == 'write_lance'
-            and self.nodes[producer].kernel.kind == 'join'
-            # A fused multi-join/reducer region owns a different output
-            # iterator. It retains its current carrier/profile until that
-            # producer explicitly implements this sealed representation.
-            and sum(n.kind == 'relational' for n in self.nodes) == 1
-            and self.nodes[producer].kernel.profile.requests['memory_bytes']
-                + self.bounds.max_batch_bytes + self.bounds.max_row_bytes + control
-                > self.bounds.max_resident_bytes
-            and all(n.kernel.kind in {'items', 'range', 'materialized'}
-                    for n in self.nodes if n.kind == 'source'))
-        if compact:
-            from ..execution.dataflow_publication_budget import PHASE_SCHEMA, REF_CARRIER
-            metadata = min(self.bounds.max_state_bytes, max(3072, self.bounds.max_resident_bytes // 128))
-            payload = min(128 * 1024, max(4096, self.bounds.max_resident_bytes // 64))
-            configuration['terminal_memory'] = {'payload_bytes': payload, 'metadata_bytes': metadata,
-                                                 'carrier': REF_CARRIER}
-            configuration['input_carrier'] = REF_CARRIER
-            configuration[FIELD]['schema'] = PHASE_SCHEMA
-            profile = replace(profile, requests={**profile.requests, 'memory_bytes': payload + metadata})
-            source_node = self.nodes[producer]
-            source_kernel = source_node.kernel
-            memory = min(source_kernel.profile.requests['memory_bytes'], self.bounds.max_resident_bytes - control)
-            self.nodes[producer] = replace(source_node, kernel=replace(source_kernel,
-                configuration={**_plain(source_kernel.configuration), 'output_carrier': REF_CARRIER},
-                profile=replace(source_kernel.profile, requests={**source_kernel.profile.requests,
-                    'memory_bytes': memory})))
-        # A small native terminal can stream ordinary Records with a smaller
-        # resident codec window than the *business* R/B ceilings. This versioned
-        # window accounts actual codec, index and flush peaks before allocation;
-        # it does not promise every R-sized object fits an arbitrarily small M.
-        # The existing durable residency protocol parks the upstream worker,
-        # while the native reservation remains beside the live terminal.
-        bounded_workspace = False
-        if native_publication and not compact:
-            # Default working sets are separate from the public R/B ceilings.
-            # In a constrained run leave two shares for worker codec/index and
-            # three for native input/array/writer copies. Both original runtime
-            # peak guards still reject an indivisible row that cannot fit.
-            publication_min = min(self.bounds.max_batch_bytes + self.bounds.max_row_bytes,
-                                  (self.bounds.max_resident_bytes - control) * 3 // 5)
-            terminal_space = self.bounds.max_resident_bytes - control - publication_min
-            legacy_floor = 2 * (self.bounds.max_batch_bytes + self.bounds.max_row_bytes) + metadata
-            if (legacy_floor > self.bounds.max_resident_bytes - control
-                    and 8192 <= terminal_space < profile.requests['memory_bytes']):
-                from ..execution.dataflow_publication_budget import PHASE_SCHEMA, TERMINAL_WORKSPACE
-                bounded_workspace = True
-                configuration[FIELD]['schema'] = PHASE_SCHEMA
-                configuration['terminal_memory'] = {'schema': TERMINAL_WORKSPACE,
-                                                       'resident_bytes': terminal_space}
-                profile = replace(profile, requests={**profile.requests, 'memory_bytes': terminal_space})
+        budget = terminal_budget(request, self.nodes, producer, bounds=self.bounds, semantic=semantic)
         kernel = KernelSpec(
-            kind=request.kind, implementation_ref=None, configuration=configuration,
+            kind=request.kind, implementation_ref=None, configuration=budget.configuration,
             inputs=(replace(_input_port("main", request.kind), requirement='finite_complete')
-                    if phased_publication else _input_port("main", request.kind),),
+                    if budget.phased_publication else _input_port("main", request.kind),),
             state="none", effect="pure", resource_role="cpu",
-            profile=profile, output_bound_bytes=self.bounds.max_row_bytes,
+            profile=budget.profile, output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
         )
         index = self._add_node("terminal", kernel, semantic, _plain(request.arguments), {}, None)
-        if native_publication:
-            self.publication_windows[index] = (publication_min if bounded_workspace else
-                self.bounds.max_batch_bytes + self.bounds.max_row_bytes,
-                _payload_workspace(self.bounds) + self.bounds.max_batch_bytes)
-        minimum = (payload if compact else self.bounds.max_batch_bytes + self.bounds.max_row_bytes) + metadata
-        if not bounded_workspace and payload + metadata > minimum:
-            self.codec_windows[index] = (minimum, payload + metadata)
+        if budget.publication_window is not None:
+            self.publication_windows[index] = budget.publication_window
+        if budget.codec_window is not None:
+            self.codec_windows[index] = budget.codec_window
         if self.report is not None:
             key = (request.action.action_id, request.action.action_id, 0)
             if self.report.observed(key):
@@ -1143,7 +881,7 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None) -> Com
     terminal = capture.capture_terminal(producer)
     from .dataflow_graph_adapter import decorate_graph_capture
     terminal = decorate_graph_capture(capture, request, terminal=terminal)
-    capture.fit_codec_windows()
+    fit_codec_windows(capture.nodes, capture.edges, capture.codec_windows, capture.publication_windows, bounds)
     # DTO constructors validate identities. Keep integer graph indices private;
     # never construct invalid public DTOs merely to replace their IDs later.
     bound_nodes = tuple(capture.nodes)

@@ -86,8 +86,8 @@ def _model_profile(resource_role, bounds, concurrency, state, *, operation=None,
     # Native actors carry the same typed records as ordinary kernels. Their
     # codec copies must fit the original stage grant too; input+output alone
     # is not that peak. Keep one planner and every explicit worker constraint.
-    from ..planning.dataflow_compile import _default_profile
-    profile = _default_profile(operation, bounds=bounds, state=state,
+    from ..planning.dataflow_budget import default_profile
+    profile = default_profile(operation, bounds=bounds, state=state,
         codec_workspace=codec_workspace, concurrency=concurrency)
     requests = dict(profile.requests)
     resources = getattr(getattr(operation, 'native_options', None), 'worker_resources', None) or {}
