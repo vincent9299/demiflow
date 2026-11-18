@@ -28,6 +28,32 @@ def member(record, bounds):
     return [record.record_id,hashlib.sha256(raw).hexdigest()]
 
 
+def select_replay_batch(records, expected, bounds):
+    """Restore the original effect order without weakening payload/multiplicity.
+
+    Concurrent upstream calls may finish in a different order on replay. Keep
+    their original records in the kernel's bounded pending batch until every
+    recorded member is present; later-batch rows stay pending. No new journal.
+    """
+    from collections import defaultdict, deque
+    positions = defaultdict(deque)
+    for index, (record_id, _) in enumerate(expected):
+        positions[record_id].append(index)
+    selected = [None] * len(expected)
+    for index, record in enumerate(records):
+        slots = positions.get(record.record_id)
+        if slots:
+            slot = slots.popleft()
+            if member(record, bounds) != expected[slot]:
+                raise DataflowError('INCOMPATIBLE_HISTORY',
+                    'Native replay batch changed original record membership or payload')
+            selected[slot] = index
+    if any(index is None for index in selected):
+        return None
+    used = set(selected)
+    return tuple(records[index] for index in selected), [r for i, r in enumerate(records) if i not in used]
+
+
 class NativeBatchMembership:
     def __init__(self,services,node,partition):
         self.services,self.node,self.partition=services,node,partition

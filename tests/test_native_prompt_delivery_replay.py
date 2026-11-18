@@ -81,7 +81,10 @@ def test_prompt_then_native_save_then_prompt_survives_hard_exit(
                else {'trust_env': False, 'timeout_s': 20})
     (tmp_path/'options.json').write_text(json.dumps(options))
     (tmp_path/'prompt.yaml').write_text(PACK)
-    env = {**os.environ, 'PYTHONPATH': str(WORKTREE)+':'+str(WORKTREE/'tests'), 'PYTHONDONTWRITEBYTECODE':'1'}
+    # Keep both attempts in the same capacity domain, isolated per scenario.
+    env = {**os.environ, 'PYTHONPATH': str(WORKTREE)+':'+str(WORKTREE/'tests'), 'PYTHONDONTWRITEBYTECODE':'1',
+           'DEMIFLOW_RESOURCE_ROOT': str(tmp_path/'resources'),
+           'DEMIFLOW_RESOURCE_HOME': str(tmp_path/'resource-home')}
     def child(mode):
         return subprocess.run([sys.executable, '-B', '-c', CHILD, str(tmp_path), mode, str(WORKTREE)],
             cwd=WORKTREE, env=env, capture_output=True, text=True, timeout=100)

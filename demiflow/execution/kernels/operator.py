@@ -712,6 +712,8 @@ class OperatorKernel:
         for instance in self._instances:
             if instance is not None:
                 instance.check_lifecycle()
+        if self._batch_membership is not None and self._batch:
+            yield from self._drain_replay_batches()
         if self._batch and self._batch_deadline is not None and self._services.clock_ms() >= self._batch_deadline:
             expected = self._batch_membership.expected(self._batch_ordinal) if self._batch_membership else None
             if expected is None:
@@ -849,7 +851,23 @@ class OperatorKernel:
         return record
 
     def _push_batch(self, record: Record) -> Iterator[Record]:
+        if self._batch_membership is not None and self._batch:
+            yield from self._drain_replay_batches()
         expected = self._batch_membership.expected(self._batch_ordinal) if self._batch_membership else None
+        if expected is not None:
+            bounds = self._services.bounds
+            # Reuse the original batch byte window plus bounded control slots.
+            # A pathological arrival skew fails explicitly, never grows memory
+            # without limit or changes the committed batch's payload/order.
+            if (len(self._batch) >= self._max_batch + bounds.max_pending_events
+                    or sum(r.encoded_bytes for r in self._batch) + record.encoded_bytes > bounds.max_batch_bytes):
+                raise _err('BUDGET_EXCEEDED', 'native replay reorder exceeds the original batch window')
+            if not self._batch:
+                interval = self._spec.configuration.get('flush_interval')
+                self._batch_deadline = (self._services.clock_ms() + max(1, int(float(interval)*1000))) if interval else None
+            self._batch.append(record)
+            yield from self._drain_replay_batches()
+            return
         if self._batch and (self._batch[0].schema_ref != record.schema_ref
                             or self._batch[0].block_partition != record.block_partition):
             if expected is not None:
@@ -872,6 +890,37 @@ class OperatorKernel:
         if len(self._batch) >= (len(expected) if expected is not None else self._max_batch):
             batch, self._batch = tuple(self._batch), []
             self._batch_deadline = None
+            yield from self._invoke_batch(batch)
+
+    def _drain_replay_batches(self):
+        from ..dataflow_batch_membership import select_replay_batch
+        while self._batch:
+            scan = (id(self._batch), self._batch_ordinal, len(self._batch))
+            if getattr(self, '_batch_scan', None) == scan:
+                return  # Pending records are immutable; poll need not rehash.
+            expected = self._batch_membership.expected(self._batch_ordinal)
+            if expected is None:
+                first = self._batch[0]
+                count = 0
+                for record in self._batch:
+                    if (count == self._max_batch or record.schema_ref != first.schema_ref
+                            or record.block_partition != first.block_partition):
+                        break
+                    count += 1
+                if count < self._max_batch and count == len(self._batch):
+                    self._batch_scan = scan
+                    return  # Fresh partial batch keeps its original timer.
+                batch, self._batch = tuple(self._batch[:count]), self._batch[count:]
+            else:
+                selected = select_replay_batch(self._batch, expected, self._services.bounds)
+                if selected is None:
+                    self._batch_scan = scan
+                    return
+                batch, self._batch = selected
+            if not self._batch:
+                self._batch_deadline = None
+            # Leave every not-yet-emitted row in the original snapshot field,
+            # including across a yield/checkpoint between completed batches.
             yield from self._invoke_batch(batch)
 
     def _invoke_batch(self, batch):
@@ -1002,6 +1051,10 @@ class OperatorKernel:
             self._finish_cursor = None
             return
         if kind in _BATCH_INSTANCE_KINDS:
+            if self._batch_membership is not None:
+                yield from self._drain_replay_batches()
+                if self._batch_membership.expected(self._batch_ordinal) is not None:
+                    raise _err('INCOMPATIBLE_HISTORY', 'Native replay ended before original batch membership was complete')
             if self._batch:
                 batch = tuple(self._batch)
                 self._batch = []
@@ -1344,6 +1397,10 @@ class OperatorKernel:
             if name in self._ports:
                 self._ports[name].restore(snap)
         self._batch = list(image["batch"])
+        self._batch_scan = None
+        if (len(self._batch) > self._max_batch + self._services.bounds.max_pending_events
+                or sum(r.encoded_bytes for r in self._batch) > self._services.bounds.max_batch_bytes):
+            raise _err('BUDGET_EXCEEDED', 'restored native batch exceeds the original batch window')
         self._batch_ordinal = image.get('batch_ordinal',image.get('call_ordinal',0))
         if type(self._batch_ordinal) is not int or self._batch_ordinal < 0:
             raise _err('CORRUPT_ARTIFACT','Invalid native batch cursor')
