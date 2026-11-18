@@ -663,8 +663,14 @@ def make_physical(action_id, graph, store, *, partitions=("p0", "p1"), with_sour
     constants_raw = document({"schema": "demiflow.dataflow_constants.v3", "constants": {}})
     constants_ref = store.put(iter([constants_raw]), max_bytes=bounds.max_state_bytes,
                               media_type=seal.CONSTANTS_MEDIA)
+    # This plan has one stage, so the stage is granted the plan's whole resident budget.
+    # The record codec checks its workspace against the stage grant: with the former 1 KiB
+    # (below one batch plus one row, a grant the compiler refuses) every record failed in the
+    # codec, before any of the commit, recovery and budget behaviour these tests are about.
+    # A grant of only one batch plus one row would still stop D009's 10,001 rows in the codec,
+    # not at the sink partition budget that stopped them before the codec check existed.
     stage = StageSpec(stage_id="stage-0", occurrences=tuple(n.occurrence_id for n in graph.nodes),
-                      partitions=tuple(partitions), profile=ResourceProfile(requests={"cpu_millis": 100, "memory_bytes": 1024}), replica_min=1, replica_target=1,
+                      partitions=tuple(partitions), profile=ResourceProfile(requests={"cpu_millis": 100, "memory_bytes": bounds.max_resident_bytes}), replica_min=1, replica_target=1,
                       replica_max=1, resident_bytes=0, output_bytes=0, state_bytes=0, kernel_refs=())
     exchanges = ()
     if route_epoch:
