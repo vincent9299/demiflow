@@ -662,7 +662,8 @@ def _refusal(exc):
     return {'ok': False, 'error': type(exc).__name__ + (':' + code if isinstance(code, str) else '') + ': ' + str(exc)[:300]}
 
 
-def compile_case(name, context, raw=None):
+def lower_case(name, context):
+    """Build and lower one direct case; returns (compiled, bounds, source, plan) or raises the refusal."""
     from demiflow.execution import checked
     from demiflow.execution.contracts.dataflow import ActionRequest
     from demiflow.planning.dataflow_compile import lower_action
@@ -682,20 +683,30 @@ def compile_case(name, context, raw=None):
                                 action=action)
         if built.get('report'):
             token = checked._CURRENT.set(report_for(source, plan, action_id, terminal=built.get('report_terminal', True)))
-        return _summary(lower_action(request, bounds=limits), limits, source, plan, raw)
-    except Exception as exc:  # recorded: a refused declaration is part of the contract
-        return _refusal(exc)
+        return lower_action(request, bounds=limits), limits, source, plan
     finally:
         if token is not None:
             checked._CURRENT.reset(token)
 
 
-def capture_case(name, context, raw=None):
-    """The real terminal method, stopped at the production planning boundary."""
-    from dataclasses import asdict
-    from demiflow.execution.plan_capture import capture_pipeline
+def compile_case(name, context, raw=None):
     try:
-        captured = capture_pipeline(lambda: CAPTURED[name](context), {})
+        compiled, limits, source, plan = lower_case(name, context)
+        return _summary(compiled, limits, source, plan, raw)
+    except Exception as exc:  # recorded: a refused declaration is part of the contract
+        return _refusal(exc)
+
+
+def capture(name, context):
+    """The real terminal method, stopped at the production planning boundary."""
+    from demiflow.execution.plan_capture import capture_pipeline
+    return capture_pipeline(lambda: CAPTURED[name](context), {})
+
+
+def capture_case(name, context, raw=None):
+    from dataclasses import asdict
+    try:
+        captured = capture(name, context)
     except Exception as exc:
         return _refusal(exc)
     graph = captured.compiled.graph

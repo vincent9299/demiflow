@@ -165,7 +165,8 @@
    "batch_size": [
     "execution/dataflow_batch_membership.py",
     "execution/kernels/operator.py",
-    "planning/dataflow_compile.py"
+    "planning/dataflow_compile.py",
+    "planning/dataflow_configuration.py"
    ],
    "cache": [
     "execution/dataflow_models.py"
@@ -190,7 +191,8 @@
    ],
    "default_batch_size": [
     "execution/dataflow_batch_membership.py",
-    "execution/kernels/operator.py"
+    "execution/kernels/operator.py",
+    "planning/dataflow_configuration.py"
    ],
    "descending": [
     "execution/kernels/ordering.py"
@@ -243,6 +245,7 @@
    ],
    "input_carrier": [
     "execution/worker/dataflow_graph_runner.py",
+    "planning/dataflow_configuration.py",
     "planning/dataflow_place.py"
    ],
    "inputs": [
@@ -253,8 +256,12 @@
     "execution/kernels/operator.py",
     "execution/kernels/ordering.py"
    ],
+   "kind": [
+    "planning/dataflow_configuration.py"
+   ],
    "lance_key_source": [
-    "execution/kernels/lance_keys.py"
+    "execution/kernels/lance_keys.py",
+    "planning/dataflow_configuration.py"
    ],
    "limit": [
     "execution/kernels/operator.py",
@@ -290,7 +297,8 @@
    ],
    "native_key": [
     "execution/dataflow_fetch.py",
-    "execution/dataflow_search.py"
+    "execution/dataflow_search.py",
+    "planning/dataflow_configuration.py"
    ],
    "native_operation": [
     "execution/dataflow.py",
@@ -298,7 +306,8 @@
     "execution/dataflow_native.py",
     "execution/dataflow_producer.py",
     "execution/dataflow_queue.py",
-    "execution/dataflow_search.py"
+    "execution/dataflow_search.py",
+    "planning/dataflow_configuration.py"
    ],
    "node_id": [
     "execution/dataflow_models.py"
@@ -313,7 +322,8 @@
     "execution/dataflow_models.py",
     "execution/kernels/dataflow.py",
     "execution/kernels/lance_keys.py",
-    "execution/kernels/relational_region.py"
+    "execution/kernels/relational_region.py",
+    "planning/dataflow_configuration.py"
    ],
    "on": [
     "execution/kernels/lance_keys.py",
@@ -324,7 +334,8 @@
     "execution/kernels/operator.py"
    ],
    "output_carrier": [
-    "execution/kernels/relational.py"
+    "execution/kernels/relational.py",
+    "planning/dataflow_configuration.py"
    ],
    "outputs": [
     "execution/kernels/operator.py"
@@ -373,7 +384,8 @@
    ],
    "shared_actor": [
     "execution/dataflow_shared.py",
-    "execution/kernels/operator.py"
+    "execution/kernels/operator.py",
+    "planning/dataflow_configuration.py"
    ],
    "shuffle": [
     "execution/kernels/block_partition.py"
@@ -396,6 +408,7 @@
     "execution/dataflow_seal.py",
     "execution/kernels/operator.py",
     "planning/dataflow_compile.py",
+    "planning/dataflow_configuration.py",
     "planning/dataflow_finite_fusion.py",
     "planning/dataflow_fusion.py",
     "planning/dataflow_graph_adapter.py",

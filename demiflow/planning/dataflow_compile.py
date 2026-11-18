@@ -909,6 +909,9 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None) -> Com
         terminals=graph.terminals, sources=graph.sources,
     )
     validate_graph(graph, bounds=bounds)
+    # Report-only: silent unless the configuration schema logger is enabled for DEBUG.
+    from .dataflow_configuration import report_configuration
+    report_configuration(graph)
     return CompiledDataflow(graph=graph, declarations=declarations,
                             report_bindings=tuple(capture.report_bindings),
                             observation_labels=capture.observation_labels)
