@@ -231,8 +231,7 @@ def test_combined_browser_keeps_development_and_runtime_views(root, tmp_path, mo
                 page.set_viewport_size(dict(width=width,height=1000))
                 assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
                 page.screenshot(path=str(shots/f'combined-development-{width}.png'),full_page=True)
-            page.get_by_role('button',name='管道',exact=True).click()
-            page.get_by_role('button',name='运行记录',exact=True).click()
+            page.locator('.function-nav').get_by_role('button',name='运行监控',exact=True).click()
             assert page.evaluate('ForgeDevelopment.activeCount()') == 0
             page.locator('.wb-run-record[data-run=\"'+value['run_id']+'\"]').click()
             expect(page.locator('.wb-run-bar').get_by_label('运行记录')).to_have_value(value['run_id'])

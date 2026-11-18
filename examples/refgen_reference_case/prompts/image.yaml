@@ -1,0 +1,10 @@
+schema_version: demiflow_prompt_pack_v2
+prompts:
+  synthesis:
+    version: refgen-reference-case-image-1
+    response_format: image
+    template: "{{ instruction }}{{ images | image }}"
+  boogu:
+    version: refgen-reference-case-image-1
+    response_format: image
+    template: "{{ instruction }}{{ images | image }}"

@@ -13,7 +13,7 @@ do not claim enforcement is already active. The tool is at
 location, the project's `python3 .demiforge/forge` launcher, or the installed
 `demiflow forge dev --project <absolute-project-root>` public CLI. Use `--help`
 for command syntax. Source-checkout setup is in `docs/demiforge-quickstart.md`;
-wheel installations contain this Skill, its launcher and all nine bound standards.
+wheel installations contain this Skill, its launcher and all ten bound standards.
 
 ## Before Editing / Resuming
 
@@ -60,7 +60,29 @@ update its relevant sections during the same task. Check the final diff against
 the README in DF-02 review and cite both; a mechanical check alone does not prove
 the documentation is current. Keep older task bindings intact when upgrading.
 
-For candidate.9 and later, use project-v2 registrations with one owned directory
+For candidate.10, use project-v3: `projects.<id>` owns `flows`, `operators`,
+`prompts`, optional notebooks and verification. Each named flow has its own real
+`{path, symbol}` entry; there is no project-wide default entry. Prefer project-local
+`flows/`, `operators/`, `prompts/` roles; do not force unrelated flows into one
+parameterized dispatcher or copy definitions per flow. Start a development task
+with `--project-name <id>` and precise writable paths; `--pipeline` remains the
+historical CLI alias. All declared flow sources and shared definitions participate
+in checks and snapshot identity, including a Prompt not yet referenced by a flow.
+
+Each flow has one necessary business-parameter contract and one current set of
+values. Do not require a parameter-file/profile selection. Operator defaults,
+Prompt definitions and engine/deployment settings retain separate ownership; a
+flow only exposes explicitly justified business bindings. Runtime snapshots keep
+historical effective values; they are not alternate editable parameter schemes.
+Code and Prompt libraries read real owned definitions, not call-node copies.
+Read candidate.10 DF-02 for role, sharing, migration and enforcement boundaries.
+Existing project-v1/v2 registrations and saved evidence retain their original
+standard. Adopt v3 explicitly with updated project rules and new tasks; never
+rewrite old accepted records, reset their baseline or migrate business code/data
+as a side effect. The library UI and parameter editor require separate product
+implementation; this skill/tool upgrade does not claim those screens are live.
+
+For candidate.9, use project-v2 registrations with one owned directory
 per pipeline. Register the actual repository-relative `entry: {path, symbol}`,
 operator files/directories and optional notebooks inside that owner. File and
 directory names do not determine roles; keep wiring, configuration, transforms,
@@ -68,13 +90,13 @@ documentation and tests with the project instead of splitting/copying them into
 repository-wide trees. Shared operators are imported from their declared owner.
 The authoritative layout and dependency rules are DF-02 of the bound standard.
 Candidate.7/.8 bindings retain their historical layout only until explicitly
-migrated; do not apply those layout requirements to new candidate.9 projects or
+migrated; do not apply those layout requirements to new project-local registrations or
 claim old evidence under the new standard. Never reduce watched coverage to fit a budget. Inspect capacity,
 set explicit bounded `snapshot_limits`, and retain full notebook/output hashes.
 Platform contract verification remains a registered fixture command; this skill
 and the structural checker do not implement or authorize platform execution.
 
-The current candidate.9 tool selects coverage by the task's actual standard,
+Candidate.9 and candidate.10 select coverage by the task's actual standard,
 including in mixed projects. `runs`/`datasets` are legal author path names, with
 roles, ownership, watch, readonly and writes checked separately. Normal watch
 coverage and full notebook/output hashes remain intact. Under broad watch roots,

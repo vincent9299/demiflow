@@ -26,7 +26,8 @@ def parser():
             history.add_argument("--page", type=int, default=1)
     start = commands.add_parser("start", help="Capture current dirty tree and task boundary BEFORE editing")
     start.add_argument("--id", required=True)
-    start.add_argument("--pipeline", required=True)
+    start.add_argument("--project-name", "--pipeline", dest="pipeline", required=True,
+                       help="Registered business project (historical --pipeline remains supported)")
     start.add_argument("--goal", required=True)
     start.add_argument("--write", action="append", required=True)
     start.add_argument("--non-goal", action="append", required=True)

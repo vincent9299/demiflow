@@ -1,0 +1,82 @@
+{
+  "head": "814c14a5248f35c718481462e23623367669c24c",
+  "branch": "workbench/project-operators-20261118",
+  "tree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_forge_project_flows_20261118",
+  "port": 59866,
+  "checks": {
+    "main_head_unchanged": true,
+    "main_status_unchanged": true,
+    "protected_docs_unchanged": true,
+    "frozen_seven_unchanged": true,
+    "token_unchanged": true,
+    "old_projects_unchanged": true
+  },
+  "inputs": {
+    "demiflow/workbench/api.py": "122bb211bd2ecf6bbb5fb5b2101573a26ba7ee519b17a1bee40d25309215cbfb",
+    "demiflow/workbench/graph/preview.py": "745a03a045241fef5420f7eb9e366df0cf41078961fdd19f8c4f1e185ff335cd",
+    "demiflow/workbench/projects/definitions.py": "1dde78688b6e08cb6272df779cef7b6ec4848c5ead972d7cc0d63b7b1f31f091",
+    "demiflow/workbench/projects/discovery.py": "d63626c31cbb53477cfa46246e44e0e8807199bb3e615d4969e9530aabae75e9",
+    "demiflow/workbench/projects/flow_arguments.py": "3f97c7f1c3a818ee4f8195b6360c0c56185f8b4208f29b98166a9e76e24ff8d0",
+    "demiflow/workbench/web/app.js": "d840c4c603b4f920a746c38b87160193dd1930fd308102798348d87efc8c14d3",
+    "demiflow/workbench/web/flow-arguments.js": "61a348bd8184268a6ce21150a7bb9900256f3c561c90791fcd41ae4ea4a915db",
+    "demiflow/workbench/web/index.html": "6ad6cf46d6b117ec7b0d2902854f498825b5047b7af9c18f55e8247990efa26b",
+    "demiflow/workbench/web/operator-browser.js": "f7fdee654b56d608c0e30da52171b78d55bc334e8e65f822117f239973263f6b",
+    "demiflow/workbench/web/workbench-modern.css": "f694e836146cace319039785211edf516a247e1a410808a976a83b92cf538c81",
+    "demiflow/workbench/web/workbench.js": "d3f4740591c54a2aaa3cd40ff97864574030274c4d38ed4e3c02168f729608f0",
+    "docs/forge-project-flows-product-20261118.md": "d0bf6ec6d4f619898dc85dc8aa931ee68180a1ab25c3f4704e65fcea58661154",
+    "docs/workbench-project-operators-delivery-20261118.md": "32048c42d356fdf3a67144567539a8c0c92d0821746cb216f3c9dabedb4da6bc",
+    "examples/.demiforge/project.json": "849850f47a91da235449023dd1bd06fcf33be725a8e5fa65ea74cf99e8a78447",
+    "examples/refgen_reference_case/.gitignore": "327bddb0ee73d500934e13956716a9796f623b347ae361b3327af2ad38d555d5",
+    "examples/refgen_reference_case/README.md": "307afa62227a6ed22f8f5f5f0867dd59120dff755d30c1782a4026b4aa7bc262",
+    "examples/refgen_reference_case/flow.py": "f306bb7cfe8c148cc550039f14f4f5a663a0ace720acb80ceb18a361ccd66565",
+    "examples/refgen_reference_case/flows/__init__.py": "a2a47664eb6c84e17b80b9649887aec899910c3365168976ff9dd8375f3d614c",
+    "examples/refgen_reference_case/flows/quality.py": "c2b072024d438823750eb52ffbb746a5eefe1ffc5543ad24161d373d2de9d30c",
+    "examples/refgen_reference_case/flows/reference.py": "fba053da5da548dcb080369ff0f9d81afcfa38b67ed962af880d457f2dc84e03",
+    "examples/refgen_reference_case/project_runtime.py": "2de8b87a7bef6657c3bffa3a3b166328ac96b09a06f3ebb273a52882bd4cb283",
+    "examples/refgen_reference_case/prompt_bindings.py": "f8c90f19382f0642325f5382fe5681044f1da44d6fa3411fa131f1c9eed2b7c9",
+    "examples/refgen_reference_case/prompts/image.yaml": "65c81aa2fd8bac1682815b9077b49df98290840900763bcf9c9373efb70707dd",
+    "examples/refgen_reference_case/refgen_operators.py": "063d5afa9ebc80bb6663dda074831f6033ed1233d746e357a7af142f0daf9dcc",
+    "tests/test_refgen_reference_case.py": "9e1b2c8ea990d7a599c40864087ae3b1b054e58d8e07a77d709da7b521dacfa9",
+    "tests/test_workbench_project_definitions.py": "b5ea38d0665c6c3bf08eed3f912d96fdf110537bc85472b11e7d98e428509d52",
+    "tests/test_workbench_project_definitions_ui.py": "35b9fab784c496f81d34a3ad06fa712040483c2bff487c4064fe894a670fc789"
+  },
+  "tests": {
+    "final-regression.log": "a29435761f0c58062babeb384e5609b35691bd459e2882c3e39de5505290cf51",
+    "final-ui-tests.log": "ec9dcaae00e74bcc097a94d8803c12c77244e8d3fe4cd8845fd264fa8e093bb5",
+    "object-root-tests.log": "8ac8e55a3ccc8270a185d9a8f1d1b7b256dbcca9ef54a0ae6342a2ded8b33ea9"
+  },
+  "browser": {
+    "checks": [
+      "真实声明目录，不随流程重复定义",
+      "搜索与准确源码",
+      "真实 Git 版本只读阅读",
+      "Prompt 正文与版本",
+      "两个独立流程，无参数文件选择器",
+      "独立审核真实七节点编译图",
+      "完整实验真实四十七节点编译图",
+      "执行节点对应真实 Prompt",
+      "Prompt 摘要匹配后跳到项目当前定义",
+      "文件与源码摘要匹配后跳到当前算子",
+      "业务参数与模型部署分开",
+      "重载保持同一流程的真实计划",
+      "窄窗口无页面溢出"
+    ],
+    "page_errors": [],
+    "transient_http_admission_rejections": 3
+  },
+  "native_quality": {
+    "status": "committed",
+    "rows": 3,
+    "passed": 1,
+    "object_root": "/tmp/demiflow-project-operators-20261118/case-data",
+    "output_root": "/tmp/demiflow-project-operators-20261118/case-data/quality-v2",
+    "run_directory": "/tmp/demiflow-project-operators-20261118/run-quality-v2"
+  },
+  "artifacts": {
+    "final-regression.log": "a29435761f0c58062babeb384e5609b35691bd459e2882c3e39de5505290cf51",
+    "object-root-tests.log": "8ac8e55a3ccc8270a185d9a8f1d1b7b256dbcca9ef54a0ae6342a2ded8b33ea9",
+    "case-prompt.png": "8da2ccc4760e162053c8dfe55a24a3b725dcc2c8c25b2262200ec09ba252975a",
+    "case-reference-plan.png": "bd266419c3104fd89e5c96e26fde7efd1069d7d482a4249c0be331d4f615c13e",
+    "final-ui-tests.log": "ec9dcaae00e74bcc097a94d8803c12c77244e8d3fe4cd8845fd264fa8e093bb5"
+  }
+}

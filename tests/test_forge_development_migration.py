@@ -16,6 +16,9 @@ from demiflow.forge.development.project import ForgeError, MAX_TOTAL, Project, S
 from demiflow.forge.development.resources import PACKAGE_ROOT, implementation_files, resource_path
 from demiflow.forge.development.runner import run
 
+# These fixtures exercise the preserved candidate.9 registration contract.
+VERSION = '1.0.0-candidate.9'
+
 
 def fixture(root, tool=TOOL_ROOT):
     (root / "AGENTS.md").write_text("Follow DemiForge; fixture only.")
@@ -42,7 +45,7 @@ class MigrationTests(unittest.TestCase):
         self.project = fixture(self.root)
 
     def test_all_resources_and_finite_binding_files_exist(self):
-        self.assertEqual(len(STANDARDS), 9)
+        self.assertEqual(len(STANDARDS), 10)
         self.assertEqual(STANDARDS["1.0.0-candidate.1"].name, "pipeline-v1.md")
         for path in STANDARDS.values():
             self.assertTrue(path.read_bytes())

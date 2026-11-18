@@ -1,5 +1,7 @@
 """Actual compiler/HTTP provenance: no table-name matching or source fallback."""
 import json
+import hashlib
+from pathlib import Path
 from urllib.parse import urlencode
 import pytest
 
@@ -50,6 +52,11 @@ def test_read_callsite_and_entire_pipeline_share_immutable_preview(original):
             assert status == 200, detail
             assert detail['path'] == 'shipping/dispatch.py'
             assert detail['start_line'] == detail['end_line'] == 9
+            api = detail['metadata']['definition']
+            assert api['symbol'] == 'DataAPI.read_lance'
+            assert 'version: int | None=None' in api['signature']
+            assert next(p for p in api['parameters'] if p['name']=='columns')['default'] is None
+            assert api['returns'] == 'Dataset'
             texts.append(detail['text'])
             status, parameters=request(app, '/api/plan-node-detail', dict(basis=address(preview),
                 logical_node_id=node['logical_node_id'], occurrence_id=node['occurrence_id'], kind='configuration'))
@@ -90,15 +97,15 @@ def test_pipeline_ui_read_call_code_config_and_whole_source(original, tmp_path, 
         page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
         expect(page.locator('.wb-node')).to_have_count(4, timeout=65000)
         page.locator('.wb-node').first.click()
-        expect(page.locator('.wb-source > .wb-source-header')).to_contain_text('API接口')
+        expect(page.locator('.wb-source > .wb-source-header')).to_contain_text('流程接线')
         expect(page.locator('.wb-source-body')).to_contain_text("columns=['order']")
         expect(page.get_by_text('输入输出与执行详情', exact=True)).to_have_count(0)
         expect(page.get_by_text('原文信息', exact=True)).to_have_count(0)
         expect(page.get_by_text('来源摘要', exact=True)).to_have_count(0)
         expect(page.locator('.wb-inspector')).to_be_hidden()
-        expect(page.locator('.wb-source > .wb-source-tabs button')).to_have_text(['API接口', '输入', '输出', '自定义算子代码', '自定义 Prompt'])
-        page.locator('.wb-source-tabs').get_by_role('button', name='输入', exact=True).click()
-        expect(page.locator('.wb-source > .wb-source-header')).to_contain_text('输入')
+        expect(page.locator('.wb-source > .wb-source-tabs button:visible')).to_have_text(['Dataset API', '流程接线'])
+        page.locator('.wb-source-tabs').get_by_role('button', name='流程接线', exact=True).click()
+        expect(page.locator('.wb-source > .wb-source-header')).to_contain_text('流程接线')
         advanced = page.locator('.wb-input-advanced')
         expect(advanced).to_be_visible()
         expect(advanced).not_to_have_attribute('open', '')
@@ -119,25 +126,25 @@ def test_pipeline_ui_read_call_code_config_and_whole_source(original, tmp_path, 
         expect(page.locator('.wb-parameter-explanation')).to_contain_text('外层配置字典')
         advanced.locator(':scope > summary').click()
         expect(page.locator('.wb-source-body')).to_contain_text('没有上游 Dataset 输入')
-        expect(page.locator('.wb-source-body')).not_to_contain_text('输出行 Schema')
-        page.locator('.wb-source-tabs').get_by_role('button', name='输出', exact=True).click()
+        expect(page.locator('.wb-source-body')).to_contain_text('输出行 Schema')
+        page.locator('.wb-source-tabs').get_by_role('button', name='流程接线', exact=True).click()
         expect(page.locator('.wb-schema-section')).to_contain_text('order')
         expect(page.locator('.wb-schema-section')).to_contain_text('字段类型和可空性尚未取得')
-        expect(page.locator('.wb-source-body')).not_to_contain_text('调用表达式 / 来源')
+        expect(page.locator('.wb-source-body')).to_contain_text('调用表达式 / 来源')
 
         page.locator('.wb-node').nth(2).click()  # union: two distinct Dataset inputs
-        page.locator('.wb-source-tabs').get_by_role('button', name='输入', exact=True).click()
+        page.locator('.wb-source-tabs').get_by_role('button', name='流程接线', exact=True).click()
         expect(page.locator('.wb-source-body')).to_contain_text('上游数据流')
-        expect(page.locator('.wb-schema-section')).to_have_count(2)
+        expect(page.locator('.wb-schema-section')).to_have_count(3)
         expect(page.locator('.wb-material-basis')).to_be_hidden()
-        for section, field in zip(page.locator('.wb-schema-section').all(), ['order', 'amount']):
+        for section, field in zip(page.locator('.wb-schema-section').all()[:2], ['order', 'amount']):
             expect(section.locator('table')).to_be_hidden()
             section.locator('summary').click()
             expect(section.locator('table')).to_be_visible()
             expect(section.locator('table')).to_contain_text(field)
         page.reload();expect(page.locator('.wb-node')).to_have_count(4, timeout=65000)
-        expect(page.locator('.wb-source-tabs').get_by_role('button', name='输入', exact=True)).to_have_attribute('aria-pressed', 'true')
-        expect(page.locator('.wb-schema-section')).to_have_count(2)
+        expect(page.locator('.wb-source-tabs').get_by_role('button', name='流程接线', exact=True)).to_have_attribute('aria-pressed', 'true')
+        expect(page.locator('.wb-schema-section')).to_have_count(3)
         page.locator('.wb-node').first.click()
 
         page.locator('.wb-more > summary').click()
@@ -147,8 +154,12 @@ def test_pipeline_ui_read_call_code_config_and_whole_source(original, tmp_path, 
         page.locator('.wb-node').first.click()
         expect(page.locator('.wb-inspector')).to_be_hidden()
 
-        page.locator('.wb-source-tabs').get_by_role('button', name='API接口', exact=True).click()
-        expect(page.locator('.wb-source-body')).to_contain_text("columns=['order']")
+        page.locator('.wb-source-tabs').get_by_role('button', name='Dataset API', exact=True).click()
+        expect(page.locator('.definition-signature')).to_contain_text('DataAPI.read_lance')
+        sdk_digest = hashlib.sha256((Path(__file__).parents[1] / 'demiflow/data/api.py').read_bytes()).hexdigest()
+        expect(page.locator('.definition-meta')).to_contain_text(sdk_digest[:8])
+        expect(page.locator('.wb-source-body')).to_contain_text('输入参数与默认值')
+        expect(page.locator('.wb-source-body')).not_to_contain_text("columns=['order']")
         page.get_by_role('button', name='Pipeline 源码', exact=True).click()
         expect(page.locator('.wb-pipeline-code')).to_be_visible()
         expect(page.locator('.wb-graph')).to_be_hidden()
@@ -162,6 +173,8 @@ def test_pipeline_ui_read_call_code_config_and_whole_source(original, tmp_path, 
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
         page.get_by_role('button', name='返回算子图', exact=True).click()
         expect(page.locator('.wb-node')).to_have_count(4)
+        expect(page.locator('.definition-signature')).to_contain_text('DataAPI.read_lance')
+        page.locator('.wb-source-tabs').get_by_role('button', name='流程接线', exact=True).click()
         expect(page.locator('.wb-source-body')).to_contain_text("columns=['order']")
         page.reload();expect(page.locator('.wb-node')).to_have_count(4, timeout=65000)
         page.get_by_role('button', name='Pipeline 源码', exact=True).click()
@@ -190,7 +203,7 @@ def test_pipeline_ui_read_call_code_config_and_whole_source(original, tmp_path, 
 
 
 @pytest.mark.parametrize('owned_fixture', [{'execution_format':'v3'}], indirect=True)
-def test_historical_pipeline_source_never_falls_back_to_edited_file(owned_fixture):
+def test_historical_pipeline_source_never_falls_back_to_edited_file(owned_fixture, monkeypatch):
     fx=owned_fixture; run=fx.run_facts
     assert run['status']=='succeeded'
     status, graph=fx.api('/api/graph?'+urlencode(dict(basis_kind='run',run_id=run['run_id'],attempt=run['attempt'])))
@@ -201,3 +214,12 @@ def test_historical_pipeline_source_never_falls_back_to_edited_file(owned_fixtur
     assert source['text']==(fx.root/source['path']).read_text()
     (fx.root/source['path']).write_text('# current file deliberately differs from the sealed run\n')
     assert fx.api(query)==(200,source)
+    from demiflow.workbench.graph import api_definition
+    def forbidden(*args, **kwargs): raise AssertionError('Historical API must not use the current SDK')
+    monkeypatch.setattr(api_definition, 'current', forbidden)
+    node=graph['nodes'][0]
+    status, contract=fx.api('/api/graph-source?'+urlencode(dict(graph_binding=json.dumps(graph['binding']),node_id=node['id'],kind='callsite')))
+    assert status==200,contract
+    assert contract['source_basis']=='sealed'
+    assert contract['definition']['symbol']=='DataAPI.read_lance'
+    assert 'version' in contract['definition']['signature']

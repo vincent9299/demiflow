@@ -13,8 +13,8 @@ KINDS = ('callsite', 'configuration', 'schema', 'implementation', 'prompt')
 TEXT_BYTES = 64 * 1024
 
 
-def unavailable(reason):
-    return dict(availability='unavailable', reason=reason, source_basis='compiled_snapshot',
+def unavailable(reason, *, referenced=False):
+    return dict(referenced=referenced, availability='unavailable', reason=reason, source_basis='compiled_snapshot',
                 path=None, sha256=None, start_line=None, end_line=None,
                 language=None, text=None, truncated=False)
 
@@ -73,16 +73,26 @@ def _implementation(declaration, root, sources):
     spec = declaration.callable_spec
     target = spec.target if spec is not None else None
     identity = declaration.code_identity.get('target', {})
-    if type(target) is not FunctionType or not isinstance(identity, Mapping):
+    prompts = _prompts(spec)
+    if prompts:
+        predicates = [settings['when'] for _, _, _, settings in prompts if type(settings.get('when')) is FunctionType]
+        if len(predicates) == 1:
+            target = predicates[0]
+            path = Path(target.__code__.co_filename)
+            relative = path.relative_to(root).as_posix() if path.is_relative_to(root) else None
+            identity = dict(module=target.__module__, name=target.__qualname__, source_hash=sources.get(relative))
+    is_class = type(target) is type
+    method = vars(target).get('__call__') if is_class else target
+    if type(method) is not FunctionType or not isinstance(identity, Mapping):
         return unavailable('本节点没有已绑定的业务函数源码；原生算子可查看 API 调用与入参。')
     if identity.get('module') != target.__module__ or identity.get('name') != target.__qualname__:
         return unavailable('函数身份与编译声明不一致。')
-    path = Path(target.__code__.co_filename)
+    path = Path(method.__code__.co_filename)
     if not path.is_absolute() or not path.is_relative_to(root):
         return unavailable('函数不在本次项目源码范围内。')
     relative = path.relative_to(root).as_posix()
     expected = sources.get(relative)
-    if not expected or identity.get('source_hash') != expected:
+    if not expected or (not is_class and identity.get('source_hash') != expected):
         return unavailable('函数源码未绑定本次解析的文件摘要。')
     ws.no_symlinks(path)
     raw = read_bounded(path, 4 * 1024**2)
@@ -91,19 +101,26 @@ def _implementation(declaration, root, sources):
     # Parsing locates an already authenticated function; it never invents DAG
     # nodes or dataflow edges from syntax.
     tree = ast.parse(raw, filename=str(path))
-    line = target.__code__.co_firstlineno
+    line = method.__code__.co_firstlineno
     candidates = []
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             start = min([node.lineno] + [d.lineno for d in node.decorator_list])
-            if start == line and node.name == target.__name__:
+            if not is_class and start == line and node.name == target.__name__:
                 candidates.append((node, start))
+        elif is_class and isinstance(node, ast.ClassDef) and node.name == target.__name__:
+            calls = [n for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == '__call__']
+            if len(calls) == 1 and min([calls[0].lineno, *(d.lineno for d in calls[0].decorator_list)]) == line:
+                candidates.append((node, min([node.lineno, *(d.lineno for d in node.decorator_list)])))
     if len(candidates) != 1:
         return unavailable('无法唯一定位编译函数的源码范围。')
     node, start = candidates[0]
     lines = raw.decode('utf-8-sig').splitlines(keepends=True)
-    return material(''.join(lines[start - 1:node.end_lineno]), language='python', path=relative,
-                    sha256=expected, start_line=start, end_line=node.end_lineno)
+    text = ''.join(lines[start - 1:node.end_lineno])
+    from demiflow.workbench.definition_contracts import code_definition
+    definition = code_definition(node, '')
+    return material(text, language='python', path=relative,
+                    sha256=expected, start_line=start, end_line=node.end_lineno, metadata=dict(definition=definition))
 
 
 def _prompts(spec, *, depth=0):
@@ -116,15 +133,15 @@ def _prompts(spec, *, depth=0):
     if spec.target is CacheFactory and args:
         return _prompts(args[0], depth=depth + 1)
     if spec.target is RoutedPromptFactory and args and type(args[0]) is dict and len(args[0]) <= 32:
-        return [(route + '/' + name, definition, operation)
+        return [(route + '/' + name, definition, operation, settings)
                 for route, child in args[0].items()
-                for name, definition, operation in _prompts(child, depth=depth + 1)]
+                for name, definition, operation, settings in _prompts(child, depth=depth + 1)]
     if spec.target is PromptFactory and args:
         operation = args[0]
         if type(operation) is OperatorLLMMapOp and type(operation.config) is PromptPack:
             definition = operation.config.prompt_definitions.get(operation.prompt_name)
             if type(definition) is PromptDefinition:
-                return [(operation.prompt_name, definition, operation)]
+                return [(operation.prompt_name, definition, operation, args[1] if len(args) > 1 and type(args[1]) is dict else {})]
     return []
 
 
@@ -133,10 +150,16 @@ def _prompt_detail(declaration):
     if not definitions:
         return unavailable('这个节点没有声明 Prompt。')
     texts, metadata = [], []
-    for name, definition, operation in definitions:
+    for name, definition, operation, settings in definitions:
         text = definition.template.source
         texts.append(text if len(definitions) == 1 else f'### {name}\n\n{text}')
-        metadata.append(safe_json(dict(name=name, version=definition.version,
+        from demiflow.workbench.definition_contracts import prompt_definition
+        contract = prompt_definition(name, dict(version=definition.version, template=text,
+            response_schema=definition.response_schema, response_format=definition.response_format,
+            input_mode=definition.input_mode, schema_retries=definition.schema_retries,
+            message_limits=definition.message_limits, model=definition.model.name),
+            arguments={key: kind.value for key, kind in definition.arguments.items()})
+        metadata.append(safe_json(dict(name=name, version=definition.version, definition=contract,
             model=definition.model.name, transport=definition.model.transport,
             response_format=definition.response_format, response_schema=definition.response_schema,
             inputs=operation.inputs, output=operation.output, outputs=operation.outputs,
@@ -179,12 +202,19 @@ def build_plan_details(compiled, *, sources, root, callsites=None, bounds=None):
         declaration = declarations.get(node.occurrence_id)
         if declaration is not None:
             details['implementation'] = _implementation(declaration, root, sources)
+            spec = declaration.callable_spec
+            prompt_refs = _prompts(spec)
+            target = spec.target if spec is not None else None
+            details['implementation']['referenced'] = (type(target) is FunctionType
+                or type(target) is type and not target.__module__.startswith('demiflow.')
+                or any(type(settings.get('when')) is FunctionType for _, _, _, settings in prompt_refs))
             try:
                 details['prompt'] = _prompt_detail(declaration)
             except ValueError as exc:
                 # Presentation has a narrower budget than legal execution.
                 # A missing material must not discard the actual compiled DAG.
                 details['prompt'] = unavailable(str(exc))
+            details['prompt']['referenced'] = bool(prompt_refs)
         details['callsite'] = (callsites.detail(node.occurrence_id) if callsites is not None
                                else unavailable('这份计划未记录精确 API 调用；不会按函数名猜测。'))
         details['schema'] = schemas.get(node.occurrence_id, unavailable('这份计划未提供 Schema 材料。'))
@@ -203,7 +233,7 @@ def build_plan_details(compiled, *, sources, root, callsites=None, bounds=None):
         for kind, detail in details.items():
             size = len(json.dumps(detail, ensure_ascii=False).encode())
             if size > 128 * 1024 or total + size > 4 * 1024**2 - 256 * 1024:
-                details[kind] = unavailable('材料超过展示预算。')
+                details[kind] = unavailable('材料超过展示预算。', referenced=detail.get('referenced', False))
                 size = len(json.dumps(details[kind], ensure_ascii=False).encode())
             total += size
         result[node.occurrence_id] = details

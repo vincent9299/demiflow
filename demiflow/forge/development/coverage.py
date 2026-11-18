@@ -97,13 +97,16 @@ class SourceFacts:
         self.bytes = self.references = 0
         self.symbol_cache = {}
         self.locals, self.modern, self.operator_set = set(), [], set()
-        for name, pipeline in project.config['pipelines'].items():
+        self.notebook_owners = {}
+        for name, pipeline in project.registrations.items():
             self.charge(('registration', name))
-            entry = project.entry_path(name)
-            self.charge(('entry', entry))
-            self.entry_owners[module_name(entry)] = pipeline['path']
             self.locals.add(pipeline['path'].split('/')[0])
-            self.locals.add(entry.split('/')[0])
+            entries = project.entries(name)
+            for definition in entries.values():
+                entry = definition['path']
+                self.charge(('entry', entry))
+                self.entry_owners[module_name(entry)] = pipeline['path']
+                self.locals.add(entry.split('/')[0])
             for operator in pipeline.get('operators', [pipeline['path'] + '/operators']):
                 self.charge(('operator', operator))
                 self.locals.add(operator.split('/')[0])
@@ -113,11 +116,17 @@ class SourceFacts:
             if project.standard(name) not in PROJECT_LOCAL_STANDARDS:
                 continue
             self.modern.append(name)
-            self.seed(entry, False, module_name(entry))
-            for path in pipeline['operators']:
-                self.seed(path, True, module_name(entry), subtree=True)
             for path in pipeline['notebooks']:
-                self.seed(path, False, module_name(entry))
+                self.notebook_owners[path] = pipeline['path']
+            for definition in entries.values():
+                entry = definition['path']
+                self.seed(entry, False, module_name(entry))
+                for path in pipeline['operators']:
+                    self.seed(path, True, module_name(entry), subtree=True)
+                for path in pipeline.get('prompts', []):
+                    self.seed(path, False, module_name(entry), subtree=True)
+                for path in pipeline['notebooks']:
+                    self.seed(path, False, module_name(entry))
         while self.pending:
             path = self.pending.popleft()
             record = self.parse(path)
@@ -126,9 +135,10 @@ class SourceFacts:
             for edge in record['imports']:
                 self.resolve_edge(record, edge)
         for name in self.modern:
-            record = self.parsed.get(project.entry_path(name))
-            if record is not None and record['functions'].count(project.pipeline(name)['entry']['symbol']) != 1:
-                self.problem('DF-02 entry requires exactly one registered top-level function')
+            for entry in project.entries(name).values():
+                record = self.parsed.get(entry['path'])
+                if record is not None and record['functions'].count(entry['symbol']) != 1:
+                    self.problem('DF-02 entry requires exactly one registered top-level function: ' + entry['path'])
         self.directions()
         self.stable()
 
@@ -529,13 +539,16 @@ class SourceFacts:
             if record is None:
                 continue
             owner = self.entry_owners[own_entry]
+            caller_entries = {e for e, project_owner in self.entry_owners.items()
+                              if project_owner == self.notebook_owners.get(path)} if (
+                                  self.project.config['schema'] == 'demiforge-project-v3') else set()
             ancestor_init = path.endswith('/__init__.py') and any(within(p, str(Path(path).parent))
                             for p in [owner, *self.operators])
             if not within(path, owner) and not any(within(path, p) for p in self.operators) and not ancestor_init:
                 self.problem(f'DF-02 local dependency has no declared operator owner: {path}')
             for module, line in record['targets']:
                 entries = {e for e in self.entry_owners if module == e or module.startswith(e + '.')}
-                if entries - {own_entry}:
+                if entries - {own_entry} - caller_entries:
                     self.problem(f'DF-03 cross-entry import in {path}:{line}')
                 if operator and entries:
                     self.problem(f'DF-03 operator imports entry in {path}:{line}')
@@ -544,9 +557,9 @@ class SourceFacts:
                 if target_entry in self.entry_owners:
                     if operator:
                         self.problem(f'DF-03 operator imports entry in {path}: package initialization/dependency')
-                    if target_entry != own_entry:
+                    if target_entry != own_entry and target_entry not in caller_entries:
                         self.problem(f'DF-03 cross-entry import in {path}: package initialization/dependency')
-                context = (dependency, operator, own_entry)
+                context = (dependency, operator, target_entry if target_entry in caller_entries else own_entry)
                 if context not in queued:
                     self.charge(('direction-pending', *context))
                     queued.add(context)
@@ -564,7 +577,9 @@ class SourceFacts:
                 raise ForgeError(f'Source changed during static observation: {path}')
 
     def summary(self):
-        return {'policy': 'candidate.9-local-source-v1', 'scope': 'declared-local-and-supported-static-imports',
+        policy = ('candidate.10-multi-flow-source-v1' if self.project.config['schema'] == 'demiforge-project-v3'
+                  else 'candidate.9-local-source-v1')
+        return {'policy': policy, 'scope': 'declared-local-and-supported-static-imports',
                 'exact_sources': sorted(self.required), 'author_subtrees': sorted(self.subtrees),
                 'unwatched_local_sources': sorted(self.unwatched), 'static_diagnostics': sorted(self.problems),
                 'external_imports_uninspected': [dict(source=p, line=n, module=m) for p, n, m in sorted(self.external)],

@@ -53,27 +53,26 @@ def test_unadmitted_import_still_has_sha_bound_syntax_calls_without_compute_admi
 
 
 @pytest.mark.parametrize('calls',[True,False,'cached'])
-def test_browser_unadmitted_source_and_empty_graph_finish_with_explicit_state(original,tmp_path,browser,calls):
+def test_browser_unadmitted_source_keeps_diagnostics_without_fake_execution_graph(original,tmp_path,browser,calls):
     author(original,calls=calls);before=business_bytes(original)
     registry=tmp_path/'registry.json';console.add(registry,original)
     with service(None,registry=registry,enable_runs=True) as app,page_for(browser,app) as (page,errors):
         posts=[];page.on('request',lambda r:posts.append(r.url) if r.method=='POST' else None)
         page.locator('.function-nav').get_by_role('button',name='管道',exact=True).click()
-        expect(page.locator('.wb-basis')).to_contain_text('源码观察图')
+        # Syntax observations remain available to diagnostics, but the product
+        # must never substitute them for a Dataset execution plan.
+        expect(page.locator('.wb-graph-empty')).to_contain_text('尚无运行执行图', timeout=15000)
         expect(page.locator('.wb-graph')).not_to_have_attribute('aria-busy','true')
-        if calls:
-            expect(page.locator('.wb-node')).to_have_count(1)
-            page.locator('.wb-node').first.click()
-            expect(page.locator('.wb-source-body')).to_contain_text('local_clean(cfg)')
-        else:
-            expect(page.locator('.wb-inspector')).to_contain_text('argparse')
-            expect(page.locator('.wb-source-body')).to_contain_text('没有可展示的调用节点')
-            expect(page.locator('.wb-source-body')).not_to_contain_text('正在读取')
-            assert page.locator('.wb-node').count()==0
+        expect(page.locator('.wb-node')).to_have_count(0)
+        expect(page.get_by_role('button',name='解析执行计划',exact=True)).to_be_disabled()
         expect(page.get_by_role('button',name='运行',exact=True)).to_be_disabled()
+        page.locator('.wb-more > summary').click()
         page.get_by_role('button',name='检查问题',exact=True).click()
         expect(page.locator('.wb-check-issues')).to_contain_text('OP-06')
-        assert not errors and not posts and business_bytes(original)==before
+        assert not errors and business_bytes(original)==before
+        # Read-only native compilation may be attempted automatically; no
+        # execution, writes, or synthetic static-to-runtime promotion is allowed.
+        assert all(url.endswith('/plan-preview') for url in posts)
         evidence=tmp_path/'evidence'
         evidence.mkdir(exist_ok=True)
         page.screenshot(path=str(evidence/('source-observation-'+('cached-dependency' if calls=='cached' else 'calls' if calls else 'empty')+'.png')),full_page=True)

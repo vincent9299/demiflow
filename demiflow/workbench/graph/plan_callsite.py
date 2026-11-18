@@ -31,6 +31,7 @@ class PlanCallsites:
         self.compiler_code = capture_graph.__code__
         self.dataset_types = (Dataset, MaterializedDataset)
         self.locations, self.files, self.nodes, self.active = {}, {}, {}, {}
+        self.api_definitions = {}
         self.retained_bytes = 0
 
     def __enter__(self):
@@ -245,9 +246,12 @@ class PlanCallsites:
         rows = [dict(p, expression=expressions.get(p['name']),
                      origin='explicit' if p['name'] in expressions else 'expanded_or_default' if expansions else 'default')
                 for p in arguments]
+        if api not in self.api_definitions:
+            from .api_definition import current
+            self.api_definitions[api] = current(api)
         return material(invocation, language='python', path=relative, sha256=expected,
                         start_line=line, end_line=end_line,
-                        metadata=dict(api=api, arguments=rows, expansions=expansions,
+                        metadata=dict(api=api, definition=self.api_definitions[api], arguments=rows, expansions=expansions,
                                       context=full[:32768], context_truncated=len(full) > 32768,
                                       summary=' '.join(invocation.split())[:256]))
 
