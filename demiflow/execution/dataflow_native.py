@@ -23,6 +23,7 @@ Rules for this module:
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from types import MappingProxyType
 from typing import Any, Mapping
 
 # The model factories the compiler lowers through a model path.
@@ -35,6 +36,17 @@ PRODUCER = 'producer'
 SEARCH = 'search'
 STREAM_WRITE = 'stream_write'                     # passive RPC factory, no user predicate
 STREAM_WRITE_PREDICATE = 'stream_write_predicate'  # the same factory carrying a user predicate
+
+
+# The lowering function of a recognised model declaration, as a symbol the plan
+# compiler resolves on use:
+#     lower(operation, declaration, *, program_ref, bounds) -> KernelSpec
+# A cache declaration has none: its operation is lowered generically and only its
+# state is tightened.
+DECLARATION_LOWERINGS: Mapping[str, str] = MappingProxyType({
+    ROUTED_PROMPT: 'demiflow.execution.dataflow_routed_prompt:compile_routed_prompt',
+    PROMPT: 'demiflow.execution.dataflow_models:lower_prompt_declaration',
+})
 
 
 @dataclass(frozen=True)
@@ -56,6 +68,11 @@ def model_variant(declaration) -> str | None:
     if declaration.target is CacheFactory:
         return CACHE
     return None
+
+
+def declaration_lowering(variant) -> str | None:
+    """The registered lowering symbol of a model variant, or ``None`` for generic lowering."""
+    return DECLARATION_LOWERINGS.get(variant)
 
 
 def cache_runtime_state(callable_spec):

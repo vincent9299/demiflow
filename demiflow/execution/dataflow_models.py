@@ -186,6 +186,31 @@ def build_model_factory(operation: LogicalOp, *, program_ref: ArtifactRef | None
                       output_bound_bytes=bounds.max_row_bytes, mergeable=False)
 
 
+def lower_prompt_declaration(operation: LogicalOp, declaration, *, program_ref: ArtifactRef | None,
+                             bounds: Bounds) -> KernelSpec:
+    """Lower a validated prompt-factory declaration (map_prompt_async, agentmap_async, typed prompt).
+
+    The declaration carries the native operation and the actor settings. The model
+    kernel is the one build_model_factory freezes; concurrency, the caught
+    exception types and an owned service are settings of the declaration.
+    Registered in execution.dataflow_native.DECLARATION_LOWERINGS; the plan
+    compiler resolves it by symbol and never names this module.
+    """
+    from dataclasses import replace
+    native_op, settings = declaration.constructor_args
+    model = build_model_factory(operation if isinstance(operation, AgentMapOp) else native_op,
+                                program_ref=program_ref, bounds=bounds)
+    # A KernelSpec configuration is frozen strict Json, for which _json_config is the plain copy.
+    configuration = _json_config(model.configuration)
+    configuration.update(concurrency=settings.get('concurrency', 1),
+                         catch=[c.__module__ + '.' + c.__qualname__ for c in getattr(operation, 'catch', ())])
+    model = replace(model, configuration=configuration,
+        profile=_model_profile(model.resource_role, bounds, configuration["concurrency"],
+                               model.state, operation=operation))
+    from .dataflow_prompt_service import service_kernel
+    return service_kernel(model, settings)
+
+
 class _EffectTransport:
     """Typed driver RPC adapter over the native effect ledger (no second ledger)."""
 

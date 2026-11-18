@@ -167,3 +167,63 @@ def test_importing_the_module_initialises_no_native_service():
 def test_the_compiler_no_longer_names_the_class(name):
     source = (ROOT / 'demiflow' / 'planning' / 'dataflow_compile.py').read_text(encoding='utf-8')
     assert name not in source
+
+
+def test_every_registered_lowering_symbol_resolves_to_a_function_with_the_agreed_signature():
+    """A symbol is a string an import scan cannot see; each one is resolved here for real."""
+    import inspect
+    from demiflow.execution.contracts.dataflow_kinds import kind_records
+    from demiflow.planning import dataflow_compile
+    from demiflow.planning.dataflow_compile import _GENERIC_LOWERING, _lowering, compile_kernel_spec
+    compiler_symbols = {record.operator[0] for record in kind_records().values() if record.operator is not None}
+    assert compiler_symbols == {_GENERIC_LOWERING, 'demiflow.execution.dataflow_models:build_model_factory'}
+    assert _lowering(_GENERIC_LOWERING) is compile_kernel_spec is dataflow_compile.compile_kernel_spec
+    for symbol in compiler_symbols:                      # lower(operation, *, program_ref, bounds)
+        parameters = inspect.signature(_lowering(symbol)).parameters
+        assert list(parameters) == ['operation', 'program_ref', 'bounds'], symbol
+        assert all(parameters[name].kind is inspect.Parameter.KEYWORD_ONLY for name in ('program_ref', 'bounds'))
+    assert set(native.DECLARATION_LOWERINGS) == {native.ROUTED_PROMPT, native.PROMPT}
+    assert native.declaration_lowering(native.CACHE) is None and native.declaration_lowering(None) is None
+    for variant, symbol in native.DECLARATION_LOWERINGS.items():   # lower(operation, declaration, *, program_ref, bounds)
+        assert native.declaration_lowering(variant) == symbol
+        parameters = inspect.signature(_lowering(symbol)).parameters
+        assert list(parameters) == ['operation', 'declaration', 'program_ref', 'bounds'], symbol
+        assert all(parameters[name].kind is inspect.Parameter.KEYWORD_ONLY for name in ('program_ref', 'bounds'))
+
+
+def test_only_engine_symbols_are_resolved():
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.planning.dataflow_compile import _lowering
+    for symbol in ('os:system', 'json.decoder:JSONDecoder', 'demiflow.execution.dataflow_models', 'build_model_factory',
+                   'demiflow.execution.dataflow_models:not_a_function', 'demiflow.execution.dataflow_models:__doc__'):
+        with pytest.raises(DataflowError) as refused:
+            _lowering(symbol)
+        assert refused.value.code == 'INVALID_CONTRACT', symbol
+
+
+def test_kernel_symbols_name_real_functions_or_are_listed_as_not_resolvable():
+    """Kernel symbols are registered but nothing resolves them today. This records which ones exist."""
+    import importlib
+    from demiflow.execution.contracts.dataflow_kinds import kind_records
+    symbols = sorted({record.operator[1] for record in kind_records().values() if record.operator is not None})
+    missing = []
+    for symbol in symbols:
+        module_name, _, name = symbol.partition(':')
+        try:
+            found = callable(getattr(importlib.import_module(module_name), name, None))
+        except ImportError:
+            found = False
+        if not found:
+            missing.append(symbol)
+    assert len(symbols) == 5
+    assert missing == KERNEL_SYMBOLS_WITHOUT_A_FUNCTION
+
+
+KERNEL_SYMBOLS_WITHOUT_A_FUNCTION = []
+
+
+@pytest.mark.parametrize('name', ['dataflow_models', 'dataflow_routed_prompt', 'dataflow_prompt_service',
+                                  'build_model_factory', 'compile_routed_prompt', 'service_kernel', 'AgentMapOp'])
+def test_the_generic_lowering_names_no_model_module(name):
+    source = (ROOT / 'demiflow' / 'planning' / 'dataflow_compile.py').read_text(encoding='utf-8')
+    assert name not in source

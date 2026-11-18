@@ -54,7 +54,10 @@ from .dataflow_registry import operator_registry, source_registry, terminal_regi
 
 _SCHEMA = "demiflow.dataflow_graph.v3"
 _NON_SEMANTIC_FIELDS = frozenset({"runtime_contract", "label", "node_id", "source_dataset"})
-_MODEL_COMPILER = "demiflow.execution.dataflow_models:build_model_factory"
+# The compiler symbol of a kind lowered by compile_kernel_spec itself. Any other
+# registered compiler symbol names the kind's own lowering function:
+#     lower(operation, *, program_ref, bounds) -> KernelSpec
+_GENERIC_LOWERING = "demiflow.planning.dataflow_compile:compile_kernel_spec"
 
 # kind -> (state, effect, resource_role, mergeable). Traits are declarations; the
 # physical planner refines resources. Unknown UDF state is never claimed pure.
@@ -213,6 +216,18 @@ def _source_kind(source: SourcePlan) -> str:
     raise _error("INVALID_CONTRACT", "unknown source plan: " + type(source).__name__)
 
 
+def _lowering(symbol: str):
+    """Resolve a registered lowering function from its ``module:name`` symbol, on use."""
+    module_name, separator, name = symbol.partition(":")
+    if not separator or not module_name.startswith("demiflow."):
+        raise _error("INVALID_CONTRACT", "lowering symbol is outside the engine: " + symbol)
+    import importlib
+    function = getattr(importlib.import_module(module_name), name, None)
+    if not callable(function):
+        raise _error("INVALID_CONTRACT", "unknown lowering symbol: " + symbol)
+    return function
+
+
 def _input_port(name: str, kind: str) -> InputPort:
     finite = kind in _FINITE_COMPLETE_KINDS or name in {"left", "right", "prefix"}
     ordering = "global" if kind in _ORDERING_KINDS else "none"
@@ -241,30 +256,18 @@ def compile_kernel_spec(
     from ..data.native_options import validate_stream_native_options
     validate_stream_native_options(getattr(operation, 'native_options', None))
     from ..execution.dataflow_model_factory import native_model_declaration
-    from ..execution.dataflow_native import cache_runtime_state, model_variant, native_variant
+    from ..execution.dataflow_native import cache_runtime_state, declaration_lowering, model_variant, native_variant
     native_declaration = native_model_declaration(operation)
     # The compiler asks which declaration this is; the classes stay on the execution side.
     model_kind = model_variant(native_declaration)
-    if model_kind == 'routed_prompt':
-        from ..execution.dataflow_routed_prompt import compile_routed_prompt
-        return compile_routed_prompt(operation, native_declaration, program_ref=program_ref, bounds=bounds)
-    if model_kind == 'prompt':
-        from ..execution.dataflow_models import build_model_factory, _model_profile
-        native_op, settings = native_declaration.constructor_args
-        from ..data.plan import AgentMapOp
-        model = build_model_factory(operation if isinstance(operation, AgentMapOp) else native_op,
-                                    program_ref=program_ref, bounds=bounds)
-        configuration = _plain(model.configuration)
-        configuration.update(concurrency=settings.get('concurrency', 1),
-                             catch=[c.__module__ + '.' + c.__qualname__ for c in getattr(operation, 'catch', ())])
-        model = replace(model, configuration=configuration,
-            profile=_model_profile(model.resource_role, bounds, configuration["concurrency"],
-                                   model.state, operation=operation))
-        from ..execution.dataflow_prompt_service import service_kernel
-        return service_kernel(model, settings)
-    if definition.compiler_symbol == _MODEL_COMPILER:
-        from ..execution.dataflow_models import build_model_factory
-        return build_model_factory(operation, program_ref=program_ref, bounds=bounds)
+    # A recognised model declaration is lowered by the function registered for it,
+    # and a kind that registers its own lowering is lowered by that function. Both
+    # are resolved from their registered symbols; neither module is named here.
+    declared = declaration_lowering(model_kind)
+    if declared is not None:
+        return _lowering(declared)(operation, native_declaration, program_ref=program_ref, bounds=bounds)
+    if definition.compiler_symbol != _GENERIC_LOWERING:
+        return _lowering(definition.compiler_symbol)(operation, program_ref=program_ref, bounds=bounds)
     traits = (_NATIVE_TRAITS if isinstance(operation, NativeOperation) else _TRAITS).get(kind)
     if traits is None:
         raise _error("UNSUPPORTED_CAPABILITY", "operator traits are not registered: " + kind)

@@ -78,7 +78,6 @@ PLANNING_MAY_IMPORT = {
     'demiflow.execution.dataflow_models',
     'demiflow.execution.dataflow_native',
     'demiflow.execution.dataflow_native_limits',
-    'demiflow.execution.dataflow_prompt_service',
     'demiflow.execution.dataflow_publication_budget',
     'demiflow.execution.dataflow_routed_prompt',
     'demiflow.execution.dataflow_schema',
@@ -206,9 +205,26 @@ def test_pre_v3_modules_gain_no_importers():
     assert not missing, 'Listed pre-v3 modules no longer exist; delete them here:' + _lines(missing)
 
 
+def _lowering_symbol_modules():
+    """Execution modules the plan compiler reaches through a registered lowering symbol.
+
+    A symbol is a string, so an import scan does not see it. It is a dependency
+    all the same: compiling a plan that uses the kind runs code in that module.
+    """
+    import re
+    kinds = (PACKAGE / 'execution/contracts/dataflow_kinds.py').read_text(encoding='utf-8')
+    native = (PACKAGE / 'execution/dataflow_native.py').read_text(encoding='utf-8')
+    compiler_symbols = re.findall(r'^_(?:MODEL_)?COMPILE = "([a-z_.]+):[A-Za-z_]+"$', kinds, re.M)
+    block = native[native.index('DECLARATION_LOWERINGS'):]
+    declared = re.findall(r"'([a-z_.]+):[A-Za-z_]+'", block[:block.index('})')])
+    assert len(compiler_symbols) == 2 and len(declared) == 2, (compiler_symbols, declared)
+    return {module for module in compiler_symbols + declared if module.startswith('demiflow.execution.')}
+
+
 def test_plan_compiler_learns_no_new_runtime_modules():
     used = {imported for importer, imported, _ in IMPORTS
             if _package(importer) == 'planning' and _package(imported) == 'execution'}
+    used |= _lowering_symbol_modules()
     new = used - PLANNING_MAY_IMPORT
     assert not new, ('planning imports an execution module it did not import before. Register the '
                      'kind in planning/dataflow_registry.py instead of importing its implementation:' + _lines(new))

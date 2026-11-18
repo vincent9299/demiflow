@@ -39,7 +39,6 @@
    "StreamLanceSink"
   ],
   "planning.compiler": [
-   "AgentMapOp",
    "DatasourceSource",
    "FileSource",
    "ItemsSource",
@@ -180,9 +179,9 @@
    ],
    "concurrency": [
     "execution/dataflow_model_observations.py",
+    "execution/dataflow_models.py",
     "execution/kernels/operator.py",
     "planning/dataflow_budget.py",
-    "planning/dataflow_compile.py",
     "planning/dataflow_finite_fusion.py",
     "planning/dataflow_fusion.py",
     "planning/dataflow_graph_adapter.py",
@@ -453,9 +452,11 @@
     "planning/dataflow_compile.py"
    ],
    "catch": [
+    "execution/dataflow_models.py",
     "planning/dataflow_compile.py"
    ],
    "concurrency": [
+    "execution/dataflow_models.py",
     "planning/dataflow_compile.py"
    ],
    "default_batch_size": [
