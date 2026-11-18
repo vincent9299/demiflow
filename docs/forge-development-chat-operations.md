@@ -1,6 +1,6 @@
 # DemiFlow 开发对话与运行态组合部署
 
-2026-11-19 试用已上线：`http://localhost:59866/` →“Forge 开发试用”→“开发”，实际运行 `fix/prompt-replay-delivery-20261118` / `_demiflow/worktrees/gpt_prompt_replay_20261118` 的 `20581ae`。真实连续两轮开发及重启后接受、原项目视图和历史保护均已核验；[试用交付记录](forge-development-harness-delivery-20261119.md)包含测试、限制和回退。采用原 token、registry 与分析数据库，当前开发授权配置位于 `_demiflow/shared-review/forge-harness-final-delivery-20261118/trial-development-final.json`。下方 11 月 5 日地址与结果为历史事实，不能替代本轮记录。
+2026-11-19 试用已上线：`http://localhost:55972/` →“Forge 开发试用”→“开发”，实际运行 `fix/prompt-replay-delivery-20261118` / `_demiflow/worktrees/gpt_prompt_replay_20261118` 的 `20581ae`。真实连续两轮开发及重启后接受、原项目视图和历史保护均已核验；[试用交付记录](forge-development-harness-delivery-20261119.md)包含测试、限制和回退。采用原 token、registry 与分析数据库，当前开发授权配置位于 `_demiflow/shared-review/forge-harness-final-delivery-20261118/trial-development-final.json`。下方 11 月 5 日地址与结果为历史事实，不能替代本轮记录。
 
 2026-11-05：当前原服务已接通本地 DeepSeek CLI，`shared/concepts/identity` 的开发对话可直接使用。刷新原页面，进入「开发」并发送要求即可；界面按 DeepSeek Harness 精简，历史与连接详情按需展开。下面的 `/srv` 路径是移植示例，不是当前安装值。
 

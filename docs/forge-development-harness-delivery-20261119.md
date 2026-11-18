@@ -5,12 +5,14 @@
 ## 交付位置与试用
 
 - 唯一候选：`_demiflow/worktrees/gpt_prompt_replay_20261118`，分支 `fix/prompt-replay-delivery-20261118`，基于平台总控 (2) 的 `dab45bb`。主仓不是本版开发或试用来源。
-- 页面入口沿用用户当前本地转发 `http://localhost:59866/`。选择“Forge 开发试用”→“开发”，直接输入需求。试用根目录为 `_demiflow/harness-trial-acceptance-20261119`，workspace `w4def8444b92e46c3bb36a645175ea5b8`。
+- 页面入口沿用用户当前本地转发 `http://localhost:55972/`。选择“Forge 开发试用”→“开发”，直接输入需求。试用根目录为 `_demiflow/harness-trial-acceptance-20261119`，workspace `w4def8444b92e46c3bb36a645175ea5b8`。
 - 建议试用：“把 normalize_name 的输入上限从 128 改为 256 个字符，保留 None 和空白处理，补边界测试并更新说明。”
 - 项目包含两个独立 flow、共享算子及 3 条合成数据。开发仅写 `lab/`，数据和控制文件只读；未授权本试用项目提交管道运行。现有项目的运行权限保持原值。
 - 此次交付针对已登记并明确授权的项目；不会自动给存量项目补登记、迁移历史或签发接受。Codex 适配与边界测试已覆盖，但真实账号推理仅验收已配置的 DeepSeek。
 
 本版已在原试用入口运行，重启后连续开发、严格准入及旧项目视图均通过下列核验；最终用户试用验收仍由真人完成。
+
+2026-11-19 浏览器入口复核：用户本机实际使用 `http://localhost:55972/`，通过既有转发访问 devbox 的 `127.0.0.1:59866`；此前交付回复混用了这两个端口，现已更正。截图所选 `refgen-syntheic`（workspace `w7c0d74c84cf945968ce515dfad15707a`）未启用开发，页面显示“尚未连接开发代理”不能准确区分项目未授权和服务未连接。原权限保持。真实浏览器从该项目切换到“Forge 开发试用”，再点“开发”，已确认 DeepSeek 模型、原接受状态及发送输入可用，未发送模型请求。证据在 `entry-selection-20261119/result.json`。
 
 ## 本版实现与 Review 结论
 
