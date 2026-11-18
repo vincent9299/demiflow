@@ -84,3 +84,20 @@
 配置、未知格式、原生/普通配置真实并发改写，以及真实 HTTP/Chromium 的首次进入、
 等待初始读取、切换两份配置、编译与刷新。现场证据为
 `parameter-projection-red.json`、`parameter-cold-open-verification.json`，位于上述证据目录。
+
+## 2026-11-18：算子目录
+
+管道导航现在依次为「算子 / 读图与配置 / 检查问题 / 运行监控 / 输出结果」。
+算子目录直接使用运行图已经校验的计划节点；没有计划时提供解析入口，不列出静态
+Python 调用冒充算子。编译计划仍限定首个执行动作，历史运行则按所选封存 action 展示。
+目录中的序号用于查找，不代表并行分支的执行先后。
+
+可按名称、类型或 Prompt 搜索，逐项展开源码、Prompt 与绑定配置，并跳回图中定位。
+目录与图复用同一个节点材料读取器及身份校验，不复制材料缓存、不扫描任意源码文件。
+同一时间只展开一项，仍沿用 256 节点展示上限和按需读取的材料预算。配置切换会清空
+旧目录，迟到的材料响应不能覆盖新选择；历史来源缺失时不回退到当前代码。
+
+`tests/test_workbench_operator_directory.py` 覆盖真实 HTTP/编译器的目录与图一致、源码/
+Prompt/配置、搜索、键盘展开、刷新、配置切换、窄屏、迟到响应与快照过期。现场标杆及
+历史运行复验记录在上述证据目录的 `operator-directory-live-verification.json`；截图为
+`operator-directory-overview.png`、`operator-directory-prompt.png` 等。
