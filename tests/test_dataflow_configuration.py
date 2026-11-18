@@ -15,6 +15,7 @@ from demiflow.planning.dataflow_compile import _plain
 from demiflow.planning.dataflow_configuration import configuration_findings, report_configuration
 
 import compile_contract_corpus as corpus
+from configuration_schema_gate import reports_on_purpose
 
 
 @pytest.fixture(scope='module')
@@ -167,6 +168,25 @@ def test_a_defect_is_reported(graphs, case, kind, change, expected):
     assert any(expected in finding for finding in found), found
 
 
+@reports_on_purpose
+def test_the_opt_in_gate_collects_reports_and_counts_checked_graphs():
+    """What the gate plugin acts on: one line per checked graph, one line per finding."""
+    import configuration_schema_gate as gate
+    handler = gate._Reports()
+    logger = logging.getLogger(gate._LOGGER)
+    level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        logger.debug('configuration schema: action %s: %d nodes checked, %d findings', 'a', 3, 0)
+        assert handler.graphs == 1 and handler.findings == []
+        logger.debug('configuration schema: action %s: %s', 'a', 'MapOp 0123: key x is not admitted on this node')
+        assert len(handler.findings) == 1
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+
+
 def test_a_kind_the_schema_does_not_describe_is_reported_not_guessed(graphs):
     graph = graphs['case map']
     node = next(node for node in graph.nodes if node.kernel.kind == 'MapOp')
@@ -175,16 +195,24 @@ def test_a_kind_the_schema_does_not_describe_is_reported_not_guessed(graphs):
     assert any('not described by the configuration schema' in finding for finding in configuration_findings(strange))
 
 
+@reports_on_purpose
 def test_reporting_is_silent_and_harmless_by_default(graphs, caplog):
     broken = _mutate(graphs['case map'], 'MapOp', _set('not_a_key', 1))
     logger = logging.getLogger('demiflow.planning.configuration')
-    assert not logger.isEnabledFor(logging.DEBUG)
-    assert report_configuration(broken) == ()                 # not even evaluated
-    with caplog.at_level(logging.DEBUG, logger='demiflow.planning.configuration'):
-        found = report_configuration(broken)
-        assert len(found) == 1 and 'not_a_key' in found[0]
-        messages = [record.getMessage() for record in caplog.records]
-        assert any('3 nodes checked, 1 findings' in message for message in messages)
-        assert any('not_a_key' in message for message in messages)
-        assert report_configuration(object()) == ()           # a defect in the check itself never escapes
-    assert report_configuration(graphs['case map']) == ()
+    level, propagate = logger.level, logger.propagate
+    logger.setLevel(logging.NOTSET)                            # the default, whatever a harness configured
+    logger.propagate = True
+    try:
+        assert not logger.isEnabledFor(logging.DEBUG)
+        assert report_configuration(broken) == ()              # not even evaluated
+        with caplog.at_level(logging.DEBUG, logger='demiflow.planning.configuration'):
+            found = report_configuration(broken)
+            assert len(found) == 1 and 'not_a_key' in found[0]
+            messages = [record.getMessage() for record in caplog.records]
+            assert any('3 nodes checked, 1 findings' in message for message in messages)
+            assert any('not_a_key' in message for message in messages)
+            assert report_configuration(object()) == ()        # a defect in the check itself never escapes
+        assert report_configuration(graphs['case map']) == ()
+    finally:
+        logger.setLevel(level)
+        logger.propagate = propagate
