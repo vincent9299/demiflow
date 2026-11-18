@@ -12,6 +12,16 @@ import sys
 import time
 
 
+def limit_native_allocations():
+    """Bound native decoding in this disposable preview without reading proc."""
+    import resource
+    ceiling = 4 * 1024**3
+    for inherited in resource.getrlimit(resource.RLIMIT_AS):
+        if inherited != resource.RLIM_INFINITY:
+            ceiling = min(ceiling, inherited)
+    resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
+
+
 def preview_launcher(root):
     from .admission import lookup
     binding = lookup(root)
@@ -78,6 +88,10 @@ def main():
     if (type(request) is not dict or set(request) != {'operation', 'root', 'arguments'}
             or request['operation'] != 'plan_preview'):
         raise ValueError('Confined inspection accepts only plan_preview')
+    # Lance metadata/decoding has the same finite 4-GiB ceiling as the ordinary
+    # readonly worker. Lower inherited limits remain authoritative; B1 still
+    # accounts the complete process tree's RSS independently.
+    limit_native_allocations()
     # The kernel boundary is imposed before Python is executed. The legacy
     # guard cannot be stacked here (B1 forbids changing seccomp); its weaker
     # filesystem/network policy is unnecessary in this fixed confined entry.
