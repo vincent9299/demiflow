@@ -98,6 +98,7 @@ class SourceFacts:
         self.symbol_cache = {}
         self.locals, self.modern, self.operator_set = set(), [], set()
         self.notebook_owners = {}
+        self.multi_owners = {p['path'] for p in project.registrations.values() if 'flows' in p}
         for name, pipeline in project.registrations.items():
             self.charge(('registration', name))
             self.locals.add(pipeline['path'].split('/')[0])
@@ -541,7 +542,7 @@ class SourceFacts:
             owner = self.entry_owners[own_entry]
             caller_entries = {e for e, project_owner in self.entry_owners.items()
                               if project_owner == self.notebook_owners.get(path)} if (
-                                  self.project.config['schema'] == 'demiforge-project-v3') else set()
+                                  self.notebook_owners.get(path) in self.multi_owners) else set()
             ancestor_init = path.endswith('/__init__.py') and any(within(p, str(Path(path).parent))
                             for p in [owner, *self.operators])
             if not within(path, owner) and not any(within(path, p) for p in self.operators) and not ancestor_init:
@@ -576,8 +577,8 @@ class SourceFacts:
             if actual != expected:
                 raise ForgeError(f'Source changed during static observation: {path}')
 
-    def summary(self):
-        policy = ('candidate.10-multi-flow-source-v1' if self.project.config['schema'] == 'demiforge-project-v3'
+    def summary(self, *, standard):
+        policy = ('candidate.10-multi-flow-source-v1' if standard == '1.0.0-candidate.10'
                   else 'candidate.9-local-source-v1')
         return {'policy': policy, 'scope': 'declared-local-and-supported-static-imports',
                 'exact_sources': sorted(self.required), 'author_subtrees': sorted(self.subtrees),

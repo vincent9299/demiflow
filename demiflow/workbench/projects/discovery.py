@@ -225,8 +225,8 @@ def discover(root, control=None):
                 else:
                     entry = record.get('entry')
                     origin = str(declaration) + ('#projects.' if multi else '#pipelines.') + name
-                    if multi:
-                        if standard != '1.0.0-candidate.10' or type(record.get('flows')) is not dict or not 1 <= len(record['flows']) <= 64:
+                    if standard == '1.0.0-candidate.10':
+                        if not multi or type(record.get('flows')) is not dict or not 1 <= len(record['flows']) <= 64:
                             raise ForgeError('Invalid multi-flow declaration')
                         for flow_id, flow in record['flows'].items():
                             if (type(flow_id) is not str or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,95}', flow_id)

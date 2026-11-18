@@ -139,3 +139,40 @@ def test_flow_count_budget_is_checked_before_source_inspection(workspace):
     _, config, _, save = workspace
     config['projects']['orders']['flows'] = {f'f{i}': dict(path=f'orders/flows/f{i}.py',symbol='run') for i in range(65)}
     with pytest.raises(ForgeError, match='1..64'): save()
+
+
+@pytest.mark.parametrize('version', ['1.0.0-candidate.5', '1.0.0-candidate.9'])
+def test_upgrade_one_owner_preserves_other_owners_original_protocol(workspace, version):
+    from demiflow.workbench.projects.discovery import discover
+    root, config, write, save = workspace
+    write('legacy/README.md', 'DemiForge historical owner, independently versioned.')
+    write('legacy/operators/clean.py', 'def clean(row): return row\n')
+    write('legacy/legacy_pipeline.py', 'def config(): return {}\ndef run_pipeline(configuration): return configuration\n')
+    command = copy.deepcopy(config['projects']['orders']['verify'])
+    record = dict(path='legacy', standard=version, entry='legacy_pipeline.py', verify=command)
+    if version.endswith('.9'):
+        record.update(entry=dict(path='legacy/legacy_pipeline.py', symbol='run_pipeline'),
+                      operators=['legacy/operators'], notebooks=[])
+    config['projects']['legacy'] = record
+    config['watch'].append('legacy')
+    original = copy.deepcopy(record)
+    project = save()
+    assert project.standard('legacy') == version
+    assert project.standard('orders') == VERSION
+    assert project.pipeline('legacy') == original
+    assert project.entries('legacy') == {'main': dict(path='legacy/legacy_pipeline.py', symbol='run_pipeline')}
+    assert 'pipeline-entry' in project.source_defs('legacy')
+    assert 'flow-entry-select' in project.source_defs('orders')
+    if version.endswith('.9'):
+        assert project.observe('legacy').coverage['policy'] == 'candidate.9-local-source-v1'
+    old = discover(root/'legacy', {'entries': {}})
+    assert old['entries'][0]['standard'] == version
+    assert old['entries'][0]['protocol'] == ('native_flow' if version.endswith('.9') else 'config_run_pipeline')
+    new = discover(root/'orders', {'entries': {}})
+    assert {e['flow_id'] for e in new['entries']} == {'select', 'evaluate'}
+    assert new['prompts'][0]['path'] == 'prompts'
+    # Writing v3 at the repository level must not reinterpret an old record as
+    # a multi-flow owner, nor accept new fields without its explicit upgrade.
+    config['projects']['legacy']['flows'] = copy.deepcopy(config['projects']['orders']['flows'])
+    with pytest.raises(ForgeError, match='Invalid pipeline registration'):
+        save()

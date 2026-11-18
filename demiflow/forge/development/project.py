@@ -352,8 +352,9 @@ class Project:
                 raise ForgeError(f"Invalid pipeline registration: {name}")
             legacy = p.get("standard", c["standard"]) not in WORKSPACE_STANDARDS
             local = p.get("standard", c["standard"]) in PROJECT_LOCAL_STANDARDS
-            required_pipeline = {"path", "flows" if multi else "entry", "verify"}
-            if multi:
+            multi_project = p.get("standard", c["standard"]) == VERSION
+            required_pipeline = {"path", "flows" if multi_project else "entry", "verify"}
+            if multi_project:
                 required_pipeline.add('prompts')
             if modern and legacy:
                 required_pipeline.add("standard")
@@ -363,7 +364,7 @@ class Project:
                     required_pipeline.add("standard")
             if type(p) is not dict or set(p) != required_pipeline or p.get("standard", c["standard"]) not in STANDARDS:
                 raise ForgeError(f"Invalid pipeline registration: {name}")
-            if (multi and p.get('standard', VERSION) != VERSION) or (not multi and p.get('standard') == VERSION):
+            if multi_project and not multi:
                 raise ForgeError('Multi-flow ownership requires a candidate.10 project-v3 registration')
             relative(p["path"], modern=local)
             watched = [p["path"]]
@@ -372,7 +373,7 @@ class Project:
                 if "/" in p["entry"] or not p["entry"].endswith("_pipeline.py"):
                     raise ForgeError("entry must be a local <prefix>_pipeline.py")
             else:
-                entries = p['flows'] if multi else {'main': p['entry']}
+                entries = p['flows'] if multi_project else {'main': p['entry']}
                 if not isinstance(entries, dict) or not 1 <= len(entries) <= 64:
                     raise ForgeError('Register 1..64 named flows per project')
                 modules = set()
@@ -389,7 +390,7 @@ class Project:
                         raise ForgeError('Each named flow owns a distinct entry module')
                     modules.add(entry['path'])
                     watched.append(entry["path"])
-                for key, suffix in (("operators", None), ("notebooks", '.ipynb'), *((('prompts', None),) if multi else ())):
+                for key, suffix in (("operators", None), ("notebooks", '.ipynb'), *((('prompts', None),) if multi_project else ())):
                     if type(p[key]) is not list or len(p[key]) > 64 or any(not isinstance(v, str) for v in p[key]) or len(set(p[key])) != len(p[key]):
                         raise ForgeError(f"Invalid registered {key}")
                     for path in p[key]:
@@ -623,7 +624,7 @@ class Project:
         tree_report, readonly_report, identities = {}, {}, {}
         tree = self.tree(pipeline, facts=facts, report=tree_report, identities=identities, deadline=deadline)
         readonly = self.readonly(pipeline, facts=facts, report=readonly_report, identities=identities, deadline=deadline)
-        coverage = {**facts.summary(), 'default_pruning_candidates': ['datasets', 'runs'],
+        coverage = {**facts.summary(standard=self.standard(pipeline)), 'default_pruning_candidates': ['datasets', 'runs'],
                     'protected_directories': sorted(SKIP - {'datasets', 'runs'}),
                     'tree': tree_report, 'readonly': readonly_report,
                     'complete': tree_report['complete'] and readonly_report['complete'] and not facts.problems}
