@@ -63,6 +63,48 @@ PRE_V3_MODULES = {
     'demiflow.execution.ray': {'demiflow.execution'},
 }
 
+# Execution modules the plan compiler imports today. Plan compilation and run
+# orchestration are one module by intent, so this dependency is allowed; what
+# must not happen is the compiler learning about yet another runtime module.
+PLANNING_MAY_IMPORT = {
+    'demiflow.execution.checked',
+    'demiflow.execution.contracts.dataflow',
+    'demiflow.execution.contracts.dataflow_codec',
+    'demiflow.execution.contracts.dataflow_errors',
+    'demiflow.execution.contracts.errors',
+    'demiflow.execution.dataflow_acquisition_call',
+    'demiflow.execution.dataflow_fetch',
+    'demiflow.execution.dataflow_managed_devices',
+    'demiflow.execution.dataflow_model_factory',
+    'demiflow.execution.dataflow_models',
+    'demiflow.execution.dataflow_native_limits',
+    'demiflow.execution.dataflow_producer',
+    'demiflow.execution.dataflow_prompt_service',
+    'demiflow.execution.dataflow_publication_budget',
+    'demiflow.execution.dataflow_routed_prompt',
+    'demiflow.execution.dataflow_schema',
+    'demiflow.execution.dataflow_search',
+    'demiflow.execution.dataflow_shared',
+    'demiflow.execution.dataflow_stream_lance',
+    'demiflow.execution.kernels.reducer_memory',
+    'demiflow.execution.kernels.shuffle_order',
+    'demiflow.execution.kernels.task_scope',
+    'demiflow.execution.lance_key_source',
+    'demiflow.execution.local_kernel',
+    'demiflow.execution.operator_policy',
+    'demiflow.execution.payload_limits',
+    'demiflow.execution.plan_facts',
+    'demiflow.execution.plan_interpreter',
+    'demiflow.execution.queue_history',
+    'demiflow.execution.queue_sinks',
+    'demiflow.execution.queue_source',
+    'demiflow.execution.recovery_contract',
+    'demiflow.execution.recovery_identity',
+    'demiflow.execution.reservation',
+    'demiflow.execution.runtime_limits',
+    'demiflow.execution.sealed_plans',
+}
+
 
 def _modules():
     found = {}
@@ -169,6 +211,14 @@ def test_pre_v3_modules_gain_no_importers():
                      'add the importer to PRE_V3_MODULES on purpose:' + _lines(new))
     missing = {module for module in PRE_V3_MODULES if module not in MODULES}
     assert not missing, 'Listed pre-v3 modules no longer exist; delete them here:' + _lines(missing)
+
+
+def test_plan_compiler_learns_no_new_runtime_modules():
+    used = {imported for importer, imported, _ in IMPORTS
+            if _package(importer) == 'planning' and _package(imported) == 'execution'}
+    new = used - PLANNING_MAY_IMPORT
+    assert not new, ('planning imports an execution module it did not import before. Register the '
+                     'kind in planning/dataflow_registry.py instead of importing its implementation:' + _lines(new))
 
 
 def test_budgets_are_not_stale_by_more_than_they_help():
