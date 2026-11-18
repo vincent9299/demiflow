@@ -100,30 +100,45 @@
   const staleRequest = () => new DOMException('页面选择已变化', 'AbortError');
   function pageKind(reference = pendingView || view) {
     const kind = reference?.kind || 'overview';
-    return ({development_session:'development',table:'tables',table_request:'tables',case:'tables',inspection:'flows',run:'flows',run_compare:'flows',runs:'flows',checks:'flows'})[kind] || kind;
+    if(reference?.panel)return reference.panel;
+    return ({development_session:'development',table:'tables',table_request:'tables',case:'tables',inspection:'flows',run:'monitor',run_compare:'monitor',runs:'monitor',checks:'flows'})[kind] || kind;
+  }
+  const pipelinePage=page=>['flows','operators','monitor'].includes(page);
+  function markFunction(page=pageKind()) {
+    for(const b of nav.querySelectorAll('[data-page]')){
+      const selected=b.dataset.page===page;b.classList.toggle('active',selected);b.setAttribute('aria-pressed',String(selected));
+      if(selected)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');
+    }
+    revealTab();
   }
   function target(kind, fields = {}) { return V.validateView({v:2, workspace:workspaceId, kind, ...fields}); }
-  // At most four validated locators per registered project. Drafts stay in
+  // At most six validated locators per registered project. Drafts stay in
   // their existing Stores; only a confirmed current view is remembered here.
   function rememberTab() {
     if (viewState !== 'ready') return;
     const reference = selection || view;
     if (!reference || reference.v !== 2 || reference.workspace !== workspaceId) return;
     const page = pageKind(reference);
-    if (!['development','flows','tables','overview'].includes(page)) return;
+    if (!['development','flows','operators','monitor','tables','overview'].includes(page)) return;
     const saved = projectTabs.get(workspaceId) || {page, views:new Map()};
     saved.page = page; saved.views.set(page, V.validateView(reference));
+    if(pipelinePage(page))saved.pipeline=V.validateView(reference);
     projectTabs.set(workspaceId, saved);
   }
   function tabTarget(page) {
     const current = selection || view;
     if (viewState === 'ready' && current?.workspace === workspaceId && pageKind(current) === page) return current;
-    return projectTabs.get(workspaceId)?.views.get(page) || target(page);
+    const saved=projectTabs.get(workspaceId)?.views;
+    if(pipelinePage(page)){
+      const shared=projectTabs.get(workspaceId)?.pipeline||[saved?.get(page),saved?.get('flows'),saved?.get('operators'),saved?.get('monitor')].find(Boolean);
+      return shared?V.validateView({...shared,panel:page}):target(page==='monitor'?'runs':'flows',{panel:page});
+    }
+    return saved?.get(page) || target(page);
   }
   function revokeImages() { for (const url of blobs) URL.revokeObjectURL(url); blobs.clear();blobSizes.clear(); mediaBytes = 0; }
   async function api(path, query = {}, body, projectId = workspaceId, options = {}) {
     if (offline) throw new Error('离线报告不能读取工作区或重新检查');
-    const write=!!body&&!['analysis-source-register','analysis-case-group-bindings','analysis-case-page','analysis-annotation-heads','analysis-annotation-definitions','analysis-field-preview','analysis-source-from-handle','analysis-case-media','analysis-artifact-media-current','analysis-media'].includes(path);
+    const write=!!body&&!['plan-preview','plan-node-detail','analysis-source-register','analysis-case-group-bindings','analysis-case-page','analysis-annotation-heads','analysis-annotation-definitions','analysis-field-preview','analysis-source-from-handle','analysis-case-media','analysis-artifact-media-current','analysis-media'].includes(path);
     const cleanup=options.cleanup===true&&path==='analysis-media'&&body?.action==='revoke';
     if(options.range&&!['analysis-output-media','analysis-artifact-media'].includes(path))throw new Error('不支持的媒体 Range 路由');
     const epoch = viewEpoch;
@@ -273,12 +288,7 @@
       putHistory(value,historyMode);historyMode='replace';
       main.append($('p','正在读取请求的数据引用…','busy view-loading'));
     }
-    for (const b of nav.querySelectorAll('[data-page]')) {
-      const current = b.dataset.page === pageKind();
-      b.classList.toggle('active', current);
-      if (current) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
-    }
-    revealTab();
+    markFunction();
     try {
       const page = pageKind();
       if (page === 'development') {
@@ -294,7 +304,7 @@
         value=resolved;pendingView=value;main.querySelector('.view-loading')?.remove();
         putHistory(value,'replace');projectHeading();
       });
-      else if (page === 'flows') {main.classList.add('workbench-active');const mounted=await pipeline(value);value=mounted.reference;}
+      else if (pipelinePage(page)) {main.classList.add('workbench-active');const mounted=await pipeline(value);value=mounted.reference;}
       if (epoch !== viewEpoch) throw staleRequest();
       view = value; pendingView = null; viewState = 'ready';
       if (!selection) clearSelection();
@@ -309,7 +319,12 @@
       throw err;
     }
   }
-  function navigate(page) { return openView(tabTarget(page)); }
+  async function navigate(page) {
+    if(pipelinePage(page)&&workbenchView&&['ready','loading'].includes(viewState)&&pipelinePage(pageKind())){
+      rememberTab();await workbenchView.showPage(page);closeNavigation();return;
+    }
+    return openView(tabTarget(page));
+  }
   function syncStatus(message, failed=false) {
     const box=document.getElementById('sync-status');if(!box)return;
     box.className='nav-note'+(failed?' sync-error':'');
@@ -421,7 +436,7 @@
         const position=window.scrollY;
         if(viewState==='error'){
           if(forced||!['table_request','table','case'].includes(current.kind))await openView(current,{historyMode:'replace'});
-        } else if(pageKind()==='flows'&&workbenchView){
+        } else if(pipelinePage(pageKind())&&workbenchView){
           await workbenchView.sync(context,{force:forced,graphChanged,catalogChanged,runsChanged:changed('runs')||changed('run_revision')});
         } else if(forced||viewState==='error') {
           await openView(current,{historyMode:'replace'});
@@ -1245,8 +1260,9 @@
       continueInput,
       continueWithResult:async(run,output)=>{continueInput=addResultTable(run,output);await openView(target('flows'));},
       onContext:fresh=>{if(epoch===viewEpoch&&workspaceId===id&&fresh.workspace_id===id){context=fresh;projectHeading();}},
+      onPageChange:page=>{if(isCurrent())markFunction(page);},
       rememberView:fields=>{if(epoch!==viewEpoch||workspaceId!==id)return;reference=V.validateView({v:2,workspace:id,...fields});
-        if(viewState==='ready'){view=reference;selection=reference;selectionEpoch++;putHistory(reference,'replace');}},
+        if(viewState==='ready'){view=reference;selection=reference;selectionEpoch++;putHistory(reference,'replace');projectHeading();}},
       projectSettings:{get:()=>({manage:projectManageEnabled,project:projectList.find(p=>p.workspace_id===id),digest:projectDigest,
         service:serviceRunPermissions,workbench:serviceWorkbenchPermissions}),refresh:refreshProjects},
       renderProjectInfo:async parent=>{await projectChecks(parent,{project:id,isCurrent,
@@ -1277,7 +1293,7 @@
     mode.textContent=context?(context.runs_enabled?'可查看、检查与运行':canRun('run_control')?'可查看、检查与停止已有运行':'可查看、检查 · 运行未开启'):'';
     mode.hidden=!context;
     const path=document.getElementById('workspace-path');
-    if(path){const current=pendingView||view;path.textContent=({development:'开发',overview:'Readme',tables:'数据',flows:'管道'})[pageKind()]+(current?.alias?' / '+current.alias:'')+(current?.row_id?' / Case '+current.row_id:'');}
+    if(path){const current=pendingView||view;path.textContent=({development:'开发',overview:'Readme',tables:'数据',flows:'管道',operators:'算子',monitor:'运行监控'})[pageKind()]+(current?.alias?' / '+current.alias:'')+(current?.row_id?' / Case '+current.row_id:'');}
     const settings=document.getElementById('project-settings');if(settings)settings.disabled=!workspaceId;
     const status=document.getElementById('workspace-status');if(status){status.hidden=!workspaceId;if(!workspaceId)status.open=false;}
   }
@@ -1367,7 +1383,8 @@
       context=fresh;
       projectHeading();
       for(const b of nav.querySelectorAll('[data-page]'))b.disabled=false;
-      await openView(requested||tabTarget(projectTabs.get(id)?.page||'overview'),{historyMode});
+      const initialPage=context.flows?.length||context.project?.entries?.length?'flows':'overview';
+      await openView(requested||tabTarget(projectTabs.get(id)?.page||initialPage),{historyMode});
       changes=await api('changes');
       lastObserved=new Date();
       await refreshAudit();
@@ -1397,7 +1414,7 @@
     const projectHeader=$('div',undefined,'project-header'),label=$('h2','项目','sidebar-heading');label.id='projects-heading';projectHeader.append(label);sidebar.append(projectHeader);
     projectNav=$('nav',undefined,'project-list');projectNav.id='project-list';projectNav.setAttribute('aria-labelledby',label.id);sidebar.append(projectNav);
     nav=$('nav',undefined,'function-nav');nav.setAttribute('aria-label','项目功能');nav.hidden=true;
-    for(const [page,label]of [['development','开发'],['flows','管道'],['tables','数据'],['overview','Readme']]){const b=button(label,()=>navigate(page),nav);b.dataset.page=page;b.disabled=true;}
+    for(const [page,label]of [['development','开发'],['operators','算子'],['flows','管道'],['monitor','运行监控'],['tables','数据'],['overview','Readme']]){const b=button(label,()=>navigate(page),nav);b.dataset.page=page;b.disabled=true;}
     const actions=$('div',undefined,'header-actions');
     const settings=iconButton('项目设置',settingsDialog,actions,['M4 7h10m4 0h2M4 17h2m4 0h10M14 4v6M10 14v6']);settings.id='project-settings';
     iconButton('刷新当前视图',refreshView,actions,['M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 11-2l3 3M4 16l3 3a7 7 0 0 0 11-2']);

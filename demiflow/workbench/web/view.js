@@ -46,6 +46,10 @@
   const schemasV2 = Object.fromEntries(Object.entries(schemas).map(([kind, spec]) => [kind, {
     ...spec, properties: {...spec.properties, v:{const:2}, workspace:text(33, '^[wl][0-9a-f]{32}$')}
   }]));
+  // Presentation only: all three project tabs retain the same plan/run locator.
+  for (const kind of ['flows','inspection','checks','runs','run','run_compare']) {
+    schemasV2[kind].properties.panel=text(9,'^(?:flows|operators|monitor)$');
+  }
   schemasV2.table_request={
     type:'object',additionalProperties:false,
     properties:{v:{const:2},kind:{const:'table_request'},workspace:schemasV2.table.properties.workspace,

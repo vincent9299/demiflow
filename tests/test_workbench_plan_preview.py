@@ -11,6 +11,25 @@ from demiflow.workbench.graph.preview import preview
 from demiflow.workbench.projects import workspace as ws
 from demiflow.forge.schema import ForgeError
 from test_forge_public_api import service, request
+from test_forge_workspace import demo, isolated
+
+
+@pytest.mark.parametrize('import_write', [False, True])
+def test_native_fixed_inputs_resolve_before_guard_but_project_import_stays_readonly(isolated, import_write):
+    entry = isolated / 'flows/questions.py'
+    if import_write:
+        entry.write_text("from pathlib import Path\nPath('import-side-effect').write_text('bad')\n" + entry.read_text())
+    before = business_bytes(isolated)
+    if import_write:
+        with pytest.raises(ForgeError, match='解析阶段'):
+            preview(isolated, entry='flows/questions.py:select', params='flows/select_a.json')
+    else:
+        result = preview(isolated, entry='flows/questions.py:select', params='flows/select_a.json')
+        assert result['kind'] == 'write_lance' and result['entry_completed'] is False
+        assert len(result['dag']['nodes']) == 7
+        assert sum(n['op_kind'] == 'lance' for n in result['dag']['nodes']) == 2
+        assert not list(isolated.rglob('selected_a.lance'))
+    assert business_bytes(isolated) == before
 
 
 def test_original_helpers_and_parameter_branches_compile_without_execution(original):

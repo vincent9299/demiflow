@@ -28,18 +28,21 @@ def test_configuration_error_repair_and_submit_reaches_real_result(isolated, bro
             page.goto(app.origin + "/#token=" + app.token)
             page.locator(".function-nav").get_by_role("button", name="管道", exact=True).click()
             page.locator(".wb-node").first.wait_for()
+            page.locator(".wb-more > summary").click()
             page.get_by_role("button", name="整图配置", exact=True).click()
             page.get_by_label("配置 /arguments/scores/alias", exact=True).fill("candidates")
             page.get_by_role("button", name="保存配置", exact=True).click()
             expect(page.locator(".wb-notice")).to_contain_text("配置已保存", timeout=65000)
             with page.expect_response(lambda response: response.request.method == "POST" and
                                       urlparse(response.url).path.endswith("/inspect")) as checked:
+                page.locator(".wb-more > summary").click()
                 page.get_by_role("button", name="检查", exact=True).click()
             assert checked.value.json()["status"] == "invalid"
             expect(page.locator(".wb-check-issues")).to_contain_text("Missing field(s): ['score']", timeout=65000)
             assert prepares == []
 
             page.get_by_role("button", name="返回配置与图", exact=True).click()
+            page.locator(".wb-more > summary").click()
             page.get_by_role("button", name="整图配置", exact=True).click()
             page.get_by_label("配置 /arguments/scores/alias", exact=True).fill("scores")
             page.get_by_label("配置 /arguments/minimum", exact=True).fill("0.9")
@@ -47,6 +50,7 @@ def test_configuration_error_repair_and_submit_reaches_real_result(isolated, bro
             expect(page.locator(".wb-notice")).to_contain_text("配置已保存", timeout=65000)
             with page.expect_response(lambda response: response.request.method == "POST" and
                                       urlparse(response.url).path.endswith("/inspect")) as checked:
+                page.locator(".wb-more > summary").click()
                 page.get_by_role("button", name="检查", exact=True).click()
             assert checked.value.json()["status"] == "checked"
             expect(page.locator(".wb-check-issues")).to_contain_text("当前配置的接线检查通过", timeout=65000)

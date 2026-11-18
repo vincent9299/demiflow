@@ -26,11 +26,11 @@ def test_directory_real_source_prompt_config_graph_link_reload_and_narrow(origin
         page.on('pageerror', lambda error: errors.append(str(error)))
         page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
         expect(page.get_by_role('button', name='解析执行计划', exact=True)).to_be_enabled()
-        assert page.locator('.wb-navigation > button').all_text_contents() == [
-            '算子', '读图与配置', '检查问题', '运行监控', '输出结果']
+        assert page.locator('.function-nav > button').all_text_contents() == [
+            '开发', '算子', '管道', '运行监控', '数据', 'Readme']
         page.get_by_role('button', name='算子', exact=True).click()
-        expect(page.get_by_role('region', name='算子目录')).to_contain_text('尚无执行计划')
-        expect(page.locator('.wb-operator-row')).to_have_count(0)
+        expect(page.get_by_role('region', name='算子目录')).to_contain_text('编译计划')
+        expect(page.locator('.wb-operator-row')).to_have_count(4)
         expect(page.locator('.wb-body')).to_be_hidden()
         page.get_by_role('button', name='解析执行计划', exact=True).click()
         expect(page.locator('.wb-operator-row')).to_have_count(4)
@@ -85,12 +85,13 @@ def test_directory_real_source_prompt_config_graph_link_reload_and_narrow(origin
         assert source_tabs['height'] < 90
         assert source_tabs['y'] - source_header['y'] - source_header['height'] <= 2
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-        page.get_by_role('button', name='检查问题', exact=True).click()
+        page.locator('.wb-more > summary').click()
+        page.locator('.wb-more').get_by_role('button', name='检查问题', exact=True).click()
         provenance = page.locator('.wb-checks details').filter(has=page.locator('summary', has_text='当前项目检查与来源'))
         expect(provenance).to_be_visible()
         page.get_by_role('button', name='算子', exact=True).click()
         expect(provenance).to_be_hidden()
-        page.get_by_role('button', name='读图与配置', exact=True).click()
+        page.get_by_role('button', name='管道', exact=True).click()
         expect(provenance).to_be_hidden()
         assert not errors
         assert all(url.endswith(('/plan-preview', '/plan-node-detail'))

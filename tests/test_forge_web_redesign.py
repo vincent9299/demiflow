@@ -56,7 +56,8 @@ def navigate(page,label):
 
 def project_info(page):
     if not page.locator('.workbench').count():navigate(page,'管道')
-    page.get_by_role('button',name='检查问题',exact=True).click()
+    page.locator('.wb-more > summary').click()
+    page.locator('.wb-more').get_by_role('button',name='检查问题',exact=True).click()
     disclosure=page.locator('.wb-checks details').filter(has=page.locator('summary').filter(has_text='当前项目检查与来源'))
     if disclosure.get_attribute('open') is None:disclosure.locator(':scope > summary').click()
     page.get_by_role('button',name='检查当前项目',exact=True).wait_for()
@@ -481,7 +482,7 @@ def test_project_rows_have_independent_tabs_and_restore_history(isolated,origina
         assert row(original_id).get_attribute('title')==original_name+'\n'+str(original)
         assert row(broken_id).get_by_text('暂不可用',exact=True).is_visible()
         tab_boxes=[item.bounding_box() for item in tabs.get_by_role('button').all()]
-        assert len(tab_boxes)==4 and all(box['y']==tab_boxes[0]['y'] for box in tab_boxes)
+        assert len(tab_boxes)==6 and all(box['y']==tab_boxes[0]['y'] for box in tab_boxes)
         assert tabs.bounding_box()['x']>=page.locator('#project-sidebar').bounding_box()['width']
         assert page.locator('.workspace-top').bounding_box()['y']==0
         artifact(page,'projects-and-tabs-1440')
@@ -491,8 +492,8 @@ def test_project_rows_have_independent_tabs_and_restore_history(isolated,origina
         page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='flows'")
         row(original_id).click()
         page.locator('#workspace-name').filter(has_text=original_name).wait_for()
-        page.wait_for_function("id => {const v=ForgeView.decodeView(location.hash);return v?.workspace===id&&v.kind==='overview';}",arg=original_id)
-        assert page.evaluate('ForgeView.decodeView(location.hash).kind')=='overview'
+        page.wait_for_function("id => {const v=ForgeView.decodeView(location.hash);return v?.workspace===id&&v.kind==='flows';}",arg=original_id)
+        assert page.evaluate('ForgeView.decodeView(location.hash).kind')=='flows'
         navigate(page,'数据')
         page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='tables'")
         row(bound_id).click()
@@ -514,25 +515,30 @@ def test_project_rows_have_independent_tabs_and_restore_history(isolated,origina
 
         # An unavailable row stays visible and cannot trap navigation.
         row(broken_id).click()
-        page.locator('main > .error-box').first.wait_for()
+        page.locator('main > .load-failure').first.wait_for()
         row(bound_id).click()
-        page.locator('.workbench').wait_for()
+        try:
+            page.locator('.workbench').wait_for()
+        except Exception:
+            (tmp_path/'project-recovery-failure.txt').write_text(page.locator('main').inner_text()+'\n'+json.dumps(dict(view=page.evaluate('ForgeView.decodeView(location.hash)'),requests=requests[-40:]),ensure_ascii=False))
+            page.screenshot(path=str(tmp_path/'project-recovery-failure.png'))
+            raise
         page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='flows'")
-        assert not page.locator('main > .error-box').count()
+        assert not page.locator('main > .load-failure').count()
 
         # A deep link selects its explicit project/tab ahead of session memory.
         reference=dict(v=2,workspace=original_id,kind='runs')
         page.goto(app.origin+'/#view='+urllib.parse.quote(json.dumps(reference)))
         page.locator('.wb-history').wait_for()
         assert row(original_id).get_attribute('aria-current')=='true'
-        assert tabs.get_by_role('button',name='管道',exact=True).get_attribute('aria-current')=='page'
+        assert tabs.get_by_role('button',name='运行监控',exact=True).get_attribute('aria-current')=='page'
         for width in [390,320]:
             page.set_viewport_size({'width':width,'height':844})
             assert tabs.is_visible() and not page.locator('#project-sidebar').is_visible()
-            expect(tabs.get_by_role('button',name='管道',exact=True)).to_be_in_viewport()
+            expect(tabs.get_by_role('button',name='运行监控',exact=True)).to_be_in_viewport()
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
             artifact(page,f'projects-and-tabs-{width}')
-        assert not any(method=='POST' for method,_ in requests)
+        assert all(url.endswith(('/plan-preview','/plan-node-detail')) for method,url in requests if method=='POST')
 
 
 def test_original_table_link_keeps_its_selection_in_a_mixed_project(isolated,browser):

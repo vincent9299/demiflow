@@ -53,7 +53,9 @@ def hold_reads(page,run_id,*,graph):
 
 
 def select_run(page,run_id):
-    page.get_by_role('button',name='运行记录',exact=True).click()
+    page.locator('.function-nav').get_by_role('button',name='运行监控',exact=True).click()
+    if not page.locator('.wb-history').is_visible():
+        page.get_by_role('button',name='运行记录',exact=True).click()
     page.locator('.wb-run-record[data-run="'+run_id+'"]').click()
     expect(page.get_by_role('combobox',name='运行记录',exact=True)).to_have_value(run_id)
     page.get_by_role('button',name='输出结果',exact=True).click()

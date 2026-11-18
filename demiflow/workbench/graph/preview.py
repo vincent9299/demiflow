@@ -129,6 +129,12 @@ def _preview(root, *, entry, params=None):
     source_root = _import_root(root, project)
     sources = _Sources(source_root)
     entry_sha = hashlib.sha256(sources.read(target)).hexdigest()
+    # Resolve declared, fixed table metadata through the trusted platform
+    # before importing project code. Lance initializes its native runtime here
+    # (including local signal sockets), which cannot happen under the guard.
+    # No row scan or output creation occurs in this resolver. Project imports
+    # and all pipeline construction still run under the unchanged guard.
+    arguments, params_sha = _parameters(root, control, entry, params)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str(source_root))
     sys.meta_path.insert(0, sources)
@@ -140,9 +146,7 @@ def _preview(root, *, entry, params=None):
             function = getattr(importlib.import_module(module), symbol)
             if not inspect.isfunction(function) or Path(inspect.getfile(function)) != target:
                 raise ForgeError('Entry resolved outside its declared source', code='conflict')
-            bound = {}
             def construct():
-                arguments, bound['params_sha'] = _parameters(root, control, entry, params)
                 signature = inspect.signature(function)
                 try:
                     signature.bind(**arguments)
@@ -156,7 +160,6 @@ def _preview(root, *, entry, params=None):
                     raise ForgeError(detail, code='invalid_request') from exc
                 return function(**arguments)
             result = capture_pipeline(construct, {})
-            params_sha = bound['params_sha']
             from demiflow.workbench.graph.plan_details import build_plan_details
             details = build_plan_details(result.compiled, sources=sources.digests, root=source_root)
         sources.verify()

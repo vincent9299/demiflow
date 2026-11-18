@@ -14,7 +14,7 @@
   const recoveryText={checkpoint:'检查点恢复',final_commit:'最终提交恢复',delivery_only:'仅交付恢复',attempt_only:'仅本次尝试（不可恢复）'};
   const restrictionText={INCOMPATIBLE_HISTORY:'历史封存与当前运行时不兼容，不能恢复；请新建运行。',UNKNOWN_EFFECT:'存在未知效果的执行，恢复准入待服务端核对。',CAPACITY_PENDING:'容量待满足，尚未执行完成；不会自动新建或重复提交。'};
   async function mount(options) {
-    const {main,api,workspaceId:project,view={},mountText,disposeReaders,onContext=()=>{},rememberView=()=>{},
+    const {main,api,workspaceId:project,view={},mountText,disposeReaders,onContext=()=>{},rememberView:saveView=()=>{},onPageChange=()=>{},
       openResult=async()=>{},navigate=async()=>{},projectSettings={}}=options;
     const presentation=globalThis.ForgeWorkbenchPresentation;
     if(!presentation||typeof presentation.chooseGraphView!=='function'||typeof presentation.buildGraphModel!=='function'||typeof presentation.buildNodeDetails!=='function')
@@ -30,6 +30,9 @@
     let lastRunGraphAt=0,graphStatus=null,graphModel=null,actionExplicit=false;
     let settingsBasis=null,issueScope='flow',scopedCheckButton=null;
     let planPreview=null,previewSelection=null,previewSequence=0,previewBusy=false,previewInputBasis=null;
+    let activePage=view.panel||(['run','run_compare','runs'].includes(view.kind)?'monitor':'flows'),detailOpen=false,locationFields=null,userNavigation=0;
+    function rememberView(fields){locationFields=fields;saveView({...fields,panel:activePage});}
+    function rememberPanel(){if(locationFields)saveView({...locationFields,panel:activePage});onPageChange(activePage);}
     const previewStorage='demiflow.preview-locators.v1';
     function storedPreviews(){try{const raw=sessionStorage.getItem(previewStorage);if(!raw||raw.length>65536)return {};const value=JSON.parse(raw);return value&&typeof value==='object'&&!Array.isArray(value)?value:{};}catch{return {};}}
     function savePreviewLocator(clear=false){
@@ -66,17 +69,22 @@
     const toolbar=$('div',undefined,'wb-toolbar'),selectors=$('div',undefined,'wb-selectors'),actions=$('div',undefined,'wb-actions');
     const entryChoice=select('流程',[],null),paramsChoice=select('配置',[],null);
     field('流程',entryChoice,selectors);field('配置',paramsChoice,selectors);toolbar.append(selectors,actions);root.append(toolbar);
-    const checkButton=button('检查',()=>check(),actions),runButton=button('运行',()=>submit(),actions,{cls:'primary'});
-    const historyButton=button('运行记录',async()=>{historyOpen=!historyOpen;historyPanel.hidden=!historyOpen;historyButton.setAttribute('aria-expanded',String(historyOpen));if(historyOpen)await listRuns();},actions);
+    const more=details('更多',actions);more.className='wb-more';const moreBody=$('div',undefined,'wb-more-body');more.append(moreBody);
+    root.addEventListener('click',event=>{if(!more.contains(event.target))more.open=false;});
+    root.addEventListener('keydown',event=>{if(event.key==='Escape'&&more.open){more.open=false;more.querySelector('summary').focus();}});
+    const checkButton=button('检查',()=>{more.open=false;return check();},moreBody),runButton=button('运行',()=>submit(),actions,{cls:'primary'});
+    const historyButton=button('运行记录',async()=>{more.open=false;activePage='monitor';state.setMode(run?'monitor':'history');historyOpen=!historyOpen;updateActions();rememberPanel();if(historyOpen)await listRuns();},moreBody);
     historyButton.setAttribute('aria-expanded','false');
-    button('接入与权限',()=>{settings.hidden=!settings.hidden;paintSettings();},actions,{cls:'quiet'});
+    button('接入与权限',()=>{more.open=false;settings.hidden=!settings.hidden;paintSettings();},moreBody,{cls:'quiet'});
     const notice=$('div',undefined,'wb-notice');notice.hidden=true;notice.setAttribute('role','status');root.append(notice);
-    const accessState=$('p',undefined,'wb-access wb-caption');accessState.hidden=true;root.append(accessState);
+    const accessState=$('p',undefined,'wb-access wb-caption');accessState.hidden=true;moreBody.append(accessState);
     const settings=$('div',undefined,'wb-settings');settings.hidden=true;root.append(settings);
     const historyPanel=$('div',undefined,'wb-history');historyPanel.hidden=true;root.append(historyPanel);
-    const navigation=$('div',undefined,'wb-navigation'),modes=new Map();
-    for(const[key,label]of [['operators','算子'],['config','读图与配置'],['checks','检查问题'],['monitor','运行监控'],['results','输出结果']])modes.set(key,button(label,()=>changeMode(key),navigation));
-    const basisLabel=$('span',undefined,'wb-basis');toolbar.append(basisLabel);navigation.append(actions);root.insertBefore(navigation,notice);
+    button('检查问题',()=>changeMode('checks'),moreBody);
+    const outputMenu=button('输出结果',()=>changeMode('results'),moreBody);
+    const basisLabel=$('span',undefined,'wb-basis');
+    const monitorTabs=$('div',undefined,'wb-monitor-tabs');monitorTabs.hidden=true;toolbar.insertBefore(monitorTabs,actions);
+    const monitorStatus=button('状态与日志',()=>changeMode('monitor'),monitorTabs),monitorOutputs=button('输出结果',()=>changeMode('results'),monitorTabs);
     const runBar=$('div',undefined,'wb-run-bar');runBar.hidden=true;root.append(runBar);
     const runFacts=$('div',undefined,'wb-run-facts');runFacts.hidden=true;root.append(runFacts);
     const operators=$('section',undefined,'wb-operators');operators.hidden=true;operators.setAttribute('aria-label','算子目录');root.append(operators);
@@ -87,18 +95,27 @@
     const operatorLayout=$('div',undefined,'wb-operator-layout'),operatorSidebar=$('nav',undefined,'wb-operator-sidebar'),operatorViewer=$('section',undefined,'wb-operator-viewer'),operatorActions=$('div'),operatorPlaceholder=$('p','选择左侧算子，查看源码、Prompt 或配置。','wb-caption');
     operatorSidebar.setAttribute('aria-label','Pipeline 算子');operatorViewer.setAttribute('aria-label','算子内容');
     operatorSidebar.append(operatorSearch,operatorList,operatorEmpty);operatorViewer.append(operatorActions,operatorPlaceholder);operatorLayout.append(operatorSidebar,operatorViewer);
-    operators.append(operatorBasis,operatorControls,operatorLayout);
+    operatorHeading.append(operatorBasis);operators.append(operatorControls,operatorLayout);
     const operatorRows=new Map();let operatorKey=null;
-    const body=$('div',undefined,'wb-body'),graphSection=$('div',undefined,'wb-graph-section'),inspector=$('aside',undefined,'wb-inspector');
+    const body=$('div',undefined,'wb-body'),graphSection=$('div',undefined,'wb-graph-section'),inspector=$('div',undefined,'wb-inspector');
+    const nodePanel=$('aside',undefined,'wb-node-panel');nodePanel.setAttribute('aria-label','算子详情');
+    const nodePanelTools=$('div',undefined,'wb-node-panel-tools');
+    button('在算子目录中查看',()=>showPage('operators'),nodePanelTools);
+    const nodeOutputs=button('查看本次输出',()=>changeMode('results'),nodePanelTools);nodeOutputs.hidden=true;
+    button('关闭详情',()=>{detailOpen=false;updateActions();},nodePanelTools);
+    const inspectorDetails=details('输入输出与执行详情',nodePanel);inspectorDetails.append(inspector);nodePanel.prepend(nodePanelTools);
     const checks=$('section',undefined,'wb-checks'),checkScopes=$('div',undefined,'wb-check-scopes'),checkGrid=$('div',undefined,'wb-check-grid'),checkIssues=$('div',undefined,'wb-check-issues'),checkCoverage=$('aside',undefined,'wb-check-coverage');checks.hidden=true;checkGrid.append(checkIssues,checkCoverage);checks.append(checkScopes,checkGrid);root.append(checks);
     const graphTools=$('div',undefined,'wb-graph-tools'),graphTitle=$('span','运行执行图'),graphHost=$('div',undefined,'wb-graph');
     graphTools.append(graphTitle);const tools=$('div');graphTools.append(tools);
-    const wholeButton=button('整图配置',()=>wholeConfiguration(),tools);
+    const wholeButton=button('整图配置',()=>wholeConfiguration(),moreBody);
+    graphTools.append(basisLabel);
+    const issuesButton=button('检查问题',()=>changeMode('checks'),tools);issuesButton.hidden=true;
+    const closeChecks=button('收起检查',()=>changeMode('config'),checks);checks.prepend(closeChecks);
     const previewControls=$('div',undefined,'wb-plan-preview-controls'),previewPath=$('input'),previewPaths=$('datalist');
     previewPath.type='text';previewPath.placeholder='项目内 JSON 配置路径；留空使用默认参数';previewPath.maxLength=4096;
     previewPath.setAttribute('aria-label','解析配置路径');previewPaths.id='wb-plan-configs-'+project;
-    previewPath.setAttribute('list',previewPaths.id);field('解析配置',previewPath,previewControls);previewControls.append(previewPaths);
-    const previewButton=button('解析执行计划',()=>compilePlanPreview(),previewControls);
+    previewPath.setAttribute('list',previewPaths.id);field('其他配置路径',previewPath,previewControls);previewControls.append(previewPaths);moreBody.append(previewControls);
+    const previewButton=button('解析执行计划',()=>compilePlanPreview(),actions);actions.prepend(previewButton,runButton);actions.append(more);
     const previewHint=$('span','只编译当前入口与已保存配置，不启动数据处理。','wb-caption');previewControls.append(previewHint);
     previewPath.oninput=()=>{if(!disposed){savePreviewLocator(true);clearPlanPreview(true);if(!ctx.flows.find(f=>f.entry===working?.entry)?.parameters?.length)paramsChoice.value=previewPath.value.trim();updateActions();}};
     const graph=ForgeWorkbenchGraph.mount(graphHost,{onSelect:selection=>{selectGraphNode(selection).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});}});
@@ -113,10 +130,10 @@
     document.addEventListener('fullscreenchange',fullscreenChanged);
     const graphLegend=$('p','读取引擎执行计划…','wb-caption');
     const actionBar=$('div',undefined,'wb-action-bar');actionBar.hidden=true;
-    const promptNav=$('nav',undefined,'wb-prompt-nav');promptNav.setAttribute('aria-label','Prompt 节点');promptNav.hidden=true;
-    const advanced=details('高级诊断',graphSection);advanced.hidden=true;
+
+    const advanced=details('高级诊断',moreBody);advanced.hidden=true;
     const locator=details('定位节点 / 查看局部',graphSection),locatorBody=$('div',undefined,'wb-inline-actions');locator.append(locatorBody);locator.hidden=true;
-    graphSection.prepend(graphTools,previewControls,promptNav,actionBar,graphHost,graphLegend);body.append(graphSection,inspector);root.append(body);
+    graphSection.prepend(graphTools,actionBar,graphHost,graphLegend);body.append(graphSection,nodePanel);root.append(body);
     const runDetail=$('section',undefined,'wb-run-detail'),detailHeader=$('div',undefined,'wb-source-header'),detailTabs=$('div',undefined,'wb-source-tabs'),runDetailBody=$('div',undefined,'wb-run-detail-body');runDetail.hidden=true;
     const detailButtons=new Map();
     detailHeader.append($('strong','日志与观测'),detailTabs);runDetail.append(detailHeader,runDetailBody);graphSection.append(runDetail);
@@ -124,7 +141,7 @@
     const bottom=$('section',undefined,'wb-source'),sourceHeader=$('div',undefined,'wb-source-header'),sourceTitle=$('strong','节点源码'),sourceTabs=$('div',undefined,'wb-source-tabs'),sourceBody=$('div',undefined,'wb-source-body');
     const sourceButtons=new Map();
     for(const[key,label]of [['implementation','实现'],['callsite','调用点'],['prompt','Prompt'],['configuration','配置']])sourceButtons.set(key,button(label,async()=>{sourceKind=key;sourceOpen=true;sourceBody.hidden=false;sourceTabs.hidden=false;await loadSource();},sourceTabs));
-    sourceHeader.append(sourceTitle);const sourceToggle=button('收起代码',async()=>{sourceOpen=!sourceOpen;sourceBody.hidden=sourceTabs.hidden=!sourceOpen;sourceSequence++;disposeReaders(sourceBody);sourceBody.replaceChildren();if(sourceOpen)await loadSource();updateActions();},sourceHeader);bottom.append(sourceHeader,sourceTabs,sourceBody);graphSection.append(bottom);
+    sourceHeader.append(sourceTitle);const sourceToggle=button('收起代码',async()=>{sourceOpen=!sourceOpen;sourceBody.hidden=sourceTabs.hidden=!sourceOpen;sourceSequence++;disposeReaders(sourceBody);sourceBody.replaceChildren();if(sourceOpen)await loadSource();updateActions();},sourceHeader);bottom.append(sourceHeader,sourceTabs,sourceBody);inspectorDetails.before(bottom);
     const results=$('section',undefined,'wb-results');results.hidden=true;root.append(results);
     const documents=details('当前项目检查与来源',checks);
     let projectInfoRendered=false,projectInfoPending=null,projectInfoDirty=false;
@@ -152,7 +169,7 @@
     documents.addEventListener('toggle',()=>{if(documents.open&&!projectInfoRendered)refreshProjectInfo();});
     button('在开发中查看与修正',()=>navigate('development'),documents);
     function graphLoading(loading){graphHost.inert=inspector.inert=checks.inert=operatorList.inert=loading;if(loading){graphHost.setAttribute('aria-busy','true');basisLabel.textContent='正在读取图…';disposeReaders(sourceBody);sourceBody.replaceChildren($('p','正在读取绑定来源…','wb-caption'));}else graphHost.removeAttribute('aria-busy');updateActions();}
-    function transition(patch){clearPlanPreview();previewInputBasis=null;notice.hidden=true;notice.textContent='';delete notice.dataset.observationError;observer.stop();controller.abort();controller=new AbortController();snapshot=null;sourceSequence++;nodeSequence++;graphSequence++;scopeNode=null;nodeOffset=0;graphModel=null;actionExplicit=false;logOffset=0;logBody='';eventCursor=null;eventRows=[];lastMetricAt=lastEventAt=0;observationCursor=null;observationPages=[];lastObservationRevision=null;trend.hidden=true;trendPlot.replaceChildren();runFacts.hidden=results.hidden=runDetail.hidden=true;runFacts.replaceChildren();results.replaceChildren();runDetailBody.replaceChildren();outputFingerprint=null;graphLoading(true);const ticket=state.transition(patch);paintOperators(null);markHistorySelection();updateActions();return ticket;}
+    function transition(patch){detailOpen=false;clearPlanPreview();previewInputBasis=null;notice.hidden=true;notice.textContent='';delete notice.dataset.observationError;observer.stop();controller.abort();controller=new AbortController();snapshot=null;sourceSequence++;nodeSequence++;graphSequence++;scopeNode=null;nodeOffset=0;graphModel=null;actionExplicit=false;logOffset=0;logBody='';eventCursor=null;eventRows=[];lastMetricAt=lastEventAt=0;observationCursor=null;observationPages=[];lastObservationRevision=null;trend.hidden=true;trendPlot.replaceChildren();runFacts.hidden=results.hidden=runDetail.hidden=true;runFacts.replaceChildren();results.replaceChildren();runDetailBody.replaceChildren();outputFingerprint=null;graphLoading(true);const ticket=state.transition(patch);paintOperators(null);markHistorySelection();updateActions();return ticket;}
     function registered(){return !!working&&ctx.flows.some(f=>f.entry===working.entry&&(f.parameters||[]).includes(working.params));}
     function requiredPreviewArguments(){return ctx.project?.entries?.find(e=>e.entry===working?.entry)?.required_arguments||[];}
     function choices(){
@@ -175,6 +192,7 @@
       if(!run&&!configs.length){const option=$('option',selectable.length?'请选择用于解析的配置':'可在下方填写解析配置路径');option.value='';paramsChoice.append(option);}
       for(const path of [...new Set([...selectable,...(selectedParams?[selectedParams]:[])])]){const option=$('option',path);option.value=path;paramsChoice.append(option);}
       if(!paramsChoice.options.length){const option=$('option',run?'封存运行使用内联参数':'尚无原生参数绑定');option.value='';paramsChoice.append(option);}
+      if(!run){const other=$('option','其他配置文件…');other.value='__other__';paramsChoice.append(other);}
       paramsChoice.value=selectedParams||previewPath.value||'';paramsChoice.disabled=!!run||!selectable.length;
       const paths=[...new Set([...configs,...(ctx.project?.configurations||[]).map(item=>item.path).filter(path=>typeof path==='string'&&path.endsWith('.json'))])];
       previewPaths.replaceChildren();for(const path of paths.slice(0,128)){const option=$('option');option.value=path;previewPaths.append(option);}
@@ -191,7 +209,21 @@
       }
       previewPath.title=previewPath.value;
       const resultsActive=data().mode==='results',checksActive=data().mode==='checks',operatorsActive=data().mode==='operators';
-      body.hidden=resultsActive||operatorsActive;operators.hidden=!operatorsActive;checks.hidden=!checksActive;runDetail.hidden=!run||resultsActive||operatorsActive;runFacts.hidden=!run||resultsActive||operatorsActive;trend.hidden=!run||resultsActive||operatorsActive;
+      const monitoring=activePage==='monitor',hasRun=!!run;
+      selectors.hidden=monitoring;
+      if(monitoring&&historyButton.parentElement!==actions)actions.insertBefore(historyButton,more);
+      else if(!monitoring&&historyButton.parentElement!==moreBody)moreBody.prepend(historyButton);
+      body.hidden=resultsActive||operatorsActive||(monitoring&&!hasRun);operators.hidden=!operatorsActive;checks.hidden=!checksActive;
+      runDetail.hidden=runFacts.hidden=trend.hidden=!monitoring||!hasRun||resultsActive;
+      monitorTabs.hidden=!monitoring||!hasRun;
+      monitorStatus.setAttribute('aria-pressed',String(!resultsActive));monitorOutputs.setAttribute('aria-pressed',String(resultsActive));
+      outputMenu.hidden=monitoring&&hasRun;
+      results.hidden=!resultsActive;historyPanel.hidden=!historyOpen;
+      nodePanel.hidden=!detailOpen||operatorsActive;body.classList.toggle('wb-detail-open',detailOpen&&!operatorsActive);
+      nodeOutputs.hidden=!run||!run.outputs?.length;
+      bottom.hidden=inspectorWhole&&!operatorsActive;
+      if(inspectorWhole)inspectorDetails.open=true;
+      root.dataset.page=activePage;onPageChange(activePage);
       placeOperatorReader();
       runBar.hidden=!run||!!comparison;
       if(!checksActive)documents.open=false;
@@ -208,16 +240,19 @@
       previewButton.textContent=previewBusy?'正在解析…':'解析执行计划';
       previewButton.title=dirty?'先保存当前配置草稿，解析使用已保存文件':'读取当前入口和指定配置，由引擎编译首个执行动作';
       previewPath.disabled=previewBusy||!!run||!!data().run;
+      previewButton.hidden=monitoring||!!run;runButton.hidden=monitoring||!!run;
+      historyButton.setAttribute('aria-expanded',String(historyOpen));
+      const diagnostics=data().graph?.diagnostics||[];
+      issuesButton.hidden=!diagnostics.length||checksActive;
+      issuesButton.textContent='问题 '+diagnostics.length;issuesButton.title='查看当前图依据中的诊断；不代表执行状态';
       accessState.hidden=!!run||registered()&&can('run_submit');
       accessState.textContent=!working?.entry?'尚未发现可用入口。可在开发中编写流程，再通过“接入与权限”登记。':!registered()?'已发现原项目入口，尚未绑定可执行的原生流程与参数；可解析已保存配置的执行计划，接入不会自动授予运行权限。':'原生流程已登记；当前可阅读与检查，项目或服务尚未开放提交权限。';
-      for(const[key,b]of modes){b.classList.toggle('active',data().mode===key);b.setAttribute('aria-pressed',String(data().mode===key));}
       const previewNode=planPreview?.dag.nodes.find(n=>n.occurrence_id===previewSelection?.occurrenceId);
       for(const[key,b]of sourceButtons){
         b.classList.toggle('active',sourceKind===key);b.setAttribute('aria-pressed',String(sourceKind===key));
         b.disabled=!!previewNode&&previewNode.source_views?.[key]?.available!==true;
         b.title=b.disabled?(previewNode.source_views?.[key]?.reason||'本节点没有已核验的这类材料。'):'';
       }
-      for(const b of promptNav.querySelectorAll('button')){const active=b.dataset.occurrence===previewSelection?.occurrenceId;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));}
       for(const[key,b]of detailButtons){b.classList.toggle('active',detailKind===key);b.disabled=!run;}
       sourceToggle.textContent=sourceOpen?'收起代码':'展开代码';sourceToggle.setAttribute('aria-expanded',String(sourceOpen));
       guardSettings();
@@ -226,6 +261,7 @@
     paramsChoice.onchange=async()=>{
       savePreviewLocator(true);
       if(disposed||!paramsChoice.isConnected)return;
+      if(paramsChoice.value==='__other__'){paramsChoice.value=previewPath.value;more.open=true;previewPath.focus();return;}
       if(!(ctx.flows.find(f=>f.entry===entryChoice.value)?.parameters||[]).length){
         previewPath.value=paramsChoice.value;clearPlanPreview(true);updateActions();return;
       }
@@ -289,7 +325,7 @@
       if(Object.keys(getDraft().values).length)throw new Error('请先保存配置草稿；计划解析读取已保存文件。');
       clearPlanPreview(true);
       const ticket=state.capture(),sequence=++previewSequence,entry=working.entry,params=previewPath.value.trim()||null;
-      previewBusy=true;if(data().mode!=='operators')state.setMode('config');updateActions();message('正在由引擎解析执行计划；不会启动数据处理或模型请求。');
+      previewBusy=true;updateActions();message('正在由引擎解析执行计划；不会启动数据处理或模型请求。');
       try{
         const value=await request('plan-preview',{}, {entry,params});
         if(!current(ticket)||sequence!==previewSequence||run||data().run||working?.entry!==entry||((previewPath.value.trim()||null)!==params))return;
@@ -298,7 +334,8 @@
         planPreview=value;previewSelection=null;state.setGraphSelection(null);state.chooseNode(null);
         savePreviewLocator();
         paintGraph();sourceSequence++;disposeReaders(sourceBody);sourceBody.replaceChildren($('p','这是尚未运行的编译计划。节点来自引擎，不借用静态检查节点的源码或观测。','wb-caption'));
-        if(graphModel.nodes[0])paintPreviewNode(graphModel.nodes[0].selection);
+        if(graphModel.nodes[0])paintPreviewNode(graphModel.nodes[0].selection,{quiet:true});
+        rememberView({kind:'flows',entry,...(params?{params}:{})});
         message('');
       }finally{if(sequence===previewSequence){previewBusy=false;updateActions();}}
     }
@@ -310,12 +347,6 @@
       graphLegend.textContent='点击算子查看实现与 Prompt；箭头表示引擎编译的数据流。';
       paintNodeJump(model);
       paintOperators(model);
-      promptNav.replaceChildren();
-      const prompts=planPreview.dag.nodes.filter(n=>n.source_views?.prompt?.available);
-      promptNav.hidden=!prompts.length;
-      if(prompts.length){promptNav.append($('span','快速查看 Prompt','wb-caption'));
-        for(const node of prompts.slice(0,32)){const card=model.nodes.find(n=>n.selection.occurrenceId===node.occurrence_id);
-          const b=button(node.label||'Prompt',()=>paintPreviewNode(card.selection),promptNav);b.dataset.occurrence=node.occurrence_id;}}
       actionBar.hidden=locator.hidden=true;
       advanced.hidden=false;advanced.replaceChildren($('summary','高级诊断'));
       raw('编译依据',{basis:planPreview.basis,scope:planPreview.scope,entry_completed:planPreview.entry_completed,kind:planPreview.kind,provider:planPreview.provider,dag_id:planPreview.dag.dag_id},advanced);
@@ -330,19 +361,25 @@
     // source cache: one shared, identity-checked reader serves the right pane.
     function placeOperatorReader(){
       const inDirectory=data().mode==='operators';
-      if(inDirectory){
-        if(previewControls.parentElement!==operatorControls)operatorControls.append(previewControls,actionBar);
-      }else if(previewControls.parentElement!==graphSection){
-        graphTools.after(previewControls);promptNav.after(actionBar);
-      }
+      if(inDirectory&&actionBar.parentElement!==operatorControls)operatorControls.append(actionBar);
+      else if(!inDirectory&&actionBar.parentElement!==graphSection)graphTools.after(actionBar);
       const selected=previewSelection?.key||data().selection?.key;
       const row=inDirectory?operatorRows.get(operatorKey||selected):null;
-      const target=row?operatorViewer:graphSection;
-      if(bottom.parentElement!==target)target.append(bottom);
+      const target=row?operatorViewer:nodePanel;
+      if(bottom.parentElement!==target){if(row)target.append(bottom);else inspectorDetails.before(bottom);}
       if(row){if(row.content.parentElement!==operatorActions)operatorActions.replaceChildren(row.content);}
       else operatorActions.replaceChildren();
       operatorPlaceholder.hidden=!!row;
       for(const [key,item]of operatorRows){item.row.classList.toggle('selected',key===selected);item.row.setAttribute('aria-pressed',String(key===selected));}
+    }
+    function revealOperator(){
+      if(data().mode!=='operators')return;
+      const row=operatorRows.get(previewSelection?.key||data().selection?.key)?.row;
+      if(!row||row.hidden)return;
+      const box=row.getBoundingClientRect(),bounds=operatorSidebar.getBoundingClientRect();
+      const top=bounds.top+operatorSearch.getBoundingClientRect().height+20;
+      if(box.top<top)operatorSidebar.scrollTop+=box.top-top;
+      else if(box.bottom>bounds.bottom)operatorSidebar.scrollTop+=box.bottom-bounds.bottom;
     }
     function filterOperators(){
       const query=operatorSearch.value.trim().toLocaleLowerCase();let visible=0;
@@ -371,10 +408,11 @@
       operatorRows.clear();operatorList.replaceChildren();
       const cards=model?.nodes||[];
       if(!cards.some(c=>c.key===operatorKey))operatorKey=null;
-      operatorBasis.textContent=planPreview&&!run
+      const fullBasis=planPreview&&!run
         ?'当前入口与配置 · 编译计划，尚未运行 · 首个执行动作的 '+cards.length+' 个算子。选择左侧算子查看材料；编号不代表并行分支的执行先后。'
         :run?'历史运行 · 封存执行计划 · 当前所选执行动作。材料缺失时明确提示，不借用当前代码。'
         :'目录与运行图使用同一份引擎计划；不会把静态源码调用当作数据算子。';
+      operatorHeading.title=fullBasis;operatorBasis.textContent=planPreview&&!run?'编译计划 · 尚未运行 · 首个执行动作':run?'封存计划 · '+run.run_id.slice(-10):'尚无执行计划';
       cards.forEach((card,index)=>{
         const row=$('button',undefined,'wb-operator-row'),name=$('strong',card.title),kind=$('span',card.kindLabel,'wb-tag');
         row.type='button';name.className='wb-operator-name';row.append($('span',String(index+1).padStart(2,'0'),'wb-operator-number'),name,kind);
@@ -385,7 +423,7 @@
         const content=$('div',undefined,'wb-operator-content'),links=$('div',undefined,'wb-inline-actions');
         button('在运行图中定位',async()=>{
           if(card.selection.occurrenceId!==null||card.occurrences.length<=1)await selectGraphNode(card.selection);
-          state.setMode(run?'monitor':'config');updateActions();savePreviewLocator();
+          activePage='flows';state.setMode('config');updateActions();savePreviewLocator();rememberPanel();
           graph.update(graphModel);graph.select(card.key);graphHost.scrollIntoView({block:'nearest'});
         },links);
         if(card.selection.occurrenceId===null&&card.occurrences.length>1){
@@ -397,13 +435,14 @@
         operatorRows.set(card.key,{row,content,search:(card.title+' '+card.kindLabel+' '+available.join(' ')).toLocaleLowerCase()});operatorList.append(row);
       });
       filterOperators();placeOperatorReader();
-      operatorSidebar.scrollTop=scrollTop;
+      operatorSidebar.scrollTop=scrollTop;revealOperator();
     }
-    function paintPreviewNode(selection){
+    function paintPreviewNode(selection,{quiet=false}={}){
       if(!planPreview||run||selection.previewDigest!==planPreview.basis.digest)return;
       const node=planPreview.dag.nodes.find(n=>n.occurrence_id===selection.occurrenceId&&n.logical_node_id===selection.logicalNodeId);
       const card=graphModel?.nodes.find(n=>n.key===selection.key);if(!node||!card)return;
       previewSelection=selection;operatorKey=data().mode==='operators'?card.key:null;graph.select(card.key);nodeJump.value=card.key;inspectorWhole=false;
+      if(!quiet)detailOpen=true;inspectorDetails.open=false;
       inspector.replaceChildren($('h3',card.title),$('span','编译计划 · 尚未运行','wb-tag'));
       inspector.append($('p','算子类型：'+node.op_kind,'wb-caption'));
       factLines(inspector,'输入端口',node.input_ports.map(port=>({label:port,value:'引擎输入端口',basis:'compile'})));
@@ -413,12 +452,11 @@
       sourceKind=node.source_views?.prompt?.available?'prompt':node.source_views?.implementation?.available?'implementation':'configuration';
       savePreviewLocator();
       sourceOpen=true;sourceBody.hidden=sourceTabs.hidden=false;
-      loadSource().catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});
+      loadSource().catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});updateActions();
     }
     function paintGraph(){
       if(planPreview&&!run&&!data().run)return paintPreviewGraph();
       const g=data().graph;
-      promptNav.hidden=true;
       if(!g){graphModel=null;paintOperators(null);return null;}
       const preference=data().graphPreference;
       const choice=presentation.chooseGraphView(g,{actionId:data().actionId,preference});
@@ -494,7 +532,7 @@
     }
     async function selectGraphNode(selection,{quiet=false,locate=true}={}){
       if(disposed||!selection)return;
-      if(selection.previewDigest){paintPreviewNode(selection);return;}
+      if(selection.previewDigest){paintPreviewNode(selection,{quiet});return;}
       const model=graphModel;
       let card=model?.nodes.find(c=>c.key===selection.key);
       if(!card&&selection.reportNodeId&&locate){
@@ -510,6 +548,7 @@
         return;
       }
       const member=selection.occurrenceId!==null?card.occurrences.find(o=>o.occurrenceId===selection.occurrenceId)||card.selection:card.selection;
+      if(!quiet){detailOpen=true;inspectorDetails.open=false;sourceOpen=true;sourceBody.hidden=sourceTabs.hidden=false;}
       const isGroup=member.occurrenceId===null&&card.occurrences.length>1;
       const logical=member.logicalNodeId?{logical_node_id:member.logicalNodeId,occurrence_id:member.occurrenceId}:null;
       state.chooseNode(member.reportNodeId,logical);
@@ -533,6 +572,7 @@
       if(sourceOpen&&member.reportNodeId)loadSource().catch(error=>{if(current(ticket)&&error.name!=='AbortError')message(error.message,'error-box',ticket);});
       else if(sourceOpen){disposeReaders(sourceBody);sourceBody.replaceChildren($('p','该出现尚无节点身份桥；封存计划与物理详情仍可查看，源码不借用其它节点。','wb-caption'));}
       if(run&&detailKind==='observations')loadRunDetail(true).catch(error=>{if(current(ticket)&&error.name!=='AbortError')message(error.message,'error-box',ticket);});
+      updateActions();
     }
     function paintGroupPicker(card){
       paintConfiguration(null);
@@ -572,6 +612,7 @@
     }
     async function useWorking(entry,params,report=null,mode='config'){
       if(disposed)throw new DOMException('工作台已关闭','AbortError');
+      activePage=mode==='operators'?'operators':'flows';detailOpen=false;historyOpen=false;
       sourceOpen=true;sourceBody.hidden=sourceTabs.hidden=false;
       run=null;comparison=null;working={entry,params};const ticket=transition({entry,params,report,run:null,attempt:null,mode});
       runBar.hidden=runFacts.hidden=results.hidden=true;results.replaceChildren();paintSelectors();
@@ -609,7 +650,22 @@
       for(const[label,value]of [['范围','所选入口与配置'],['流程',g?.binding.entry||working?.entry||'尚未选择'],['配置',g?.binding.params||'未绑定参数文件'],['依据',checked?'固定检查报告':'源码观察，尚未检查'],['状态',checked?g.status:'尚未检查']])facts.append($('dt',label),$('dd',value));
       if(g)raw('规则、覆盖与原始依据',{binding:g.binding,coverage:g.coverage,freshness:g.freshness,completeness:g.completeness,status:g.status},checkCoverage);
     }
-    function wholeConfiguration(){if(!run)state.setMode('config');paintConfiguration(null);updateActions();}
+    async function wholeConfiguration(){
+      more.open=false;activePage='flows';state.setMode('config');detailOpen=true;paintConfiguration(null);updateActions();rememberPanel();
+      // Unsupported editor formats remain readable as exact, digest-bound
+      // project documents. Historical runs never read the current file here.
+      if(run||data().graph?.parameters.available)return;
+      const path=previewPath.value.trim(),evidence=ctx.project?.configurations?.find(item=>item.path===path);
+      const expected=planPreview?.basis.params===path?planPreview.basis.params_sha256:evidence?.sha256;
+      if(!path||!expected)return;
+      const ticket=state.capture(),sequence=++sourceSequence,host=$('div');
+      inspector.replaceChildren($('h3','配置文件 · 只读'),$('p',path,'wb-caption'),host);host.textContent='正在读取绑定配置…';
+      try{const value=await request('project-document',{path,expected});
+        if(!current(ticket)||sequence!==sourceSequence||!host.isConnected||!inspectorWhole)return;
+        if(value.path!==path||value.sha256!==expected)throw new Error('配置内容与当前依据不一致。');
+        host.replaceChildren();mountText(host,value.text,{sourceOnly:true});
+      }catch(error){if(current(ticket)&&sequence===sourceSequence&&host.isConnected&&error.name!=='AbortError')host.replaceChildren($('p',error.message,'error-box'));}
+    }
     function affects(field,node){
       if(field.affected_nodes.includes(node.id))return true;
       if(!field.affected_nodes_truncated)return false;
@@ -805,18 +861,31 @@
         if(value.truncated)sourceBody.append($('p','这里只显示有界源码片段。','wb-caption'));
       }catch(error){if(current(ticket)&&sequence===sourceSequence&&error.name!=='AbortError'){sourceBody.replaceChildren($('p',error.message,'error-box'));}}
     }
+    async function showPage(page){
+      if(disposed||!root.isConnected||!['flows','operators','monitor'].includes(page))return;
+      userNavigation++;
+      more.open=false;activePage=page;comparison=null;outputFingerprint=null;
+      if(page==='monitor'&&!run){
+        if(lastRun)return openRun(lastRun.run_id,lastRun.attempt);
+        state.setMode('history');historyOpen=true;updateActions();rememberPanel();await listRuns();return;
+      }
+      historyOpen=false;state.setMode(page==='operators'?'operators':page==='monitor'?'monitor':'config');
+      if(page==='operators'&&!sourceOpen){sourceOpen=true;sourceBody.hidden=sourceTabs.hidden=false;await loadSource();}
+      updateActions();revealOperator();
+      if(page==='monitor'){paintRunBar();paintRunFacts();await loadRunDetail();}
+      savePreviewLocator();rememberPanel();
+    }
     async function changeMode(mode){
-      if(mode==='operators'){
-        comparison=null;state.setMode(mode);results.hidden=true;updateActions();savePreviewLocator();return;
+      more.open=false;
+      if(mode==='operators')return showPage('operators');
+      if(mode==='monitor')return showPage('monitor');
+      if(mode==='results'){
+        if(!run)return showPage('monitor');
+        activePage='monitor';state.setMode('results');paintResults();updateActions();rememberPanel();return;
       }
-      if(['monitor','results'].includes(mode)){
-        if(mode==='monitor'&&comparison){comparison=null;outputFingerprint=null;}
-        if(!run){if(lastRun)await openRun(lastRun.run_id,lastRun.attempt,mode);else{historyOpen=true;historyPanel.hidden=false;historyButton.setAttribute('aria-expanded','true');await listRuns();message('选择一次运行后查看它的封存图、状态、日志和结果。');return;}}
-        state.setMode(mode);results.hidden=mode!=='results';paintResults();paintRunBar();updateActions();return;
-      }
-      if(run)await useWorking(working?.entry||ctx.flows[0]?.entry||choices()[0]?.value,working?.params||ctx.flows[0]?.parameters?.[0]||null,null,mode);
-      else{state.setMode(mode);if(mode==='checks')paintIssues();else paintConfiguration(inspectorWhole?null:data().graph?.nodes.find(n=>n.id===data().node)||null);updateActions();}
-      savePreviewLocator();
+      activePage='flows';state.setMode(mode);
+      if(mode==='checks')paintIssues();
+      updateActions();savePreviewLocator();rememberPanel();
     }
     function paintRunBar(){
       runBar.replaceChildren();runBar.hidden=!run||!!comparison;runFacts.hidden=!run||data().mode==='results';trend.hidden=!run||data().mode==='results';runDetail.hidden=!run||data().mode==='results';
@@ -884,8 +953,9 @@
       if(run.outputs.some(o=>o.status==='committed')&&run.status!=='succeeded')runFacts.append($('div','部分输出已提交；整次运行尚未成功。','wb-partial'));
     }
     async function openRun(id,attempt=null,mode='monitor'){
+      activePage=mode==='operators'?'operators':mode==='config'?'flows':'monitor';detailOpen=false;
       historyOpen=false;historyPanel.hidden=true;historyButton.setAttribute('aria-expanded','false');
-      sourceOpen=false;sourceBody.hidden=sourceTabs.hidden=true;
+      sourceOpen=mode==='operators';sourceBody.hidden=sourceTabs.hidden=!sourceOpen;
       const initial=transition({run:id,attempt,report:null,mode});run=null;comparison=null;
       runBar.hidden=false;runBar.replaceChildren($('span','正在读取运行记录…','wb-caption'));
       let value;
@@ -994,7 +1064,7 @@
         }
       }
     }
-    async function compare(left,right){const ticket=state.capture(),value=await request('run-compare',{left,right});if(!current(ticket))return;comparison=value;state.setMode('results');results.hidden=false;paintResults();updateActions();rememberView({kind:'run_compare',left,right});}
+    async function compare(left,right){const ticket=state.capture(),value=await request('run-compare',{left,right});if(!current(ticket))return;comparison=value;activePage='monitor';state.setMode('results');results.hidden=false;paintResults();updateActions();rememberView({kind:'run_compare',left,right});}
     async function loadRunDetail(force=false,resetRetry=false){
       if(!run||runDetail.hidden)return;
       const ticket=state.capture(detailKind==='observations'),sequence=++nodeSequence,kind=detailKind;
@@ -1193,6 +1263,7 @@
       },
     });
     const handle=Object.freeze({
+      showPage,
       sync:async(fresh,{graphChanged=false,catalogChanged=false,runsChanged=false,force=false}={})=>{
         const permissionsChanged=json(ctx.run_permissions)!==json(fresh.run_permissions)||json(ctx.capabilities)!==json(fresh.capabilities);
         ctx=fresh;paintSelectors();updateActions();
@@ -1215,10 +1286,10 @@
     let firstEntry=view.entry||ctx.flows[0]?.entry||choices()[0]?.value||null;
     let firstParams=view.params||ctx.flows.find(f=>f.entry===firstEntry)?.parameters?.[0]||null;
     working={entry:firstEntry,params:firstParams};
-    if(view.kind==='run')await openRun(view.run_id,view.attempt||null);
+    if(view.kind==='run')await openRun(view.run_id,view.attempt||null,view.panel==='operators'?'operators':view.panel==='flows'?'config':'monitor');
     else if(view.kind==='inspection')await useWorking(firstEntry,firstParams,view.report_digest,'checks');
     else if(view.kind==='run_compare'){await useWorking(firstEntry,firstParams);await compare(view.left,view.right);}
-    else await useWorking(firstEntry,firstParams,null,view.kind==='checks'?'checks':'config');
+    else await useWorking(firstEntry,firstParams,null,view.kind==='checks'?'checks':view.panel==='operators'?'operators':'config');
     if(!run&&['flows',undefined].includes(view.kind)){
       const saved=storedPreviews()[project];
       if(saved&&saved.entry===working?.entry&&(saved.params===null||typeof saved.params==='string'&&saved.params.length<=4096)){
@@ -1227,11 +1298,14 @@
           if(planPreview?.basis.digest===saved.digest){const card=graphModel?.nodes.find(n=>n.selection.occurrenceId===saved.occurrence);
             if(card){paintPreviewNode(card.selection);const node=planPreview.dag.nodes.find(n=>n.occurrence_id===saved.occurrence);
               if(node.source_views?.[saved.kind]?.available){sourceKind=saved.kind;await loadSource();}}}
-          if(planPreview&&saved.mode==='operators'){state.setMode('operators');operatorKey=previewSelection?.key||null;paintOperators(graphModel);updateActions();savePreviewLocator();}
+          if(!userNavigation&&planPreview&&(view.panel==='operators'||!view.panel&&saved.mode==='operators')){activePage='operators';state.setMode('operators');operatorKey=previewSelection?.key||null;paintOperators(graphModel);updateActions();savePreviewLocator();rememberPanel();}
         }catch(error){if(error.name!=='AbortError')message('重新解析未完成：'+error.message,'error-box');}
       }
+      else if(working.entry&&(previewPath.value.trim()||!requiredPreviewArguments().length)){
+        try{await compilePlanPreview();}catch(error){if(error.name!=='AbortError')message('解析未完成：'+error.message,'error-box');}
+      }
     }
-    if(view.kind==='runs'){historyOpen=true;historyPanel.hidden=false;historyButton.setAttribute('aria-expanded','true');await listRuns();}
+    if(!userNavigation&&(view.kind==='runs'||view.panel==='monitor'&&!run))await showPage('monitor');
     if(view.kind==='run'&&data().graph){
       if(view.action_id!=null){
         const actions=data().graph.logical?.actions||[];
