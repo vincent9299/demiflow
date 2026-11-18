@@ -38,6 +38,9 @@ PUBLIC = {
     'demiflow.execution': {'run_telemetry'},
     'demiflow.execution.artifacts': {'resolve_local_artifact'},
     'demiflow.execution.capabilities': {'VERSION', 'stream_residency'},
+    # Managed host contract: docs/p4-workbench-boundaries-20261118.md.
+    'demiflow.execution.checked': {'CheckedExecution'},
+    'demiflow.execution.local_kernel': {'local_execution'},
     'demiflow.execution.dataflow_stage_facts': {'native_stage_commit', 'iter_native_stage_commits'},
     'demiflow.execution.datafusion': {'DataFusionOptions', 'DataFusionSession'},
     'demiflow.execution.output_watch': {'OutputWatch'},
@@ -51,7 +54,7 @@ PUBLIC = {
     'demiflow.execution.recovery_contract': {
         'MAX_DOCUMENT_BYTES', 'RecoveryContractError', 'document', 'identity'},
     'demiflow.execution.recovery_identity': {'platform_identity'},
-    'demiflow.execution.run_context': {'create_target_absent_binding'},
+    'demiflow.execution.run_context': {'create_target_absent_binding', 'RunContext'},
     'demiflow.execution.run_journal': {'OBSERVATION_COUNT', 'RunJournal'},
     'demiflow.execution.run_reader': {
         'JOURNAL_BYTES', 'RunReadError', 'RunReader', 'open_journal', 'read_run', 'storage_snapshot'},
@@ -76,9 +79,6 @@ HEAD = 'unreviewed (added after b4396f8): node description should come from the 
 # must not be described as a stable public compiler API or a step 0-4 fix.
 PENDING_IMPORTS = {
     ('graph/plan_callsite.py', 'demiflow.planning.dataflow_compile', 'capture_graph'): HEAD,
-    ('runs/worker.py', 'demiflow.execution.checked', 'CheckedExecution'): 'step 5: single engine launch entry',
-    ('runs/worker.py', 'demiflow.execution.local_kernel', 'local_execution'): 'step 5: single engine launch entry',
-    ('runs/worker.py', 'demiflow.execution.run_context', 'RunContext'): 'step 5: single engine launch entry',
     ('graph/plan_details.py', 'demiflow.data.plan', 'CallableSpec'): 'unreviewed (added after b4396f8): node description should come from the engine',
     ('graph/plan_details.py', 'demiflow.data.plan', 'OperatorLLMMapOp'): 'unreviewed (added after b4396f8): node description should come from the engine',
     ('graph/plan_details.py', 'demiflow.execution.dataflow_model_factory', 'CacheFactory'): 'unreviewed (added after b4396f8): node description should come from the engine',
@@ -87,7 +87,7 @@ PENDING_IMPORTS = {
 }
 
 # (workbench file, private attribute) -> exact number of uses still allowed
-PENDING_PRIVATE_ATTRIBUTES = {('runs/worker.py', '_executor'): 3}  # step 5
+PENDING_PRIVATE_ATTRIBUTES = {}
 
 
 # workbench/runs file -> exact number of direct sqlite3.connect calls (step 3)

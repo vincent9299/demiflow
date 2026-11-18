@@ -97,14 +97,10 @@ def execute(root, run_id, attempt=None):
                 if errors:
                     registration_failed[0] = True
                     raise RuntimeError('Committed output registration failed: ' + '; '.join(errors))
-        # Forward C's additive report_digest only once the engine accepts it (shared checkout).
-        checked_extra = {}
-        if 'report_digest' in inspect.signature(CheckedExecution.__init__).parameters:
-            checked_extra['report_digest'] = manifest['report_digest']
         context = CheckedExecution(nodes=report['nodes'], edges=report['edges'], actions=report['actions'],
             operators=report['operators'], source_root=source, resource_root=target, work_root=work, limits=limits,
             record=record, check_stop=check_stop, observe=run.observe_nodes,
-            targets=report['binding']['targets'], **checked_extra)
+            targets=report['binding']['targets'], report_digest=manifest['report_digest'])
         native = dict(memory_bytes=limits['memory_bytes'], max_rss_bytes=limits['max_rss_bytes'] // 2,
             max_scratch_bytes=limits['max_scratch_bytes'], max_row_bytes=limits['max_row_bytes'],
             batch_rows=limits['batch_rows'], threads=2, partitions=1,
@@ -114,10 +110,8 @@ def execute(root, run_id, attempt=None):
                 limits=manifest['limits'], check_stop=check_stop), local_execution(
                 worker_mode=(manifest.get('native_execution') or {}).get('worker_mode', 'thread'), partitions=1,
                 batch_rows=limits['batch_rows'], memory_bytes=limits['memory_bytes'],
-                temp_directory=str(work), native_resources=native) as session:
-            session._executor.resource_root = source
-            session._executor.diagnostics_root = target / 'diagnostics'
-            session._executor._block_size = limits['batch_rows']
+                temp_directory=str(work), native_resources=native, resource_root=source,
+                diagnostics_root=target / 'diagnostics', block_size=limits['batch_rows']):
             with context.bind_context():
                 entry(**report['binding']['arguments'])
         errors = runs.register_results(root, run_id, attempt=attempt)
