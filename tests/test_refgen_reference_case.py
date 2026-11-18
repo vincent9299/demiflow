@@ -79,6 +79,11 @@ def test_full_case_real_http_objects_fixed_delivery_and_history_replay(case_modu
     class InterruptedAfterFinalAck(RuntimeError): pass
     with fixture.model_transport() as server:
         config = fixture.create_inputs(root, base=server['base'])
+        # Moving results must not move the identity of existing input images.
+        object_root = root
+        root = object_root / 'experiment'
+        root.mkdir()
+        config.update(object_root=str(object_root), output_root=str(root))
         # A completed RunContext is read-only and cannot create another attempt.
         # Exercise the actual recovery case: action ACK exists, outer run failed
         # before it could finalize. Resume must return that authenticated result.
@@ -170,3 +175,23 @@ def test_quality_transport_failure_is_not_an_empty_qualified_pool(case_modules):
     assert len(failed) == 2 and {row['slot'] for row in failed} == {'01', '02'}
     assert all(not row['ready'] and row['status'] == 'author_failed'
                and 'controlled transport unavailable' in row['error'] for row in failed)
+
+
+def test_unreadable_inputs_preserve_failed_scores_without_model_calls(case_modules, tmp_path):
+    flow, fixture = case_modules
+    root = tmp_path / 'unreadable-case'
+    with fixture.model_transport() as server:
+        config = fixture.create_inputs(root, base=server['base'])
+        for image in (root / 'input-images').glob('*.png'):
+            image.unlink()
+        with RunContext.start(root / 'run', limits=LIMITS):
+            with data.local_execution(workers=4, partitions=1, worker_mode='thread', memory_bytes=384 * 1024**2):
+                receipt = flow.run(**config)
+        assert receipt.status == 'committed'
+        assert not server['requests'] and not server['errors']
+        rows = _records(root)
+        scores = [row for row in rows if row['record_kind'] == 'score']
+        summaries = [json.loads(row['summary_json']) for row in rows if row['record_kind'] == 'summary']
+        assert len(scores) == 24 and len(summaries) == 12
+        assert all(row['status'] == 'failed' and row['score'] is None and row['generated_image'] is None for row in scores)
+        assert all(row['expected'] == row['observed'] == row['failed'] == 2 and row['scored'] == 0 for row in summaries)

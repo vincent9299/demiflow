@@ -32,6 +32,7 @@
       }
       if(!list.childNodes.length)list.append(el('p',index?.definitions.length?'没有匹配的算子':'项目尚未声明可复用算子或 Prompt。','op-muted'));
       for(const issue of index?.diagnostics||[])list.append(el('p',issue.path+'：'+issue.detail,'op-error'));
+      list.querySelector('[aria-pressed=true]')?.scrollIntoView({block:'nearest'});
     }
     async function open(id,version='current'){
       selected=id;revision=version;const ticket=++sequence;paintTree();

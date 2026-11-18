@@ -7,18 +7,21 @@ from prompt_bindings import prompt_configuration
 from project_runtime import load_runtime
 
 
-def run(*, sources: dict, output_root: str, max_images: int = 8):
+def run(*, sources: dict, object_root: str, output_root: str, max_images: int = 8):
     """已有图片质量审核"""
     if type(max_images) is not int or not 1 <= max_images <= 32:
         raise ValueError('max_images must be between 1 and 32')
     root = Path(output_root)
     if not root.is_absolute():
         raise ValueError('output_root must be absolute')
+    objects = Path(object_root)
+    if not objects.is_absolute():
+        raise ValueError('object_root must be an absolute declared directory')
     runtime = load_runtime()
     models = runtime['models']
     name, pack = prompt_configuration('quality', models)
     images = data.read_lance(**sources['images'], columns=['image_id', 'image'], batch_size=1)
-    reviewed = (images.read_object(reference='image', output='pixels', root=str(root), max_bytes=65536,
+    reviewed = (images.read_object(reference='image', output='pixels', root=str(objects), max_bytes=65536,
                                    error_output='read_error', label='读取待审核图片')
         .map(op.quality_input, label='准备质量审核输入')
         .map_prompt_async(name, config=pack, inputs={'payload':'payload', 'images':'images'},

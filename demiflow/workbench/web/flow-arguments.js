@@ -36,7 +36,10 @@
         try{
           const argumentsValue={};
           for(const [name,{input,field}]of inputs){
-            if(input.value===''&&input.type!=='checkbox'){if(field.required)throw new Error('请填写 '+name);continue;}
+            // Untouched fields retain both their value and omission: null and
+            // an explicit default are different from an absent argument.
+            if(!Object.hasOwn(draft.raw,name)){if(Object.hasOwn(draft.state.arguments,name))argumentsValue[name]=draft.state.arguments[name];else if(field.required)throw new Error('请填写 '+name);continue;}
+            if(input.value===''&&input.type!=='checkbox'&&(input.type==='number'||input.dataset.structured==='true')){if(field.required)throw new Error('请填写 '+name);continue;}
             argumentsValue[name]=input.type==='checkbox'?input.checked:input.dataset.structured==='true'?JSON.parse(input.value):input.type==='number'?Number(input.value):input.value;
           }
           const result=await request('flow-arguments-save',{}, {entry:target,revision:draft.state.revision,source_sha256:draft.state.source_sha256,arguments:argumentsValue});

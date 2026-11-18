@@ -270,6 +270,9 @@ def boogu_input(row, *, profile):
     # Full task text is identical between arms. Only the explicit image list and
     # conditioning_mode differ. A real service must own its model/CFG adapter.
     return {**row, 'images': [row['reference_pixels']] if row.get('reference_pixels') else [],
+            # A gated model call leaves its input unchanged. Keep an explicit
+            # null image so the downstream reader retains failed score rows.
+            'generated_image': None,
             'sample_id': digest([row['sample_id'], profile]), 'generation_profile_json': packed(profile)}
 
 

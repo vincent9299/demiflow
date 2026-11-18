@@ -14,10 +14,13 @@ def test_project_tree_prompt_flow_switch_arguments_reload(project,tmp_path,brows
         (project/f'flows/{name}.py').write_text(f'''from demiflow import data
 from operators.clean import clean
 
-def run(*, limit: int = {default}, label: str = "demo"):
+def run(*, limit: int = {default}, label: str = "demo", note: str | None = "default"):
     """{name}"""
     return data.from_items([{{"item":label}}]).map(clean).limit(limit).take_all()
 ''')
+    parameters=project/'settings/select.json'
+    value=json.loads(parameters.read_text());value['arguments']['note']=None
+    parameters.write_text(json.dumps(value))
     index=tmp_path/'console.json';registry.add(index,project)
     from demiflow.forge.platform import content_digest
     inventory=registry.load_registry(index)
@@ -25,6 +28,14 @@ def run(*, limit: int = {default}, label: str = "demo"):
     inventory=registry.load_registry(index)
     registry.set_capabilities(index,next(iter(inventory['projects'])),expected=content_digest(inventory),capabilities={k:k=='config_write' for k in registry.CAPABILITIES})
     with service(None,registry=index,enable_config_write=True) as app,opened(browser,app) as (page,requests):
+        rejected=[]
+        def busy_once(route):
+            if not rejected:
+                rejected.append(True)
+                route.fulfill(status=503,content_type='application/json',body=json.dumps(dict(error='Worker capacity exceeded',code='busy',operation_started=False)))
+            else:
+                route.continue_()
+        page.route('**/plan-preview',busy_once)
         nav=page.locator('.function-nav')
         nav.get_by_role('button',name='算子',exact=True).click()
         expect(page.locator('.op-browser')).to_be_visible()
@@ -52,6 +63,7 @@ def run(*, limit: int = {default}, label: str = "demo"):
         expect(page.locator('.flow-arguments')).to_be_visible()
         expect(page.get_by_label('limit',exact=True)).to_have_value('3')
         page.get_by_label('limit',exact=True).fill('5')
+        page.get_by_label('label',exact=True).fill('')
         expect(page.get_by_role('button',name='解析执行计划',exact=True)).to_be_disabled()
         # Switch without discarding this flow's draft.
         page.get_by_role('combobox',name='流程',exact=True).select_option('flows/evaluate.py:run')
@@ -60,6 +72,7 @@ def run(*, limit: int = {default}, label: str = "demo"):
         page.get_by_role('combobox',name='流程',exact=True).select_option('flows/select.py:run')
         page.get_by_role('button',name='业务参数',exact=True).click()
         expect(page.get_by_label('limit',exact=True)).to_have_value('5',timeout=30000)
+        expect(page.get_by_label('label',exact=True)).to_have_value('')
         page.get_by_role('button',name='保存参数',exact=True).click()
         expect(page.locator('.flow-argument-status')).to_contain_text('已保存',timeout=45000)
         page.get_by_role('button',name='关闭业务参数',exact=True).click()
@@ -76,4 +89,6 @@ def run(*, limit: int = {default}, label: str = "demo"):
         page.set_viewport_size({'width':780,'height':950})
         artifact(page,'project-operators-narrow')
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1')
+        assert rejected
+    assert json.loads(parameters.read_text())['arguments']=={'limit':5,'label':'','note':None}
     assert json.loads((project/'settings/evaluate.json').read_text())['arguments']['limit']==8

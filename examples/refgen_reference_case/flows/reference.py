@@ -6,14 +6,15 @@ from prompt_bindings import PROMPTS, prompt_configuration
 from project_runtime import load_runtime
 
 
-def run(*, sources: dict, output_root: str, max_concepts: int = 4):
+def run(*, sources: dict, object_root: str, output_root: str, max_concepts: int = 4):
     """参考图联合出题与对照评测"""
     runtime = load_runtime()
     return _execute(sources=sources, output_root=output_root, max_concepts=max_concepts,
+                    object_root=object_root,
                     models=runtime["models"], execution_kind=runtime["execution_kind"])
 
 
-def _execute(*, sources, output_root, models, execution_kind='fixture', max_concepts=4):
+def _execute(*, sources, output_root, models, execution_kind='fixture', max_concepts=4, object_root=None):
     """Build and execute one complete reference experiment.
 
     sources are three fixed Lance URI/version bindings; output_root is owned by
@@ -32,6 +33,9 @@ def _execute(*, sources, output_root, models, execution_kind='fixture', max_conc
         raise ValueError('Fixture/real provenance must agree with all declared model profiles')
     root = Path(output_root)
     if not root.is_absolute(): raise ValueError('output_root must be an absolute owned directory')
+    objects = Path(object_root) if object_root is not None else root
+    if not objects.is_absolute() or not root.is_relative_to(objects):
+        raise ValueError('Declare an absolute object_root containing the input images and this output_root')
     if set(sources) != {'concepts', 'images', 'relations'} or any(
             type(source.get('version')) is not int or source['version'] < 1 for source in sources.values()):
         raise ValueError('Three fixed positive Lance versions are required')
@@ -56,7 +60,7 @@ def _execute(*, sources, output_root, models, execution_kind='fixture', max_conc
     images = data.read_lance(**sources['images'], columns=['image_id', 'image'], batch_size=1)
     relations = data.read_lance(**sources['relations'], columns=['concept_id', 'image_id', 'relation_decision'], batch_size=1)
     related = relations.filter(op.relation_passes).join(images, on='image_id').join(concepts, on='concept_id')
-    quality = (related.read_object(reference='image', output='pixels', root=str(root), max_bytes=64 * 1024,
+    quality = (related.read_object(reference='image', output='pixels', root=str(objects), max_bytes=64 * 1024,
                                   error_output='read_error', label='读取已有图片')
         .map(op.quality_input, label='准备独立质量审核')
         .map_prompt_async(quality_name, config=quality_pack, inputs={'payload': 'payload', 'images': 'images'},
@@ -82,7 +86,7 @@ def _execute(*, sources, output_root, models, execution_kind='fixture', max_conc
             output='synthesized_image', call_output='synthesis_call', error_output='synthesis_error',
             max_requests=max_concepts * 2, concurrency=1, queue_depth=1, options=image_options, label='合成参考图')
         .map(op.generated_reference, label='绑定真实合成图片对象')
-        .read_object(reference='reference_image', output='pixels', root=str(root), max_bytes=64 * 1024,
+        .read_object(reference='reference_image', output='pixels', root=str(objects), max_bytes=64 * 1024,
                      error_output='read_error', label='读取实际合成像素')
         .map(op.finalize_input, label='实际图与原始三档草案')
         .map_prompt_async(finalize_name, config=finalize_pack, inputs={'context': 'context', 'images': 'images'},
@@ -94,13 +98,13 @@ def _execute(*, sources, output_root, models, execution_kind='fixture', max_conc
                     mode='append', max_batch=2, queue_depth=1, flush_interval=0.05, output_ref='delivery',
                     max_rows=8, max_row_bytes=256 * 1024, max_index_bytes=1024 * 1024))
     answers = (delivery.flat_map(op.expand_arms)
-        .read_object(reference='input_reference', output='reference_pixels', root=str(root), max_bytes=64 * 1024,
+        .read_object(reference='input_reference', output='reference_pixels', root=str(objects), max_bytes=64 * 1024,
                      error_output='reference_read_error', label='读取有参组固定参考图')
         .map(op.boogu_input, fn_kwargs={'profile': models['boogu']}, label='相同题面与显式参考条件')
         .map_prompt_async(boogu_name, config=boogu_pack, inputs={'instruction': 'instruction', 'images': 'images'},
             output='generated_image', call_output='boogu_call', error_output='boogu_error', when=op.generation_ready,
             max_requests=max_concepts * 12, concurrency=1, queue_depth=1, options=image_options, label='Boogu 有参无参作答')
-        .read_object(reference='generated_image', output='generated_pixels', root=str(root), max_bytes=64 * 1024,
+        .read_object(reference='generated_image', output='generated_pixels', root=str(objects), max_bytes=64 * 1024,
                      error_output='generated_read_error', label='读取同一份固定作答图片')
         .map(op.scoring_input, label='两路评分共用题面与实际作答图'))
     concept_scores = (answers.map_prompt_async(concept_name, config=concept_pack,

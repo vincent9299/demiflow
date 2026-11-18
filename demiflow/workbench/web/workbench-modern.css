@@ -45,9 +45,11 @@
 .workbench>.wb-pending:empty,.workbench[data-page=operators]>.wb-pending{display:none}
 .op-browser{height:calc(100dvh - 102px);min-height:420px;overflow:hidden}
 .op-tree,.op-viewer{overflow:auto;scrollbar-width:thin;scrollbar-color:#d7deeb transparent}
+.op-tree{display:flex;flex-direction:column;overflow:hidden;min-height:0}.op-tree>input{flex-shrink:0}.op-tree-items{flex:1;min-height:0;overflow:auto;scrollbar-width:thin;scrollbar-color:#d7deeb transparent}
 .op-content .reading-source-chunk{border:0;padding:20px;font-size:13.5px;line-height:1.9;background:#f8f9fc}
 .op-content .reading-source-nav{justify-content:flex-end;margin:0 0 8px}
 .op-content .reading-source-nav button{border:0;background:transparent;color:#7c89a0;box-shadow:none;font-size:12px}
+.op-content .forge-reader .reading-source-page,.op-content .forge-reader .reading-source-chunk{white-space:pre-wrap;overflow-wrap:anywhere;max-height:none}
 .flow-arguments label{align-items:stretch;text-align:left}
 .flow-arguments label>span,.flow-arguments label>small{text-align:left}
 @media(max-width:600px){.op-browser{height:auto;overflow:visible}.op-viewer{overflow:visible}}

@@ -1,7 +1,8 @@
 # 完整 Dataset 标杆：参考图、联合出题、作答与两路评分
 
 这是独立副本，不导入 `demiwtg` 的生产 launcher，不改原业务代码、训练服务或数据。
-入口为 `flow.py:run`。工作台预览和执行读取同一份 Dataset 声明：**一个最终
+完整流程入口为 `flows/reference.py:run`，独立审核入口为 `flows/quality.py:run`。
+预览和原生执行读取同一份 Dataset 声明：**一个最终
 `write_lance` action**，中途通过原生 `save_lance` 固定题图交付，再把原行与实际提交的
 URI/version 送往下游。没有先在 Python 中运行多个阶段、再拼一张展示图。
 
@@ -45,9 +46,12 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/absolute/isolated/demiflow \
 ```
 
 服务显式创建三份小型测试源和 `params.json`（外层为 `{"arguments": ...}`），打印 endpoint 后保持运行。
-工作台项目根目录取本例目录，入口取 `flow.py:run`，参数取生成的 `params.json` 内容。
-需要在项目内选择参数文件时，可把这份无凭据配置写入
-`configs/generated-preview.json`（已忽略，不提交）。实际工作台执行环境设置公开模拟值
+工作台项目根目录取本例目录，按明确登记的 `flows/` 入口显示两条流程。
+部署时把生成配置中的业务值分别写入各流程唯一的 `settings/reference.json`、
+`settings/quality.json`，把 `models` / `execution_kind` 写入 `settings/runtime.json`。
+参数文档沿用 `{"arguments": ...}` 格式，模型部署文档是这两个键组成的对象。
+工作台不提供参数文件选择器；`flow.py:run` 只为原测试和直接调用保留兼容。
+实际执行环境设置公开模拟值
 `REFGEN_FIXTURE_KEY=synthetic-fixture-only`；它不是服务密钥，禁止改用真实业务 token。
 source、对象、题图表、结果表与运行目录均应在本次专属 `/tmp/demiflow-*` 下；不要指向
 生产目录。只读预览不需要启动模型服务或读表，但必须使用同一份明确的配置。
@@ -64,13 +68,16 @@ source、对象、题图表、结果表与运行目录均应在本次专属 `/tm
 | 参数 | 形态 |
 |---|---|
 | `sources` | `concepts` / `images` / `relations` 各为 `{uri: 绝对路径, version: 正整数}` |
+| `object_root` | 显式允许读取图片对象的绝对根；完整实验的输出目录也位于此根内。更换输出子目录不改变输入图片位置 |
 | `output_root` | 本次专属绝对目录；产生 `questions.lance` / `results.lance` / 原生对象目录 |
-| `models` | `quality, focus, author, finalize, synthesis, boogu, concept, alignment` 八个显式 profile |
-| `execution_kind` | `fixture` 或 `real`；原样进入持久结果，禁止将模拟响应标为真实 |
 | `max_concepts` | 1..4；本例的有限容量声明，默认 fixture 取 1 |
 
+独立审核使用 `max_images`（1..32）代替 `max_concepts`。部署文档中的 `models`
+包含八个显式 profile；`execution_kind` 必须为 `fixture` 或 `real`，原样进入持久结果，
+不在流程业务参数中混入模型连接、算子默认配置或 Prompt 内容。
+
 三份输入分别为：`concept_id/concept/description`、`image_id/image{uri,sha256}`、
-`concept_id/image_id/relation_decision`。输入图片需位于本次专属根目录，逐张 SHA 验证。
+`concept_id/image_id/relation_decision`。输入图片需位于显式 `object_root`，逐张 SHA 验证。
 本例的图片读取上限为 64 KiB，模型输入数和请求数均有有限上限，面向小型验收和读图。
 扩大到生产图片规模需要明确调整本例配置与资源验收，不能把模拟验收解释为生产规模已通过。
 
@@ -84,7 +91,7 @@ seed=null 与 unseeded-native-v1，透传到请求并进入结果详情。模拟
 
 ## 验收
 
-`tests/test_refgen_reference_case.py` 包含四项：
+`tests/test_refgen_reference_case.py` 包含五项：
 
 1. 捕获真实编译结果，断言唯一 terminal、所有八个模型阶段只出现一次、真实分支与
    双源边完整；不存在源文件时也不得读取输入、启动 HTTP 或 worker。
@@ -96,6 +103,8 @@ seed=null 与 unseeded-native-v1，透传到请求并进入结果详情。模拟
    其余 22 次评分真实走同一个 HTTP transport。
 4. 质量审核 transport 失败时，不把审核未完成当作无合格图；阻断该概念后续出题，仍
    留下两个明确失败的题组位置。明确的质量 reject 与请求失败分别处理。
+5. 输入图片不可读时不调用模型，仍提交 24 个失败评分位置与 12 个固定分母汇总。
+   完整黄金路径另核对输入对象根与输出子目录分离，恢复仍不重复调用或提交。
 
 执行时从隔离代码树通过 `python -m pytest` 并显式绑定 `PYTHONPATH`，测试临时根取
 `--basetemp=/tmp/demiflow-refgen-tests-<unique>`。测试只替换外部模型响应，没有替换
@@ -110,8 +119,9 @@ Dataset、编译器、journal、writer、图或执行结果。验收结果应以
 - 固定输入、显式条件分支、模型节点与业务交付必须映射到真实编译图。检查共享前缀只
   执行一次、配置的阶段是否确实可达、失败分母是否保留，不能靠节点数量“认证”。
 - 静态 import/ownership 检查不能证明任意 Python helper 无副作用；应把配置、源码、
-  提示词摘要和受控 fixture 的运行证据绑定后才给验收结论。本例还未取得 Forge 项目级
-  注册/认证，不能继承原生产 pipeline 的 certification。
+  提示词摘要和受控 fixture 的运行证据绑定后才给验收结论。本例已按 candidate.10
+  登记明确的 flows/operators/prompts，尚未取得完整 Forge 项目验收认证，不能继承
+  原生产 pipeline 的 certification。
 - 分阶段生产入口各有一个真实 action 时，first-action 预览只展示该入口当前 action，
   不能声称自动追踪多个历史表和独立运行。本例通过一个真实 lazy 图覆盖完整流程。
 
