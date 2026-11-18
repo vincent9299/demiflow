@@ -1,0 +1,80 @@
+...............................FFF............                           [100%]
+=================================== FAILURES ===================================
+_ test_browser_unadmitted_source_and_empty_graph_finish_with_explicit_state[True] _
+
+original = PosixPath('/tmp/demiflow-node-views-20261118/final/test_browser_unadmitted_source0/retail/shipping')
+tmp_path = PosixPath('/tmp/demiflow-node-views-20261118/final/test_browser_unadmitted_source0')
+browser = <Browser type=<BrowserType name=chromium executable_path=/root/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome> version=153.0.8010.12>
+calls = True
+
+    @pytest.mark.parametrize('calls',[True,False,'cached'])
+    def test_browser_unadmitted_source_and_empty_graph_finish_with_explicit_state(original,tmp_path,browser,calls):
+        author(original,calls=calls);before=business_bytes(original)
+        registry=tmp_path/'registry.json';console.add(registry,original)
+        with service(None,registry=registry,enable_runs=True) as app,page_for(browser,app) as (page,errors):
+            posts=[];page.on('request',lambda r:posts.append(r.url) if r.method=='POST' else None)
+            page.locator('.function-nav').get_by_role('button',name='管道',exact=True).click()
+>           expect(page.locator('.wb-basis')).to_contain_text('源码观察图')
+E           AssertionError: Locator expected to contain text '源码观察图'
+E           Actual value: 尚无运行执行图 
+E           Call log:
+E             - Expect "to_contain_text" locator(".wb-basis") with timeout 65000ms
+E             - waiting for locator(".wb-basis")
+E               13 × locator resolved to <span class="wb-basis">正在读取图…</span>
+E                  - unexpected value "正在读取图…"
+E               120 × locator resolved to <span class="wb-basis">尚无运行执行图</span>
+E                   - unexpected value "尚无运行执行图"
+E           
+E           Aria snapshot:
+E           - text: 尚无运行执行图
+
+tests/test_forge_workbench_source_observation.py:62: AssertionError
+_ test_browser_unadmitted_source_and_empty_graph_finish_with_explicit_state[False] _
+
+original = PosixPath('/tmp/demiflow-node-views-20261118/final/test_browser_unadmitted_source1/retail/shipping')
+tmp_path = PosixPath('/tmp/demiflow-node-views-20261118/final/test_browser_unadmitted_source1')
+browser = <Browser type=<BrowserType name=chromium executable_path=/root/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome> version=153.0.8010.12>
+calls = False
+
+>   ???
+E   AssertionError: Locator expected to contain text '源码观察图'
+E   Actual value: 尚无运行执行图 
+E   Call log:
+E     - Expect "to_contain_text" locator(".wb-basis") with timeout 65000ms
+E     - waiting for locator(".wb-basis")
+E       12 × locator resolved to <span class="wb-basis">正在读取图…</span>
+E          - unexpected value "正在读取图…"
+E       121 × locator resolved to <span class="wb-basis">尚无运行执行图</span>
+E           - unexpected value "尚无运行执行图"
+E   
+E   Aria snapshot:
+E   - text: 尚无运行执行图
+
+tests/test_forge_workbench_source_observation.py:62: AssertionError
+_ test_browser_unadmitted_source_and_empty_graph_finish_with_explicit_state[cached] _
+
+original = PosixPath('/tmp/demiflow-node-views-20261118/final/test_browser_unadmitted_source2/retail/shipping')
+tmp_path = PosixPath('/tmp/demiflow-node-views-20261118/final/test_browser_unadmitted_source2')
+browser = <Browser type=<BrowserType name=chromium executable_path=/root/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome> version=153.0.8010.12>
+calls = 'cached'
+
+>   ???
+E   AssertionError: Locator expected to contain text '源码观察图'
+E   Actual value: 尚无运行执行图 
+E   Call log:
+E     - Expect "to_contain_text" locator(".wb-basis") with timeout 65000ms
+E     - waiting for locator(".wb-basis")
+E       12 × locator resolved to <span class="wb-basis">正在读取图…</span>
+E          - unexpected value "正在读取图…"
+E       121 × locator resolved to <span class="wb-basis">尚无运行执行图</span>
+E           - unexpected value "尚无运行执行图"
+E   
+E   Aria snapshot:
+E   - text: 尚无运行执行图
+
+tests/test_forge_workbench_source_observation.py:62: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_forge_workbench_source_observation.py::test_browser_unadmitted_source_and_empty_graph_finish_with_explicit_state[True]
+FAILED tests/test_forge_workbench_source_observation.py::test_browser_unadmitted_source_and_empty_graph_finish_with_explicit_state[False]
+FAILED tests/test_forge_workbench_source_observation.py::test_browser_unadmitted_source_and_empty_graph_finish_with_explicit_state[cached]
+3 failed, 43 passed in 492.97s (0:08:12)
