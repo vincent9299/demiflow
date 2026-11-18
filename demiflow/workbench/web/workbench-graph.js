@@ -287,7 +287,7 @@
       const facts = summary.map(summaryText).filter(Boolean);
       const sealed = card.selection.execution !== null;
       el.group.setAttribute('aria-label', card.title + ' · ' + card.kindLabel + (facts.length ? ' · ' + facts.join(' · ') : '') + ' · ' + card.state.label);
-      el.tip.textContent = card.title + '\n' + card.kindLabel + (memberCount>1 ? '\n共 ' + memberCount + ' 次出现' : '') + (facts.length ? '\n' + facts.join('\n') : '') + '\n' + card.state.label + (sealed ? '\n资源与恢复限制见执行详情' : '\n点击查看源码与配置');
+      el.tip.textContent = card.title + '\n' + card.kindLabel + (memberCount>1 ? '\n共 ' + memberCount + ' 次出现' : '') + (facts.length ? '\n' + facts.join('\n') : '') + '\n' + card.state.label + (sealed ? '\n资源与恢复限制见执行详情' : '\n点击查看 API、入参和实现');
     }
     function renderNotices(model) {
       notices.replaceChildren();

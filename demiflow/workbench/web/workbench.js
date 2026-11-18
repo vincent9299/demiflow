@@ -23,7 +23,7 @@
     const state=ForgeWorkbenchState.create(project),commands=ForgeWorkbenchCommands.create({project,api});
     const root=$('section',undefined,'workbench');main.append(root);
     let controller=new AbortController(),disposed=false,run=null,snapshot=null,working=null,lastRun=null;
-    let busy=false,historyOpen=false,sourceKind='implementation',detailKind='logs',sourceSequence=0,nodeSequence=0;
+    let busy=false,historyOpen=false,sourceKind='callsite',detailKind='logs',sourceSequence=0,nodeSequence=0;
     let logOffset=0,logBody='',eventCursor=null,eventRows=[],lastMetricAt=0,lastEventAt=0;
     let records=null,cursors=[null],page=0,listSequence=0,sourceOpen=true,comparison=null,outputFingerprint=null,runFilter='';
     let observationCursor=null,observationPages=[],graphSequence=0,scopeNode=null,nodeOffset=0,inspectorWhole=false;
@@ -68,8 +68,8 @@
     function details(label,parent){const n=$('details');n.append($('summary',label));parent.append(n);return n;}
     function raw(label,value,parent){const n=details(label,parent);n.append($('pre',json(value),'wb-code'));return n;}
     const toolbar=$('div',undefined,'wb-toolbar'),selectors=$('div',undefined,'wb-selectors'),actions=$('div',undefined,'wb-actions');
-    const entryChoice=select('流程',[],null),paramsChoice=select('配置',[],null);
-    field('流程',entryChoice,selectors);field('配置',paramsChoice,selectors);toolbar.append(selectors,actions);root.append(toolbar);
+    const entryChoice=select('流程',[],null),paramsChoice=select('入参文件',[],null);
+    field('流程',entryChoice,selectors);field('入参文件',paramsChoice,selectors);toolbar.append(selectors,actions);root.append(toolbar);
     const more=details('更多',actions);more.className='wb-more';const moreBody=$('div',undefined,'wb-more-body');more.append(moreBody);
     root.addEventListener('click',event=>{if(!more.contains(event.target))more.open=false;});
     root.addEventListener('keydown',event=>{if(event.key==='Escape'&&more.open){more.open=false;more.querySelector('summary').focus();}});
@@ -93,7 +93,7 @@
     operatorHeading.append($('h3','算子目录'),operatorCount);operators.append(operatorHeading);
     const operatorBasis=$('p',undefined,'wb-caption'),operatorControls=$('div'),operatorSearch=$('input'),operatorList=$('div',undefined,'wb-operator-list'),operatorEmpty=$('p',undefined,'wb-caption');
     operatorSearch.type='search';operatorSearch.placeholder='搜索算子名称或类型';operatorSearch.maxLength=160;operatorSearch.setAttribute('aria-label','搜索算子');
-    const operatorLayout=$('div',undefined,'wb-operator-layout'),operatorSidebar=$('nav',undefined,'wb-operator-sidebar'),operatorViewer=$('section',undefined,'wb-operator-viewer'),operatorActions=$('div'),operatorPlaceholder=$('p','选择左侧算子，查看源码、Prompt 或配置。','wb-caption');
+    const operatorLayout=$('div',undefined,'wb-operator-layout'),operatorSidebar=$('nav',undefined,'wb-operator-sidebar'),operatorViewer=$('section',undefined,'wb-operator-viewer'),operatorActions=$('div'),operatorPlaceholder=$('p','选择左侧算子，查看 API、入参、Schema、代码或 Prompt。','wb-caption');
     operatorSidebar.setAttribute('aria-label','Pipeline 算子');operatorViewer.setAttribute('aria-label','算子内容');
     operatorSidebar.append(operatorSearch,operatorList,operatorEmpty);operatorViewer.append(operatorActions,operatorPlaceholder);operatorLayout.append(operatorSidebar,operatorViewer);
     operatorHeading.append(operatorBasis);operators.append(operatorControls,operatorLayout);
@@ -147,7 +147,7 @@
     for(const[key,label]of [['logs','运行日志'],['observations','节点证据'],['events','控制事件']])detailButtons.set(key,button(label,async()=>{detailKind=key;await loadRunDetail(true);updateActions();},detailTabs));
     const bottom=$('section',undefined,'wb-source'),sourceHeader=$('div',undefined,'wb-source-header'),sourceTitle=$('strong','节点源码'),sourceTabs=$('div',undefined,'wb-source-tabs'),sourceBody=$('div',undefined,'wb-source-body');
     const sourceButtons=new Map();
-    for(const[key,label]of [['implementation','实现'],['callsite','调用代码'],['prompt','Prompt'],['configuration','配置']])sourceButtons.set(key,button(label,async()=>{sourceKind=key;sourceOpen=true;sourceBody.hidden=false;sourceTabs.hidden=false;await loadSource();},sourceTabs));
+    for(const[key,label]of [['callsite','API 调用'],['configuration','入参'],['schema','输入 / 输出'],['implementation','实现代码'],['prompt','Prompt']])sourceButtons.set(key,button(label,async()=>{sourceKind=key;sourceOpen=true;sourceBody.hidden=false;sourceTabs.hidden=false;await loadSource();},sourceTabs));
     sourceHeader.append(sourceTitle);const sourceToggle=button('收起代码',async()=>{sourceOpen=!sourceOpen;sourceBody.hidden=sourceTabs.hidden=!sourceOpen;sourceSequence++;disposeReaders(sourceBody);sourceBody.replaceChildren();if(sourceOpen)await loadSource();updateActions();},sourceHeader);bottom.append(sourceHeader,sourceTabs,sourceBody);inspectorDetails.before(bottom);
     const results=$('section',undefined,'wb-results');results.hidden=true;root.append(results);
     const documents=details('当前项目检查与来源',checks);
@@ -250,7 +250,7 @@
       previewControls.hidden=!!run||!!data().run;
       const needsConfiguration=!previewPath.value.trim()&&requiredPreviewArguments().length>0;
       previewButton.disabled=busy||previewBusy||!!run||!!data().run||!working?.entry||dirty||needsConfiguration||graphHost.hasAttribute('aria-busy');
-      previewHint.textContent=needsConfiguration?'先在顶部“配置”中选择原项目配置，再点击“解析执行计划”。入口需要：'+requiredPreviewArguments().slice(0,8).join('、')+'。':'只编译当前入口与已保存配置，不启动数据处理。';
+      previewHint.textContent=needsConfiguration?'先在顶部“入参文件”中选择原项目配置，再点击“解析执行计划”。入口需要：'+requiredPreviewArguments().slice(0,8).join('、')+'。':'只编译当前入口与已保存配置，不启动数据处理。';
       previewButton.textContent=previewBusy?'正在解析…':'解析执行计划';
       previewButton.title=dirty?'先保存当前配置草稿，解析使用已保存文件':'读取当前入口和指定配置，由引擎编译首个执行动作';
       previewPath.disabled=previewBusy||!!run||!!data().run;
@@ -264,8 +264,8 @@
       const previewNode=planPreview?.dag.nodes.find(n=>n.occurrence_id===previewSelection?.occurrenceId);
       for(const[key,b]of sourceButtons){
         b.classList.toggle('active',sourceKind===key);b.setAttribute('aria-pressed',String(sourceKind===key));
-        b.disabled=!!previewNode&&previewNode.source_views?.[key]?.available!==true;
-        b.title=b.disabled?(previewNode.source_views?.[key]?.reason||'本节点没有已核验的这类材料。'):'';
+        b.disabled=previewNode?previewNode.source_views?.[key]?.available!==true:key==='schema';
+        b.title=b.disabled?(previewNode?.source_views?.[key]?.reason||'本节点没有已核验的这类材料。'):'';
       }
       for(const[key,b]of detailButtons){b.classList.toggle('active',detailKind===key);b.disabled=!run;}
       sourceToggle.textContent=sourceOpen?'收起代码':'展开代码';sourceToggle.setAttribute('aria-expanded',String(sourceOpen));
@@ -432,8 +432,9 @@
         row.type='button';name.className='wb-operator-name';row.append($('span',String(index+1).padStart(2,'0'),'wb-operator-number'),name,kind);
         const node=planPreview?.dag.nodes.find(n=>n.occurrence_id===card.selection.occurrenceId);
         const materials=node?.source_views;
-        const available=materials?[['implementation','源码'],['prompt','Prompt'],['configuration','配置']].filter(([key])=>materials[key]?.available).map(([,label])=>label):[];
+        const available=materials?[['callsite','API'],['configuration','入参'],['schema','Schema'],['implementation','代码'],['prompt','Prompt']].filter(([key])=>materials[key]?.available).map(([,label])=>label):[];
         if(available.length)row.append($('span',available.join(' · '),'wb-operator-materials'));
+        const apiCall=node?.api_call;if(apiCall)row.append($('code',apiCall.summary,'wb-operator-api'));
         const content=$('div',undefined,'wb-operator-content'),links=$('div',undefined,'wb-inline-actions');
         button('在运行图中定位',async()=>{
           if(card.selection.occurrenceId!==null||card.occurrences.length<=1)await selectGraphNode(card.selection);
@@ -446,7 +447,7 @@
         }
         content.append(links);
         row.onclick=()=>openOperator(card).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});
-        operatorRows.set(card.key,{row,content,search:(card.title+' '+card.kindLabel+' '+available.join(' ')).toLocaleLowerCase()});operatorList.append(row);
+        operatorRows.set(card.key,{row,content,search:(card.title+' '+card.kindLabel+' '+(node?.api_call?.summary||'')+' '+available.join(' ')).toLocaleLowerCase()});operatorList.append(row);
       });
       filterOperators();placeOperatorReader();
       operatorSidebar.scrollTop=scrollTop;revealOperator();
@@ -463,7 +464,7 @@
       factLines(inspector,'输出端口',node.output_ports.map(port=>({label:port,value:'引擎输出端口',basis:'compile'})));
       raw('算子声明',node.traits,inspector);
       raw('编译节点身份',{logical_node_id:node.logical_node_id,occurrence_id:node.occurrence_id},inspector);
-      sourceKind=node.source_views?.prompt?.available?'prompt':node.source_views?.implementation?.available?'implementation':node.source_views?.callsite?.available?'callsite':'configuration';
+      sourceKind=node.source_views?.callsite?.available?'callsite':node.source_views?.prompt?.available?'prompt':node.source_views?.implementation?.available?'implementation':'configuration';
       savePreviewLocator();
       sourceOpen=true;sourceBody.hidden=sourceTabs.hidden=false;
       loadSource().catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});updateActions();
@@ -835,12 +836,44 @@
         raw('来源摘要',{path:value.path,sha256:value.sha256},pipelineCode);
       }catch(error){if(valid()&&error.name!=='AbortError'){disposeReaders(pipelineCode);pipelineCode.replaceChildren($('p',error.message,'error-box'));}}
     }
+    function materialTable(parent, headings, rows){
+      const scroll=$('div',undefined,'wb-contract-table'),table=$('table'),head=$('thead'),body=$('tbody'),tr=$('tr');
+      headings.forEach(name=>tr.append($('th',name)));head.append(tr);table.append(head,body);scroll.append(table);parent.append(scroll);
+      for(const values of rows){const row=$('tr');values.forEach(value=>row.append($('td',value)));body.append(row);}
+    }
+    function parameterRows(parent, meta){
+      const rows=meta.arguments||[],provided=rows.filter(p=>p.origin!=='default'),defaults=rows.filter(p=>p.origin==='default');
+      const value=p=>typeof p.value==='string'?p.value:json(p.value);
+      const render=(target,items)=>materialTable(target,['入参','调用表达式 / 来源','绑定值'],items.map(p=>[p.name,
+        p.expression||(p.origin==='default'?'API 默认值':'字典展开或 API 默认值'),value(p)]));
+      if(meta.expansions?.length)parent.append($('p','字典展开：'+meta.expansions.map(x=>'**'+x).join('，'),'wb-caption'));
+      if(provided.length)render(parent,provided);
+      if(defaults.length)render(details('API 默认入参（'+defaults.length+'）',parent),defaults);
+    }
+    function schemaMaterial(parent,meta){
+      function schemaBlock(title,schema){
+        const section=$('section',undefined,'wb-schema-section');section.append($('h4',title));parent.append(section);
+        section.append($('p',schema.basis||schema.reason||'尚无 Schema 声明','wb-caption'));
+        if(schema.fields?.length)materialTable(section,['字段','类型','允许空值'],schema.fields.map(f=>[f.name,f.type??'未知',f.nullable===null?'未知':f.nullable?'是':'否']));
+        if(schema.truncated)section.append($('p','字段较多，仅显示前 256 个。','wb-caption'));
+      }
+      if(!meta.inputs.length)parent.append($('p','数据源节点：没有上游 Dataset 输入。','wb-caption'));
+      for(const input of meta.inputs){const upstream=planPreview?.dag.nodes.find(n=>n.occurrence_id===input.producer);
+        const port=({left:'左侧输入',right:'右侧输入',main:'输入'})[input.port]||'输入 '+input.port;
+        schemaBlock(port+(upstream?' · '+upstream.label:''),input.schema);}
+      schemaBlock('输出行 Schema',meta.output);
+      for(const declared of meta.declarations||[])schemaBlock('API 声明 · '+declared.parameter+(declared.expression?' = '+declared.expression:''),
+        {fields:declared.fields,basis:'调用者显式传入的 Schema 约束；不同于上游数据已验证的完整结构。'});
+
+      if(Object.keys(meta.bindings||{}).length){const box=details('字段绑定（不等于完整 Schema）',parent);box.append($('pre',json(meta.bindings),'wb-code'));}
+      parent.append($('p',meta.note,'wb-caption'));
+    }
     async function loadPreviewSource(){
       savePreviewLocator();
       const preview=planPreview,selected=previewSelection,kind=sourceKind;
       const node=preview.dag.nodes.find(n=>n.occurrence_id===selected.occurrenceId&&n.logical_node_id===selected.logicalNodeId);
       const ticket=state.capture(),sequence=++sourceSequence;
-      const names={implementation:'实现源码',prompt:'Prompt 模板',configuration:'算子配置',callsite:'调用代码'};
+      const names={implementation:'实现源码',prompt:'Prompt 模板',configuration:'API 入参',callsite:'API 调用',schema:'输入 / 输出 Schema'};
       sourceTitle.textContent=names[kind]+' · '+(node?.label||node?.op_kind||'节点');
       if(!node?.source_views?.[kind]?.available){
         sourceBody.append($('p',node?.source_views?.[kind]?.reason||'本节点尚无绑定材料；不从静态检查节点推测对应关系。','wb-caption'));return;
@@ -860,10 +893,10 @@
         disposeReaders(sourceBody);sourceBody.replaceChildren();
         if(value.availability!=='available'){sourceBody.append($('p',value.reason||'本节点没有这类材料。','wb-caption'));return;}
         sourceBody.append($('div','解析时快照'+(value.path?' · '+value.path:'')+(value.start_line?' : '+value.start_line+'–'+value.end_line:''),'wb-caption wb-material-basis'));
-        if(kind==='callsite')sourceBody.append($('p','这是 Pipeline 中实际构造该数据源的调用；最终读取参数可切换到“配置”查看。','wb-caption'));
+        if(kind==='callsite')sourceBody.append($('p','这是当前算子的实际 API 调用；字典展开后的绑定值见“入参”，行结构见“输入 / 输出”。','wb-caption'));
         const meta=value.metadata;
         if(meta&&kind==='configuration'){
-          sourceTitle.textContent=(meta.display_title||'算子参数')+' · '+(node.label||node.op_kind);
+          sourceTitle.textContent=(meta.display_title||'API 入参')+' · '+(node.label||node.op_kind);
           if(meta.note)sourceBody.append($('p',meta.note,'wb-caption wb-parameter-explanation'));
         }
         if(meta&&kind==='prompt'){
@@ -875,8 +908,17 @@
           contract.append($('pre',json({inputs:meta.inputs,output:meta.output,outputs:meta.outputs,response_schema:meta.response_schema,...(meta.routes?{routes:meta.routes}:{})}),'wb-code'));
         }
         if(typeof value.text!=='string')throw new Error('节点材料没有可读取的正文。');
-        const text=$('div',undefined,kind==='prompt'?'wb-prompt-text':'wb-implementation-text');sourceBody.append(text);
-        mountText(text,value.text,{sourceOnly:true,compactSource:true});
+        if(kind==='configuration'&&meta?.arguments)parameterRows(sourceBody,meta);
+        else if(kind==='schema'&&meta?.output)schemaMaterial(sourceBody,meta);
+        else {
+          if(kind==='callsite'&&meta?.api)sourceBody.append($('code',meta.api,'wb-api-name'));
+          const text=$('div',undefined,kind==='prompt'?'wb-prompt-text':'wb-implementation-text');sourceBody.append(text);
+          mountText(text,value.text,{sourceOnly:true,compactSource:true});
+          if(kind==='callsite'&&meta?.context&&meta.context!==value.text){
+            const context=details('完整链式调用上下文'+(meta.context_truncated?'（部分）':''),sourceBody);
+            mountText(context,meta.context,{sourceOnly:true,compactSource:true});
+          }
+        }
         if(kind==='configuration'&&meta?.engine_configuration)raw('引擎内部描述（只读）',meta.engine_configuration,sourceBody);
         if(value.truncated)sourceBody.append($('p','正文超过 64 KiB 展示上限，当前只显示开头；摘要绑定完整原文。','wb-caption'));
         raw('来源摘要',{sha256:value.sha256,dag_id:basis.dag_id,occurrence_id:node.occurrence_id},sourceBody);
@@ -890,7 +932,7 @@
       if(!sourceOpen)return;
       if(planPreview&&previewSelection&&!run)return loadPreviewSource();
       const g=data().graph,selection=data().selection,node=selection?.reportNodeId??data().node,ticket=state.capture(true),sequence=++sourceSequence;
-      if(!g||!node){sourceBody.append($('p','选择节点后查看实现、调用点或公开配置。','wb-caption'));return;}
+      if(!g||!node){sourceBody.append($('p','选择节点后查看 API 调用、入参和实现。','wb-caption'));return;}
       if(g.binding.basis_kind==='run'&&selection&&!selection.reportNodeId){sourceBody.append($('p','该出现尚无节点身份桥；不借用其它节点的源码。','wb-caption'));return;}
       sourceBody.append($('p','正在读取绑定来源…','wb-caption'));
       const query={graph_binding:JSON.stringify(g.binding),node_id:node,kind:sourceKind};
@@ -902,7 +944,7 @@
         if(value.node_id!==node||json(value.graph_binding)!==json(g.binding))throw new Error('源码响应身份不一致');
         disposeReaders(sourceBody);sourceBody.replaceChildren();
         if(value.availability==='unavailable'){sourceBody.append($('p','该视角没有可用材料：'+value.reason,'wb-caption'));return;}
-        sourceBody.append($('div',({sealed:'封存来源',report_bound:'报告绑定来源',current:'当前来源'}[value.source_basis]||'绑定来源')+' · '+(value.path||'公开配置')+(value.start_line?':'+value.start_line:''),'wb-caption'));
+        sourceBody.append($('div',({sealed:'封存来源',report_bound:'报告绑定来源',current:'当前来源'}[value.source_basis]||'绑定来源')+' · '+(value.path||'入参材料')+(value.start_line?':'+value.start_line:''),'wb-caption'));
         if(value.text!==undefined)mountText(sourceBody,value.text,{sourceOnly:true,compactSource:true});
         else mountText(sourceBody,json(value.public_projection??value.fields),{sourceOnly:true,compactSource:true});
         if(value.note)sourceBody.append($('p',value.note,'wb-caption'));

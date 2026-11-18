@@ -230,7 +230,7 @@ def test_real_run_data_graph_source_and_params_still_load(isolated, browser):
         expect(page.get_by_label('配置 /arguments/minimum', exact=True)).to_be_disabled()
         with page.expect_response(lambda response: '/graph-source?' in response.url and
                                   parse_qs(urlsplit(response.url).query).get('kind') == ['configuration']) as configured:
-            page.locator('.wb-source').get_by_role('button', name='配置', exact=True).click()
+            page.locator('.wb-source').get_by_role('button', name='入参', exact=True).click()
         parameters = assert_source_response(configured.value, parameter_selection, graph)
         assert any(field['pointer'] == minimum['pointer'] and field['value'] == minimum['value']
                    for field in parameters['fields'])

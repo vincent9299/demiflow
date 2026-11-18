@@ -159,11 +159,11 @@ def _preview(root, *, entry, params=None):
                         detail = '所选配置的 arguments 与入口参数不匹配：' + str(exc)[:256]
                     raise ForgeError(detail, code='invalid_request') from exc
                 return function(**arguments)
-            from demiflow.workbench.graph.plan_callsite import SourceCallsites, pipeline_material
-            with SourceCallsites(source_root, sources.digests) as callsites:
+            from demiflow.workbench.graph.plan_callsite import PlanCallsites, pipeline_material
+            with PlanCallsites(source_root, sources.digests) as callsites:
                 result = capture_pipeline(construct, {})
             from demiflow.workbench.graph.plan_details import build_plan_details
-            details = build_plan_details(result.compiled, sources=sources.digests, root=source_root, callsites=callsites)
+            details = build_plan_details(result.compiled, sources=sources.digests, root=source_root, callsites=callsites, bounds=result.bounds)
             pipeline = pipeline_material(source_root, target, sources.digests)
         sources.verify()
         current_params_sha = (hashlib.sha256(read_bounded(ws.validate_parameter_path(root, params), 65536)).hexdigest()
@@ -184,6 +184,9 @@ def _preview(root, *, entry, params=None):
                  limitations=['仅解析首个 Dataset 执行动作；依赖执行结果的后续动作尚未解析。',
                               '未启动 Dataset 数据读取与执行；不包含实际资源分配、运行状态或结果。'])
     for node in value['dag']['nodes']:
+        call = details.get(node['occurrence_id'], {}).get('callsite', {})
+        if call.get('availability') == 'available':
+            node['api_call'] = {k: call['metadata'][k] for k in ('api', 'summary')}
         node['source_views'] = {kind: dict(available=detail['availability'] == 'available', reason=detail['reason'])
                                 for kind, detail in details.get(node['occurrence_id'], {}).items()}
     bounded_json(value, 1024**2)

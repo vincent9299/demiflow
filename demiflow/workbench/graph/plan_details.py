@@ -9,7 +9,7 @@ from types import FunctionType
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.workbench.projects import workspace as ws
 
-KINDS = ('implementation', 'prompt', 'configuration', 'callsite')
+KINDS = ('callsite', 'configuration', 'schema', 'implementation', 'prompt')
 TEXT_BYTES = 64 * 1024
 
 
@@ -74,7 +74,7 @@ def _implementation(declaration, root, sources):
     target = spec.target if spec is not None else None
     identity = declaration.code_identity.get('target', {})
     if type(target) is not FunctionType or not isinstance(identity, Mapping):
-        return unavailable('本节点没有已绑定的业务函数源码；原生算子可查看配置。')
+        return unavailable('本节点没有已绑定的业务函数源码；原生算子可查看 API 调用与入参。')
     if identity.get('module') != target.__module__ or identity.get('name') != target.__qualname__:
         return unavailable('函数身份与编译声明不一致。')
     path = Path(target.__code__.co_filename)
@@ -145,27 +145,34 @@ def _prompt_detail(declaration):
                     metadata=metadata[0] if len(metadata) == 1 else {'routes': metadata})
 
 
-def _configuration_detail(node):
+def _configuration_detail(node, callsite=None):
     configuration = safe_json(node.kernel.configuration)
     public = {k: v for k, v in configuration.items() if k not in {'occurrence_id', 'program'}}
-    title = '算子参数'
+    title = '算子入参'
     # This is the public Lance API's immutable scan declaration, not a
     # pipeline-specific mapping or another input to execution.
     query = configuration.get('query')
     if node.kernel.kind == 'lance' and type(query) is dict and type(query.get('fields')) is dict:
         public = query['fields']
-        title = '读取参数'
+        title = '读取入参'
+    call = callsite.get('metadata', {}) if callsite and callsite.get('availability') == 'available' else {}
+    if call:
+        public = {p['name']: p['value'] for p in call['arguments']}
+        title = 'API 入参'
     return material(json.dumps(public, ensure_ascii=False, indent=2, allow_nan=False), language='json',
         metadata=dict(display_title=title,
-            note='这是引擎编译时已绑定的参数，包含展开后的传参与默认值，不是另一份执行配置；具体写法可在 Pipeline 源码中核对。',
+            note='入参可以来自常量、函数、上游 Dataset 或外层配置字典。这里展示解析时绑定的值；不读取数据或展开任意对象。' if call else '未取得公开 API 入参绑定；下方仅为编译参数，包含默认值，不等同于调用源码。',
+            arguments=call.get('arguments'), expansions=call.get('expansions', []), api=call.get('api'),
             engine_configuration=configuration))
 
 
-def build_plan_details(compiled, *, sources, root, callsites=None):
+def build_plan_details(compiled, *, sources, root, callsites=None, bounds=None):
     root = Path(root)
     if len(compiled.graph.nodes) > 256:
         raise ValueError('Plan materials exceed node budget')
     declarations = {d.occurrence_id: d for d in compiled.declarations}
+    from .plan_schema import build_schema_details
+    schemas = build_schema_details(compiled, bounds=bounds) if bounds is not None else {}
     result, total = {}, 0
     for node in compiled.graph.nodes:
         details = {kind: unavailable('本节点没有已核验的这类材料。') for kind in KINDS}
@@ -178,13 +185,21 @@ def build_plan_details(compiled, *, sources, root, callsites=None):
                 # Presentation has a narrower budget than legal execution.
                 # A missing material must not discard the actual compiled DAG.
                 details['prompt'] = unavailable(str(exc))
+        details['callsite'] = (callsites.detail(node.occurrence_id) if callsites is not None
+                               else unavailable('这份计划未记录精确 API 调用；不会按函数名猜测。'))
+        details['schema'] = schemas.get(node.occurrence_id, unavailable('这份计划未提供 Schema 材料。'))
+        call_meta = details['callsite'].get('metadata', {})
+        schema_meta = details['schema'].get('metadata')
+        if schema_meta is not None:
+            schema_meta['declarations'] = [dict(parameter=p['name'], expression=p['expression'], **p['value'])
+                for p in call_meta.get('arguments', []) if type(p.get('value')) is dict
+                and p['value'].get('type') == 'Schema' and 'fields' in p['value']]
+            details['schema'] = material(json.dumps(schema_meta, ensure_ascii=False, indent=2), language='json', metadata=schema_meta)
+
         try:
-            details['configuration'] = _configuration_detail(node)
+            details['configuration'] = _configuration_detail(node, details['callsite'])
         except ValueError as exc:
             details['configuration'] = unavailable(str(exc))
-        details['callsite'] = (callsites.detail(declaration.source_spec)
-            if callsites is not None and declaration is not None and declaration.source_spec is not None
-            else unavailable('编译声明未记录精确调用行；不会按函数名称猜测。'))
         for kind, detail in details.items():
             size = len(json.dumps(detail, ensure_ascii=False).encode())
             if size > 128 * 1024 or total + size > 4 * 1024**2 - 256 * 1024:

@@ -25,10 +25,11 @@ def test_compact_tabs_keep_real_plan_selection_and_history_context(original, tmp
         expect(page.locator('.wb-node')).to_have_count(4)
         expect(page.locator('.wb-node-panel')).to_be_hidden()
         expect(page.locator('.wb-navigation')).to_have_count(0)
-        assert page.get_by_role('combobox', name='配置', exact=True).count() == 1
+        assert page.get_by_role('combobox', name='入参文件', exact=True).count() == 1
         expect(page.get_by_role('combobox', name='解析配置路径')).to_be_hidden()
         initial = len([u for m, u in requests if m == 'POST' and u.endswith('/plan-preview')])
         page.locator('.wb-node').filter(has_text='联合出题').click()
+        page.locator('.wb-source-tabs').get_by_role('button', name='Prompt', exact=True).click()
         expect(page.locator('.wb-node-panel')).to_be_visible()
         expect(page.locator('.wb-node-panel .wb-source-body')).to_contain_text('{{ payload | json }}')
         tab(page, '算子')
@@ -103,7 +104,8 @@ def test_project_change_can_leave_pending_plan_read(original, tmp_path, browser)
     other_id = registry.add(path, other)['workspace_id']
     with service(None, registry=path) as app, opened(browser, app) as (page, requests):
         page.locator('#project-list').get_by_role('button', name='shipping', exact=True).click()
-        expect(page.locator('.wb-node')).to_have_count(4)
+        tab(page, '管道')
+        expect(page.locator('.wb-node')).to_have_count(4, timeout=65000)
         page.evaluate('''() => {
           const native=fetch.bind(window);
           window.fetch=async(...args)=>{

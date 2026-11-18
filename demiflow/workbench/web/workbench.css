@@ -137,3 +137,13 @@
 .wb-pipeline-code[hidden],.wb-graph[hidden]{display:none}
 .wb-pipeline-code h3{margin:0 0 10px}.wb-pipeline-text{min-width:0}
 .wb-pipeline-code .reading-source-page{max-height:none;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;tab-size:4}
+
+/* API arguments and schema share a bounded, readable material pane. */
+.wb-contract-table{max-width:100%;overflow:auto;margin:10px 0;border:1px solid var(--line);border-radius:7px}
+.wb-contract-table table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
+.wb-contract-table th,.wb-contract-table td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}
+.wb-contract-table th{background:#f5f7fb;font-weight:600}
+.wb-contract-table td{font-family:ui-monospace,monospace;line-height:1.6}
+.wb-contract-table th:first-child{width:22%}.wb-contract-table tr:last-child td{border-bottom:0}
+.wb-schema-section h4{margin:18px 0 6px}.wb-api-name{display:block;color:#355aa4;margin:12px 0;font-size:13px}
+.wb-operator-api{grid-column:2;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#506b91;min-width:0}

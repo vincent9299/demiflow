@@ -57,7 +57,7 @@ def test_read_callsite_and_entire_pipeline_share_immutable_preview(original):
             bound=json.loads(parameters['text'])
             assert bound['version']==1 and bound['columns'] in (['order'],['amount'])
             assert not {'occurrence_id','type','fields'} & set(bound)
-            assert parameters['metadata']['display_title']=='读取参数'
+            assert parameters['metadata']['display_title']=='API 入参'
             assert parameters['metadata']['engine_configuration']['occurrence_id']==node['occurrence_id']
         assert texts == ["data.read_lance(table, version=1, columns=['order'])",
                          "data.read_lance(table, version=1, columns=['amount'])"]
@@ -83,12 +83,12 @@ def test_pipeline_ui_read_call_code_config_and_whole_source(original, tmp_path, 
         page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
         expect(page.locator('.wb-node')).to_have_count(4, timeout=65000)
         page.locator('.wb-node').first.click()
-        expect(page.locator('.wb-source > .wb-source-header')).to_contain_text('调用代码')
+        expect(page.locator('.wb-source > .wb-source-header')).to_contain_text('API 调用')
         expect(page.locator('.wb-source-body')).to_contain_text("columns=['order']")
-        page.locator('.wb-source-tabs').get_by_role('button', name='配置', exact=True).click()
-        expect(page.locator('.wb-source > .wb-source-header')).to_contain_text('读取参数')
-        expect(page.locator('.wb-parameter-explanation')).to_contain_text('不是另一份执行配置')
-        page.locator('.wb-source-tabs').get_by_role('button', name='调用代码', exact=True).click()
+        page.locator('.wb-source-tabs').get_by_role('button', name='入参', exact=True).click()
+        expect(page.locator('.wb-source > .wb-source-header')).to_contain_text('API 入参')
+        expect(page.locator('.wb-parameter-explanation')).to_contain_text('外层配置字典')
+        page.locator('.wb-source-tabs').get_by_role('button', name='API 调用', exact=True).click()
         expect(page.locator('.wb-source-body')).to_contain_text("columns=['order']")
         page.get_by_role('button', name='Pipeline 源码', exact=True).click()
         expect(page.locator('.wb-pipeline-code')).to_be_visible()

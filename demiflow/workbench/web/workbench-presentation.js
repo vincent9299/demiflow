@@ -837,12 +837,12 @@
         // Optional labels are supplied by the compiler's declaration, never joined from AST nodes.
         kindLabel: kindLabel(node.op_kind), title: typeof node.label === 'string' && node.label.trim()
           && node.label.length <= 256 ? displayTitle(node.label, node.op_kind) : kindLabel(node.op_kind),
-        summary: [{label: '端口', value: bounded((node.input_ports.join(', ') || '—') + ' → '
+        summary: [...(isRecord(node.api_call)&&typeof node.api_call.summary==='string'?[{label:'API',value:bounded(node.api_call.summary,256),basis:'compile',reason:null}]:[]), {label: '端口', value: bounded((node.input_ports.join(', ') || '—') + ' → '
           + (node.output_ports.join(', ') || '—'), 160), basis: 'compile', reason: null},
           node.data_source ? {label: '版本', value: Number.isInteger(node.data_source.version)
             ? String(node.data_source.version) : '运行时固定', basis: 'compile', reason: null}
-            : {label: '材料', value: node.source_views?.prompt?.available ? 'Prompt 与绑定配置'
-              : node.source_views?.implementation?.available ? '算子源码' : '算子配置', basis: 'compile', reason: null}],
+            : {label: '材料', value: node.source_views?.prompt?.available ? 'Prompt 与入参'
+              : node.source_views?.implementation?.available ? '算子源码' : '算子入参', basis: 'compile', reason: null}],
         state: {label: '尚未运行', tone: 'neutral'}};
     });
     const notices = ['首个 Dataset 执行动作的完整数据流，尚未运行。依赖运行结果的后续动作不在本图。'];

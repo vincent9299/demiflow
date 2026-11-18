@@ -72,16 +72,16 @@ def test_registered_plain_configuration_cold_open_switch_and_reload(browser, tmp
         ws.register_flow(root, 'flow.py:run', params=name)
     with service(root) as app, opened(browser, app) as (page, requests):
         graph_reply = lambda response: '/graph?' in response.url
-        # Wait for the initial graph response *before* clicking compile. A
-        # compile-only test missed this registered-source initialization error.
+        # The default 管道 page already loads automatically. Observe a fresh
+        # mount rather than waiting for a request from an idempotent tab click.
         with page.expect_response(graph_reply) as first:
-            page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+            page.reload()
         assert first.value.status == 200, first.value.text()
         expect(page.locator('.wb-graph')).not_to_have_attribute('aria-busy', 'true')
         expect(page.locator('.wb-notice')).to_be_hidden()
-        expect(page.locator('.wb-node')).to_have_count(0)
+        expect(page.locator('.wb-node')).to_have_count(3, timeout=65000)
         for name, expected in [('base.json', 3), ('extra.json', 4), ('base.json', 3)]:
-            selector = page.get_by_role('combobox', name='配置', exact=True)
+            selector = page.get_by_role('combobox', name='入参文件', exact=True)
             if selector.input_value() != name:
                 with page.expect_response(graph_reply) as switched:
                     selector.select_option(name)

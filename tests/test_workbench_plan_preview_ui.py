@@ -41,8 +41,8 @@ def run_pipeline(*, stage):
         expect(page.locator('.wb-node')).to_have_count(0)
         compile_button = page.get_by_role('button', name='解析执行计划', exact=True)
         expect(compile_button).to_be_disabled()
-        expect(page.locator('.wb-plan-preview-controls')).to_contain_text('先在顶部“配置”中选择')
-        choice = page.get_by_role('combobox', name='配置', exact=True)
+        expect(page.locator('.wb-plan-preview-controls')).to_contain_text('先在顶部“入参文件”中选择')
+        choice = page.get_by_role('combobox', name='入参文件', exact=True)
         expect(choice).to_be_enabled()
         assert choice.locator('option[value="settings/small.json"]').count() == 0
         for name, count in (('plain', 3), ('combined', 5)):
