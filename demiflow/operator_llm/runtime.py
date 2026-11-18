@@ -580,7 +580,7 @@ class PromptActor(BoundOperatorLLMMap):
                     self.environment)
             self._observe_call(trace)
             out=self.merge(row,result)
-            if self.call_output:out[self.call_output]=trace
+            if self.call_output:out[self.call_output]=self._delivery_trace(trace)
             if self._prompt.response_format == 'image' and self.error_output:
                 out[self.error_output] = None
             return out
@@ -599,9 +599,17 @@ class PromptActor(BoundOperatorLLMMap):
             if self._prompt.response_format == 'image':
                 out = self.merge(row, {'image': None})
                 return {**out, self.error_output: f'{type(exc).__name__}: {exc}',
-                        self.call_output: getattr(exc, 'call', None)}
+                        self.call_output: self._delivery_trace(getattr(exc, 'call', None))}
             from .errors import error_category
-            return {**row,self.error_output:{'category':error_category(exc),'type':type(exc).__name__,'detail':str(exc),'call':getattr(exc,'call',{})}}
+            return {**row,self.error_output:{'category':error_category(exc),'type':type(exc).__name__,'detail':str(exc),'call':self._delivery_trace(getattr(exc,'call',{}))}}
+
+    def _delivery_trace(self, trace):
+        # Single-completion native Prompt rows carry original call facts;
+        # monitoring above retains this attempt's true reuse/token counts.
+        # Agent interaction traces and external-cache contracts are unchanged.
+        recovery = getattr(self._runtime, 'native_recovery', None)
+        project = getattr(recovery, 'delivery_trace', None)
+        return project(trace) if trace is not None and self.environment is None and callable(project) else trace
 
     def _observe_call(self, trace, *, error=False):
         if 'environment' not in trace:

@@ -402,6 +402,19 @@ separately enforce unique input identities and exclusive run ownership.
 
 `call_output` retains references, status, elapsed time, usage and reuse. Streaming adds `transport=sse`, `stream_complete`, `headers_received_s`, and `stream` containing bytes/events, first body byte, first data event, first nonempty content and maximum gap between body chunks. That gap excludes initial and EOF waits. These are client measurements, not inference times. Only selected technical response headers are saved, never authorization headers.
 
+For a single-completion Prompt bound to the native run journal, delivered call
+facts describe the **original provider call**. Replaying that same action/node/row
+therefore preserves `call_output` (and a returned row error's call facts), including
+the original `reused=false` flags in its attempts. This is necessary when downstream
+transforms persist or hash the trace: an acknowledged `save_lance` batch must replay
+identical data. The actor observes the actual lookup before producing those stable
+facts, so current-attempt monitoring still reports `reused=true`, zero newly consumed
+tokens and no new request charge. Do not derive current-attempt billing from a
+persisted row's call facts. Explicit private caches, offline input stores and Agent
+interaction traces keep their existing contracts; this rule does not reinterpret
+those external-cache or multi-turn observations. Source/version protection remains
+in force: this change does not migrate runs sealed by a different platform revision.
+
 `run_stream().metrics.models` aggregates timings for new calls using bounded histograms. `native_journal_totals` separately reports the entire journal, including known usage from failed streams. Missing usage does not mean free; cached/reasoning subcounts are included in provider totals and not added again.
 
 The LiteLLM adapter requests no router/SDK retry or fallback. Server policies can override request settings, so deployment must honor the contract. Saved response headers show reported retries/fallbacks when available. Provider-internal behavior and billing remain outside client control. Streaming helps proxy timeouts only when actual traffic arrives inside the proxy's inactivity window; it cannot guarantee every request succeeds.

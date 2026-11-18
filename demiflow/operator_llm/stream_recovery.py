@@ -227,6 +227,27 @@ class NativePromptRecovery:
         self.row_local = not self.semantic_owners
         self.copy_inputs = predicate is not None
 
+    def delivery_trace(self, trace):
+        """Keep native call_output bound to its original provider execution.
+
+        The journal key includes this action/node/row occurrence. A lookup is
+        replay of that original call, not a new business result. Attempt-local
+        cache hits are observed BEFORE this projection by PromptActor; they
+        must not change a downstream row or its native commit digest.
+
+        Private journals and offline inputs never install this binding, and
+        retain their existing delivery semantics. Only trace-owned flags are
+        projected; response bodies and arbitrary user metadata are untouched.
+        """
+        if not getattr(self, '_native_delivery_bound', False):
+            return trace
+        def original(call):
+            return {**call, 'reused': False} if 'reused' in call else dict(call)
+        result = original(trace)
+        if 'attempts' in trace:
+            result['attempts'] = [original(call) for call in trace['attempts']]
+        return result
+
     def bind_client(self, client):
         # Explicit request journals remain the authoritative caller-selected
         # cache. They already persist model responses before returning them.
@@ -275,3 +296,4 @@ class NativePromptRecovery:
                 content = {**content, 'image': ObjectRef(**content['image']).to_dict()}
             return replace(response, content=content, metadata=_stable_metadata(response.metadata))
         client.decode = saved
+        self._native_delivery_bound = True
