@@ -65,12 +65,17 @@ def _decode(raw):
     return value
 
 
-def read_file(root,path):
+def _read_registered_bytes(root,path):
     root,control,_=ws.load_workspace(root)
     if path not in {p for paths in control.get('entries',{}).values() for p in paths}:
         raise ForgeError('Parameter file is not registered',code='not_found')
     target=ws.validate_parameter_path(root,path)
     raw=read_bounded(target,MAX_BYTES)
+    return root,control,raw
+
+
+def read_file(root,path):
+    root,control,raw=_read_registered_bytes(root,path)
     try:value=_decode(raw)
     except (ValueError,RecursionError) as exc:
         raise ForgeError('Invalid registered parameters: '+str(exc)[:512],code='invalid_request') from exc
@@ -106,8 +111,15 @@ def public_model(root,control,entry,path,nodes,*,readonly=False,sealed=None,expe
         return {**result,'available':False,'reason':'no_registered_parameters'}
     else:
         try:
-            _,_,raw,document=read_file(root,path)
+            _,_,raw=_read_registered_bytes(root,path)
             result['sha256']=_sha(raw)
+            # The file identity exists even when the editor cannot project its
+            # format. Keep that identity so graph reads can distinguish an
+            # unsupported editor document from a real concurrent modification.
+            try:document=_decode(raw)
+            except (ValueError,RecursionError) as exc:
+                return {**result,'available':False,'readonly':True,
+                        'reason':'Invalid registered parameters: '+str(exc)[:512]}
         except (ForgeError,OSError) as exc:
             return {**result,'available':False,'reason':str(exc)[:512]}
     if expected_document is not None and content_digest(document)!=content_digest(expected_document):
