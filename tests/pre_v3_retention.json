@@ -266,7 +266,6 @@
      "batch": 4,
      "users": [
       "demiflow.execution.worker.execution",
-      "demiflow.execution.worker.graph_execution",
       "demiflow.execution.worker.queue_transform"
      ]
     }
@@ -364,86 +363,6 @@
     "called_only_by_tests": 2,
     "ran_only_at_import": 0,
     "never_ran": 2
-   }
-  },
-  "demiflow.execution.exchange.carriage_ray": {
-   "status": "old",
-   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。",
-   "batch": 1,
-   "importers": [
-    "demiflow.execution.worker.graph_execution"
-   ],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 0
-    },
-    "functions": 19,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 19
-   }
-  },
-  "demiflow.execution.exchange.graph_channel": {
-   "status": "old",
-   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。",
-   "batch": 1,
-   "importers": [
-    "demiflow.execution.exchange.graph_router"
-   ],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 7
-    },
-    "functions": 22,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 21,
-    "ran_only_at_import": 0,
-    "never_ran": 1
-   }
-  },
-  "demiflow.execution.exchange.graph_router": {
-   "status": "old",
-   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。",
-   "batch": 1,
-   "importers": [
-    "demiflow.execution.worker.graph_execution"
-   ],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 5
-    },
-    "functions": 35,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 25,
-    "ran_only_at_import": 0,
-    "never_ran": 10
-   }
-  },
-  "demiflow.execution.exchange.segment_gc": {
-   "status": "old",
-   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。",
-   "batch": 1,
-   "importers": [
-    "demiflow.execution.worker.graph_execution"
-   ],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 2
-    },
-    "functions": 13,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 13,
-    "ran_only_at_import": 0,
-    "never_ran": 0
    }
   },
   "demiflow.execution.graph": {
@@ -930,7 +849,6 @@
      "users": [
       "demiflow.data.dataset",
       "demiflow.execution.worker.execution",
-      "demiflow.execution.worker.graph_execution",
       "demiflow.execution.worker.queue_transform"
      ]
     }
@@ -1000,7 +918,6 @@
      "status": "old",
      "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
      "users": [
-      "demiflow.execution.worker.graph_progress",
       "demiflow.execution.worker.progress"
      ]
     },
@@ -1090,83 +1007,6 @@
     "never_ran": 9
    }
   },
-  "demiflow.execution.worker.graph_execution": {
-   "status": "old",
-   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。",
-   "batch": 1,
-   "importers": [
-    "demiflow.execution.worker.graph_host",
-    "demiflow.execution.worker.graph_ray_host"
-   ],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 1
-    },
-    "functions": 19,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 4,
-    "ran_only_at_import": 0,
-    "never_ran": 15
-   }
-  },
-  "demiflow.execution.worker.graph_host": {
-   "status": "old",
-   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。",
-   "batch": 1,
-   "importers": [],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 0
-    },
-    "functions": 4,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 4
-   }
-  },
-  "demiflow.execution.worker.graph_progress": {
-   "status": "old",
-   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。",
-   "batch": 1,
-   "importers": [
-    "demiflow.execution.worker.graph_execution"
-   ],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 2
-    },
-    "functions": 14,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 7,
-    "ran_only_at_import": 0,
-    "never_ran": 7
-   }
-  },
-  "demiflow.execution.worker.graph_ray_host": {
-   "status": "old",
-   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。",
-   "batch": 1,
-   "importers": [],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 0
-    },
-    "functions": 20,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 20
-   }
-  },
   "demiflow.execution.worker.layout": {
    "status": "old",
    "reason": "只被旧执行器和 chain.py 的旧实现使用。批次 4。",
@@ -1174,7 +1014,6 @@
    "importers": [
     "demiflow.execution.chain",
     "demiflow.execution.worker.execution",
-    "demiflow.execution.worker.graph_execution",
     "demiflow.execution.worker.queue_transform"
    ],
    "measured": {
@@ -1265,5 +1104,46 @@
    "reason": "v3 worker 的启动入口。函数里 execution 和 queue_transform 两个分支以及它们的导入属于旧执行器：批次 2 去掉 queue_transform 分支，批次 4 去掉 execution 分支。"
   }
  ],
- "removed": []
+ "removed": [
+  {
+   "module": "demiflow.execution.worker.graph_host",
+   "batch": 1,
+   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  },
+  {
+   "module": "demiflow.execution.worker.graph_ray_host",
+   "batch": 1,
+   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  },
+  {
+   "module": "demiflow.execution.worker.graph_execution",
+   "batch": 1,
+   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  },
+  {
+   "module": "demiflow.execution.worker.graph_progress",
+   "batch": 1,
+   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  },
+  {
+   "module": "demiflow.execution.exchange.graph_router",
+   "batch": 1,
+   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  },
+  {
+   "module": "demiflow.execution.exchange.graph_channel",
+   "batch": 1,
+   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  },
+  {
+   "module": "demiflow.execution.exchange.segment_gc",
+   "batch": 1,
+   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  },
+  {
+   "module": "demiflow.execution.exchange.carriage_ray",
+   "batch": 1,
+   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  }
+ ]
 }

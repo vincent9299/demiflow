@@ -17,7 +17,6 @@ from demiflow.execution.admission import FairTurns, RoleDemand, plan_activation
 from demiflow.execution.exchange.carriage_local import (
     LocalSegmentStore, channel_pair, inline_records,
 )
-from demiflow.execution.exchange.graph_router import GraphInputReader, GraphOutputRouter
 from demiflow.execution.graph import _activation_order
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.planning.dag import build_channel_plan
@@ -158,29 +157,6 @@ def _channel(edge_id, consumer="c0"):
         seal_scope=None)
 
 
-def _two_input_reader(tmp_path):
-    store = LocalSegmentStore(tmp_path, host_id="h")
-    specs, plinks, clinks, routers = [], {}, {}, {}
-    for edge in ("edge-a", "edge-b"):
-        channel = _channel(edge)
-        table = RouteTable(channel)
-        physical = table.physical_channels[0]
-        cid = physical["channel_id"]
-        producer_link, consumer_link = channel_pair()
-        plinks[cid] = producer_link
-        clinks[cid] = consumer_link
-        specs.append({"channel_id": cid, "reader_id": "c0",
-                      "exchange_mode": physical["exchange_mode"],
-                      "credit_budget": physical["credit_budget"], "route_epoch": 0})
-        routers[edge] = GraphOutputRouter(
-            [specs[-1]], {cid: producer_link},
-            producer={"logical_node_id": edge, "occurrence_id": edge + "-p0"},
-            route_table=table, depth=256)
-    reader = GraphInputReader(specs, clinks, reader_id="c0",
-                              reader_domain=store.domain, store=store)
-    return reader, routers, specs
-
-
 def _records(tag, ordinal):
     return inline_records([{"v": "%s%d" % (tag, ordinal)}], source_id="src",
                           occurrence_id="shared", start_ordinal=ordinal)
@@ -195,46 +171,3 @@ def _wait_eoi(reader, timeout=10.0):
     raise AssertionError("reader did not observe end-of-input on every channel")
 
 
-def test_input_reader_fair_interleave_two_channels(tmp_path):
-    reader, routers, specs = _two_input_reader(tmp_path)
-    try:
-        reader.start()  # grants initial credit; pre-flood both channels within budget
-        for ordinal in range(8):
-            routers["edge-a"].route(_records("a", ordinal))
-            routers["edge-b"].route(_records("b", ordinal))
-        for router in routers.values():
-            router.end_of_input()
-        _wait_eoi(reader)  # all envelopes are queued before the first consume pass
-        rows = [row["v"] for row in reader.rows()]
-        # Rotating pass start: A,B then B,A then A,B ... — neither channel runs dry
-        # ahead of its peer and neither is systematically first.
-        assert rows == ["a0", "b0", "b1", "a1", "a2", "b2", "b3", "a3",
-                        "a4", "b4", "b5", "a5", "a6", "b6", "b7", "a7"]
-        assert reader.consumed_rows == 16
-    finally:
-        for router in routers.values():
-            router.close()
-        reader.close()
-
-
-def test_input_reader_empty_slow_channel_never_blocks_peer(tmp_path):
-    reader, routers, specs = _two_input_reader(tmp_path)
-    try:
-        reader.start()
-        for ordinal in range(4):
-            routers["edge-a"].route(_records("a", ordinal))
-        routers["edge-a"].end_of_input()
-        # edge-b stays open and empty: the reader must dequeue edge-a timely anyway.
-        rows = reader.rows()
-        start = time.monotonic()
-        received = [next(rows)["v"] for _ in range(4)]
-        assert received == ["a0", "a1", "a2", "a3"]
-        assert time.monotonic() - start < 2.0
-        routers["edge-b"].end_of_input()
-        _wait_eoi(reader)
-        assert list(rows) == []  # the empty peer contributes nothing and ends the stream
-        assert reader.consumed_rows == 4
-    finally:
-        for router in routers.values():
-            router.close()
-        reader.close()
