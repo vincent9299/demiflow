@@ -3014,6 +3014,26 @@
    "reduce",
    "union"
   ],
+  "runtime.layout_preserving_kinds": [
+   "AddColumnOp",
+   "BatchMapOp",
+   "BoundMapOp",
+   "DropColumnsOp",
+   "EmbeddingMapOp",
+   "FilterOp",
+   "FlatMapOp",
+   "LimitOp",
+   "MapBatchesOp",
+   "MapOp",
+   "RandomSampleOp",
+   "RandomShuffleOp",
+   "RandomizeBlockOrderOp",
+   "RegisterDocumentsBatchOp",
+   "RenameColumnsOp",
+   "RepartitionOp",
+   "SaveLanceOp",
+   "SelectColumnsOp"
+  ],
   "runtime.model_kinds": [
    "AgentMapOp",
    "AsyncMapOp",

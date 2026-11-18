@@ -38,12 +38,14 @@ import logging
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Any, Callable, Mapping
 
+from ..execution.contracts.dataflow_kinds import kinds_with
+
 _LOG = logging.getLogger('demiflow.planning.configuration')
 
 # Operation fields the generic lowering does not copy into the configuration.
 NOT_COPIED = frozenset({'runtime_contract', 'label', 'node_id', 'source_dataset',
                         'callable', 'native_options', 'stream_options'})
-TASK_KINDS = frozenset({'MapOp', 'BoundMapOp', 'FlatMapOp', 'FilterOp', 'AddColumnOp'})
+TASK_KINDS = kinds_with('task')
 # Column projections never start a task group; they stay in the one they follow.
 TASK_FOLLOWERS = frozenset({'SelectColumnsOp', 'DropColumnsOp', 'RenameColumnsOp', 'RandomSampleOp'})
 TASK_KEYS = ('task_batch_rows', 'task_group', 'task_origin')

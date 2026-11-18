@@ -43,6 +43,7 @@ from ..execution.contracts.dataflow import (
 )
 from ..execution.contracts.dataflow_codec import compute_graph_digest
 from ..execution.contracts.dataflow_errors import DataflowError
+from ..execution.contracts.dataflow_kinds import NATIVE, TYPED, kinds_with, traits_of
 from ..execution.local_kernel import KeyedSource, PlanInput, UnionSource
 from ..execution.recovery_contract import identity
 from ..execution.recovery_identity import describe
@@ -57,60 +58,10 @@ _MODEL_COMPILER = "demiflow.execution.dataflow_models:build_model_factory"
 
 # kind -> (state, effect, resource_role, mergeable). Traits are declarations; the
 # physical planner refines resources. Unknown UDF state is never claimed pure.
-_TRAITS: Mapping[str, tuple[str, str, str, bool]] = MappingProxyType({
-    "MapOp": ("none", "pure", "cpu", True),
-    "FlatMapOp": ("none", "pure", "cpu", True),
-    "MapBatchesOp": ("auto_json", "pure", "cpu", False),
-    "BoundMapOp": ("none", "pure", "cpu", True),
-    "OperatorLLMMapOp": ("adapter", "journaled", "remote_api", False),
-    "FilterOp": ("none", "pure", "cpu", True),
-    "AsyncMapOp": ("none", "pure", "cpu", False),
-    "DeduplicateOp": ("adapter", "journaled", "cpu", False),
-    "AgentMapOp": ("adapter", "journaled", "remote_api", False),
-    "BatchMapOp": ("auto_json", "pure", "cpu", False),
-    "EmbeddingMapOp": ("adapter", "journaled", "remote_api", False),
-    "StreamGroupBatchesOp": ("auto_json", "pure", "cpu", False),
-    "StreamPrependOp": ("none", "pure", "cpu", False),
-    "LimitOp": ("none", "pure", "cpu", False),
-    "SelectColumnsOp": ("none", "pure", "cpu", True),
-    "DropColumnsOp": ("none", "pure", "cpu", True),
-    "RenameColumnsOp": ("none", "pure", "cpu", True),
-    "AddColumnOp": ("none", "pure", "cpu", True),
-    "RandomSampleOp": ("none", "pure", "cpu", True),
-    "SortOp": ("none", "pure", "cpu", False),
-    "RepartitionOp": ("none", "pure", "cpu", False),
-    "RandomShuffleOp": ("none", "pure", "cpu", False),
-    "RandomizeBlockOrderOp": ("none", "pure", "cpu", False),
-    "VectorSearchOp": ("adapter", "journaled", "io", False),
-    "SearchWebOp": ("adapter", "journaled", "remote_api", False),
-    "RegisterDocumentsOp": ("adapter", "journaled", "io", False),
-    "RegisterDocumentsBatchOp": ("adapter", "journaled", "io", False),
-    "ReadDocumentsOp": ("adapter", "journaled", "io", False),
-    "SaveLanceOp": ("adapter", "journaled", "io", False),
-})
-_NATIVE_TRAITS: Mapping[str, tuple[str, str, str, bool]] = MappingProxyType({
-    "prompt": ("adapter", "journaled", "remote_api", False),
-    "embedding": ("adapter", "journaled", "remote_api", False),
-    "agent": ("adapter", "journaled", "remote_api", False),
-    "raw_fetch": ("adapter", "journaled", "io", False),
-    "queue_produce": ("adapter", "journaled", "io", False),
-    "queue_ack": ("adapter", "journaled", "io", False),
-    "lance_lookup": ("adapter", "journaled", "io", False),
-    "search_vectors": ("adapter", "journaled", "io", False),
-    "search_web": ("adapter", "journaled", "remote_api", False),
-    "deduplicate": ("adapter", "journaled", "cpu", False),
-    "group_batches": ("auto_json", "pure", "cpu", False),
-    "stream_prepend": ("none", "pure", "cpu", False),
-    "save_lance": ("adapter", "journaled", "io", False),
-    "register_documents": ("adapter", "journaled", "io", False),
-    "register_documents_batch": ("adapter", "journaled", "io", False),
-    "read_documents": ("adapter", "journaled", "io", False),
-    "pack_prompt_inputs": ("none", "pure", "cpu", True),
-    "read_local_object": ("none", "pure", "io", True),
-    "decode_document": ("none", "pure", "cpu", True),
-    "encode_image": ("none", "pure", "cpu", True),
-    "parse_wikitext": ("none", "pure", "cpu", True),
-})
+# Typed operations and native declarations are looked up separately, as before:
+# a NativeOperation that names a typed operation finds no traits and is refused.
+_TRAITS: Mapping[str, tuple[str, str, str, bool]] = traits_of(TYPED)
+_NATIVE_TRAITS: Mapping[str, tuple[str, str, str, bool]] = traits_of(NATIVE)
 # Service declarations whose state hooks and original commit scopes own recovery
 # replace the traits of the operation that carries them. The names are the ones
 # execution.dataflow_native.native_variant reports. A stream write that carries a
@@ -120,11 +71,8 @@ _VARIANT_TRAITS: Mapping[str, tuple[str, str, str, bool]] = MappingProxyType({
     "search": ("adapter", "journaled", "io", False),
     "stream_write": ("adapter", "journaled", "io", False),
 })
-_ORDERING_KINDS = frozenset({"SortOp", "RandomShuffleOp", "RandomizeBlockOrderOp"})
-_FINITE_COMPLETE_KINDS = frozenset({
-    "SortOp", "RandomShuffleOp", "RandomizeBlockOrderOp", "RepartitionOp",
-    "OperatorLLMMapOp", "EmbeddingMapOp", "AgentMapOp",
-})
+_ORDERING_KINDS = kinds_with("global_ordering")
+_FINITE_COMPLETE_KINDS = kinds_with("finite_complete")
 
 
 def _freeze(value: Any) -> Any:

@@ -29,6 +29,7 @@ from demiflow.execution.contracts.dataflow import (
     thaw_record_value,
 )
 from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.dataflow_kinds import kinds_with
 
 ROW_MEDIA_TYPE = "application/vnd.demiflow.record.v3"
 RECORD_MEDIA_TYPE = "application/x-demiflow-record-v1"
@@ -628,31 +629,15 @@ def finish_kernel(
 
 
 # Kinds assembled by the single factory. Relational kinds come from KeyedSource
-# (join/reduce/groups/exclude_keys) and UnionSource; the rest mirror OPERATOR-MATRIX.
-_UNARY_KINDS = frozenset(
-    {
-        "MapOp", "FlatMapOp", "BoundMapOp", "FilterOp", "LimitOp",
-        "SelectColumnsOp", "DropColumnsOp", "RenameColumnsOp", "AddColumnOp",
-        "RandomSampleOp",
-    }
-)
-_BATCH_KINDS = frozenset(
-    {"MapBatchesOp", "BatchMapOp", "EmbeddingMapOp", "RegisterDocumentsBatchOp", "SaveLanceOp"}
-)
-_MODEL_KINDS = frozenset(
-    {
-        "prompt", "embedding", "agent", "fetch", "document",
-        "OperatorLLMMapOp", "AsyncMapOp", "AgentMapOp", "DeduplicateOp",
-        "EmbeddingMapOp", "VectorSearchOp", "SearchWebOp", "RegisterDocumentsOp",
-        "RegisterDocumentsBatchOp", "ReadDocumentsOp", "SaveLanceOp", "StreamPrependOp",
-    }
-)
-_RELATIONAL_KINDS = frozenset({"join", "exclude_keys", "reduce", "groups", "union"})
-_ORDERING_KINDS = frozenset(
-    {"SortOp", "RandomShuffleOp", "RandomizeBlockOrderOp", "RepartitionOp"}
-)
-_AGGREGATE_KINDS = frozenset({"aggregate"})
-_STREAM_GROUP_KINDS = frozenset({"StreamGroupBatchesOp"})
+# (join/reduce/groups/exclude_keys) and UnionSource. Each set is the kinds that
+# carry the role of the same name in the kind table.
+_UNARY_KINDS = kinds_with("unary")
+_BATCH_KINDS = kinds_with("batch")
+_MODEL_KINDS = kinds_with("model")
+_RELATIONAL_KINDS = kinds_with("relational")
+_ORDERING_KINDS = kinds_with("ordering")
+_AGGREGATE_KINDS = kinds_with("aggregate")
+_STREAM_GROUP_KINDS = kinds_with("stream_group")
 
 KERNEL_KINDS = (
     _UNARY_KINDS | _BATCH_KINDS | _MODEL_KINDS | _RELATIONAL_KINDS

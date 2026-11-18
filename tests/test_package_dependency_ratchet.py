@@ -70,6 +70,7 @@ PLANNING_MAY_IMPORT = {
     'demiflow.execution.contracts.dataflow',
     'demiflow.execution.contracts.dataflow_codec',
     'demiflow.execution.contracts.dataflow_errors',
+    'demiflow.execution.contracts.dataflow_kinds',
     'demiflow.execution.contracts.errors',
     'demiflow.execution.dataflow_compile_inputs',
     'demiflow.execution.dataflow_managed_devices',

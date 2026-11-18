@@ -28,6 +28,7 @@ TASK_SCOPE = 'execution/kernels/task_scope.py'
 BATCH_MEMBERSHIP = 'execution/dataflow_batch_membership.py'
 TERMINAL_BLOCKS = 'execution/worker/terminal_blocks.py'
 SEAL = 'execution/dataflow_seal.py'
+KINDS = 'execution/contracts/dataflow_kinds.py'
 API = 'execution/dataflow_api.py'
 SDK = 'data/dataset.py'
 NATIVE_DECLARATION = 'execution/dataflow_model_factory.py'
@@ -66,6 +67,8 @@ class Constants:
             return self.evaluate(self.assignments[name])
         if name in self.imports:
             return self.imports[name].value(name)
+        if self.relative != KINDS and name in ('TYPED', 'NATIVE'):
+            return kind_table().value(name)          # imported from the kind table
         raise KeyError(f'{self.relative}: {name} is not a module-level constant')
 
     def evaluate(self, node):
@@ -88,7 +91,39 @@ class Constants:
                 return frozenset(self.evaluate(node.args[0]))
             if node.func.id == 'MappingProxyType':
                 return self.evaluate(node.args[0])
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            arguments = [self.evaluate(argument) for argument in node.args]
+            if node.func.id == '_kind' and len(arguments) == 5:      # one row of the kind table
+                return tuple(arguments)
+            # Views of the kind table, evaluated from its rows exactly as the module does.
+            if node.func.id == 'kinds_with' and len(arguments) == 1:
+                return kind_table().with_role(arguments[0])
+            if node.func.id == 'traits_of' and len(arguments) == 1:
+                return kind_table().traits_of(arguments[0])
+            if node.func.id == 'operator_rows' and not arguments:
+                return kind_table().operator_rows()
         raise ValueError(f'{self.relative}: unsupported constant expression at line {node.lineno}')
+
+
+class KindTable(Constants):
+    """The rows of execution/contracts/dataflow_kinds.py, read from source."""
+
+    def rows(self):
+        return self.value('_RECORDS')          # (name, entry, roles, operator, traits) per kind
+
+    def with_role(self, role):
+        assert role in self.value('ROLES'), role
+        return frozenset(name for name, _, roles, _, _ in self.rows() if role in roles)
+
+    def traits_of(self, entry):
+        return {name: traits for name, declared, _, _, traits in self.rows() if declared == entry}
+
+    def operator_rows(self):
+        return tuple((name, *operator) for name, _, _, operator, _ in self.rows() if operator is not None)
+
+
+def kind_table():
+    return KindTable(KINDS)
 
 
 def _sorted(value):
@@ -126,6 +161,7 @@ def tables():
     }
     for name in kernel_sets:
         result['runtime.' + name.strip('_').lower()] = kernels.value(name)
+    result['runtime.layout_preserving_kinds'] = kind_table().with_role('keeps_layout')
     return result
 
 
@@ -152,10 +188,8 @@ PREDICATES = (
      lambda t, kind: kind in t['runtime.aggregate_kinds']),
     ('native_batch_membership', OPERATOR, 'if self._spec.kind in KINDS:',
      lambda t, kind: kind in t['runtime.batch_membership_kinds']),
-    ('layout_preserving', TERMINAL_BLOCKS,
-     "preserving = _UNARY_KINDS | _BATCH_KINDS | {'RepartitionOp', 'RandomShuffleOp', 'RandomizeBlockOrderOp'}",
-     lambda t, kind: kind in t['runtime.unary_kinds'] | t['runtime.batch_kinds'] | {
-         'RepartitionOp', 'RandomShuffleOp', 'RandomizeBlockOrderOp'}),
+    ('layout_preserving', TERMINAL_BLOCKS, "preserving = kinds_with('keeps_layout')",
+     lambda t, kind: kind in t['runtime.layout_preserving_kinds']),
     ('task_scoped', COMPILER, "if kernel.kind in TASK_KINDS and not kernel.configuration.get('streaming_map'):",
      lambda t, kind: kind in t['runtime.task_kinds']),
     ('input_finite_complete', COMPILER, 'finite = kind in _FINITE_COMPLETE_KINDS or name in {"left", "right", "prefix"}',

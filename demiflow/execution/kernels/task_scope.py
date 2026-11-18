@@ -8,9 +8,10 @@ from pathlib import PurePath, PurePosixPath, PureWindowsPath, PosixPath, Windows
 from types import ModuleType
 
 from ..contracts.dataflow_errors import DataflowError
+from ..contracts.dataflow_kinds import kinds_with
 from ..operator_policy import _json_fields
 
-TASK_KINDS = frozenset({'MapOp', 'BoundMapOp', 'FlatMapOp', 'FilterOp', 'AddColumnOp'})
+TASK_KINDS = kinds_with('task')
 
 
 def function_fields(function):
