@@ -109,6 +109,15 @@ _NATIVE_TRAITS: Mapping[str, tuple[str, str, str, bool]] = MappingProxyType({
     "encode_image": ("none", "pure", "cpu", True),
     "parse_wikitext": ("none", "pure", "cpu", True),
 })
+# Service declarations whose state hooks and original commit scopes own recovery
+# replace the traits of the operation that carries them. The names are the ones
+# execution.dataflow_native.native_variant reports. A stream write that carries a
+# user predicate has unproven state and is deliberately absent: it is not upgraded.
+_VARIANT_TRAITS: Mapping[str, tuple[str, str, str, bool]] = MappingProxyType({
+    "producer": ("adapter", "journaled", "io", False),
+    "search": ("adapter", "journaled", "io", False),
+    "stream_write": ("adapter", "journaled", "io", False),
+})
 _ORDERING_KINDS = frozenset({"SortOp", "RandomShuffleOp", "RandomizeBlockOrderOp"})
 _FINITE_COMPLETE_KINDS = frozenset({
     "SortOp", "RandomShuffleOp", "RandomizeBlockOrderOp", "RepartitionOp",
@@ -201,9 +210,10 @@ def _source_semantic_facts(source: SourcePlan) -> Mapping[str, Any]:
                 "options": dict(source.options),
                 "connection_factory": describe(source.connection_factory)}
     if isinstance(source, LanceSource):
-        from ..execution.lance_key_source import LanceKeySource
+        from ..execution.dataflow_native import is_key_only
+        key_only = is_key_only(source)
         return {"kind": "lance", "query": describe(source.query),
-                **({"key_only": True} if isinstance(source, LanceKeySource) else {})}
+                **({"key_only": True} if key_only else {})}
     if isinstance(source, MaterializedSource):
         ref = getattr(source.handle, "recovery_reference", None)
         return {"kind": "materialized", "row_count": source.row_count,
@@ -246,13 +256,8 @@ def _source_kind(source: SourcePlan) -> str:
     if isinstance(source, IterableSource):
         return "iterable"
     if isinstance(source, DatasourceSource):
-        from ..execution.queue_source import QueueDatasource
-        from ..execution.queue_history import QueueHistoryDatasource
-        if type(source.datasource) is QueueDatasource:
-            return "queue"
-        if type(source.datasource) is QueueHistoryDatasource:
-            return "queue_history"
-        return "datasource"
+        from ..execution.dataflow_native import datasource_kind
+        return datasource_kind(source.datasource)
     if type(source).__name__ == "_LiteralEmptySource":
         return "literal_empty"
     raise _error("INVALID_CONTRACT", "unknown source plan: " + type(source).__name__)
@@ -347,12 +352,15 @@ def compile_kernel_spec(
     # Ray Data pool controls must not be silently discarded by this compiler.
     from ..data.native_options import validate_stream_native_options
     validate_stream_native_options(getattr(operation, 'native_options', None))
-    from ..execution.dataflow_model_factory import native_model_declaration, PromptFactory, RoutedPromptFactory, CacheFactory
+    from ..execution.dataflow_model_factory import native_model_declaration
+    from ..execution.dataflow_native import cache_runtime_state, model_variant, native_variant
     native_declaration = native_model_declaration(operation)
-    if native_declaration is not None and native_declaration.target is RoutedPromptFactory:
+    # The compiler asks which declaration this is; the classes stay on the execution side.
+    model_kind = model_variant(native_declaration)
+    if model_kind == 'routed_prompt':
         from ..execution.dataflow_routed_prompt import compile_routed_prompt
         return compile_routed_prompt(operation, native_declaration, program_ref=program_ref, bounds=bounds)
-    if native_declaration is not None and native_declaration.target is PromptFactory:
+    if model_kind == 'prompt':
         from ..execution.dataflow_models import build_model_factory, _model_profile
         native_op, settings = native_declaration.constructor_args
         from ..data.plan import AgentMapOp
@@ -391,9 +399,8 @@ def compile_kernel_spec(
             from ..execution.kernels.task_scope import function_residency_kind
             state = function_residency_kind(declaration.target, call_args=declaration.call_args,
                                             call_kwargs=declaration.call_kwargs)
-        elif native_declaration is not None and native_declaration.target is CacheFactory:
-            owner = getattr(declaration.target, '__self__', declaration.target)
-            if owner.validate_runtime_state() is not None:
+        elif model_kind == 'cache':
+            if cache_runtime_state(declaration) is not None:
                 # The wrapper's hooks do not make unadapted nested callback
                 # state safe to park and reconstruct within the same attempt.
                 state = 'nonrecoverable'
@@ -414,30 +421,11 @@ def compile_kernel_spec(
         configuration[FIELD] = VERSION
     # Ordinary CPU kernels do not use native services. Importing every native
     # adapter here initializes Lance/Arrow and model modules even for a map.
-    if native_declaration is not None:
-        from ..execution.dataflow_acquisition_call import AcquisitionCall
-        from ..execution.dataflow_producer import ProducerCall
-        if native_declaration is not None and native_declaration.target is AcquisitionCall:
-            configuration['native_operation'] = native_declaration.constructor_args[0]
-            if configuration['native_operation'] == 'acquire':
-                actor = getattr(operation.callable.target, '__self__', operation.callable.target)
-                from ..execution.dataflow_fetch import fetch_declaration_key
-                configuration['native_key'] = fetch_declaration_key(actor)
-        if native_declaration is not None and native_declaration.target is ProducerCall:
-            configuration['native_operation'] = 'producer'
-            state, effect, role, mergeable = 'adapter', 'journaled', 'io', False
-        from ..execution.dataflow_search import NativeSearchCall
-        if native_declaration is not None and native_declaration.target is NativeSearchCall:
-            configuration['native_operation'] = 'search'
-            configuration['native_key'] = native_declaration.constructor_args[0]
-            state, effect, role, mergeable = 'adapter', 'journaled', 'io', False
-        from ..execution.dataflow_stream_lance import StreamLanceFactory
-        if (native_declaration is not None and native_declaration.target is StreamLanceFactory
-                and native_declaration.constructor_args[1] is None):
-            # This is the verified passive RPC factory, not the original driver
-            # writer object. Its state hooks and original child-commit scopes own
-            # recovery. A user predicate with unproven state is not upgraded here.
-            state, effect, role, mergeable = 'adapter', 'journaled', 'io', False
+    variant = native_variant(operation, native_declaration)
+    if variant is not None:
+        configuration.update(variant.configuration)
+        if variant.name in _VARIANT_TRAITS:
+            state, effect, role, mergeable = _VARIANT_TRAITS[variant.name]
     stream_options = getattr(operation, 'stream_options', None)
     if stream_options is not None:
         configuration.update(streaming_map=True, concurrency=stream_options.concurrency,
@@ -843,8 +831,8 @@ class _Capture:
         child_indices = []
         for binding in bindings:
             if isinstance(source, KeyedSource) and source.kind == "exclude_keys" and binding.port == "left":
-                from ..execution.lance_key_source import LanceKeySource
-                narrowed = LanceKeySource(replace(binding.source.query, columns=tuple(source.on)))
+                from ..execution.dataflow_native import narrow_to_keys
+                narrowed = narrow_to_keys(binding.source, source.on)
                 child = self.capture_chain(narrowed, binding.plan, binding.path)
             else:
                 child = self.capture_chain(binding.source, binding.plan, binding.path)
@@ -1021,10 +1009,10 @@ class _Capture:
         configuration = {**semantic, "terminal_memory": {"payload_bytes": payload, "metadata_bytes": metadata}}
         native_publication = request.kind in {'write_lance', 'write_file', 'write_datasink'}
         if request.kind == 'write_datasink':
-            from ..execution.queue_sinks import QueueResultSink
+            from ..execution.dataflow_native import publishes_natively
             # Queue tasks were settled by their original authority already;
             # this terminal only publishes the result manifest, without Arrow.
-            native_publication = not isinstance(request.sink, QueueResultSink)
+            native_publication = publishes_natively(request.sink)
         if native_publication:
             from ..execution.dataflow_publication_budget import FIELD, SCHEMA
             # A native consumer can still hold its previous yielded Arrow

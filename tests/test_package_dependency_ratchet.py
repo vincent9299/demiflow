@@ -72,32 +72,24 @@ PLANNING_MAY_IMPORT = {
     'demiflow.execution.contracts.dataflow_codec',
     'demiflow.execution.contracts.dataflow_errors',
     'demiflow.execution.contracts.errors',
-    'demiflow.execution.dataflow_acquisition_call',
-    'demiflow.execution.dataflow_fetch',
     'demiflow.execution.dataflow_managed_devices',
     'demiflow.execution.dataflow_model_factory',
     'demiflow.execution.dataflow_models',
+    'demiflow.execution.dataflow_native',
     'demiflow.execution.dataflow_native_limits',
-    'demiflow.execution.dataflow_producer',
     'demiflow.execution.dataflow_prompt_service',
     'demiflow.execution.dataflow_publication_budget',
     'demiflow.execution.dataflow_routed_prompt',
     'demiflow.execution.dataflow_schema',
-    'demiflow.execution.dataflow_search',
     'demiflow.execution.dataflow_shared',
-    'demiflow.execution.dataflow_stream_lance',
     'demiflow.execution.kernels.reducer_memory',
     'demiflow.execution.kernels.shuffle_order',
     'demiflow.execution.kernels.task_scope',
-    'demiflow.execution.lance_key_source',
     'demiflow.execution.local_kernel',
     'demiflow.execution.operator_policy',
     'demiflow.execution.payload_limits',
     'demiflow.execution.plan_facts',
     'demiflow.execution.plan_interpreter',
-    'demiflow.execution.queue_history',
-    'demiflow.execution.queue_sinks',
-    'demiflow.execution.queue_source',
     'demiflow.execution.recovery_contract',
     'demiflow.execution.recovery_identity',
     'demiflow.execution.reservation',
@@ -219,6 +211,9 @@ def test_plan_compiler_learns_no_new_runtime_modules():
     new = used - PLANNING_MAY_IMPORT
     assert not new, ('planning imports an execution module it did not import before. Register the '
                      'kind in planning/dataflow_registry.py instead of importing its implementation:' + _lines(new))
+    stale = PLANNING_MAY_IMPORT - used
+    assert not stale, ('planning no longer imports these execution modules. Remove them from '
+                       'PLANNING_MAY_IMPORT so that they cannot come back unnoticed:' + _lines(stale))
 
 
 def test_budgets_are_not_stale_by_more_than_they_help():

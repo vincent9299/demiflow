@@ -39,28 +39,17 @@
    "StreamLanceSink"
   ],
   "planning.compiler": [
-   "AcquisitionCall",
    "AgentMapOp",
-   "CacheFactory",
    "DatasourceSource",
    "FileSource",
    "ItemsSource",
    "IterableSource",
    "KeyedSource",
-   "LanceKeySource",
    "LanceSource",
    "MaterializedSource",
    "NativeOperation",
-   "NativeSearchCall",
-   "ProducerCall",
-   "PromptFactory",
-   "QueueDatasource",
-   "QueueHistoryDatasource",
-   "QueueResultSink",
    "RangeSource",
-   "RoutedPromptFactory",
    "SqlSource",
-   "StreamLanceFactory",
    "StreamPrependOp",
    "UnionSource"
   ],
@@ -304,10 +293,10 @@
    "native_operation": [
     "execution/dataflow.py",
     "execution/dataflow_fetch.py",
+    "execution/dataflow_native.py",
     "execution/dataflow_producer.py",
     "execution/dataflow_queue.py",
-    "execution/dataflow_search.py",
-    "planning/dataflow_compile.py"
+    "execution/dataflow_search.py"
    ],
    "node_id": [
     "execution/dataflow_models.py"
@@ -477,10 +466,10 @@
     "execution/dataflow_prompt_service.py"
    ],
    "native_key": [
-    "planning/dataflow_compile.py"
+    "execution/dataflow_native.py"
    ],
    "native_operation": [
-    "planning/dataflow_compile.py"
+    "execution/dataflow_native.py"
    ],
    "node_id": [
     "execution/dataflow_routed_prompt.py"
