@@ -155,8 +155,9 @@ def test_actual_function_restore_uses_committed_counter_and_no_prefix_reexecutio
                 source.map(bound,fn_kwargs={'owned':[0]},execution='inline',concurrency=1))
     original = DataflowCheckpointCoordinator.commit
     captured = {}
-    def interrupt(coordinator, cut_id, *, sinks):
-        image = original(coordinator, cut_id, sinks=sinks)
+    def interrupt(coordinator, cut_id, *, sinks, **forwarded):
+        # The driver also passes native_queue_state; forward whatever the real commit is given.
+        image = original(coordinator, cut_id, sinks=sinks, **forwarded)
         if not image.cut.final and not captured:
             for contribution in image.contributions:
                 for ref in contribution.operator_states.values():
