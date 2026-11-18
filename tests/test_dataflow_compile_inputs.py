@@ -131,26 +131,3 @@ def test_report_questions_read_the_context_lazily():
     assert bindings.reused(['a', 'n', 0]) is False
     live['state'] = 'reused'                       # a later change is seen: the view is not a snapshot
     assert bindings.reused(['a', 'n', 0]) is True
-
-
-def test_a_routed_graph_keeps_recording_bindings_before_adaptation(tmp_path):
-    """Existing behaviour, pinned and not changed here.
-
-    Graph adaptation replaces the terminal's occurrence with the captured union's
-    and re-derives the semantic id of every node it marks. Report bindings were
-    recorded before that, so for a routed graph they do not cover the final graph
-    and the driver builds no identity bridge for it.
-    """
-    built = corpus.CASES['report/graph_broadcast'](corpus.Context(tmp_path))
-    request = ActionRequest(kind=built['kind'], source=built['source'], plan=built['plan'], arguments=built['arguments'],
-                            sink=None, programs=(), provider='local',
-                            action=type('Action', (), {'action_id': 'routed'})())
-    report = ReportBindings(corpus.report_for(built['source'], built['plan'], 'routed'))
-    compiled = lower_action(request, bounds=BOUNDS, inputs=CompileInputs(report=report))
-    nodes = {node.occurrence_id: node for node in compiled.graph.nodes}
-    missing = [b['report_node_id'] for b in compiled.report_bindings if b['occurrence_id'] not in nodes]
-    assert missing == ['routed']                                   # the terminal binding names a replaced occurrence
-    stale = [b for b in compiled.report_bindings
-             if b['occurrence_id'] in nodes and nodes[b['occurrence_id']].semantic_id != b['logical_node_id']]
-    assert len(stale) == 5                                         # every node the adapter marked
-    assert {b['occurrence_id'] for b in compiled.report_bindings} != set(nodes)

@@ -524,7 +524,11 @@ class _Capture:
         self.alias_source: dict[int, int] = {}
         self.alias_op: dict[tuple[int, int], int] = {}
         self.visiting: set[int] = set()
+        # (node index, report node, report occurrence, mode). Kept by position:
+        # the identities are read from the finished graph, see capture_graph.
         self.report_bindings = []
+        # A source the compiler builds in place of a declared one stands for it in the report.
+        self.declared_as: dict[int, tuple[SourcePlan, SourcePlan]] = {}
         self.observation_labels = {}
         # Optional codec targets are not independent hard per-node minima.
         # Keep their provenance private until all simultaneous inputs are known.
@@ -539,11 +543,8 @@ class _Capture:
     def _bind_report(self, index, key):
         if key is None or self.report is None:
             return
-        node = self.nodes[index]
         reused = self.report.reused(key)
-        self.report_bindings.append({"report_node_id": key[1], "report_occurrence": key[2],
-            "occurrence_id": node.occurrence_id, "logical_node_id": node.semantic_id,
-            "mode": "reuse" if reused else "execute"})
+        self.report_bindings.append((index, key[1], key[2], "reuse" if reused else "execute"))
 
     def _check_node_budget(self) -> None:
         if len(self.nodes) >= self.bounds.max_nodes:
@@ -593,7 +594,8 @@ class _Capture:
             else:
                 index = self._capture_leaf(source, path)
             if self.report is not None:
-                self._bind_report(index, self.report.source(source))
+                declared = self.declared_as.get(id(source))
+                self._bind_report(index, self.report.source(source if declared is None else declared[1]))
             self.alias_source[key] = index
             return index
         finally:
@@ -630,6 +632,9 @@ class _Capture:
             if isinstance(source, KeyedSource) and source.kind == "exclude_keys" and binding.port == "left":
                 from ..execution.dataflow_native import narrow_to_keys
                 narrowed = narrow_to_keys(binding.source, source.on)
+                # Reading only the keys is still reading the declared source: the node keeps
+                # that source's report binding, so the report covers every node of the plan.
+                self.declared_as[id(narrowed)] = (narrowed, binding.source)
                 child = self.capture_chain(narrowed, binding.plan, binding.path)
             else:
                 child = self.capture_chain(binding.source, binding.plan, binding.path)
@@ -829,9 +834,9 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None) -> Com
         inputs = compile_inputs(request)
     capture = _Capture(request, bounds, inputs)
     producer = capture.capture_chain(request.source, request.plan, ())
-    terminal = capture.capture_terminal(producer)
+    captured_terminal = capture.capture_terminal(producer)
     from .dataflow_graph_adapter import decorate_graph_capture
-    terminal = decorate_graph_capture(capture, request, terminal=terminal)
+    terminal = decorate_graph_capture(capture, request, terminal=captured_terminal)
     fit_codec_windows(capture.nodes, capture.edges, capture.codec_windows, capture.publication_windows, bounds)
     # DTO constructors validate identities. Keep integer graph indices private;
     # never construct invalid public DTOs merely to replace their IDs later.
@@ -863,8 +868,17 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None) -> Com
     # Report-only: silent unless the configuration schema logger is enabled for DEBUG.
     from .dataflow_configuration import report_configuration
     report_configuration(graph)
+    # Report bindings name nodes of the graph that is returned. Graph adaptation can
+    # fold the terminal into another node and re-derive semantic identities, so the
+    # identities are read here, from the finished nodes, not when a node was captured.
+    report_bindings = []
+    for index, report_node_id, report_occurrence, mode in capture.report_bindings:
+        node = bound_nodes[terminal if index == captured_terminal else index]
+        report_bindings.append({"report_node_id": report_node_id, "report_occurrence": report_occurrence,
+                                "occurrence_id": node.occurrence_id, "logical_node_id": node.semantic_id,
+                                "mode": mode})
     return CompiledDataflow(graph=graph, declarations=declarations,
-                            report_bindings=tuple(capture.report_bindings),
+                            report_bindings=tuple(report_bindings),
                             observation_labels=capture.observation_labels)
 
 
