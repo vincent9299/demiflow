@@ -873,7 +873,7 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None) -> Com
         terminals=graph.terminals, sources=graph.sources,
     )
     validate_graph(graph, bounds=bounds)
-    # Report-only: silent unless the configuration schema logger is enabled for DEBUG.
+    # Report-only: a plan outside the configuration schema is logged as a warning, never refused.
     from .dataflow_configuration import report_configuration
     report_configuration(graph)
     # Report bindings name nodes of the graph that is returned. Graph adaptation can

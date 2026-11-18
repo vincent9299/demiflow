@@ -196,23 +196,33 @@ def test_a_kind_the_schema_does_not_describe_is_reported_not_guessed(graphs):
 
 
 @reports_on_purpose
-def test_reporting_is_silent_and_harmless_by_default(graphs, caplog):
+def test_production_warns_and_never_refuses(graphs, caplog):
     broken = _mutate(graphs['case map'], 'MapOp', _set('not_a_key', 1))
     logger = logging.getLogger('demiflow.planning.configuration')
     level, propagate = logger.level, logger.propagate
     logger.setLevel(logging.NOTSET)                            # the default, whatever a harness configured
     logger.propagate = True
     try:
-        assert not logger.isEnabledFor(logging.DEBUG)
-        assert report_configuration(broken) == ()              # not even evaluated
-        with caplog.at_level(logging.DEBUG, logger='demiflow.planning.configuration'):
-            found = report_configuration(broken)
+        with caplog.at_level(logging.WARNING):
+            assert report_configuration(graphs['case map']) == ()
+            assert not [record for record in caplog.records if record.name == logger.name]   # a clean plan is silent
+            found = report_configuration(broken)                # returned, logged, not raised
             assert len(found) == 1 and 'not_a_key' in found[0]
-            messages = [record.getMessage() for record in caplog.records]
-            assert any('3 nodes checked, 1 findings' in message for message in messages)
-            assert any('not_a_key' in message for message in messages)
-            assert report_configuration(object()) == ()        # a defect in the check itself never escapes
-        assert report_configuration(graphs['case map']) == ()
+            warnings = [record for record in caplog.records if record.name == logger.name]
+            assert len(warnings) == 1 and warnings[0].levelno == logging.WARNING and 'not_a_key' in warnings[0].getMessage()
+            caplog.clear()
+            assert report_configuration(object()) == ()         # a defect in the check itself never escapes
+            assert [record.levelno for record in caplog.records if record.name == logger.name] == [logging.WARNING]
+            caplog.clear()
+            many = _mutate(graphs['case map'], 'MapOp', lambda configuration: {
+                **configuration, **{'unknown_%02d' % index: index for index in range(30)}})
+            assert len(report_configuration(many)) == 30
+            messages = [record.getMessage() for record in caplog.records if record.name == logger.name]
+            assert len(messages) == schema._MAX_REPORTED + 1 and messages[-1].endswith('and 10 more findings')
+        with caplog.at_level(logging.DEBUG, logger=logger.name):
+            caplog.clear()
+            report_configuration(graphs['case map'])
+            assert any('3 nodes checked, 0 findings' in record.getMessage() for record in caplog.records)
     finally:
         logger.setLevel(level)
         logger.propagate = propagate

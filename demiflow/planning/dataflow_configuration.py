@@ -22,10 +22,14 @@ A key reaches a node from exactly one of these writers, in the order they run:
 ``shared``       same-instance actor ownership.
 
 ``configuration_findings(graph)`` checks a newly compiled graph against this
-schema and returns what does not fit. It is report-only: nothing here rejects a
-plan, and ``report_configuration`` does nothing unless the
-``demiflow.planning.configuration`` logger is enabled for DEBUG. A sealed plan
-is never checked; it keeps the keys it was sealed with.
+schema and returns what does not fit. Nothing here rejects a plan:
+``report_configuration`` logs each finding as a warning on the
+``demiflow.planning.configuration`` logger and returns. A sealed plan is never
+checked; it keeps the keys it was sealed with.
+
+Enforcement is staged. Tests can already fail on a finding (the opt-in
+``configuration_schema_gate`` pytest plugin). Production warns. Refusing a plan
+is a later step, for the invariants only, once real pipelines have run clean.
 
 The key names owned by other modules (``publication_workspace``,
 ``reducer_memory_v1``, ``shuffle_order_version``, ``declared_arrow_schema``,
@@ -36,11 +40,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, fields, is_dataclass
+from functools import lru_cache
 from typing import Any, Callable, Mapping
 
 from ..execution.contracts.dataflow_kinds import kinds_with
 
 _LOG = logging.getLogger('demiflow.planning.configuration')
+_MAX_REPORTED = 20          # findings logged per graph; the rest are counted
 
 # Operation fields the generic lowering does not copy into the configuration.
 NOT_COPIED = frozenset({'runtime_contract', 'label', 'node_id', 'source_dataset',
@@ -219,6 +225,7 @@ UNPRODUCED_KEYS: Mapping[str, str] = {
 READ_WITHOUT_WRITER: Mapping[str, str] = {**HISTORICAL_KEYS, **UNPRODUCED_KEYS}
 
 
+@lru_cache(maxsize=None)
 def declared_fields(kind: str):
     """The configuration keys a typed operation declares, or ``None`` when ``kind`` is not one."""
     from ..data import plan
@@ -228,6 +235,7 @@ def declared_fields(kind: str):
     return frozenset(field.name for field in fields(operation)) - NOT_COPIED
 
 
+@lru_cache(maxsize=None)
 def _has_field(kind: str, name: str) -> bool:
     from ..data import plan
     operation = getattr(plan, kind, None)
@@ -330,20 +338,22 @@ def configuration_findings(graph) -> tuple[str, ...]:
 
 
 def report_configuration(graph) -> tuple[str, ...]:
-    """Log what does not fit, at DEBUG, and return it. Never raises and never rejects.
+    """Check a newly compiled graph; log what does not fit as warnings and return it.
 
-    It does nothing at all unless the ``demiflow.planning.configuration`` logger is
-    enabled for DEBUG, so an ordinary run pays nothing and cannot be affected.
+    Never raises and never rejects: a plan outside the schema still compiles, and
+    a defect in this check is logged, not propagated.
     """
-    if not _LOG.isEnabledFor(logging.DEBUG):
-        return ()
     try:
         found = configuration_findings(graph)
-    except Exception:  # report-only: a defect in this check must never fail a compile
-        _LOG.debug('configuration schema check failed for action %s', getattr(graph, 'action_id', None), exc_info=True)
+    except Exception:  # a defect in this check must never fail a compile
+        _LOG.warning('configuration schema check failed for action %s', getattr(graph, 'action_id', None),
+                     exc_info=True)
         return ()
     _LOG.debug('configuration schema: action %s: %d nodes checked, %d findings',
                graph.action_id, len(graph.nodes), len(found))
-    for finding in found:
-        _LOG.debug('configuration schema: action %s: %s', graph.action_id, finding)
+    for finding in found[:_MAX_REPORTED]:
+        _LOG.warning('configuration schema: action %s: %s', graph.action_id, finding)
+    if len(found) > _MAX_REPORTED:
+        _LOG.warning('configuration schema: action %s: and %d more findings', graph.action_id,
+                     len(found) - _MAX_REPORTED)
     return found
