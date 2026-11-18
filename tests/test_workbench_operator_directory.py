@@ -38,25 +38,25 @@ def test_directory_real_source_prompt_config_graph_link_reload_and_narrow(origin
         clean = operator(page, '整理输入')
         before_list = page.locator('.wb-operator-sidebar').bounding_box()
         clean.click()
-        page.locator('.wb-source-tabs').get_by_role('button', name='实现代码', exact=True).click()
+        page.locator('.wb-source-tabs').get_by_role('button', name='自定义算子代码', exact=True).click()
         after_list = page.locator('.wb-operator-sidebar').bounding_box()
         assert before_list == after_list
         reader_box = page.locator('.wb-operator-viewer').bounding_box()
         assert reader_box['x'] >= after_list['x'] + after_list['width']
         expect(page.locator('.wb-operator-viewer .wb-source-body')).to_contain_text('def clean(row):')
         expect(page.locator('.wb-operator-viewer .wb-source-body')).to_contain_text('准确的业务函数正文')
-        expect(page.locator('.wb-operator-viewer').get_by_role('button', name='Prompt', exact=True)).to_be_disabled()
+        expect(page.locator('.wb-operator-viewer').get_by_role('button', name='自定义 Prompt', exact=True)).to_be_disabled()
         expect(page.locator('.wb-operator-row[aria-pressed=true]')).to_have_count(1)
         page.get_by_role('searchbox', name='搜索算子').fill('Prompt')
         expect(page.locator('.wb-operator-row:visible')).to_have_count(1)
         prompt = operator(page, '联合出题')
         prompt.focus()
         page.keyboard.press('Enter')
-        page.locator('.wb-source-tabs').get_by_role('button', name='Prompt', exact=True).click()
+        page.locator('.wb-source-tabs').get_by_role('button', name='自定义 Prompt', exact=True).click()
         expect(page.locator('.wb-operator-viewer .wb-source-body')).to_contain_text('{{ payload | json }}')
         expect(page.locator('.wb-operator-viewer .wb-prompt-summary')).to_contain_text('请求上限：1')
         expect(page.locator('.wb-operator-row[aria-pressed=true]')).to_have_count(1)
-        page.locator('.wb-operator-viewer').get_by_role('button', name='入参', exact=True).click()
+        page.locator('.wb-operator-viewer').get_by_role('button', name='输入', exact=True).click()
         expect(page.locator('.wb-operator-viewer .wb-source-body')).to_contain_text('prompt')
         page.locator('.wb-operator-viewer').get_by_role('button', name='在运行图中定位', exact=True).click()
         expect(page.locator('.wb-body')).to_be_visible()
@@ -67,9 +67,9 @@ def test_directory_real_source_prompt_config_graph_link_reload_and_narrow(origin
         page.get_by_role('searchbox', name='搜索算子').fill('')
         # Switch nodes in place, then reload the same compiled selection.
         clean.click()
-        page.locator('.wb-source-tabs').get_by_role('button', name='实现代码', exact=True).click()
+        page.locator('.wb-source-tabs').get_by_role('button', name='自定义算子代码', exact=True).click()
         prompt.click()
-        page.locator('.wb-source-tabs').get_by_role('button', name='Prompt', exact=True).click()
+        page.locator('.wb-source-tabs').get_by_role('button', name='自定义 Prompt', exact=True).click()
         expect(page.locator('.wb-operator-viewer .wb-source-body')).to_contain_text('{{ payload | json }}')
         # Reload re-compiles against current source. Await the real response,
         # rather than treating the default 5 s DOM assertion as a compiler SLA.
@@ -132,7 +132,7 @@ def test_directory_configuration_switch_clears_old_rows_and_keeps_tab(tmp_path, 
             expect(page.locator('.wb-operator-row')).to_have_count(expected)
             if name == 'extra.json':
                 operator(page, '仅此配置的转换').click()
-                page.locator('.wb-source-tabs').get_by_role('button', name='实现代码', exact=True).click()
+                page.locator('.wb-source-tabs').get_by_role('button', name='自定义算子代码', exact=True).click()
                 expect(page.locator('.wb-operators .wb-source-body')).to_contain_text('def keep(row)')
             else:
                 expect(page.locator('.wb-operators')).not_to_contain_text('def keep(row)')
@@ -156,10 +156,10 @@ def test_directory_late_material_cannot_replace_other_selected_operator(original
                 route.continue_()
         page.route('**/plan-node-detail', delay)
         operator(page, '整理输入').click()
-        page.locator('.wb-source-tabs').get_by_role('button', name='实现代码', exact=True).click()
+        page.locator('.wb-source-tabs').get_by_role('button', name='自定义算子代码', exact=True).click()
         expect(page.locator('.wb-operators .wb-source-body')).to_contain_text('正在读取解析时快照')
         operator(page, '联合出题').click()
-        page.locator('.wb-source-tabs').get_by_role('button', name='Prompt', exact=True).click()
+        page.locator('.wb-source-tabs').get_by_role('button', name='自定义 Prompt', exact=True).click()
         expect(page.locator('.wb-operators .wb-source-body')).to_contain_text('{{ payload | json }}')
         assert pending
         for route, response in pending:
@@ -168,6 +168,6 @@ def test_directory_late_material_cannot_replace_other_selected_operator(original
         expect(page.locator('.wb-operators .wb-source-body')).to_contain_text('{{ payload | json }}')
         page.unroute('**/plan-node-detail', delay)
         app.plan_snapshots._ttl = 0
-        page.locator('.wb-operators').get_by_role('button', name='入参', exact=True).click()
+        page.locator('.wb-operators').get_by_role('button', name='输入', exact=True).click()
         expect(page.locator('.wb-operators .wb-source-body')).to_contain_text('解析快照已过期')
         expect(page.locator('.wb-operators .wb-source-body')).not_to_contain_text('{{ payload | json }}')

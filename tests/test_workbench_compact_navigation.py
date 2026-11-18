@@ -29,7 +29,7 @@ def test_compact_tabs_keep_real_plan_selection_and_history_context(original, tmp
         expect(page.get_by_role('combobox', name='解析配置路径')).to_be_hidden()
         initial = len([u for m, u in requests if m == 'POST' and u.endswith('/plan-preview')])
         page.locator('.wb-node').filter(has_text='联合出题').click()
-        page.locator('.wb-source-tabs').get_by_role('button', name='Prompt', exact=True).click()
+        page.locator('.wb-source-tabs').get_by_role('button', name='自定义 Prompt', exact=True).click()
         expect(page.locator('.wb-node-panel')).to_be_visible()
         expect(page.locator('.wb-node-panel .wb-source-body')).to_contain_text('{{ payload | json }}')
         tab(page, '算子')

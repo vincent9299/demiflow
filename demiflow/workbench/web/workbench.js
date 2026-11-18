@@ -93,7 +93,7 @@
     operatorHeading.append($('h3','算子目录'),operatorCount);operators.append(operatorHeading);
     const operatorBasis=$('p',undefined,'wb-caption'),operatorControls=$('div'),operatorSearch=$('input'),operatorList=$('div',undefined,'wb-operator-list'),operatorEmpty=$('p',undefined,'wb-caption');
     operatorSearch.type='search';operatorSearch.placeholder='搜索算子名称或类型';operatorSearch.maxLength=160;operatorSearch.setAttribute('aria-label','搜索算子');
-    const operatorLayout=$('div',undefined,'wb-operator-layout'),operatorSidebar=$('nav',undefined,'wb-operator-sidebar'),operatorViewer=$('section',undefined,'wb-operator-viewer'),operatorActions=$('div'),operatorPlaceholder=$('p','选择左侧算子，查看 API、入参、Schema、代码或 Prompt。','wb-caption');
+    const operatorLayout=$('div',undefined,'wb-operator-layout'),operatorSidebar=$('nav',undefined,'wb-operator-sidebar'),operatorViewer=$('section',undefined,'wb-operator-viewer'),operatorActions=$('div'),operatorPlaceholder=$('p','选择左侧算子，查看 API 接口、输入、输出、自定义算子代码或自定义 Prompt。','wb-caption');
     operatorSidebar.setAttribute('aria-label','Pipeline 算子');operatorViewer.setAttribute('aria-label','算子内容');
     operatorSidebar.append(operatorSearch,operatorList,operatorEmpty);operatorViewer.append(operatorActions,operatorPlaceholder);operatorLayout.append(operatorSidebar,operatorViewer);
     operatorHeading.append(operatorBasis);operators.append(operatorControls,operatorLayout);
@@ -147,7 +147,7 @@
     for(const[key,label]of [['logs','运行日志'],['observations','节点证据'],['events','控制事件']])detailButtons.set(key,button(label,async()=>{detailKind=key;await loadRunDetail(true);updateActions();},detailTabs));
     const bottom=$('section',undefined,'wb-source'),sourceHeader=$('div',undefined,'wb-source-header'),sourceTitle=$('strong','节点源码'),sourceTabs=$('div',undefined,'wb-source-tabs'),sourceBody=$('div',undefined,'wb-source-body');
     const sourceButtons=new Map();
-    for(const[key,label]of [['callsite','API 调用'],['configuration','入参'],['schema','输入 / 输出'],['implementation','实现代码'],['prompt','Prompt']])sourceButtons.set(key,button(label,async()=>{sourceKind=key;sourceOpen=true;sourceBody.hidden=false;sourceTabs.hidden=false;await loadSource();},sourceTabs));
+    for(const[key,label]of [['callsite','API接口'],['configuration','输入'],['schema','输出'],['implementation','自定义算子代码'],['prompt','自定义 Prompt']])sourceButtons.set(key,button(label,async()=>{sourceKind=key;sourceOpen=true;sourceBody.hidden=false;sourceTabs.hidden=false;await loadSource();},sourceTabs));
     sourceHeader.append(sourceTitle);const sourceToggle=button('收起代码',async()=>{sourceOpen=!sourceOpen;sourceBody.hidden=sourceTabs.hidden=!sourceOpen;sourceSequence++;disposeReaders(sourceBody);sourceBody.replaceChildren();if(sourceOpen)await loadSource();updateActions();},sourceHeader);bottom.append(sourceHeader,sourceTabs,sourceBody);inspectorDetails.before(bottom);
     const results=$('section',undefined,'wb-results');results.hidden=true;root.append(results);
     const documents=details('当前项目检查与来源',checks);
@@ -264,7 +264,7 @@
       const previewNode=planPreview?.dag.nodes.find(n=>n.occurrence_id===previewSelection?.occurrenceId);
       for(const[key,b]of sourceButtons){
         b.classList.toggle('active',sourceKind===key);b.setAttribute('aria-pressed',String(sourceKind===key));
-        b.disabled=previewNode?previewNode.source_views?.[key]?.available!==true:key==='schema';
+        b.disabled=previewNode?!sourceAvailable(previewNode,key):key==='schema';
         b.title=b.disabled?(previewNode?.source_views?.[key]?.reason||'本节点没有已核验的这类材料。'):'';
       }
       for(const[key,b]of detailButtons){b.classList.toggle('active',detailKind===key);b.disabled=!run;}
@@ -432,7 +432,7 @@
         row.type='button';name.className='wb-operator-name';row.append($('span',String(index+1).padStart(2,'0'),'wb-operator-number'),name,kind);
         const node=planPreview?.dag.nodes.find(n=>n.occurrence_id===card.selection.occurrenceId);
         const materials=node?.source_views;
-        const available=materials?[['callsite','API'],['configuration','入参'],['schema','Schema'],['implementation','代码'],['prompt','Prompt']].filter(([key])=>materials[key]?.available).map(([,label])=>label):[];
+        const available=materials?[['callsite','API接口'],['configuration','输入'],['schema','输出'],['implementation','代码'],['prompt','Prompt']].filter(([key])=>sourceAvailable(node,key)).map(([,label])=>label):[];
         if(available.length)row.append($('span',available.join(' · '),'wb-operator-materials'));
         const apiCall=node?.api_call;if(apiCall)row.append($('code',apiCall.summary,'wb-operator-api'));
         const content=$('div',undefined,'wb-operator-content'),links=$('div',undefined,'wb-inline-actions');
@@ -846,42 +846,50 @@
       const value=p=>{
         if(p.value?.type==='Dataset')return 'Dataset · 上游数据流';
         if(p.value?.type==='function')return p.value.reference;
-        if(p.value?.type==='Schema'&&p.value.fields)return 'Schema · '+p.value.fields.length+' 个字段（见输入 / 输出）';
+        if(p.value?.type==='Schema'&&p.value.fields)return 'Schema · '+p.value.fields.length+' 个字段（见下方声明）';
         if(p.value?.unavailable)return p.value.type+' · '+p.value.unavailable;
         return typeof p.value==='string'?p.value:json(p.value);
       };
-      const render=(target,items)=>materialTable(target,['入参','调用表达式 / 来源','绑定值'],items.map(p=>[p.name,
+      const render=(target,items)=>materialTable(target,['参数','调用表达式 / 来源','绑定值'],items.map(p=>[p.name,
         p.expression||(p.origin==='default'?'API 默认值':'字典展开或 API 默认值'),value(p)]));
       if(meta.expansions?.length)parent.append($('p','字典展开：'+meta.expansions.map(x=>'**'+x).join('，'),'wb-caption'));
       if(provided.length)render(parent,provided);
-      if(defaults.length)render(details('API 默认入参（'+defaults.length+'）',parent),defaults);
+      if(defaults.length)render(details('API 默认参数（'+defaults.length+'）',parent),defaults);
     }
-    function schemaMaterial(parent,meta){
-      function schemaBlock(title,schema){
+    function sourceAvailable(node,kind){
+      return node?.source_views?.[kind]?.available===true
+        ||kind==='configuration'&&node?.source_views?.schema?.available===true;
+    }
+    function schemaMaterial(parent,meta,{input=false}={}){
+      function schemaBlock(title,schema,folded=false){
         const section=$('section',undefined,'wb-schema-section');section.append($('h4',title));parent.append(section);
         section.append($('p',schema.basis||schema.reason||'尚无 Schema 声明','wb-caption'));
-        if(schema.fields?.length)materialTable(section,['字段','类型','允许空值'],schema.fields.map(f=>[f.name,f.type??'未知',f.nullable===null?'未知':f.nullable?'是':'否']));
+        if(schema.fields?.length)materialTable(folded?details('展开 Schema · '+schema.fields.length+' 个字段',section):section,
+          ['字段','类型','允许空值'],schema.fields.map(f=>[f.name,f.type??'未知',f.nullable===null?'未知':f.nullable?'是':'否']));
         if(schema.truncated)section.append($('p','字段较多，仅显示前 256 个。','wb-caption'));
       }
-      if(!meta.inputs.length)parent.append($('p','数据源节点：没有上游 Dataset 输入。','wb-caption'));
-      for(const input of meta.inputs){const upstream=planPreview?.dag.nodes.find(n=>n.occurrence_id===input.producer);
-        const port=({left:'左侧输入',right:'右侧输入',main:'输入'})[input.port]||'输入 '+input.port;
-        schemaBlock(port+(upstream?' · '+upstream.label:''),input.schema);}
-      schemaBlock('输出行 Schema',meta.output);
-      for(const declared of meta.declarations||[])schemaBlock('API 声明 · '+declared.parameter+(declared.expression?' = '+declared.expression:''),
-        {fields:declared.fields,basis:'调用者显式传入的 Schema 约束；不同于上游数据已验证的完整结构。'});
-
-      if(Object.keys(meta.bindings||{}).length){const box=details('字段绑定（不等于完整 Schema）',parent);box.append($('pre',json(meta.bindings),'wb-code'));}
-      parent.append($('p',meta.note,'wb-caption'));
+      if(input){
+        if(!meta.inputs.length)parent.append($('p','数据源节点：没有上游 Dataset 输入。','wb-caption'));
+        for(const item of meta.inputs){const upstream=planPreview?.dag.nodes.find(n=>n.occurrence_id===item.producer);
+          const port=({left:'左侧 Dataset',right:'右侧 Dataset',main:'上游 Dataset'})[item.port]||'上游 Dataset · '+item.port;
+          schemaBlock(port+(upstream?' · '+upstream.label:''),item.schema,true);}
+        for(const declared of meta.declarations||[])schemaBlock('Schema 参数 · '+declared.parameter+(declared.expression?' = '+declared.expression:''),
+          {fields:declared.fields,basis:'调用者显式传入的 Schema 约束；不同于上游数据已验证的完整结构。'},true);
+      }else{
+        schemaBlock('输出行 Schema',meta.output);
+        if(meta.note)parent.append($('p',meta.note,'wb-caption'));
+      }
+      const bindings=Object.fromEntries(Object.entries(meta.bindings||{}).filter(([key])=>input?key==='inputs':key!=='inputs'));
+      if(Object.keys(bindings).length){const box=details('字段绑定（不等于完整 Schema）',parent);box.append($('pre',json(bindings),'wb-code'));}
     }
     async function loadPreviewSource(){
       savePreviewLocator();
       const preview=planPreview,selected=previewSelection,kind=sourceKind;
       const node=preview.dag.nodes.find(n=>n.occurrence_id===selected.occurrenceId&&n.logical_node_id===selected.logicalNodeId);
       const ticket=state.capture(),sequence=++sourceSequence;
-      const names={implementation:'实现源码',prompt:'Prompt 模板',configuration:'API 入参',callsite:'API 调用',schema:'输入 / 输出 Schema'};
+      const names={implementation:'自定义算子代码',prompt:'自定义 Prompt',configuration:'输入',callsite:'API接口',schema:'输出'};
       sourceTitle.textContent=names[kind]+' · '+(node?.label||node?.op_kind||'节点');
-      if(!node?.source_views?.[kind]?.available){
+      if(!sourceAvailable(node,kind)){
         sourceBody.append($('p',node?.source_views?.[kind]?.reason||'本节点尚无绑定材料；不从静态检查节点推测对应关系。','wb-caption'));return;
       }
       const basis={kind:'preview',entry:preview.basis.entry,params:preview.basis.params,digest:preview.basis.digest,dag_id:preview.basis.dag_id};
@@ -890,21 +898,39 @@
         &&planPreview?.basis.digest===basis.digest&&previewSelection?.occurrenceId===node.occurrence_id&&sourceKind===kind;
       sourceBody.append($('p','正在读取解析时快照…','wb-caption'));
       try{
-        const value=await request('plan-node-detail',{},address);
+        // Input combines arguments and upstream schemas from the same immutable
+        // node snapshot. Keep wire kinds compatible with stored previews.
+        const kinds=kind==='configuration'?['configuration','schema'].filter(k=>node.source_views?.[k]?.available):[kind];
+        const values=await Promise.all(kinds.map(k=>request('plan-node-detail',{},{...address,kind:k})));
         if(!valid())return;
-        if(value?.format!=='demiflow.plan_node_detail.v1'||value.logical_node_id!==address.logical_node_id
-            ||value.occurrence_id!==address.occurrence_id||value.kind!==kind
-            ||Object.keys(basis).some(k=>value.basis?.[k]!==basis[k])||value.source_basis!=='compiled_snapshot')
-          throw new Error('节点材料身份不一致，请重新解析。');
+        for(const [index,value]of values.entries()){
+          if(value?.format!=='demiflow.plan_node_detail.v1'||value.logical_node_id!==address.logical_node_id
+              ||value.occurrence_id!==address.occurrence_id||value.kind!==kinds[index]
+              ||Object.keys(basis).some(k=>value.basis?.[k]!==basis[k])||value.source_basis!=='compiled_snapshot')
+            throw new Error('节点材料身份不一致，请重新解析。');
+        }
         disposeReaders(sourceBody);sourceBody.replaceChildren();
+        if(kind==='configuration'){
+          sourceBody.append($('div','解析时快照','wb-caption wb-material-basis'));
+          for(const value of values){
+            if(value.availability!=='available'){sourceBody.append($('p',value.reason||'本节点没有这类材料。','wb-caption'));continue;}
+            if(value.kind==='schema'){schemaMaterial(sourceBody,value.metadata,{input:true});continue;}
+            const meta=value.metadata;
+            if(meta?.note)sourceBody.append($('p',meta.note,'wb-caption wb-parameter-explanation'));
+            if(meta?.arguments)parameterRows(sourceBody,meta);
+            else if(typeof value.text==='string')mountText(sourceBody,value.text,{sourceOnly:true,compactSource:true});
+            if(meta?.engine_configuration)raw('引擎内部描述（只读）',meta.engine_configuration,sourceBody);
+            if(value.truncated)sourceBody.append($('p','正文超过展示上限，当前只显示开头。','wb-caption'));
+          }
+          if(!kinds.includes('schema'))sourceBody.append($('p',node.source_views?.schema?.reason||'这份快照没有上游数据的 Schema 材料。','wb-caption'));
+          raw('来源摘要',{materials:values.map(v=>({kind:v.kind,sha256:v.sha256})),dag_id:basis.dag_id,occurrence_id:node.occurrence_id},sourceBody);
+          return;
+        }
+        const value=values[0];
         if(value.availability!=='available'){sourceBody.append($('p',value.reason||'本节点没有这类材料。','wb-caption'));return;}
         sourceBody.append($('div','解析时快照'+(value.path?' · '+value.path:'')+(value.start_line?' : '+value.start_line+'–'+value.end_line:''),'wb-caption wb-material-basis'));
-        if(kind==='callsite')sourceBody.append($('p','这是当前算子的实际 API 调用；字典展开后的绑定值见“入参”，行结构见“输入 / 输出”。','wb-caption'));
+        if(kind==='callsite')sourceBody.append($('p','这是当前算子的实际 API 调用；参数及上游数据结构见“输入”，结果数据结构见“输出”。','wb-caption'));
         const meta=value.metadata;
-        if(meta&&kind==='configuration'){
-          sourceTitle.textContent=(meta.display_title||'API 入参')+' · '+(node.label||node.op_kind);
-          if(meta.note)sourceBody.append($('p',meta.note,'wb-caption wb-parameter-explanation'));
-        }
         if(meta&&kind==='prompt'){
           const header=$('div',undefined,'wb-prompt-summary');
           for(const [label,item] of [['版本',meta.version],['模型',meta.model],['服务',meta.transport],['响应格式',meta.response_format],['请求上限',meta.max_requests]])
@@ -914,8 +940,7 @@
           contract.append($('pre',json({inputs:meta.inputs,output:meta.output,outputs:meta.outputs,response_schema:meta.response_schema,...(meta.routes?{routes:meta.routes}:{})}),'wb-code'));
         }
         if(typeof value.text!=='string')throw new Error('节点材料没有可读取的正文。');
-        if(kind==='configuration'&&meta?.arguments)parameterRows(sourceBody,meta);
-        else if(kind==='schema'&&meta?.output)schemaMaterial(sourceBody,meta);
+        if(kind==='schema'&&meta?.output)schemaMaterial(sourceBody,meta);
         else {
           if(kind==='callsite'&&meta?.api)sourceBody.append($('code',meta.api,'wb-api-name'));
           const text=$('div',undefined,kind==='prompt'?'wb-prompt-text':'wb-implementation-text');sourceBody.append(text);
@@ -925,7 +950,6 @@
             mountText(context,meta.context,{sourceOnly:true,compactSource:true});
           }
         }
-        if(kind==='configuration'&&meta?.engine_configuration)raw('引擎内部描述（只读）',meta.engine_configuration,sourceBody);
         if(value.truncated)sourceBody.append($('p','正文超过 64 KiB 展示上限，当前只显示开头；摘要绑定完整原文。','wb-caption'));
         raw('来源摘要',{sha256:value.sha256,dag_id:basis.dag_id,occurrence_id:node.occurrence_id},sourceBody);
       }catch(error){
@@ -938,7 +962,7 @@
       if(!sourceOpen)return;
       if(planPreview&&previewSelection&&!run)return loadPreviewSource();
       const g=data().graph,selection=data().selection,node=selection?.reportNodeId??data().node,ticket=state.capture(true),sequence=++sourceSequence;
-      if(!g||!node){sourceBody.append($('p','选择节点后查看 API 调用、入参和实现。','wb-caption'));return;}
+      if(!g||!node){sourceBody.append($('p','选择节点后查看 API 接口、输入、输出和自定义实现。','wb-caption'));return;}
       if(g.binding.basis_kind==='run'&&selection&&!selection.reportNodeId){sourceBody.append($('p','该出现尚无节点身份桥；不借用其它节点的源码。','wb-caption'));return;}
       sourceBody.append($('p','正在读取绑定来源…','wb-caption'));
       const query={graph_binding:JSON.stringify(g.binding),node_id:node,kind:sourceKind};
@@ -1396,7 +1420,7 @@
         try{await compilePlanPreview();
           if(planPreview?.basis.digest===saved.digest){const card=graphModel?.nodes.find(n=>n.selection.occurrenceId===saved.occurrence);
             if(card){paintPreviewNode(card.selection);const node=planPreview.dag.nodes.find(n=>n.occurrence_id===saved.occurrence);
-              if(node.source_views?.[saved.kind]?.available){sourceKind=saved.kind;await loadSource();}}}
+              if(sourceAvailable(node,saved.kind)){sourceKind=saved.kind;await loadSource();}}}
           if(!userNavigation&&planPreview&&(view.panel==='operators'||!view.panel&&saved.mode==='operators')){activePage='operators';state.setMode('operators');operatorKey=previewSelection?.key||null;paintOperators(graphModel);updateActions();savePreviewLocator();rememberPanel();}
         }catch(error){if(error.name!=='AbortError')message('重新解析未完成：'+error.message,'error-box');}
       }

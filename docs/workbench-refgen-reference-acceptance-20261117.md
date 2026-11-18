@@ -274,3 +274,19 @@ Prompt 模板、模型、请求预算、输入输出字段绑定及响应 JSON S
 现场复核追加：图上 API 摘要显示两行，join 键不再被单行截断；上游 Dataset 用人类可读
 文字展示。真实页面发现 Schema 读取入口曾有第二份材料类型白名单，已合并为共享 KINDS，
 并补入真实 HTTP 与浏览器 Schema 读取断言，防止只在 Python 材料构建层通过。
+
+### 2026-11-18：统一输入与输出阅读入口
+
+按真人确认，算子材料标签固定为：**API接口｜输入｜输出｜自定义算子代码｜自定义 Prompt**。
+“输入”包含真实 API 参数（表达式、绑定值、默认值）以及各上游 Dataset 可展开的 Schema；
+显式 Schema 参数也在输入下展示，不被误当成已验证的输出事实。“输出”仅展示结果行结构
+及输出字段绑定，未知结构仍如实标注。读取源没有上游 Dataset，不影响其 API 参数展示。
+
+这是工作台呈现层调整：复用原 configuration / schema 材料与同一不可变快照，未改引擎、
+公开 API、编译或执行。组合读取逐项校验项目/节点/计划/摘要，快速切换、过期和迟到响应
+沿用原保护。图与目录共用五个标签；已有浏览器保存的材料选择无需迁移。
+
+验证入口：`tests/test_workbench_pipeline_source.py`、`test_workbench_plan_node_details_ui.py`、
+`test_workbench_operator_directory.py`、`test_workbench_compact_navigation.py`。
+新增断言并入现有真实浏览器用例，覆盖双 Dataset 参数及可展开 Schema、输出不混入参数、
+刷新恢复“输入”、组合读取迟到不覆盖新选择。现场证据在预览目录的 `input-output-tabs-live.json`。
