@@ -127,7 +127,7 @@ class LocalExecutionSession:
 def local_execution(*, workers=4, worker_mode=None, partitions=None,
                     batch_rows=8192, memory_bytes=256 * 1024 * 1024,
                     temp_directory=None, native_resources=None, unified_chain=True,
-                    unified_queue_chain=True):
+                    unified_queue_chain=True, planning=None):
     """Bind existing Dataset readers to a single-machine partition executor.
 
     Callbacks must be partition-local: no driver side effects or dependence on
@@ -135,6 +135,9 @@ def local_execution(*, workers=4, worker_mode=None, partitions=None,
     notebook functions; thread mode is for I/O or code releasing the GIL. Row
     order and within-key fold order are preserved. No retry of arbitrary UDFs.
     Actions must run inside this context; it closes all owned worker resources.
+    planning optionally supplies the same validated platform planning policy as
+    a Pipeline driver. Explicit worker limits remain bounded by that policy;
+    omitting planning retains the platform defaults, including 32 workers.
     native_resources optionally tightens native query limits separately from
     Python workers/memory_bytes; shared admission and sampled guards remain.
     unified_chain selects the platform-side unified Runtime for stream-op
@@ -153,6 +156,8 @@ def local_execution(*, workers=4, worker_mode=None, partitions=None,
     """
     from ..data.api import _current_executor, _use_executor
     from .executors.local import LocalDatasetExecutor
+    from ..planning.policy import parse_platform_planning_policy
+    planning_policy = parse_platform_planning_policy(planning)
     if _current_executor.get() is not None:
         raise ValueError("local_execution cannot replace a bound Pipeline or nested executor")
     options = LocalKernelOptions(workers, "process" if worker_mode is None else worker_mode,
@@ -164,6 +169,7 @@ def local_execution(*, workers=4, worker_mode=None, partitions=None,
     except ImportError as exc:
         raise ImportError("local_execution requires the demiflow cloudpickle dependency") from exc
     executor = LocalDatasetExecutor(workers=workers, local_kernel=options,
+                                    planning_policy=planning_policy,
                                     unified_chain=unified_chain,
                                     unified_queue_chain=unified_queue_chain)
     from .run_context import execution_scope
