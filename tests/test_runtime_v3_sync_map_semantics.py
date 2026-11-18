@@ -90,8 +90,11 @@ def test_sync_map_hidden_awaitable_is_rejected_without_running_it(tmp_path, exec
     assert not path.exists()
 
 
-@pytest.mark.parametrize('execution', ['inline', 'thread'])
-@pytest.mark.parametrize('async_callback', [False, True])
+# execution='thread' runs a synchronous callable, so an asynchronous callback is only legal
+# inline. The former fourth combination (asynchronous callback on a thread) is the separate
+# rejection test below; the ids of the three legal combinations are unchanged.
+@pytest.mark.parametrize('async_callback,execution', [(False, 'inline'), (False, 'thread'), (True, 'inline')],
+                         ids=['False-inline', 'False-thread', 'True-inline'])
 def test_callback_cancel_preserves_exception_closes_actor_and_does_not_commit(tmp_path, execution, async_callback):
     path = tmp_path / 'events'
     async def cancel_async():
@@ -110,6 +113,23 @@ def test_callback_cancel_preserves_exception_closes_actor_and_does_not_commit(tm
                 ds.map_async(Cancel(), execution=execution, catch=(Exception,)).take_all()
             else:
                 ds.map(Cancel, execution=execution, catch=(Exception,)).take_all()
+    assert [item['event'] for item in events(path)] == ['close']
+    assert not run.journal.execution_commits('action-1')
+
+
+def test_thread_callback_returning_an_awaitable_is_rejected_closes_actor_and_does_not_commit(tmp_path):
+    path = tmp_path / 'events'
+    async def never_awaited():
+        emit(path, 'awaited')
+        raise asyncio.CancelledError('callback cancelled')
+    class Hidden:
+        def __call__(self, row):
+            return never_awaited()
+        async def aclose(self):
+            emit(path, 'close')
+    with pytest.raises(TypeError, match='awaitable'):
+        with RunContext.start(tmp_path / 'run') as run, data.local_execution():
+            data.from_items([{'i': 1}]).map_async(Hidden(), execution='thread').take_all()
     assert [item['event'] for item in events(path)] == ['close']
     assert not run.journal.execution_commits('action-1')
 
