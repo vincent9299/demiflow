@@ -11,7 +11,7 @@ from demiflow.execution.dataflow_api import _CompileContext
 from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.planning.dataflow_compile import lower_action
 from demiflow.planning.dataflow_place import partition_stages
-from demiflow.planning.dataflow_policy import resolve_runtime_policy
+from demiflow.planning.dataflow_policy import fit_default_stream_windows, resolve_runtime_policy
 from demiflow.planning.dataflow_thread_fusion import fuse_thread_suffix
 from demiflow.resources.contracts import ResourceProfile
 
@@ -36,6 +36,10 @@ def compiled(workers=4, mode='process', *, streaming=False, dataset=None):
     request = ActionRequest(kind='take_all', source=dataset._source, plan=dataset._plan,
         arguments={}, sink=None, programs=(), provider='local', action=action)
     policy, bounds = resolve_runtime_policy({'max_active_workers': workers, 'worker_mode': mode}, {}, provider='local')
+    # The public entry fits the default windows to the simultaneous workload before it
+    # lowers the plan (dataflow_api.resolve_action_runtime). Prepare the bounds the same way,
+    # so these structural checks see the plan a default run actually gets.
+    bounds = fit_default_stream_windows(request, policy=policy, bounds=bounds)
     graph = lower_action(request, bounds=bounds).graph
     return graph, partition_stages(graph, policy=policy, bounds=bounds), policy, bounds
 
