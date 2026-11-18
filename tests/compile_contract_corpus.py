@@ -189,17 +189,21 @@ class _Report:
 
 
 def _walk(source, plan, seen):
-    """Every (source, operation) object reachable from a request, in a stable order."""
-    if id(source) in seen:
-        return
-    seen[id(source)] = source
-    yield 'source', source
-    for name in ('left', 'right'):
-        child = getattr(source, name, None)
-        if child is not None and hasattr(child, 'plan'):
+    """Every (source, operation) object reachable from a request, in a stable order.
+
+    A source reached a second time is not walked again, but the operations of the
+    plan that reached it are: a report context binds every operation of every
+    branch, including branches that share a source.
+    """
+    if id(source) not in seen:
+        seen[id(source)] = source
+        yield 'source', source
+        for name in ('left', 'right'):
+            child = getattr(source, name, None)
+            if child is not None and hasattr(child, 'plan'):
+                yield from _walk(child.source, child.plan, seen)
+        for child in getattr(source, 'inputs', ()) or ():
             yield from _walk(child.source, child.plan, seen)
-    for child in getattr(source, 'inputs', ()) or ():
-        yield from _walk(child.source, child.plan, seen)
     for operation in plan.operations:
         if id(operation) in seen:
             continue
