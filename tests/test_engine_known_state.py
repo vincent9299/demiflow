@@ -88,6 +88,21 @@ def test_same_nodeid_failing_differently_is_reported():
     assert [item[0] for item in setup_crash['changed']] == [A]      # same message, other phase
 
 
+def test_one_more_failing_subtest_is_a_change():
+    def subtests(entries):
+        reports = [report(A, 'setup', 'passed')]
+        for entry in entries:
+            reports.append(dict(report(A, 'call', 'failed', 'x.py:1: in t\nE   AssertionError: 1 != 0'), subtest={'schema': 'pytest.subtest.v1', 'index': 1, 'message': None, 'parameters': {'entry': entry}}))
+        return reports + [report(A, 'call', 'passed'), report(A, 'teardown', 'passed')]
+    two = state(subtests(['a', 'b']))
+    assert two['outcome'] == 'failed' and two['failure']['failed_reports'] == 2
+    base = known({'tests/t.py': ['a']}, {A: subtests(['a', 'b'])})
+    assert ks.is_clean(compare(base, {'tests/t.py': ['a']}, {A: two}))
+    three = compare(base, {'tests/t.py': ['a']}, {A: state(subtests(['a', 'b', 'c']))})
+    other = compare(base, {'tests/t.py': ['a']}, {A: state(subtests(['a', 'c']))})
+    assert [item[0] for item in three['changed']] == [A] and [item[0] for item in other['changed']] == [A]
+
+
 def test_new_failure_fixed_entry_and_missing_report():
     base = known({'tests/t.py': ['a', 'b', 'c']}, {A: call_failed(A, 'AssertionError: no')})
     result = compare(base, {'tests/t.py': ['a', 'b', 'c']},

@@ -98,17 +98,29 @@ def node_state(reports, paths=()):
 
     Returns (outcome, phases, failure). outcome is passed / failed (the call failed) /
     error (setup or teardown failed) / skipped / incomplete (a phase is missing, e.g. the
-    process died). A subtest report is folded into its phase: any failed subtest fails it.
+    process died). A subtest report is folded into its phase: any failed subtest fails it,
+    and the failure record binds how many reports failed and which.
     """
     phases = {}
     failure = None
+    failed = []
     for report in reports:
         when, outcome = report['when'], report['outcome']
         if phases.get(when) != 'failed':
             phases[when] = outcome
-        if outcome == 'failed' and failure is None:
+        if outcome == 'failed':
             reason = stable_reason(report.get('detail'), paths)
-            failure = {'when': when, 'type': failure_type(reason), 'reason': reason}
+            subtest = report.get('subtest') or {}
+            which = json.dumps([subtest.get('message'), subtest.get('parameters')], sort_keys=True) if subtest else ''
+            failed.append([when, which, reason])
+            if failure is None:
+                failure = {'when': when, 'type': failure_type(reason), 'reason': reason}
+    if len(failed) > 1:
+        # Several failed reports under one nodeid (subtests, or a call and its teardown): the
+        # first one is shown, all of them are bound, so one more failing subtest is a change.
+        failure['failed_reports'] = len(failed)
+        failure['failed_reports_sha256'] = hashlib.sha256(
+            json.dumps(sorted(failed), separators=(',', ':')).encode()).hexdigest()
     if 'setup' not in phases or (phases.get('setup') == 'passed' and ('call' not in phases or 'teardown' not in phases)):
         return 'incomplete', phases, failure
     if phases.get('setup') == 'failed' or phases.get('teardown') == 'failed':
@@ -201,7 +213,8 @@ def read_run(collection_path, execution_roots):
 def signature(state):
     """What must stay the same for a known entry to count as unchanged."""
     failure = state.get('failure') or {}
-    return (state['outcome'], failure.get('when', ''), failure.get('type', ''), failure.get('reason', ''))
+    return (state['outcome'], failure.get('when', ''), failure.get('type', ''), failure.get('reason', ''),
+            failure.get('failed_reports', 1 if failure else 0), failure.get('failed_reports_sha256', ''))
 
 
 def annotate(rules, nodeid, state):
