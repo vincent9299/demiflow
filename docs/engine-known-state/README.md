@@ -42,3 +42,29 @@ The full-run snapshot remains labelled 83b528e; its input digests are not rewrit
 the release commit. Publication metadata in the shared review directory binds the actual main
 tag to this full run, those delta receipts, the final merge gate and the unchanged production
 source comparison. A known-state entry is not an xfail and is never counted as a pass.
+
+## 2026-11-19 release rules and submitted-delivery integration
+
+`3640116.json` records the actual fixed four-lane run after the engine repairs,
+P12 design v2.1 and exact provider-version qualification were merged. The
+standard inventory also includes all newly changed test files omitted from the
+previous release list; first-run outcomes are retained.
+
+Collected: 6,180. Executed: 5,931 (5,579 passed, 157 failed, 34 errors, 161 skipped).
+The 249 collected-but-not-executed cases are explicitly listed; GPU/multi-host,
+performance and recursive suite drivers retain the previously recorded scope
+limits. The postponed Lance performance file is not counted as a pass.
+
+Two new failed fault-injection fixtures are repaired separately in `659ea31`:
+explicit unconfirmed-row admission and the original finite byte windows keep
+the intended fault boundaries. All 48 original assertions remain; two assertions
+are added. Five related files: 31 passed, one standard-environment Ray skip whose
+node passed in the full Ray lane. A separate delayed-ACK reproduction confirms
+the repaired admission fixture. The navigation-browser test's missing Chromium
+skip is retained alongside a passing private-service run with the installed
+browser selected explicitly. No production source changed after 3640116.
+
+The final main tag is bound in the external release record to this original
+snapshot, delta receipts, input-digest comparison and the final pre-commit merge
+gate. Do not rewrite this snapshot to the later documentation/fixture commit or
+call the raw suite all-green. Future releases follow `../repository-rules.md`.
