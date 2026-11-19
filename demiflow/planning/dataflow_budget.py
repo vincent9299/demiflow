@@ -260,16 +260,8 @@ def codec_window(kernel, operation, bounds):
     return (minimum, target) if target > minimum else None
 
 
-def fit_codec_windows(nodes, edges, codec_windows, publication_windows, bounds):
-    """Share only optional codec slack inside each incremental component.
-
-    Input/output/state and terminal index minima remain fully additive.
-    Finite-complete edges separate natural phases; no source is upgraded to
-    checkpointable and no existing sealed graph is passed through this code.
-    The physical solver still accounts for replicas, hosts and real grants;
-    actual typed codec allocations must still pass the runtime peak guard.
-    """
-    from .dataflow_compile import _plain
+def incremental_components(nodes, edges):
+    """Node-index groups that must coexist; finite inputs split natural phases."""
     parents = list(range(len(nodes)))
     def owner(index):
         while parents[index] != index:
@@ -283,6 +275,20 @@ def fit_codec_windows(nodes, edges, codec_windows, publication_windows, bounds):
     groups = {}
     for index in range(len(nodes)):
         groups.setdefault(owner(index), []).append(index)
+    return groups
+
+
+def fit_codec_windows(nodes, edges, codec_windows, publication_windows, bounds):
+    """Share only optional codec slack inside each incremental component.
+
+    Input/output/state and terminal index minima remain fully additive.
+    Finite-complete edges separate natural phases; no source is upgraded to
+    checkpointable and no existing sealed graph is passed through this code.
+    The physical solver still accounts for replicas, hosts and real grants;
+    actual typed codec allocations must still pass the runtime peak guard.
+    """
+    from .dataflow_compile import _plain
+    groups = incremental_components(nodes, edges)
     control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
     available = bounds.max_resident_bytes - control
     phased_publication = False

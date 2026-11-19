@@ -197,6 +197,7 @@ def fit_default_stream_windows(request, *, policy, bounds, explicit_limits=()):
     The allocator still makes the admission decision on the resulting profiles.
     """
     from dataclasses import replace
+    from fractions import Fraction
     from .dataflow_compile import lower_action
     from .dataflow_place import partition_stages
     adjustable = {'max_row_bytes', 'max_batch_bytes', 'max_state_bytes'} - set(explicit_limits)
@@ -204,26 +205,43 @@ def fit_default_stream_windows(request, *, policy, bounds, explicit_limits=()):
         return bounds
     for _ in range(8):
         graph = lower_action(request, bounds=bounds).graph
-        from ..execution.dataflow_publication_budget import phased
-        if any(n.kind == 'terminal' and phased(n.kernel.configuration) for n in graph.nodes):
-            # These sealed finite phases already fit their own codec grants;
-            # a terminal-only driver reservation is not live upstream state.
-            return bounds
-        if policy.max_active_workers != 1 and any(port.requirement == 'finite_complete' for node in graph.nodes for port in node.kernel.inputs):
-            return bounds
         stages = partition_stages(graph, policy=policy, bounds=bounds)
-        resident = sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes'])
-                       * len(stage.partitions) for stage in stages)
-        control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
-        from ..execution.dataflow_publication_budget import graph_workspace_bytes
-        control += graph_workspace_bytes(graph)
-        available = bounds.max_resident_bytes - control
+        by_occurrence = {stage.occurrences[0]: stage for stage in stages}
+        if policy.max_active_workers == 1:
+            groups = [tuple(graph.nodes)]
+        else:
+            from .dataflow_budget import incremental_components
+            indices = {node.occurrence_id: index for index, node in enumerate(graph.nodes)}
+            edges = [(indices[edge.producer], edge.output_port,
+                      indices[edge.consumer], edge.input_port) for edge in graph.edges]
+            groups = [tuple(graph.nodes[index] for index in members)
+                      for members in incremental_components(graph.nodes, edges).values()]
+        from ..execution.dataflow_publication_budget import PublicationReservation
+        reservation = PublicationReservation(graph, stages, bounds)
+        # A finite input releases its producer before its consumer runs, but
+        # each incremental component must still fit. Returning on the first
+        # finite edge left downstream reducers and streaming suffixes with
+        # oversized implicit windows and forced otherwise avoidable parking.
+        demands = []
+        for group in groups:
+            members = [by_occurrence[node.occurrence_id] for node in group]
+            resident = sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes'])
+                           * len(stage.partitions) for stage in members)
+            available = bounds.max_resident_bytes - reservation.reserved(
+                stage.stage_id for stage in members)
+            demands.append((resident, available))
+        resident, available = max(demands, key=lambda pair: Fraction(pair[0], max(1, pair[1])))
         if resident <= available or available < 1:
             return bounds
         # Leave bounded slack for fixed parts and integer rounding. An explicit
         # large row must still fit its batch, and may correctly make it infeasible.
         changes = {name: max(1, getattr(bounds, name) * available * 9 // (resident * 10))
                    for name in adjustable}
+        if 'max_state_bytes' in changes and all(node.kernel.state == 'none' for node in graph.nodes):
+            # Pure kernels still publish recovery images. Their aggregate cut
+            # ceiling is not per-worker payload slack and must not shrink with
+            # row/batch windows when no live mutable state needs that space.
+            changes.pop('max_state_bytes')
         if 'max_state_bytes' in changes:
             # A terminal needs its first block/root even when no actor owns
             # state. Shrinking an unused default state ceiling below that

@@ -55,3 +55,37 @@ def test_unconfigured_public_stream_uses_adjusted_profile_and_zero_actor_instanc
             assert result.emitted == 0
     finally:
         executor.close()
+
+
+def test_finite_inputs_still_fit_the_downstream_streaming_component():
+    from demiflow import data
+    from test_runtime_v3_codec_profile_groups import request
+    from demiflow.planning.dataflow_budget import incremental_components
+    from demiflow.execution.dataflow_publication_budget import PublicationReservation
+
+    def source():
+        raise AssertionError('planning accessed the live iterator')
+        yield {'id': 1}
+
+    dataset = (data.from_iter(source).map(lambda row: row, concurrency=2, execution='thread')
+               .reduce_by_key('id', lambda acc, row: row))
+    action = request(dataset)
+    policy, original = resolve_runtime_policy({'max_active_workers': 2}, {}, provider='local')
+    bounds = fit_default_stream_windows(action, policy=policy, bounds=original)
+    assert bounds.max_row_bytes < original.max_row_bytes
+    assert bounds.max_resident_bytes == original.max_resident_bytes
+    assert fit_default_stream_windows(action, policy=policy, bounds=original,
+        explicit_limits=('max_row_bytes', 'max_batch_bytes', 'max_state_bytes')) == original
+    graph = lower_action(action, bounds=bounds).graph
+    assert any(port.requirement == 'finite_complete' for node in graph.nodes for port in node.kernel.inputs)
+    stages = partition_stages(graph, policy=policy, bounds=bounds)
+    owners = {stage.occurrences[0]: stage for stage in stages}
+    indices = {node.occurrence_id: i for i, node in enumerate(graph.nodes)}
+    groups = incremental_components(graph.nodes, [(indices[edge.producer], edge.output_port,
+        indices[edge.consumer], edge.input_port) for edge in graph.edges])
+    reservation = PublicationReservation(graph, stages, bounds)
+    for group in groups.values():
+        members = [owners[graph.nodes[i].occurrence_id] for i in group]
+        resident = sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes'])
+                       * len(stage.partitions) for stage in members)
+        assert resident + reservation.reserved(stage.stage_id for stage in members) <= bounds.max_resident_bytes
