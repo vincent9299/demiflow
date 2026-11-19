@@ -222,7 +222,8 @@ def test_r_c_existing_native_commit_recovers_without_republication(tmp_path):
     journal = RunJournal(tmp_path / 'run')
     before = journal.execution_commits('action-1')
     assert len(before) == 1 and before[0]['status'] == 'prepared'
-    from demiflow.workbench.runs.manager import _native_execution_receipt
+    # The workbench no longer re-exports the engine reader under a private name (P4).
+    from demiflow.execution.publication_facts import inspect_write_receipt as _native_execution_receipt
     projected = _native_execution_receipt(journal, 'action-1')
     assert projected['committed_version'] == 1
     assert journal.execution_commits('action-1') == before
@@ -327,14 +328,14 @@ def test_workbench_producer_requires_confirmed_absence(stopped_workbench):
         aid, journal.execution_action(aid)['declaration'], intent)
     assert prior_proof is not None
 
-    def register():
+    def register(errors=()):
         child = subprocess.run([sys.executable, '-B', '-c',
             'from test_gpt_write_recovery import _registration_child; import json,sys; '
             'print(json.dumps(_registration_child(sys.argv[1],sys.argv[2])))', str(f['root']), rid],
             cwd=repo, env=env, capture_output=True, text=True, timeout=45)
         assert child.returncode == 0, child.stdout + child.stderr
         result = json.loads(child.stdout)
-        assert result['errors'] == [], result
+        assert result['errors'] == list(errors), result
         assert result['events'] == before, 'admission must not invent recovered/result events'
         assert result['commits'] == [], 'admission must not invent commits or receipts'
         return result['admission']
@@ -346,8 +347,11 @@ def test_workbench_producer_requires_confirmed_absence(stopped_workbench):
     shutil.rmtree(uri)  # Only this test's freshly created foreign-target fixture.
 
     # Unreadable/malformed storage is not an absence proof.
+    # Since the workbench reads the target through the engine host (P4), a target
+    # that is not a table directory is reported, not passed over in silence. It is
+    # still no absence proof: the admission, events, commits and the file are unchanged.
     uri.write_text('not a Lance dataset')
-    assert register() == prior_proof
+    assert register(errors=['target: Native table location must be a directory']) == prior_proof
     assert uri.read_text() == 'not a Lance dataset'
     uri.unlink()
 
