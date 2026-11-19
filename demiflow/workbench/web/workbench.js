@@ -95,6 +95,22 @@
     const settings=$('div',undefined,'wb-settings');settings.hidden=true;root.append(settings);
     const historyPanel=$('nav',undefined,'wb-history wb-section-navigation');historyPanel.hidden=true;historyPanel.id='wb-run-navigation';historyPanel.setAttribute('aria-label','运行记录导航');root.append(historyPanel);
     const flowNavigation=$('nav',undefined,'wb-flow-navigation wb-section-navigation');flowNavigation.id='wb-flow-navigation';flowNavigation.setAttribute('aria-label','项目管道');flowNavigation.hidden=true;root.append(flowNavigation);
+    const flowHeader=ForgeNavigation.header({title:'管道',searchLabel:'搜索管道',onSearch:filterFlows});
+    const flowList=$('div',undefined,'wb-navigation-items');flowNavigation.append(flowHeader.element,flowList);
+    const runHeader=ForgeNavigation.header({title:'运行',searchLabel:'搜索运行',placeholder:'管道、已加载的运行',onSearch:filterRuns});
+    const runList=$('div',undefined,'wb-navigation-items');historyPanel.append(runHeader.element,runList);
+    function filterFlows(){
+      const term=flowHeader.search.value.trim().toLocaleLowerCase();
+      for(const row of flowList.querySelectorAll('.wb-flow-record'))row.hidden=!(row.title+' '+row.textContent).toLocaleLowerCase().includes(term);
+    }
+    function filterRuns(){
+      const term=runHeader.search.value.trim().toLocaleLowerCase();
+      for(const group of runList.querySelectorAll('.wb-run-group')){
+        const matches=group.querySelector('.wb-run-group-heading').title.toLocaleLowerCase().includes(term);
+        for(const row of group.querySelectorAll('.wb-run-record'))row.hidden=!matches&&!(row.title+' '+row.textContent).toLocaleLowerCase().includes(term);
+        group.hidden=!matches&&!group.querySelector('.wb-run-record:not([hidden])');
+      }
+    }
     button('检查问题',()=>changeMode('checks'),moreBody);
     const outputMenu=button('输出结果',()=>changeMode('results'),moreBody);
     const basisLabel=$('span',undefined,'wb-basis');
@@ -207,15 +223,15 @@
       updateActions();
     }
     function paintFlowNavigation(){
-      const entries=choices();flowNavigation.replaceChildren();
-      const heading=$('div',undefined,'wb-navigation-heading');heading.append($('strong','管道'),$('span',entries.length+' 条','wb-caption'));flowNavigation.append(heading);
-      if(!entries.length)flowNavigation.append($('p','当前项目尚无管道。','wb-caption'));
+      const entries=choices();flowList.replaceChildren();
+      if(!entries.length)flowList.append($('p','当前项目尚无管道。','wb-caption'));
       for(const item of entries){
-        const row=button('',async()=>{if(working?.entry===item.value&&!run)return;entryChoice.value=item.value;await entryChoice.onchange();},flowNavigation,{cls:'wb-flow-record',disabled:!!run});
+        const row=button('',async()=>{if(working?.entry===item.value&&!run)return;entryChoice.value=item.value;await entryChoice.onchange();},flowList,{cls:'wb-flow-record',disabled:!!run});
         const name=runUI.flowName(ctx,item.value);row.append($('strong',name));if(name!==item.value)row.append($('span',item.value,'wb-caption'));
         row.dataset.entry=item.value;row.title=item.value;row.setAttribute('aria-label',item.value);const selected=item.value===(run?.entry||working?.entry);
         row.classList.toggle('selected',selected);row.setAttribute('aria-pressed',String(selected));if(selected)row.setAttribute('aria-current','page');
       }
+      filterFlows();
     }
     function updateActions(){
       if(!root.isConnected)return;
@@ -1150,7 +1166,7 @@
       runVisible=nextVisible;paintHistory();
     }
     function paintHistory(){
-      const scroll=historyPanel.scrollTop;historyPanel.replaceChildren();
+      const scroll=historyPanel.scrollTop;runList.replaceChildren();
       const entries=new Map(choices().map(item=>[item.value,item]));
       for(const item of records?.runs||[])if(!entries.has(item.entry))entries.set(item.entry,{value:item.entry,historical:true});
       if(runFlowFilter&&!entries.has(runFlowFilter))entries.set(runFlowFilter,{value:runFlowFilter,historical:true});
@@ -1159,7 +1175,7 @@
         const group=$('section',undefined,'wb-run-group');group.dataset.entry=entry;
         const heading=button(name,()=>selectRunFlow(entry),group,{cls:'wb-run-group-heading'});
         heading.title=name+' · '+entry+(definition.historical?' · 历史入口':'');heading.setAttribute('aria-label','查看管道运行：'+name);
-        const branch=$('div',undefined,'wb-run-branch');group.append(branch);historyPanel.append(group);
+        const branch=$('div',undefined,'wb-run-branch');group.append(branch);runList.append(group);
         for(const item of items.slice(0,runVisible)){
           const row=button('',()=>openRun(item.run_id),branch,{cls:'wb-run-record'}),date=new Date(item.created_at*1000);
           const label=timeText(item.created_at).slice(5)+':'+String(date.getSeconds()).padStart(2,'0');
@@ -1174,7 +1190,7 @@
           button('显示更多',()=>showMoreRuns(entry),branch,{cls:'wb-run-more'});
         }
       }
-      markHistorySelection();historyPanel.scrollTop=scroll;
+      filterRuns();markHistorySelection();historyPanel.scrollTop=scroll;
     }
     function paintResults(){
       const fingerprint=json([comparison,run?.run_id,run?.attempt,run?.current_attempt,run?.outputs,can('attach'),can('run_submit')]);

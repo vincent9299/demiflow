@@ -133,6 +133,12 @@ def test_native_edit_execute_save_reopen_and_dictionary(browser,native_project,t
             page.goto(app.origin+'/#token='+app.token+'&view='+view)
             frame=page.frame_locator('iframe.native-notebook-frame')
             expect(frame.locator('.jp-Notebook')).to_be_visible(timeout=60000)
+            expect(page.get_by_role('searchbox',name='搜索数据字典')).to_be_hidden()
+            page.get_by_role('button',name='搜索数据字典',exact=True).click()
+            page.get_by_role('searchbox',name='搜索数据字典').fill('missing')
+            expect(page.locator('.dictionary-table:visible')).to_have_count(0)
+            page.keyboard.press('Escape')
+            expect(page.locator('.dictionary-table:visible')).to_have_count(1)
             frame.locator('body').evaluate('async () => { const app=window.jupyterapp; await app.restored; const p=app.shell.currentWidget; await p.context.ready; await p.sessionContext.ready; }')
             editor=frame.locator('.jp-CodeCell .cm-content').first
             editor.fill('answer = 40 + 2\nprint("native-ok", answer)')

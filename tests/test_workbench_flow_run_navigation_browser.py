@@ -53,13 +53,20 @@ def test_pipeline_directory_preserves_drafts_late_selection_and_narrow_space(roo
                 if request.method == 'POST' else None)
         tab(page, 'flows')
         expect(page.locator('.wb-flow-record')).to_have_count(2)
+        expect(page.get_by_role('searchbox',name='搜索管道')).to_be_hidden()
+        page.get_by_role('button',name='搜索管道',exact=True).click()
+        page.get_by_role('searchbox',name='搜索管道').fill(SECOND)
+        expect(flow(page,FIRST)).to_be_hidden()
+        expect(flow(page,SECOND)).to_be_visible()
+        page.keyboard.press('Escape')
         flow(page, FIRST).click()
         expect(flow(page, FIRST)).to_have_attribute('aria-current', 'page')
         expect(page.locator('.wb-selectors')).to_be_hidden()
         expect(page.locator('.wb-section-navigation:visible')).to_have_count(1)
         directory = page.locator('.wb-flow-navigation').bounding_box()
         canvas = page.locator('.wb-workspace-main').bounding_box()
-        assert directory['x'] + directory['width'] < canvas['x']
+        assert directory['x'] == 0 and directory['width'] == 240
+        assert directory['x'] + directory['width'] == canvas['x']
         screenshot(page, 'project-pipeline-navigation-desktop')
 
         page.get_by_role('button', name='业务参数', exact=True).click()
@@ -143,7 +150,11 @@ def test_run_directory_simple_groups_show_more_and_identity(root, browser):
         nav = page.locator('.wb-history')
         expect(page.locator('.wb-run-group')).to_have_count(2)
         expect(page.locator('.wb-run-record')).to_have_count(10)
-        expect(nav.locator('input,select,summary,details')).to_have_count(0)
+        expect(nav.locator('input:visible,select,summary,details')).to_have_count(0)
+        nav.get_by_role('button',name='搜索运行',exact=True).click()
+        nav.get_by_role('searchbox',name='搜索运行').fill(value['run_id'])
+        expect(nav.locator('.wb-run-record:visible')).to_have_count(1)
+        page.keyboard.press('Escape')
         for text in ('管道与运行','最近运行','较新记录','较早记录','第 1 页'):
             expect(nav).not_to_contain_text(text)
         group = page.locator('.wb-run-group[data-entry="'+FIRST+'"]')

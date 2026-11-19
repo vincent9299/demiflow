@@ -1,7 +1,7 @@
 /* One selected run: history, sealed execution graph, and an identity-bound reader. */
 .wb-workspace-layout,.wb-workspace-main{min-width:0}
 .wb-runs-layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:22px}
-.workbench .wb-runs-layout>.wb-history{margin:0;padding:18px 10px;background:#f8f9fc;border:0;border-right:1px solid var(--op-line);border-radius:0;min-width:0;align-self:stretch}
+.workbench .wb-runs-layout>.wb-history{margin:0;padding:20px 12px;background:#f8f9fb;border:0;border-right:1px solid #e8eaf0;border-radius:0;min-width:0;align-self:stretch}
 .wb-runs-layout .wb-history-heading{display:flex;flex-direction:column;align-items:stretch;gap:9px;padding:0 8px 12px}
 .wb-runs-layout .wb-history-heading>.wb-caption{font-size:10px}
 .wb-runs-layout .wb-history-heading select{width:100%;border:0;background:transparent;box-shadow:none}
@@ -34,17 +34,17 @@
 .wb-run-definition dt{color:var(--op-muted)}.wb-run-definition dd{margin:0;overflow-wrap:anywhere}.wb-run-definition-panel>.wb-code{max-height:440px}
 .wb-run-confirmation{padding:18px 22px;margin:10px 0;border-left:3px solid var(--op-accent);background:#f6f8fd}.wb-run-confirmation button{border:0}
 .wb-attempt-history{padding-left:20px;color:#68768b;font-size:12px;line-height:2}
-.workbench[data-page=operators] .wb-workspace-main>.wb-toolbar,.workbench[data-page=operators] .wb-workspace-main>.wb-notice,.workbench[data-page=operators] .wb-workspace-main>.wb-pending{display:none}
+.workbench[data-page=operators] .wb-workspace-main>.wb-settings,.workbench[data-page=operators] .wb-workspace-main>.wb-toolbar,.workbench[data-page=operators] .wb-workspace-main>.wb-notice,.workbench[data-page=operators] .wb-workspace-main>.wb-pending{display:none}
 .wb-workspace-main>.wb-pending:empty{display:none}
 .wb-run-empty{padding:40px 14px;max-width:600px}.wb-run-empty h3{font-size:18px;font-weight:550}.wb-run-empty p{line-height:1.8}.wb-run-empty button{margin-top:14px}
 @media(max-width:1200px){.wb-runs-layout{grid-template-columns:185px minmax(0,1fr);gap:14px}.workbench[data-page=monitor] .wb-body.wb-detail-open{grid-template-columns:minmax(0,1fr)}.workbench[data-page=monitor] .wb-node-panel{padding:10px 0 0;border-left:0;border-top:1px solid var(--op-line)}.workbench[data-page=monitor] .wb-node-panel>.wb-source{max-height:650px}}
-@media(max-width:680px){.wb-runs-layout{grid-template-columns:minmax(0,1fr);gap:12px}.workbench .wb-runs-layout>.wb-history{border-right:0;border-bottom:1px solid var(--op-line);max-height:260px;overflow:auto}.wb-runs-layout .wb-history-heading{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center}.wb-runs-layout .wb-history-heading>select{width:auto;max-width:100%}.wb-runs-layout .wb-history-heading>.wb-caption{flex-basis:100%}.wb-run-definition{grid-template-columns:80px minmax(0,1fr);gap:10px}.wb-run-confirmation{padding:14px}.workbench[data-page=monitor] .wb-graph{height:480px}}
+@media(max-width:680px){.wb-runs-layout{grid-template-columns:minmax(0,1fr);gap:12px}.workbench .wb-runs-layout>.wb-history{padding:12px 6px;border-right:0;border-bottom:1px solid var(--op-line);max-height:260px;overflow:auto}.wb-runs-layout .wb-history-heading{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center}.wb-runs-layout .wb-history-heading>select{width:auto;max-width:100%}.wb-runs-layout .wb-history-heading>.wb-caption{flex-basis:100%}.wb-run-definition{grid-template-columns:80px minmax(0,1fr);gap:10px}.wb-run-confirmation{padding:14px}.workbench[data-page=monitor] .wb-graph{height:480px}}
 
 /* Single-line execution entries; identity and detail remain in the main view. */
+.workbench .wb-run-group .wb-run-record[hidden]{display:none!important}
 .workbench .wb-runs-layout .wb-run-group .wb-run-record{grid-template-columns:minmax(0,1fr) auto;padding:4px 8px!important;gap:8px!important;margin:1px 0;height:30px;min-height:30px;border-radius:5px!important}
 .workbench .wb-run-group .wb-run-record>strong{grid-column:1;grid-row:1;font-size:12px;font-weight:400;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .workbench .wb-run-group .wb-run-record>.wb-tag{grid-column:2;grid-row:1;white-space:nowrap!important;color:#707885;font-size:10px;font-weight:400;background:transparent;padding:0;line-height:20px}
 .workbench .wb-run-group .wb-run-record[data-status=running]>.wb-tag,.workbench .wb-run-group .wb-run-record[data-status=starting]>.wb-tag{color:#5577bc}
 .workbench .wb-run-group .wb-run-record[data-status=failed]>.wb-tag{color:#b56060}
 .workbench .wb-run-group .wb-run-record.selected{background:#e9ebee!important;color:#262b33}
-.workbench .wb-runs-layout>.wb-history{padding:8px 6px;background:#f8f9fa}

@@ -235,14 +235,17 @@ SOFTWARE.
     const handle={get sessionId(){return state.session?.id;},dispose(){if(state.disposed)return;state.disposed=true;clearTimeout(state.timer);state.observer?.disconnect();state.releaseViewport?.();state.releaseMenus?.();state.composer?.dispose();state.chat?.dispose();active.delete(state);main.classList.remove('development-main');disposeReaders(layout);for(const dialog of state.dialogs)dialog.remove();state.dialogs.clear();}};register(handle);
     const sidebar=el('aside',undefined,'development-session-sidebar'),sideHeading=el('div',undefined,'development-session-heading');
     const createNew=el('button',undefined,'development-new-conversation');createNew.type='button';createNew.append(el('span','＋'),el('span','新会话'));createNew.disabled=true;
-    const sideClose=iconButton('收起会话列表','M15 18l-6-6 6-6');sideHeading.append(createNew,sideClose);
+    const navigation=ForgeNavigation.header({title:'会话',searchLabel:'搜索会话',placeholder:'筛选当前页会话',onSearch:()=>{if(!state.initializing)renderConversations();}});
+    sideHeading.append(createNew);
     const sessionList=el('nav',undefined,'development-session-list');sessionList.setAttribute('aria-label','项目会话');
-    const sessionPages=el('div',undefined,'development-session-pages'),sessionNote=el('p','正在读取会话…','development-session-note');sidebar.append(sideHeading,sessionList,sessionPages,sessionNote);layout.prepend(sidebar);
+    const sessionPages=el('div',undefined,'development-session-pages'),sessionNote=el('p','正在读取会话…','development-session-note');sidebar.append(navigation.element,sideHeading,sessionList,sessionPages,sessionNote);layout.prepend(sidebar);
     const backdrop=el('button',undefined,'development-sidebar-backdrop');backdrop.type='button';backdrop.setAttribute('aria-label','关闭会话列表');layout.append(backdrop);
     const head=el('div',undefined,'development-controls'),sideToggle=iconButton('会话列表','M3 4h18v16H3zM9 4v16');
-    function sidebarOpen(value){layout.dataset.sidebar=value?'open':'closed';sideToggle.setAttribute('aria-expanded',String(value));sidebar.hidden=!value;backdrop.hidden=!value;}
-    sideToggle.onclick=()=>sidebarOpen(layout.dataset.sidebar!=='open');sideClose.onclick=()=>{sidebarOpen(false);sideToggle.focus();};backdrop.onclick=sideClose.onclick;
-    let narrowViewport=matchMedia('(max-width:900px)').matches;sidebarOpen(!narrowViewport);head.append(sideToggle);
+    function sidebarOpen(value){layout.dataset.sidebar=value?'open':'closed';sideToggle.setAttribute('aria-expanded',String(value));sidebar.hidden=!value;backdrop.hidden=!value;(value?navigation.actions:head).prepend(sideToggle);}
+    sideToggle.onclick=()=>{sidebarOpen(layout.dataset.sidebar!=='open');sideToggle.focus();};
+    const closeSidebar=()=>{sidebarOpen(false);sideToggle.focus();};backdrop.onclick=closeSidebar;
+    sidebar.onkeydown=event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();closeSidebar();}};
+    let narrowViewport=matchMedia('(max-width:900px)').matches;sidebarOpen(!narrowViewport);
     createNew.onclick=()=>{if(!createNew.disabled&&typeof openNew==='function')openNew();};
     const archive=el('button','归档历史','development-archive');archive.type='button';archive.disabled=true;archive.title='压缩较早的上下文，保留原始消息';
     const more=el('details',undefined,'development-more'),moreToggle=el('summary','···'),moreMenu=el('div',undefined,'development-menu');
@@ -275,12 +278,14 @@ SOFTWARE.
         const progress=running(row)&&turn.cleanup==='complete'?'处理中':turn?(labels[turn.state]||turn.state):row.revision?'已有记录':'尚无消息';
         const stateText=(readonly?'只读历史 · ':'')+progress;
         button.append(el('span',title,'development-session-title'),el('span',stateText,'development-session-state'));button.title=title+' · '+stateText;
+        button.hidden=!(title+' '+stateText).toLocaleLowerCase().includes(navigation.search.value.trim().toLocaleLowerCase());
         button.onclick=()=>{if(row.id!==state.session?.id||state.historyOnly)openSession(row.id);};sessionList.append(button);
       }
       const pageButton=(label,offset)=>{const button=el('button',label);button.type='button';button.disabled=!!state.listing;button.onclick=()=>{state.listOffset=offset;loadConversations(true).catch(e=>error(body,e));};sessionPages.append(button);};
       if(state.listOffset>0)pageButton('较新的会话',Math.max(0,state.listOffset-20));
       if(state.nextListOffset!==null&&state.nextListOffset!==undefined)pageButton('更早的会话',state.nextListOffset);
       sessionNote.textContent=!capabilities.enabled?'尚未连接开发代理':capabilities.multiple_conversations!==true?'当前服务仅支持一个项目会话':!(state.sessionRows||[]).length?'还没有会话，从新会话开始。':'';
+      if(navigation.search.value.trim()&&!sessionList.querySelector('button:not([hidden])'))sessionNote.textContent='当前页没有匹配的会话';
     }
     async function loadConversations(force=false){
       if(state.disposed||!capabilities.enabled)return;
