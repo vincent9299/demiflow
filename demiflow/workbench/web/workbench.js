@@ -293,7 +293,7 @@
       const reportNode=data().graph?.nodes.find(n=>n.id===data().node);
       for(const[key,b]of sourceButtons){
         b.classList.toggle('active',sourceKind===key);b.setAttribute('aria-pressed',String(sourceKind===key));
-        b.hidden=key==='implementation'||key==='prompt'?previewNode?!sourceReferenced(previewNode,key):key==='implementation'?!reportNode?.operator:!reportNode?.source_resources?.length:false;
+        b.hidden=key==='implementation'||key==='prompt'?previewNode?!sourceReferenced(previewNode,key):key==='implementation'?!(reportNode?.operator||sourceReferenced(reportNode,key)):!(reportNode?.source_resources?.length||sourceReferenced(reportNode,key)):false;
         b.disabled=previewNode?!sourceAvailable(previewNode,key)&&!sourceReferenced(previewNode,key):false;
         b.title=b.disabled?(previewNode?.source_views?.[key]?.reason||'本节点没有已核验的这类材料。'):'';
       }
@@ -734,7 +734,7 @@
       const timeout=$('input');timeout.type='number';timeout.min=1;timeout.max=ctx.run_limits.timeout_s;timeout.value=d.timeout;timeout.setAttribute('aria-label','本次运行秒数上限');
       timeout.oninput=()=>{if(disposed||run||!timeout.isConnected||key!==draftKey())return;const next=getDraft();next.timeout=timeout.value;storeDraft(next);};field('秒数上限',timeout,box);
       button('重置本次运行设置',()=>{const next=getDraft();next.inputs={};next.timeout=String(ctx.run_limits.timeout_s);storeDraft(next);paintConfiguration(inspectorWhole?null:data().graph.nodes.find(n=>n.id===data().node)||null);},box);
-      box.append($('p','这些设置只作用本次运行。输出使用原生执行器的新运行目录。','wb-caption'));
+      box.append($('p','这些设置只作用本次运行。提交时核对实际写出目标，保留已有结果。','wb-caption'));
       if(options.continueInput)box.append($('p','可在输入槽中选择上次结果：'+options.continueInput,'wb-caption'));
     }
     async function saveParameters(){
@@ -831,7 +831,7 @@
         basis:(value.source_basis==='compiled_snapshot'?'计划绑定版本':value.source_basis==='sealed'?'运行封存版本':'')+(definitionDigest?' · '+definitionDigest.slice(0,8):''),
         truncated:value.truncated},{mountText});
     }
-    function renderWiring(node,values){
+    function renderWiring(node,values,dag=planPreview?.dag){
       const byKind=Object.fromEntries(values.map(v=>[v.kind,v])),call=byKind.callsite,config=byKind.configuration,schema=byKind.schema;
       if(call?.availability==='available'){
         sourceBody.append($('h4','本次 API 调用'));
@@ -854,10 +854,10 @@
       if(bindings.outputs)materialTable(sourceBody,['算子输出','Dataset 字段'],Object.entries(bindings.outputs).map(([k,v])=>[k,String(v)]));
       if(schema?.metadata)schemaMaterial(sourceBody,schema.metadata,{advanced});
       else sourceBody.append($('p','尚无已确认的输出 Schema。','wb-caption'));
-      const next=(planPreview?.dag.edges||[]).filter(e=>e.from.occurrence_id===node.occurrence_id);
+      const next=(dag?.edges||[]).filter(e=>e.from.occurrence_id===node.occurrence_id);
       const targets=[...new Set(next.map(e=>e.to.occurrence_id))];
       const downstream=$('div',undefined,'wb-downstream');downstream.append($('span',targets.length?'下游：':'当前动作的数据流终点。','wb-caption'));sourceBody.append(downstream);
-      for(const id of targets){const target=planPreview.dag.nodes.find(n=>n.occurrence_id===id);button(target?.label||target?.op_kind||'下游节点',()=>{const card=graphModel?.nodes.find(c=>c.selection.occurrenceId===id);if(card)return selectGraphNode(card.selection);},downstream);}
+      for(const id of targets){const target=dag.nodes.find(n=>n.occurrence_id===id);button(target?.label||target?.op_kind||'下游节点',()=>{const card=graphModel?.nodes.find(c=>c.selection.occurrenceId===id);if(card)return selectGraphNode(card.selection);},downstream);}
       sourceBody.append(advanced);
     }
     async function loadPreviewSource(){
@@ -932,6 +932,10 @@
         sourceTitle.textContent=({callsite:'Dataset API',implementation:'代码算子',prompt:'Prompt 算子',configuration:'流程接线'})[sourceKind];
         if(value.availability==='unavailable'){sourceBody.append($('p','该视角没有可用材料：'+value.reason,'wb-caption'));return;}
         if(sourceKind==='configuration'){
+          if(value.metadata){
+            const entry=(g.logical?.actions||[]).find(a=>a.action_id===selection?.actionId);
+            renderWiring({occurrence_id:selection?.occurrenceId},[...values,{kind:'schema',metadata:value.schema_metadata}],entry?.dag);return;
+          }
           const call=values[0];if(call.text){sourceBody.append($('h4','本次 API 调用'));mountText(sourceBody,call.text,{sourceOnly:true,compactSource:true});}
           const info=value.wiring||{},rows=info.parameters||{};
           sourceBody.append($('h4','输入接线'));
@@ -1091,7 +1095,7 @@
       if(!current(ticket))return;
       if(admission.status!=='requires_prepare'){message(admission.message||'当前流程尚未接入受管提交。');return;}
       runUI.confirmation(runConfirmation,{title:'运行 '+runUI.flowName(ctx,working.entry),
-        description:'检查并封存当前流程和唯一业务参数，再提交运行。创建模式的声明输出使用本次独立目标；覆盖模式仍需要固定版本校验。',
+        description:admission.output_binding==='compiled_targets'?'编译并封存当前流程和业务参数，写入参数指定的目标。已有目标会拒绝写入；需要另一次运行时，请先指定新目标。':'检查并封存当前流程和唯一业务参数，再提交运行。创建模式的声明输出使用本次独立目标；覆盖模式仍需要固定版本校验。',
         rows:[['流程',working.entry],['业务参数',working.params||'未绑定'],['累计时长上限',getDraft().timeout+' 秒']],confirmLabel:'确认运行',
         cancel:()=>{runConfirmation.hidden=true;},confirm:async()=>{if(!current(ticket))return;runConfirmation.hidden=true;await submit();}});
     }
@@ -1192,6 +1196,29 @@
       }
       filterRuns();markHistorySelection();historyPanel.scrollTop=scroll;
     }
+    async function previewOutput(selectedRun,output,box){
+      const old=box.querySelector('.wb-result-preview');if(old){old.remove();return;}
+      const ticket=state.capture(),panel=$('section',undefined,'wb-result-preview');
+      panel.dataset.attempt=String(selectedRun.attempt);panel.dataset.version=String(output.result.ref.lance_version);
+      box.append(panel);panel.append($('p','正在读取固定版本…','wb-caption'));
+      const valid=()=>current(ticket)&&panel.isConnected&&run?.run_id===selectedRun.run_id&&run?.attempt===selectedRun.attempt;
+      const alias='run:'+selectedRun.run_id+':'+output.name+':'+selectedRun.attempt;
+      try{
+        const description=await request('table',{alias});if(!valid())return;
+        const ref=description.binding?.reference?.ref,expected=output.result.ref;
+        if(!ref||Object.keys(expected).some(k=>json(ref[k])!==json(expected[k])))throw new Error('结果版本与本次运行不一致');
+        const names=description.columns||Object.keys(description.metadata?.fields||{});
+        const columns=names.slice(0,16);
+        const sample=await request('sample',{alias,columns:JSON.stringify(columns),limit:10,expected_binding:description.binding.digest});
+        if(!valid())return;
+        if(sample.binding?.digest!==description.binding.digest||sample.version!==expected.lance_version)throw new Error('结果读取依据已变化');
+        panel.replaceChildren($('p','尝试 '+selectedRun.attempt+' · 固定 v'+sample.version+' · 展示 '+sample.rows.length+' / '+sample.row_count+' 行'+(names.length>columns.length?' · 前 '+columns.length+' 个字段':''),'wb-caption'));
+        materialTable(panel,sample.columns,sample.rows.map(row=>sample.columns.map(name=>{
+          const value=row[name];return value==null?'—':(typeof value==='string'?value:json(value)).slice(0,2000);
+        })));
+        if(sample.has_more||names.length>columns.length)panel.append($('p','完整数据可在数据页通过固定版本引用读取。','wb-caption'));
+      }catch(error){if(valid()&&error.name!=='AbortError')panel.replaceChildren($('p',error.message,'error-box'));}
+    }
     function paintResults(){
       const fingerprint=json([comparison,run?.run_id,run?.attempt,run?.current_attempt,run?.outputs,can('attach'),can('run_submit')]);
       if(fingerprint===outputFingerprint)return;outputFingerprint=fingerprint;
@@ -1209,7 +1236,8 @@
           box.append($('p','固定版本 v'+output.result.ref.lance_version+' · '+output.result.ref.row_count+' 行'));
           const captured=Object.freeze({run_id:run.run_id,attempt:run.attempt,output:output.name,alias:'',expected_result:output.result_digest});
           const snapshotRun=run,snapshotOutput=output;
-          button('查看固定结果',()=>openResult(snapshotRun,snapshotOutput),box);
+          button('查看固定结果',()=>previewOutput(snapshotRun,snapshotOutput,box),box);
+          button('在数据页打开',()=>openResult(snapshotRun,snapshotOutput),box);
           if(run.attempt===run.current_attempt){
             button('作为输入继续加工',()=>options.continueWithResult?.(snapshotRun,snapshotOutput),box,{disabled:!can('run_submit')});
             const alias=$('input'),aliasKey=run.run_id+'|'+run.attempt+'|'+output.name;alias.maxLength=64;alias.setAttribute('aria-label','结果别名 '+output.name);alias.placeholder='保存为输入表别名';alias.value=aliasDrafts.get(aliasKey)||'';box.append(alias);

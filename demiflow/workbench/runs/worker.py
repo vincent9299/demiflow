@@ -37,6 +37,15 @@ def allocation_guard(limits, *, native_execution=None):
 
 
 def execute(root, run_id, attempt=None):
+    from demiflow.workbench.runs.manager import directory
+    from demiflow.execution.host.control import RunJournal
+    # Callbacks and stop polls own separate bounded connections from the engine
+    # driver. Keep them for the process lifetime, without retaining transactions.
+    with RunJournal(directory(root, run_id), attempt=attempt).connection_scope() as run:
+        return _execute(root, run_id, run, attempt)
+
+
+def _execute(root, run_id, run, attempt=None):
     import importlib
     import signal
     import time
@@ -50,7 +59,6 @@ def execute(root, run_id, attempt=None):
     bind_parent()
     target, value = runs._load(root, run_id)
     manifest = value['manifest']
-    run = RunJournal(target, attempt=attempt)
     run.execution_status()
     work = runs.attempt_directory(target, 'work', attempt)
     stopped = [False]
@@ -76,7 +84,7 @@ def execute(root, run_id, attempt=None):
         run.transition({'starting'}, 'running', worker=process_identity(os.getpid()), running_at=time.time())
         source = target / 'source'
         _source_imports(source, report['binding']['sources'])
-        module, function = manifest['entry'].split(':')
+        module, function = report['binding'].get('source_entry', manifest['entry']).split(':')
         entry = getattr(importlib.import_module(module[:-3].replace('/', '.')), function)
         import inspect
         if Path(inspect.getfile(entry)).resolve() != source / module:
@@ -97,7 +105,13 @@ def execute(root, run_id, attempt=None):
                 if errors:
                     registration_failed[0] = True
                     raise RuntimeError('Committed output registration failed: ' + '; '.join(errors))
-        context = CheckedExecution(nodes=report['nodes'], edges=report['edges'], actions=report['actions'],
+        context_type = CheckedExecution
+        context_options = {}
+        if manifest.get('native_submission'):
+            from demiflow.execution.host.control import NativeExecution
+            context_type = NativeExecution
+            context_options['contract'] = report['native_contract']
+        context = context_type(**context_options, nodes=report['nodes'], edges=report['edges'], actions=report['actions'],
             operators=report['operators'], source_root=source, resource_root=target, work_root=work, limits=limits,
             record=record, check_stop=check_stop, observe=run.observe_nodes,
             targets=report['binding']['targets'], report_digest=manifest['report_digest'])
@@ -123,7 +137,7 @@ def execute(root, run_id, attempt=None):
         run.finish(dict(outcome='succeeded', finished_at=time.time()))
     except BaseException as exc:
         import traceback
-        traceback.print_exc(limit=12)
+        traceback.print_exc(limit=-12)
         # Previous independent writes remain available even if a later action failed.
         try:
             runs.register_results(root, run_id, attempt=attempt)
@@ -225,7 +239,7 @@ class RunLog:
             self.stream = None
 
 
-def _supervise(root, run_id, lease, attempt=None):
+def _supervise(root, run_id, lease, attempt=None, *, run):
     import selectors
     import signal
     import subprocess
@@ -244,7 +258,6 @@ def _supervise(root, run_id, lease, attempt=None):
     from demiflow.workbench.runs.storage import scratch_bytes
     from demiflow.workbench.runs.storage import clean_stopped, cleanup_deadline, remove_attempt_work
     object_roots = object_locations(manifest=manifest, target=target)
-    run = RunJournal(target, attempt=attempt)
     run.execution_status()
     work = runs.attempt_directory(target, 'work', attempt)
     logs = runs.attempt_directory(target, 'logs', attempt)
@@ -288,9 +301,15 @@ def _supervise(root, run_id, lease, attempt=None):
         for output in manifest['outputs'].values():
             Path(output['uri']).parent.mkdir(parents=True, exist_ok=True)
         from demiflow.execution.output_watch import OutputWatch
-        output_watch = OutputWatch([output['uri'] for output in manifest['outputs'].values()])
+        # A new native output directory may also contain business delivery
+        # files (for example image archives). Account the admitted directory,
+        # while published table identities remain the exact compiled URIs.
+        output_watch = OutputWatch(list(dict.fromkeys(
+            output.get('allocation_root', output['uri']) for output in manifest['outputs'].values())))
         env = runs.worker_environment(target, limits, manifest.get('credential_names', []),
-                                      native_execution=manifest.get('native_execution'))
+                                      native_execution=manifest.get('native_execution'),
+                                      capacity_domain=manifest.get('capacity_domain'),
+                                      executable_dirs=manifest.get('executable_dirs', []))
         env['DEMIFLOW_INSPECTION_PARENT'] = str(os.getpid())
         env['TMPDIR'] = str(work)
         unit_fds = inherited_unit()
@@ -414,7 +433,7 @@ def _supervise(root, run_id, lease, attempt=None):
         final_status, final_details = status, details
     except BaseException as exc:
         import traceback
-        traceback.print_exc(limit=12)
+        traceback.print_exc(limit=-12)
         accounting_valid = process is None
         final_status = 'failed'
         final_details = dict(error={'type': type(exc).__name__, 'message': str(exc)[:2048]},
@@ -445,8 +464,6 @@ def _supervise(root, run_id, lease, attempt=None):
             cleanup = 'pending'
             if children_drained:
                 maintenance_deadline = cleanup_deadline()
-                remove_attempt_work(work, deadline=maintenance_deadline)
-
                 def stopped_snapshot(snapshot):
                     return (children_drained and (process is None or process.poll() is not None)
                         and snapshot['attempt'] == attempt
@@ -454,6 +471,7 @@ def _supervise(root, run_id, lease, attempt=None):
                         and snapshot['unit_identity'] == value['state'].get('unit_identity'))
 
                 clean_stopped(run, confirm_stopped=stopped_snapshot, deadline=maintenance_deadline)
+                remove_attempt_work(work, deadline=maintenance_deadline)
                 cleanup = 'complete'
         except Exception as exc:
             cleanup = 'pending'
@@ -481,7 +499,10 @@ def supervise(root, run_id, lease, attempt=None):
     # The inherited execution lease covers initialization and every finalization
     # failure, including accounting, cleanup and index publication.
     try:
-        return _supervise(root, run_id, lease, attempt)
+        from demiflow.workbench.runs.manager import directory
+        from demiflow.execution.host.control import RunJournal
+        with RunJournal(directory(root, run_id), attempt=attempt).connection_scope() as run:
+            return _supervise(root, run_id, lease, attempt, run=run)
     finally:
         os.close(lease)
 
@@ -512,7 +533,7 @@ if __name__ == '__main__':
                 try:
                     supervise(Path(root), run_id, int(sys.argv[4]), attempt)
                 except BaseException:
-                    traceback.print_exc(limit=12)
+                    traceback.print_exc(limit=-12)
                     raise
         finally:
             logger.close()

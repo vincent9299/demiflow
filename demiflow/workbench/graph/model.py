@@ -291,18 +291,40 @@ def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
         entry = report.get('entry', report.get('binding',{}).get('entry'))
         params = report.get('binding',{}).get('parameter_path')
         nodes = report.get('nodes', [])
+        if report.get('format') == 'demiflow_forge_native_inspection_v1':
+            # Display annotations come from the immutable capture; execution
+            # topology and bridge identities still come from the sealed plan.
+            declarations = {n['occurrence_id']: n for n in report['native_dag']['nodes']}
+            terminal = report['native_contract']['outputs'][0]['occurrence_id']
+            nodes = [dict(n) for n in nodes]
+            for node in nodes:
+                occurrence = terminal if node['id'] == report['actions'][0] else node['id']
+                declaration = declarations.get(occurrence, {})
+                detail = report['native_details'].get(occurrence, {})
+                node['display_label'] = declaration.get('label')
+                node['source_views'] = {kind: dict(available=item.get('availability') == 'available',
+                    referenced=item.get('referenced', False)) for kind, item in detail.items()}
+                call = detail.get('callsite', {})
+                if call.get('availability') == 'available':
+                    node['api_call'] = {k: call['metadata'][k] for k in ('api', 'summary')}
         edges = [{**e,'type':'data'} for e in report.get('edges', [])]
         edges += [{**e,'type':'value'} for e in report.get('value_edges', [])]
         edges += [{**e,'type':'action'} for e in report.get('action_edges', [])]
         sources = report.get('binding',{}).get('sources', {})
         diagnostics = report.get('diagnostics', [])
-        semantic = 'complete' if report['status']=='checked' else 'partial' if nodes else 'unavailable'
+        semantic = 'complete' if report['status'] in {'checked', 'compiled'} else 'partial' if nodes else 'unavailable'
         bound_parameters = report.get('binding',{}).get('parameters', {})
     from demiflow.workbench.graph import logical
     if basis_kind == 'source':
         logical_view = logical.unchecked()
     else:
-        logical_view = logical.project(nodes, report.get('edges', []), report.get('actions', []))
+        if report.get('format') == 'demiflow_forge_native_inspection_v1':
+            logical_view = dict(format=logical.FORMAT, basis='compiled', available=True,
+                reason=None, detail=None, semantic_unchecked=False, action_count=1, truncated=False,
+                actions=[dict(action_id=report['actions'][0], status='compiled', binding_level='compiled',
+                              dag=report['native_dag'], node_map={})])
+        else:
+            logical_view = logical.project(nodes, report.get('edges', []), report.get('actions', []))
         if basis_kind == 'run':
             from demiflow.workbench.runs import facts
             logical_view = facts.overlay_sealed(root, run_id, logical_view, report_digest=report['digest'])
@@ -318,7 +340,7 @@ def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
     index_nodes = nodes[node_offset:node_offset+64]
     node_index = dict(offset=node_offset, total=len(nodes),
                       next_offset=node_offset+64 if node_offset+64<len(nodes) else None,
-                      nodes=[dict(id=n['id'], label=str((n.get('operator') or {}).get('name') or n['api'])[:80],
+                      nodes=[dict(id=n['id'], label=str(n.get('display_label') or (n.get('operator') or {}).get('name') or n['api'])[:80],
                                   source=str(n['source'])[:160], line=n.get('line')) for n in index_nodes])
     if basis_kind=='source':
         total_nodes,total_edges=observed['total_nodes'],observed['total_edges']
@@ -523,5 +545,6 @@ def bound_source(root, binding, node_id, *, include_parameters=True, logical_nod
     from demiflow.workbench.graph.parameters import public_model
     return dict(binding=observed, nodes=[node], sources=evidence.get('sources', {}),
                 sealed_code_pin_ref=sealed_code_pin_ref,
+                native_details=report.get('native_details'), native_contract=report.get('native_contract'),
                 parameters=public_model(root, control, observed['entry'], observed['params'], [node],
                                         readonly=True, sealed=evidence.get('parameters', {})))

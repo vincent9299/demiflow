@@ -19,6 +19,66 @@ INVENTORY = 'native-device-inventory.json'
 MAX_BYTES = 65536
 
 
+def capacity_domain(value=None):
+    """Capture the trusted deployment domain before inspector TMPDIR changes."""
+    from demiflow.execution.host.control import local_capacity, local_capacity_domain
+    root = str(local_capacity()[0]) if value is None else value
+    with local_capacity_domain(root):
+        pass
+    return root
+
+
+def environment_names(value):
+    """Names only; credential values never enter the run manifest or report."""
+    import re
+    if (type(value) is not list or len(value) > 32
+            or any(type(name) is not str or not re.fullmatch(r'[A-Z_][A-Z0-9_]{0,127}', name)
+                   or name in {'HOME', 'PATH', 'TMPDIR', 'LD_PRELOAD', 'LD_LIBRARY_PATH'}
+                   or name.startswith(('PYTHON', 'DEMIFLOW_', 'CUDA_')) for name in value)
+            or len(set(value)) != len(value)):
+        raise ForgeError('Invalid deployment execution environment names')
+    return sorted(value)
+
+
+def executable_directories(value, *, workspace=None):
+    if type(value) is not list or len(value) > 8 or any(type(p) is not str for p in value):
+        raise ForgeError('Invalid deployment executable directories')
+    result = []
+    for item in value:
+        path = no_symlinks(Path(item))
+        if (not path.is_absolute() or str(path.resolve()) != item or not path.is_dir()
+                or ':' in item or (workspace is not None and path.is_relative_to(Path(workspace).resolve()))):
+            raise ForgeError('Executable directories must be canonical deployment directories outside the project')
+        if item not in result:
+            result.append(item)
+    return result
+
+
+def trusted_process_environment(*, workspace):
+    """Deployment-owned per-project CLI credentials/settings, never request input."""
+    path = os.environ.get('DEMIFLOW_WORKBENCH_RUN_ENVIRONMENT')
+    if not path:
+        return dict(environment_names=[], executable_dirs=[])
+    path = no_symlinks(Path(path))
+    root = Path(workspace).absolute()
+    if not path.is_absolute() or path.is_relative_to(root):
+        raise ForgeError('Execution environment declaration must be deployment-owned')
+    value = json.loads(read_bounded(path, MAX_BYTES))
+    if (type(value) is not dict or set(value) - {'executable_dirs'} != {'format', 'workspaces'}
+            or value['format'] != 'demiflow_managed_environment_v1'
+            or type(value['workspaces']) is not dict or len(value['workspaces']) > 128):
+        raise ForgeError('Invalid deployment execution environment declaration')
+    directories = value.get('executable_dirs', {})
+    if type(directories) is not dict or len(directories) > 128:
+        raise ForgeError('Invalid deployment executable directory declaration')
+    return dict(environment_names=environment_names(value['workspaces'].get(str(root), [])),
+                executable_dirs=executable_directories(directories.get(str(root), []), workspace=root))
+
+
+def trusted_environment(*, workspace):
+    return trusted_process_environment(workspace=workspace)['environment_names']
+
+
 def validate(value):
     """Validate an already sealed/trusted declaration without allocating."""
     if type(value) is not dict or set(value) != {

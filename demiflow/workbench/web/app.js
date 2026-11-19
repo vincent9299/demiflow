@@ -132,6 +132,22 @@
   const canRun=permission=>context?.run_permissions?.[permission]??!!context?.runs_enabled;
   let updates = {}, activeWrites = 0, authFailed = false;
   let readController = new AbortController(), activeReads = 0;
+  const waitingReads=[];
+  function acquireRead(signal){
+    if(signal.aborted)return Promise.reject(staleRequest());
+    if(activeReads<8){activeReads++;return Promise.resolve();}
+    if(waitingReads.length>=32)return Promise.reject(new Error('页面等待读取过多，请稍后再试。'));
+    return new Promise((resolve,reject)=>{
+      const waiter={resolve,signal,cancel:null};
+      waiter.cancel=()=>{const at=waitingReads.indexOf(waiter);if(at>=0)waitingReads.splice(at,1);signal.removeEventListener('abort',waiter.cancel);reject(staleRequest());};
+      signal.addEventListener('abort',waiter.cancel,{once:true});waitingReads.push(waiter);
+    });
+  }
+  function releaseRead(){
+    const waiter=waitingReads.shift();
+    if(waiter){waiter.signal.removeEventListener('abort',waiter.cancel);waiter.resolve();}
+    else activeReads--;
+  }
   const staleRequest = () => new DOMException('页面选择已变化', 'AbortError');
   function pageKind(reference = pendingView || view) {
     const kind = reference?.kind || 'overview';
@@ -180,8 +196,7 @@
     const payload=body?V.boundedJSON(body,65536):null;
     const signal=cleanup?AbortSignal.timeout(5000):write?AbortSignal.timeout(65000):AbortSignal.any([readController.signal,...(options.signal?[options.signal]:[]),AbortSignal.timeout(65000)]);
     const run=async()=>{
-    if (!write && activeReads >= 8) throw new Error('busy：页面读取已达并发上限');
-    if (!write) activeReads++;
+    if (!write) await acquireRead(signal);
     else activeWrites++;
     try {
       const started=Date.now();let attempts=0;
@@ -210,7 +225,7 @@
         // Keep transient admission contention inside the original project read.
         // Result-source selection and all writes retain their explicit recovery.
         const projectRead=err.operationStarted===false&&(
-          !body&&['projects','capabilities','context','changes','graph','project-operators','operator-definition','operator-history','flow-arguments','project-documents','project-markdown'].includes(path)
+          !body&&['projects','capabilities','context','changes','graph','graph-source','table','sample','project-operators','operator-definition','operator-history','flow-arguments','project-documents','project-markdown'].includes(path)
           ||!!body&&['plan-preview','plan-node-detail','plan-pipeline-source'].includes(path));
         if(projectRead&&!write&&!cleanup&&err.code==='busy'&&!signal.aborted&&attempts<12&&Date.now()-started<20000){
           const wait=Math.min(2000,100*2**Math.min(attempts++,5));
@@ -229,7 +244,7 @@
       if (!write && !cleanup && epoch !== viewEpoch) throw staleRequest();
       return value;
       }
-    } finally { if (!write) activeReads--; else activeWrites--; }
+    } finally { if (!write) releaseRead(); else activeWrites--; }
     };
     return run();
   }

@@ -98,6 +98,7 @@
   }
   function reportName(node) {
     if (!node) return null;
+    if (typeof node.display_label === 'string' && node.display_label.trim()) return bounded(node.display_label, 80);
     if (node.operator && typeof node.operator.name === 'string' && node.operator.name) return bounded(node.operator.name, 80);
     if (typeof node.api === 'string' && node.api) return bounded(node.api.split(/[.:]/).at(-1) || node.api, 80);
     return null;
@@ -601,10 +602,12 @@
       const sameLogical = execution.nodes.filter(item => item.logicalNodeId === node.logicalNodeId);
       const ordinal = sameLogical.findIndex(item => item.occurrenceId === node.occurrenceId) + 1;
       const cardSelection = memberSelection(graph, node, identity, context);
+      const call = findReportNode(graph, cardSelection.reportNodeId)?.api_call;
       return {
         key: v3Key(identity, node.occurrenceId), selection: cardSelection, occurrences: [],
         kindLabel: kindLabel(node.kind), title: sealedTitle(graph, node, identity, context, ordinal, sameLogical.length),
         summary: [
+          ...(typeof call?.summary === 'string' ? [{label: 'API', value: bounded(call.summary, 256), basis: 'sealed', reason: null}] : []),
           {label: '端口', value: bounded((node.inputPorts.join(', ') || '—') + ' → ' + (node.outputPorts.join(', ') || '—'), 160), basis: 'sealed', reason: null},
           placementSummary(node),
         ],

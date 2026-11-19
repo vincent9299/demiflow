@@ -19,6 +19,10 @@
         "demiflow.execution.runtime_limits",
         "DEFAULT_LIMITS"
       ],
+      "NativeExecution": [
+        "demiflow.execution.managed_native",
+        "NativeExecution"
+      ],
       "RunContext": [
         "demiflow.execution.run_context",
         "RunContext"
@@ -34,6 +38,14 @@
       "clean_stopped_execution": [
         "demiflow.execution.run_context",
         "clean_stopped_execution"
+      ],
+      "local_capacity": [
+        "demiflow.execution.dataflow_capacity",
+        "local_capacity"
+      ],
+      "local_capacity_domain": [
+        "demiflow.execution.dataflow_capacity",
+        "local_capacity_domain"
       ],
       "local_execution": [
         "demiflow.execution.local_kernel",
@@ -89,6 +101,10 @@
         "demiflow.execution.plan_capture",
         "build_logical_plan_view"
       ],
+      "capture_managed_pipeline": [
+        "demiflow.execution.managed_native",
+        "capture_managed_pipeline"
+      ],
       "capture_pipeline": [
         "demiflow.execution.plan_capture",
         "capture_pipeline"
@@ -116,6 +132,10 @@
       "latest": [
         "demiflow.execution.run_telemetry",
         "latest"
+      ],
+      "native_submission_view": [
+        "demiflow.execution.managed_native",
+        "native_submission_view"
       ],
       "observe_storage": [
         "demiflow.execution.run_reader",
@@ -413,7 +433,7 @@
       "returned": "Existing context manager establishment only; worker does not bind returned RunContext or access its state. CheckedExecution.bind_context() independently uses original ContextVar mechanism; no new coupling."
     },
     "control.RunJournal": {
-      "conditional": "reserve_nodes/reserve_actions only initial prepare; resumed managed attempts must pass both to begin_attempt. Remove listed read members that final facts migration leaves unused; never expand to arbitrary class members.",
+      "conditional": "connection_scope is process-local bounded connection reuse; transactions and attempt fencing remain per operation. reserve_nodes/reserve_actions only initial prepare; resumed managed attempts must pass both to begin_attempt. Remove listed read members that final facts migration leaves unused; never expand to arbitrary class members.",
       "constructor": "directory, attempt=None; existing approved public options only, no _maintenance_deadline from host",
       "forbidden": [
         "db",
@@ -472,7 +492,8 @@
       "kind",
       "provider",
       "bounds",
-      "entry_completed"
+      "entry_completed",
+      "submission"
     ],
     "Catalog": [
       "versions"
@@ -527,6 +548,9 @@
       "_open",
       "_rows",
       "_json_value"
+    ],
+    "NativeExecution": [
+      "bind_context"
     ],
     "NodeConfigurationMaterial": [
       "availability",
@@ -591,6 +615,7 @@
     "RunJournal": [
       "directory",
       "attempt",
+      "connection_scope",
       "initialize",
       "execution_status",
       "transition",
@@ -664,16 +689,43 @@
     "demiflow/workbench/runs/storage.py:clean_stopped": {
       "run": "RunJournal"
     },
+    "demiflow/workbench/runs/worker.py:_execute": {
+      "run": "RunJournal"
+    },
+    "demiflow/workbench/runs/worker.py:_supervise": {
+      "run": "RunJournal"
+    },
     "demiflow/workbench/runs/worker.py:sample_output": {
       "output_watch": "OutputWatch"
     }
   },
   "record_fields": {
+    "record:NativeOutput": {
+      "expected_version": "value",
+      "max_index_bytes": "value",
+      "mode": "value",
+      "node_id": "value",
+      "occurrence_id": "value",
+      "schema_identity": "value",
+      "stage": "value",
+      "uri": "value",
+      "write_spec": "value",
+      "writer_mode": "value"
+    },
     "record:NativeRecording": {
       "action_id": "value",
       "attempt": "value",
       "kind": "value",
       "value": "opaque:native_recording"
+    },
+    "record:NativeSubmission": {
+      "action_id": "value",
+      "credential_names": "value",
+      "format": "value",
+      "graph": "opaque:compiled_wire",
+      "kind": "value",
+      "object_roots": "value",
+      "outputs": "seq:record:NativeOutput"
     },
     "record:VerifiedPublication": {
       "action_id": "value",
@@ -700,10 +752,12 @@
     "demiflow/workbench/analysis/trusted_entry.py:main": "Fixed local worker dispatcher selects one of four existing workbench.analysis modules from validated operation/role; independent of Pipeline surface.",
     "demiflow/workbench/graph/plan_callsite.py:__init__": "vars(owner) enumerates exact DataAPI/Dataset/MaterializedDataset methods and passive FunctionType code/signature; no declaration state.",
     "demiflow/workbench/graph/preview.py:preview": "Existing authorized import of pinned project entry in isolated compiler worker; not an engine dependency loader.",
+    "demiflow/workbench/runs/native_submission.py:inspect_submission": "Registered business entry imported in disposable read-only compiler worker; never an engine module loader.",
     "demiflow/workbench/runs/worker.py:execute": "Existing authorized import of pinned project entry after worker guards; not an engine dependency loader."
   },
   "result_origins": {
     "CapturedAction.compiled": "CompiledDataflow",
+    "CapturedAction.submission": "record:NativeSubmission",
     "CheckedExecution.bind_context": "CheckedExecution",
     "CompiledDataflow.declarations": "opaque:declarations",
     "CompiledDataflow.graph": "DataflowGraph",
@@ -713,17 +767,21 @@
     "CompiledNodeMaterials.prompts": "ProgramPromptMaterials",
     "CompiledNodeMaterials.schema": "NodeSchemaMaterial",
     "DataflowGraph.nodes": "seq:GraphNode",
+    "NativeExecution.bind_context": "NativeExecution",
     "NodeConfigurationMaterial.engine_configuration": "opaque:configuration",
     "ProgramPromptMaterials.prompts": "seq:PromptMaterial",
     "PromptMaterial.definition": "PromptDefinition",
+    "RunJournal.connection_scope": "RunJournal",
     "contextlib.ExitStack": "stdlib:ExitStack",
     "demiflow.data.dataset.Dataset": "Dataset",
     "demiflow.data.dataset.MaterializedDataset": "Dataset",
     "demiflow.execution.datafusion.DataFusionSession": "DataFusionSession",
     "demiflow.execution.host.control.CheckedExecution": "CheckedExecution",
+    "demiflow.execution.host.control.NativeExecution": "NativeExecution",
     "demiflow.execution.host.control.RunContext": "RunContext",
     "demiflow.execution.host.control.RunContext.attach": "RunContext",
     "demiflow.execution.host.control.RunJournal": "RunJournal",
+    "demiflow.execution.host.inspection.capture_managed_pipeline": "CapturedAction",
     "demiflow.execution.host.inspection.capture_pipeline": "CapturedAction",
     "demiflow.execution.host.inspection.compiled_node_materials": "map:CompiledNodeMaterials",
     "demiflow.execution.host.inspection.observe_storage": "StorageObservation",

@@ -215,7 +215,7 @@ class DataflowExecution:
 
     def _start_checkpoint_deadline(self):
         # One coordination allowance starts at source-pause admission. Only
-        # authenticated finite business that cannot yet snapshot is excluded;
+        # authenticated business that cannot yet yield its live owner is excluded;
         # ordinary alignment/silence still consumes this original allowance.
         # An already-started publication task drains
         # before timeout is reported and its original receipt is never undone.
@@ -229,12 +229,12 @@ class DataflowExecution:
             raise TimeoutError('Checkpoint coordination exceeded checkpoint_timeout_s')
 
     def _update_checkpoint_wait_clock(self):
-        """Exclude only confirmed non-replayable business before cut admission.
+        """Exclude only confirmed business drain before cut admission.
 
         This does not replenish the coordination allowance or the action's
         independent total deadline. A silent peer cannot hide behind another
-        peer's finite work: every remaining participant must name its current
-        finite finish, or the original coordination clock keeps running.
+        peer's work: every remaining participant must name its current finite
+        fold or authorized native-model drain, or the original clock runs.
         """
         if self._checkpoint_deadline is None:
             return
@@ -441,6 +441,11 @@ class DataflowExecution:
                                             store=self._store, bounds=self._bounds, live_binding=live_binding)
         else:
             compiled = lower_action(self._request, bounds=self._bounds)
+            from .checked import current
+            from .managed_native import NativeExecution
+            checked = current()
+            if isinstance(checked, NativeExecution):
+                compiled = checked.admit_compiled(self._request, compiled, bounds=self._bounds)
             graph = stage_dataflow_programs(compiled, action=self._action, store=self._store,
                                             bounds=self._bounds, worker_mode=self._policy.worker_mode)
             if producer is not None:
@@ -1260,12 +1265,16 @@ class DataflowExecution:
             if occurrence is not None:
                 assigned = {n for stage in endpoint._assignment.stages for n in stage.occurrences}
                 node = next((n for n in self._graph.nodes if n.occurrence_id == occurrence), None)
-                # OperatorKernel has exactly this non-replayable finite path.
-                # An arbitrary UDF/pending model call cannot claim the exemption.
-                if (occurrence not in assigned or node is None or node.kernel.kind != 'reduce'
-                        or not node.kernel.inputs
-                        or any(p.requirement != 'finite_complete' for p in node.kernel.inputs)):
-                    raise DataflowError('FENCED', 'checkpoint wait lacks a sealed non-replayable finite kernel')
+                finite_fold = (node is not None and node.kernel.kind == 'reduce'
+                    and node.kernel.inputs
+                    and all(p.requirement == 'finite_complete' for p in node.kernel.inputs))
+                native_drain = (node is not None and node.kernel.kind in {'prompt', 'embedding'}
+                    and self._durable_residency is not None)
+                # Native requests only need this exemption when the sealed
+                # residency must retire their live owner. No arbitrary UDF or
+                # ordinary pending model can extend a coordination deadline.
+                if occurrence not in assigned or not (finite_fold or native_drain):
+                    raise DataflowError('FENCED', 'checkpoint wait lacks a sealed business drain boundary')
             sequences = self._checkpoint_wait_sequence
             if generation != expected or sequence <= sequences.get(event.allocation_id, 0):
                 return  # Delayed control evidence never changes the current frontier.

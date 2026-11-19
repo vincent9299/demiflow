@@ -68,6 +68,8 @@ class WorkerGraphRunner:
         self._checkpoint_wait_requested = False
         self._checkpoint_wait_signature = None
         self._checkpoint_wait_sequence = 0
+        self._park_wait_authorized = False
+        self._checkpoint_model_calls = set()
         self._closed_inputs = set()
         self._closed_outputs = set()
         self._emitted_eoi = set()
@@ -476,6 +478,15 @@ class WorkerGraphRunner:
         if not getattr(self, '_checkpoint_wait_requested', False):
             return None
         occurrence = min(getattr(self, '_checkpoint_finishes', ()), default=None)
+        if occurrence is None and getattr(self, '_park_wait_authorized', False):
+            # Parking retires this worker, so even journal-backed native calls
+            # must finish before its live owner can be released. This is
+            # business request time, not a stalled cut. Ordinary non-parking
+            # model calls still snapshot pending requests without this claim.
+            live = set(getattr(self, '_checkpoint_model_calls', ()))
+            live.update(key[0] for key, kernel in self.e._kernels.items()
+                if kernel.pending_calls and kernel._spec.kind in {'prompt', 'embedding'})
+            occurrence = min(live, default=None)
         signature = (getattr(self, '_activity_generation', 0), occurrence)
         previous = getattr(self, '_checkpoint_wait_signature', None)
         if signature == previous or occurrence is None and (previous is None or previous[1] is None):
@@ -486,6 +497,43 @@ class WorkerGraphRunner:
             raise DataflowError('BUDGET_EXCEEDED', 'finite checkpoint wait sequence exhausted')
         return {'activity_generation': signature[0], 'sequence': self._checkpoint_wait_sequence,
                 'partition_id': self.partition, 'occurrence_id': occurrence}
+
+    def _model_results(self, occurrence, kernel, results):
+        """Expose serial native request time to the independent control thread.
+
+        Track only next(), never downstream output/ACK waiting. Concurrent
+        calls use the original pending-call evidence after next() returns.
+        """
+        if kernel._spec.kind not in {'prompt', 'embedding'}:
+            yield from results
+            return
+        iterator = iter(results)
+        while True:
+            with self._condition:
+                self._checkpoint_model_calls.add(occurrence)
+                notice = self._checkpoint_wait_notification()
+            failure = None
+            try:
+                if notice is not None:
+                    self._send('checkpoint_wait', notice)
+                result = next(iterator)
+            except StopIteration:
+                return
+            except BaseException as exc:
+                failure = exc
+                raise
+            finally:
+                with self._condition:
+                    self._checkpoint_model_calls.discard(occurrence)
+                    notice = self._checkpoint_wait_notification()
+                if notice is not None:
+                    try:
+                        self._send('checkpoint_wait', notice)
+                    except BaseException as exc:
+                        if failure is None:
+                            raise
+                        failure.add_note('Native model wait cleanup failed: ' + str(exc))
+            yield result
 
     def _finite_finish_iterator(self, occurrence, kernel, port):
         iterator = iter(kernel.finish(port, wait_for_calls=False))
@@ -542,6 +590,7 @@ class WorkerGraphRunner:
                 self._credits.pop(command['delivery_id'])
                 self._credit_payloads.pop(command['delivery_id'], None)
             elif kind == 'park_policy':
+                self._park_wait_authorized = True
                 self._park_mode = True
                 self._source_quantum = self._source_park_quantum
                 self._consumed_deliveries.intersection_update(command.get('retain_consumed', ()))
@@ -814,11 +863,14 @@ class WorkerGraphRunner:
             if notify_idle:
                 self._idle_sent = True
             idle_generation = getattr(self, '_activity_generation', 0)
+            wait_notice = self._checkpoint_wait_notification()
             snapshot_request = self._cut if quiet and (self._paused or done) else None
             if snapshot_request is not None:
                 # Freeze under the same lock that admits new input, BEFORE
                 # snapshot I/O or a mailbox send can release this thread.
                 self._sealed_cut = snapshot_request.cut_id
+        if wait_notice is not None:
+            self._send('checkpoint_wait', wait_notice)
         if notify_done:
             from ..dataflow_checkpoint import _cursor_json
             self._send('eoi', {'scope': 'worker', 'cursors': [_cursor_json(r.snapshot())
@@ -1172,7 +1224,7 @@ class WorkerGraphRunner:
                 self._close_inputs(occ)
             return
         kernel = self.e._kernels[(occ, self.partition)]
-        for out in kernel.push(port, record):
+        for out in self._model_results(occ, kernel, kernel.push(port, record)):
             self._output(occ, out)
         if kernel._spec.kind == 'LimitOp' and kernel._emitted >= kernel._spec.configuration['limit']:
             self._finish_node(occ)
@@ -1339,7 +1391,8 @@ class WorkerGraphRunner:
                                 return processed
                             continue
                     elif kernel is not None:
-                        for out in kernel.finish(edge.input_port, wait_for_calls=False):
+                        for out in self._model_results(occurrence, kernel,
+                                kernel.finish(edge.input_port, wait_for_calls=False)):
                             self._output(occurrence, out)
                     self._finished_ports.add(edge.edge_id)
                     processed += 1

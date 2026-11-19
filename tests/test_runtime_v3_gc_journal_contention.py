@@ -6,6 +6,55 @@ from demiflow.execution.run_journal import RunJournal, ExecutionConflict
 from test_runtime_v3_artifact_accounting import store_fixture
 
 
+def test_supervisor_waits_for_first_store_registration(tmp_path, monkeypatch):
+    """Exercise the real writer's initial registration against usage polling."""
+    import fcntl
+    import demiflow.execution.dataflow_object_lease as leases
+    waiting, finished = threading.Event(), threading.Event()
+    failures, observers = [], []
+    record = leases.record_protocol
+    flock = fcntl.flock
+
+    def observed_flock(fd, operation):
+        try:
+            return flock(fd, operation)
+        except BlockingIOError:
+            if threading.current_thread().name == 'first-store-supervisor':
+                waiting.set()
+            raise
+
+    def record_during_usage(root, identity):
+        assert leases.protocol_identity(root) is None
+
+        def supervise():
+            try:
+                RunJournal(root.parent, attempt=1).record_usage(elapsed_ms=17, output_bytes=0)
+            except BaseException as exc:
+                failures.append(exc)
+            finally:
+                finished.set()
+
+        observer = threading.Thread(target=supervise, name='first-store-supervisor')
+        observers.append(observer)
+        observer.start()
+        assert waiting.wait(2)
+        assert not finished.is_set()
+        record(root, identity)
+
+    monkeypatch.setattr(fcntl, 'flock', observed_flock)
+    monkeypatch.setattr(leases, 'record_protocol', record_during_usage)
+    try:
+        with store_fixture(tmp_path) as (run, store, port):
+            assert finished.wait(3)
+            assert not failures, failures
+            assert run.journal.execution_status()['usage']['elapsed_ms'] == 17
+            store.close()
+    finally:
+        for observer in observers:
+            observer.join(3)
+            assert not observer.is_alive()
+
+
 def test_supervisor_usage_waits_for_original_gc_lease(tmp_path, monkeypatch):
     import fcntl
     import os

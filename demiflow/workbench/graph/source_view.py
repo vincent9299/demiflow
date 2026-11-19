@@ -125,6 +125,23 @@ def get(root,*,graph_binding,node_id,kind,resource=None,logical_node_id=None,occ
     result=dict(graph_binding=graph_binding,node_id=node_id,requested_kind=kind,
                 historical=historical,read_only=True,availability='available',
                 source_basis='sealed' if historical else 'report_bound' if graph_binding['basis_kind']=='report' else 'current')
+    if graph.get('native_details') is not None:
+        contract = graph['native_contract']
+        native_node = (contract['outputs'][0]['occurrence_id'] if node_id == contract['action_id'] else node_id)
+        details = graph['native_details'].get(native_node, {})
+        detail = details.get(kind, {})
+        if kind == 'configuration':
+            from .plan_details import safe_json
+            return {**detail, **result, 'kind': kind, 'fields': [],
+                'schema_metadata': details.get('schema', {}).get('metadata'),
+                'wiring': safe_json(dict(api=node.get('api'), parameters=node.get('parameters', {}), output_fields={})),
+                'resources': []}
+        metadata = detail.get('metadata', {})
+        definitions = [item.get('definition') for item in metadata.get('routes', [metadata]) if item.get('definition')]
+        return {**detail, **result, 'kind': kind,
+            'availability': detail.get('availability', 'unavailable'),
+            'reason': detail.get('reason', 'no_sealed_material'),
+            'definition': metadata.get('definition'), 'definitions': definitions}
     if kind=='configuration':
         from .plan_details import safe_json
         fields=[f for f in graph['parameters']['fields'] if node_id in f['affected_nodes']]
@@ -206,6 +223,13 @@ def pipeline(root, *, graph_binding):
     from .model import from_binding
     from .plan_details import material
     graph = from_binding(root, graph_binding)
+    if graph_binding['basis_kind'] == 'run':
+        from demiflow.workbench.runs import manager as runs
+        target, value = runs._load(root, graph_binding['run_id'], detail='identity', attempt=graph_binding['attempt'])
+        report = runs._report(target, value['manifest'])
+        if report.get('pipeline_detail') is not None:
+            return {**report['pipeline_detail'], 'format': 'demiflow.pipeline_source.v1',
+                    'graph_binding': graph_binding, 'read_only': True, 'source_basis': 'sealed'}
     entry = graph_binding.get('entry')
     if type(entry) is not str or ':' not in entry:
         raise ForgeError('This graph has no bound pipeline entry', code='not_found')

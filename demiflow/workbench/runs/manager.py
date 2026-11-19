@@ -233,7 +233,9 @@ def prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None,
     from demiflow.workbench.runs.domain import preparation_lock
     from functools import partial
     args = dict(params=params, outputs=outputs, new_outputs=new_outputs, limits=limits, inputs=inputs,telemetry=telemetry)
-    from demiflow.workbench.runs.native_resources import trusted_deployment
+    from demiflow.workbench.runs.native_resources import trusted_deployment, capacity_domain, trusted_process_environment
+    args['capacity_domain'] = capacity_domain()
+    args.update(trusted_process_environment(workspace=root))
     native_deployment = trusted_deployment(workspace=root)
     if native_deployment is not None:
         args['native_deployment'] = native_deployment
@@ -252,7 +254,8 @@ def _fact_actions(report, outputs):
 
 
 def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None, inputs=None,
-             reserved_run_id=None, prepare_request_id=None, telemetry=True, authority=None, native_deployment=None):
+             reserved_run_id=None, prepare_request_id=None, telemetry=True, authority=None, native_deployment=None,
+             capacity_domain=None, environment_names=None, executable_dirs=None):
     operation_budget.check()
     if type(telemetry) is not bool:
         raise ForgeError('telemetry must be boolean',code='invalid_request')
@@ -322,109 +325,126 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                 visit(child, (*names, str(i)))
 
     visit(effective['arguments'])
-    if not output_specs or len(output_specs) > 32 or set(metadata) - set(output_specs):
-        raise ForgeError('Run requires 1..32 declared outputs with matching metadata')
-    report = ws._inspect_flow(root, entry, params=effective, save=True)
-    if report.get('status') != 'checked':
-        raise ForgeError('Flow is not checked: ' + json.dumps(report.get('diagnostics', []), ensure_ascii=False)[:4096])
-    from demiflow.workbench.runs import native_resources
-    native_execution = native_resources.select(report, native_deployment, workspace=root)
-    if not 1 <= len(report['actions']) <= 32:
-        raise ForgeError('Run action budget exceeded')
-    from demiflow.execution.host.inspection import VERSION as capability_version
-    from demiflow.execution.host.inspection import stream_residency
-    by_id = {node['id']: node for node in report['nodes']}
-    parents = {identity: [] for identity in by_id}
-    for edge in sorted(report['edges'], key=lambda value: value['port']):
-        parents[edge['to']].append(edge['from'])
-    for node in report['nodes']:
-        capability = node.get('capability', {})
-        if capability.get('version') != capability_version or not capability.get('supported') or capability.get('backend') != 'local':
-            raise ForgeError('Run requires current supported local native capabilities')
-        if node['kind'] == 'write_table' and node['parameters']['mode'] not in {'create', 'overwrite'}:
-            raise ForgeError('This action requires create or fixed-baseline overwrite')
-        if node['role'] in {'action', 'bridge'} and capability['driver'] == 'stream':
-            facts = []
-            current = parents[node['id']][0]
-            while by_id[current]['role'] == 'transform' and by_id[current]['kind'] not in {'join', 'union'}:
-                upstream = by_id[current]
-                facts.append({**upstream['capability_fact'],
-                              'native': upstream['analysis'].get('native', {}),
-                              'arguments': upstream['analysis'].get('stream_arguments', upstream['normalized_parameters']),
-                              'reserved_bytes': upstream['analysis'].get('reserved_bytes', 0)})
-                current = parents[current][0]
-            try:
-                if payload_defaults:
-                    from demiflow.execution.host.control import stream_limits
-                    # Seal the admitted defaults into the original manifest; every
-                    # reader, checked call and physical worker receives these caps.
-                    limits = stream_limits(facts, limits, adjustable_fields=payload_defaults)
-                else:
-                    stream_residency(facts, limits)
-            except ValueError as exc:
-                raise ForgeError(str(exc)) from exc
-    for operator in report['operators']:
-        if set(operator['hooks']) - {'astart', 'astop', 'aclose'}:
-            raise ForgeError('Actor resource lifecycle must use the native astart/astop/aclose protocol')
-    ledgers = [r for r in report['binding'].get('resources', {}).values() if r['kind'] == 'ledger']
-    checkpoint_bytes = sum(n['parameters']['max_bytes'] for n in report['nodes'] if n['kind'] == 'open_checkpoint')
-    if sum(r['max_bytes'] for r in ledgers) + checkpoint_bytes > limits['max_evidence_bytes']:
-        raise ForgeError('Persistent evidence reservation exceeds run budget')
-    if sum(n['parameters']['max_index_bytes'] for n in report['nodes'] if n['kind'] == 'save_lance') > limits['max_scratch_bytes']:
-        raise ForgeError('Stream key index reservation exceeds scratch budget')
-    budgets, credentials = {}, set()
-    distributions = {d['name'] for d in platform['environment']['dependencies'] if d['status'] == 'installed'}
-    for node in report['nodes']:
-        missing = set(node['analysis'].get('required_distributions', ())) - distributions
-        if missing:
-            raise ForgeError('Native dependencies are outside the platform snapshot; bind the corresponding extras: ' + ', '.join(sorted(missing)))
-        drain = node['analysis'].get('drain_timeout_s', 0)
-        if drain and limits['cancel_grace_s'] < drain + 2:
-            raise ForgeError('Declared native drain exceeds cancel_grace_s')
-        budget = node['analysis'].get('request_budget')
-        if budget:
-            key = budget.get('path', node['id'])
-            if key in budgets and budgets[key] != budget:
-                raise ForgeError('Shared durable request ledger has conflicting budgets')
-            budgets[key] = budget if 'path' in budget else {**budget, 'node': node['id']}
-        credentials.update(r['name'] for r in node['analysis'].get('resources', []) if r['kind'] == 'credential' and r['name'])
-    if len(credentials) > 16:
-        raise ForgeError('Credential name budget exceeded')
-    depths = {}
-    for node in report['nodes']:
-        depths[node['id']] = 1 + max((depths[parent] for parent in parents[node['id']]), default=0)
-    if max(depths.values(), default=0) > 128:
-        raise ForgeError('Run native plan depth exceeds 128')
-    from demiflow.execution.host.inspection import execution_instances
-    from demiflow.execution.host.inspection import OBSERVATION_COUNT
-    try:
-        observation_instances = execution_instances(report['nodes'], report['edges'], report['actions'], maximum=OBSERVATION_COUNT)
-    except ValueError as exc:
-        raise ForgeError(str(exc)) from exc
-    actual_outputs = {n['parameters']['uri']: n['id'] for n in report['nodes'] if n['kind'] in {'write_table', 'save_lance'}}
-    if set(actual_outputs) != {o['uri'] for o in output_specs.values()}:
-        raise ForgeError('Every declared output must have one checked write action')
-    for output in output_specs.values():
-        output['action_id'] = actual_outputs[output['uri']]
-        sink = by_id[output['action_id']]
-        if sink['kind'] == 'save_lance' and output['mode'] != 'checkpoint':
-            output.update(publication='native_stage_v3', stage=sink['parameters']['stage'],
-                          schema_identity=sink['normalized_parameters']['schema']['identity'])
-        if output['mode'] == 'checkpoint':
+    from demiflow.workbench.runs import native_submission
+    native_flow = not output_specs
+    if native_flow:
+        report, output_specs = native_submission.prepare(root, entry, parameters=effective, limits=limits, metadata=metadata)
+        from demiflow.workbench.runs import native_resources
+        capacity_domain = native_resources.capacity_domain(capacity_domain)
+        native_execution = None
+        ledgers, budgets, credentials = [], {}, set(report['native_contract']['credential_names'])
+        observation_instances = report['observation_instances']
+    else:
+        if not output_specs or len(output_specs) > 32 or set(metadata) - set(output_specs):
+            raise ForgeError('Run requires 1..32 declared outputs with matching metadata')
+        report = ws._inspect_flow(root, entry, params=effective, save=True)
+        if report.get('status') != 'checked':
+            raise ForgeError('Flow is not checked: ' + json.dumps(report.get('diagnostics', []), ensure_ascii=False)[:4096])
+        from demiflow.workbench.runs import native_resources
+        capacity_domain = native_resources.capacity_domain(capacity_domain)
+        native_execution = native_resources.select(report, native_deployment, workspace=root)
+        if native_execution and native_execution['resource_root'] != capacity_domain:
+            raise ForgeError('Native deployment and capacity domain differ')
+        if not 1 <= len(report['actions']) <= 32:
+            raise ForgeError('Run action budget exceeded')
+        from demiflow.execution.host.inspection import VERSION as capability_version
+        from demiflow.execution.host.inspection import stream_residency
+        by_id = {node['id']: node for node in report['nodes']}
+        parents = {identity: [] for identity in by_id}
+        for edge in sorted(report['edges'], key=lambda value: value['port']):
+            parents[edge['to']].append(edge['from'])
+        for node in report['nodes']:
+            capability = node.get('capability', {})
+            if capability.get('version') != capability_version or not capability.get('supported') or capability.get('backend') != 'local':
+                raise ForgeError('Run requires current supported local native capabilities')
+            if node['kind'] == 'write_table' and node['parameters']['mode'] not in {'create', 'overwrite'}:
+                raise ForgeError('This action requires create or fixed-baseline overwrite')
+            if node['role'] in {'action', 'bridge'} and capability['driver'] == 'stream':
+                facts = []
+                current = parents[node['id']][0]
+                while by_id[current]['role'] == 'transform' and by_id[current]['kind'] not in {'join', 'union'}:
+                    upstream = by_id[current]
+                    facts.append({**upstream['capability_fact'],
+                                  'native': upstream['analysis'].get('native', {}),
+                                  'arguments': upstream['analysis'].get('stream_arguments', upstream['normalized_parameters']),
+                                  'reserved_bytes': upstream['analysis'].get('reserved_bytes', 0)})
+                    current = parents[current][0]
+                try:
+                    if payload_defaults:
+                        from demiflow.execution.host.control import stream_limits
+                        # Seal the admitted defaults into the original manifest; every
+                        # reader, checked call and physical worker receives these caps.
+                        limits = stream_limits(facts, limits, adjustable_fields=payload_defaults)
+                    else:
+                        stream_residency(facts, limits)
+                except ValueError as exc:
+                    raise ForgeError(str(exc)) from exc
+        for operator in report['operators']:
+            if set(operator['hooks']) - {'astart', 'astop', 'aclose'}:
+                raise ForgeError('Actor resource lifecycle must use the native astart/astop/aclose protocol')
+        ledgers = [r for r in report['binding'].get('resources', {}).values() if r['kind'] == 'ledger']
+        checkpoint_bytes = sum(n['parameters']['max_bytes'] for n in report['nodes'] if n['kind'] == 'open_checkpoint')
+        if sum(r['max_bytes'] for r in ledgers) + checkpoint_bytes > limits['max_evidence_bytes']:
+            raise ForgeError('Persistent evidence reservation exceeds run budget')
+        if sum(n['parameters']['max_index_bytes'] for n in report['nodes'] if n['kind'] == 'save_lance') > limits['max_scratch_bytes']:
+            raise ForgeError('Stream key index reservation exceeds scratch budget')
+        budgets, credentials = {}, set()
+        distributions = {d['name'] for d in platform['environment']['dependencies'] if d['status'] == 'installed'}
+        for node in report['nodes']:
+            missing = set(node['analysis'].get('required_distributions', ())) - distributions
+            if missing:
+                raise ForgeError('Native dependencies are outside the platform snapshot; bind the corresponding extras: ' + ', '.join(sorted(missing)))
+            drain = node['analysis'].get('drain_timeout_s', 0)
+            if drain and limits['cancel_grace_s'] < drain + 2:
+                raise ForgeError('Declared native drain exceeds cancel_grace_s')
+            budget = node['analysis'].get('request_budget')
+            if budget:
+                key = budget.get('path', node['id'])
+                if key in budgets and budgets[key] != budget:
+                    raise ForgeError('Shared durable request ledger has conflicting budgets')
+                budgets[key] = budget if 'path' in budget else {**budget, 'node': node['id']}
+            credentials.update(r['name'] for r in node['analysis'].get('resources', []) if r['kind'] == 'credential' and r['name'])
+        if len(credentials) > 16:
+            raise ForgeError('Credential name budget exceeded')
+        depths = {}
+        for node in report['nodes']:
+            depths[node['id']] = 1 + max((depths[parent] for parent in parents[node['id']]), default=0)
+        if max(depths.values(), default=0) > 128:
+            raise ForgeError('Run native plan depth exceeds 128')
+        from demiflow.execution.host.inspection import execution_instances
+        from demiflow.execution.host.inspection import OBSERVATION_COUNT
+        try:
+            observation_instances = execution_instances(report['nodes'], report['edges'], report['actions'], maximum=OBSERVATION_COUNT)
+        except ValueError as exc:
+            raise ForgeError(str(exc)) from exc
+        actual_outputs = {n['parameters']['uri']: n['id'] for n in report['nodes'] if n['kind'] in {'write_table', 'save_lance'}}
+        if set(actual_outputs) != {o['uri'] for o in output_specs.values()}:
+            raise ForgeError('Every declared output must have one checked write action')
+        for output in output_specs.values():
+            output['action_id'] = actual_outputs[output['uri']]
             sink = by_id[output['action_id']]
-            owners = [n for n in report['nodes'] if n['kind'] == 'open_checkpoint'
-                      and any(o['uri'] == output['uri'] for o in n['normalized_parameters']['outputs'].values())]
-            if sink['kind'] != 'save_lance' or len(owners) != 1:
-                raise ForgeError('Stage output requires a unique checkpoint-owned sink')
-            output.update(stage=sink['parameters']['stage'], checkpoint_node=owners[0]['id'],
-                          schema_identity=sink['normalized_parameters']['schema']['identity'])
-    if sum(t['row_count'] for t in report['binding']['tables'].values()) > limits['max_input_rows']:
-        raise ForgeError('Input row admission budget exceeded')
+            if sink['kind'] == 'save_lance' and output['mode'] != 'checkpoint':
+                output.update(publication='native_stage_v3', stage=sink['parameters']['stage'],
+                              schema_identity=sink['normalized_parameters']['schema']['identity'])
+            if output['mode'] == 'checkpoint':
+                sink = by_id[output['action_id']]
+                owners = [n for n in report['nodes'] if n['kind'] == 'open_checkpoint'
+                          and any(o['uri'] == output['uri'] for o in n['normalized_parameters']['outputs'].values())]
+                if sink['kind'] != 'save_lance' or len(owners) != 1:
+                    raise ForgeError('Stage output requires a unique checkpoint-owned sink')
+                output.update(stage=sink['parameters']['stage'], checkpoint_node=owners[0]['id'],
+                              schema_identity=sink['normalized_parameters']['schema']['identity'])
+        if sum(t['row_count'] for t in report['binding']['tables'].values()) > limits['max_input_rows']:
+            raise ForgeError('Input row admission budget exceeded')
     from demiflow.workbench.runs.domain import SEALED_BYTES
+    from demiflow.workbench.runs.native_resources import environment_names as validate_environment_names
+    credentials.update(validate_environment_names(environment_names or []))
+    executable_dirs = native_resources.executable_directories(executable_dirs or [], workspace=root)
     platform_root = Path(__file__).resolve().parents[2]
-    seal_files = [(ws.relative_path(root,name), Path('source')/name, digest,1024**2)
+    seal_root = Path(report['binding'].get('source_root', root))
+    seal_files = [(ws.relative_path(seal_root,name), Path('source')/name, digest,1024**2)
                   for name,digest in report['binding']['sources'].items()]
-    seal_files.extend((ws.relative_path(root,r['path']),Path('source')/r['path'],r['sha256'],r.get('max_bytes',1024**2))
+    seal_files.extend((ws.relative_path(seal_root,r['path']),Path('source')/r['path'],r['sha256'],r.get('max_bytes',1024**2))
                       for r in report['binding'].get('resources',{}).values() if r['kind'] in {'config','file'})
     seal_files.extend((platform_root/item['path'],Path('runtime/demiflow')/item['path'],item['sha256'],platform['limits']['file_bytes'])
                       for item in platform['platform']['files'])
@@ -455,12 +475,12 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
             if change_scope is not None:
                 ws.write_control(target / 'change-baseline.json', ws._scope_baseline(root, workspace), create=True)
             manifest = dict(format=FORMAT, run_id=run_id, root=str(root), entry=entry,
-                runtime_contract='demiflow_forge_runtime_v1', prepare_request_id=prepare_request_id, telemetry_enabled=telemetry,
+                runtime_contract='demiflow_forge_runtime_v1', native_submission=native_flow, prepare_request_id=prepare_request_id, telemetry_enabled=telemetry,
                 change_scope=change_scope,
                 journal_version=2,
                 created_at=time.time(), report_digest=report['digest'], original_parameters=original,
                 parameter_path=str(parameter_path.relative_to(root)) if parameter_path else None,
-                outputs=output_specs, limits=limits, workspace=workspace,
+                outputs=output_specs, limits=limits, workspace=workspace, capacity_domain=capacity_domain, executable_dirs=executable_dirs,
                 observation_instances=observation_instances,
                 credential_names=sorted(credentials), evidence=ledgers, request_budgets=list(budgets.values()),
                 object_locations=object_locations(report=report),
@@ -474,7 +494,10 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
             manifest['digest'] = content_digest(manifest)
             operation_budget.check()
             # Expensive freshness checks precede the authorization commit guard.
-            ws.verify_run_basis(root, manifest)
+            if native_flow:
+                native_submission.verify_basis(root, manifest, report)
+            else:
+                ws.verify_run_basis(root, manifest)
             durable_tree(target)
             with authority.guard(root, 'run_submit'), development_admission.guard(root, entry=entry, expected=development_acceptance):
                 run = RunJournal(target)
@@ -602,7 +625,7 @@ def verify_seal(target, manifest, *, environment=True):
     report = _report(target, manifest)
     from demiflow.workbench.runs.native_resources import verify
     verify(target, manifest.get('native_execution'))
-    if manifest.get('format') not in {FORMAT, PREVIOUS_FORMAT, LEGACY_EXECUTABLE_FORMAT} or report.get('format') != 'demiflow_forge_flow_inspection_v3':
+    if manifest.get('format') not in {FORMAT, PREVIOUS_FORMAT, LEGACY_EXECUTABLE_FORMAT} or report.get('format') not in {'demiflow_forge_flow_inspection_v3', 'demiflow_forge_native_inspection_v1'}:
         raise ForgeError('Historical execution records are read-only; prepare a newly inspected run')
     if manifest['format'] in {FORMAT, PREVIOUS_FORMAT}:
         if 'change_scope' not in manifest:
@@ -690,7 +713,6 @@ def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authorit
                 preflight = operation('run_preflight', root, run_id=run_id, expected=expected,_pass_fds=(preparation_lease,), _authority=authority.bootstrap())
             if preflight['status'] != 'checked':
                 raise ForgeError('Run changed before admission', code='conflict')
-            marker = index.begin(root, 'run', run_id)
             run_domain.history_admission(root, reserve=0, admitting=run_id, ceiling=capacity['history_bytes'])
             operation_budget.check()
             # Establish the durable execution fence before any visible admission.
@@ -698,16 +720,18 @@ def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authorit
             development_guard = (development_admission.guard(root, entry=value['manifest']['entry'], expected=value['manifest'].get('development_acceptance'))
                                  if attempt == 1 else nullcontext())
             with authority.guard(root, 'run_submit'), development_guard, _launch_unit(target, attempt) as (unit, unit_identity):
-                process = reservation = None
+                process = reservation = marker = None
                 spawn_attempted = False
                 try:
                     operation_budget.check()
                     reservation = run_domain.reserve(domain, capacity, root, value['manifest'], attempt)
                     operation_budget.check()
+                    marker = index.begin(root, 'run', run_id)
                     _claim_lease(lease, run_id)
                     run.transition({'prepared'}, 'starting', started_at=time.time(), deployment=reservation,
                                    execution_stopped=False, unit_identity=unit_identity, launch_phase='admitted')
                     index.publish(root, marker)
+                    marker = None
                     # Persist uncertainty before Popen; an interrupted launch may
                     # have forked even when no process identity was recorded yet.
                     usage = value['state'].get('usage', {})
@@ -729,7 +753,9 @@ def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authorit
                     if attempt is not None:
                         command.append(str(attempt))
                     env = worker_environment(target, value['manifest']['limits'], value['manifest'].get('credential_names', []),
-                                             native_execution=value['manifest'].get('native_execution'))
+                                             native_execution=value['manifest'].get('native_execution'),
+                                             capacity_domain=value['manifest'].get('capacity_domain'),
+                                             executable_dirs=value['manifest'].get('executable_dirs', []))
                     env['DEMIFLOW_EXECUTION_UNIT_FD'] = str(unit)
                     operation_budget.check()
                     spawn_attempted = True
@@ -750,6 +776,8 @@ def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authorit
                             execution_stopped=True, cleanup=cleanup, stop_phase='confirmed')
                         if closed and cleanup == 'complete':
                             run_domain.abandon(domain, reservation['slot'], run_id=run_id, attempt=attempt)
+                        if marker is not None:
+                            index.publish(root, marker)
                     # Once spawned, retain uncertain state and ownership. The
                     # durable unit permits explicit recovery after launcher loss.
                     raise
@@ -783,7 +811,11 @@ def _preflight(root, run_id, *, expected, authority=None):
 
 def _check_basis(root, target, m, *, phase='preflight'):
     verify_seal(target, m)
-    ws.verify_run_basis(root, m)
+    if m.get('native_submission'):
+        from demiflow.workbench.runs.native_submission import verify_basis
+        verify_basis(root, m, _report(target, m))
+    else:
+        ws.verify_run_basis(root, m)
 
 
 def _output_metadata(uri, version):
@@ -941,7 +973,7 @@ def _resume(root, run_id, *, expected, expected_attempt, authority=None):
     return show(root, run_id)
 
 
-def worker_environment(target, limits=None, credential_names=(), *, native_execution=None):
+def worker_environment(target, limits=None, credential_names=(), *, native_execution=None, capacity_domain=None, executable_dirs=()):
     limits = limits or DEFAULT_LIMITS
     result = dict(PATH=os.path.dirname(sys.executable) + ':/usr/bin:/bin', LANG='C.UTF-8',
         PYTHONDONTWRITEBYTECODE='1', PYTHONNOUSERSITE='1',
@@ -953,8 +985,16 @@ def worker_environment(target, limits=None, credential_names=(), *, native_execu
         MALLOC_ARENA_MAX='2',
         TOKIO_WORKER_THREADS='2', LANCE_CPU_THREADS='2', CUDA_VISIBLE_DEVICES='',
         LANCE_MEM_POOL_SIZE=str(limits['memory_bytes']), LANCE_MAX_TEMP_DIRECTORY_SIZE=str(limits['max_scratch_bytes']))
-    from demiflow.workbench.runs.native_resources import environment
+    from demiflow.workbench.runs.native_resources import environment, executable_directories
+    paths = executable_directories(list(executable_dirs))
+    result['PATH'] = os.pathsep.join([os.path.dirname(sys.executable), *paths, '/usr/bin', '/bin'])
     result.update(environment(target, native_execution))
+    if capacity_domain is not None:
+        from demiflow.workbench.runs.native_resources import capacity_domain as validate_domain
+        root = validate_domain(capacity_domain)
+        if result.get('DEMIFLOW_RESOURCE_ROOT', root) != root:
+            raise ForgeError('Native deployment and capacity domain differ')
+        result['DEMIFLOW_RESOURCE_ROOT'] = root
     for name in credential_names:
         if not re.fullmatch(r'[A-Z_][A-Z0-9_]{0,127}', name) or name in result or name in {'HOME', 'LD_PRELOAD', 'LD_LIBRARY_PATH'} or name.startswith(('PYTHON', 'DEMIFLOW_', 'CUDA_')):
             raise ForgeError('Credential name conflicts with worker control environment')
@@ -1014,9 +1054,12 @@ def result_table(root, run_id, name, *, attempt=None):
             or ref.relative_uri != item['relative_uri'] or ref.store_id != item['location_id']):
         raise ForgeError('Run result reference differs from its verified native publication')
     root, workspace, _ = ws.load_workspace(root)
-    if ref.store_id not in workspace['locations']:
-        raise ForgeError('Result location is no longer declared')
-    base = ws.location_root(root, workspace['locations'][ref.store_id])
+    if value['manifest'].get('native_submission'):
+        base = ws.no_symlinks(Path(item['location_root']))
+    else:
+        if ref.store_id not in workspace['locations']:
+            raise ForgeError('Result location is no longer declared')
+        base = ws.location_root(root, workspace['locations'][ref.store_id])
     uri = ws.relative_path(base, ref.relative_uri)
     if str(uri) != item['uri']:
         raise ForgeError('Result location changed from the sealed output')
@@ -1156,11 +1199,11 @@ def _reconcile(root, run_id, *, expected_attempt):
 
         try:
             errors = register_results(root, run_id, recover=True, maintenance_deadline=deadline)
-            if not completed:
-                remove_attempt_work(work, deadline=deadline)
             current = run.execution_status()
             clean_stopped(run, expected_revision=current['revision'],
                           confirm_stopped=stopped, deadline=deadline)
+            if not completed:
+                remove_attempt_work(work, deadline=deadline)
             if not completed:
                 current = run.execution_status()
                 if not run.transition({current['status']}, current['status'],

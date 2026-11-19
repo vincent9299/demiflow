@@ -33,9 +33,10 @@ class CompileContext:
     ref = None
     explicit_limits = ()
 
-    def __init__(self):
+    def __init__(self, limits=None):
         from .runtime_limits import execution_limits
-        self._limits = execution_limits()
+        self._limits = execution_limits(limits)
+        self.explicit_limits = tuple(limits or ())
 
     @property
     def limits(self):
@@ -54,13 +55,16 @@ class CapturedAction:
     policy: RuntimePolicy
     bounds: Bounds
     entry_completed: bool = False
+    submission: dict | None = None
 
 
 class _Capture:
-    def __init__(self, on_compiled=None):
+    def __init__(self, on_compiled=None, *, action_id='preview', limits=None, submission=False):
         self.result = None
-        self.context = CompileContext()
+        self.context = CompileContext(limits)
         self.on_compiled = on_compiled
+        self.action_id = action_id
+        self.submission = submission
 
     def intercept(self, request, *, policy, bounds):
         from ..planning.dataflow_compile import lower_action
@@ -68,11 +72,15 @@ class _Capture:
         if self.result is not None:
             raise DataflowError('UNSUPPORTED_CAPABILITY', 'construction caught the planning boundary; later actions cannot be guessed')
         compiled = lower_action(request, bounds=bounds, on_compiled=self.on_compiled)
-        self.result = CapturedAction(compiled, request.kind, request.provider, policy, bounds)
+        contract = None
+        if self.submission:
+            from .managed_native import submission_contract
+            contract = submission_contract(request, compiled, bounds=bounds)
+        self.result = CapturedAction(compiled, request.kind, request.provider, policy, bounds, submission=contract)
         raise _Captured()
 
 
-def capture_pipeline(entry, arguments, *, on_compiled=None) -> CapturedAction:
+def capture_pipeline(entry, arguments, *, on_compiled=None, _submission=False, _limits=None) -> CapturedAction:
     """Compile the exact first action request from a trusted callable and kwargs.
 
     The same make_action_request/resolve_action_runtime/lower_action functions
@@ -94,7 +102,8 @@ def capture_pipeline(entry, arguments, *, on_compiled=None) -> CapturedAction:
     from .checked import current as current_checked
     if current_capture() is not None or current_run() is not None or current_checked() is not None:
         raise DataflowError('INVALID_CONTRACT', 'plan capture cannot nest inside execution or another capture')
-    capture = _Capture(on_compiled)
+    capture = _Capture(on_compiled, action_id='action-1' if _submission else 'preview',
+                       limits=_limits, submission=_submission)
     token = _CURRENT.set(capture)
     try:
         try:
