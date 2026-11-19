@@ -1,0 +1,254 @@
+{
+  "native_baseline": "568d55c90b696ad6b76fc34bb080b9f5aa2a408a",
+  "approved_native_delta": "save_lance: make_native_operation -> validate_native_operation",
+  "native_uses": {
+    "imports": [
+      [
+        "Dataset.ack_queue",
+        "from ..execution.queue_ack import QueueAcknowledge"
+      ],
+      [
+        "Dataset.admit_rows",
+        "from ..execution.stream_admission import StreamAdmission"
+      ],
+      [
+        "Dataset.enqueue",
+        "from ..execution.queue_producer import QueueProducer"
+      ],
+      [
+        "Dataset.fetch",
+        "from ..execution.raw_fetch import RawFetch"
+      ],
+      [
+        "Dataset.lookup_lance",
+        "from ..execution.stream_lookup import LanceLookup"
+      ],
+      [
+        "Dataset.map_cached",
+        "from .result_cache import CachedMap, CachedSyncMap"
+      ],
+      [
+        "Dataset.save_lance",
+        "from ..execution.stream_lance import StreamLanceSink"
+      ]
+    ],
+    "map_cached": [
+      [
+        [
+          [
+            "if",
+            "synchronous",
+            "body"
+          ]
+        ],
+        "return self.map(CachedSyncMap(fn, cache_dir, version, **options))"
+      ],
+      [
+        [],
+        "return self.map_async(CachedMap(fn, cache_dir, version, **options), concurrency=concurrency, queue_depth=queue_depth)"
+      ]
+    ],
+    "enqueue": [
+      [
+        [],
+        "actor = QueueProducer(config, producer=producer, messages=messages, queue_depth=queue_depth)"
+      ],
+      [
+        [],
+        "return self.map_async(actor, concurrency=1, queue_depth=queue_depth, label='enqueue')"
+      ]
+    ],
+    "ack_queue": [
+      [
+        [],
+        "actor = QueueAcknowledge(config, result=result, queue_depth=queue_depth, keep_row=keep_row)"
+      ],
+      [
+        [],
+        "return self.map_async(actor, concurrency=1, queue_depth=queue_depth, label='ack_queue')"
+      ]
+    ],
+    "fetch": [
+      [
+        [],
+        "actor = RawFetch(request=request, output=output, store=store, policy=policy, concurrency=concurrency, queue_depth=queue_depth, label=label)"
+      ],
+      [
+        [],
+        "return self.map_async(actor, concurrency=concurrency, queue_depth=queue_depth, label=label)"
+      ]
+    ],
+    "lookup_lance": [
+      [
+        [],
+        "return self.map_async(LanceLookup(source, on, columns, output, max_matches, max_bytes), concurrency=1, queue_depth=1, label='lookup_' + output)"
+      ]
+    ],
+    "admit_rows": [
+      [
+        [],
+        "actor = StreamAdmission(path=path, key=key, unique_on=unique_on, quotas=quotas, output=output, when=when, max_entries=max_entries, max_key_bytes=max_key_bytes, max_disk_bytes=max_disk_bytes)"
+      ],
+      [
+        [],
+        "return self.map_async(actor, concurrency=1, queue_depth=queue_depth, label='admit_' + output)"
+      ]
+    ],
+    "save_lance": [
+      [
+        [],
+        "actor = StreamLanceSink(uri, schema, key=key, stage=stage, output_ref=output_ref, mode=mode, when=when, max_rows=max_rows, max_row_bytes=max_row_bytes, max_key_bytes=max_key_bytes, max_index_bytes=max_index_bytes)"
+      ],
+      [
+        [],
+        "declared = self.batch_map(actor.__call__, max_batch=max_batch, flush_interval=flush_interval, concurrency=1, queue_depth=queue_depth, label='save_' + stage)"
+      ],
+      [
+        [],
+        "validate_native_operation('save_lance', configuration={'uri': actor.uri, 'stage': stage, 'mode': mode, 'max_batch': max_batch, 'queue_depth': queue_depth}, bindings={'stage': stage})"
+      ],
+      [
+        [],
+        "return Dataset(self._source, self._plan.append(SaveLanceOp(**vars(op), uri=actor.uri, stage=stage, key=key, output_ref=output_ref, mode=mode)), self._executor, self._stages + (actor,))"
+      ]
+    ]
+  },
+  "assembly_entries": {
+    "demiflow/data/api.py": {
+      "imports": [
+        [
+          "_select_executor",
+          "demiflow.execution.executors.local",
+          "LocalDatasetExecutor",
+          null
+        ]
+      ],
+      "uses": [
+        [
+          "_select_executor",
+          "LocalDatasetExecutor(workers=workers, block_size=block_size)"
+        ],
+        [
+          "_select_executor",
+          "executor"
+        ],
+        [
+          "_select_executor",
+          "executor"
+        ],
+        [
+          "_select_executor",
+          "executor"
+        ]
+      ]
+    },
+    "demiflow/data/read_api.py": {
+      "imports": [
+        [
+          "",
+          "demiflow.execution",
+          "queue_flow",
+          "_queue_flow"
+        ],
+        [
+          "from_items",
+          "demiflow.execution.input_runtime",
+          "prepare_public_items",
+          null
+        ],
+        [
+          "read_legacy_queue_records",
+          "demiflow.execution.legacy_queue",
+          "LegacyQueueHistoryDatasource",
+          null
+        ],
+        [
+          "read_queue",
+          "demiflow.execution.queue_source",
+          "QueueDatasource",
+          null
+        ],
+        [
+          "read_queue_records",
+          "demiflow.execution.queue_history",
+          "QueueHistoryDatasource",
+          null
+        ]
+      ],
+      "uses": [
+        [
+          "from_items",
+          "prepare_public_items(InputSpec('public_items', items), select_executor=lambda: _select_executor(_current_executor.get()))"
+        ],
+        [
+          "read_legacy_queue_records",
+          "LegacyQueueHistoryDatasource(path, sha256=sha256, pool=pool, through=through, results=results, limits=limits, max_journal_bytes=max_journal_bytes, after=after)"
+        ],
+        [
+          "read_legacy_queue_records",
+          "source"
+        ],
+        [
+          "read_legacy_queue_records",
+          "source"
+        ],
+        [
+          "read_queue",
+          "QueueDatasource(config, pool=pool, settlement=settlement, max_inflight=max_inflight, idle_timeout_s=idle_timeout_s, lease_s=lease_s, max_tasks=max_tasks, stop=stop)"
+        ],
+        [
+          "read_queue",
+          "_queue_flow.analyze_untyped"
+        ],
+        [
+          "read_queue",
+          "_queue_flow.normalize_source"
+        ],
+        [
+          "read_queue",
+          "source"
+        ],
+        [
+          "read_queue",
+          "source"
+        ],
+        [
+          "read_queue_records",
+          "QueueHistoryDatasource(config, pool=pool, through=through, results=results, verify=verify, limits=limits, after=after)"
+        ],
+        [
+          "read_queue_records",
+          "_queue_flow.analyze_untyped"
+        ],
+        [
+          "read_queue_records",
+          "_queue_flow.normalize_history"
+        ],
+        [
+          "read_queue_records",
+          "source"
+        ],
+        [
+          "read_queue_records",
+          "source"
+        ]
+      ]
+    },
+    "demiflow/data/guards.py": {
+      "imports": [
+        [
+          "require",
+          "demiflow.execution.dataset_runtime",
+          "execute_guard",
+          null
+        ]
+      ],
+      "uses": [
+        [
+          "require",
+          "execute_guard(condition, message)"
+        ]
+      ]
+    }
+  }
+}
