@@ -29,3 +29,16 @@ Build a document for another candidate from a specification (lanes, their receip
 
 A located cause is not a ruling. An entry without a ruling stays `undetermined`; nothing
 here marks a test as expected to fail.
+
+## 2026-11-19 integration follow-up
+
+- `36cd37c.json`: actual receipts from the previously tagged main, retained as history.
+- `83b528e.json`: the complete four-lane run after integrating the latest platform coordinator work.
+- `../integration-followups-20261119.md`: per-difference review, separately validated test repairs,
+  preserved limitations, and exact source-binding policy.
+
+The final release includes a separately tested delta in three test files and documentation.
+The full-run snapshot remains labelled 83b528e; its input digests are not rewritten to impersonate
+the release commit. Publication metadata in the shared review directory binds the actual main
+tag to this full run, those delta receipts, the final merge gate and the unchanged production
+source comparison. A known-state entry is not an xfail and is never counted as a pass.
