@@ -496,7 +496,7 @@ class LocalHostEndpoint(_EndpointBase):
 
     def activate(self, assignment: "WorkerAssignment") -> None:
         from .contracts.worker import WorkerProtocolModel
-        from .worker.bootstrap import recv_message, ControlFrameReader
+        from .worker.bootstrap import ControlFrameReader
         from .worker.dataflow_host import make_worker_control_assignment
         if self._assignment != assignment:
             raise DataflowError("FENCED", "worker assignment was not staged before allocation")
@@ -508,9 +508,7 @@ class LocalHostEndpoint(_EndpointBase):
             scope_id=self._scope_id, run_id=run.ref.run_id, allocation_id=self._allocation_id,
             boot_id=self._boot_id, controller_epoch=run.attempt, grant=grant, plan_revision=0,
             capabilities=["cpu-map", "stream"])
-        register = recv_message(self._sock)
-        if register is None or register.get("kind") != "Register":
-            raise DataflowError("INTERNAL_PROTOCOL", "local worker did not register")
+        register = self._receive_registration()
         self._model.handle(register, now_ms=int(time.time() * 1000))
         self._control_reader = ControlFrameReader(self._sock,
             timeout_s=self._services.policy.control_timeout_ms / 1000)
@@ -524,6 +522,33 @@ class LocalHostEndpoint(_EndpointBase):
                                    "operation_id": uuid.uuid4().hex})
         self._send_k3("Assign", {"assignment": control})
         self._activated = True
+
+    def _receive_registration(self):
+        from .worker.bootstrap import recv_message
+        context = {"allocation_id": self._allocation_id, "boot_id": self._boot_id}
+
+        def lost_registration():
+            process = getattr(self._provider, '_spawned', {}).get(self._allocation_id)
+            if process is not None:
+                # Preserve observed exit evidence only. EOF may precede process
+                # exit; it must not manufacture a signal or automatically retry.
+                context['worker_exit_code'] = process.poll()
+            return DataflowError("UNKNOWN_EFFECT", "local worker connection closed before registration",
+                                 context=context)
+
+        try:
+            register = recv_message(self._sock)
+        except (ConnectionResetError, ConnectionAbortedError) as exc:
+            raise lost_registration() from exc
+        except TimeoutError as exc:
+            raise DataflowError("DEADLINE_EXCEEDED", "local worker registration deadline elapsed",
+                                context=context) from exc
+        if register is None:
+            raise lost_registration()
+        if not isinstance(register, dict) or register.get("kind") != "Register":
+            raise DataflowError("INTERNAL_PROTOCOL", "local worker sent an invalid registration frame",
+                                context=context)
+        return register
 
     def _read_control(self, *, max_messages):
         try:
