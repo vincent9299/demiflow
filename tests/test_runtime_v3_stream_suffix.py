@@ -105,17 +105,27 @@ def test_nonfinal_live_checkpoint_cannot_recreate_retired_attempt(tmp_path, monk
         return data.from_items([{'n':n} for n in range(8)]).map(callback, execution='thread', concurrency=1)
     class Interrupted(Exception): pass
     commit = DataflowCheckpointCoordinator.commit
+    committed = []
     def interrupt(coordinator, *args, **kwargs):
         image = commit(coordinator, *args, **kwargs)
-        if not image.cut.final: raise Interrupted()
+        if not image.cut.final:
+            fact = coordinator._action.context.journal.execution_commit(image.commit_id)
+            assert fact['status'] == 'acked'
+            committed.append(image)
+            raise Interrupted()
         return image
     with pytest.raises(Interrupted):
-        with RunContext.start(tmp_path/'run',limits={'checkpoint_rows':1}) as run, data.local_execution(workers=2):
+        # A row trigger does not bound read-ahead during publication. Keep the
+        # original partial-attempt assertion by explicitly limiting admission,
+        # including the generation allowed to overlap the first ACK.
+        with RunContext.start(tmp_path/'run',limits={'checkpoint_rows':1,
+                'checkpoint_unconfirmed_rows':1}) as run, data.local_execution(workers=2):
             ref = run.ref
             with monkeypatch.context() as patch:
                 patch.setattr(DataflowCheckpointCoordinator, 'commit', interrupt)
                 pipeline().take_all()
     before = events.read_text()
+    assert len(committed) == 1 and not committed[0].cut.final
     assert 0 < len(before.splitlines()) < 8
     with pytest.raises(DataflowError,match='no final ACKed result'):
         with RunContext.resume(ref), data.local_execution(workers=2):

@@ -12,6 +12,18 @@ def joined():
 
 
 def test_finite_result_keeps_original_small_budget_and_resumes_original_seal(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from demiflow.execution import dataflow_api
+    original_policy = dataflow_api.resolve_runtime_policy
+    def separate_finite_phases(*args, **kwargs):
+        policy, bounds = original_policy(*args, **kwargs)
+        return replace(policy, fusion=False), bounds
+    # This counterexample interrupts the seal between join and terminal. Pin
+    # separate operators and the original windows; adaptive defaults may put
+    # both in the same live phase and remove this retirement boundary.
+    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', separate_finite_phases)
+    limits = {'max_row_bytes': 16 * 1024, 'max_batch_bytes': 16 * 1024,
+              'max_state_bytes': 16 * 1024}
     class Interrupted(Exception):
         pass
     retire = DataflowExecution._retire_phase
@@ -29,7 +41,7 @@ def test_finite_result_keeps_original_small_budget_and_resumes_original_seal(tmp
             sealed.append(execution._physical.plan_id)
             raise Interrupted()
         return retire(execution, image)
-    with pytest.raises(Interrupted), RunContext.start(tmp_path/'run') as run:
+    with pytest.raises(Interrupted), RunContext.start(tmp_path/'run', limits=limits) as run:
         ref = run.ref
         with data.local_execution(workers=2, memory_bytes=128 * 1024), monkeypatch.context() as patch:
             patch.setattr(DataflowExecution, '_retire_phase', interrupt)
