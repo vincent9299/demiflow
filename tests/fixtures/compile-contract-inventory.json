@@ -267,6 +267,7 @@
     "execution/worker/dataflow_graph_runner.py"
    ],
    "limits": [
+    "execution/dataflow_resource_recovery.py",
     "execution/run_context.py",
     "execution/run_journal.py",
     "execution/worker/authority.py"
@@ -358,6 +359,9 @@
    "prompt_name": [
     "execution/plan_capture.py"
    ],
+   "query": [
+    "execution/program_materials.py"
+   ],
    "reducer_kwargs": [
     "execution/kernels/relational.py"
    ],
@@ -374,6 +378,7 @@
     "execution/dataflow_routed_prompt.py"
    ],
    "run_id": [
+    "execution/dataflow_resource_recovery.py",
     "execution/run_context.py",
     "execution/run_journal.py",
     "execution/worker/authority.py"
