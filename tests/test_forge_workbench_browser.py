@@ -280,6 +280,7 @@ def test_original_declared_project_without_native_flows_is_usable_and_honest(ori
     grants=registry.read_bytes();calls=[]
     with service(None,registry=registry,enable_runs=True) as app,page_for(browser,app) as (page,errors):
         page.on('request',lambda r:calls.append((r.method,r.url)) if '/api/' in r.url else None)
+        page.locator('#project-switcher').click()
         page.locator('#project-list [data-workspace="'+key+'"]').click()
         pipeline(page)
         expect(page.get_by_label('流程',exact=True)).to_have_value('dispatch.py:run_pipeline')

@@ -97,6 +97,7 @@ def test_later_explicit_selection_discards_held_fixed_result(completed,browser,t
     other=tmp_path/'other-project';other.mkdir();(other/'README.md').write_text('# Other navigation scope\nSeparate project.')
     other_key=console.add(registry,other)['workspace_id']
     with service(None,registry=registry) as app,page_for(browser,app) as (page,errors):
+        page.locator('#project-switcher').click()
         page.locator('#project-list [data-workspace="'+key+'"]').click()
         pipeline(page)
         page.evaluate('() => Object.defineProperty(document,"hidden",{configurable:true,get:()=>true})')
@@ -112,6 +113,7 @@ def test_later_explicit_selection_discards_held_fixed_result(completed,browser,t
             pipeline(page);select_run(page,b)
             expect(page.locator('.wb-basis')).to_contain_text('封存运行图')
         else:
+            page.locator('#project-switcher').click()
             page.locator('#project-list [data-workspace="'+other_key+'"]').click()
             page.get_by_role('heading',name='Other navigation scope',exact=True).wait_for()
         position=page.url

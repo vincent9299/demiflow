@@ -66,6 +66,7 @@ def test_project_switch_discards_old_status_and_detached_check(project,browser,m
     other=tmp_path/'other-project';other.mkdir();(other/'README.md').write_text('# Other project\nSeparate context.')
     other_key=console.add(registry,other)['workspace_id']
     with service(None,registry=registry) as app,page_for(browser,app) as (page,errors):
+        page.locator('#project-switcher').click()
         page.locator('#project-list [data-workspace="'+key+'"]').click()
         project_info(page)
         page.get_by_role('button',name='检查当前项目',exact=True).evaluate('(node)=>window.__oldProjectCheck=node')
@@ -82,6 +83,7 @@ def test_project_switch_discards_old_status_and_detached_check(project,browser,m
         }''')
         page.get_by_role('button',name='刷新当前视图',exact=True).click()
         page.wait_for_function('() => typeof window.__releaseStatus==="function"')
+        page.locator('#project-switcher').click()
         page.locator('#project-list [data-workspace="'+other_key+'"]').click()
         page.get_by_role('heading',name='Other project',exact=True).wait_for()
         writes=[];page.on('request',lambda r:writes.append(r.url) if r.method=='POST' else None)

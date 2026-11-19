@@ -9,6 +9,7 @@
     report_digest: text(64, '^[0-9a-f]{64}$'),
     run_id: text(25, '^r[0-9a-f]{24}$'),
     session_id: text(33, '^d[0-9a-f]{32}$'),
+    document: text(1024, '^.+\\.(?:[mM][dD]|[mM][aA][rR][kK][dD][oO][wW][nN])$'),
     attempt: {type: 'integer', minimum: 1, maximum: 32},
     row_id: text(20, '^(?:0|[1-9][0-9]*)$'),
     node_id: text(64),
@@ -27,8 +28,8 @@
   fields.plan_revision = {type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER};
   fields.plan_format = {type: 'string', minLength: 2, maxLength: 6, pattern: '^(?:legacy|v3)$'};
   const kinds = {
-    development: [[], []], development_session: [['session_id'], []],
-    overview: [[], []], tables: [[], []], runs: [[], []], checks: [[], []],
+    development: [[], []], development_new: [[], []], development_session: [['session_id'], []],
+    overview: [[], ['document']], tables: [[], []], runs: [[], []], checks: [[], []],
     flows: [[], ['entry', 'params']],
     table: [['alias', 'binding_digest'], ['columns', 'offset']],
     case: [['alias', 'binding_digest', 'row_id'], ['columns']],
@@ -91,6 +92,7 @@
   }
   function validateView(value) {
     if (!object(value)) throw new Error('不支持的视图类型');
+    if(value.document&&(value.document.includes('\\')||value.document.split('/').some(part=>!part||part.startsWith('.'))))throw new Error('文档路径必须位于项目内');
     const variants=value.v===2?schemasV2:schemas;
     if (!Object.hasOwn(variants,value.kind)) throw new Error('不支持的视图类型');
     const spec = variants[value.kind], keys = Object.keys(value);

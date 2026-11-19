@@ -62,22 +62,27 @@
     if(sourceOnly)reader.element.querySelector('.reading-toolbar').hidden=true;
     readers.add(reader);parent.append(reader.element);return reader;
   }
-  function closeNavigation() {
-    const wasOpen=document.querySelector('.shell')?.classList.contains('nav-open');
-    document.querySelector('.shell')?.classList.remove('nav-open');
-    const toggle=document.getElementById('navigation-toggle');
-    updateNavigation();
-    if(wasOpen&&toggle?.getClientRects().length)toggle.focus();
+  function closeProjectPicker({restoreFocus=false}={}) {
+    const picker=document.getElementById('project-picker'),toggle=document.getElementById('project-switcher');
+    if(!picker||picker.hidden)return;
+    const containedFocus=picker.contains(document.activeElement);
+    picker.hidden=true;toggle?.setAttribute('aria-expanded','false');
+    if(restoreFocus||containedFocus)toggle?.focus();
   }
-  function updateNavigation() {
-    const shell=document.querySelector('.shell');if(!shell)return;
-    const narrow=matchMedia('(max-width:760px)').matches,expanded=narrow?shell.classList.contains('nav-open'):!shell.classList.contains('sidebar-collapsed');
-    shell.classList.toggle('nav-narrow',narrow);
-    document.getElementById('navigation-toggle')?.setAttribute('aria-expanded',String(expanded));
-    const sidebar=document.getElementById('project-sidebar');
-    if(sidebar){if(narrow)sidebar.setAttribute('aria-hidden',String(!expanded));else sidebar.removeAttribute('aria-hidden');}
-    const control=document.getElementById('sidebar-toggle');
-    if(control){const label=narrow?'收起项目导航':expanded?'收起侧栏':'展开侧栏';control.setAttribute('aria-label',label);control.title=label;control.setAttribute('aria-expanded',String(expanded));}
+  function filterProjects() {
+    const term=(document.getElementById('project-search')?.value||'').trim().toLocaleLowerCase();let count=0;
+    for(const item of projectNav?.querySelectorAll('[data-workspace]')||[]){
+      item.hidden=!item.title.toLocaleLowerCase().includes(term);if(!item.hidden)count++;
+    }
+    const empty=document.getElementById('project-no-match');if(empty)empty.hidden=!projectList.length||count>0;
+  }
+  function toggleProjectPicker() {
+    const picker=document.getElementById('project-picker'),toggle=document.getElementById('project-switcher');
+    if(!picker.hidden){closeProjectPicker({restoreFocus:true});return;}
+    document.getElementById('workspace-status').open=false;
+    picker.hidden=false;toggle.setAttribute('aria-expanded','true');
+    const search=document.getElementById('project-search');search.value='';filterProjects();search.focus();
+    projectNav.querySelector('[aria-current=true]')?.scrollIntoView({block:'nearest'});
   }
   function revealTab() {
     const current=nav?.querySelector('[aria-current=page]');if(!current)return;
@@ -101,7 +106,7 @@
   function pageKind(reference = pendingView || view) {
     const kind = reference?.kind || 'overview';
     if(reference?.panel)return reference.panel;
-    return ({development_session:'development',table:'tables',table_request:'tables',case:'tables',inspection:'flows',run:'monitor',run_compare:'monitor',runs:'monitor',checks:'flows'})[kind] || kind;
+    return ({development_new:'development',development_session:'development',table:'tables',table_request:'tables',case:'tables',inspection:'flows',run:'monitor',run_compare:'monitor',runs:'monitor',checks:'flows'})[kind] || kind;
   }
   const pipelinePage=page=>['flows','operators','monitor'].includes(page);
   function markFunction(page=pageKind()) {
@@ -284,7 +289,7 @@
     if(value.v === 1)value={...value,v:2,workspace:workspaceId};
     rememberTab();
     readController.abort();readController=new AbortController();
-    const epoch = ++viewEpoch; selectionEpoch++; revokeImages();disposeReaders();closeNavigation();updates={};
+    const epoch = ++viewEpoch; selectionEpoch++; revokeImages();disposeReaders();updates={};
     pendingView = value; clearSelection(); viewState = 'loading'; main.replaceChildren();main.classList.remove('bound-case-active','original-case-active','original-table-active','workbench-active','data-active','data-notebook-active','data-case-config-active','data-catalog-expanded','data-catalog-collapsed');projectHeading();
     if(value.kind==='table_request'){
       putHistory(value,historyMode);historyMode='replace';
@@ -294,11 +299,15 @@
     try {
       const page = pageKind();
       if (page === 'development') {
-        developmentView = await ForgeDevelopment.mount({main, api, workspaceId, view:value, mountText, disposeReaders,
-          openSession:id=>openView(target('development_session',{session_id:id})), error, register:handle=>{developmentView=handle;}});
-        if(epoch===viewEpoch&&developmentView?.sessionId)value=target('development_session',{session_id:developmentView.sessionId});
+        const mounted = await ForgeDevelopment.mount({main, api, workspaceId, view:value, mountText, disposeReaders,
+          openNew:()=>epoch===viewEpoch?openView(target('development_new')):undefined,
+          openSession:id=>epoch===viewEpoch?openView(target('development_session',{session_id:id})):undefined,
+          error, register:handle=>{if(epoch===viewEpoch)developmentView=handle;else handle.dispose();}});
+        if(epoch!==viewEpoch){mounted.dispose();throw staleRequest();}
+        developmentView=mounted;
+        if(developmentView?.sessionId)value=target('development_session',{session_id:developmentView.sessionId});
       }
-      else if (page === 'overview') overview();
+      else if (page === 'overview') await overview(value);
       else if (page === 'tables') await tables(value,reference=>{
         if(epoch!==viewEpoch)throw staleRequest();
         const resolved=V.validateView(reference);
@@ -323,7 +332,7 @@
   }
   async function navigate(page) {
     if(pipelinePage(page)&&workbenchView&&['ready','loading'].includes(viewState)&&pipelinePage(pageKind())){
-      rememberTab();await workbenchView.showPage(page);closeNavigation();return;
+      rememberTab();await workbenchView.showPage(page);closeProjectPicker();return;
     }
     return openView(tabTarget(page));
   }
@@ -579,12 +588,55 @@
     if(refs.length===1)return {label:'查看数据 · '+path,open:async()=>{current();pendingOriginalPath=path;await openView(target('tables'));}};
     return null;
   }
-  function overview() {
-    const intro=panel('README.md');intro.id='project-readme';intro.tabIndex=-1;
-    if(!context.readme){intro.append($('p','尚无 README.md。可在开发中补充项目说明。','notice'));button('进入开发',()=>navigate('development'),intro);}
-    else if(context.readme.startsWith('项目说明无法读取：'))intro.append($('p',context.readme,'error-box'));
-    else mountText(intro,context.readme,{resolveLink:resolveProjectLink});
-    const info=$('details');info.append($('summary','项目内容、能力与依据'));main.append(info);
+  async function overview(reference) {
+    const epoch=viewEpoch,project=workspaceId,documentPath=reference.document||'README.md';
+    const layout=$('div',undefined,'document-workspace'),directory=$('nav',undefined,'document-directory'),viewer=$('div',undefined,'document-viewer');
+    directory.id='document-directory';directory.setAttribute('aria-label','Markdown 文档目录');
+    const bar=$('div',undefined,'document-toolbar');
+    const toggle=button('文档目录',()=>{directory.hidden=!directory.hidden;layout.classList.toggle('document-catalog-closed',directory.hidden);toggle.setAttribute('aria-expanded',String(!directory.hidden));},bar);
+    toggle.setAttribute('aria-controls',directory.id);toggle.setAttribute('aria-expanded',String(!matchMedia('(max-width:760px)').matches));
+    directory.hidden=matchMedia('(max-width:760px)').matches;layout.classList.toggle('document-catalog-closed',directory.hidden);
+    directory.append($('h2','文档','document-directory-heading'));layout.append(directory,viewer);main.append(bar,layout);main.classList.add('readme-main');
+    let disposed=false;const current=()=>!disposed&&epoch===viewEpoch&&project===workspaceId;
+    registerViewHandle({dispose(){disposed=true;main.classList.remove('readme-main');}});
+    const navigateDocument=path=>{if(current())return openView(target('overview',{document:path}));};
+    async function folder(host,path='',offset=0){
+      if(!current()||host.dataset.loading==='true')return;
+      host.dataset.loading='true';
+      try{
+        const result=await api('project-documents',{...(path?{path}:{}),offset,limit:50});if(!current()||!host.isConnected||(path&&!host.parentElement.open))return;
+        if(directory.querySelectorAll('[data-document]').length+result.entries.length>300)throw new Error('展开的目录较多，请先收起部分目录。');
+        host.querySelector(':scope > .document-page')?.remove();host.querySelector(':scope > .document-list-error')?.remove();
+        for(const row of result.entries){
+          if(row.kind==='directory'){
+            const group=$('details',undefined,'document-folder'),summary=$('summary',row.name),children=$('div',undefined,'document-children');
+            group.dataset.document=row.path;group.append(summary,children);host.append(group);
+            group.addEventListener('toggle',()=>{if(group.open)folder(children,row.path);else children.replaceChildren();});
+            if(documentPath.startsWith(row.path+'/'))group.open=true;
+          }else{
+            const item=button(row.name,()=>navigateDocument(row.path),host);item.className='document-item';item.dataset.document=row.path;item.title=row.path;
+            if(row.path===documentPath){item.classList.add('active');item.setAttribute('aria-current','page');}
+          }
+        }
+        if(!result.entries.length&&offset===0)host.append($('p','没有 Markdown 文档','document-empty'));
+        if(result.next_offset!==null){const next=button('更多文件',()=>folder(host,path,result.next_offset),host);next.className='document-page';}
+      }catch(err){if(current()&&err.name!=='AbortError'){const message=$('p',err.message,'document-list-error');host.querySelector(':scope > .document-list-error')?.remove();host.append(message);}}
+      finally{delete host.dataset.loading;}
+    }
+    const catalog=$('div',undefined,'document-tree');directory.append(catalog);folder(catalog);
+    const intro=panel(documentPath,viewer);intro.id='project-readme';intro.tabIndex=-1;
+    let text=context.readme;
+    if(reference.document){try{const doc=await api('project-markdown',{path:documentPath});if(!current())return;text=doc.text;}catch(err){if(current())error(intro,err);return;}}
+    if(!text){intro.append($('p',reference.document?'此文档为空。':'尚无 README.md。可在开发中补充项目说明。','notice'));if(!reference.document)button('进入开发',()=>navigate('development'),intro);}
+    else if(!reference.document&&text.startsWith('项目说明无法读取：'))intro.append($('p',text,'error-box'));
+    else mountText(intro,text,{resolveLink:href=>{
+      if(!current()||/^(?:[a-z][a-z0-9+.-]*:|\/|#)/i.test(href))return null;
+      let path;try{path=decodeURIComponent(new URL(href,'https://project.invalid/'+documentPath).pathname.slice(1));}catch{return null;}
+      if(/\.(?:md|markdown)$/i.test(path)){try{V.validateView(target('overview',{document:path}));}catch{return null;}
+        return {label:'打开文档 · '+path,open:()=>navigateDocument(path)};}
+      return resolveProjectLink(path);
+    }});
+    const info=$('details');info.append($('summary','项目内容、能力与依据'));viewer.append(info);
     info.append($('p',context.flows.length+' 个登记流程 · '+context.tables.length+' 个固定数据引用 · '+context.report_total+' 份报告；报告数量不代表全部通过。','muted small'));
     button('查看管道与检查',()=>navigate('flows'),info);button('查看数据',()=>navigate('tables'),info);
     if(Object.keys(context.locations).length)table(info,['位置','根目录','权限'],Object.entries(context.locations).map(([name,value])=>({cells:[name,value.root,value.writable?'可声明输出':'只读']})));
@@ -1291,6 +1343,7 @@
   }
   function projectHeading() {
     const name=document.getElementById('workspace-name');name.textContent=context?.name||projectList.find(p=>p.workspace_id===workspaceId)?.name||'选择项目';name.title=name.textContent;
+    document.getElementById('project-switcher')?.setAttribute('aria-label','切换项目：'+name.textContent);
     const mode=document.getElementById('workspace-mode');
     mode.textContent=context?(context.runs_enabled?'可查看、检查与运行':canRun('run_control')?'可查看、检查与停止已有运行':'可查看、检查 · 运行未开启'):'';
     mode.hidden=!context;
@@ -1318,7 +1371,7 @@
   function clearProject(message='在原项目目录中阅读说明、查看数据与 Case、核对流程和检查结果。') {
     if(!canLeaveViews())return;
     readController.abort();readController=new AbortController();
-    viewEpoch++;selectionEpoch++;auditRequest++;revokeImages();disposeReaders();closeNavigation();
+    viewEpoch++;selectionEpoch++;auditRequest++;revokeImages();disposeReaders();closeProjectPicker();
     workspaceId='';context=null;view=null;pendingView=null;initialView=null;selection=null;
     viewState='ready';changes=null;lastObserved=null;updates={};
     continueInput='';auditState=null;auditError=null;pendingOriginalPath=null;
@@ -1341,13 +1394,11 @@
       for(const [index,p] of rows.entries()){
         let item=existing.get(p.workspace_id);
         if(!item){
-          item=button('',()=>p.workspace_id===workspaceId?closeNavigation():switchProject(p.workspace_id));
+          item=button('',()=>p.workspace_id===workspaceId?closeProjectPicker():switchProject(p.workspace_id));
           item.className='project-item';item.dataset.workspace=p.workspace_id;
           const mark=icon(['M3 7V5h6l2 2h10v13H3z']);mark.classList.add('project-mark');
-          const avatar=$('span',undefined,'project-avatar');avatar.setAttribute('aria-hidden','true');
-          item.append(mark,avatar,$('span',undefined,'project-name'),$('span','暂不可用','project-unavailable'));
+          item.append(mark,$('span',undefined,'project-name'),$('span','暂不可用','project-unavailable'));
         }
-        item.querySelector('.project-avatar').textContent=Array.from(p.name.split('/').filter(Boolean).at(-1)||p.name).slice(0,2).join('').toUpperCase();
         item.querySelector('.project-name').textContent=p.name;
         item.querySelector('.project-unavailable').hidden=p.status==='available';
         item.dataset.unavailable=String(p.status!=='available');item.setAttribute('aria-label',p.name+(p.status==='available'?'':' · 暂不可用'));
@@ -1357,9 +1408,9 @@
       }
       for(const item of existing.values())item.remove();
       if(!rows.length)projectNav.append($('p','尚未登记项目','project-empty'));
-      markProject();
+      markProject();filterProjects();
     }
-    const manage=document.getElementById('project-actions');if(manage)manage.hidden=!rows.length;
+    const manage=document.getElementById('project-actions');if(manage)manage.hidden=false;
     for(const id of projectTabs.keys())if(!rows.some(p=>p.workspace_id===id))projectTabs.delete(id);
     if(workspaceId&&!rows.some(p=>p.workspace_id===workspaceId))clearProject('项目已移出 DemiFlow 登记清单，项目文件和历史数据均已保留。可以重新注册，或选择其他项目。');
   }
@@ -1370,7 +1421,7 @@
     rememberTab();
     clearTimeout(syncTimer);readController.abort();readController=new AbortController();
     document.getElementById('workspace-status').open=false;
-    const epoch=++viewEpoch;selectionEpoch++;revokeImages();disposeReaders();closeNavigation();
+    const epoch=++viewEpoch;selectionEpoch++;revokeImages();disposeReaders();closeProjectPicker();
     workspaceId=id;context=null;view=null;pendingView=null;selection=null;viewState='loading';
     changes=null;lastObserved=null;updates={};continueInput='';forcePending=false;
     auditState=null;auditError=null;renderAudit();
@@ -1400,21 +1451,29 @@
     return row.workspace_id;
   }
   async function start() {
-    const app=document.getElementById('app'),shell=$('div',undefined,'shell'),sidebar=$('aside',undefined,'sidebar');
-    const sidebarHeader=$('div',undefined,'sidebar-header'),brand=$('div',undefined,'brand');brand.append($('strong','DemiFlow'),$('span','数据工作台'));sidebarHeader.append(brand);sidebar.append(sidebarHeader);
+    const app=document.getElementById('app'),shell=$('div',undefined,'shell');
+    const brand=$('div',undefined,'brand');brand.append($('strong','DemiFlow'));
     const content=$('div',undefined,'workspace-content'),top=$('div',undefined,'workspace-top'),header=$('header',undefined,'workspace-header');
     main=$('main');main.id='workspace-content';
     const title=$('div',undefined,'workspace-title'),workspaceName=$('strong');workspaceName.id='workspace-name';
-    title.append(workspaceName);header.append(title);
-    top.append(header);content.append(top,main);shell.append(sidebar,content);app.append(shell);
-    if(offline){workspaceName.textContent='固定快照';sidebar.append($('div','固定快照 · 只读','nav-note'));heading('接线检查报告','此页面可独立查看。当前源码、表数据和运行结果未复核。');renderOffline(offline,main);return;}
-    try{shell.classList.toggle('sidebar-collapsed',sessionStorage.getItem('demiflow-sidebar-collapsed')==='1');}catch{ /* Keep navigation usable without preference storage. */ }
-    const toggle=iconButton('展开项目导航',()=>{shell.classList.toggle('nav-open');updateNavigation();},null,['M4 6h16M4 12h16M4 18h16']);title.prepend(toggle);
-    toggle.id='navigation-toggle';toggle.setAttribute('aria-controls','project-sidebar');toggle.setAttribute('aria-expanded','false');sidebar.id='project-sidebar';
-    const fold=$('button',undefined,'icon-button sidebar-toggle');fold.id='sidebar-toggle';fold.setAttribute('aria-controls','project-sidebar');fold.append(icon(['M4 4h16v16H4zM9 4v16']));const railBrand=$('span','DF','rail-brand');railBrand.setAttribute('aria-hidden','true');fold.append(railBrand);sidebarHeader.append(fold);
-    fold.onclick=()=>{if(matchMedia('(max-width:760px)').matches)closeNavigation();else{const collapsed=shell.classList.toggle('sidebar-collapsed');try{sessionStorage.setItem('demiflow-sidebar-collapsed',String(Number(collapsed)));}catch{ /* Preference storage is optional. */ }updateNavigation();revealTab();}};
-    const projectHeader=$('div',undefined,'project-header'),label=$('h2','项目','sidebar-heading');label.id='projects-heading';projectHeader.append(label);sidebar.append(projectHeader);
-    projectNav=$('nav',undefined,'project-list');projectNav.id='project-list';projectNav.setAttribute('aria-labelledby',label.id);sidebar.append(projectNav);
+    title.append(brand);header.append(title);
+    top.append(header);content.append(top,main);shell.append(content);app.append(shell);
+    if(offline){workspaceName.textContent='固定快照 · 只读';title.append(workspaceName);heading('接线检查报告','此页面可独立查看。当前源码、表数据和运行结果未复核。');renderOffline(offline,main);return;}
+    const toggle=button('',toggleProjectPicker,title);toggle.className='project-switcher';toggle.id='project-switcher';
+    toggle.append(workspaceName,icon(['m8 10 4 4 4-4']));toggle.setAttribute('aria-haspopup','dialog');toggle.setAttribute('aria-controls','project-picker');toggle.setAttribute('aria-expanded','false');
+    const picker=$('div',undefined,'project-picker');picker.id='project-picker';picker.hidden=true;picker.setAttribute('role','dialog');picker.setAttribute('aria-label','切换项目');top.append(picker);
+    const projectHeader=$('div',undefined,'project-header'),label=$('h2','项目','project-picker-heading');label.id='projects-heading';projectHeader.append(label);picker.append(projectHeader);
+    const search=$('input');search.id='project-search';search.type='search';search.maxLength=128;search.placeholder='搜索项目…';search.setAttribute('aria-label','搜索项目');search.oninput=filterProjects;picker.append(search);
+    projectNav=$('nav',undefined,'project-list');projectNav.id='project-list';projectNav.setAttribute('aria-labelledby',label.id);picker.append(projectNav);
+    const noMatch=$('p','没有匹配的项目','project-empty');noMatch.id='project-no-match';noMatch.hidden=true;picker.append(noMatch);
+    picker.addEventListener('keydown',event=>{
+      if(!['ArrowDown','ArrowUp','Enter'].includes(event.key))return;
+      const rows=[...projectNav.querySelectorAll('[data-workspace]')].filter(item=>!item.hidden),index=rows.indexOf(document.activeElement);
+      if(event.target!==search&&index<0)return;
+      if(event.key==='Enter'){if(event.target===search&&rows.length){event.preventDefault();rows[0].click();}return;}
+      if(rows.length){event.preventDefault();rows[index<0?(event.key==='ArrowDown'?0:rows.length-1):(index+(event.key==='ArrowDown'?1:-1)+rows.length)%rows.length].focus();}
+    });
+    picker.addEventListener('focusout',event=>{if(event.relatedTarget&&!picker.contains(event.relatedTarget)&&event.relatedTarget!==toggle)closeProjectPicker();});
     nav=$('nav',undefined,'function-nav');nav.setAttribute('aria-label','项目功能');nav.hidden=true;
     for(const [page,label]of [['development','开发'],['operators','算子'],['flows','管道'],['monitor','运行监控'],['tables','数据'],['overview','Readme']]){const b=button(label,()=>navigate(page),nav);b.dataset.page=page;b.disabled=true;}
     const actions=$('div',undefined,'header-actions');
@@ -1430,11 +1489,9 @@
     statusPanel.append($('h2','工作区状态'),mode,syncDetail);status.append(statusSummary,statusPanel);title.append(status);
     auditPanel=$('details',undefined,'audit-panel');auditPanel.id='audit-panel';auditPanel.hidden=true;statusPanel.append(auditPanel);
     header.insertBefore(nav,actions);
-    updateNavigation();
-    window.addEventListener('resize',()=>{updateNavigation();revealTab();});
-    matchMedia('(max-width:760px)').addEventListener('change',()=>{closeNavigation();revealTab();});
-    document.addEventListener('click',event=>{if(!status.contains(event.target))status.open=false;});
-    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!document.querySelector('dialog[open]')){if(shell.classList.contains('nav-open')){closeNavigation();toggle.focus();}else if(status.open){status.open=false;statusSummary.focus();}}});
+    window.addEventListener('resize',revealTab);
+    document.addEventListener('click',event=>{if(!status.contains(event.target))status.open=false;if(!picker.contains(event.target)&&!toggle.contains(event.target))closeProjectPicker();});
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!document.querySelector('dialog[open]')){if(!picker.hidden){event.preventDefault();closeProjectPicker({restoreFocus:true});}else if(status.open){status.open=false;statusSummary.focus();}}});
     window.addEventListener('pagehide',()=>{disposeReaders();revokeImages();readController.abort();clearTimeout(syncTimer);});
     projectHeading();
     main.append($('p','正在读取工作区…','busy'));
@@ -1452,6 +1509,7 @@
       else await switchProject(initialView?projectFor(initialView):projectList[0].workspace_id,initialView,'replace');
     }catch(err){if(err.name!=='AbortError'){viewState='error';if(!err.presented)error(main,err);syncStatus('暂未更新：'+err.message,true);if(!context)main.append($('p','请从 workbench view 输出的带会话 token 地址打开。','muted'));}}
     window.addEventListener('popstate',async()=>{
+      closeProjectPicker();
       if(reloadSessionEntry())return;
       try{const value=V.decodeView(location.hash)||target('overview');const id=projectFor(value);if(id!==workspaceId)await switchProject(id,value,'none');else await openView(value,{historyMode:'none'});}
       catch(err){if(!err?.presented)error(main,err);}

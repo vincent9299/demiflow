@@ -115,19 +115,16 @@ def test_ui_d19_shell_and_responsive(owned_fixture, browser):
         first = nav.get_by_role('button', name='管道', exact=True)
         first.focus()
         expect(first).to_be_focused()
-        # A01: collapsing the project sidebar must release the content grid
-        # column (content gets wider), not merely hide an overlay.
-        toggle = page.locator('#sidebar-toggle')
-        if toggle.count():
-            content = page.locator('.content, main').first
-            before = content.evaluate('el => el.getBoundingClientRect().width')
-            toggle.click()
-            page.wait_for_timeout(200)
-            after = content.evaluate('el => el.getBoundingClientRect().width')
-            assert after > before, ('sidebar collapse did not release the grid column', before, after)
-            expect(toggle).to_have_attribute('aria-expanded', 'false')
-            toggle.click()
-            fx.shot(page, 'v01-sidebar-collapsed')
+        # Projects are selected from the header; opening it does not reserve
+        # a second navigation column or change the current working context.
+        toggle = page.locator('#project-switcher')
+        before = page.locator('main').bounding_box()['width']
+        toggle.click()
+        expect(page.locator('#project-picker')).to_be_visible()
+        assert page.locator('main').bounding_box()['width'] == before
+        assert page.locator('.workspace-content').bounding_box()['x'] == 0
+        page.keyboard.press('Escape')
+        expect(toggle).to_have_attribute('aria-expanded', 'false')
         # counterexample: switching tab keeps the project header, not a new shell
         nav.get_by_role('button', name='数据', exact=True).click()
         expect(nav.get_by_role('button', name='数据', exact=True)).to_be_visible()

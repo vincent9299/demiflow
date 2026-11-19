@@ -84,6 +84,8 @@ BODY_BYTES = 65536
 RESPONSE_BYTES = 9 * 1024**2
 # Required and optional wire fields; these describe transport, never Flow operators.
 GET_FIELDS = {
+    'project-documents': (set(), {'path', 'offset', 'limit'}),
+    'project-markdown': ({'path'}, set()),
     'project-operators': (set(), set()),
     'operator-definition': ({'id'}, {'revision'}),
     'operator-history': ({'id'}, set()),
@@ -670,7 +672,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:self._send(value)
                 return
             with self._work(control=url.path in {'/api/run-snapshot','/api/run-events'},
-                            project=name in {'project-operators','operator-definition','operator-history','flow-arguments'}):
+                            project=name in {'project-operators','operator-definition','operator-history','flow-arguments','project-documents','project-markdown'}):
                 if url.path == "/api/context":
                     value = api.workspace_context(root)
                     value['runs_enabled'] = permissions['run_submit']
@@ -733,6 +735,10 @@ class Handler(BaseHTTPRequestHandler):
                 elif url.path == '/api/flow-arguments':
                     from demiflow.workbench.projects.flow_arguments import read
                     value = read(root, **query)
+                elif url.path in {'/api/project-documents', '/api/project-markdown'}:
+                    from demiflow.workbench.projects import documents
+                    value = (documents.read(root, query['path']) if url.path == '/api/project-markdown' else
+                             documents.listing(root, query.get('path', ''), int(query.get('offset', 0)), int(query.get('limit', 50))))
                 elif url.path == '/api/project-discovery':
                     value = api.discover_project(root)
                 elif url.path == '/api/project-document':

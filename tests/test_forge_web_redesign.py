@@ -143,6 +143,7 @@ def test_both_case_sources_use_field_reading_with_fixed_versions(original,isolat
     bound_id=console.add(registry,isolated)['workspace_id']
     before=business_bytes(original)
     with service(None,registry=registry) as app,opened(browser,app) as (page,requests):
+        page.locator('#project-switcher').click()
         page.locator(f'#project-list [data-workspace="{bound_id}"]').click()
         page.locator('#workspace-name').filter(has_text='question-experiments').wait_for()
         with page.expect_request(lambda r:'/table?' in r.url and 'alias=reading_fixture' in r.url) as bound_link:
@@ -190,6 +191,7 @@ def test_both_case_sources_use_field_reading_with_fixed_versions(original,isolat
         assert page.locator('.case-field .reading-preview').count()==0
         # Original-project Case uses its existing project-sample route and version.
         page.set_viewport_size({'width':1440,'height':1000})
+        page.locator('#project-switcher').click()
         page.locator(f'#project-list [data-workspace="{orig_id}"]').click()
         page.locator('#workspace-name').filter(has_text='shipping').wait_for()
         navigate(page,'数据')
@@ -314,21 +316,21 @@ def test_case_change_disposes_reader_and_discards_late_worker(isolated,tmp_path,
 
 def test_narrow_navigation_keyboard_and_history_preserve_read_only_context(isolated,browser):
     with service(isolated) as app,opened(browser,app,width=390) as (page,requests):
-        toggle=page.get_by_role('button',name='展开项目导航',exact=True)
-        assert not page.locator('#project-sidebar').is_visible()
+        toggle=page.locator('#project-switcher')
+        assert not page.locator('#project-picker').is_visible()
         toggle.focus();toggle.press('Enter')
         assert toggle.get_attribute('aria-expanded')=='true'
         projects=page.get_by_role('navigation',name='项目',exact=True)
         assert projects.is_visible()
         artifact(page,'navigation-390')
         projects.get_by_role('button',name='question-experiments',exact=True).press('Enter')
-        assert not page.locator('#project-sidebar').is_visible()
+        assert not page.locator('#project-picker').is_visible()
         assert toggle.evaluate('(button)=>document.activeElement===button')
         page.get_by_role('navigation',name='项目功能').get_by_role('button',name='管道',exact=True).focus()
         page.keyboard.press('Enter')
         page.locator('.workbench').wait_for()
         page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='flows'")
-        assert not page.locator('#project-sidebar').is_visible()
+        assert not page.locator('#project-picker').is_visible()
         page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='flows'")
         toggle.click()
         projects.get_by_role('button',name='question-experiments',exact=True).focus()
@@ -397,7 +399,7 @@ def test_compact_header_keeps_status_and_actions_accessible(isolated,browser):
         assert not any(method=='POST' for method,_ in requests)
 
 
-def test_unified_demiflow_sidebar_collapses_without_losing_project_tabs(isolated,original,tmp_path,browser):
+def test_project_picker_preserves_tabs_and_releases_the_full_workspace(isolated,original,tmp_path,browser):
     expect=pytest.importorskip('playwright.sync_api').expect
     registry=tmp_path/'registry.json'
     bound_id=console.add(registry,isolated)['workspace_id']
@@ -405,56 +407,38 @@ def test_unified_demiflow_sidebar_collapses_without_losing_project_tabs(isolated
     with service(None,registry=registry) as app,opened(browser,app) as (page,requests):
         assert page.title()=='DemiFlow · 项目工作台'
         assert page.locator('.brand strong').inner_text()=='DemiFlow'
-        projects=page.get_by_role('navigation',name='项目',exact=True)
-        row=lambda identity:projects.locator(f'[data-workspace="{identity}"]')
-        row(bound_id).click()
+        toggle=page.locator('#project-switcher')
+        def choose(identity):
+            toggle.click()
+            page.locator(f'#project-list [data-workspace="{identity}"]').click()
+            page.wait_for_function("id=>ForgeView.decodeView(location.hash)?.workspace===id",arg=identity)
+        choose(bound_id)
         page.locator('#workspace-name').filter(has_text='question-experiments').wait_for()
-        controls=page.locator('.project-header')
-        assert controls.get_by_role('button',name='新建项目',exact=True).is_visible()
-        assert controls.get_by_role('button',name='注册已有项目',exact=True).is_visible()
         navigate(page,'管道')
         page.locator('.workbench').wait_for()
         page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='flows'")
-        fold=page.get_by_role('button',name='收起侧栏',exact=True)
-        fold.press('Enter')
-        assert page.locator('#project-sidebar').bounding_box()['width']==56
-        assert not row(bound_id).locator('.project-name').is_visible()
-        assert row(bound_id).locator('.project-avatar').is_visible()
-        assert row(bound_id).get_attribute('aria-label')=='question-experiments'
-        assert page.evaluate('ForgeView.decodeView(location.hash).kind')=='flows'
-        assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
-        artifact(page,'demiflow-sidebar-collapsed-1440')
-        row(original_id).click()
+        assert page.locator('#project-sidebar').count()==0
+        assert page.locator('.workspace-content').bounding_box()['x']==0
+        choose(original_id)
         page.locator('#workspace-name').filter(has_text='shipping').wait_for()
-        row(bound_id).click()
-        page.locator('.workbench').wait_for()
-        page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='flows'")
+        choose(bound_id)
         page.wait_for_function("identity => {const value=ForgeView.decodeView(location.hash);return value?.kind==='flows'&&value.workspace===identity;}",arg=bound_id)
         page.reload()
         page.locator('.workbench').wait_for()
-        page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='flows'")
-        assert page.locator('#project-sidebar').bounding_box()['width']==56
-        # The desktop preference does not collapse the mobile project drawer.
-        page.set_viewport_size({'width':390,'height':844})
-        toggle=page.get_by_role('button',name='展开项目导航',exact=True)
-        assert not page.locator('#project-sidebar').is_visible()
-        toggle.click()
-        assert row(bound_id).locator('.project-name').is_visible()
-        assert page.locator('.brand strong').is_visible()
-        artifact(page,'demiflow-sidebar-390')
-        page.get_by_role('button',name='收起项目导航',exact=True).click()
-        assert not page.locator('#project-sidebar').is_visible()
-        expect(toggle).to_be_focused()
-        page.set_viewport_size({'width':1440,'height':1000})
-        page.get_by_role('button',name='展开侧栏',exact=True).press('Enter')
-        assert row(bound_id).locator('.project-name').is_visible()
-        assert page.locator('#project-sidebar').bounding_box()['width']==264
-        assert page.evaluate('ForgeView.decodeView(location.hash).kind')=='flows'
-        artifact(page,'demiflow-sidebar-expanded-1440')
+        for width in [1440,390]:
+            page.set_viewport_size({'width':width,'height':1000})
+            toggle.click()
+            assert page.locator('#project-list .project-name').first.is_visible()
+            assert page.evaluate('ForgeView.decodeView(location.hash).kind')=='flows'
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+            artifact(page,'demiflow-project-picker-'+str(width))
+            page.keyboard.press('Escape')
+            expect(toggle).to_be_focused()
         for label in ['新建项目','注册已有项目']:
-            controls.get_by_role('button',name=label,exact=True).click()
+            toggle.click()
+            page.locator('.project-header').get_by_role('button',name=label,exact=True).click()
             page.get_by_role('dialog').get_by_role('button',name='取消',exact=True).click()
-        assert not any(method=='POST' for method,_ in requests)
+        assert all(url.endswith(('/plan-preview','/plan-node-detail')) for method,url in requests if method=='POST')
 
 
 def test_project_rows_have_independent_tabs_and_restore_history(isolated,original,tmp_path,browser):
@@ -465,15 +449,17 @@ def test_project_rows_have_independent_tabs_and_restore_history(isolated,origina
     original_id=console.add(registry,original,name=original_name)['workspace_id']
     broken=tmp_path/'unavailable';broken.mkdir()
     with service(None,registry=registry) as app,opened(browser,app) as (page,requests):
-        projects=page.get_by_role('navigation',name='项目',exact=True)
+        projects=page.locator('#project-list')
         tabs=page.get_by_role('navigation',name='项目功能',exact=True)
         row=lambda identity:projects.locator(f'[data-workspace="{identity}"]')
         # A CLI registration appears in the same list during automatic sync.
         broken_id=console.add(registry,broken)['workspace_id']
         (broken/'workspace.json').write_text('{invalid')
-        row(broken_id).wait_for()
+        row(broken_id).wait_for(state='attached')
+        page.locator('#project-switcher').click()
         row(bound_id).click()
         page.locator('#workspace-name').filter(has_text='question-experiments').wait_for()
+        page.locator('#project-switcher').click()
         assert projects.get_by_role('button').count()==3
         assert page.locator('#project-sidebar select').count()==0
         boxes=[item.bounding_box() for item in projects.get_by_role('button').all()]
@@ -483,24 +469,27 @@ def test_project_rows_have_independent_tabs_and_restore_history(isolated,origina
         assert row(broken_id).get_by_text('暂不可用',exact=True).is_visible()
         tab_boxes=[item.bounding_box() for item in tabs.get_by_role('button').all()]
         assert len(tab_boxes)==6 and all(box['y']==tab_boxes[0]['y'] for box in tab_boxes)
-        assert tabs.bounding_box()['x']>=page.locator('#project-sidebar').bounding_box()['width']
+        assert page.locator('.workspace-content').bounding_box()['x']==0
         assert page.locator('.workspace-top').bounding_box()['y']==0
         artifact(page,'projects-and-tabs-1440')
 
         navigate(page,'管道')
         page.locator('.workbench').wait_for()
         page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='flows'")
+        page.locator('#project-switcher').click()
         row(original_id).click()
         page.locator('#workspace-name').filter(has_text=original_name).wait_for()
         page.wait_for_function("id => {const v=ForgeView.decodeView(location.hash);return v?.workspace===id&&v.kind==='flows';}",arg=original_id)
         assert page.evaluate('ForgeView.decodeView(location.hash).kind')=='flows'
         navigate(page,'数据')
         page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='tables'")
+        page.locator('#project-switcher').click()
         row(bound_id).click()
         page.locator('.workbench').wait_for()
         page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='flows'")
         assert row(bound_id).get_attribute('aria-current')=='true'
         assert tabs.get_by_role('button',name='管道',exact=True).get_attribute('aria-current')=='page'
+        page.locator('#project-switcher').click()
         row(original_id).click()
         page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='tables'")
         assert row(original_id).get_attribute('aria-current')=='true'
@@ -514,8 +503,10 @@ def test_project_rows_have_independent_tabs_and_restore_history(isolated,origina
         assert row(original_id).get_attribute('aria-current')=='true'
 
         # An unavailable row stays visible and cannot trap navigation.
+        page.locator('#project-switcher').click()
         row(broken_id).click()
         page.locator('main > .load-failure').first.wait_for()
+        page.locator('#project-switcher').click()
         row(bound_id).click()
         try:
             page.locator('.workbench').wait_for()
@@ -534,7 +525,7 @@ def test_project_rows_have_independent_tabs_and_restore_history(isolated,origina
         assert tabs.get_by_role('button',name='运行监控',exact=True).get_attribute('aria-current')=='page'
         for width in [390,320]:
             page.set_viewport_size({'width':width,'height':844})
-            assert tabs.is_visible() and not page.locator('#project-sidebar').is_visible()
+            assert tabs.is_visible() and not page.locator('#project-picker').is_visible()
             expect(tabs.get_by_role('button',name='运行监控',exact=True)).to_be_in_viewport()
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
             artifact(page,f'projects-and-tabs-{width}')

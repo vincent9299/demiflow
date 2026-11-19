@@ -33,6 +33,7 @@ def tab_page(fx, browser):
             if '/api/' in request.url and len(requests)<1024 else None)
     try:
         page.goto(fx.app.origin+'/#token='+fx.app.token)
+        page.locator('#project-switcher').click()
         page.locator('#project-list [data-workspace="'+fx.project_id+'"]').click()
         page.locator('.function-nav [data-page="flows"]').wait_for()
         page.evaluate('() => Object.defineProperty(document,"hidden",{configurable:true,get:()=>true})')
@@ -142,9 +143,11 @@ def test_tabs_restore_exact_run_version_and_project_despite_late_response(owned_
 
         # A separate project gets its own default page; returning restores A's
         # complete run locator and its independent fixed historical data locator.
+        page.locator('#project-switcher').click()
         page.locator('#project-list [data-workspace="'+other+'"]').click()
         page.wait_for_function('workspace=>ForgeView.decodeView(location.hash)?.workspace===workspace',arg=other)
         assert reference(page)==dict(v=2,workspace=other,kind='overview')
+        page.locator('#project-switcher').click()
         page.locator('#project-list [data-workspace="'+fx.project_id+'"]').click()
         expect_reference(page,run_ref)
         tab(page,'数据');expect_reference(page,fixed_ref)
@@ -179,6 +182,7 @@ def test_blocked_tab_and_project_departure_preserve_notebook_editor(owned_fixtur
         expect(page.locator('.analysis-notice')).to_contain_text('暂停离开')
         expect(page.get_by_label('python 单元代码',exact=True)).to_have_value(source)
         assert reference(page)==current
+        page.locator('#project-switcher').click()
         page.locator('#project-list [data-workspace="'+other+'"]').click()
         expect(page.get_by_label('选择 Notebook',exact=True)).to_have_value(editor_id)
         expect(page.get_by_label('python 单元代码',exact=True)).to_have_value(source)
