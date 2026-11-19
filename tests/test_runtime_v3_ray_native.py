@@ -19,7 +19,7 @@ def test_ray_prompt_and_relational_chain(tmp_path, native_server, monkeypatch):
         monkeypatch.setattr(ray.data, name, no_ray_data)
     try:
         ray.init(num_cpus=6, include_dashboard=False, object_store_memory=100 * 1024**2,
-                 _temp_dir=tempfile.mkdtemp(prefix='demiflow-ray-'))
+                 _temp_dir=tempfile.mkdtemp(prefix='demiflow-ray-', dir='/tmp'))
         with RunContext.start(tmp_path / 'run') as run:
             source = data.from_items([{'item': 'b'}, {'item': 'a'}])
             ds = Dataset(source._source, source._plan, RayDatasetExecutor())
@@ -56,7 +56,7 @@ def test_ray_native_producer_fetch_settlement_and_history(tmp_path, monkeypatch)
         kind='records', source_id='fixed-input', uri='memory:records', version=1))
     try:
         ray.init(num_cpus=8, include_dashboard=False, object_store_memory=100 * 1024**2,
-                 _temp_dir=tempfile.mkdtemp(prefix='demiflow-ray-'))
+                 _temp_dir=tempfile.mkdtemp(prefix='demiflow-ray-', dir='/tmp'))
         with origin_server() as (url, calls):
             with RunContext.start(tmp_path/'producer'):
                 rows = [{'messages': [task_message(str(i), {'request': {'uri': url+'/file'}}, pool='p')]}

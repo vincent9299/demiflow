@@ -63,7 +63,7 @@ def private_ray():
     try:
         ray.init(address='local', num_cpus=2, num_gpus=0, include_dashboard=False,
                  object_store_memory=100*1024**2,
-                 _temp_dir=tempfile.mkdtemp(prefix='demiflow-ray-binding-'))
+                 _temp_dir=tempfile.mkdtemp(prefix='demiflow-ray-binding-', dir='/tmp'))
         yield
     finally:
         ray.shutdown()

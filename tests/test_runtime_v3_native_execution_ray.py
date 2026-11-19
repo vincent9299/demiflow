@@ -47,7 +47,7 @@ def test_actual_ray_native_adapter_preserves_budget_schema_and_completed_result(
     try:
         ray.init(address='local', num_cpus=4, num_gpus=0, include_dashboard=False,
             object_store_memory=128*MiB,
-            _temp_dir=tempfile.mkdtemp(prefix='demiflow-native-adapter-ray-'))
+            _temp_dir=tempfile.mkdtemp(prefix='demiflow-native-adapter-ray-', dir='/tmp'))
         with pytest.raises(Interrupted):
             with RunContext.start(tmp_path/'run', limits={'memory_bytes':32*MiB,
                     'max_row_bytes':8192, 'max_batch_bytes':16384, 'timeout_s':90}) as run:

@@ -35,7 +35,7 @@ def test_resource_evidence_backup_closes_every_sqlite_handle(tmp_path, monkeypat
             db.execute('CREATE TABLE original(value INTEGER)')
             db.execute('INSERT INTO original VALUES (?)',(i,)); db.commit()
     import tempfile
-    destination = tempfile.mkdtemp(prefix='demiflow-resource-export-fd-')
+    destination = tempfile.mkdtemp(prefix='demiflow-resource-export-fd-', dir='/tmp')
     monkeypatch.setenv('DEMIFLOW_RESOURCE_EVIDENCE',destination)
     enabled = gc.isenabled(); gc.disable()
     try:

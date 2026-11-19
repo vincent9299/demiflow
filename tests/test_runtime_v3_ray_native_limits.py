@@ -38,7 +38,7 @@ def test_real_ray_join_seals_public_native_limits(tmp_path, monkeypatch, partiti
     try:
         ray.init(address='local', num_cpus=4, num_gpus=0, include_dashboard=False,
                  object_store_memory=128*1024**2,
-                 _temp_dir=tempfile.mkdtemp(prefix='demiflow-ray-native-limits-'))
+                 _temp_dir=tempfile.mkdtemp(prefix='demiflow-ray-native-limits-', dir='/tmp'))
         with RunContext.start(tmp_path/'run', limits={'memory_bytes':128*1024**2,
                 'max_row_bytes':65536, 'max_batch_bytes':262144,
                 'max_scratch_bytes':64*1024**2, 'timeout_s':90}) as run:

@@ -210,7 +210,7 @@ def test_ray_core_uses_same_logical_block_manifest(tmp_path, monkeypatch):
     try:
         ray.init(address='local', num_cpus=3, include_dashboard=False,
                  object_store_memory=100*1024**2,
-                 _temp_dir=tempfile.mkdtemp(prefix='demiflow-ray-blocks-'))
+                 _temp_dir=tempfile.mkdtemp(prefix='demiflow-ray-blocks-', dir='/tmp'))
         with RunContext.start(tmp_path/'run', limits={'memory_bytes': 32 << 20, 'max_row_bytes': 4096,
                                                      'max_batch_bytes': 1 << 20}):
             source = data.from_items([{'n': n} for n in range(7)]).repartition(3)
