@@ -89,7 +89,7 @@ def test_supervisor_lease_closes_even_if_initialization_or_finalization_raises(t
         raise RuntimeError('finalization failed')
     monkeypatch.setattr(worker, '_supervise', fail)
     with pytest.raises(RuntimeError, match='finalization'):
-        worker.supervise(tmp_path, 'run', fd, 1)
+        worker.supervise(tmp_path, 'r' + '1' * 24, fd, 1)
     with pytest.raises(OSError):
         os.fstat(fd)
 
@@ -100,7 +100,8 @@ def test_supervisor_publishes_one_final_state_after_cancel_race(tmp_path, monkey
     from demiflow.workbench.runs import worker, manager
     from demiflow.workbench.runs import storage
     from test_p4_attempt_reservations import managed
-    journal = managed(tmp_path / 'run')
+    run_id = 'r' + '2' * 24
+    journal = managed(manager.directory(tmp_path, run_id))
     journal.transition({'interrupted'}, 'starting')
     state = journal.execution_status()
     manifest = dict(limits={}, object_locations=[])
@@ -126,7 +127,7 @@ def test_supervisor_publishes_one_final_state_after_cancel_race(tmp_path, monkey
         return original_transition(self, expected, status, **kwargs)
     monkeypatch.setattr(RunJournal, 'transition', record)
     fd = os.open(tmp_path / 'lease', os.O_RDWR | os.O_CREAT, 0o600)
-    worker.supervise(tmp_path, 'run', fd, 1)
+    worker.supervise(tmp_path, run_id, fd, 1)
     final = journal.execution_status()
     assert len(transitions) == 1 and final['status'] == 'failed'
     assert final['execution_stopped'] is True and final['stop_phase'] == 'confirmed'
@@ -135,6 +136,16 @@ def test_supervisor_publishes_one_final_state_after_cancel_race(tmp_path, monkey
     assert len(indexed) == 1 and indexed[0] is not None
     with pytest.raises(OSError):
         os.fstat(fd)
+
+
+def test_supervisor_invalid_identity_still_closes_inherited_lease(tmp_path):
+    from demiflow.workbench.runs import worker
+    fd = os.open(tmp_path / 'lease', os.O_RDWR | os.O_CREAT, 0o600)
+    with pytest.raises(ForgeError, match='Invalid run identity'):
+        worker.supervise(tmp_path, 'run', fd, 1)
+    with pytest.raises(OSError):
+        os.fstat(fd)
+    assert not (tmp_path / '.forge').exists()
 
 
 def test_replaced_ancestor_cannot_redirect_cleanup_and_closes_descriptors(tmp_path, monkeypatch):
