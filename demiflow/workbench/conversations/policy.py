@@ -269,12 +269,14 @@ class Deployment:
                 if not model['available']: reason = model['reason']
                 elif managed and not review['available']: reason = review['reason']
             providers.append(dict(id=name, version=config['version'], model=config['model'], available=permitted and ready,
+                **({'effort': config['effort']} if 'effort' in config else {}),
                 compaction='native', input_requests='supported' if name == 'codex' else 'unsupported',
                 history_replay='supported' if name == 'codex' else 'unsupported', independent_review=review['mode'],
                 reason=reason))
         available = any(p['available'] for p in providers)
         independent = managed and any(p['independent_review'] == 'model_only' for p in providers)
         return dict(format='demiflow_development_chat_v1', enabled=permitted, start=available,
+            conversation_stats=True,
             mode=self.mode, filesystem_enforcement=execution['filesystem_enforcement'], reason=execution['reason'],
             # Capability is not an acceptance receipt. The task projection alone
             # can claim enforced after both execution phases and review verify.

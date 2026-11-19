@@ -123,6 +123,7 @@ class DeepSeek:
         self.prompt='';self.prompt_key=None;self.items={};self.acknowledged=False
         self.message_scope=None;self.message_block=0;self.message_kind=None
         self.stream_attempt=None;self.stream_blocks={};self.stream_count=0;self.stream_messages=set()
+        self.metrics_sequence=-1
         self.mcp_servers=[]
 
     def initialize(self):
@@ -163,6 +164,7 @@ class DeepSeek:
         self.message_scope=scope
         self.message_block=0;self.message_kind=None
         self.stream_attempt=None;self.stream_blocks={};self.stream_count=0;self.stream_messages.clear()
+        self.metrics_sequence=-1
         return self.prompt_key
 
     def interrupt(self):
@@ -183,6 +185,13 @@ class DeepSeek:
             allowed=bool(item and item.get('rawInput'))
             return [('request',dict(rpc_id=event['id'],method=method,params=dict(params,known_tool=item),allow_once=allowed))]
         if 'id' in event:reject('Unsupported ACP server request')
+        if method=='demiflow/metrics':
+            from .stats import validate_metric
+            if not self.message_scope or set(params)!={'sessionId','metrics'}:reject('Invalid native metric scope')
+            metric=validate_metric(params['metrics'])
+            if metric['event_sequence']<=self.metrics_sequence:return []
+            self.metrics_sequence=metric['event_sequence']
+            return [('usage.observed',metric)]
         if method=='demiflow/assistant-stream':return self._stream(params)
         if method!='session/update':return []
         update=params.get('update',{});kind=update.get('sessionUpdate')

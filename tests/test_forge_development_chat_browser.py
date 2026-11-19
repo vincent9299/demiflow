@@ -5,6 +5,11 @@ import pytest
 from test_forge_development_chat_http import app, legacy_history
 
 
+def detailed_mode(page):
+    page.get_by_label('对话显示模式', exact=True).click()
+    page.get_by_role('button', name='Detailed mode', exact=True).click()
+
+
 def test_browser_conversation_navigation_refresh_and_mobile(tmp_path):
     playwright=pytest.importorskip('playwright.sync_api')
     browser_path=Path('/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome')
@@ -24,12 +29,12 @@ def test_browser_conversation_navigation_refresh_and_mobile(tmp_path):
         try: page.get_by_text('本轮已完成',exact=True).wait_for()
         except Exception:
             print('PAGE_ERRORS',errors);print('PAGE_TEXT',page.locator('body').inner_text()[:5000]);raise
-        page.locator('.development-message').filter(has_text='fixture answer').wait_for()
+        page.locator('.dfc-message').filter(has_text='fixture answer').wait_for()
         assert page.locator('.development-history').count()==0
         assert page.get_by_role('button',name='新对话',exact=True).count()==0
         playwright.expect(page.get_by_role('navigation',name='历史消息定位')).to_be_visible()
         page.get_by_role('button',name='定位消息：A small normal task',exact=True).wait_for()
-        assert page.locator('.development-message script').count()==0
+        assert page.locator('.dfc-message script').count()==0
         page.screenshot(path=str(shots/'development-desktop.png'),full_page=True)
         sid=server.development.store.list(workspace)['sessions'][0]['id']
         assert server.development.store.show(workspace,sid)['revision']==1
@@ -40,21 +45,25 @@ def test_browser_conversation_navigation_refresh_and_mobile(tmp_path):
         assert page.evaluate('ForgeDevelopment.activeCount()')==0
         page.get_by_role('button',name='开发',exact=True).click();page.get_by_label('开发要求').wait_for()
         page.wait_for_url('**/*development_session*')
-        page.locator('.development-message').filter(has_text='fixture answer').wait_for()
+        page.locator('.dfc-message').filter(has_text='fixture answer').wait_for()
         assert page.get_by_label('开发要求').input_value()=='draft kept'
         for width in (390,320):
             page.set_viewport_size({'width':width,'height':850});page.screenshot(path=str(shots/f'development-{width}.png'),full_page=True)
             assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth'),width
             assert page.locator('.development-history').count()==0
-            assert page.get_by_role('navigation',name='版本时间线').count()==1
+            page.get_by_role('tab',name='Trajectory',exact=True).click()
+            playwright.expect(page.get_by_role('navigation',name='版本时间线')).to_be_visible()
+            page.get_by_role('tab',name='Chat',exact=True).click()
         second=page.context.new_page();second.goto(server.origin+'/#token='+server.token)
         second.get_by_role('button',name='开发',exact=True).click()
-        second.locator('.development-message').filter(has_text='fixture answer').wait_for()
+        second.locator('.dfc-message').filter(has_text='fixture answer').wait_for()
         assert second.evaluate('ForgeView.decodeView(location.hash).session_id')==sid
         assert len(server.development.store.list(workspace)['sessions'])==1
+        second.get_by_label('更多对话操作',exact=True).click()
         second.get_by_role('button',name='归档历史',exact=True).click()
         second.get_by_text('归档处理完成',exact=True).wait_for()
-        playwright.expect(second.locator('.development-user')).to_have_count(0)
+        playwright.expect(second.locator('.dfc-user')).to_have_count(0)
+        second.get_by_role('tab',name='Trajectory',exact=True).click()
         node=second.locator('.development-version-node[data-kind=archive]');node.wait_for()
         node.click();second.get_by_role('dialog').get_by_text('历史已归档',exact=True).wait_for()
         second.get_by_role('button',name='查看对应消息',exact=True).click()
@@ -63,9 +72,9 @@ def test_browser_conversation_navigation_refresh_and_mobile(tmp_path):
         playwright.expect(second.get_by_label('开发要求')).to_be_enabled()
         second.screenshot(path=str(shots/'project-archive-desktop.png'),full_page=True)
         second.reload();second.get_by_text('归档处理完成',exact=True).wait_for()
-        playwright.expect(second.locator('.development-user')).to_have_count(0)
+        playwright.expect(second.locator('.dfc-user')).to_have_count(0)
         second.get_by_role('button',name='定位消息：A small normal task',exact=True).click()
-        second.locator('.development-user').filter(has_text='A small normal task').wait_for()
+        second.locator('.dfc-user').filter(has_text='A small normal task').wait_for()
         assert server.development.store.show(workspace,sid)['revision']==2
         assert not errors,errors
         browser.close()
@@ -89,17 +98,26 @@ def test_acp_permission_diff_markdown_and_dialog_lifecycle(tmp_path):
         permission.get_by_text('操作许可', exact=True).wait_for()
         assert 'code.py' in permission.inner_text()
         assert '# fixture addition' in permission.inner_text()
+        # Even the current turn's saved-message view is history-only: no
+        # approval/input controls may mutate the background active session.
+        page.get_by_role('button',name='定位消息：interactive edit fixture',exact=True).click()
+        playwright.expect(permission).to_have_count(0)
+        page.wait_for_timeout(1700)  # Covers an active poll while reading history.
+        playwright.expect(permission).to_have_count(0)
+        page.get_by_role('button',name='回到最新记录',exact=True).click()
         permission.get_by_role('button', name='允许一次').click()
         page.get_by_text('本轮已完成', exact=True).wait_for()
         page.get_by_role('heading', name='Fixture result', exact=True).wait_for()
-        changed = page.locator('.development-message').filter(has_text='观察到的变化')
+        changed = page.locator('.dfc-system').filter(has_text='Changed files')
         changed.wait_for()
+        page.get_by_role('tab',name='Trajectory',exact=True).click()
         page.locator('.development-version-node[data-kind=change]').wait_for()
+        page.get_by_role('tab',name='Chat',exact=True).click()
         assert not changed.evaluate('(node)=>node.open')
         changed.locator('summary').click()
         assert '+# fixture addition' in changed.inner_text()
         assert (root / 'code.py').read_text() == '# initial dirty bytes\n# fixture addition\n'
-        changed.get_by_role('button', name='分页查看原文').click()
+        changed.get_by_role('button', name='View original').click()
         page.get_by_role('dialog').wait_for()
         playwright.expect(page.get_by_role('dialog')).to_contain_text('fixture addition')
         page.get_by_role('button', name='关闭', exact=True).click()
@@ -137,7 +155,7 @@ def test_first_message_ime_idempotent_creation_and_stop(tmp_path):
         menu.get_by_role('menuitemradio').press('Escape');expect(menu).to_be_hidden();expect(model).to_be_focused()
         model.press('ArrowDown');menu.get_by_role('menuitemradio').press('Enter')
         expect(page.get_by_label('开发要求')).to_be_focused()
-        page.locator('.development-composer').click(position={'x':120,'y':4})
+        page.locator('.dc-card').click(position={'x':120,'y':4})
         expect(page.get_by_label('开发要求')).to_be_focused()
         field=page.get_by_label('开发要求');field.fill('First message')
         for width in (1440,390,320):
@@ -187,8 +205,10 @@ def test_unconfigured_chat_is_compact_and_read_only(tmp_path):
         waiting=[];page.route('**/dev-capabilities',lambda route:waiting.append(route))
         page.goto(server.origin+'/#token='+server.token)
         page.get_by_role('button',name='开发',exact=True).click()
+        page.get_by_label('更多对话操作',exact=True).click()
         page.get_by_role('button',name='归档历史',exact=True).wait_for()
         expect(page.get_by_role('button',name='归档历史',exact=True)).to_be_disabled()
+        page.get_by_label('更多对话操作',exact=True).click()
         assert len(waiting)==1
         waiting[0].fulfill(response=waiting[0].fetch())
         page.get_by_text('尚未连接开发代理',exact=True).wait_for()
@@ -218,17 +238,21 @@ def test_acp_stream_visible_before_completion_and_reconnect(tmp_path):
         page.get_by_role('button',name='开发',exact=True).click()
         page.get_by_label('开发要求').fill('stream fixture')
         page.get_by_role('button',name='发送',exact=True).click()
-        first=page.locator('.development-assistant')
+        first=page.locator('.dfc-answer')
         expect(first).to_contain_text('First streamed paragraph.')
         sid=server.development.store.list(workspace)['sessions'][0]['id']
         assert server.development.store.show(workspace,sid)['turn']['cleanup']!='complete'
         expect(page.get_by_role('button',name='停止',exact=True)).to_be_enabled()
-        expect(page.locator('.development-streaming')).to_have_count(1)
+        expect(page.locator('.dfc-streaming')).to_have_count(1)
         page.reload();expect(first).to_contain_text('First streamed paragraph.')
         assert first.inner_text().count('First streamed paragraph.')==1
         for width in (1440,320):
             page.set_viewport_size({'width':width,'height':1000})
-            box=page.locator('.development-composer').bounding_box();assert box['y']+box['height']<=1000
+            # Match a painted layout after the responsive header and its
+            # ResizeObserver have committed, keeping the exact viewport bound.
+            page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+            box=page.locator('.development-composer').bounding_box()
+            assert box['y']+box['height']<=1000
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
         timeline=page.locator('.development-timeline')
         assert timeline.evaluate('(e)=>e.scrollHeight>e.clientHeight')
@@ -251,7 +275,7 @@ def test_acp_stream_visible_before_completion_and_reconnect(tmp_path):
         page.wait_for_function("()=>{const e=document.querySelector('.development-timeline');return e.scrollHeight-e.scrollTop-e.clientHeight<60;}")
 
         assert first.inner_text().count('Second streamed paragraph.')==1
-        expect(page.locator('.development-streaming')).to_have_count(0)
+        expect(page.locator('.dfc-streaming')).to_have_count(0)
         expect(page.locator('.error-box')).to_have_count(0)
         assert len(failures)>=2
         page.get_by_role('button',name='Readme',exact=True).click()
@@ -283,17 +307,18 @@ def test_legacy_same_message_ids_stay_in_turn_and_tool_order(tmp_path,remote_com
         page.get_by_role('button',name='开发',exact=True).click()
         expected=['第一轮进展','第一轮工具','第一轮结果','第二轮进展','第二轮工具','第二轮结果']
         def ordered():
-            expect(page.locator('.development-assistant')).to_have_count(4)
-            expect(page.locator('.development-tool')).to_have_count(2)
+            expect(page.locator('.dfc-answer')).to_have_count(4)
+            expect(page.locator('.dfc-tool')).to_have_count(2)
             for index,text in enumerate(expected):
-                expect(page.locator('.development-assistant,.development-tool').nth(index)).to_contain_text(text)
-            nodes=page.locator('.development-assistant,.development-tool').evaluate_all('(nodes)=>nodes.map(node=>node.textContent)')
+                expect(page.locator('.dfc-answer,.dfc-tool').nth(index)).to_contain_text(text)
+            nodes=page.locator('.dfc-answer,.dfc-tool').evaluate_all('(nodes)=>nodes.map(node=>node.textContent)')
             assert len(nodes)==len(expected)
             assert all(text in node for text,node in zip(expected,nodes)),nodes
         page.get_by_text('本轮已完成',exact=True).wait_for();ordered()
         page.reload();page.get_by_text('本轮已完成',exact=True).wait_for();ordered()
-        final=page.locator('.development-assistant').filter(has_text='第二轮结果')
-        final.get_by_role('button',name='分页查看原文').click()
+        detailed_mode(page)
+        final=page.locator('.dfc-answer').filter(has_text='第二轮结果')
+        final.get_by_role('button',name='View original').click()
         dialog=page.get_by_role('dialog');expect(dialog).to_contain_text('第二轮结果')
         assert all(text not in dialog.inner_text() for text in ('第一轮','第二轮进展','第二轮工具'))
         expect(dialog.get_by_role('button',name='下一页')).to_be_hidden()
@@ -315,13 +340,13 @@ def test_public_acp_process_visible_while_running_and_after_reload(tmp_path):
         page.get_by_role('button',name='开发',exact=True).click()
         page.get_by_label('开发要求').fill('public process fixture')
         page.get_by_role('button',name='发送',exact=True).click()
-        process=page.locator('.development-process')
+        process=page.locator('.dfc-think')
         expect(process).to_contain_text('公开过程：先检查现有数据。')
         assert not process.evaluate('(node)=>node.open')
         expect(process.locator(':scope>div')).to_be_hidden()
         process.locator(':scope>summary').click()
         assert process.evaluate('(node)=>node.open')
-        expect(page.locator('.development-assistant')).to_contain_text('正在查找数据来源。')
+        expect(page.locator('.dfc-answer')).to_contain_text('正在查找数据来源。')
         sid=server.development.store.list(workspace)['sessions'][0]['id']
         assert server.development.store.show(workspace,sid)['turn']['cleanup']!='complete'
         page.reload();expect(process).to_contain_text('公开过程：先检查现有数据。')
@@ -330,16 +355,16 @@ def test_public_acp_process_visible_while_running_and_after_reload(tmp_path):
         assert process.inner_text().count('公开过程：先检查现有数据。')==1
         (root/'release-process').write_text('release')
         page.get_by_text('本轮已完成',exact=True).wait_for()
-        expect(page.locator('.development-assistant')).to_have_count(2)
-        nodes=page.locator('.development-process,.development-assistant,.development-tool').evaluate_all('(nodes)=>nodes.map(node=>node.textContent)')
+        expect(page.locator('.dfc-answer')).to_have_count(2)
+        nodes=page.locator('.dfc-think,.dfc-answer,.dfc-tool').evaluate_all('(nodes)=>nodes.map(node=>node.textContent)')
         expected=['公开过程：先检查现有数据。','正在查找数据来源。','读取输入信息','已找到输入，下一步可以开发过滤流程。']
         for index,text in enumerate(expected):
-            expect(page.locator('.development-process,.development-assistant,.development-tool').nth(index)).to_contain_text(text)
-        nodes=page.locator('.development-process,.development-assistant,.development-tool').evaluate_all('(nodes)=>nodes.map(node=>node.textContent)')
+            expect(page.locator('.dfc-think,.dfc-answer,.dfc-tool').nth(index)).to_contain_text(text)
+        nodes=page.locator('.dfc-think,.dfc-answer,.dfc-tool').evaluate_all('(nodes)=>nodes.map(node=>node.textContent)')
         assert len(nodes)==len(expected)
         assert all(text in node for text,node in zip(expected,nodes)),nodes
-        expect(page.locator('.development-streaming')).to_have_count(0)
-        page.reload();expect(page.locator('.development-assistant')).to_have_count(2)
+        expect(page.locator('.dfc-streaming')).to_have_count(0)
+        page.reload();expect(page.locator('.dfc-answer')).to_have_count(2)
         assert not process.evaluate('(node)=>node.open')
         process.locator(':scope>summary').click()
         assert process.inner_text().count('公开过程：先检查现有数据。')==1
@@ -360,7 +385,7 @@ def test_large_public_summary_and_final_keep_message_role_without_duplication(tm
         page.get_by_role('button',name='发送',exact=True).click()
         page.get_by_text('本轮已完成',exact=True).wait_for()
         def check():
-            process=page.locator('.development-process');answer=page.locator('.development-assistant')
+            process=page.locator('.dfc-think');answer=page.locator('.dfc-answer')
             expect(process).to_have_count(1);expect(answer).to_have_count(1)
             assert not process.evaluate('(node)=>node.open')
             expect(process.locator(':scope>div')).to_be_hidden()
@@ -369,11 +394,16 @@ def test_large_public_summary_and_final_keep_message_role_without_duplication(tm
             expect(process).to_contain_text('Summary end.');expect(answer).to_contain_text('Final answer end.')
             assert process.inner_text().count('Public summary start.')==1
             assert answer.inner_text().count('Long final answer start.')==1
-            expect(page.locator('.development-tool')).to_have_count(2)
-            assert 'Actual tool output.' in page.locator('.development-tool').last.text_content()
+            # The started item and its output update share one native tool row.
+            expect(page.locator('.dfc-tool')).to_have_count(1)
+            actual_tool=page.locator('.dfc-tool').last
+            actual_tool.locator(':scope>summary').click()
+            expect(actual_tool.locator('.dfc-row-content')).to_contain_text('fixture inspection')
+            expect(actual_tool.locator('.dfc-row-content')).to_contain_text('Actual tool output.')
             assert 'PRIVATE REASONING' not in page.locator('body').text_content()
         check();page.reload();page.get_by_text('本轮已完成',exact=True).wait_for();check()
-        page.locator('.development-assistant').get_by_role('button',name='分页查看原文').click()
+        detailed_mode(page)
+        page.locator('.dfc-answer').get_by_role('button',name='View original').click()
         dialog=page.get_by_role('dialog');expect(dialog).to_contain_text('Final answer end.')
         assert dialog.inner_text().count('Long final answer start.')==1
         sid=server.development.store.list(workspace)['sessions'][0]['id']
@@ -398,7 +428,7 @@ def test_process_disclosure_streams_compactly_and_keeps_reader_choice(tmp_path):
         errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
         page.goto(server.origin+'/#token='+server.token)
         page.get_by_role('button',name='开发',exact=True).click()
-        process=page.locator('.development-process');preview=process.locator('.development-process-preview')
+        process=page.locator('.dfc-think');preview=process.locator('.dfc-summary')
         expect(preview).to_have_text('检查现有字段和样例内容。')
         assert not process.evaluate('(node)=>node.open')
         expect(process.locator(':scope>div')).to_be_hidden()
@@ -425,9 +455,9 @@ def test_process_disclosure_streams_compactly_and_keeps_reader_choice(tmp_path):
         page.screenshot(path=str(shots/'development-process-compact.png'),full_page=True)
         process.locator(':scope>summary').click()
         store.event(turn['id'],'message.completed',dict(item_id='process',channel='process',text=process_text,interrupted=True,status='incomplete'))
-        expect(process.locator(':scope>summary')).to_contain_text('未完成')
+        expect(process.locator(':scope>summary')).to_contain_text('Incomplete')
         store.event(turn['id'],'message.delta',dict(item_id='answer',text='开始开发过滤流程。'))
-        answer=page.locator('.development-assistant');expect(answer).to_contain_text('开始开发过滤流程。')
+        answer=page.locator('.dfc-answer');expect(answer).to_contain_text('开始开发过滤流程。')
         store.event(turn['id'],'message.delta',dict(item_id='answer',text='正在补齐算子。'))
         expect(answer).to_contain_text('正在补齐算子。')
         assert process.evaluate('(node)=>node.open')
@@ -437,20 +467,52 @@ def test_process_disclosure_streams_compactly_and_keeps_reader_choice(tmp_path):
         store.finish_provider(turn['id'],state='completed',cleanup='complete',result={})
         page.get_by_text('本轮已完成',exact=True).wait_for()
         assert process.evaluate('(node)=>node.open')
-        process.get_by_role('button',name='分页查看原文').click()
+        process.get_by_role('button',name='View original').click()
         dialog=page.get_by_role('dialog');expect(dialog).to_contain_text('已找到输入结构')
         expect(dialog).to_contain_text('仍在检查。')
         assert dialog.inner_text().count('先查看数据结构')==1
         page.get_by_role('button',name='关闭',exact=True).click()
-        answer.get_by_role('button',name='分页查看原文').click()
+        detailed_mode(page)
+        answer.get_by_role('button',name='View original').click()
         expect(dialog).to_contain_text('开始开发过滤流程。正在补齐算子。')
         assert dialog.inner_text().count('开始开发过滤流程。')==1
         page.get_by_role('button',name='关闭',exact=True).click()
         page.reload();expect(answer).to_contain_text('正在补齐算子。')
         expect(process.locator(':scope>div')).to_be_hidden()
         assert not process.evaluate('(node)=>node.open')
-        expect(preview).to_have_text('')
-        expect(process.locator(':scope>summary')).to_contain_text('未完成')
-        expect(page.locator('.development-streaming')).to_have_count(0)
+        expect(preview).to_have_text('先查看数据结构')
+        expect(process.locator(':scope>summary')).to_contain_text('Incomplete')
+        expect(page.locator('.dfc-streaming')).to_have_count(0)
         assert not errors,errors
         browser.close()
+
+
+from test_forge_chat_markdown_browser import chat_page
+
+
+def test_disposed_first_send_cannot_reopen_old_project(chat_page):
+    """A successful late response clears its sent draft, without grabbing the route."""
+    page=chat_page
+    page.evaluate('''async () => {
+      window.routeOpens=[];window.startCalls=0;window.oldMain=document.createElement('main');
+      oldMain.id='late-send-fixture';document.body.append(oldMain);
+      const capabilities={enabled:true,start:true,providers:[{id:'fixture',model:'Fixture',available:true}]};
+      const api=async(name)=>{
+        if(name==='dev-capabilities')return capabilities;
+        if(name==='dev-project-turns')return {turns:[],next_offset:null};
+        if(name==='dev-conversation')return {session:null};
+        if(name==='dev-session-create')return {id:'old-session',provider:'fixture',revision:0};
+        if(name==='dev-turn-start'){startCalls++;return new Promise(resolve=>window.releaseOldSend=resolve);}
+        throw new Error('Unexpected route '+name);
+      };
+      await ForgeDevelopment.mount({main:oldMain,api,workspaceId:'old-project',view:{},
+        disposeReaders(){},openSession:sid=>routeOpens.push(sid),error(){},register:value=>window.oldHandle=value});
+    }''')
+    page.locator('#late-send-fixture textarea').fill('A request already accepted by the server')
+    page.locator('#late-send-fixture .dc-send').click()
+    page.wait_for_function('() => !!window.releaseOldSend')
+    page.evaluate("() => {oldHandle.dispose();oldMain.remove();releaseOldSend({id:'old-turn'});}")
+    page.wait_for_function("() => !JSON.parse(sessionStorage.getItem('forge-development-drafts')).some(([key])=>key==='old-project:project')")
+    assert page.evaluate('routeOpens')==[]
+    assert page.evaluate('startCalls')==1
+    assert page.evaluate('ForgeDevelopment.activeCount()')==0
