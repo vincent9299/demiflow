@@ -6,6 +6,7 @@ each kind of defect when one is introduced.
 """
 import logging
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -14,6 +15,7 @@ from demiflow.planning.dataflow_compile import _plain
 from demiflow.planning.dataflow_configuration import configuration_findings, report_configuration
 
 import compile_contract_corpus as corpus
+from configuration_schema_gate import reports_on_purpose
 
 
 @pytest.fixture(scope='module')
@@ -96,6 +98,28 @@ def test_every_key_a_reader_asks_for_is_explained():
     assert schema.SEAL_KEYS <= read
 
 
+def test_keys_without_a_writer_are_one_of_two_things(graphs):
+    assert set(schema.HISTORICAL_KEYS) == {'initial', 'initial_program', 'reducer_kwargs'}
+    assert set(schema.UNPRODUCED_KEYS) == {'aggregates', 'cache', 'cache_namespace'}
+    assert not set(schema.HISTORICAL_KEYS) & set(schema.UNPRODUCED_KEYS)
+    root = Path(__file__).resolve().parents[1]
+    relational = (root / 'demiflow/execution/kernels/relational.py').read_text(encoding='utf-8')
+    # The earlier reduce form is read on purpose, and a test holds it.
+    assert 'Legacy sealed plans keep their original' in relational
+    assert all(repr(name)[1:-1] in relational for name in schema.HISTORICAL_KEYS)
+    assert 'def test_legacy_unfinished_reduce_validates_original_grant_without_rewriting_seal' in (
+        root / 'tests/test_runtime_v3_reducer_memory.py').read_text(encoding='utf-8')
+    # No compiled plan reaches the kernels the other keys declare.
+    nodes = [node for graph in graphs.values() for node in graph.nodes]
+    assert not any(set(node.kernel.configuration) & set(schema.READ_WITHOUT_WRITER) for node in nodes)
+    assert {node.kind for node in nodes if node.kernel.kind == 'aggregate'} == {'terminal'}
+    assert not any(node.kernel.kind in ('fetch', 'document') for node in nodes)
+    engine = root / 'demiflow'
+    writers = [path.relative_to(engine).as_posix() for path in sorted(engine.rglob('*.py'))
+               if 'cache_namespace' in path.read_text(encoding='utf-8')]
+    assert writers == ['execution/kernels/dataflow.py', 'planning/dataflow_configuration.py']   # one reader, this schema
+
+
 def _mutate(graph, kernel_kind, change):
     nodes = []
     done = False
@@ -144,6 +168,25 @@ def test_a_defect_is_reported(graphs, case, kind, change, expected):
     assert any(expected in finding for finding in found), found
 
 
+@reports_on_purpose
+def test_the_opt_in_gate_collects_reports_and_counts_checked_graphs():
+    """What the gate plugin acts on: one line per checked graph, one line per finding."""
+    import configuration_schema_gate as gate
+    handler = gate._Reports()
+    logger = logging.getLogger(gate._LOGGER)
+    level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        logger.debug('configuration schema: action %s: %d nodes checked, %d findings', 'a', 3, 0)
+        assert handler.graphs == 1 and handler.findings == []
+        logger.debug('configuration schema: action %s: %s', 'a', 'MapOp 0123: key x is not admitted on this node')
+        assert len(handler.findings) == 1
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+
+
 def test_a_kind_the_schema_does_not_describe_is_reported_not_guessed(graphs):
     graph = graphs['case map']
     node = next(node for node in graph.nodes if node.kernel.kind == 'MapOp')
@@ -152,16 +195,34 @@ def test_a_kind_the_schema_does_not_describe_is_reported_not_guessed(graphs):
     assert any('not described by the configuration schema' in finding for finding in configuration_findings(strange))
 
 
-def test_reporting_is_silent_and_harmless_by_default(graphs, caplog):
+@reports_on_purpose
+def test_production_warns_and_never_refuses(graphs, caplog):
     broken = _mutate(graphs['case map'], 'MapOp', _set('not_a_key', 1))
     logger = logging.getLogger('demiflow.planning.configuration')
-    assert not logger.isEnabledFor(logging.DEBUG)
-    assert report_configuration(broken) == ()                 # not even evaluated
-    with caplog.at_level(logging.DEBUG, logger='demiflow.planning.configuration'):
-        found = report_configuration(broken)
-        assert len(found) == 1 and 'not_a_key' in found[0]
-        messages = [record.getMessage() for record in caplog.records]
-        assert any('3 nodes checked, 1 findings' in message for message in messages)
-        assert any('not_a_key' in message for message in messages)
-        assert report_configuration(object()) == ()           # a defect in the check itself never escapes
-    assert report_configuration(graphs['case map']) == ()
+    level, propagate = logger.level, logger.propagate
+    logger.setLevel(logging.NOTSET)                            # the default, whatever a harness configured
+    logger.propagate = True
+    try:
+        with caplog.at_level(logging.WARNING):
+            assert report_configuration(graphs['case map']) == ()
+            assert not [record for record in caplog.records if record.name == logger.name]   # a clean plan is silent
+            found = report_configuration(broken)                # returned, logged, not raised
+            assert len(found) == 1 and 'not_a_key' in found[0]
+            warnings = [record for record in caplog.records if record.name == logger.name]
+            assert len(warnings) == 1 and warnings[0].levelno == logging.WARNING and 'not_a_key' in warnings[0].getMessage()
+            caplog.clear()
+            assert report_configuration(object()) == ()         # a defect in the check itself never escapes
+            assert [record.levelno for record in caplog.records if record.name == logger.name] == [logging.WARNING]
+            caplog.clear()
+            many = _mutate(graphs['case map'], 'MapOp', lambda configuration: {
+                **configuration, **{'unknown_%02d' % index: index for index in range(30)}})
+            assert len(report_configuration(many)) == 30
+            messages = [record.getMessage() for record in caplog.records if record.name == logger.name]
+            assert len(messages) == schema._MAX_REPORTED + 1 and messages[-1].endswith('and 10 more findings')
+        with caplog.at_level(logging.DEBUG, logger=logger.name):
+            caplog.clear()
+            report_configuration(graphs['case map'])
+            assert any('3 nodes checked, 0 findings' in record.getMessage() for record in caplog.records)
+    finally:
+        logger.setLevel(level)
+        logger.propagate = propagate

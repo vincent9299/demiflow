@@ -181,3 +181,43 @@ def test_read_run_binds_identity_before_open_returns(tmp_path, monkeypatch):
         with read_run(target):
             pytest.fail('A replaced pathname reached the reader body')
     assert len(os.listdir('/proc/self/fd')) <= descriptors
+
+
+def _minimal_journal(directory, *, binary=False, state=None, manifest=None, summary=None):
+    """A journal with only the control tables under test. ``binary`` stores the documents as BLOB."""
+    directory.mkdir(parents=True, exist_ok=True)
+    wrap = (lambda text: sqlite3.Binary(text.encode())) if binary else (lambda text: text)
+    with sqlite3.connect(directory / 'run.sqlite') as db:
+        for table, value in (('execution_state', state), ('manifest', manifest), ('runtime_summary', summary)):
+            if value is not None:
+                db.execute(f'CREATE TABLE {table}(document TEXT)')
+                db.execute(f'INSERT INTO {table} VALUES (?)', (wrap(json.dumps(value, ensure_ascii=False)),))
+        db.execute('CREATE TABLE attempts(attempt INTEGER, document TEXT)')
+        if state is not None:
+            db.execute('INSERT INTO attempts VALUES (?,?)', (7, wrap(json.dumps({'attempt': 7, 'status': 'failed'}))))
+    return directory
+
+
+def test_a_control_document_must_be_text_and_fit_its_byte_budget(tmp_path):
+    """The budget is counted in bytes inside SQLite, and a document of any other storage class is refused.
+
+    The engine only ever writes TEXT. A BLOB-typed document is evidence that something else wrote the
+    journal, and a host that decides whether a run directory may be deleted must not accept it.
+    """
+    state, manifest, summary = {'status': None, 'revision': 0, 'attempt': 1}, {'run_id': 'run'}, {'workers': 1}
+    with read_run(_minimal_journal(tmp_path / 'text', state=state, manifest=manifest, summary=summary)) as reader:
+        assert reader.document('execution_state', 65536) == state and reader.document('manifest', 1024) == manifest
+        assert reader.state() == (state, 1) and reader.runtime_summary() == summary
+        assert reader.state(7) == ({'attempt': 7, 'status': 'failed'}, 1)
+    with read_run(_minimal_journal(tmp_path / 'blob', binary=True, state=state, manifest=manifest, summary=summary)) as reader:
+        for read in (lambda: reader.document('execution_state', 65536), lambda: reader.document('manifest', 1024),
+                     reader.state, lambda: reader.state(7), reader.runtime_summary):
+            with pytest.raises(RunReadError):
+                read()
+    # 40 characters, 120 bytes: inside a 100-character budget, outside a 100-byte one.
+    wide = {'k': '中' * 38}
+    assert len(json.dumps(wide, ensure_ascii=False)) < 100 < len(json.dumps(wide, ensure_ascii=False).encode())
+    with read_run(_minimal_journal(tmp_path / 'wide', manifest=wide)) as reader:
+        with pytest.raises(RunReadError):
+            reader.document('manifest', 100)
+        assert reader.document('manifest', 200) == wide

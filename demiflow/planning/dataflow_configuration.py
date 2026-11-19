@@ -22,10 +22,14 @@ A key reaches a node from exactly one of these writers, in the order they run:
 ``shared``       same-instance actor ownership.
 
 ``configuration_findings(graph)`` checks a newly compiled graph against this
-schema and returns what does not fit. It is report-only: nothing here rejects a
-plan, and ``report_configuration`` does nothing unless the
-``demiflow.planning.configuration`` logger is enabled for DEBUG. A sealed plan
-is never checked; it keeps the keys it was sealed with.
+schema and returns what does not fit. Nothing here rejects a plan:
+``report_configuration`` logs each finding as a warning on the
+``demiflow.planning.configuration`` logger and returns. A sealed plan is never
+checked; it keeps the keys it was sealed with.
+
+Enforcement is staged. Tests can already fail on a finding (the opt-in
+``configuration_schema_gate`` pytest plugin). Production warns. Refusing a plan
+is a later step, for the invariants only, once real pipelines have run clean.
 
 The key names owned by other modules (``publication_workspace``,
 ``reducer_memory_v1``, ``shuffle_order_version``, ``declared_arrow_schema``,
@@ -36,11 +40,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, fields, is_dataclass
+from functools import lru_cache
 from typing import Any, Callable, Mapping
 
 from ..execution.contracts.dataflow_kinds import kinds_with
 
 _LOG = logging.getLogger('demiflow.planning.configuration')
+_MAX_REPORTED = 20          # findings logged per graph; the rest are counted
 
 # Operation fields the generic lowering does not copy into the configuration.
 NOT_COPIED = frozenset({'runtime_contract', 'label', 'node_id', 'source_dataset',
@@ -191,20 +197,35 @@ SCHEMA_KEY = 'declared_arrow_schema'
 # Written after compilation, when a plan is sealed for thread programs. A newly
 # compiled graph does not carry it yet.
 SEAL_KEYS = frozenset({'thread_attempt'})
-# Keys a kernel reads that no compile stage writes today. Each is a reader without
-# a writer in this tree: an older sealed plan may carry it, or the read is dead.
-# They are listed so that the gap is visible; a newly compiled graph that carried
-# one would be reported.
-READ_WITHOUT_WRITER: Mapping[str, str] = {
-    'initial': 'reduce kernel: inline initial accumulator; a new reduce names reducer_program instead',
-    'initial_program': 'reduce kernel: program holding the initial accumulator',
-    'reducer_kwargs': 'reduce kernel: inline reducer keyword arguments',
-    'aggregates': 'aggregate kernel: inline aggregate declarations; a new aggregate terminal uses action programs',
-    'cache': 'model binding: result-cache declaration',
-    'cache_namespace': 'kernel factory: result-cache namespace of a non-aggregate kernel',
+# Keys a kernel reads that no compile stage writes. They are two different things.
+#
+# The earlier sealed form of a reduce node. A reduce is sealed today as one
+# reducer program that carries its initial accumulator and keyword arguments.
+# Before that, the node carried them inline. The reduce kernel still reads the
+# inline form so that an unfinished run sealed in it is validated against its
+# original grant (kernels/relational.py, "Legacy sealed plans keep their original
+# identity and grant"; pinned by the reducer memory tests).
+HISTORICAL_KEYS: Mapping[str, str] = {
+    'initial': 'inline initial accumulator of a reduce sealed in the earlier form',
+    'initial_program': 'program holding the initial accumulator of a reduce sealed in the earlier form',
+    'reducer_kwargs': 'inline reducer keyword arguments of a reduce sealed in the earlier form',
 }
+# The declaration of a kernel that exists and has unit tests, but that no compile
+# stage produces. No compiled plan can reach these kernels:
+# - the kernel-level aggregate (kernels/aggregate.py): the aggregate terminal of a
+#   compiled plan is computed in the worker terminal from its action program;
+# - the cached-map kernel (dataflow_models.bind_cached_map): map_cached is lowered
+#   as a cache declaration on an ordinary kernel.
+UNPRODUCED_KEYS: Mapping[str, str] = {
+    'aggregates': 'aggregate declarations of the kernel-level aggregate',
+    'cache': 'cache declaration of the cached-map kernel',
+    'cache_namespace': 'what makes the kernel factory choose the cached-map kernel',
+}
+# A newly compiled graph that carried one of either group would be reported.
+READ_WITHOUT_WRITER: Mapping[str, str] = {**HISTORICAL_KEYS, **UNPRODUCED_KEYS}
 
 
+@lru_cache(maxsize=None)
 def declared_fields(kind: str):
     """The configuration keys a typed operation declares, or ``None`` when ``kind`` is not one."""
     from ..data import plan
@@ -214,6 +235,7 @@ def declared_fields(kind: str):
     return frozenset(field.name for field in fields(operation)) - NOT_COPIED
 
 
+@lru_cache(maxsize=None)
 def _has_field(kind: str, name: str) -> bool:
     from ..data import plan
     operation = getattr(plan, kind, None)
@@ -316,20 +338,22 @@ def configuration_findings(graph) -> tuple[str, ...]:
 
 
 def report_configuration(graph) -> tuple[str, ...]:
-    """Log what does not fit, at DEBUG, and return it. Never raises and never rejects.
+    """Check a newly compiled graph; log what does not fit as warnings and return it.
 
-    It does nothing at all unless the ``demiflow.planning.configuration`` logger is
-    enabled for DEBUG, so an ordinary run pays nothing and cannot be affected.
+    Never raises and never rejects: a plan outside the schema still compiles, and
+    a defect in this check is logged, not propagated.
     """
-    if not _LOG.isEnabledFor(logging.DEBUG):
-        return ()
     try:
         found = configuration_findings(graph)
-    except Exception:  # report-only: a defect in this check must never fail a compile
-        _LOG.debug('configuration schema check failed for action %s', getattr(graph, 'action_id', None), exc_info=True)
+    except Exception:  # a defect in this check must never fail a compile
+        _LOG.warning('configuration schema check failed for action %s', getattr(graph, 'action_id', None),
+                     exc_info=True)
         return ()
     _LOG.debug('configuration schema: action %s: %d nodes checked, %d findings',
                graph.action_id, len(graph.nodes), len(found))
-    for finding in found:
-        _LOG.debug('configuration schema: action %s: %s', graph.action_id, finding)
+    for finding in found[:_MAX_REPORTED]:
+        _LOG.warning('configuration schema: action %s: %s', graph.action_id, finding)
+    if len(found) > _MAX_REPORTED:
+        _LOG.warning('configuration schema: action %s: and %d more findings', graph.action_id,
+                     len(found) - _MAX_REPORTED)
     return found

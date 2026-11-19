@@ -189,17 +189,21 @@ class _Report:
 
 
 def _walk(source, plan, seen):
-    """Every (source, operation) object reachable from a request, in a stable order."""
-    if id(source) in seen:
-        return
-    seen[id(source)] = source
-    yield 'source', source
-    for name in ('left', 'right'):
-        child = getattr(source, name, None)
-        if child is not None and hasattr(child, 'plan'):
+    """Every (source, operation) object reachable from a request, in a stable order.
+
+    A source reached a second time is not walked again, but the operations of the
+    plan that reached it are: a report context binds every operation of every
+    branch, including branches that share a source.
+    """
+    if id(source) not in seen:
+        seen[id(source)] = source
+        yield 'source', source
+        for name in ('left', 'right'):
+            child = getattr(source, name, None)
+            if child is not None and hasattr(child, 'plan'):
+                yield from _walk(child.source, child.plan, seen)
+        for child in getattr(source, 'inputs', ()) or ():
             yield from _walk(child.source, child.plan, seen)
-    for child in getattr(source, 'inputs', ()) or ():
-        yield from _walk(child.source, child.plan, seen)
     for operation in plan.operations:
         if id(operation) in seen:
             continue
@@ -477,6 +481,23 @@ CASES = {
     'refuse_nodes': lambda c: case(c.rows().map(identity).map(identity).map(identity), bounds='nodes3'),
     'refuse_depth': lambda c: case(c.rows().join(c.rows().join(c.rows(), on='k'), on='k'), bounds='depth1'),
 }
+
+# A native declaration placed in a plan directly, for each registered native name. The public
+# entries never do this: they preflight the name and append a typed operation.
+def _direct_native(c, name):
+    from demiflow.data.plan import LogicalPlan
+    from demiflow.execution.dataflow_api import make_native_operation
+    base = c.rows()
+    return dict(dataset=None, source=base._source, plan=LogicalPlan((make_native_operation(name, {}, bindings={}),)),
+                kind='take', arguments={'limit': 1})
+
+
+NATIVE_NAMES = ('prompt', 'embedding', 'agent', 'raw_fetch', 'queue_produce', 'queue_ack', 'lance_lookup',
+                'search_vectors', 'search_web', 'deduplicate', 'group_batches', 'stream_prepend', 'save_lance',
+                'register_documents', 'register_documents_batch', 'read_documents', 'pack_prompt_inputs',
+                'read_local_object', 'decode_document', 'encode_image', 'parse_wikitext')
+for _name in NATIVE_NAMES:
+    CASES['native/' + _name] = lambda c, name=_name: _direct_native(c, name)
 
 # Executor defaults: the same plans with and without each stand-in executor.
 for _name, _plan in {

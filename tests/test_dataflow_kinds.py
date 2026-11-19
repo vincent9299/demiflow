@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from demiflow.execution.contracts import dataflow_kinds as kinds
 from demiflow.execution.contracts.dataflow_kinds import FAMILIES, NATIVE, ROLES, TYPED, kind_records, kinds_with
 
@@ -82,6 +84,27 @@ def test_what_the_table_makes_visible():
     assert not_registered == ['fetch', 'document', 'join', 'exclude_keys', 'reduce', 'groups', 'union', 'aggregate']
     assert kinds_with('relational') <= set(source_registry()) and kinds_with('aggregate') <= set(terminal_registry())
     assert not {'fetch', 'document'} & (set(OPERATORS) | set(source_registry()) | set(terminal_registry()))
+
+
+def test_a_native_declaration_is_refused_by_name_not_by_accident(tmp_path):
+    """All 21 native names are declaration names. Placed in a plan directly, each is refused, and told why."""
+    import compile_contract_corpus as corpus
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    native = tuple(name for name, record in kind_records().items() if record.entry == NATIVE)
+    assert native == corpus.NATIVE_NAMES and len(native) == 21
+    context = corpus.Context(tmp_path)
+    for name in native:
+        with pytest.raises(DataflowError) as refused:
+            corpus.lower_case('native/' + name, context)
+        assert refused.value.code == 'UNSUPPORTED_CAPABILITY', name
+        assert 'native declaration cannot be lowered directly: ' + name + ';' in str(refused.value), name
+    # A name that is not registered at all keeps its own refusal.
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.contracts.dataflow import NativeOperation
+    from demiflow.planning.dataflow_compile import compile_kernel_spec
+    with pytest.raises(DataflowError, match='operator kind is not registered: not_registered_kind'):
+        compile_kernel_spec(NativeOperation(kind='not_registered_kind', configuration={}, bindings={},
+                                            factory=CallableSpec.create(len)), program_ref=None, bounds=corpus.bounds())
 
 
 def test_every_older_table_is_a_view_of_the_rows():

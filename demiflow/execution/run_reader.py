@@ -50,6 +50,12 @@ _SUMMARY_SCOPE = ('plan_id', 'dag_id', 'plan_revision', 'occurrence_id')
 _PAGE_SCOPE = ('plan_id', 'dag_id', 'plan_revision')
 
 
+# A control document is stored as TEXT. Casting to BLOB makes substr count bytes, so the
+# budget holds before the value reaches Python; the CASE keeps the storage-class check that
+# the cast alone would erase. Anything that is not TEXT comes back as NULL and is refused.
+_TEXT_BYTES = "CASE WHEN typeof(document)='text' THEN substr(CAST(document AS BLOB),1,?) END"
+
+
 class RunReadError(RecoveryContractError):
     """A bounded journal read was refused. ``code`` tells the host how to present it."""
 
@@ -161,7 +167,7 @@ class RunReader:
             raise ValueError('Unsupported table')
         if not self.has_table(table):
             return None
-        row = self.db.execute(f'SELECT substr(CAST(document AS BLOB),1,?) FROM {table} LIMIT 1', (maximum + 1,)).fetchone()
+        row = self.db.execute(f'SELECT {_TEXT_BYTES} FROM {table} LIMIT 1', (maximum + 1,)).fetchone()
         if not row:
             return None
         if not isinstance(row[0], bytes) or len(row[0]) > maximum:
@@ -197,14 +203,15 @@ class RunReader:
     def state(self, attempt=None):
         """``(state document, current attempt)``; a historical attempt reads ``attempts``."""
         _check_attempt(attempt)
-        raw = self.db.execute('SELECT substr(CAST(document AS BLOB),1,65537) FROM execution_state LIMIT 1').fetchone()
+        raw = self.db.execute(f'SELECT {_TEXT_BYTES} FROM execution_state LIMIT 1', (_STATE_BYTES + 1,)).fetchone()
         if not raw or not isinstance(raw[0], bytes) or len(raw[0]) > _STATE_BYTES:
             raise RunReadError('Invalid run state')
         current = json.loads(raw[0])
         if attempt is not None and current.get('attempt') is None:
             raise RunReadError('Historical journal has no attempt contract', code='invalid_request')
         if attempt is not None and attempt != current.get('attempt'):
-            raw = self.db.execute('SELECT substr(CAST(document AS BLOB),1,65537) FROM attempts WHERE attempt=? LIMIT 1', (attempt,)).fetchone()
+            raw = self.db.execute(f'SELECT {_TEXT_BYTES} FROM attempts WHERE attempt=? LIMIT 1',
+                                  (_STATE_BYTES + 1, attempt)).fetchone()
             if not raw or not isinstance(raw[0], bytes) or len(raw[0]) > _STATE_BYTES:
                 raise RunReadError('Unknown attempt', code='not_found')
             return json.loads(raw[0]), current.get('attempt')
@@ -245,7 +252,7 @@ class RunReader:
         """The managed-run summary document, or ``None`` for a pre-summary journal."""
         if not self.has_table('runtime_summary'):
             return None
-        row = self.db.execute('SELECT substr(CAST(document AS BLOB),1,65537) FROM runtime_summary LIMIT 1').fetchone()
+        row = self.db.execute(f'SELECT {_TEXT_BYTES} FROM runtime_summary LIMIT 1', (_STATE_BYTES + 1,)).fetchone()
         if not row or not isinstance(row[0], bytes) or len(row[0]) > _STATE_BYTES:
             raise RunReadError('Runtime projection exceeds budget')
         return json.loads(row[0])
