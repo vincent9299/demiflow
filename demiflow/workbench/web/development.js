@@ -232,7 +232,7 @@ SOFTWARE.
     const state={disposed:false,initializing:true,timer:null,session:null,sequence:0,items:new Map(),pending:new Set(),submission:null,dialogs:new Set(),stats:null,statsAt:0,newDraft:view?.kind==='development_new',listOffset:0,listAt:0,writerBusy:false,activeSession:null};
     const layout=el('section',undefined,'development-layout'),body=el('div',undefined,'development-conversation');
     layout.append(body);main.append(layout);main.classList.add('development-main');active.add(state);
-    const handle={get sessionId(){return state.session?.id;},dispose(){if(state.disposed)return;state.disposed=true;clearTimeout(state.timer);state.observer?.disconnect();state.releaseViewport?.();state.navigationResize?.dispose();state.releaseMenus?.();state.releaseSettings?.();state.composer?.dispose();state.chat?.dispose();active.delete(state);main.classList.remove('development-main');disposeReaders(layout);for(const dialog of state.dialogs)dialog.remove();state.dialogs.clear();}};register(handle);
+    const handle={get sessionId(){return state.session?.id;},dispose(){if(state.disposed)return;state.disposed=true;clearTimeout(state.timer);state.observer?.disconnect();state.releaseViewport?.();state.navigationResize?.dispose();state.releaseMenus?.();state.composer?.dispose();state.chat?.dispose();active.delete(state);main.classList.remove('development-main');disposeReaders(layout);for(const dialog of state.dialogs)dialog.remove();state.dialogs.clear();}};register(handle);
     const sidebar=el('aside',undefined,'development-session-sidebar'),sideHeading=el('div',undefined,'development-session-heading');
     const createNew=el('button',undefined,'development-new-conversation');createNew.type='button';createNew.append(el('span','＋'),el('span','新会话'));createNew.disabled=true;
     const navigation=ForgeNavigation.header({title:'会话',searchLabel:'搜索会话',placeholder:'筛选当前页会话',onSearch:()=>{if(!state.initializing)renderConversations();}});
@@ -397,7 +397,7 @@ SOFTWARE.
       hero.hidden=!!state.items.size||!trajectory.hidden;layout.classList.toggle('development-empty',!state.items.size&&trajectory.hidden);
       busyNotice.hidden=!otherBusy||readonly||!!state.historyOnly;busyText.textContent='另一个会话正在使用此项目，可以继续编辑草稿，完成后再发送。';busyJump.hidden=!state.activeSession;
       status.textContent=unsupportedNew?'当前开发服务不支持新建独立会话，请从左侧打开已有会话。':readonly||state.historyOnly?'历史会话 · 只读，不能继续发送':t?(t.operation==='compact'?(t.cleanup!=='complete'?'正在归档历史…':t.state==='completed'?'归档处理完成':'归档未完成'):(t.development?developmentLabel(t.development):(labels[t.state]||t.state)))+(t.dispatch==='unknown'?' · 发送结果未知，请先核对':''):
-        readonly?'已有开发历史 · 只读':provider?.available?'':ForgeDevelopmentComposer.connectionStatus(capabilities).label+' · 右上角设置中配置连接';
+        readonly?'已有开发历史 · 只读':provider?.available?'':ForgeDevelopmentComposer.connectionStatus(capabilities).label;
       reason.textContent=capabilities.reason+(t?.development?' 开发验收由 Forge 独立检查；'+(t.development.assurance==='enforced'?'开发进程受外部执行边界约束。':capabilities.mode==='restricted'?'本次受限开发的验收证据尚未齐备。':'当前为可信本地模式，未防篡改。')+(t.development.reason?' '+t.development.reason:''):'')+(provider?.reason?' '+provider.reason:'')+(provider?.input_requests==='unsupported'?' 此代理不支持轮内补充输入；停止后可继续。':'')+(provider?.history_replay==='unsupported'?' 恢复时仅展示本应用已保存的历史。':'');
     }
     providers.onchange=availability;
@@ -520,15 +520,6 @@ SOFTWARE.
       }
       input.value=drafts.get(draftKey)||'';await refresh();
     }
-    const settingsChanged=async()=>{
-      try{
-        capabilities=await api('dev-capabilities');if(state.disposed)return;state.capabilitiesAt=Date.now();
-        if(state.session)state.session=await api('dev-session',{session_id:state.session.id});
-        if(state.disposed)return;await loadConversations(true);if(state.disposed)return;renderConversations();availability();
-      }catch(e){if(!state.disposed)error(body,e);}
-    };
-    window.addEventListener('forge-development-settings-changed',settingsChanged);
-    state.releaseSettings=()=>window.removeEventListener('forge-development-settings-changed',settingsChanged);
     if(state.disposed)return handle;state.initializing=false;renderConversations();availability();resizeInput();
     return handle;
   }
