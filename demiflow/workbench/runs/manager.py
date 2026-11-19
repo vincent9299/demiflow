@@ -1020,7 +1020,8 @@ def result_table(root, run_id, name, *, attempt=None):
     uri = ws.relative_path(base, ref.relative_uri)
     if str(uri) != item['uri']:
         raise ForgeError('Result location changed from the sealed output')
-    return {'format': 'demiflow_forge_table_v1', 'alias': f'run:{run_id}:{name}',
+    alias = f'run:{run_id}:{name}' + (f':{attempt}' if attempt is not None else '')
+    return {'format': 'demiflow_forge_table_v1', 'alias': alias,
             'location_id': ref.store_id, 'ref': ref.to_dict()}, ref, uri
 
 

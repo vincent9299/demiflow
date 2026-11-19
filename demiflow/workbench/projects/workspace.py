@@ -763,9 +763,9 @@ def table_binding(root, value, alias):
     if isinstance(alias, str) and alias.startswith("run:"):
         from demiflow.workbench.runs.manager import result_table
         parts = alias.split(":")
-        if len(parts) != 3:
+        if len(parts) not in (3, 4) or len(parts) == 4 and not re.fullmatch(r"(?:[1-9]|[12][0-9]|3[0-2])", parts[3]):
             raise ForgeError("Invalid run output reference")
-        return result_table(root, parts[1], parts[2])
+        return result_table(root, parts[1], parts[2], attempt=int(parts[3]) if len(parts) == 4 else None)
     identifier(alias)
     control = read_control(root / "tables" / f"{alias}.json", 16384)
     modern = control.get('format') == 'demiflow_forge_table_v2'

@@ -1298,7 +1298,7 @@
   }
   renderCase.serial=0;
   function addResultTable(run,output,destination=context){
-    const alias='run:'+run.run_id+':'+output.name;
+    const alias='run:'+run.run_id+':'+output.name+(run.attempt!=null?':'+run.attempt:'');
     if(!output.result)return alias;
     const t={alias,run_id:run.run_id,output_name:output.name,uri:output.uri,reference:{location_id:output.result.location_id,ref:output.result.ref}};
     const at=destination.tables.findIndex(t=>t.alias===alias);if(at<0)destination.tables.push(t);else destination.tables[at]=t;return alias;
@@ -1348,7 +1348,7 @@
     mode.textContent=context?(context.runs_enabled?'可查看、检查与运行':canRun('run_control')?'可查看、检查与停止已有运行':'可查看、检查 · 运行未开启'):'';
     mode.hidden=!context;
     const path=document.getElementById('workspace-path');
-    if(path){const current=pendingView||view;path.textContent=({development:'开发',overview:'Readme',tables:'数据',flows:'管道',operators:'算子',monitor:'运行监控'})[pageKind()]+(current?.alias?' / '+current.alias:'')+(current?.row_id?' / Case '+current.row_id:'');}
+    if(path){const current=pendingView||view;path.textContent=({development:'开发',overview:'Readme',tables:'数据',flows:'管道',operators:'算子',monitor:'运行'})[pageKind()]+(current?.alias?' / '+current.alias:'')+(current?.row_id?' / Case '+current.row_id:'');}
     const settings=document.getElementById('project-settings');if(settings)settings.disabled=!workspaceId;
     const status=document.getElementById('workspace-status');if(status){status.hidden=!workspaceId;if(!workspaceId)status.open=false;}
   }
@@ -1475,7 +1475,7 @@
     });
     picker.addEventListener('focusout',event=>{if(event.relatedTarget&&!picker.contains(event.relatedTarget)&&event.relatedTarget!==toggle)closeProjectPicker();});
     nav=$('nav',undefined,'function-nav');nav.setAttribute('aria-label','项目功能');nav.hidden=true;
-    for(const [page,label]of [['development','开发'],['operators','算子'],['flows','管道'],['monitor','运行监控'],['tables','数据'],['overview','Readme']]){const b=button(label,()=>navigate(page),nav);b.dataset.page=page;b.disabled=true;}
+    for(const [page,label]of [['development','开发'],['operators','算子'],['flows','管道'],['monitor','运行'],['tables','数据'],['overview','Readme']]){const b=button(label,()=>navigate(page),nav);b.dataset.page=page;b.disabled=true;}
     const actions=$('div',undefined,'header-actions');
     const settings=iconButton('项目设置',settingsDialog,actions,['M4 7h10m4 0h2M4 17h2m4 0h10M14 4v6M10 14v6']);settings.id='project-settings';
     iconButton('刷新当前视图',refreshView,actions,['M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 11-2l3 3M4 16l3 3a7 7 0 0 0 11-2']);

@@ -29,6 +29,7 @@ RESPONSE_BYTES=9*1024**2
 STDERR_BYTES=1024**2
 RSS_BYTES=768*1024**2
 _context=ContextVar('demiflow_workspace_read_lane',default=None)
+_native_dispatch=ContextVar('demiflow_native_reader_dispatch',default=False)
 
 @contextmanager
 def using(reader,consumer_closed=None):
@@ -37,6 +38,10 @@ def using(reader,consumer_closed=None):
     finally:_context.reset(token)
 
 def current():return _context.get()
+
+def in_native_dispatch():
+    """True only while the bounded reader child serves a validated request."""
+    return _native_dispatch.get()
 
 class Reader:
     def __init__(self,*,max_requests=64,idle_seconds=60,timeout_seconds=20,rss_bytes=RSS_BYTES,owner_loop=False):
@@ -377,7 +382,9 @@ def serve(prepare,dispatch):
                     or request['operation'] not in ALLOWED or type(request['arguments']) is not dict
                     or type(request['root']) is not str or not Path(request['root']).is_absolute()):
                 raise ValueError('Invalid closed readonly operation')
-            result=dispatch(request)
+            token=_native_dispatch.set(True)
+            try:result=dispatch(request)
+            finally:_native_dispatch.reset(token)
             raw=bounded_json(dict(sequence=count+1,response=result),RESPONSE_BYTES)
             outgoing.write(struct.pack('!I',len(raw)));outgoing.write(raw);outgoing.flush()
             count+=1

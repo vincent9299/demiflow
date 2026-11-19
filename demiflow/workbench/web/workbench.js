@@ -23,12 +23,14 @@
     const state=ForgeWorkbenchState.create(project),commands=ForgeWorkbenchCommands.create({project,api});
     const root=$('section',undefined,'workbench');main.append(root);
     let controller=new AbortController(),disposed=false,run=null,snapshot=null,working=null,lastRun=null;
-    let busy=false,historyOpen=false,sourceKind='configuration',detailKind='logs',sourceSequence=0,nodeSequence=0;
+    let busy=false,historyOpen=false,sourceKind='configuration',detailKind='observations',sourceSequence=0,nodeSequence=0;
     let logOffset=0,logBody='',eventCursor=null,eventRows=[],lastMetricAt=0,lastEventAt=0;
     let records=null,cursors=[null],page=0,listSequence=0,sourceOpen=true,comparison=null,outputFingerprint=null,runFilter='';
     let observationCursor=null,observationPages=[],graphSequence=0,scopeNode=null,nodeOffset=0,inspectorWhole=false;
     let lastRunGraphAt=0,graphStatus=null,graphModel=null,actionExplicit=false;
     let settingsBasis=null,issueScope='flow',scopedCheckButton=null;
+    let runInspector='observations',runDefinition=null,definitionSequence=0,runFlowFilter='';
+    const runUI=globalThis.ForgeRunPresentation;
     let pipelineCodeOpen=false,pipelineSequence=0,pipelineReadKey=null;
     let planPreview=null,previewSelection=null,previewSequence=0,previewBusy=false;
     let activePage=view.panel||(['run','run_compare','runs'].includes(view.kind)?'monitor':'flows'),detailOpen=false,locationFields=null,userNavigation=0;
@@ -82,7 +84,7 @@
     window.addEventListener('resize',positionMore);window.addEventListener('scroll',positionMore,true);
     root.addEventListener('click',event=>{if(!more.contains(event.target))more.open=false;});
     root.addEventListener('keydown',event=>{if(event.key==='Escape'&&more.open){more.open=false;more.querySelector('summary').focus();}});
-    const checkButton=button('检查',()=>{more.open=false;return check();},moreBody),runButton=button('运行',()=>submit(),actions,{cls:'primary'});
+    const checkButton=button('检查',()=>{more.open=false;return check();},moreBody),runButton=button('运行',()=>confirmSubmit(),actions,{cls:'primary'});
     const historyButton=button('运行记录',async()=>{more.open=false;activePage='monitor';state.setMode(run?'monitor':'history');historyOpen=!historyOpen;updateActions();rememberPanel();if(historyOpen)await listRuns();},moreBody);
     historyButton.setAttribute('aria-expanded','false');
     button('接入与权限',()=>{more.open=false;settings.hidden=!settings.hidden;paintSettings();},moreBody,{cls:'quiet'});
@@ -94,7 +96,13 @@
     const outputMenu=button('输出结果',()=>changeMode('results'),moreBody);
     const basisLabel=$('span',undefined,'wb-basis');
     const monitorTabs=$('div',undefined,'wb-monitor-tabs');monitorTabs.hidden=true;toolbar.insertBefore(monitorTabs,actions);
-    const monitorStatus=button('状态与日志',()=>changeMode('monitor'),monitorTabs),monitorOutputs=button('输出结果',()=>changeMode('results'),monitorTabs);
+    const monitorStatus=button('执行图',()=>changeMode('monitor'),monitorTabs),monitorOutputs=button('输出结果',()=>changeMode('results'),monitorTabs);
+    const monitorDefinition=button('本次参数与版本',()=>showRunDefinition(),monitorTabs);
+    const runDefinitionPanel=$('section',undefined,'wb-run-definition-panel');runDefinitionPanel.hidden=true;root.append(runDefinitionPanel);
+    const runConfirmation=$('section',undefined,'wb-run-confirmation');runConfirmation.hidden=true;root.append(runConfirmation);
+    const runEmpty=$('section',undefined,'wb-run-empty');runEmpty.hidden=true;root.append(runEmpty);
+    runEmpty.append($('h3','选择一次运行'),$('p','左侧查看已提交的运行；发起新运行请回到管道。执行图、参数、日志和结果始终对应所选记录。','wb-caption'));
+    button('查看管道',()=>showPage('flows'),runEmpty);
     const runBar=$('div',undefined,'wb-run-bar');runBar.hidden=true;root.append(runBar);
     const runFacts=$('div',undefined,'wb-run-facts');runFacts.hidden=true;root.append(runFacts);
     const operators=$('section',undefined,'wb-operators');operators.hidden=true;operators.setAttribute('aria-label','算子目录');root.append(operators);
@@ -109,7 +117,7 @@
     const nodePanelTools=$('div',undefined,'wb-node-panel-tools');
     const definitionButton=button('项目算子',async()=>{const target=definitionSource;await showPage('operators');if(target){const found=target.path?await operatorBrowser.selectSource(target.path,target.line,target.sha256):await operatorBrowser.selectPrompt(target);if(!found)message('当前项目未找到唯一匹配的定义；运行快照仍保留。','notice');}},nodePanelTools);
     const nodeOutputs=button('查看本次输出',()=>changeMode('results'),nodePanelTools);nodeOutputs.hidden=true;
-    button('关闭详情',()=>{detailOpen=false;updateActions();},nodePanelTools);
+    const closeDetail=button('关闭详情',()=>{detailOpen=false;updateActions();},nodePanelTools);
     nodePanel.append(nodePanelTools,inspector);
     const checks=$('section',undefined,'wb-checks'),checkScopes=$('div',undefined,'wb-check-scopes'),checkGrid=$('div',undefined,'wb-check-grid'),checkIssues=$('div',undefined,'wb-check-issues'),checkCoverage=$('aside',undefined,'wb-check-coverage');checks.hidden=true;checkGrid.append(checkIssues,checkCoverage);checks.append(checkScopes,checkGrid);root.append(checks);
     const planContext=$('div',undefined,'wb-plan-context'),graphTitle=$('strong','执行计划'),graphHost=$('div',undefined,'wb-graph');
@@ -143,12 +151,14 @@
     graphSection.prepend(actionBar,pipelineCode,graphHost);const planHelp=details('计划说明',moreBody);planHelp.append(graphLegend);body.append(graphSection,nodePanel);root.append(body);
     const runDetail=$('section',undefined,'wb-run-detail'),detailHeader=$('div',undefined,'wb-source-header'),detailTabs=$('div',undefined,'wb-source-tabs'),runDetailBody=$('div',undefined,'wb-run-detail-body');runDetail.hidden=true;
     const detailButtons=new Map();
-    detailHeader.append($('strong','日志与观测'),detailTabs);runDetail.append(detailHeader,runDetailBody);graphSection.append(runDetail);
-    for(const[key,label]of [['logs','运行日志'],['observations','节点证据'],['events','控制事件']])detailButtons.set(key,button(label,async()=>{detailKind=key;await loadRunDetail(true);updateActions();},detailTabs));
+    detailHeader.append($('strong','执行情况'),detailTabs);runDetail.append(detailHeader,runDetailBody);graphSection.append(runDetail);
+    for(const[key,label]of [['logs','运行日志'],['observations','节点证据'],['events','控制事件']])detailButtons.set(key,button(label,async()=>{detailKind=key;runInspector=key==='observations'?'observations':'logs';await loadRunDetail(true);updateActions();},detailTabs));
     const bottom=$('section',undefined,'wb-source'),sourceHeader=$('div',undefined,'wb-source-header'),sourceTitle=$('strong','节点源码'),sourceTabs=$('div',undefined,'wb-source-tabs'),sourceBody=$('div',undefined,'wb-source-body');
     const sourceButtons=new Map();
     for(const[key,label]of [['callsite','Dataset API'],['prompt','Prompt 算子'],['implementation','代码算子'],['configuration','流程接线']])sourceButtons.set(key,button(label,async()=>{sourceKind=key;sourceOpen=true;sourceBody.hidden=false;sourceTabs.hidden=false;await loadSource();},sourceTabs));
     sourceHeader.append(sourceTitle);const sourceToggle=button('收起详情',async()=>{sourceOpen=!sourceOpen;sourceBody.hidden=sourceTabs.hidden=!sourceOpen;sourceSequence++;disposeReaders(sourceBody);sourceBody.replaceChildren();if(sourceOpen)await loadSource();updateActions();},sourceHeader);bottom.append(sourceHeader,sourceTabs,sourceBody);inspector.before(bottom);
+    const runInspectorTabs=$('div',undefined,'wb-run-inspector-tabs');runInspectorTabs.hidden=true;nodePanel.prepend(runInspectorTabs);
+    for(const[key,label]of [['observations','执行情况'],['definition','定义与接线'],['logs','日志']])button(label,async()=>{runInspector=key;detailKind=key==='definition'?detailKind:key;updateActions();if(key==='definition')await loadSource();else await loadRunDetail(true);},runInspectorTabs).dataset.kind=key;
     const results=$('section',undefined,'wb-results');results.hidden=true;root.append(results);
     const documents=details('当前项目检查与来源',checks);
     let projectInfoRendered=false,projectInfoPending=null,projectInfoDirty=false;
@@ -176,7 +186,7 @@
     documents.addEventListener('toggle',()=>{if(documents.open&&!projectInfoRendered)refreshProjectInfo();});
     button('在开发中查看与修正',()=>navigate('development'),documents);
     function graphLoading(loading){graphHost.inert=inspector.inert=checks.inert=loading;if(loading){graphHost.setAttribute('aria-busy','true');basisLabel.textContent='正在读取图…';disposeReaders(sourceBody);sourceBody.replaceChildren($('p','正在读取绑定来源…','wb-caption'));}else graphHost.removeAttribute('aria-busy');updateActions();}
-    function transition(patch){detailOpen=false;clearPlanPreview();notice.hidden=true;notice.textContent='';delete notice.dataset.observationError;observer.stop();controller.abort();controller=new AbortController();snapshot=null;sourceSequence++;nodeSequence++;graphSequence++;scopeNode=null;nodeOffset=0;graphModel=null;actionExplicit=false;logOffset=0;logBody='';eventCursor=null;eventRows=[];lastMetricAt=lastEventAt=0;observationCursor=null;observationPages=[];lastObservationRevision=null;trend.hidden=true;trendPlot.replaceChildren();runFacts.hidden=results.hidden=runDetail.hidden=true;runFacts.replaceChildren();results.replaceChildren();runDetailBody.replaceChildren();outputFingerprint=null;graphLoading(true);const ticket=state.transition(patch);markHistorySelection();updateActions();return ticket;}
+    function transition(patch){detailOpen=false;runDefinition=null;definitionSequence++;runDefinitionPanel.hidden=true;runDefinitionPanel.replaceChildren();runConfirmation.hidden=true;clearPlanPreview();notice.hidden=true;notice.textContent='';delete notice.dataset.observationError;observer.stop();controller.abort();controller=new AbortController();snapshot=null;sourceSequence++;nodeSequence++;graphSequence++;scopeNode=null;nodeOffset=0;graphModel=null;actionExplicit=false;logOffset=0;logBody='';eventCursor=null;eventRows=[];lastMetricAt=lastEventAt=0;observationCursor=null;observationPages=[];lastObservationRevision=null;trend.hidden=true;trendPlot.replaceChildren();runFacts.hidden=results.hidden=runDetail.hidden=true;runFacts.replaceChildren();results.replaceChildren();runDetailBody.replaceChildren();outputFingerprint=null;graphLoading(true);const ticket=state.transition(patch);markHistorySelection();updateActions();return ticket;}
     function registered(){return !!working&&ctx.flows.some(f=>f.entry===working.entry&&(f.parameters||[]).includes(working.params));}
     function requiredPreviewArguments(){return ctx.project?.entries?.find(e=>e.entry===working?.entry)?.required_arguments||[];}
     function choices(){
@@ -194,17 +204,24 @@
     }
     function updateActions(){
       if(!root.isConnected)return;
-      const resultsActive=data().mode==='results',checksActive=data().mode==='checks',operatorsActive=data().mode==='operators';
+      const resultsActive=data().mode==='results',definitionActive=data().mode==='run_definition',checksActive=data().mode==='checks',operatorsActive=data().mode==='operators';
       const monitoring=activePage==='monitor',hasRun=!!run;
       selectors.hidden=monitoring||operatorsActive;planContext.hidden=monitoring||operatorsActive;toolbar.hidden=operatorsActive;argumentsButton.hidden=monitoring||operatorsActive||!!run;argumentsButton.disabled=!working?.entry;argumentsButton.setAttribute('aria-pressed',String(argumentEditor.visible()));
       if(monitoring&&historyButton.parentElement!==actions)actions.insertBefore(historyButton,more);
       else if(!monitoring&&historyButton.parentElement!==moreBody)moreBody.prepend(historyButton);
-      body.hidden=resultsActive||operatorsActive||argumentEditor.visible()||(monitoring&&!hasRun);operators.hidden=!operatorsActive;checks.hidden=!checksActive;
-      runDetail.hidden=runFacts.hidden=trend.hidden=!monitoring||!hasRun||resultsActive;
+      body.hidden=resultsActive||definitionActive||operatorsActive||argumentEditor.visible()||(monitoring&&!hasRun);operators.hidden=!operatorsActive;checks.hidden=!checksActive;
+      runFacts.hidden=trend.hidden=!monitoring||!hasRun||resultsActive||definitionActive;
+      runDetail.hidden=!monitoring||!hasRun||resultsActive||definitionActive||runInspector==='definition';
+      runDefinitionPanel.hidden=!monitoring||!hasRun||!definitionActive;
+      runEmpty.hidden=!monitoring||hasRun;
+      runInspectorTabs.hidden=!monitoring||!hasRun;
+      for(const b of runInspectorTabs.querySelectorAll('button'))b.setAttribute('aria-pressed',String(b.dataset.kind===runInspector));
+      const detailParent=monitoring?nodePanel:graphSection;if(runDetail.parentElement!==detailParent)detailParent.append(runDetail);
+      detailHeader.hidden=monitoring&&detailKind!=='events';
       monitorTabs.hidden=!monitoring||!hasRun;
-      monitorStatus.setAttribute('aria-pressed',String(!resultsActive));monitorOutputs.setAttribute('aria-pressed',String(resultsActive));
+      monitorStatus.setAttribute('aria-pressed',String(!resultsActive&&!definitionActive));monitorDefinition.setAttribute('aria-pressed',String(definitionActive));monitorOutputs.setAttribute('aria-pressed',String(resultsActive));
       outputMenu.hidden=monitoring&&hasRun;
-      results.hidden=!resultsActive;historyPanel.hidden=!historyOpen;
+      results.hidden=!resultsActive;historyPanel.hidden=!monitoring||!historyOpen;layout.classList.toggle('wb-runs-layout',monitoring&&historyOpen);
       const codeShown=pipelineCodeOpen&&activePage==='flows';
       pipelineCode.hidden=!codeShown;graphHost.hidden=codeShown;
       nodeJump.hidden=codeShown;expandGraph.hidden=codeShown||!document.fullscreenEnabled;
@@ -212,12 +229,13 @@
       pipelineCodeButton.setAttribute('aria-pressed',String(codeShown));
       pipelineCodeButton.disabled=!planPreview&&!data().graph?.binding?.entry;
       if(codeShown)loadPipelineCode();
-      nodePanel.hidden=codeShown||!detailOpen||operatorsActive;body.classList.toggle('wb-detail-open',!codeShown&&detailOpen&&!operatorsActive);
+      nodePanel.hidden=codeShown||(!detailOpen&&!monitoring)||operatorsActive;body.classList.toggle('wb-detail-open',!codeShown&&(detailOpen||monitoring)&&!operatorsActive);
       nodeOutputs.hidden=!run||!run.outputs?.length;
-      bottom.hidden=inspectorWhole&&!operatorsActive;
-      inspector.hidden=!inspectorWhole;
+      bottom.hidden=monitoring?runInspector!=='definition':inspectorWhole&&!operatorsActive;
+      inspector.hidden=monitoring||!inspectorWhole;
+      nodePanelTools.hidden=monitoring&&runInspector!=='definition';closeDetail.hidden=monitoring;
       root.dataset.page=activePage;onPageChange(activePage);
-      runBar.hidden=!run||!!comparison||activePage==='operators';
+      runBar.hidden=!run||!!comparison||activePage!=='monitor';
       if(!checksActive)documents.open=false;
       const dirty=argumentEditor.dirty()||working&&Object.keys(getDraft().values).length>0;
       checkButton.disabled=busy||previewBusy||!!run||!registered()||dirty;
@@ -905,15 +923,16 @@
       if(disposed||!root.isConnected||!['flows','operators','monitor'].includes(page))return;
       userNavigation++;
       if(page!=='flows'){pipelineCodeOpen=false;pipelineSequence++;pipelineReadKey=null;disposeReaders(pipelineCode);pipelineCode.replaceChildren();}
-      more.open=false;activePage=page;comparison=null;outputFingerprint=null;
+      more.open=false;activePage=page;comparison=null;outputFingerprint=null;runConfirmation.hidden=true;
+      if(page==='flows'&&run){const entry=working?.entry||run.entry,params=working?.params||run.parameter_path;await useWorking(entry,params);if(entry)await compilePlanPreview();return;}
       if(page==='monitor'&&!run){
         if(lastRun)return openRun(lastRun.run_id,lastRun.attempt);
         state.setMode('history');historyOpen=true;updateActions();rememberPanel();await listRuns();return;
       }
-      historyOpen=false;state.setMode(page==='operators'?'operators':page==='monitor'?'monitor':'config');
+      historyOpen=page==='monitor';state.setMode(page==='operators'?'operators':page==='monitor'?'monitor':'config');
       argumentEditor.hide();if(page==='operators')await operatorBrowser.load();
       updateActions();
-      if(page==='monitor'){paintRunBar();paintRunFacts();await loadRunDetail();}
+      if(page==='monitor'){paintRunBar();paintRunFacts();await Promise.all([listRuns(),loadRunDetail()]);}
       if(page==='flows'&&!run&&!data().graph&&working?.entry){await useWorking(working.entry,working.params);await compilePlanPreview();}
       savePreviewLocator();rememberPanel();
     }
@@ -930,14 +949,13 @@
       updateActions();savePreviewLocator();rememberPanel();
     }
     function paintRunBar(){
-      runBar.replaceChildren();runBar.hidden=!run||!!comparison||activePage==='operators';runFacts.hidden=!run||data().mode==='results';trend.hidden=!run||data().mode==='results';runDetail.hidden=!run||data().mode==='results';
+      runBar.replaceChildren();runBar.hidden=!run||!!comparison||activePage!=='monitor';
+      updateActions();
       if(!run)return;
-      const choices=(records?.runs||[]).map(item=>({value:item.run_id,label:item.run_id.slice(-10)+' · '+(labels[item.run_id===run.run_id?run.status:item.status]||item.status)+' · '+(item.parameter_path||item.entry)}));
-      if(!choices.some(item=>item.value===run.run_id))choices.unshift({value:run.run_id,label:run.run_id.slice(-10)+' · '+(labels[run.status]||run.status)});
-      const selectedRun=select('运行记录',choices,run.run_id);selectedRun.title=run.run_id;selectedRun.onchange=()=>openRun(selectedRun.value,null,data().mode).catch(error=>message(error.message,'error-box'));field('运行',selectedRun,runBar);runBar.append($('span',labels[run.status]||run.status,'wb-tag'));
+      runUI.summary(runBar,run,ctx);
       const attempts=run.attempts?.length?run.attempts:[{attempt:run.attempt,status:run.status}];
       const choice=select('运行尝试',attempts.map(a=>({value:String(a.attempt),label:'尝试 '+a.attempt+' · '+(labels[a.status]||a.status)})),String(run.attempt));
-      choice.onchange=()=>openRun(run.run_id,Number(choice.value),data().mode).catch(error=>message(error.message,'error-box'));runBar.append(choice);
+      choice.onchange=()=>openRun(run.run_id,Number(choice.value),data().mode).catch(error=>message(error.message,'error-box'));if(attempts.length>1)runBar.append(choice);
       const historical=run.current_attempt!==run.attempt;
       if(historical)runBar.append($('span','历史尝试 · 只读','wb-caption'));
       runBar.append($('span',undefined,'wb-caption wb-run-seal'));
@@ -946,15 +964,13 @@
       if(!historical&&run.status==='prepared')button('开始这次运行',async()=>{
         const ticket=state.capture();await request('run-start',{}, {run_id:target.run_id,expected:target.digest,expected_attempt:target.attempt});if(current(ticket))await observer.refresh();
       },runBar,{disabled:!can('run_submit')});
-      if(!historical&&active(run.status))button('停止',()=>control(commands.cancel),runBar,{disabled:!can('run_control')||run.status==='stopping'});
+      if(!historical&&active(run.status))button('停止',()=>confirmControl('stop',target,()=>control(commands.cancel)),runBar,{disabled:!can('run_control')||run.status==='stopping'});
       if(!historical&&!['prepared','succeeded'].includes(run.status))button('核对提交与清理',()=>control(commands.reconcileRun),runBar,{disabled:!can('run_control')||run.supervisor_alive===true});
-      if(!historical&&(['cancelled','interrupted'].includes(run.status)||(run.status==='failed'&&run.state.recoverable)))button('恢复运行',async()=>{
-        const ticket=state.capture();const value=await commands.resume(target);if(current(ticket)){
-          message('已创建新的尝试；当前继续显示原尝试，可选择新尝试查看。');
-          const fresh=await request('run',{run_id:target.run_id,attempt:target.attempt,report:'1'});if(current(ticket)){run=fresh;paintRunBar();}
-        }
-      },runBar,{disabled:!can('run_submit')||run.state.usage_complete!==true});
-      button('刷新状态',()=>observer.refresh(),runBar);button('返回当前配置',()=>useWorking(working?.entry||run.entry,working?.params||run.parameter_path),runBar);
+      if(!historical&&(['cancelled','interrupted'].includes(run.status)||(run.status==='failed'&&run.state.recoverable)))button('恢复运行',()=>confirmControl('resume',target,async()=>{
+        const ticket=state.capture(),value=await commands.resume(target);
+        if(current(ticket)){await openRun(value.run_id,value.attempt);message('已恢复原运行；可切换执行经历查看之前的记录。');}
+      }),runBar,{disabled:!can('run_submit')||run.state.usage_complete!==true||run.state.cleanup!=='complete'});
+      button('刷新状态',()=>observer.refresh(),runBar);button('回到管道',()=>showPage('flows'),runBar);
       if(run.state.cancel_requested_at)runBar.append($('span','停止：'+({requested:'等待执行端确认',terminating:'正在请求所属进程退出',killing:'正在终止未退出进程',confirmed:'所属执行已停止',unconfirmed:'尚未确认全部停止'}[run.state.stop_phase]||'等待确认'),'wb-caption'));
       if(run.state.cleanup==='pending')runBar.append($('span','临时资源清理待确认 · 容量保留','wb-caption'));
       const entry=(data().graph?.logical?.actions||[]).find(a=>a.action_id===data().actionId);
@@ -996,8 +1012,8 @@
     }
     async function openRun(id,attempt=null,mode='monitor'){
       activePage=mode==='operators'?'operators':mode==='config'?'flows':'monitor';detailOpen=false;
-      historyOpen=false;historyPanel.hidden=true;historyButton.setAttribute('aria-expanded','false');
-      sourceOpen=mode==='operators';sourceBody.hidden=sourceTabs.hidden=!sourceOpen;
+      historyOpen=activePage==='monitor';historyPanel.hidden=!historyOpen;historyButton.setAttribute('aria-expanded',String(historyOpen));
+      sourceOpen=true;sourceBody.hidden=sourceTabs.hidden=false;runInspector='observations';detailKind='observations';
       const initial=transition({run:id,attempt,report:null,mode});run=null;comparison=null;
       runBar.hidden=false;runBar.replaceChildren($('span','正在读取运行记录…','wb-caption'));
       let value;
@@ -1010,13 +1026,40 @@
       paintSelectors();paintRunBar();paintRunFacts();results.hidden=mode!=='results';paintResults();
       rememberView({kind:'run',run_id:id,attempt:value.attempt});
       const target=Object.freeze({run_id:id,attempt:value.attempt,digest:value.digest,ticket});
-      await Promise.allSettled([fetchGraph(ticket),observer.set(target),records?Promise.resolve():listRuns()]).then(values=>{
+      await Promise.allSettled([fetchGraph(ticket),observer.set(target),listRuns()]).then(values=>{
         if(!current(ticket))return;
         for(const result of values)if(result.status==='rejected'&&result.reason.name!=='AbortError')message(result.reason.message,'error-box',ticket);
       });
       if(current(ticket))graphLoading(false);
-      if(current(ticket))await loadRunDetail(true);
+      if(current(ticket)){if(mode==='run_definition')await showRunDefinition();else await loadRunDetail(true);}
       paintPending();
+    }
+    async function showRunDefinition(){
+      if(!run)return;activePage='monitor';state.setMode('run_definition');updateActions();rememberPanel();
+      const ticket=state.capture(),sequence=++definitionSequence,target={run_id:run.run_id,attempt:run.attempt,report:'1'};
+      runDefinitionPanel.replaceChildren($('p','正在读取本次封存参数…','wb-caption'));
+      const value=runDefinition||await request('run',target);
+      if(!current(ticket)||sequence!==definitionSequence)return;
+      if(value.run_id!==target.run_id||value.attempt!==target.attempt||value.digest!==run.digest)throw new Error('运行快照身份不一致');
+      runDefinition=value;runUI.snapshot(runDefinitionPanel,{...value,attempts:run.attempts,current_attempt:run.current_attempt});
+    }
+    function confirmControl(kind,target,perform){
+      const ticket=state.capture();
+      runUI.confirmation(runConfirmation,{title:kind==='stop'?'停止这次运行':'恢复原运行',
+        description:kind==='stop'?'停止请求需要执行端确认；保留已经提交的结果。':'沿用原计划、业务参数和代码，从可恢复的提交点继续。服务端会核对历史、容量和输出，不会覆盖原记录。',
+        rows:[['运行',target.run_id],['当前执行','第 '+target.attempt+' 次启动']],confirmLabel:kind==='stop'?'确认停止':'确认恢复',
+        cancel:()=>{runConfirmation.hidden=true;},confirm:async()=>{if(!current(ticket))return;await perform();runConfirmation.hidden=true;}});
+    }
+    async function confirmSubmit(){
+      if(busy||run||!working)return;
+      const ticket=state.capture();
+      const admission=await request('run-admission',{}, {entry:working.entry,params:working.params});
+      if(!current(ticket))return;
+      if(admission.status!=='requires_prepare'){message(admission.message||'当前流程尚未接入受管提交。');return;}
+      runUI.confirmation(runConfirmation,{title:'运行 '+runUI.flowName(ctx,working.entry),
+        description:'检查并封存当前流程和唯一业务参数，再提交运行。创建模式的声明输出使用本次独立目标；覆盖模式仍需要固定版本校验。',
+        rows:[['流程',working.entry],['业务参数',working.params||'未绑定'],['累计时长上限',getDraft().timeout+' 秒']],confirmLabel:'确认运行',
+        cancel:()=>{runConfirmation.hidden=true;},confirm:async()=>{if(!current(ticket))return;runConfirmation.hidden=true;await submit();}});
     }
     async function submit(){
       if(busy||run)return;
@@ -1057,22 +1100,24 @@
     function paintHistory(){
       if(!records)return;historyPanel.replaceChildren();
       const top=$('div',undefined,'wb-history-heading');top.append($('strong','运行记录'),$('span','本页 '+records.runs.length+' 条 · 全项目共 '+records.total+' 条'+(records.index?.complete===false?' · 列表待同步':''),'wb-caption'));historyPanel.append(top);
+      const flowFilter=select('筛选本页流程',[{value:'',label:'全部流程'},...choices()],runFlowFilter);
+      flowFilter.onchange=()=>{runFlowFilter=flowFilter.value;paintHistory();};top.append(flowFilter);
       const filter=select('筛选本页运行状态',[{value:'',label:'全部状态'},...Object.entries(labels).map(([value,label])=>({value,label}))],runFilter);
       filter.onchange=()=>{if(!disposed&&filter.isConnected){runFilter=filter.value;paintHistory();}};top.append(filter);
       if(!records.runs.length)historyPanel.append($('p','当前页没有运行记录。运行会在检查和封存后产生独立记录。','wb-caption'));
-      const visible=records.runs.filter(item=>!runFilter||item.status===runFilter);
+      const visible=records.runs.filter(item=>(!runFilter||item.status===runFilter)&&(!runFlowFilter||item.entry===runFlowFilter));
       if(records.runs.length&&!visible.length)historyPanel.append($('p','本页没有符合筛选条件的运行。','wb-caption'));
-      for(const item of visible){const row=button('',()=>openRun(item.run_id),historyPanel,{cls:'wb-run-record'});row.replaceChildren($('strong',item.run_id.slice(-10)),$('span',timeText(item.created_at),'wb-caption'),$('span',item.entry),$('span',item.parameter_path||'内联配置'),$('span',labels[item.status]||item.status,'wb-tag'));row.dataset.run=item.run_id;row.setAttribute('aria-label',item.run_id+' · '+item.entry+' · '+(labels[item.status]||item.status));row.classList.toggle('selected',item.run_id===data().run);}
+      for(const item of visible){const row=button('',()=>openRun(item.run_id),historyPanel,{cls:'wb-run-record'});
+        row.replaceChildren($('strong',runUI.flowName(ctx,item.entry)),$('span',timeText(item.created_at),'wb-caption'),
+          $('span',runUI.labels[item.status]||item.status,'wb-tag'),$('span',runUI.duration(item.state),'wb-caption wb-record-duration'));
+        row.dataset.run=item.run_id;row.setAttribute('aria-label',item.run_id+' · '+item.entry+' · '+(labels[item.status]||item.status));
+        if(item.state?.error){const err=item.state.error;row.append($('span',typeof err==='string'?err:(err.message||err.type||'执行失败'),'wb-record-error'));}
+        row.classList.toggle('selected',item.run_id===data().run);}
       markHistorySelection();
       const pager=$('div',undefined,'wb-inline-actions');historyPanel.append(pager);
-      button('最新记录',async()=>{cursors=[null];page=0;await listRuns();},pager,{disabled:page===0});
+      button(page===0?'刷新记录':'最新记录',async()=>{cursors=[null];page=0;await listRuns();},pager);
       button('较新记录',async()=>{page--;await listRuns();},pager,{disabled:page===0});
       button('较早记录',async()=>{if(cursors.length>=32){cursors=cursors.slice(1);page--;}cursors=cursors.slice(0,page+1);cursors.push(records.next_cursor);page++;await listRuns();},pager,{disabled:!records.next_cursor});
-      if(records.runs.length>1){
-        const choices=records.runs.map(r=>({value:r.run_id,label:r.run_id.slice(-10)+' · '+(r.parameter_path||r.entry)}));
-        const left=select('左侧运行',choices,choices[0].value),right=select('右侧运行',choices,choices[1].value);pager.append(left,right);
-        button('比较两次运行',()=>compare(left.value,right.value),pager);
-      }
     }
     function paintResults(){
       const fingerprint=json([comparison,run?.run_id,run?.attempt,run?.current_attempt,run?.outputs,can('attach'),can('run_submit')]);
@@ -1090,16 +1135,16 @@
         if(output.result){
           box.append($('p','固定版本 v'+output.result.ref.lance_version+' · '+output.result.ref.row_count+' 行'));
           const captured=Object.freeze({run_id:run.run_id,attempt:run.attempt,output:output.name,alias:'',expected_result:output.result_digest});
+          const snapshotRun=run,snapshotOutput=output;
+          button('查看固定结果',()=>openResult(snapshotRun,snapshotOutput),box);
           if(run.attempt===run.current_attempt){
-            const snapshotRun=run,snapshotOutput=output;
-            button('查看固定结果',()=>openResult(snapshotRun,snapshotOutput),box);
             button('作为输入继续加工',()=>options.continueWithResult?.(snapshotRun,snapshotOutput),box,{disabled:!can('run_submit')});
             const alias=$('input'),aliasKey=run.run_id+'|'+run.attempt+'|'+output.name;alias.maxLength=64;alias.setAttribute('aria-label','结果别名 '+output.name);alias.placeholder='保存为输入表别名';alias.value=aliasDrafts.get(aliasKey)||'';box.append(alias);
             alias.oninput=()=>{if(disposed||!alias.isConnected)return;const next=new Map(aliasDrafts);if(alias.value)next.set(aliasKey,alias.value);else next.delete(aliasKey);
               if(next.size>128||new TextEncoder().encode(JSON.stringify([...next])).length>32768){alias.value=aliasDrafts.get(aliasKey)||'';message('结果别名草稿已达上限，请先处理已有项。','error-box');return;}
               if(alias.value)aliasDrafts.set(aliasKey,alias.value);else aliasDrafts.delete(aliasKey);};
             button('保留为输入表',async()=>{const ticket=state.capture();await request('run-attach',{}, {...captured,alias:alias.value});if(current(ticket)){aliasDrafts.delete(aliasKey);message('已保留固定版本引用：'+alias.value);const fresh=await request('context');if(current(ticket)){ctx=fresh;onContext(fresh);}}},box,{disabled:!can('attach')});
-          }else box.append($('p','历史尝试的固定结果引用在下方保留；当前表入口不会代替它。','wb-caption'));
+          }else box.append($('p','读取这次历史尝试的固定结果；后续恢复不会替换本次引用。','wb-caption'));
           raw('固定结果引用',output.result,box);
         }else if(output.status==='committed'){
           box.append($('p','已提交但登记待完成；暂不作为可打开的固定结果。','wb-caption'));
@@ -1113,7 +1158,7 @@
       const target={run_id:run.run_id,attempt:run.attempt},g=data().graph;
       try{
       if(kind==='observations'){
-        const node=data().node;if(!node)return;
+        const node=data().node;if(!node){runDetailBody.replaceChildren($('p','选择图中的算子，查看本次执行情况。','wb-caption'));return;}
         const selection=data().selection,execution=selection?.execution??null;
         const value=await request('run-observations',{...target,node_id:node,limit:32,
           ...(execution?.format==='v3'?{action_id:execution.actionId}:{}),...(observationCursor?{cursor:observationCursor}:{})});
@@ -1272,6 +1317,10 @@
     }
     const trend=details('性能趋势 · 整次运行',root),trendPlot=$('div',undefined,'wb-trend');trend.append(trendPlot);trend.hidden=true;
     root.insertBefore(trend,body);
+    const layout=$('div',undefined,'wb-workspace-layout'),runMain=$('div',undefined,'wb-workspace-main');
+    root.prepend(layout);layout.append(historyPanel,runMain);
+    for(const element of [...root.children])if(element!==layout)runMain.append(element);
+    // Runtime facts remain one compact strip; trend and diagnostics are optional.
     let metricSequence=0,lastObservationRevision=null;
     async function refreshTrend(force=false){
       if(!run||!trend.open||(!force&&Date.now()-lastMetricAt<5000))return;
@@ -1291,6 +1340,13 @@
         const refreshGraph=()=>data().graph&&fetchGraph(target.ticket,{preserveSelection:true});
         if(value.unchanged){paintRunFacts(value.freshness);if(active(run.status)&&Date.now()-lastRunGraphAt>=5000)await refreshGraph();return;}
         snapshot=value;run={...run,...value,attempts:run.attempts?.map(a=>a.attempt===value.attempt?{...a,status:value.status}:a)};
+        if(records&&run.attempt===run.current_attempt){const i=records.runs.findIndex(r=>r.run_id===run.run_id);if(i>=0){
+          const previousStatus=records.runs[i].status;records.runs[i]={...records.runs[i],...run};
+          if(previousStatus!==run.status)paintHistory();
+          else for(const row of historyPanel.querySelectorAll('.wb-run-record'))if(row.dataset.run===run.run_id){
+            const duration=row.querySelector('.wb-record-duration');if(duration)duration.textContent=runUI.duration(run.state);
+          }
+        }}
         paintRunBar();paintRunFacts();paintResults();paintGraph();
         if(data().graph&&data().node&&data().mode!=='checks'){
           const stateLabel=inspector.querySelector('.wb-tag');if(stateLabel){const node=data().graph.nodes.find(n=>n.id===data().node);if(node)stateLabel.textContent=ForgeWorkbenchGraph.status(node,value).label;}

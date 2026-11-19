@@ -37,6 +37,8 @@ from demiflow.workbench.analysis import http as analysis_http
 ASSETS = Path(__file__).with_name("web")
 # One closed asset allowlist serves both live pages and self-contained reports.
 STATIC_ASSETS = {
+    "/run-presentation.js": ("run-presentation.js", "text/javascript; charset=utf-8"),
+    "/workbench-runs.css": ("workbench-runs.css", "text/css; charset=utf-8"),
     '/operator-browser.js': ('operator-browser.js', 'text/javascript; charset=utf-8'),
     '/definition-reader.js': ('definition-reader.js', 'text/javascript; charset=utf-8'),
     '/flow-arguments.js': ('flow-arguments.js', 'text/javascript; charset=utf-8'),
