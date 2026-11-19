@@ -207,7 +207,8 @@ def test_connection_distinguishes_shared_configuration_from_project_permission(p
     ]
     for caps,label in cases:
         page.evaluate('caps=>composer.update({capabilities:caps})',caps)
-        expect(page.locator('.dc-access-label')).to_have_text(label)
+        assert page.evaluate('caps=>ForgeDevelopmentComposer.connectionStatus(caps).label',caps)==label
+        expect(page.locator('.dc-access-label')).to_have_text('Project access')
         expect(page.locator('.dc-send')).to_be_disabled()
         page.locator('.dc-access').click()
     assert page.evaluate('events.access')==3

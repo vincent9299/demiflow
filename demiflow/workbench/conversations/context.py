@@ -125,7 +125,8 @@ def assemble(project, requirement, scratch, limits, *, managed_tasks=None, task_
                 for goal in project['non_goals']: args += ['--non-goal', goal]
                 cli(root, args, scratch=scratch)
             binding = cli(root, ['context', '--id', task], scratch=scratch)
-        if not isinstance(binding, dict) or sorted(binding.get('writes', [])) != sorted(project['writes']):
+        from .development import declaration_writes
+        if not isinstance(binding, dict) or sorted(binding.get('writes', [])) != sorted(declaration_writes(project)):
             reject('Registered task writable scope differs from the deployment grant', 'conflict')
         if managed_tasks is not None:
             intent = dict(task_id=task, initial_goal=binding['goal'], current_request=current_request or dict(text=requirement),
@@ -279,7 +280,7 @@ class ProtocolBridge:
             from demiflow.workbench.conversations.review import review_authority
             session = store.session(store.turn(tid)['session'])
             self.task_id = session['id']
-            self.managed_tasks = ManagedTasks(store.root, session['workspace'], project['root'], review_authority=review_authority(store.root))
+            self.managed_tasks = ManagedTasks(store.root, session['workspace'], project.get('development_root', project['root']), review_authority=review_authority(store.root))
 
     def require_active(self):
         turn = self.store.turn(self.tid)

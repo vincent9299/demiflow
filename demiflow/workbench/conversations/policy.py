@@ -90,7 +90,7 @@ class Deployment:
             reject('Configure 1..128 explicitly permitted projects')
         for key, project in self.projects.items():
             required = {'root', 'kind', 'phase', 'writes', 'watch', 'sources', 'non_goals', 'authorization'}
-            optional = {'task_id', 'pipeline', 'allow_tests', 'design_review', 'managed', 'run_policy'}
+            optional = {'task_id', 'pipeline', 'allow_tests', 'design_review', 'managed', 'run_policy', 'development_root', 'protected'}
             if type(project) is not dict or not required <= project.keys() or project.keys() - required - optional:
                 reject('Invalid project development grant')
             project['identity'] = root_identity(project['root'])
@@ -143,6 +143,15 @@ class Deployment:
                 reject('Required development acceptance needs managed restricted execution in a fixed runtime domain')
             if managed and self.mode == 'restricted' and not value.get('runtime_domain'):
                 reject('Managed restricted development needs a fixed runtime domain for all source execution entrypoints')
+            if 'development_root' in project:
+                declared = Path(project['development_root'])
+                root_identity(declared)
+                if not managed or not root.is_relative_to(declared):
+                    reject('Managed declaration root must contain the selected project')
+            protected = project.get('protected', [])
+            if type(protected) is not list or len(protected) > 128:
+                reject('Protected source list exceeds budget')
+            for name in protected: safe_path(root, name, missing=True)
             if project.get('design_review'):
                 review = project['design_review']
                 if type(review) is not dict or set(review) != {'path', 'sha256', 'authority'}:

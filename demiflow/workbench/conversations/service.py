@@ -33,6 +33,7 @@ class Service:
         # paths only to the trusted worker, never to the provider environment.
         self.input_denied_paths = tuple(dict.fromkeys(str(Path(p).absolute())
             for p in (config_path, *input_denied_paths)))
+        self.settings = None
         self.deployment = Deployment.load(config_path)
         self.root = self.deployment.state
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -52,32 +53,12 @@ class Service:
         if self.root.stat().st_dev != Path(self.deployment.value['host_budget']['device_path']).stat().st_dev:
             reject('Development state is outside the declared disk device partition')
         self.store = Store(self.root, self.deployment.limits, initialize=True)
-        self.lock, self.workers, self.closed = threading.Lock(), {}, False
+        self.lock, self.workers, self.closed = threading.RLock(), {}, False
         self.worker_targets = {}
         self.gate_workers = {}
         self.gate_targets = {}
         self.gate_wakeup = threading.Event()
-        # Exact non-secret deployment snapshot. Existing sessions bind this hash;
-        # changing a grant requires a new session, never an implicit permission upgrade.
-        value = json.loads(wire(self.deployment.value))
-        for p in value['projects'].values(): p.pop('identity', None)
-        self.policy_hash = digest(value)
-        self.config_path = self.root / (self.policy_hash + '.json')
-        if not self.config_path.exists():
-            deadline = time.monotonic() + 3
-            snapshots = 0
-            with os.scandir(self.root) as entries:
-                for count, entry in enumerate(entries):
-                    if count >= self.deployment.limits.sessions + 64 or time.monotonic() > deadline:
-                        reject('Development policy inventory exceeds budget', 'resource_limit')
-                    if entry.name.endswith('.json'):
-                        snapshots += 1
-                    if snapshots >= 32:
-                        reject('Development policy history is full; explicit maintenance required', 'resource_limit')
-            fd = os.open(self.config_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, 'wb') as stream: stream.write(wire(value, 65536))
-        from demiflow.workbench.conversations.admission import install
-        install(self.deployment, self.config_path)
+        self.policy_hash, self.config_path = self.seal_policy(self.deployment)
         for t in self.store.unresolved():
             self.store.interrupt_unresolved(t['id'])
         # A gate which may have started is never automatically replayed.
@@ -85,35 +66,79 @@ class Service:
         self.gate_thread = threading.Thread(target=self._gate_loop, name='development-gates', daemon=True)
         self.gate_thread.start()
 
+    def seal_policy(self, deployment):
+        """Persist the exact bounded non-secret policy before creating a session."""
+        from demiflow.forge.io import fsync_directory
+        value = json.loads(wire(deployment.value))
+        for p in value['projects'].values(): p.pop('identity', None)
+        revision = digest(value); path = self.root / (revision + '.json')
+        raw = wire(value, 65536)
+        if not path.exists():
+            total = count = policies = 0
+            with os.scandir(self.root) as entries:
+                for entry in entries:
+                    count += 1
+                    if count > self.deployment.limits.sessions + 128: reject('Development policy inventory exceeds budget', 'resource_limit')
+                    if entry.name.endswith('.json') and entry.name != 'global-development-settings.json':
+                        policies += 1
+                        info=entry.stat(follow_symlinks=False)
+                        total += max(info.st_size,info.st_blocks*512)
+            if policies >= 32 or total + len(raw) > 2 * 1024**2: reject('Development policy history is full; explicit maintenance required', 'resource_limit')
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, 'wb') as stream:
+                stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+            fsync_directory(self.root)
+        from .admission import install
+        install(deployment, path)
+        return revision, path
+
+    def binding(self, workspace, root, *, seal=False):
+        if self.settings is not None:
+            return self.settings.binding(workspace, root, seal=seal)
+        return self.deployment, self.policy_hash, self.config_path
+
+    def current_hash(self, workspace, root):
+        return self.binding(workspace, root)[1]
+
+    def session_policy(self, session):
+        from .common import read_file, strict_json
+        value=strict_json(read_file(self.root/(session['policy_hash']+'.json'),65536))
+        if digest(value)!=session['policy_hash']: reject('Conversation policy snapshot changed','conflict')
+        return Deployment(value)
+
     def project(self, workspace, root):
-        return self.deployment.project(workspace, root)
+        return self.binding(workspace, root)[0].project(workspace, root)
 
     def capabilities(self, workspace, root):
-        return self.deployment.capabilities(workspace, root)
+        deployment, _, _ = self.binding(workspace, root)
+        caps=deployment.capabilities(workspace, root)
+        return dict(caps, service_configured=True, project_authorized=caps['enabled'])
 
     def create(self, workspace, root, request_id, provider_id):
         self.project(workspace, root)
         identifier(provider_id)
-        if provider_id not in self.deployment.providers: reject('Provider is not configured')
-        return self.store.create(workspace, root_identity(root), provider_id, request_id, self.policy_hash)
+        deployment, revision, _ = self.binding(workspace, root, seal=True)
+        if provider_id not in deployment.providers: reject('Provider is not configured')
+        return self.store.create(workspace, root_identity(root), provider_id, request_id, revision)
 
     def conversation(self, workspace, root):
         self.project(workspace,root)
-        session=self.store.primary(workspace,root_identity(root),self.policy_hash)
+        session=self.store.primary(workspace,root_identity(root),self.current_hash(workspace,root))
         return dict(session=self.show(workspace,session['id']) if session else None)
 
     def create_project(self, workspace, root, request_id, provider_id, new_conversation=False):
         if type(new_conversation) is not bool:
             reject('new_conversation must be a boolean', 'invalid_request')
         self.project(workspace,root);identifier(provider_id)
-        if provider_id not in self.deployment.providers:reject('Provider is not configured')
+        deployment, revision, _ = self.binding(workspace, root, seal=True)
+        if provider_id not in deployment.providers:reject('Provider is not configured')
         create = self.store.create_conversation if new_conversation else self.store.ensure_project
-        return dict(create(workspace,root_identity(root),provider_id,request_id,self.policy_hash), writable=True)
+        return dict(create(workspace,root_identity(root),provider_id,request_id,revision), writable=True)
 
     def sessions(self, workspace, root, offset=0, limit=20):
         self.project(workspace, root)
         return self.store.list(workspace, offset, limit, identity=root_identity(root),
-                               policy_hash=self.policy_hash, providers=self.deployment.providers)
+                               policy_hash=self.current_hash(workspace,root), providers=self.binding(workspace,root)[0].providers)
 
     def start_project(self, workspace, root, session_id, submission_id, expected_revision, text):
         self._require_writable(workspace,root,session_id)
@@ -121,8 +146,8 @@ class Service:
 
     def _require_writable(self, workspace, root, session_id):
         self.project(workspace,root)
-        if not self.store.writable(workspace, session_id, root_identity(root), self.policy_hash,
-                                   self.deployment.providers, pin=True):
+        if not self.store.writable(workspace, session_id, root_identity(root), self.current_hash(workspace,root),
+                                   self.binding(workspace,root)[0].providers, pin=True):
             reject('This is a read-only earlier conversation or its grant changed', 'conflict')
 
     def compact(self, workspace, root, session_id, submission_id, expected_revision):
@@ -161,7 +186,7 @@ class Service:
                 reject('Retained provider homes exhaust private disk reservation', 'resource_limit')
             from demiflow.workbench.conversations.development import initial, managed
             development = initial(session_id) if operation == 'message' and managed(self.project(workspace, root)) else None
-            value, fresh = self.store.submit(workspace, session_id, submission_id, expected_revision, text, root_identity(root), self.policy_hash,
+            value, fresh = self.store.submit(workspace, session_id, submission_id, expected_revision, text, root_identity(root), self.current_hash(workspace,root),
                                              operation=operation, development=development)
             if not fresh: return self.store.public_turn(value)
             return self._launch_provider(value, session)
@@ -173,6 +198,7 @@ class Service:
 
     def _launch_provider(self, value, session):
         workspace, session_id = session['workspace'], session['id']
+        policy = self.session_policy(session)
         tid = value['id']
         lease = self._unit_path(value)
         fd = read_fd = write_fd = None
@@ -196,7 +222,7 @@ class Service:
                 env['DEMIFLOW_INPUT_DENIED_PATHS'] = wire(list(self.input_denied_paths), 65536).decode()
                 if self.deployment.value.get('runtime_domain'):
                     env['DEMIFLOW_FORGE_DOMAIN'] = self.deployment.value['runtime_domain']
-                for config in self.deployment.providers.values():
+                for config in policy.providers.values():
                     if config.get('credential_env') and config['credential_env'] in os.environ:
                         env[config['credential_env']] = os.environ[config['credential_env']]
                     env.update(proxy_environment(config))
@@ -204,7 +230,7 @@ class Service:
                 # Popen object does not prove absence of a real child.
                 self.store.update(tid, launch_phase='spawning')
                 self.worker_targets[tid] = (workspace, session_id, value['epoch'], session['root'])
-                process = subprocess.Popen([sys.executable, '-I', '-B', str(worker), str(self.config_path), tid, str(fd), str(read_fd)],
+                process = subprocess.Popen([sys.executable, '-I', '-B', str(worker), str(self.root / (session['policy_hash'] + '.json')), tid, str(fd), str(read_fd)],
                     cwd=self.root, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     pass_fds=(fd, read_fd), start_new_session=True)
                 self.workers[tid] = (process, write_fd)
@@ -286,7 +312,7 @@ class Service:
         try:
             identity = json.loads(session['root'])
             project = self.project(session['workspace'], identity['path'])
-            unchanged = session['policy_hash'] == self.policy_hash and root_identity(project['root']) == identity
+            unchanged = session['policy_hash'] == self.current_hash(session['workspace'], identity['path']) and root_identity(project['root']) == identity
         except Exception:
             unchanged = False
         if not unchanged:
@@ -317,7 +343,7 @@ class Service:
             # even if the service was restarted with a different deployment.
             policy_path = self.root / (session['policy_hash'] + '.json')
             env = dict(PATH='/usr/bin:/bin', LANG='C.UTF-8', PYTHONDONTWRITEBYTECODE='1')
-            for config in self.deployment.providers.values():
+            for config in self.session_policy(session).providers.values():
                 name = config.get('credential_env')
                 if name and name in os.environ: env[name] = os.environ[name]
                 env.update(proxy_environment(config))
@@ -349,7 +375,7 @@ class Service:
                             session = self.store.session(turn['session'])
                             try:
                                 project = self.project(session['workspace'], json.loads(session['root'])['path'])
-                                if session['policy_hash'] != self.policy_hash:
+                                if session['policy_hash'] != self.current_hash(session['workspace'], json.loads(session['root'])['path']):
                                     reject('Deployment policy changed before automatic repair', 'conflict')
                                 self.deployment.validate_runtime(admit=True)
                                 if sum(private_directory_bytes(self.root, entries=self.deployment.limits.sessions+64).values()) > self.deployment.limits.private_total_bytes:
@@ -372,23 +398,25 @@ class Service:
             self._reap()
             value = self.store.show(workspace, sid)
         value['writable'] = False
-        project = self.deployment.projects.get(workspace)
+        session_identity = json.loads(self.store.session(sid)['root'])
+        try: project = self.project(workspace, session_identity['path'])
+        except (ValueError, OSError): project = None
         if project:
             try:
                 self.project(workspace, project['root'])
                 value['writable'] = self.store.writable(workspace, sid, root_identity(project['root']),
-                    self.policy_hash, self.deployment.providers)
+                    self.current_hash(workspace,project['root']), self.binding(workspace,project['root'])[0].providers)
             except (ValueError, OSError):
                 pass  # Old history stays readable after its root or grant changed.
         turn = value.get('turn')
-        session = self.store.session(sid) if turn and turn.get('development') else None
+        session = self.store.session(sid)
         if turn and turn.get('development') and not turn['development']['busy']:
             from demiflow.workbench.conversations.development import project_tasks, projection
             try:
-                if session['policy_hash'] != self.policy_hash:
+                if session['policy_hash'] != self.current_hash(session['workspace'], json.loads(session['root'])['path']):
                     reject('Development policy changed; a new conversation is required')
                 project = self.project(workspace, json.loads(session['root'])['path'])
-                current = project_tasks(self.deployment, session, project).status(sid)
+                current = project_tasks(self.session_policy(session), session, project).status(sid)
                 if (turn['development']['state'] not in {'cancelled', 'unknown', 'failed'} and
                         (turn['development']['state'] in {'accepted', 'review_unavailable', 'needs_input'} or current.get('accepted_fingerprint')
                          or current.get('development_state') in {'stale', 'needs_input'})):
@@ -404,8 +432,10 @@ class Service:
                 from .common import read_file, strict_json
                 policy = strict_json(read_file(self.root / (session['policy_hash'] + '.json'), 65536))
                 if digest(policy) == session['policy_hash']:
+                    provider=policy['providers'].get(session['provider'],{})
+                    value.update(model=provider.get('model'),effort=provider.get('effort'))
                     bound = policy['projects'].get(workspace)
-                    if bound and bound['root'] == json.loads(session['root'])['path']:
+                    if turn and turn.get('development') and bound and bound['root'] == json.loads(session['root'])['path']:
                         turn['development']['run_policy'] = bound.get('run_policy', 'observe')
             except Exception:
                 pass  # Historical events remain readable if the grant is missing.

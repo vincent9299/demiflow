@@ -51,11 +51,12 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
     writes = [] if turn.get('operation') == 'compact' else [root / name for name in project['writes']]
     protected = [root / '.git', root / '.forge', root / '.demiforge', root / 'AGENTS.md']
     protected.extend(path for path in sources if path.name in {'AGENTS.md', 'PIPELINE_SPEC.md'})
+    protected.extend(root / name for name in project.get('protected', []))
     # The immutable registered declaration owns verifier argv and readonly roots.
     if managed(project):
         from demiflow.forge.development.project import Project
-        declared = Project(root)
-        protected.extend((root / path).resolve() for path in declared.config['readonly'])
+        declared = Project(project.get('development_root', root))
+        protected.extend((declared.root / path).resolve() for path in declared.config['readonly'])
         read.extend(path for path in protected if path.exists())
     denied = [deployment.state / 'chat.sqlite3', deployment.state / 'forge-development',
               deployment.state / 'service.lock', deployment.state / 'control.reserve']
@@ -68,7 +69,7 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
                     for count, item in enumerate(owned):
                         if count > deployment.limits.turns * 8 + 32: reject('Sandbox session inventory exceeds budget', 'resource_limit')
                         if Path(item.path) != private_home: denied.append(Path(item.path))
-            elif entry.is_dir(follow_symlinks=False) or entry.name.endswith('.json'):
+            elif entry.is_dir(follow_symlinks=False) or entry.name.endswith('.json') or entry.name.startswith('ai-key-'):
                 denied.append(Path(entry.path))
     for provider in deployment.providers.values():
         if provider.get('native_credentials'): denied.append(Path(provider['native_credentials']))

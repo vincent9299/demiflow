@@ -33,7 +33,7 @@ def preview_launcher(root):
     from .development import runtime_paths
     from .sandbox import SandboxSpec, launch_sandbox
     from demiflow.resources.process_observation import UNIT_ENV
-    declared = Project(project['root'])
+    declared = Project(project.get('development_root', project['root']))
     read = tuple(str(path) for path in [declared.root, declared.tool_root,
         *[(declared.root / name).resolve(strict=True) for name in declared.config['readonly']]])
     denied = [str(deployment.state), str(deployment.value['runtime_domain'])]

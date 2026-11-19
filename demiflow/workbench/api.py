@@ -117,6 +117,7 @@ GET_FIELDS = {
     'report': ({'digest'}, set()), 'diff': ({'left', 'right'}, set()),
 }
 POST_FIELDS = {
+    'development-settings': ({'expected','provider','model','effort','authentication','base_url','api_key'}, set()),
     'notebook-open': (set(), set()),
     'flow-arguments-save': ({'entry', 'revision', 'source_sha256', 'arguments'}, set()),
     'project-capabilities': ({'workspace_id','expected','capabilities'}, set()),
@@ -250,6 +251,7 @@ class WorkspaceServer(ThreadingHTTPServer):
         self.plan_snapshots = PreviewSnapshots()
         self.development_readers = threading.BoundedSemaphore(2)
         self.development = None
+        self.development_settings = None
         self.analysis = None
         self.notebooks = None
         notebook_python = notebook_python or os.environ.get('DEMIFLOW_NOTEBOOK_PYTHON')
@@ -276,6 +278,10 @@ class WorkspaceServer(ThreadingHTTPServer):
                 self.development.close()
                 raise
         try:
+            if self.development is not None and not self.development.remote:
+                from demiflow.workbench.conversations.global_settings import GlobalSettings
+                self.development_settings = GlobalSettings(self.development, self.inventory)
+                self.development.settings = self.development_settings
             if analysis_config is not None:
                 from demiflow.workbench.analysis.web_service import WebService
                 self.analysis = WebService(self, analysis_config)
@@ -596,7 +602,7 @@ class Handler(BaseHTTPRequestHandler):
         if name == 'plan-node-detail':
             from demiflow.workbench.graph.preview_snapshots import validate_request
             return validate_request(request)
-        if name in development_http.POST_FIELDS or name in analysis_http.POST_FIELDS:
+        if name == 'development-settings' or name in development_http.POST_FIELDS or name in analysis_http.POST_FIELDS:
             # The fixed services own their closed, typed value schemas.
             return request
         for key, value in request.items():
@@ -635,11 +641,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(read_bounded(ASSETS / filename, 512 * 1024), mime=mime)
                 return
             self._authorize()
+            if url.path == '/api/development-settings':
+                if url.query: raise ForgeError('Settings accepts no query', code='invalid_request')
+                from demiflow.workbench.conversations.global_settings import unavailable
+                with self._work():
+                    value = self.server.development_settings.public() if self.server.development_settings else unavailable()
+                self._send(value); return
             if url.path == '/api/capabilities':
                 if url.query:
                     raise ForgeError('Capabilities accepts no query', code='invalid_request')
                 self._send(dict(contract=HTTP_CONTRACT, web_enabled=not self.server.api_only,
-                    operations={'GET': sorted(GET_FIELDS), 'POST': sorted(POST_FIELDS)},
+                    operations={'GET': sorted({*GET_FIELDS,'development-settings'}), 'POST': sorted(POST_FIELDS)},
                     permissions={'read': True, 'inspect': True, 'audit_check': True, 'runs': self.server.enable_runs,
                                  'run_submit':self.server.enable_runs,'run_control':self.server.enable_runs or self.server.control_only,'attach':self.server.enable_runs,
                                  'project_manage': self.server.registry is not None, 'project_check': True},
@@ -860,6 +872,12 @@ class Handler(BaseHTTPRequestHandler):
             self._authorize()
             if len(self.path) > 8192 or urlsplit(self.path).query:
                 raise ForgeError('Invalid mutation endpoint', code='invalid_request')
+            if self.path == '/api/development-settings':
+                request = self._body('development-settings')
+                if self.server.development_settings is None:
+                    raise ForgeError('当前服务尚未安装可配置的本地开发代理。', code='operation_rejected')
+                with self._work(): value = self.server.development_settings.save(request)
+                self._send(value); return
             if self.path in {'/api/project-create', '/api/project-register', '/api/project-remove', '/api/project-permissions','/api/project-capabilities'}:
                 if self.server.registry is None:
                     raise ForgeError('Project management requires a console registry', code='operation_rejected')
