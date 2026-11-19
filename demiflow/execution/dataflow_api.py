@@ -356,9 +356,11 @@ def _run_dataset_action(request: ActionRequest) -> object:
         return result
     finally:
         try:
-            record_execution_metadata(request, handle._execution)
-        finally:
             handle.close()
+        finally:
+            # Drain carries final failed/cancelled model counters and actor
+            # lifecycle facts. Publish only after that last observation arrives.
+            record_execution_metadata(request, handle._execution)
 
 
 class _CompileContext:

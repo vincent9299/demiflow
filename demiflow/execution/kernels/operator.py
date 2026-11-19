@@ -1539,7 +1539,13 @@ class OperatorKernel:
                 errors.append(exc)
         if not errors:
             from ..dataflow_model_observations import worker_model_observations
+            from ..dataflow_usage import worker_prompt_usage
             try:
+                # Closing drains admitted calls before owners disappear. Keep
+                # their final counters for the bounded Drain response as well
+                # as model timings; the last normal progress can predate a
+                # failed or cancelled request.
+                worker_prompt_usage(self, final=True)
                 worker_model_observations(self, final=True)
             except BaseException as exc:
                 errors.append(exc)
