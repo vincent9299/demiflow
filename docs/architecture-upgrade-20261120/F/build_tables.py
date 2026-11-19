@@ -189,8 +189,8 @@ if __name__=='__main__':
             lines.extend([row['id']+' '+row['provider']+':'+row['symbol'], '分类 '+row['category'], '输入/输出 '+row['input_output'], '错误/预算 '+row['errors_limits'],
                           '状态 '+row['state_owner'], '副作用 '+row['side_effects'], '生命周期/并发 '+row.get('lifecycle_concurrency',row.get('lifecycle','')+'；'+row.get('concurrency','')),
                           '历史/身份 '+row.get('history_identity',row.get('history','')), '建议 '+row.get('recommendation',row.get('decision','')+' / '+row.get('proposed_slice','')),
-                          '目标导入 '+', '.join(r['path']+':'+str(r['line']) for r in row['focal_imports']),
+                          '目标导入 '+(', '.join(r['path']+':'+str(r['line']) for r in row['focal_imports']) or '（经模块属性绑定，见目标调用/引用）'),
                           '目标调用/引用 '+', '.join(r['path']+':'+str(r['line'])+' '+r['role'] for r in row['focal_use_sites']), ''])
-        with (options.output_dir/(section+'-symbols.txt')).open('x') as f:f.write('\n'.join(lines)+'\n')
+        with (options.output_dir/(section+'-symbols.txt')).open('x') as f:f.write('\n'.join(lines).rstrip()+'\n')
     with (options.output_dir/'reconciliation.json').open('x') as f:json.dump(table['reconciliation'],f,ensure_ascii=False,indent=2);f.write('\n')
     print(json.dumps(table['reconciliation'],ensure_ascii=False))

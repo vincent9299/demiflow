@@ -94,7 +94,7 @@ F1-08 demiflow.forge.operation_budget:bind_worker
 生命周期/并发 Caller owns request/file/payload bounds; file handles/tokens follow original finally; no new global service or duplicate state.
 历史/身份 No current source changes; future extraction changes platform/Forge identity and possibly class/callable paths. No automatic old seal adoption.
 建议 留原；不得在常驻进程或任意配置加载时调用
-目标导入 
+目标导入 （经模块属性绑定，见目标调用/引用）
 目标调用/引用 demiflow/workbench/conversations/inspection.py:84 call
 
 F1-09 demiflow.forge.operation_budget:check
@@ -130,7 +130,7 @@ F1-11 demiflow.forge.operation_budget:clear_worker_environment
 生命周期/并发 Caller owns request/file/payload bounds; file handles/tokens follow original finally; no new global service or duplicate state.
 历史/身份 No current source changes; future extraction changes platform/Forge identity and possibly class/callable paths. No automatic old seal adoption.
 建议 留原；常驻reader/原生worker仍必须清除陈旧transport
-目标导入 
+目标导入 （经模块属性绑定，见目标调用/引用）
 目标调用/引用 demiflow/workbench/runs/manager.py:1005 call
 
 F1-12 demiflow.forge.operation_budget:controlled
@@ -142,7 +142,7 @@ F1-12 demiflow.forge.operation_budget:controlled
 生命周期/并发 Caller owns request/file/payload bounds; file handles/tokens follow original finally; no new global service or duplicate state.
 历史/身份 No current source changes; future extraction changes platform/Forge identity and possibly class/callable paths. No automatic old seal adoption.
 建议 留原；保留方法装饰与嵌套控制语义
-目标导入 
+目标导入 （经模块属性绑定，见目标调用/引用）
 目标调用/引用 demiflow/workbench/runs/manager.py:228 reference, demiflow/workbench/runs/manager.py:675 reference, demiflow/workbench/runs/manager.py:888 reference
 
 F1-13 demiflow.forge.operation_budget:current_deadline
@@ -154,7 +154,7 @@ F1-13 demiflow.forge.operation_budget:current_deadline
 生命周期/并发 Caller owns request/file/payload bounds; file handles/tokens follow original finally; no new global service or duplicate state.
 历史/身份 No current source changes; future extraction changes platform/Forge identity and possibly class/callable paths. No automatic old seal adoption.
 建议 留原；中立外观不代表可拆分共享ContextVar
-目标导入 
+目标导入 （经模块属性绑定，见目标调用/引用）
 目标调用/引用 demiflow/workbench/runs/domain.py:456 call, demiflow/workbench/runs/manager.py:521 call, demiflow/workbench/runs/manager.py:550 call, demiflow/workbench/runs/manager.py:846 call, demiflow/workbench/runs/manager.py:935 call, demiflow/workbench/runs/manager.py:1051 call, demiflow/workbench/runs/manager.py:1098 call
 
 F1-14 demiflow.forge.operation_budget:scope
@@ -166,7 +166,7 @@ F1-14 demiflow.forge.operation_budget:scope
 生命周期/并发 Caller owns request/file/payload bounds; file handles/tokens follow original finally; no new global service or duplicate state.
 历史/身份 No current source changes; future extraction changes platform/Forge identity and possibly class/callable paths. No automatic old seal adoption.
 建议 留原；唯一ContextVar，不在不同应用复制一份
-目标导入 
+目标导入 （经模块属性绑定，见目标调用/引用）
 目标调用/引用 demiflow/workbench/runs/context.py:45 call, demiflow/workbench/runs/domain.py:824 call
 
 F1-15 demiflow.forge.platform:bounded_json
@@ -276,4 +276,3 @@ F1-23 demiflow.forge.schema:required_text
 建议 留原；不顺手收紧历史文本或归一化业务值
 目标导入 demiflow/workbench/projects/workspace.py:327, demiflow/workbench/projects/workspace.py:338
 目标调用/引用 demiflow/workbench/projects/workspace.py:328 call, demiflow/workbench/projects/workspace.py:339 call
-
