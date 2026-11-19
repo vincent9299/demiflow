@@ -74,7 +74,7 @@ def test_foreign_successor_is_not_adopted_or_overwritten(tmp_path, monkeypatch):
 
 def test_observer_projects_the_same_native_receipt_without_advancing_progress(tmp_path, monkeypatch):
     import demiflow.execution.commit as protocol
-    from demiflow.workbench.runs.manager import _native_execution_receipt
+    from demiflow.execution.publication_facts import inspect_write_receipt
     def stop(name, commit_id):
         if name == 'after_sink_commit_before_receipt':
             raise RuntimeError('lost response')
@@ -83,7 +83,7 @@ def test_observer_projects_the_same_native_receipt_without_advancing_progress(tm
         write_graph(tmp_path, 'create')
     journal = RunJournal(tmp_path / 'run')
     before = journal.execution_commits('action-1')
-    receipt = _native_execution_receipt(journal, 'action-1')
+    receipt = inspect_write_receipt(journal, 'action-1')
     assert receipt['committed_version'] == 1
     assert journal.execution_commits('action-1') == before
     assert before[0]['status'] == 'prepared' and before[0]['receipts'] == {}

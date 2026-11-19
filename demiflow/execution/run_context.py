@@ -174,19 +174,41 @@ def _stopped_maintenance(journal, expected_attempt, expected_revision, deadline)
 
 
 @contextmanager
-def _maintenance_owner(journal, configuration):
+def _maintenance_owner(journal, configuration, *, recover_resources=False):
     """Claim can fail after committing its owner: protect the claim itself."""
     fence = uuid.uuid4().hex
+    claimed = False
+    failure = None
     try:
-        journal.claim_execution(configuration, fence)
+        if recover_resources:
+            journal.claim_execution(configuration, fence, recover_resources=True)
+        else:
+            journal.claim_execution(configuration, fence)
+        claimed = True
         yield fence
+    except BaseException as exc:
+        failure = exc
+        raise
     finally:
-        journal._check_maintenance_deadline()
-        # Never release another owner's fence, including after a partial claim.
-        with journal._connection() as db:
-            own = db.execute('SELECT 1 FROM runtime_owner WHERE fence=?', (fence,)).fetchone()
-        if own:
-            journal.release_execution(fence)
+        release = True
+        if recover_resources and not claimed:
+            try:
+                from .resource_state import RunResourceState
+                release = not RunResourceState(journal).unfinished_scopes(configuration['run_id'])
+            except BaseException:
+                release = False  # Unknown resource cleanup retains this owner.
+        if release:
+            try:
+                journal._check_maintenance_deadline()
+                # Never release another owner's fence, including a partial claim.
+                with journal._connection() as db:
+                    own = db.execute('SELECT 1 FROM runtime_owner WHERE fence=?', (fence,)).fetchone()
+                if own:
+                    journal.release_execution(fence)
+            except BaseException as cleanup:
+                if failure is None:
+                    raise
+                failure.add_note('Maintenance owner release also failed: ' + str(cleanup))
 
 
 def clean_stopped_execution(journal, *, expected_attempt, confirm_stopped, deadline,
@@ -196,7 +218,7 @@ def clean_stopped_execution(journal, *, expected_attempt, confirm_stopped, deadl
         state, configuration, _, _ = _maintenance_snapshot(maintenance, expected_attempt,
             expected_revision, confirm_stopped)
         if configuration is not None:
-            with _maintenance_owner(maintenance, configuration) as fence:
+            with _maintenance_owner(maintenance, configuration, recover_resources=True) as fence:
                 maintenance.clean_orphans(fence)
         return dict(attempt=expected_attempt, revision=state['revision'], native_work=configuration is not None)
 
@@ -385,7 +407,7 @@ class RunContext:
                     self.journal.begin_attempt(expected_attempt=state["attempt"],
                                                expected_revision=state["revision"])
                 self.journal.transition({"prepared"}, "running")
-            self.attempt = self.journal.claim_execution(configuration, self.fence)
+            self.attempt = self.journal.claim_execution(configuration, self.fence, recover_resources=True)
             self.journal = RunJournal(self.directory, attempt=self.attempt)
             self._journal_connections.enter_context(self.journal.connection_scope())
             self.journal.clean_orphans(self.fence)

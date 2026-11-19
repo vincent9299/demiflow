@@ -110,7 +110,7 @@ def inherited_envelope():
 class LocalCapacityPool:
     """One normalized root, one file lock, bounded atomic per-allocation records."""
 
-    def __init__(self, root, *, capacity):
+    def __init__(self, root, *, capacity, deadline=None):
         self.root = Path(root).resolve()
         if type(capacity) is not dict or not {"cpu_millis", "memory_bytes"} <= set(capacity) or set(capacity) - {
                 "cpu_millis", "memory_bytes", "scratch_bytes"}:
@@ -118,6 +118,11 @@ class LocalCapacityPool:
         if any(type(v) is not int or v <= 0 for v in capacity.values()):
             raise ResourceError("INVALID_SPEC", "pool capacity values must be positive ints")
         self.capacity = dict(capacity)
+        if deadline is not None:
+            import math
+            if type(deadline) not in (int, float) or not math.isfinite(deadline) or deadline <= 0:
+                raise ResourceError('INVALID_SPEC', 'capacity deadline must be a finite monotonic time')
+        self._deadline = deadline
         self.root.mkdir(parents=True, exist_ok=True)
         self._records = self.root / "allocations"
         self._records.mkdir(exist_ok=True)
@@ -127,7 +132,18 @@ class LocalCapacityPool:
         path = self.root / "capacity.lock"
         fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            if self._deadline is None:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            else:
+                while True:
+                    remaining = self._deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise ResourceError('CLEANUP_UNCONFIRMED', 'capacity cleanup lock deadline expired')
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        time.sleep(min(.01, remaining))
         except BaseException:
             os.close(fd)
             raise

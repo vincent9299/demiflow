@@ -37,6 +37,15 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def resource_scope_binding(resources, policy):
+    """Runtime cleanup coordinates, deliberately outside sealed plan identity."""
+    binding = {'provider': policy.provider}
+    if policy.provider == 'local':
+        binding.update(worker_mode='thread' if policy.worker_mode == 'thread' else 'process',
+                       capacity_root=str(resources.provider.pool.root))
+    return binding
+
+
 def _driver_resources(action: "RunAction", policy: RuntimePolicy):
     from ..resources.manager import ManagerBounds, ResourceManager
     from .resource_state import RunResourceState

@@ -108,6 +108,8 @@ class ResourceManager:
         return parsed
 
     def apply(self, context, plan):
+        if getattr(self.state, 'cleanup_only', False):
+            raise ResourceError('PERMISSION_DENIED', 'cleanup cannot admit a resource plan')
         if type(context) is not MutationContext:
             raise ResourceError("INVALID_SPEC", "apply needs a MutationContext")
         parsed = self._parse(plan)
@@ -169,6 +171,9 @@ class ResourceManager:
         return entry
 
     def _reconcile_operation(self, operation):
+        if getattr(self.state, 'cleanup_only', False) and (
+                operation['kind'] != 'ensure_absent' or operation['scope_id'] != self.state.cleanup_scope):
+            raise ResourceError('PERMISSION_DENIED', 'cleanup cannot dispatch another scope or ensure_present')
         allocation_id = operation["allocation_id"]
         spec = operation["document"]
         try:
@@ -221,8 +226,20 @@ class ResourceManager:
         for operation in batch:
             if time.monotonic() >= deadline:
                 break
+            if getattr(self.state, 'cleanup_only', False):
+                operation = {**operation, 'document': {**operation['document'],
+                    'terminate_deadline_ms': min(operation['document']['terminate_deadline_ms'],
+                        max(1, int((deadline - time.monotonic()) * 1000)))}}
             observations.append(self._reconcile_operation(operation))
         cursor = None
         if observations:
             cursor = self.state.record_observations(authority, observations)
+        if getattr(self.state, 'cleanup_only', False):
+            for entry in observations:
+                conditions = entry.get('conditions') or ()
+                if conditions and conditions[0] in {'ARTIFACT_MISMATCH', 'INVALID_SPEC', 'UNSUPPORTED_CAPABILITY'}:
+                    # Keep the original UNCONFIRMED observation, then surface
+                    # an unrecoverable binding error instead of hiding it in a
+                    # generic timeout after repeated provider calls.
+                    raise ResourceError(conditions[0], conditions[1], allocation_id=entry['allocation_id'])
         return {"claimed": len(batch), "processed": len(observations), "cursor": cursor}

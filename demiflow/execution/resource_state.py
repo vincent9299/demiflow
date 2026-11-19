@@ -13,7 +13,7 @@ import time
 
 from ..errors import ExecutionConflict
 from ..resources.contracts import (
-    ACCELERATOR_BUDGET_PREFIX, ResourceError, ResourceScope, TERMINAL_HOST_PHASES,
+    ACCELERATOR_BUDGET_PREFIX, MAX_DOCUMENT_BYTES, ResourceError, ResourceScope, TERMINAL_HOST_PHASES,
     accelerator_budget_key, document, identifier, spec_hash, validate_observation,
 )
 from .recovery_contract import RecoveryContractError
@@ -79,7 +79,7 @@ def _merge_cleanup(old, new):
 class RunResourceState:
     def __init__(self, journal, *, event_window=1024, operation_retention_ms=3600000,
                  claim_lease_ms=30000, page_size=64, max_allocations=4096,
-                 max_operations=4096):
+                 max_operations=4096, cleanup_scope=None):
         self.journal = journal
         self.event_window = event_window
         self.operation_retention_ms = operation_retention_ms
@@ -87,11 +87,24 @@ class RunResourceState:
         self.page_size = page_size
         self.max_allocations = max_allocations
         self.max_operations = max_operations
+        self.cleanup_scope = None if cleanup_scope is None else identifier(cleanup_scope)
+
+    @property
+    def cleanup_only(self):
+        return self.cleanup_scope is not None
+
+    def _check_cleanup_scope(self, scope_id):
+        if self.cleanup_only and scope_id != self.cleanup_scope:
+            raise ResourceError('FENCED', 'cleanup is restricted to its original resource scope')
 
     @contextmanager
     def _guard(self, fence, scope_id=None):
         try:
-            with self.journal.execution_guard(fence) as db:
+            if scope_id is not None:
+                self._check_cleanup_scope(scope_id)
+            guard = (self.journal._resource_cleanup_guard if self.cleanup_only
+                     else self.journal.execution_guard)
+            with guard(fence) as db:
                 yield db
         except ExecutionConflict as exc:
             raise ResourceError("FENCED", str(exc), scope_id=scope_id) from exc
@@ -102,41 +115,80 @@ class RunResourceState:
     def _ensure_tables(db):
         db.executescript(_SCHEMA)
 
+    def _existing_cleanup_tables(self, db):
+        if self.cleanup_only:
+            # executescript would commit the already-fenced transaction.
+            # Recovery never creates a resource namespace or runs DDL.
+            if not self._tables_exist(db):
+                raise ResourceError('INVALID_SPEC', 'original resource namespace is unavailable')
+        else:
+            self._ensure_tables(db)
+
+    def _document_column(self, name, *, bounded=None):
+        bounded = self.cleanup_only if bounded is None else bounded
+        return f'substr(CAST({name} AS BLOB),1,{MAX_DOCUMENT_BYTES + 1})' if bounded else name
+
+    def _read_document(self, raw, *, bounded=None):
+        bounded = self.cleanup_only if bounded is None else bounded
+        if bounded and len(raw) > MAX_DOCUMENT_BYTES:
+            raise ResourceError('QUOTA_EXCEEDED', 'original resource control document exceeds byte budget')
+        return json.loads(raw)
+
     @staticmethod
     def _tables_exist(db):
         return db.execute("SELECT 1 FROM sqlite_master WHERE name='resource_scopes'").fetchone() is not None
 
-    @staticmethod
-    def _epoch(db):
-        return json.loads(db.execute("SELECT document FROM execution_state").fetchone()[0])["attempt"]
+    def _epoch(self, db):
+        column = self._document_column('document')
+        return self._read_document(db.execute(f"SELECT {column} FROM execution_state").fetchone()[0])["attempt"]
 
     def _check_epoch(self, db, context):
         if context.controller_epoch != self._epoch(db):
             raise ResourceError("FENCED", "controller_epoch is not the current native attempt",
                                 scope_id=context.scope_id)
 
-    def _scope_row(self, db, scope_id):
-        row = db.execute("SELECT scope_id,run_id,state,desired_revision,observed_revision,document,close_document "
+    def _scope_row(self, db, scope_id, *, bounded=None):
+        columns = ','.join(self._document_column(name, bounded=bounded) for name in ('document', 'close_document'))
+        row = db.execute("SELECT scope_id,run_id,state,desired_revision,observed_revision," + columns + " "
                          "FROM resource_scopes WHERE scope_id=?", (scope_id,)).fetchone()
         if row is None:
             raise ResourceError("INVALID_SPEC", "unknown resource scope", scope_id=scope_id)
         return {"scope_id": row[0], "run_id": row[1], "state": row[2],
                 "desired_revision": row[3], "observed_revision": row[4],
-                "document": json.loads(row[5]),
-                "close_document": json.loads(row[6]) if row[6] else None}
+                "document": self._read_document(row[5], bounded=bounded),
+                "close_document": self._read_document(row[6], bounded=bounded) if row[6] else None}
+
+    def unfinished_scopes(self, run_id, *, after=''):
+        """One bounded original-Journal page; never scan deployment-wide pools."""
+        identifier(run_id)
+        with self.journal._connection() as db:
+            if not self._tables_exist(db):
+                return []
+            rows = db.execute("SELECT scope_id FROM resource_scopes WHERE run_id=? AND state!='CLOSED' "
+                              "AND scope_id>? ORDER BY scope_id LIMIT 64", (run_id, after)).fetchall()
+            return [self._scope_row(db, row[0], bounded=True) for row in rows]
+
+    def cleanup_complete(self, scope_id):
+        self._check_cleanup_scope(scope_id)
+        with self.journal._connection() as db:
+            row = db.execute('SELECT state FROM resource_scopes WHERE scope_id=?', (scope_id,)).fetchone()
+        if row is None:
+            raise ResourceError('INVALID_SPEC', 'unknown resource scope', scope_id=scope_id)
+        return row[0] == 'CLOSED'
 
     def _allocation_row(self, db, allocation_id):
-        row = db.execute("SELECT allocation_id,scope_id,spec_hash,spec,effective,deadline_ms,phase,cleanup,"
-                         "terminal,desired,observation_revision,observed_at_ms,document "
+        spec, effective, observation = (self._document_column(name) for name in ('spec', 'effective', 'document'))
+        row = db.execute(f"SELECT allocation_id,scope_id,spec_hash,{spec},{effective},deadline_ms,phase,cleanup,"
+                         f"terminal,desired,observation_revision,observed_at_ms,{observation} "
                          "FROM resource_allocations WHERE allocation_id=?", (allocation_id,)).fetchone()
         if row is None:
             raise ResourceError("INVALID_SPEC", "unknown allocation", allocation_id=allocation_id)
         return {"allocation_id": row[0], "scope_id": row[1], "spec_hash": row[2],
-                "spec": json.loads(row[3]), "effective": json.loads(row[4]),
+                "spec": self._read_document(row[3]), "effective": self._read_document(row[4]),
                 "deadline_ms": row[5], "phase": row[6], "cleanup": row[7],
                 "terminal": bool(row[8]), "desired": bool(row[9]),
                 "observation_revision": row[10], "observed_at_ms": row[11],
-                "document": json.loads(row[12])}
+                "document": self._read_document(row[12])}
 
     def _emit_event(self, db, scope_id, kind, *, allocation_id=None, desired_revision=0,
                     observation_revision=0, reason="", evidence_ref=None):
@@ -151,8 +203,9 @@ class RunResourceState:
         raw = document(envelope).decode()
         db.execute("INSERT OR IGNORE INTO resource_events(scope_id,event_id,document) VALUES (?,?,?)",
                    (scope_id, event_id, raw))
-        row = db.execute("SELECT cursor,document FROM resource_events WHERE event_id=?", (event_id,)).fetchone()
-        envelope = json.loads(row[1])
+        column = self._document_column('document')
+        row = db.execute(f"SELECT cursor,{column} FROM resource_events WHERE event_id=?", (event_id,)).fetchone()
+        envelope = self._read_document(row[1])
         envelope["cursor"] = row[0]
         db.execute("UPDATE resource_events SET document=? WHERE event_id=?", (document(envelope).decode(), event_id))
         maximum = db.execute("SELECT MAX(cursor) FROM resource_events").fetchone()[0] or 0
@@ -161,7 +214,8 @@ class RunResourceState:
 
     def _dedup(self, db, context, kind, payload_hash, now_ms):
         """Return a stored receipt for an identical retry, or None. Conflicts raise."""
-        row = db.execute("SELECT kind,payload_hash,receipt,expires_ms FROM resource_operations "
+        column = self._document_column('receipt')
+        row = db.execute(f"SELECT kind,payload_hash,{column},expires_ms FROM resource_operations "
                          "WHERE scope_id=? AND operation_id=?",
                          (context.scope_id, context.operation_id)).fetchone()
         if row is None:
@@ -172,7 +226,7 @@ class RunResourceState:
         if row[3] < now_ms:
             raise ResourceError("EXPIRED_OPERATION", "operation receipt retention expired; query native scope authority",
                                 scope_id=context.scope_id, operation_id=context.operation_id)
-        return json.loads(row[2])
+        return self._read_document(row[2])
 
     def _store_receipt(self, db, context, kind, payload_hash, receipt, now_ms):
         db.execute("DELETE FROM resource_operations WHERE expires_ms<?", (now_ms,))
@@ -221,6 +275,8 @@ class RunResourceState:
                              reason="all cleanup obligations confirmed")
 
     def open_scope(self, fence, scope):
+        if self.cleanup_only:
+            raise ResourceError('PERMISSION_DENIED', 'cleanup cannot open a resource scope')
         if type(scope) is not ResourceScope:
             raise ResourceError("INVALID_SPEC", "open_scope needs a ResourceScope")
         raw = document(scope.to_dict()).decode()
@@ -238,6 +294,8 @@ class RunResourceState:
         return {"scope_id": scope.scope_id, "state": "OPEN", "desired_revision": 0}
 
     def accept_plan(self, context, validated):
+        if self.cleanup_only:
+            raise ResourceError('PERMISSION_DENIED', 'cleanup cannot admit a resource plan')
         scope_id = context.scope_id
         now_ms = _now_ms()
         payload_hash = validated["payload_hash"]
@@ -393,6 +451,17 @@ class RunResourceState:
                              (scope_id, allocation_id)).fetchone()
         return None if row is None else {'spec_hash': row[0], 'observation': json.loads(row[1])}
 
+    def read_cleanup_allocation(self, scope_id, allocation_id):
+        """Original immutable request and charge for scoped exit verification."""
+        identifier(scope_id); identifier(allocation_id)
+        self._check_cleanup_scope(scope_id)
+        with self.journal._connection() as db:
+            row = self._allocation_row(db, allocation_id)
+        if row['scope_id'] != scope_id:
+            raise ResourceError('FENCED', 'allocation belongs to another resource scope')
+        document(row['spec']); document(row['effective'])
+        return row
+
     def _charged(self, db, scope_id):
         rows = db.execute("SELECT effective FROM resource_allocations WHERE scope_id=? AND cleanup!='CONFIRMED'",
                           (scope_id,)).fetchall()
@@ -415,10 +484,12 @@ class RunResourceState:
 
     def begin_close(self, context, close_spec):
         scope_id = context.scope_id
+        if self.cleanup_only and close_spec['mode'] != 'ABANDON':
+            raise ResourceError('PERMISSION_DENIED', 'recovery cleanup requires ABANDON')
         now_ms = _now_ms()
         payload_hash = spec_hash(close_spec)
         with self._guard(context.authority_token, scope_id) as db:
-            self._ensure_tables(db)
+            self._existing_cleanup_tables(db)
             self._check_epoch(db, context)
             receipt = self._dedup(db, context, "close", payload_hash, now_ms)
             if receipt is not None:
@@ -460,14 +531,22 @@ class RunResourceState:
         operations = []
         touched = set()
         with self._guard(authority) as db:
-            self._ensure_tables(db)
+            self._existing_cleanup_tables(db)
             epoch = self._epoch(db)
-            rows = db.execute("SELECT sequence,scope_id,allocation_id,kind,desired_revision FROM resource_intents "
-                              "WHERE status='pending' OR (status='claimed' AND claimed_until_ms<?) "
-                              "ORDER BY sequence LIMIT ?", (now_ms, limit)).fetchall()
+            if self.cleanup_only:
+                rows = db.execute("SELECT sequence,scope_id,allocation_id,kind,desired_revision FROM resource_intents "
+                    "WHERE scope_id=? AND kind='ensure_absent' AND (status='pending' OR "
+                    "(status='claimed' AND (claimed_until_ms<? OR claimed_epoch<?))) "
+                    "ORDER BY sequence LIMIT ?", (self.cleanup_scope, now_ms, epoch, min(limit, 64))).fetchall()
+            else:
+                rows = db.execute("SELECT sequence,scope_id,allocation_id,kind,desired_revision FROM resource_intents "
+                                  "WHERE status='pending' OR (status='claimed' AND claimed_until_ms<?) "
+                                  "ORDER BY sequence LIMIT ?", (now_ms, limit)).fetchall()
             for sequence, scope_id, allocation_id, kind, revision in rows:
                 touched.add(scope_id)
                 scope = self._scope_row(db, scope_id)
+                if self.cleanup_only and scope['state'] != 'CLOSING':
+                    raise ResourceError('INVALID_SPEC', 'cleanup requires an original closing scope')
                 alloc = self._allocation_row(db, allocation_id)
                 if kind == "ensure_present":
                     if scope["state"] != "OPEN" or alloc["cleanup"] in ("REQUESTED", "CONFIRMED"):
@@ -494,8 +573,9 @@ class RunResourceState:
                     if alloc["cleanup"] == "CONFIRMED":
                         db.execute("UPDATE resource_intents SET status='done' WHERE sequence=?", (sequence,))
                         continue
-                    intent = db.execute("SELECT document FROM resource_intents WHERE sequence=?", (sequence,)).fetchone()
-                    release = json.loads(intent[0])
+                    column = self._document_column('document')
+                    intent = db.execute(f"SELECT {column} FROM resource_intents WHERE sequence=?", (sequence,)).fetchone()
+                    release = self._read_document(intent[0])
                     spec = {"terminate_deadline_ms": release["terminate_deadline_ms"],
                             "provider_uid": alloc["document"].get("provider_uid"),
                             "boot_id": alloc["document"].get("boot_id"), "release": release}
@@ -509,8 +589,9 @@ class RunResourceState:
 
     def _operation(self, db, sequence, scope_id, allocation_id, kind, epoch):
         alloc = self._allocation_row(db, allocation_id)
-        intent = db.execute("SELECT document FROM resource_intents WHERE sequence=?", (sequence,)).fetchone()
-        release = json.loads(intent[0])
+        column = self._document_column('document')
+        intent = db.execute(f"SELECT {column} FROM resource_intents WHERE sequence=?", (sequence,)).fetchone()
+        release = self._read_document(intent[0])
         spec = {"terminate_deadline_ms": release["terminate_deadline_ms"],
                 "provider_uid": alloc["document"].get("provider_uid"),
                 "boot_id": alloc["document"].get("boot_id"), "release": release}
@@ -520,14 +601,18 @@ class RunResourceState:
     def record_observations(self, authority, observations):
         if type(observations) is not list or len(observations) > 256:
             raise ResourceError("INVALID_SPEC", "observation batch exceeds budget")
+        if self.cleanup_only and any(type(entry) is not dict or 'cleanup' not in entry
+                                    or set(entry) - _CLEANUP_ENTRY_KEYS for entry in observations):
+            raise ResourceError('PERMISSION_DENIED', 'cleanup cannot record a worker admission observation')
         touched = set()
         with self._guard(authority) as db:
-            self._ensure_tables(db)
+            self._existing_cleanup_tables(db)
             for entry in observations:
                 if type(entry) is not dict or "allocation_id" not in entry:
                     raise ResourceError("INVALID_SPEC", "observation needs allocation_id")
                 alloc = self._allocation_row(db, entry["allocation_id"])
                 scope_id = alloc["scope_id"]
+                self._check_cleanup_scope(scope_id)
                 touched.add(scope_id)
                 revision = entry.get("observation_revision")
                 if type(revision) is not int or revision <= alloc["observation_revision"]:
