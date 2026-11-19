@@ -61,13 +61,14 @@ def test_all_navigation_resize_ellipsis_and_retained_width(project,tmp_path,brow
             page.set_viewport_size(dict(width=1440,height=900))
             separator.dblclick()
             assert abs(sidebar.bounding_box()['width']-240)<2
-        page.get_by_role('button',name='项目设置',exact=True).click()
+        page.get_by_role('button',name='设置',exact=True).click()
         dialog=page.get_by_role('dialog',name='项目设置')
-        expect(dialog).to_contain_text('尚未配置开发代理')
-        expect(dialog).to_contain_text('服务统一配置')
-        dialog.get_by_text('在哪里配置连接？',exact=True).click()
-        expect(dialog).to_contain_text('--development-config')
-        expect(dialog).to_contain_text('尚不支持修改连接')
-        dialog.get_by_role('button',name='重新检查连接').click()
-        expect(dialog).to_contain_text('尚未配置开发代理')
+        expect(dialog).to_be_visible()
+        expect(dialog).to_contain_text(str(project))
+        # The user removed the duplicate AI panel; project settings still work.
+        # Model selection and Forge permissions remain covered by composer tests.
+        expect(dialog.get_by_role('button',name='重新检查连接')).to_have_count(0)
+        expect(dialog.get_by_text('在哪里配置连接？',exact=True)).to_have_count(0)
+        expect(dialog.locator('input[type=password]')).to_have_count(0)
         dialog.get_by_role('button',name='关闭',exact=True).click()
+        expect(dialog).to_have_count(0)

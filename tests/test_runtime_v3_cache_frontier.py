@@ -258,18 +258,23 @@ def callback():
     else: raise AssertionError(form)
     return count
 pump=DataflowExecution.pump
+crash_deadline=None
 def crash_after_original_ack(execution, **kwargs):
+    global crash_deadline
     result=pump(execution, **kwargs)
     if execution._restore_image is not None and not execution._restore_image.cut.final:
-        deadline=time.monotonic()+15
-        while time.monotonic()<deadline:
-            with sqlite3.connect(root/'cache/results.sqlite') as db:
-                count=db.execute('SELECT COUNT(*) FROM kv').fetchone()[0]
-            if count>=4:
-                (root/'crashed.json').write_text(json.dumps({'cache_entries':count, 'cut':str(execution._restore_image.cut)}))
-                os._exit(79)
-            time.sleep(.01)
-        raise AssertionError('suffix cache write did not reach process crash boundary')
+        if crash_deadline is None: crash_deadline=time.monotonic()+15
+        with sqlite3.connect(root/'cache/results.sqlite') as db:
+            count=db.execute('SELECT COUNT(*) FROM kv').fetchone()[0]
+        if count>=4:
+            fact=RunJournal(root/'run').execution_commit(execution._restore_image.commit_id)
+            assert fact['status']=='acked'
+            (root/'crashed.json').write_text(json.dumps({'cache_entries':count,
+                'cut':str(execution._restore_image.cut),'original_ack':fact}))
+            os._exit(79)
+        # Return to the real driver so source credits and an overlapping
+        # publisher can advance. Blocking here prevents the boundary we await.
+        assert time.monotonic()<crash_deadline, 'suffix cache write did not reach process crash boundary'
     return result
 if mode=='crash': DataflowExecution.pump=crash_after_original_ack
 identity=RunJournal(root/'run').recovery_identity() if (root/'run').exists() else None
@@ -303,6 +308,8 @@ def test_real_driver_process_death_recovers_original_ack_and_suffix_cache(tmp_pa
     result = json.loads((tmp_path / 'result.json').read_text())
     assert result['rows'] == [{'value': n, 'count': n + 1} for n in range(6)]
     assert all(c['status'] == 'acked' for c in result['commits'])
+    original_ack = json.loads((tmp_path / 'crashed.json').read_text())['original_ack']
+    assert next(c for c in result['commits'] if c['commit_id'] == original_ack['commit_id']) == original_ack
     assert result['restriction'] is None
     assert result['map_states'] == ['adapter']
 
