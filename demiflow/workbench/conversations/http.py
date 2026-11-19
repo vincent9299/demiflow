@@ -15,6 +15,7 @@ GET_FIELDS = {
     'dev-project-turns': (set(),{'offset','limit','kind'}),
     'dev-sessions': (set(), {'offset', 'limit'}),
     'dev-session': ({'session_id'}, set()),
+    'dev-stats': ({'session_id'}, set()),
     'dev-context': ({'session_id', 'turn_id'}, set()),
     'dev-events': ({'session_id'}, {'after_sequence', 'limit', 'wait_ms'}),
     'dev-output': ({'session_id', 'item_id'}, {'after_sequence', 'turn_id', 'provider_epoch', 'from_sequence', 'through_sequence'}),
@@ -54,6 +55,9 @@ def get(server, workspace, root, name, query, *, consumer_closed=None):
     if name == 'dev-sessions':
         return service.store.list(workspace, int(query.get('offset', 0)), int(query.get('limit', 20)))
     if name == 'dev-session': return service.show(workspace, sid)
+    if name == 'dev-stats':
+        from .stats import read
+        return read(service.store, workspace, sid)
     if name == 'dev-context':
         service.store.show(workspace, sid)
         turn = service.store.turn(query['turn_id'])

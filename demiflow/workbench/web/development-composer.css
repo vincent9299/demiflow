@@ -1,0 +1,80 @@
+/* InputBar, ModelSelect, PermissionTrigger and ContextMeter styles adapted from
+ * DeepSeek Harness 0.2.1-rc.2, @deepseek-ai/dsh-client-ui-conversation,
+ * @deepseek-ai/dsh-client-ui-model-selection and dsh-client-ui-permission-presets.
+ * MIT License
+ * Copyright (c) 2026 DeepSeek
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+form.development-composer-native{box-sizing:border-box;width:100%;min-width:0;padding:0 0 4px;display:flex;flex-direction:column;align-items:center;gap:0;background:transparent;border:0;border-radius:0;box-shadow:none;color:#1f2024;font:14px/24px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;flex:none;position:relative}
+form.development-composer-native:focus-within{box-shadow:none}
+.development-composer-native [hidden]{display:none!important}
+.development-composer-native button{font-family:inherit}
+.development-composer-native button:focus-visible{outline:2px solid #4d6bfe;outline-offset:2px}
+.development-composer-native .dc-card{box-sizing:border-box;width:100%;min-width:0;border-radius:24px;background:#fff;border:1px solid #dedfe2;box-shadow:0 4px 20px #20263306;display:flex;flex-direction:column;gap:12px;padding-top:8px;position:relative;container-type:inline-size}
+.development-composer-native .dc-card:focus-within{border-color:#c5c8cf}
+.development-composer-native .dc-input{box-sizing:border-box;display:block;width:100%;min-height:36px;max-height:220px;resize:none;background:transparent;border:0;outline:0!important;box-shadow:none!important;border-radius:0;color:#1f2024;caret-color:#4d6bfe;font:inherit;line-height:24px;padding:4px 14px 0;overflow-y:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+.development-empty .development-composer-native .dc-input{min-height:52px}
+.development-composer-native .dc-input::placeholder{color:#aaaeb7}
+.development-composer-native .dc-input:disabled{color:#8a8d96;cursor:default}
+.development-composer-native .dc-row{box-sizing:border-box;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;min-width:0;padding:2px 8px 6px}
+.development-composer-native .dc-tools,.development-composer-native .dc-trailing{display:flex;align-items:center;min-width:0;gap:12px}
+.development-composer-native .dc-tools{flex:none}
+.development-composer-native .dc-trailing{flex:0 1 auto;margin-left:auto;max-width:100%}
+.development-composer-native .dc-add{border:0;display:grid;place-items:center;flex:none;width:28px;height:28px;padding:0;border-radius:50%;background:#f5f5f6;color:#17191d;cursor:pointer}
+.development-composer-native .dc-add:hover:not(:disabled){background:#eceef1}
+.development-composer-native .dc-add:disabled{opacity:.5;cursor:default}
+.development-composer-native .dc-access{display:inline-flex;align-items:center;gap:4px;border:0;border-radius:7px;background:transparent;min-width:0;max-width:220px;height:28px;padding:0 4px 0 8px;color:#666971;font-size:13px;font-weight:500;line-height:20px;cursor:pointer}
+.development-composer-native .dc-access>svg{flex:none}
+.development-composer-native .dc-access>svg:last-child{color:#a7abb3}
+.development-composer-native .dc-access-label{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.development-composer-native .dc-access:hover{background:#f2f3f5}
+.development-composer-native .dc-model{position:relative;min-width:0}
+.development-composer-native .dc-model-trigger{display:flex;align-items:center;gap:4px;min-width:0;max-width:min(360px,55cqw);height:28px;padding:0 4px 0 8px;border:0;border-radius:7px;background:transparent;color:#666971;font-size:13px;font-weight:400;line-height:20px;cursor:pointer}
+.development-composer-native .dc-model-trigger:hover:not(:disabled),.development-composer-native .dc-model-trigger[aria-expanded=true]{background:#f2f3f5}
+.development-composer-native .dc-model-trigger:disabled{color:#989ca5;cursor:default}
+.development-composer-native .dc-model-name,.development-composer-native .dc-effort{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.development-composer-native .dc-effort{flex-shrink:1000;color:#a7abb3}
+.development-composer-native .dc-model-trigger>svg{flex:none;color:#a7abb3;transition:transform .12s}
+.development-composer-native .dc-model-trigger[aria-expanded=true]>svg{transform:rotate(180deg)}
+.development-composer-native .dc-primary{display:grid;place-items:center;flex:none;width:34px;height:34px;padding:0;border:0;border-radius:50%;background:#4d6bfe;color:#fff;cursor:pointer;transform:translateY(-2px);transition:background-color .1s}
+.development-composer-native .dc-primary:hover:not(:disabled){background:#3e5ce8}
+.development-composer-native .dc-primary:disabled{opacity:.4;cursor:default}
+.development-composer-native .dc-menu{position:fixed;z-index:1100;box-sizing:border-box;width:max-content;min-width:min(240px,calc(100vw - 24px));max-width:min(420px,calc(100vw - 24px));max-height:min(360px,calc(100dvh - 24px));overflow:auto;padding:4px;border:1px solid #e5e6e9;border-radius:12px;background:#fff;box-shadow:0 8px 28px #2026331c;color:#202329;font:13px/20px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.development-composer-native .dc-menu-option{box-sizing:border-box;display:flex;align-items:center;gap:6px;min-width:100%;min-height:34px;width:100%;padding:5px 7px;border:0;border-radius:8px;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit}
+.development-composer-native .dc-menu-option:hover:not(:disabled),.development-composer-native .dc-menu-option:focus-visible{background:#f2f3f5}
+.development-composer-native .dc-menu-option:disabled{color:#a7abb3;cursor:default}
+.development-composer-native .dc-model-copy{display:flex;flex-direction:column;min-width:0;flex:1}
+.development-composer-native .dc-model-copy>span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.development-composer-native .dc-model-copy>small{color:#898d96;font-size:11px;line-height:18px}
+.development-composer-native .dc-model-check{width:14px;flex:none;visibility:hidden}
+.development-composer-native [aria-checked=true] .dc-model-check{visibility:visible}
+.development-composer-native .dc-notice{box-sizing:border-box;width:100%;padding:4px 8px;margin-bottom:6px;border-radius:8px;background:#f5f6f8;color:#666971;font-size:12px;line-height:18px;overflow-wrap:anywhere}
+.development-composer-native .dc-notice-error{background:#fff2f1;color:#a3453b}
+.development-composer-native .dc-dock{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:4px 12px;max-width:100%;min-width:0;padding-top:4px;color:#858992;font-size:13px;line-height:20px;font-variant-numeric:tabular-nums}
+.development-composer-native .dc-stat,.development-composer-native .dc-context{display:inline-flex;align-items:center;gap:6px;min-width:0}
+.development-composer-native .dc-stat>svg,.development-composer-native .dc-context>svg{flex:none}
+.development-composer-native .dc-stat>span{overflow-wrap:anywhere}
+.development-composer-native .dc-context{padding:1px 8px;white-space:nowrap}
+.development-composer-native .dc-ring-track{stroke:#dedfe2}
+.development-composer-native .dc-ring-fill{stroke:#858992;stroke-linecap:round}
+.dc-access-dialog{box-sizing:border-box;max-width:min(460px,calc(100vw - 32px));border:1px solid #dedfe2;border-radius:16px;padding:20px;color:#202329;background:#fff;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.dc-access-dialog::backdrop{background:#0003}
+.dc-access-dialog h2{font-size:17px;margin:0 0 10px}.dc-access-dialog button{font:inherit;border:1px solid #dedfe2;border-radius:8px;background:#fff;padding:5px 12px}
+@container (max-width:560px){.development-composer-native .dc-tools,.development-composer-native .dc-trailing{gap:8px}}
+@container (max-width:460px){.development-composer-native .dc-access-label{display:none}.development-composer-native .dc-row{gap:8px}.development-composer-native .dc-model-trigger{max-width:min(360px,60cqw)}}
+@media(max-width:480px){.development-composer-native .dc-input{font-size:16px}.development-composer-native .dc-dock{font-size:11px;gap:3px 8px}.development-composer-native .dc-menu-option{min-height:40px}}
+@media(prefers-reduced-motion:reduce){.development-composer-native *{transition:none!important}}

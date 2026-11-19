@@ -388,6 +388,136 @@
     return result;
   }
 
+  // Chat renders many messages together. It must not share the file reader's
+  // "latest selection wins" queue or its persisted preview/source controls.
+  // One reusable worker, at most 100 views/1 MiB of source, and one queued
+  // reference per view keep history replay and streaming updates bounded.
+  const markdownViews = new Set(), markdownQueue = new Set();
+  let markdownBytes = 0, markdownWorker = null, markdownReady = false;
+  let markdownRun = null, markdownTimer = null, markdownIdle = null, markdownSerial = 0;
+  function stopMarkdownWorker() {
+    clearTimeout(markdownTimer); clearTimeout(markdownIdle);
+    if (markdownWorker) {
+      markdownWorker.onmessage = markdownWorker.onerror = markdownWorker.onmessageerror = null;
+      markdownWorker.terminate();
+    }
+    markdownWorker = null; markdownReady = false; markdownRun = null;
+  }
+  function markdownResult(reason, tree) {
+    const run = markdownRun; markdownRun = null; clearTimeout(markdownTimer);
+    if (run && !run.view.disposed && run.version === run.view.version) run.view.deliver(reason, tree);
+    if (!markdownQueue.size) markdownIdle = setTimeout(stopMarkdownWorker, 1000);
+    else pumpMarkdown();
+  }
+  function markdownFailure(reason) {
+    const run = markdownRun;
+    if (!run) {
+      const batch = [...markdownQueue]; markdownQueue.clear(); stopMarkdownWorker();
+      for (const view of batch) if (!view.disposed) view.deliver(reason);
+      return;
+    }
+    stopMarkdownWorker(); markdownRun = run;
+    markdownResult(reason);
+  }
+  function pumpMarkdown() {
+    clearTimeout(markdownIdle);
+    if (markdownRun || !markdownQueue.size) return;
+    if (!markdownWorker) {
+      try {
+        markdownWorker = new Worker('/markdown-worker.js', {name: 'ForgeChatMarkdown'});
+        const worker = markdownWorker;
+        markdownTimer = setTimeout(() => {
+          // Startup failed before a view was dispatched: fail the bounded
+          // pending batch once, rather than restarting for every queued view.
+          const batch = [...markdownQueue]; markdownQueue.clear(); stopMarkdownWorker();
+          for (const view of batch) if (!view.disposed) view.deliver('startup');
+        }, limits.startupMs);
+        worker.onerror = event => {if (worker !== markdownWorker) return; event.preventDefault(); markdownFailure('worker');};
+        worker.onmessageerror = () => {if (worker === markdownWorker) markdownFailure('worker');};
+        worker.onmessage = event => {
+          if (worker !== markdownWorker) return;
+          let data = event.data;
+          if (!markdownReady) {
+            if (data?.type !== 'ready') return;
+            clearTimeout(markdownTimer); markdownReady = true; pumpMarkdown(); return;
+          }
+          if (!markdownRun) return;
+          if (performance.now() - markdownRun.began > limits.parseMs) {markdownFailure('timeout'); return;}
+          if (data instanceof ArrayBuffer) {
+            if (data.byteLength > limits.messageBytes) {markdownFailure('message'); return;}
+            try {data = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(data));}
+            catch {markdownFailure('structure'); return;}
+          }
+          if (data?.id !== markdownRun.id) {markdownFailure('structure'); return;}
+          markdownResult(data.type === 'result' ? null : Object.hasOwn(reasons, data.reason) ? data.reason : 'worker', data.tree);
+        };
+      } catch {
+        const batch = [...markdownQueue]; markdownQueue.clear(); stopMarkdownWorker();
+        for (const view of batch) if (!view.disposed) view.deliver('worker');
+      }
+      return;
+    }
+    if (!markdownReady) return;
+    const view = markdownQueue.values().next().value; markdownQueue.delete(view);
+    if (view.disposed) {pumpMarkdown(); return;}
+    markdownRun = {view, version: view.version, id: ++markdownSerial, began: performance.now()};
+    markdownTimer = setTimeout(() => markdownFailure('timeout'), limits.parseMs);
+    try {markdownWorker.postMessage({type: 'parse', id: markdownRun.id, text: view.text});}
+    catch {markdownFailure('worker');}
+  }
+  function createMarkdownView({element, text = '', onChange} = {}) {
+    if (!(element instanceof Element)) throw new TypeError('A Markdown host element is required');
+    if (markdownViews.size >= 100) throw new Error('Chat Markdown view budget exceeded');
+    const view = {text: '', bytes: 0, version: 0, disposed: false, listeners: []};
+    markdownViews.add(view); element.classList.add('development-markdown');
+    function clearListeners() {for (const remove of view.listeners) remove(); view.listeners = [];}
+    const report = reason => {if (typeof onChange === 'function') onChange({reason: reason || null});};
+    const listen = (node, name, callback) => {node.addEventListener(name, callback); view.listeners.push(() => node.removeEventListener(name, callback));};
+    view.deliver = (reason, tree) => {
+      if (view.disposed) return;
+      clearListeners();
+      if (!reason) {
+        try {
+          const dom = buildDOM(tree, undefined, listen, value => report(value));
+          dom.className = 'development-markdown-body'; element.replaceChildren(dom);
+        } catch (error) {reason = reasonOf(error);}
+      }
+      if (reason) {
+        clearListeners();
+        const source = make('div', view.text, 'development-markdown-plain');
+        source.style.whiteSpace = 'pre-wrap'; source.style.overflowWrap = 'anywhere';
+        element.replaceChildren(source); element.dataset.markdownFallback = reason;
+      } else delete element.dataset.markdownFallback;
+      report(reason);
+    };
+    function update(next) {
+      if (view.disposed || next === view.text && view.version) return;
+      let fallback;
+      try {admit(next);} catch (error) {
+        fallback = reasonOf(error);
+        if (fallback !== 'lines') {report(fallback); return;}
+      }
+      const size = byteLength(next);
+      if (markdownBytes - view.bytes + size > 1024 * 1024) {report('bytes'); return;}
+      markdownBytes += size - view.bytes; view.bytes = size; view.text = next; view.version++;
+      if (fallback) {markdownQueue.delete(view); view.deliver(fallback); return;}
+      // The first real text is readable while its safe Markdown preview builds.
+      if (!element.childNodes.length) {
+        const initial = make('div', next, 'development-markdown-plain');
+        initial.style.whiteSpace = 'pre-wrap'; initial.style.overflowWrap = 'anywhere'; element.append(initial);
+      }
+      markdownQueue.add(view); pumpMarkdown();
+    }
+    function dispose() {
+      if (view.disposed) return;
+      view.disposed = true; markdownViews.delete(view); markdownQueue.delete(view);
+      markdownBytes -= view.bytes; view.bytes = 0; view.text = ''; clearListeners(); element.replaceChildren();
+      if (!markdownViews.size) stopMarkdownWorker();
+    }
+    update(text);
+    return {element, update, dispose};
+  }
+
   function createTextReader(options = {}) {
     if (typeof options.text !== 'string') throw new TypeError('ForgeReading text must be a string');
     if (options.defaultMode !== undefined && !['preview', 'source'].includes(options.defaultMode)) throw new TypeError('Invalid reading mode');
@@ -514,5 +644,5 @@
     }
     return {element, dispose,ready};
   }
-  globalThis.ForgeReading = Object.freeze({createTextReader, limits,initialReady:true});
+  globalThis.ForgeReading = Object.freeze({createTextReader, createMarkdownView, limits,initialReady:true});
 })();

@@ -8,15 +8,76 @@ exports.apply = function(ctx, config) {
   const FRAME=1024*1024, TOTAL=16*1024*1024, BLOCK=128*1024, ATTEMPT=1024*1024;
   let input='', decoder=new StringDecoder('utf8'), agent, session, current, timer;
   let closed=false, failed=false, sent=0, frames=0, attempts=0, revision=0;
+  let metricStep, metricSequence=-1;
+  const calls=new Map();
   const identity=value=>typeof value==='string' && value.length>0 && Buffer.byteLength(value)<=256;
   const validIndex=value=>Number.isSafeInteger(value) && value>=0 && value<65536;
-  function write(value) {
-    const raw=JSON.stringify({jsonrpc:'2.0',method:'demiflow/assistant-stream',params:{sessionId:session.id,...value}})+'\n';
+  const count=value=>Number.isSafeInteger(value) && value>=0;
+  const time=value=>typeof value==='number' && Number.isFinite(value) && value>=0 && value<=Number.MAX_SAFE_INTEGER;
+  function write(value,method='demiflow/assistant-stream') {
+    const raw=JSON.stringify({jsonrpc:'2.0',method,params:{sessionId:session.id,...value}})+'\n';
     const size=Buffer.byteLength(raw);
     if(size>FRAME || sent+size>TOTAL || ++frames>20000 || process.stdout.writableLength+size>2*FRAME)
       throw new Error('stream budget');
     sent+=size;
     process.stdout.write(raw);
+  }
+  function metric(event,kind,turn,fields={}) {
+    if(!count(event.seq) || !count(turn)) return;
+    write({metrics:{format:'demiflow_native_metrics_v1',kind,event_sequence:event.seq,native_turn:turn,...fields}},
+      'demiflow/metrics');
+  }
+  function usage(value) {
+    if(!value || typeof value!=='object' || !count(value.inputTokens) || !count(value.outputTokens)) return null;
+    const result={inputTokens:value.inputTokens,outputTokens:value.outputTokens};
+    for(const key of ['totalTokens','cacheReadTokens','cacheWriteTokens']) {
+      if(value[key]!==undefined) {if(!count(value[key])) return null;result[key]=value[key];}
+    }
+    return result;
+  }
+  function modelMetric(event) {
+    const data=event.data;
+    if(!count(data?.turn) || !count(data.step) || data.turn!==current.turn || data.step!==current.step) return;
+    const timing={};
+    if(metricStep?.turn===data.turn && metricStep.step===data.step && time(event.time)) {
+      timing.llm_ms=Math.max(0,event.time-metricStep.start);
+      if(metricStep.first!==null) {
+        timing.ttft_ms=Math.max(0,metricStep.first-metricStep.start);
+        timing.decode_ms=Math.max(0,event.time-metricStep.first);
+      }
+      // Match native sessionStats: an assembled message consumes step timing.
+      metricStep=undefined;
+    }
+    metric(event,'model',data.turn,{native_step:data.step,attempt_id:current.id,
+      message_id:data.message.id,usage:data.usage===undefined?current.usage??null:usage(data.usage),timing});
+  }
+  function sessionEvent(source,event) {
+    if(closed || failed || !agent || source!==session || agent.session!==session || ctx.agents.get(session.id)!==agent) return;
+    if(!['step/start','step/end','llm/retry-started','tool/call','tool/result','turn/end'].includes(event?.type)) return;
+    try {
+      if(!count(event.seq) || event.seq<=metricSequence) return;
+      metricSequence=event.seq;
+      const data=event.data;
+      if(event.type==='step/start' && count(data?.turn) && count(data.step)) {
+        metricStep=time(event.time)?{turn:data.turn,step:data.step,start:event.time,first:null}:undefined;
+        metric(event,'step_started',data.turn,{native_step:data.step});
+      } else if(event.type==='step/end' && count(data?.turn) && count(data.step)) {
+        metric(event,'step_ended',data.turn,{native_step:data.step});metricStep=undefined;
+      } else if(event.type==='llm/retry-started' && count(data?.turn) && count(data.step)) {
+        metric(event,'retry_started',data.turn,{native_step:data.step});
+      } else if(event.type==='tool/call' && identity(data?.callId) && count(data.turn) && time(event.time)) {
+        if(calls.size>=128 && !calls.has(data.callId)) throw new Error('tool timing budget');
+        calls.set(data.callId,{turn:data.turn,time:event.time});
+      } else if(event.type==='tool/result') {
+        const id=data?.message?.source?.callId, call=calls.get(id);
+        if(call) {
+          calls.delete(id);
+          if(time(event.time)) metric(event,'tool',call.turn,{call_id:id,duration_ms:Math.max(0,event.time-call.time)});
+        }
+      } else if(event.type==='turn/end' && count(data?.turn)) {
+        metric(event,'turn_ended',data.turn);metricStep=undefined;calls.clear();
+      }
+    } catch {fail();}
   }
   function fail() {
     if(failed || closed) return;
@@ -61,7 +122,7 @@ exports.apply = function(ctx, config) {
       revision=frame.revision;
       if(frame.type==='start') {
         if(current || ++attempts>128) throw new Error('attempt boundary');
-        current={id:frame.attemptId,index:0,blocks:new Map(),bytes:0};
+        current={id:frame.attemptId,turn:frame.turn,step:frame.step,index:0,blocks:new Map(),bytes:0};
         write({phase:'start',attemptId:current.id});return;
       }
       if(!current || frame.attemptId!==current.id || frame.index!==current.index)
@@ -70,6 +131,13 @@ exports.apply = function(ctx, config) {
         current.index++;
         if(current.index>65536) throw new Error('chunk budget');
         const chunk=frame.chunk;
+        if(chunk?.type==='usage') current.usage=usage(chunk.usage);
+        // Native isTokenDelta's timestamp rule, without retaining or exporting
+        // tool arguments, replay metadata, or private model content.
+        if(metricStep && metricStep.turn===current.turn && metricStep.step===current.step && metricStep.first===null && time(frame.time) &&
+          ((['text-delta','reasoning-delta'].includes(chunk?.type) && typeof chunk.text==='string' && chunk.text!=='') ||
+           (chunk?.type==='tool-call-delta' && (typeof chunk.argumentsDelta==='string' && chunk.argumentsDelta!=='' || chunk.name!==undefined))))
+          metricStep.first=frame.time;
         if(chunk?.type==='block-start' && ['text','reasoning'].includes(chunk.blockType)) {
           if(!validIndex(chunk.index) || current.blocks.has(chunk.index) || current.blocks.size>=64)
             throw new Error('block identity');
@@ -91,13 +159,14 @@ exports.apply = function(ctx, config) {
           }
         }
         // All other chunk fields/types (including finish/replay/source/tool
-        // arguments and usage) stay on their existing native/ACP paths.
+        // arguments) stay on their existing native/ACP paths. Usage retains
+        // only the whitelisted numeric billing buckets above.
         return;
       }
       if(frame.type!=='end') throw new Error('unknown stream phase');
       flush();
       const outcome=frame.outcome;
-      let messageId, incomplete=true;
+      let messageId, committed, incomplete=true;
       if(outcome?.kind==='committed' && outcome.eventType==='assistant/message') {
         if(!Number.isSafeInteger(outcome.seq) || outcome.seq<0) throw new Error('settlement sequence');
         const events=session.snapshotEvents(outcome.seq,outcome.seq+1);
@@ -105,6 +174,7 @@ exports.apply = function(ctx, config) {
         if(events.length!==1 || event.seq!==outcome.seq || event.type!=='assistant/message' ||
             !identity(event.data?.message?.id) || !Array.isArray(event.data.message.content)) throw new Error('settlement identity');
         messageId=event.data.message.id;incomplete=event.data.interrupted===true;
+        committed=event;
         const publicBlocks=event.data.message.content.filter(block=>block?.type==='text' || block?.type==='reasoning');
         // Cancellation removes whitespace/tool blocks. Match ordered public
         // block identities, never matching repeated text or string prefixes.
@@ -122,6 +192,9 @@ exports.apply = function(ctx, config) {
       } else throw new Error('unknown settlement');
       write({phase:'settled',attemptId:current.id,...(messageId===undefined?{}:{messageId}),
         status:incomplete?'incomplete':'complete'});
+      if(committed) modelMetric(committed);
+      else if(outcome?.kind==='committed' && outcome.eventType==='assistant/attempt' && count(outcome.seq) && count(current.turn) && count(current.step))
+        metric({seq:outcome.seq},'attempt',current.turn,{native_step:current.step,attempt_id:current.id,usage:current.usage??null});
       current=undefined;
     } catch {fail();}
   }
@@ -151,7 +224,8 @@ exports.apply = function(ctx, config) {
   };
   process.stdin.on('data',data);
   ctx.on('agent/assistant-stream',receive,{global:true});
-  ctx.effect(()=>()=>{closed=true;clearTimeout(timer);current=undefined;input='';process.stdin.off('data',data);});
+  ctx.on('session/event',sessionEvent,{global:true});
+  ctx.effect(()=>()=>{closed=true;clearTimeout(timer);current=undefined;metricStep=undefined;calls.clear();input='';process.stdin.off('data',data);});
   // The ACP profile waits for this fixed readiness service before owning stdio,
   // so even its first prompt cannot race installation of the observer.
   ctx.provide('demiflowAssistantStreamReady',{ready:true});
