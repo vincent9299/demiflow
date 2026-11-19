@@ -23,8 +23,13 @@ def capture_managed_pipeline(entry, arguments, *, limits, on_compiled=None):
         with local_execution(worker_mode='thread', partitions=1, batch_rows=limits['batch_rows'],
                 block_size=limits['batch_rows'], memory_bytes=limits['memory_bytes']):
             return entry(**arguments)
-    return capture_pipeline(construct, {}, on_compiled=on_compiled,
-                            _submission=True, _limits=limits)
+    try:
+        return capture_pipeline(construct, {}, on_compiled=on_compiled,
+                                _submission=True, _limits=limits)
+    except DataflowError as exc:
+        # Host inspection returns a bounded admission rejection. It has not
+        # started data/model execution; do not lose it as a worker crash.
+        raise ValueError(str(exc)) from exc
 
 
 def native_submission_view(captured):

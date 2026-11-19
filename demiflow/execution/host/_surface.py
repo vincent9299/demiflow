@@ -186,7 +186,9 @@ SURFACE = {'constructor_keywords': {'RunJournal': ['directory', 'attempt'],
                                                 'access its state. CheckedExecution.bind_context() '
                                                 'independently uses original ContextVar mechanism; '
                                                 'no new coupling.'},
-             'control.RunJournal': {'conditional': 'reserve_nodes/reserve_actions only initial '
+             'control.RunJournal': {'conditional': 'connection_scope is process-local bounded connection reuse; '
+                                                   'transactions and attempt fencing remain per operation. '
+                                                   'reserve_nodes/reserve_actions only initial '
                                                    'prepare; resumed managed attempts must pass '
                                                    'both to begin_attempt. Remove listed read '
                                                    'members that final facts migration leaves '
@@ -319,6 +321,7 @@ SURFACE = {'constructor_keywords': {'RunJournal': ['directory', 'attempt'],
              'RunContext': ['attach', '__enter__', '__exit__'],
              'RunJournal': ['directory',
                             'attempt',
+                            'connection_scope',
                             'initialize',
                             'execution_status',
                             'transition',
@@ -356,7 +359,9 @@ SURFACE = {'constructor_keywords': {'RunJournal': ['directory', 'attempt'],
                                                            'reference alias; no nested reads, '
                                                            'conversion, copying or escaping '
                                                            'through another callable.'}},
- 'parameter_origins': {'demiflow/workbench/graph/plan_callsite.py:_observe': {'receiver': 'Dataset',
+ 'parameter_origins': {'demiflow/workbench/runs/worker.py:_execute': {'run': 'RunJournal'},
+                       'demiflow/workbench/runs/worker.py:_supervise': {'run': 'RunJournal'},
+                       'demiflow/workbench/graph/plan_callsite.py:_observe': {'receiver': 'Dataset',
                                                                               'returned': 'Dataset'},
                        'demiflow/workbench/graph/plan_details.py:_configuration_detail': {'projected': 'NodeConfigurationMaterial'},
                        'demiflow/workbench/graph/plan_details.py:_implementation': {'reference': 'NodeImplementationMaterial'},
@@ -417,7 +422,8 @@ SURFACE = {'constructor_keywords': {'RunJournal': ['directory', 'attempt'],
                                                                    'pinned project entry after '
                                                                    'worker guards; not an engine '
                                                                    'dependency loader.'},
- 'result_origins': {'CapturedAction.compiled': 'CompiledDataflow',
+ 'result_origins': {'RunJournal.connection_scope': 'RunJournal',
+                    'CapturedAction.compiled': 'CompiledDataflow',
                     'CapturedAction.submission': 'record:NativeSubmission',
                     'NativeExecution.bind_context': 'NativeExecution',
                     'CheckedExecution.bind_context': 'CheckedExecution',

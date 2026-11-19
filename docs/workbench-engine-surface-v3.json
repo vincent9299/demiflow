@@ -433,7 +433,7 @@
       "returned": "Existing context manager establishment only; worker does not bind returned RunContext or access its state. CheckedExecution.bind_context() independently uses original ContextVar mechanism; no new coupling."
     },
     "control.RunJournal": {
-      "conditional": "reserve_nodes/reserve_actions only initial prepare; resumed managed attempts must pass both to begin_attempt. Remove listed read members that final facts migration leaves unused; never expand to arbitrary class members.",
+      "conditional": "connection_scope is process-local bounded connection reuse; transactions and attempt fencing remain per operation. reserve_nodes/reserve_actions only initial prepare; resumed managed attempts must pass both to begin_attempt. Remove listed read members that final facts migration leaves unused; never expand to arbitrary class members.",
       "constructor": "directory, attempt=None; existing approved public options only, no _maintenance_deadline from host",
       "forbidden": [
         "db",
@@ -615,6 +615,7 @@
     "RunJournal": [
       "directory",
       "attempt",
+      "connection_scope",
       "initialize",
       "execution_status",
       "transition",
@@ -686,6 +687,12 @@
       "journal": "RunJournal"
     },
     "demiflow/workbench/runs/storage.py:clean_stopped": {
+      "run": "RunJournal"
+    },
+    "demiflow/workbench/runs/worker.py:_execute": {
+      "run": "RunJournal"
+    },
+    "demiflow/workbench/runs/worker.py:_supervise": {
       "run": "RunJournal"
     },
     "demiflow/workbench/runs/worker.py:sample_output": {
@@ -764,6 +771,7 @@
     "NodeConfigurationMaterial.engine_configuration": "opaque:configuration",
     "ProgramPromptMaterials.prompts": "seq:PromptMaterial",
     "PromptMaterial.definition": "PromptDefinition",
+    "RunJournal.connection_scope": "RunJournal",
     "contextlib.ExitStack": "stdlib:ExitStack",
     "demiflow.data.dataset.Dataset": "Dataset",
     "demiflow.data.dataset.MaterializedDataset": "Dataset",
