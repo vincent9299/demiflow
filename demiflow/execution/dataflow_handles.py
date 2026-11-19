@@ -370,6 +370,9 @@ class RuntimeActionHandle:
             self._close_called = True
         self._cleanup()
         if self._failure is not None:
+            for error in self._cleanup_errors:
+                if error is not self._failure:
+                    self._failure.add_note('Action cleanup also failed: ' + str(error))
             raise self._failure
         if self._cleanup_errors:
             raise self._cleanup_errors[0]
