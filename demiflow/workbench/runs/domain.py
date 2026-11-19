@@ -209,7 +209,8 @@ def _owner_finished(owner):
 
 
 def reserve(path, config, root, manifest, attempt):
-    outputs = [_target(o["uri"]) for o in manifest["outputs"].values()]
+    outputs = [_target(path) for path in dict.fromkeys(
+        o.get('allocation_root', o['uri']) for o in manifest['outputs'].values())]
     if len(outputs) > 32:
         raise ForgeError("Output lease budget exceeded")
     limits = manifest["limits"]

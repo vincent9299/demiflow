@@ -28,6 +28,35 @@ def capacity_domain(value=None):
     return root
 
 
+def environment_names(value):
+    """Names only; credential values never enter the run manifest or report."""
+    import re
+    if (type(value) is not list or len(value) > 32
+            or any(type(name) is not str or not re.fullmatch(r'[A-Z_][A-Z0-9_]{0,127}', name)
+                   or name in {'HOME', 'PATH', 'TMPDIR', 'LD_PRELOAD', 'LD_LIBRARY_PATH'}
+                   or name.startswith(('PYTHON', 'DEMIFLOW_', 'CUDA_')) for name in value)
+            or len(set(value)) != len(value)):
+        raise ForgeError('Invalid deployment execution environment names')
+    return sorted(value)
+
+
+def trusted_environment(*, workspace):
+    """Deployment-owned per-project CLI credentials/settings, never request input."""
+    path = os.environ.get('DEMIFLOW_WORKBENCH_RUN_ENVIRONMENT')
+    if not path:
+        return []
+    path = no_symlinks(Path(path))
+    root = Path(workspace).absolute()
+    if not path.is_absolute() or path.is_relative_to(root):
+        raise ForgeError('Execution environment declaration must be deployment-owned')
+    value = json.loads(read_bounded(path, MAX_BYTES))
+    if (type(value) is not dict or set(value) != {'format', 'workspaces'}
+            or value['format'] != 'demiflow_managed_environment_v1'
+            or type(value['workspaces']) is not dict or len(value['workspaces']) > 128):
+        raise ForgeError('Invalid deployment execution environment declaration')
+    return environment_names(value['workspaces'].get(str(root), []))
+
+
 def validate(value):
     """Validate an already sealed/trusted declaration without allocating."""
     if type(value) is not dict or set(value) != {

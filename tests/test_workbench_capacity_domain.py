@@ -44,3 +44,21 @@ def test_capacity_domain_is_host_internal_not_a_client_run_parameter(tmp_path):
     with pytest.raises(ForgeError, match='unknown run arguments'):
         OPERATIONS['prepare'].validate(arguments)
     assert worker_arguments('run_prepare', arguments)['capacity_domain'] == str(tmp_path)
+
+
+def test_deployment_environment_is_explicit_project_scoped_and_names_only(tmp_path, monkeypatch):
+    import json
+    root = tmp_path / 'project'
+    root.mkdir()
+    declaration = tmp_path / 'host-env.json'
+    declaration.write_text(json.dumps(dict(format='demiflow_managed_environment_v1',
+        workspaces={str(root): ['MODEL_API_KEY', 'TOOL_SETTINGS']})))
+    monkeypatch.setenv('DEMIFLOW_WORKBENCH_RUN_ENVIRONMENT', str(declaration))
+    monkeypatch.setenv('MODEL_API_KEY', 'private-test-value')
+    assert native_resources.trusted_environment(workspace=root) == ['MODEL_API_KEY', 'TOOL_SETTINGS']
+    assert native_resources.trusted_environment(workspace=tmp_path / 'other') == []
+    with pytest.raises(ForgeError):
+        OPERATIONS['prepare'].validate(dict(entry='x.py:run', params={}, environment_names=['MODEL_API_KEY']))
+    for names in (['HOME'], ['PYTHONPATH'], ['TMPDIR'], ['DEMIFLOW_RESOURCE_ROOT'], [{}]):
+        with pytest.raises(ForgeError):
+            native_resources.environment_names(names)

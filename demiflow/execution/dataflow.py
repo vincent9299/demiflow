@@ -441,6 +441,11 @@ class DataflowExecution:
                                             store=self._store, bounds=self._bounds, live_binding=live_binding)
         else:
             compiled = lower_action(self._request, bounds=self._bounds)
+            from .checked import current
+            from .managed_native import NativeExecution
+            checked = current()
+            if isinstance(checked, NativeExecution):
+                compiled = checked.admit_compiled(self._request, compiled, bounds=self._bounds)
             graph = stage_dataflow_programs(compiled, action=self._action, store=self._store,
                                             bounds=self._bounds, worker_mode=self._policy.worker_mode)
             if producer is not None:

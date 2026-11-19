@@ -176,7 +176,7 @@ def test_late_parameter_response_does_not_replace_selected_run(root, browser):
         assert not errors, errors
 
 
-def test_native_entry_without_managed_bindings_does_not_create_run(root, browser):
+def test_native_entry_without_create_schema_contract_does_not_create_run(root, browser):
     (root/'flows/native.py').write_text('''from demiflow import data
 def run(*, directory):
     return data.from_items([{'value': 1}]).write_lance(directory + '/product.lance')
@@ -191,8 +191,9 @@ def run(*, directory):
         button = page.locator('.wb-actions').get_by_role('button', name='运行', exact=True)
         expect(button).to_be_enabled()
         button.click()
-        expect(page.locator('.wb-notice')).to_contain_text('尚未接入受管提交')
+        expect(page.locator('.wb-run-confirmation')).to_be_visible()
+        page.get_by_role('button', name='确认运行', exact=True).click()
+        expect(page.locator('.wb-notice')).to_contain_text('requires create')
         assert runs.list_runs(root)['total'] == 0
         assert not (root/'never-created').exists()
-        expect(page.locator('.wb-run-confirmation')).not_to_be_visible()
         assert not errors, errors

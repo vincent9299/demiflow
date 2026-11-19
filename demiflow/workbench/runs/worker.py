@@ -76,7 +76,7 @@ def execute(root, run_id, attempt=None):
         run.transition({'starting'}, 'running', worker=process_identity(os.getpid()), running_at=time.time())
         source = target / 'source'
         _source_imports(source, report['binding']['sources'])
-        module, function = manifest['entry'].split(':')
+        module, function = report['binding'].get('source_entry', manifest['entry']).split(':')
         entry = getattr(importlib.import_module(module[:-3].replace('/', '.')), function)
         import inspect
         if Path(inspect.getfile(entry)).resolve() != source / module:
@@ -97,7 +97,13 @@ def execute(root, run_id, attempt=None):
                 if errors:
                     registration_failed[0] = True
                     raise RuntimeError('Committed output registration failed: ' + '; '.join(errors))
-        context = CheckedExecution(nodes=report['nodes'], edges=report['edges'], actions=report['actions'],
+        context_type = CheckedExecution
+        context_options = {}
+        if manifest.get('native_submission'):
+            from demiflow.execution.host.control import NativeExecution
+            context_type = NativeExecution
+            context_options['contract'] = report['native_contract']
+        context = context_type(**context_options, nodes=report['nodes'], edges=report['edges'], actions=report['actions'],
             operators=report['operators'], source_root=source, resource_root=target, work_root=work, limits=limits,
             record=record, check_stop=check_stop, observe=run.observe_nodes,
             targets=report['binding']['targets'], report_digest=manifest['report_digest'])
@@ -288,7 +294,11 @@ def _supervise(root, run_id, lease, attempt=None):
         for output in manifest['outputs'].values():
             Path(output['uri']).parent.mkdir(parents=True, exist_ok=True)
         from demiflow.execution.output_watch import OutputWatch
-        output_watch = OutputWatch([output['uri'] for output in manifest['outputs'].values()])
+        # A new native output directory may also contain business delivery
+        # files (for example image archives). Account the admitted directory,
+        # while published table identities remain the exact compiled URIs.
+        output_watch = OutputWatch(list(dict.fromkeys(
+            output.get('allocation_root', output['uri']) for output in manifest['outputs'].values())))
         env = runs.worker_environment(target, limits, manifest.get('credential_names', []),
                                       native_execution=manifest.get('native_execution'),
                                       capacity_domain=manifest.get('capacity_domain'))

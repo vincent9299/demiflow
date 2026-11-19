@@ -129,7 +129,7 @@ def make_action_request(executor: "DatasetExecutor", source: SourcePlan, plan: L
     from .plan_capture import current_capture
     capture = current_capture()
     if capture is not None:
-        action = RunAction(capture.context, 'preview', declaration)
+        action = RunAction(capture.context, capture.action_id, declaration)
     if action is None:
         run = current_run()
         if run is None:

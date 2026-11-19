@@ -159,6 +159,9 @@ def dispatch(request):
         elif op == 'plan_preview':
             from demiflow.workbench.graph.preview import _preview
             value = _preview(root, **args)
+        elif op == 'native_submission_inspect':
+            from demiflow.workbench.runs.native_submission import inspect_submission
+            value = inspect_submission(root, **args)
         elif op == 'workbench_source':
             from demiflow.workbench.graph.model import _source_tree
             value=_source_tree(root,**args)

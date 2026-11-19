@@ -302,7 +302,13 @@ def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
     if basis_kind == 'source':
         logical_view = logical.unchecked()
     else:
-        logical_view = logical.project(nodes, report.get('edges', []), report.get('actions', []))
+        if report.get('format') == 'demiflow_forge_native_inspection_v1':
+            logical_view = dict(format=logical.FORMAT, basis='compiled', available=True,
+                reason=None, detail=None, semantic_unchecked=False, action_count=1, truncated=False,
+                actions=[dict(action_id=report['actions'][0], status='compiled', binding_level='compiled',
+                              dag=report['native_dag'], node_map={})])
+        else:
+            logical_view = logical.project(nodes, report.get('edges', []), report.get('actions', []))
         if basis_kind == 'run':
             from demiflow.workbench.runs import facts
             logical_view = facts.overlay_sealed(root, run_id, logical_view, report_digest=report['digest'])
@@ -523,5 +529,6 @@ def bound_source(root, binding, node_id, *, include_parameters=True, logical_nod
     from demiflow.workbench.graph.parameters import public_model
     return dict(binding=observed, nodes=[node], sources=evidence.get('sources', {}),
                 sealed_code_pin_ref=sealed_code_pin_ref,
+                native_details=report.get('native_details'), native_contract=report.get('native_contract'),
                 parameters=public_model(root, control, observed['entry'], observed['params'], [node],
                                         readonly=True, sealed=evidence.get('parameters', {})))
