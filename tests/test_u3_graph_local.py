@@ -93,15 +93,52 @@ def test_local_graph_six_targets_shared_egress_once(tmp_path):
 
 
 def test_local_graph_slow_target_does_not_block_unrelated(tmp_path):
-    spec, readers, n = _graph_spec(n=60, slow_reader="c3")
-    result = _execute(tmp_path, spec, readers, n)
-    arrival = result["final_arrival"]
+    # A measured sleep does not prove isolation: process startup and host load
+    # can consume its whole margin. The slow worker instead refuses its first
+    # output until every other branch has processed the complete source.
+    entered = tmp_path / "slow-branch-entered"
+    release = tmp_path / "slow-branch-released"
+    markers = tuple(str(tmp_path / ("complete-" + rid))
+                    for rid in ("c0", "c1", "c2", "c4", "c5"))
+
+    def gated_passthrough(row):
+        import time as _time
+        from pathlib import Path as _Path
+        entered.touch()
+        deadline = _time.monotonic() + 30
+        while not all(_Path(marker).exists() for marker in markers):
+            if _time.monotonic() >= deadline:
+                raise AssertionError("unrelated graph branches cannot finish while the slow branch waits")
+            _time.sleep(0.005)
+        release.touch()
+        return row
+
+    def fast_passthrough(marker):
+        def apply(row):
+            import time as _time
+            from pathlib import Path as _Path
+            if row['x'] == 118:
+                # A serial executor cannot pass by finishing fast branches
+                # before it ever schedules the slow branch.
+                deadline = _time.monotonic() + 30
+                while not entered.exists():
+                    if _time.monotonic() >= deadline:
+                        raise AssertionError("slow graph branch was never scheduled independently")
+                    _time.sleep(0.005)
+                _Path(marker).touch()
+            return row
+        return apply
+
+    spec, readers, n = _graph_spec(n=60, slow_reader=None)
     fast = [rid for rid in readers if rid != "c3"]
-    latest_fast = max(arrival[rid] for rid in fast)
-    assert arrival["ancestor"] < arrival["c3"]
-    assert latest_fast < arrival["c3"]
-    assert arrival["c3"] - latest_fast > 0.1, (arrival["c3"], latest_fast)
-    assert result["target_rows"]["c3"] == n
+    for target in spec['targets']:
+        rid = target['reader_id']
+        fn = gated_passthrough if rid == 'c3' else fast_passthrough(str(tmp_path / ("complete-" + rid)))
+        target['plan'] = _stream_map(fn)
+    result = _execute(tmp_path, spec, readers, n)
+    assert entered.exists() and release.exists()
+    assert all((tmp_path / ("complete-" + rid)).exists() for rid in fast)
+    assert result["target_rows"] == {rid: n for rid in readers}
     assert result["egress_rows"] == n
 
 

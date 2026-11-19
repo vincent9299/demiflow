@@ -531,9 +531,11 @@ def _run_graph(graph_spec, executor, *, control_timeout_s):
         return graph_result(handle._execution)
     finally:
         try:
-            record_execution_metadata(request, handle._execution)
-        finally:
+            # Drain captures final prompt/model usage before projection, even
+            # when the operation failed. Metadata must include those receipts.
             handle.close()
+        finally:
+            record_execution_metadata(request, handle._execution)
 
 
 def _validate_graph_location(executor, *, host_id, resource_root):
