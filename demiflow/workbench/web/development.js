@@ -241,7 +241,7 @@ SOFTWARE.
     const sessionPages=el('div',undefined,'development-session-pages'),sessionNote=el('p','正在读取会话…','development-session-note');sidebar.append(navigation.element,sideHeading,sessionList,sessionPages,sessionNote);layout.prepend(sidebar);
     const backdrop=el('button',undefined,'development-sidebar-backdrop');backdrop.type='button';backdrop.setAttribute('aria-label','关闭会话列表');layout.append(backdrop);
     const head=el('div',undefined,'development-controls'),sideToggle=iconButton('会话列表','M3 4h18v16H3zM9 4v16');
-    function sidebarOpen(value){layout.dataset.sidebar=value?'open':'closed';sideToggle.setAttribute('aria-expanded',String(value));sidebar.hidden=!value;backdrop.hidden=!value;(value?navigation.actions:head).prepend(sideToggle);}
+    function sidebarOpen(value){layout.dataset.sidebar=value?'open':'closed';sideToggle.setAttribute('aria-expanded',String(value));sidebar.hidden=!value;backdrop.hidden=!value;if(value)navigation.actions.append(sideToggle);else head.prepend(sideToggle);}
     sideToggle.onclick=()=>{sidebarOpen(layout.dataset.sidebar!=='open');sideToggle.focus();};
     const closeSidebar=()=>{sidebarOpen(false);sideToggle.focus();};backdrop.onclick=closeSidebar;
     sidebar.onkeydown=event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();closeSidebar();}};

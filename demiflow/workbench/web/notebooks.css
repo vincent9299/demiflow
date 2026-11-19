@@ -3,7 +3,7 @@ main.native-data-active{padding:0!important;max-width:none!important;overflow:hi
 .native-data-workspace{display:grid;grid-template-columns:240px minmax(0,1fr);height:calc(100dvh - 68px);min-height:340px;background:#fff}
 .data-dictionary{min-width:0;padding:20px 12px;background:#f8f9fb;border-right:1px solid #e8eaf0;overflow:auto}
 .dictionary-table{margin:2px 0;border:0!important;background:transparent!important;padding:0!important}
-.dictionary-table>summary{display:flex;align-items:center;gap:8px;position:relative;list-style:none;border-radius:6px;padding:8px 8px 8px 22px;font-size:13px;color:#394252}
+.dictionary-table>summary{display:flex;align-items:center;gap:8px;position:relative;list-style:none;border-radius:6px;padding:5px 8px 5px 22px;font-size:13px;color:#394252}
 .dictionary-table>summary::-webkit-details-marker{display:none}
 .dictionary-table>summary::before{content:'›';position:absolute;left:8px;color:#8d95a3;font-size:17px;line-height:1;transform-origin:center}
 .dictionary-table[open]>summary::before{transform:rotate(90deg)}
@@ -13,7 +13,7 @@ main.native-data-active{padding:0!important;max-width:none!important;overflow:hi
 .dictionary-fields{padding:3px 8px 8px 22px}
 .dictionary-meta,.dictionary-empty{font-size:11px!important;line-height:1.6;color:#8a91a1;margin:5px 0 9px;overflow-wrap:anywhere}
 .dictionary-empty{padding:10px}
-.dictionary-field{display:flex;justify-content:space-between;gap:8px;padding:4px 0;font-size:12px;color:#515b6d}
+.dictionary-field{display:flex;justify-content:space-between;gap:8px;padding:2px 0;font-size:12px;color:#515b6d}
 .dictionary-field>span{min-width:0;overflow-wrap:anywhere}
 .dictionary-field small{color:#9aa0ad;white-space:nowrap;font-size:10px}
 .dictionary-actions{margin-top:8px}
@@ -24,4 +24,4 @@ main.native-data-active{padding:0!important;max-width:none!important;overflow:hi
 .native-notebook-frame{position:fixed;border:0;background:white;z-index:2}
 .native-notebook-frame[hidden]{display:none!important}
 @media(max-width:760px){.native-data-workspace{grid-template-columns:170px minmax(0,1fr);height:calc(100dvh - 110px)}.data-dictionary{padding:12px 6px}.dictionary-field{font-size:11px}}
-@media(max-width:480px){.native-data-workspace{grid-template-columns:125px minmax(0,1fr)}.dictionary-table>summary{font-size:11px}.dictionary-fields{padding-left:12px}.dictionary-field{flex-wrap:wrap;gap:0}.dictionary-field small{width:100%}.dictionary-version{display:none}.native-notebook-status{margin:16px;font-size:12px}}
+@media(max-width:480px){.native-data-workspace{grid-template-columns:150px minmax(0,1fr)}.dictionary-table>summary{font-size:11px}.dictionary-fields{padding-left:12px}.dictionary-field{flex-wrap:wrap;gap:0}.dictionary-field small{width:100%}.dictionary-version{display:none}.native-notebook-status{margin:16px;font-size:12px}}
