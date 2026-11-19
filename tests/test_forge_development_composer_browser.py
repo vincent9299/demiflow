@@ -196,3 +196,18 @@ def test_dispose_removes_menus_and_does_not_keep_document_actions_alive(page):
     page.get_by_role('button',name='添加内容',exact=True).click()
     expect(page.get_by_role('menu',name='添加内容')).to_be_hidden()
     assert page.evaluate('events.references')==0
+
+
+def test_connection_distinguishes_shared_configuration_from_project_permission(page):
+    from playwright.sync_api import expect
+    cases=[
+        (dict(enabled=False,start=False,providers=[]),'尚未配置开发代理'),
+        (dict(enabled=False,start=False,providers=[dict(id='deepseek',model='test',available=False)]),'本项目未启用开发'),
+        (dict(enabled=False,start=False,service_configured=True,project_authorized=True,providers=[]),'开发代理暂不可用'),
+    ]
+    for caps,label in cases:
+        page.evaluate('caps=>composer.update({capabilities:caps})',caps)
+        expect(page.locator('.dc-access-label')).to_have_text(label)
+        expect(page.locator('.dc-send')).to_be_disabled()
+        page.locator('.dc-access').click()
+    assert page.evaluate('events.access')==3

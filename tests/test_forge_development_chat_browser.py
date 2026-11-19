@@ -238,8 +238,8 @@ def test_unconfigured_chat_is_compact_and_read_only(tmp_path):
         page.get_by_label('更多对话操作',exact=True).click()
         assert len(waiting)==1
         waiting[0].fulfill(response=waiting[0].fetch())
-        page.locator('.development-status').filter(has_text='尚未连接开发代理').wait_for()
-        expect(page.get_by_label('开发代理')).to_be_hidden()
+        page.locator('.development-status').filter(has_text='尚未配置开发代理').wait_for()
+        expect(page.get_by_label('开发代理',exact=True)).to_be_hidden()
         expect(page.get_by_label('开发要求')).to_be_disabled()
         expect(page.get_by_role('button',name='发送',exact=True)).to_be_disabled()
         assert page.get_by_role('button',name='核对连接状态',exact=True).count()==0

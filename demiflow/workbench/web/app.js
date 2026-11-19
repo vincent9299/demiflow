@@ -19,22 +19,65 @@
     return {element,actions,search};
   }
   let navigationSequence=0;
+  function resizableNavigation({layout,sidebar,label,active=true}) {
+    const handle=$('div',undefined,'side-navigation-resizer'),key='demiflow.navigation-width.'+label;
+    let width=null,drag=null,shield=null,disposed=false;
+    try{const saved=Number(sessionStorage.getItem(key));if(saved>=140&&saved<=560)width=saved;}catch{}
+    if(!sidebar.id)sidebar.id='side-navigation-'+(++navigationSequence);
+    handle.tabIndex=0;handle.setAttribute('role','separator');handle.setAttribute('aria-orientation','vertical');
+    handle.setAttribute('aria-label','调整'+label+'宽度');handle.setAttribute('aria-controls',sidebar.id);
+    handle.title='拖动调整宽度；方向键微调；双击恢复默认';layout.classList.add('side-navigation-layout');layout.append(handle);
+    const bounds=()=>({min:140,max:Math.max(140,Math.min(560,layout.clientWidth-140))});
+    function sync(){
+      if(disposed)return;
+      handle.hidden=!active||sidebar.hidden;if(handle.hidden)return;
+      const {min,max}=bounds();
+      if(width!==null)layout.style.setProperty('--side-navigation-width',Math.max(min,Math.min(max,width))+'px');
+      const rect=sidebar.getBoundingClientRect(),parent=layout.getBoundingClientRect();
+      handle.style.left=(rect.right-parent.left-4)+'px';
+      handle.setAttribute('aria-valuemin',min);handle.setAttribute('aria-valuemax',max);handle.setAttribute('aria-valuenow',Math.round(rect.width));
+    }
+    function setWidth(value){const {min,max}=bounds();width=Math.max(min,Math.min(max,value));sync();}
+    function save(){try{if(width===null)sessionStorage.removeItem(key);else sessionStorage.setItem(key,String(width));}catch{}}
+    function finish(){
+      if(!drag)return;const id=drag.id;drag=null;shield?.remove();shield=null;
+      if(handle.hasPointerCapture(id))handle.releasePointerCapture(id);save();
+    }
+    handle.onpointerdown=event=>{
+      if(event.button!==0||!active)return;event.preventDefault();handle.focus();
+      drag={id:event.pointerId,x:event.clientX,width:sidebar.getBoundingClientRect().width};handle.setPointerCapture(event.pointerId);
+      // Native Notebook is an iframe: keep the gesture in the shell while crossing it.
+      shield=$('div',undefined,'side-navigation-drag-shield');document.body.append(shield);
+    };
+    handle.onpointermove=event=>{if(drag?.id===event.pointerId)setWidth(drag.width+event.clientX-drag.x);};
+    handle.onpointerup=finish;handle.onpointercancel=finish;handle.onlostpointercapture=finish;
+    handle.ondblclick=()=>{width=null;layout.style.removeProperty('--side-navigation-width');save();sync();};
+    handle.onkeydown=event=>{
+      if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+      event.preventDefault();const {min,max}=bounds(),now=sidebar.getBoundingClientRect().width;
+      setWidth(event.key==='Home'?min:event.key==='End'?max:now+(event.key==='ArrowRight'?1:-1)*(event.shiftKey?40:10));save();
+    };
+    const observer=new ResizeObserver(sync);observer.observe(layout);observer.observe(sidebar);sync();
+    return {setActive(value){active=value;if(!active)finish();else if(width===null)layout.style.removeProperty('--side-navigation-width');sync();},dispose(){disposed=true;finish();observer.disconnect();handle.remove();}};
+  }
   function collapsibleNavigation({layout,sidebar,header,label,initialOpen=true,active=true}) {
     let open=initialOpen;
     const reopen=$('div',undefined,'side-navigation-reopen'),toggle=$('button',undefined,'side-navigation-toggle');toggle.type='button';
     if(!sidebar.id)sidebar.id='side-navigation-'+(++navigationSequence);
     toggle.setAttribute('aria-label',label);toggle.setAttribute('aria-controls',sidebar.id);toggle.append(icon(['M3 4h18v16H3zM9 4v16']));
     layout.prepend(reopen);
+    const resize=resizableNavigation({layout,sidebar,label,active:active&&open});
     function render(){
       sidebar.hidden=!active||!open;reopen.hidden=!active||open;
       const target=open?header.actions:reopen;if(toggle.parentElement!==target)target.append(toggle);
       toggle.setAttribute('aria-expanded',String(open));toggle.title=(open?'收起':'展开')+label;
       layout.classList.toggle('side-navigation-closed',!!layout.querySelector(':scope > .side-navigation-reopen:not([hidden])'));
+      resize.setActive(active&&open);
     }
     toggle.onclick=()=>{open=!open;render();toggle.focus();};render();
-    return {setActive(value){active=value;render();}};
+    return {setActive(value){active=value;render();},dispose(){resize.dispose();}};
   }
-  globalThis.ForgeNavigation=Object.freeze({header:navigationHeader,collapsible:collapsibleNavigation});
+  globalThis.ForgeNavigation=Object.freeze({header:navigationHeader,collapsible:collapsibleNavigation,resizable:resizableNavigation});
   const json = value => JSON.stringify(value, null, 2);
   const offline = window.FORGE_EXPORT;
   const V = window.ForgeView;
@@ -574,9 +617,9 @@
     directory.id='document-directory';directory.setAttribute('aria-label','Markdown 文档目录');
     const directoryHeader=ForgeNavigation.header({title:'文档',searchLabel:'搜索文档',placeholder:'筛选已展开的目录',onSearch:filterDocuments});
     directory.append(directoryHeader.element);layout.append(directory,viewer);main.append(layout);main.classList.add('readme-main');
-    ForgeNavigation.collapsible({layout,sidebar:directory,header:directoryHeader,label:'文档目录',initialOpen:!matchMedia('(max-width:760px)').matches});
+    const directoryNavigation=ForgeNavigation.collapsible({layout,sidebar:directory,header:directoryHeader,label:'文档目录',initialOpen:!matchMedia('(max-width:760px)').matches});
     let disposed=false;const current=()=>!disposed&&epoch===viewEpoch&&project===workspaceId;
-    registerViewHandle({dispose(){disposed=true;main.classList.remove('readme-main');}});
+    registerViewHandle({dispose(){disposed=true;directoryNavigation.dispose();main.classList.remove('readme-main');}});
     const navigateDocument=path=>{if(current())return openView(target('overview',{document:path}));};
     function filterDocuments(){
       const term=directoryHeader.search.value.trim().toLocaleLowerCase();
@@ -592,8 +635,8 @@
         host.querySelector(':scope > .document-page')?.remove();host.querySelector(':scope > .document-list-error')?.remove();
         for(const row of result.entries){
           if(row.kind==='directory'){
-            const group=$('details',undefined,'document-folder'),summary=$('summary',row.name),children=$('div',undefined,'document-children');
-            group.dataset.document=row.path;group.append(summary,children);host.append(group);
+            const group=$('details',undefined,'document-folder'),summary=$('summary'),children=$('div',undefined,'document-children');
+            group.dataset.document=row.path;summary.append($('span',row.name));summary.title=row.name;group.append(summary,children);host.append(group);
             group.addEventListener('toggle',()=>{if(group.open)folder(children,row.path);else children.replaceChildren();});
             if(documentPath.startsWith(row.path+'/'))group.open=true;
           }else{
@@ -768,10 +811,30 @@
   function settingsDialog() {
     const project=projectList.find(p=>p.workspace_id===workspaceId);if(!project)return;
     const dialog=$('dialog');dialog.append($('h2','项目设置'),$('p',project.name),$('p',project.root,'muted small'));
+    dialog.setAttribute('aria-label','项目设置');
+    const connection=$('section',undefined,'development-connection-settings'),facts=$('div'),controller=new AbortController(),id=workspaceId;
+    connection.append($('h3','开发代理'),$('p','连接和模型由当前工作台服务统一配置，项目共用；每个项目单独启用开发并限定修改范围。','muted small'),facts);
+    const instructions=$('details'),summary=$('summary','在哪里配置连接？');
+    instructions.append(summary,$('p','当前版本在服务端配置，网页可查看状态，尚不支持修改连接。无需为每个项目重复配置模型地址或密钥。'));
+    instructions.append($('p','启动工作台时通过 --development-config 指定配置文件：providers 配置共享代理和模型，projects 配置项目及修改范围；已有服务连接使用其项目绑定。更改后由服务管理者重新加载，新会话使用新配置，已有历史保持。','muted small'));
+    connection.append(instructions);dialog.append(connection);
+    async function refreshConnection(){
+      facts.replaceChildren($('p','正在检查开发代理…','muted small'));
+      try{
+        const caps=await api('dev-capabilities',{},undefined,id,{signal:controller.signal});
+        if(!dialog.isConnected||id!==workspaceId)return;
+        const state=ForgeDevelopmentComposer.connectionStatus(caps);
+        facts.replaceChildren($('p',state.label),$('p','服务配置：'+(state.configured?'已配置，共用连接':'尚未配置')+' · 当前项目：'+(state.authorized?(caps.read_only?'仅查看历史':'已启用开发'):'未启用开发'),'muted small'));
+        for(const provider of (caps.providers||[]).slice(0,8))facts.append($('p',provider.id+' · '+provider.model+(provider.available?' · 当前项目可用':''),'small'));
+        if(caps.reason)facts.append($('p',caps.reason,'muted small'));
+      }catch(err){if(dialog.isConnected&&!controller.signal.aborted)facts.replaceChildren($('p','连接状态读取失败：'+err.message,'error-box'));}
+    }
+    button('重新检查连接',refreshConnection,connection);
     if(projectRemovalEnabled)button('移除项目 '+project.name,()=>{dialog.close();removeProjectDialog(project);},dialog);
     else dialog.append($('p','此服务未授予项目管理权限。','notice'));
-    button('关闭',()=>dialog.close(),dialog);document.body.append(dialog);dialog.addEventListener('close',()=>dialog.remove(),{once:true});dialog.showModal();
+    button('关闭',()=>dialog.close(),dialog);document.body.append(dialog);dialog.addEventListener('close',()=>{controller.abort();dialog.remove();},{once:true});dialog.showModal();refreshConnection();
   }
+  globalThis.ForgeDevelopmentSettings=Object.freeze({open:settingsDialog});
   function clearProject(message='在项目中阅读说明、用 Notebook 分析数据、核对流程和检查结果。') {
     if(!canLeaveViews())return;
     readController.abort();readController=new AbortController();

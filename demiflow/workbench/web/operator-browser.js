@@ -17,7 +17,7 @@
     const {search}=navigation,list=el('div',null,'op-tree-items');
     list.setAttribute('role','tabpanel');list.setAttribute('aria-label','代码算子');
     tree.append(navigation.element,categories,list);root.append(tree,viewer);host.replaceChildren(root);
-    ForgeNavigation.collapsible({layout:root,sidebar:tree,header:navigation,label:'算子目录'});
+    const treeNavigation=ForgeNavigation.collapsible({layout:root,sidebar:tree,header:navigation,label:'算子目录'});
     const key='demiflow.operator-selection.'+project;
     try{selected=sessionStorage.getItem(key);}catch{}
     function button(text,action,parent,cls='op-text-button'){
@@ -35,7 +35,7 @@
         const paths=new Map();for(const row of rows){if(!paths.has(row.path))paths.set(row.path,[]);paths.get(row.path).push(row);}
         for(const [path,items]of paths){
           const folder=el('details',null,'op-tree-file');folder.open=!!term||items.some(i=>i.id===selected)||paths.size<4;
-          const title=el('summary',path);folder.append(title);
+          const title=el('summary');title.append(el('span',path));title.title=path;folder.append(title);
           for(const item of items){const b=button('',()=>open(item.id),folder,'op-tree-leaf');
             b.append(el('span',kind==='code'?'ƒ':'P','op-glyph'),el('span',item.symbol));
             b.dataset.definition=item.id;b.setAttribute('aria-pressed',String(selected===item.id));b.title=item.path+' · '+item.symbol;
@@ -100,7 +100,7 @@
         await this.load();const matches=index.definitions.filter(d=>d.kind==='prompt'&&d.symbol===target.name&&d.declared_version===target.version&&d.template_sha256===target.template_sha256);
         if(matches.length===1){await open(matches[0].id);return true;}return false;
       },
-      dispose(){disposed=true;sequence++;disposeReaders(viewer);root.remove();}
+      dispose(){disposed=true;treeNavigation.dispose();sequence++;disposeReaders(viewer);root.remove();}
     };
   }
   globalThis.DemiFlowOperators=Object.freeze({mount});

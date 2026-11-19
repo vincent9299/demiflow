@@ -156,7 +156,7 @@
     const list=node('div',undefined,'dictionary-list');dictionary.append(list);
     const native=node('div',undefined,'native-notebook-host');native.setAttribute('aria-label','Notebook 工作区');
     const status=node('p','正在连接 Jupyter…','native-notebook-status');native.append(status);root.append(dictionary,native);
-    ForgeNavigation.collapsible({layout:root,sidebar:dictionary,header:navigation,label:'数据字典目录'});
+    const dictionaryNavigation=ForgeNavigation.collapsible({layout:root,sidebar:dictionary,header:navigation,label:'数据字典目录'});
     let disposed=false,session=null;
     const alive=()=>!disposed&&root.isConnected;
     const resize=()=>{root.style.height=Math.max(240,innerHeight-root.getBoundingClientRect().top)+'px';if(session)position(session);};
@@ -248,7 +248,7 @@
     return {
       canLeave:()=>true,
       updateContext(fresh){if(alive()){context=fresh;populate(fresh);}},
-      dispose(){if(disposed)return;disposed=true;observer.disconnect();window.removeEventListener('resize',resize);window.removeEventListener('scroll',resize,true);if(session){session.host=null;position(session);}parent.classList.remove('native-data-active');}
+      dispose(){if(disposed)return;disposed=true;dictionaryNavigation.dispose();observer.disconnect();window.removeEventListener('resize',resize);window.removeEventListener('scroll',resize,true);if(session){session.host=null;position(session);}parent.classList.remove('native-data-active');}
     };
   }
   window.ForgeNotebooks=Object.freeze({mount});

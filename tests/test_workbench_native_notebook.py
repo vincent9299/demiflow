@@ -145,6 +145,13 @@ def test_native_edit_execute_save_reopen_and_dictionary(browser,native_project,t
             editor.press('Shift+Enter')
             expect(frame.locator('.jp-OutputArea-output')).to_contain_text('native-ok 42',timeout=30000)
             session=page.locator('iframe.native-notebook-frame').evaluate('f=>f.contentWindow.jupyterapp.shell.currentWidget.sessionContext.session.id')
+            from test_workbench_navigation_resize_browser import drag
+            separator=page.get_by_role('separator',name='调整数据字典目录宽度')
+            before_drag=page.locator('iframe.native-notebook-frame').bounding_box()['width']
+            drag(page,separator,90)
+            page.wait_for_function('width=>document.querySelector("iframe.native-notebook-frame").getBoundingClientRect().width<width-80',arg=before_drag)
+            assert page.locator('iframe.native-notebook-frame').evaluate('f=>f.contentWindow.jupyterapp.shell.currentWidget.sessionContext.session.id')==session
+            expect(frame.locator('.jp-OutputArea-output')).to_contain_text('native-ok 42')
             width_before=page.locator('iframe.native-notebook-frame').bounding_box()['width']
             page.get_by_role('button',name='数据字典目录',exact=True).click()
             expect(page.locator('.data-dictionary')).to_be_hidden()
