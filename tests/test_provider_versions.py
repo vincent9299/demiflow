@@ -1,11 +1,16 @@
 """Qualified provider version registry: single source, env-overridable."""
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
+from demiflow.forge.schema import ForgeError
 from demiflow.workbench.conversations import versions
+
+
+@pytest.fixture(autouse=True)
+def isolate_qualification_environment(monkeypatch):
+    monkeypatch.delenv('DEMIFLOW_CODEX_VERSIONS', raising=False)
+    monkeypatch.delenv('DEMIFLOW_DEEPSEEK_VERSIONS', raising=False)
 
 
 def test_defaults_keep_historically_qualified_codex_versions():
@@ -50,9 +55,9 @@ class _Transport:
         return {'method': method, 'config': {}}
 
 
-def _codex():
+def _codex(version='0.170.0'):
     from demiflow.workbench.conversations.codex import Codex
-    return Codex(_Transport(), {}, {'root': '/tmp'})
+    return Codex(_Transport(), {'version': version}, {'root': '/tmp'})
 
 
 def test_adapter_accepts_a_newly_qualified_version(monkeypatch):
@@ -63,8 +68,32 @@ def test_adapter_accepts_a_newly_qualified_version(monkeypatch):
 
 
 def test_adapter_still_rejects_unqualified_version(monkeypatch):
-    from demiflow.workbench.conversations.common import reject
     client = _codex()
     monkeypatch.setenv('DEMIFLOW_CODEX_VERSIONS', '0.170.0')
-    with pytest.raises(Exception):
+    with pytest.raises(ForgeError, match='qualified version'):
         client.initialized({'userAgent': 'codex-cli/0.150.0'})
+
+
+@pytest.mark.parametrize('actual', ['0.170.00', '0.170.0-rc.1', '0.170.0+local', '10.170.0'])
+def test_qualification_requires_the_entire_version_token(monkeypatch, actual):
+    monkeypatch.setenv('DEMIFLOW_CODEX_VERSIONS', '0.170.0')
+    client = _codex()
+    with pytest.raises(ForgeError, match='qualified version'):
+        client.initialized({'userAgent': 'codex-cli/' + actual})
+    assert not client.transport.sent
+
+
+def test_adapter_requires_the_configured_version_even_when_both_are_qualified(monkeypatch):
+    monkeypatch.setenv('DEMIFLOW_CODEX_VERSIONS', '0.164.0,0.170.0')
+    client = _codex('0.164.0')
+    with pytest.raises(ForgeError, match='qualified version'):
+        client.initialized({'userAgent': 'codex_cli_rs/0.170.0 (Linux; x86_64)'})
+    assert not client.transport.sent
+
+
+@pytest.mark.parametrize('version', ['0.164.0', '0.170.0'])
+def test_adapter_accepts_the_exact_configured_version(monkeypatch, version):
+    monkeypatch.setenv('DEMIFLOW_CODEX_VERSIONS', '0.164.0,0.170.0')
+    client = _codex(version)
+    client.initialized({'userAgent': f'codex_cli_rs/{version} (Linux; x86_64)'})
+    assert client.transport.sent

@@ -1,6 +1,6 @@
 """Qualified provider runtime versions.
 
-业务流水线只接受**经过验收**的 provider 运行时版本；此前版本号散落在
+工作台开发对话只接受**经过验收**的 provider 运行时版本；此前版本号散落在
 `codex.py`、`review.py`、`policy.py` 三处硬编码，升级一次要改三处代码。
 
 这里集中成单一来源，并允许用环境变量覆盖（逗号分隔），这样升级到已验收的新
@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 DEFAULT_VERSIONS = {
     'codex': ('0.164.0',),
@@ -36,8 +37,14 @@ def is_qualified(name: str, version) -> bool:
     return isinstance(version, str) and version in qualified_versions(name)
 
 
-def matches_user_agent(name: str, user_agent) -> bool:
-    """userAgent 里是否包含某个已认可版本（app-server 的 initialize 结果）。"""
+def matches_user_agent(name: str, user_agent, *, expected_version=None) -> bool:
+    """Match a complete qualified version token, optionally pinned by config."""
     if not isinstance(user_agent, str):
         return False
-    return any(version in user_agent for version in qualified_versions(name))
+    qualified = qualified_versions(name)
+    if expected_version is not None:
+        if not isinstance(expected_version, str) or expected_version not in qualified:
+            return False
+        qualified = (expected_version,)
+    return any(re.search(r'(?<![\w.+-])' + re.escape(version) + r'(?![\w.+-])', user_agent)
+               is not None for version in qualified)

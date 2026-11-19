@@ -86,7 +86,8 @@ class Codex:
             'capabilities': {'experimentalApi': True}})
 
     def initialized(self, result):
-        if not matches_user_agent('codex', result.get('userAgent', '')):
+        if not matches_user_agent('codex', result.get('userAgent', ''),
+                                  expected_version=self.config.get('version')):
             reject('Codex runtime version differs from the qualified version')
         self.transport.send(dict(method='initialized', params={}))
         return self.transport.request('config/read', dict(cwd=self.project['root'], includeLayers=True))
