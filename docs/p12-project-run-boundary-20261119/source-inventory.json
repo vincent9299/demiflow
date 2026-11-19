@@ -962,6 +962,90 @@
       ]
     },
     {
+      "path": "demiflow/workbench/projects/definitions.py",
+      "sha256": "8cbf46b29a17953a70129d400a86f4c1681102f07d824ad02a3c2375ee451619",
+      "integration_sha256": "8cbf46b29a17953a70129d400a86f4c1681102f07d824ad02a3c2375ee451619",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "_safe_tree",
+          "line": 24
+        },
+        {
+          "name": "_items",
+          "line": 31
+        },
+        {
+          "name": "_files",
+          "line": 66
+        },
+        {
+          "name": "catalog",
+          "line": 92
+        },
+        {
+          "name": "_git",
+          "line": 133
+        },
+        {
+          "name": "history",
+          "line": 146
+        },
+        {
+          "name": "read",
+          "line": 163
+        }
+      ],
+      "workbench_imports": []
+    },
+    {
+      "path": "demiflow/workbench/projects/documents.py",
+      "sha256": "7d0e38c66740e44c99dff7dd8fa68d04cec3e4af1f6dce7e1f67cd7eee397519",
+      "integration_sha256": "7d0e38c66740e44c99dff7dd8fa68d04cec3e4af1f6dce7e1f67cd7eee397519",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "_path",
+          "line": 16
+        },
+        {
+          "name": "listing",
+          "line": 28
+        },
+        {
+          "name": "read",
+          "line": 57
+        }
+      ],
+      "workbench_imports": []
+    },
+    {
+      "path": "demiflow/workbench/projects/flow_arguments.py",
+      "sha256": "3f97c7f1c3a818ee4f8195b6360c0c56185f8b4208f29b98166a9e76e24ff8d0",
+      "integration_sha256": "3f97c7f1c3a818ee4f8195b6360c0c56185f8b4208f29b98166a9e76e24ff8d0",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "read",
+          "line": 13
+        },
+        {
+          "name": "save",
+          "line": 50
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 8,
+          "module": "demiflow.workbench.graph.parameters",
+          "names": [
+            "_decode",
+            "MAX_BYTES"
+          ]
+        }
+      ]
+    },
+    {
       "path": "demiflow/workbench/runs/manager.py",
       "sha256": "e7dce9c58938f48451f94304d503d22fa3a15a7c0a9283189fcc4f78ad3168d4",
       "integration_sha256": "e7dce9c58938f48451f94304d503d22fa3a15a7c0a9283189fcc4f78ad3168d4",
@@ -3654,6 +3738,113 @@
       "sha256": "ec08fd0134f23b9d7265af37aca163d493bac94fb986cb3793d43bcfc23f1c18",
       "integration_sha256": "ec08fd0134f23b9d7265af37aca163d493bac94fb986cb3793d43bcfc23f1c18",
       "same_at_integration": true
+    },
+    {
+      "path": "demiflow/execution/host/_surface.py",
+      "sha256": "9fa69cc83074bdb05b117dad7ef8189b7c2a50cb1ae6b8991a608fbc1f86d87f",
+      "integration_sha256": "9fa69cc83074bdb05b117dad7ef8189b7c2a50cb1ae6b8991a608fbc1f86d87f",
+      "same_at_integration": true,
+      "top_level_symbols": [],
+      "workbench_imports": []
+    },
+    {
+      "path": "tests/test_workbench_engine_boundary.py",
+      "sha256": "ed44f6407f2c018dee9aa2a7cf5fd3e6e749a2f32cbd072a35955b5ece28582e",
+      "integration_sha256": "ed44f6407f2c018dee9aa2a7cf5fd3e6e749a2f32cbd072a35955b5ece28582e",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "_module",
+          "line": 21
+        },
+        {
+          "name": "_imports",
+          "line": 26
+        },
+        {
+          "name": "_import_errors",
+          "line": 41
+        },
+        {
+          "name": "Uses",
+          "line": 58
+        },
+        {
+          "name": "_member_errors",
+          "line": 253
+        },
+        {
+          "name": "test_workbench_imports_are_classified_by_exact_surface_and_consumer",
+          "line": 259
+        },
+        {
+          "name": "test_approved_objects_do_not_leak_members_or_opaque_configuration",
+          "line": 268
+        },
+        {
+          "name": "test_native_core_never_imports_host_or_product",
+          "line": 277
+        },
+        {
+          "name": "test_surface_document_is_generated_from_runtime_literal",
+          "line": 291
+        },
+        {
+          "name": "test_import_negative_alias_fixtures",
+          "line": 308
+        },
+        {
+          "name": "test_member_negative_alias_and_return_fixtures",
+          "line": 321
+        },
+        {
+          "name": "test_host_private_state_and_independent_borrow_are_not_native_leaks",
+          "line": 325
+        },
+        {
+          "name": "test_indices_are_lazy_and_reexport_original_objects",
+          "line": 339
+        },
+        {
+          "name": "test_native_storage_layout_is_not_reinterpreted_in_workbench",
+          "line": 368
+        },
+        {
+          "name": "test_every_index_export_has_an_actual_workbench_consumer",
+          "line": 379
+        },
+        {
+          "name": "test_real_journal_consumers_cannot_hide_private_calls",
+          "line": 393
+        },
+        {
+          "name": "test_private_constructor_options_cannot_bypass_reexport_contract",
+          "line": 407
+        },
+        {
+          "name": "test_real_registration_rejects_decoding_native_recording",
+          "line": 412
+        },
+        {
+          "name": "test_publication_recording_is_not_another_host_protocol",
+          "line": 427
+        },
+        {
+          "name": "test_native_recording_can_only_be_aliased_and_forwarded_unchanged",
+          "line": 434
+        },
+        {
+          "name": "test_approved_reexport_matches_its_real_import",
+          "line": 448
+        }
+      ],
+      "workbench_imports": []
+    },
+    {
+      "path": "docs/workbench-engine-surface-v3.json",
+      "sha256": "723ac2688bed527b4d94c6efc17a1e7aa86a7c9c4a3cf0abf71399d562023dbd",
+      "integration_sha256": "723ac2688bed527b4d94c6efc17a1e7aa86a7c9c4a3cf0abf71399d562023dbd",
+      "same_at_integration": true
     }
   ],
   "direct_workspace_worker_proxies": [
@@ -4091,6 +4282,8 @@
   "evidence_records": [
     "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/integration-followups-20261119/CURRENT.json",
     "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/regression-closure-20261119/CURRENT.json",
-    "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/p12-project-run-boundary-20261119/design.json"
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/p12-project-run-boundary-20261119/design.json",
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/p12-project-run-boundary-20261119/v2/design.json",
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/CLAUDE-REVIEW-p12-project-run-boundary-v2-20261119.md"
   ]
 }

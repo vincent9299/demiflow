@@ -29,6 +29,7 @@ def inventory(design):
     selected = [
         'projects/workspace.py', 'projects/index.py', 'projects/io.py', 'projects/checks.py',
         'projects/discovery.py', 'projects/registry.py', 'projects/watch.py',
+        'projects/definitions.py', 'projects/documents.py', 'projects/flow_arguments.py',
         'runs/manager.py', 'runs/limits.py', 'runs/admission.py', 'runs/native_submission.py',
         'runs/worker.py', 'runs/cli.py', 'runs/requests.py',
         'worker.py', 'reader.py', 'host_partition.py', 'api.py', 'cli.py',
@@ -42,7 +43,8 @@ def inventory(design):
         'demiflow/execution/host/inspection.py', 'demiflow/execution/host/control.py',
         'demiflow/lance/refs.py', 'demiflow/forge/platform_snapshot.py',
         'demiflow/forge/platform_environment.py', 'docs/architecture-master-intent-v1.md',
-        'AGENTS.md',
+        'AGENTS.md', 'demiflow/execution/host/_surface.py',
+        'tests/test_workbench_engine_boundary.py', 'docs/workbench-engine-surface-v3.json',
     ]
     records = []
     for relative in paths:
@@ -88,6 +90,8 @@ def inventory(design):
             '/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/integration-followups-20261119/CURRENT.json',
             '/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/regression-closure-20261119/CURRENT.json',
             design['baseline']['previous_draft'],
+            design['baseline'].get('supersedes', {}).get('path'),
+            design.get('review_response', {}).get('review_path'),
         ])
     dump('source-inventory.json', result)
     return result
@@ -115,6 +119,7 @@ def render(design, sources):
     output = [f'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(design["title"])}</title><style>{css}</style><body><main><header>',
         f'<h1>{esc(design["title"])}</h1><div class="badge">设计待审阅 · 尚未实施</div>',
         '<p>基于最新 main，核对已交付 integration；明确改前改后、职责、输入输出及失败行为。</p>',
+        '<p>v2 获 Fable 有条件通过；v2.1 已补订 begin 拒绝语义、P4 消费者计划及模块分类。设计修订不等于实现验收。</p>',
         f'<p class="meta">main: {esc(design["baseline"]["main"])}<br>integration: {esc(design["baseline"]["integration"])}</p>',
         '<p><a href="design.json">原始方案 JSON</a> · <a href="source-inventory.json">源码与差异证据</a> · <a href="verification.json">文档核验记录</a> · <a href="review-request.txt">转交说明</a></p><nav>']
     for section in design['sections']:
