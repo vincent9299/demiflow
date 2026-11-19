@@ -1,0 +1,1940 @@
+{
+  "source_sha": "122edf4bd0c827338846abd0114f0b36cf8c1b6d",
+  "baseline_tests": {
+    "selected": 47,
+    "collected": 47,
+    "executed": 47,
+    "passed": 47,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "timeout": 0,
+    "not_run_within_selected": 0,
+    "command_receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/E/design-v1/baseline-receipt.json",
+    "junit": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/E/design-v1/pytest.xml"
+  },
+  "stage_probe": {
+    "source_sha": "122edf4bd0c827338846abd0114f0b36cf8c1b6d",
+    "import_path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/compiler/config-invariants-20261120/demiflow/__init__.py",
+    "script": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/E/design-v1/probe-stages.py",
+    "script_sha256": "dfba7d67ce9e06923ba65943d62f6330a104a10ae605495dde5d7a8f94be9464",
+    "private_root": "/tmp/demiflow-e-design-20261120-lbp_5k85/tmp/demiflow-e-stage-20261120-rya84_7x",
+    "interpreter": "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+    "pid": 13889,
+    "environment_ref": "baseline-receipt.json",
+    "measurement": "in-process read-only wrappers sample real phase outputs; only final is a native production report; not a business run or subprocess coverage",
+    "structure_matches": true,
+    "families": {
+      "cases": {
+        "total": 348,
+        "compiled": 293,
+        "refused": 55
+      },
+      "captured": {
+        "total": 30,
+        "compiled": 30,
+        "refused": 0
+      }
+    },
+    "stages": {
+      "capture": {
+        "completed": 354,
+        "check_errors": 0,
+        "findings": 0,
+        "unique_cases": 323
+      },
+      "graph": {
+        "completed": 354,
+        "check_errors": 0,
+        "findings": 0,
+        "unique_cases": 323
+      },
+      "budget": {
+        "completed": 354,
+        "check_errors": 0,
+        "findings": 0,
+        "unique_cases": 323
+      },
+      "shared": {
+        "completed": 354,
+        "check_errors": 0,
+        "findings": 0,
+        "unique_cases": 323
+      },
+      "final": {
+        "completed": 354,
+        "check_errors": 0,
+        "findings": 0,
+        "unique_cases": 323
+      }
+    },
+    "production_log_records": {
+      "DEBUG": 354
+    },
+    "complete": true
+  },
+  "cases": {
+    "cases": {
+      "ack_queue": {
+        "ok": true,
+        "graph_sha256": "dbb6297ece675639a471960e3bd49d4c5bc09801f0f0052cd42dd2bbcbf3928b",
+        "declarations_sha256": "e665cf653ff1baa95011b6ba4d693bf86bd68660dc329ad89e6fffedac384300"
+      },
+      "ack_queue_drop_row": {
+        "ok": true,
+        "graph_sha256": "4f0bcb4b6c6a86d26bff63e089f54fb4cbfab80189e8c8bfde721d9586931b7e",
+        "declarations_sha256": "37c7dbeb260695a3ff1625b9948a9f81acccf692a999e396a2b440c28a1d4f5d"
+      },
+      "add_column": {
+        "ok": true,
+        "graph_sha256": "445ea1ac158feb12250509d8833531d3da27dad9fba24e6a13ae0e1e1ecd0525",
+        "declarations_sha256": "d10a950ae359f06dd70b0e6182a6be45927d25f1575e0121a304f266b01b4992"
+      },
+      "admit_rows": {
+        "ok": true,
+        "graph_sha256": "16c8744ddfb474bce02085824baf05a3cb7137891e8d55833a87b1ecfd1f8daf",
+        "declarations_sha256": "94520fb1add21513c5791fd08aae69aca51563e48e037b9fd41e4d7e3a2d6677"
+      },
+      "agentmap_async": {
+        "ok": true,
+        "graph_sha256": "4463473818c1c99d168bcc588ed3bf97ac485b33f600fd5e6babe2e278702bba",
+        "declarations_sha256": "168ed4c00217fe62cd1207c643fc672337cde27887ba4e81165732faf46e7ed6"
+      },
+      "batch_map": {
+        "ok": true,
+        "graph_sha256": "3b6b1d728846dc5340fafdead5b8ea7339a5df7dacd9536763883d376ddcdeb3",
+        "declarations_sha256": "7a3aca399834e91bfeacffc2cbf6a29e5b0427b28df393ec743fd28753e91402"
+      },
+      "batch_map_flush": {
+        "ok": true,
+        "graph_sha256": "5d5e454b15336356b0542bf9f216863ef45664438cc5e3eac838a3fe795253fd",
+        "declarations_sha256": "d0fad4ec4c92fbef99affe6a202c5e3fbf5fee8312f26395ad7c8c57b0110924"
+      },
+      "budget/embeddings@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "a55293151340a4fad755f3ae5aed757fbbd712ce1dadcb27e5d40bbe52855763",
+        "declarations_sha256": "efe0aa7743849b645704a824f407a9a12073f4d163d43a58541000a62fb27eca"
+      },
+      "budget/embeddings@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/embeddings@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "e020372e189fb8b327cb757baccdfbafafba6f60c11a5d8ea048e19e8e14af6c",
+        "declarations_sha256": "e94235d5a2c1af793877dc3a7f6e1c22ebfbfc056b0d52cfc2e0f12d3039699a"
+      },
+      "budget/embeddings@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "9d8aa3854f2588419b05099a86a59a66af3e1c74111cf80d7add1fccc6a4713a",
+        "declarations_sha256": "a3d415c21fcdf58492c37a0090cfcb5c69d9e9ee2d2d8f06fd1b812e12c7435c"
+      },
+      "budget/embeddings@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "7eebbae8c08f032b232f5d5c6c9c611abeb10ceba9c477c72cfa9cf11d36faa3",
+        "declarations_sha256": "b400172b18ea42641ceeb6eb5fa7153b947b784bb4e176426d338cb4669088b1"
+      },
+      "budget/embeddings@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "87515807849e632577bb709b2f0daaaff267fa7e2589092e38acc24d1e44137d",
+        "declarations_sha256": "5b17c9da934e3a6e2edd77b2dedf084079c8e9d54b02e7b7f11cbdfd94d3c025"
+      },
+      "budget/embeddings@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "183cd6b6d57febab9963efef2d865b5df88e7b13b478948b79c84a3a7b293b9a",
+        "declarations_sha256": "398075cf7ba4c81a255ab839a7472fd7615576fb8a429cbebfe0a05ad718c0cd"
+      },
+      "budget/fetch@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "b9c5b46fe0acb5f88eadd981af4940f40c218e21203f4820cd0765757c049cf7",
+        "declarations_sha256": "fc31662cf449d0e0ec706d66ecc1411b4c23899c443b757191cae08ef99c7574"
+      },
+      "budget/fetch@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/fetch@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "08dfdd5d5ad659880099bbca923b285ee2f84a436323d58652addaa637136196",
+        "declarations_sha256": "e3f58c809b922eed178e659a153260cbe25a043d1e392c110f3c004f03b3bafb"
+      },
+      "budget/fetch@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "e60d878aa7d2897e48bb11b2da2e1c50f26326734db6a0ab006264d67e52b593",
+        "declarations_sha256": "50b7744692c248ce04d81c4463891e4d5b629770b2635fe78eca657078a33877"
+      },
+      "budget/fetch@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "dd8541f601d5ffc76fbcb67d1a4b9d289d10bc12c1418e84714619cb1233ba5a",
+        "declarations_sha256": "48669627279a696995de4aa8dd31b39fcbd272e169ce6073f3f56fbae13dc98f"
+      },
+      "budget/fetch@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "0b698129789849dc03330dd86935f41aee481f25c0c506ee894b1088ee486113",
+        "declarations_sha256": "1aa392135f0365b08f6abe23bf5b646827ffc546d3cc04ed68945aef6c04fe69"
+      },
+      "budget/fetch@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "740d9cf52f044ddd80f330e5f0d9d21624a89660ff1b3410ddc7c659e6d58c46",
+        "declarations_sha256": "72afbce03260939df0bcc3ad7cf95a40935b09b5146127d9dd47a1c004aca479"
+      },
+      "budget/graph@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "d998c2da0ae4c933d025174d7b2e68103cd013d1cbf057dbabbe17884de0a322",
+        "declarations_sha256": "e36a0186d304f8ed871ef4a975abff0acb70c1f21801e460035e785a99b142c0"
+      },
+      "budget/graph@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/graph@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "26304c680743cd31ee2a5bb9d5faf0dcbc158d28383c3f93a28f70530d401ce6",
+        "declarations_sha256": "e7cfd36eb6a4c8a97a08bcd1250af756b423e7b928cb31c6a99f8ca71af13bb5"
+      },
+      "budget/graph@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "faec317c427929dbc20c2dd732a74752a1fae6feb9a65aa98434275afb0a46ad",
+        "declarations_sha256": "a22a9c4d32ab62011f8ae66f3ce075f098f8eff81272f08c165d0602b2d5789f"
+      },
+      "budget/graph@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "a204477202797a1a3b5fe0e194f8c752cb0487fca78ac068a37bb2f197e2b6a0",
+        "declarations_sha256": "29917a3a82e90a2a45c1003281f73ee2b7461448cea96914bf6b133ea8df4121"
+      },
+      "budget/graph@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "10f2da9fdeedc77c3d642de227d2c440d3aad35f7b360e7566f15a3388998a70",
+        "declarations_sha256": "08f53adf5b698d3b1ab475d7c1edc901501f4aa75fa7b799056efd8144ca0642"
+      },
+      "budget/graph@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "18e8889ce1e9673773c54e6aafafcd72e72054232621a89cb3aa70cafdedbbe6",
+        "declarations_sha256": "81d93dc26084610849e4846b1ae058c994208efc484eb0ef764e09a5a5b2149b"
+      },
+      "budget/graph_literal_prefix@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "1194d0ab1eaff7a4a1660ad320d95e05b5d75331017d8c343137d8b87d38a6da",
+        "declarations_sha256": "85cb55f18226805e3b9a713f30730e607c70de0e36d6e66b3b5f6a781b024a3f"
+      },
+      "budget/graph_literal_prefix@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/graph_literal_prefix@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "7762d9f84501183c8b077d2d79f99a063c092a8cd5c815aca0295c06a13ba9b2",
+        "declarations_sha256": "e29851dee02163460eee99ef227eac21c6ddbe71a09f513deb4f187b6f42fd55"
+      },
+      "budget/graph_literal_prefix@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "ce35d41528f6a2e8b9ac1c2f12e1e9d3302be33e6d2330ffd7e625d4c027df08",
+        "declarations_sha256": "7f0d923cf44d0220b08fede7e83da417319d90d8f330e7e06549b5b8c69cf530"
+      },
+      "budget/graph_literal_prefix@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "b21b134f904c5ea6c0f7dd0d2986cabe1adf74f55c58c6b28bbb782c29452fcd",
+        "declarations_sha256": "ac80b3977fe3743d42ef1695be8a2a51e7659a7a98f67494f086550a40ca9840"
+      },
+      "budget/graph_literal_prefix@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "cb428dbe8335856524520037ecb43ea92cbee3fc5eafda30d7a4281db0f028a4",
+        "declarations_sha256": "3f5714f27a0437356f2dd6a1fa81cf504a7dc9649771e130673510c76750ddc2"
+      },
+      "budget/graph_literal_prefix@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "c44170f31f615e1cdee7eb2a755ab78130903cc7661eaaa9ae592d0108fd016a",
+        "declarations_sha256": "9911cd2af691bd05dc8dc65a67cc82ddf8eda9d406b3bf01217a60e570869061"
+      },
+      "budget/groups@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "6dad00d80de823d70e09f41b144b4d10258e8a171c2c235af25a02c78b8a4a47",
+        "declarations_sha256": "98841ae9dbedae936f289c044033354314ec321712e3c9be06311cc98a4fb8ae"
+      },
+      "budget/groups@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/groups@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "52ef3c9d1b9875e5b6360f279bca36ef38385308e5e8b9ad1edfc78b84448d4e",
+        "declarations_sha256": "89c3d9e5e9217369d62fd22860a25ac8d955687ccd7df767073b249df3f38992"
+      },
+      "budget/groups@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "22eee5eb30cad3d8991d89b4dd0464937010004955bfdea7fbb033593f8490b4",
+        "declarations_sha256": "d96e3a4b35b0c6cd95c72439a9f7411d8c8da93ef3e7d73aba97cb8f11932325"
+      },
+      "budget/groups@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "7ddcb35c784f9af134ca6c0994f225f5a5c70e8c4fe8dc722efbede2d7a24889",
+        "declarations_sha256": "8373b0920fa0107c3c7fc819e4085e8105c1218af2159128f40777a334be4743"
+      },
+      "budget/groups@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "b4918a5fced6a88fb3bba95cec5840eae575ef437d80428e9527f359c8892d0a",
+        "declarations_sha256": "9c7e3d6fd9aad97892315a707d1e97254e8b487d0e2a66705f3b0bd3c27729fe"
+      },
+      "budget/groups@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "e980572dfb808a20107fa08550062ea8d7947d7e80474d2d74a6c31a40d2e131",
+        "declarations_sha256": "3eef9cf5d2a6b2b21ab4b9d6dd8ba9f40eff44f04f010969372e4f59eeacf24b"
+      },
+      "budget/items@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "4e558b1ada035e7ba0efe21464c4b6f7fe3453f8338c6472970cb6e3d2c39f50",
+        "declarations_sha256": "8d7127f2ff9ac10ad9b812e675d5bacc787f3a9f9d0f9a08bf30a97b3c99e4a1"
+      },
+      "budget/items@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/items@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "78bd85ea8c1b81a994a15060a59988128bce79a7a2521cf28173f83cb9aeae0e",
+        "declarations_sha256": "17a1f984a6692a50e23939a0f4833bd59206c23383fee02a2505b446ebc9d66d"
+      },
+      "budget/items@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "7e1e49bffb4b116c521fac8b0355bf46331876d43a51904d34e6f02a9df217aa",
+        "declarations_sha256": "83e915165c12f606d6ae5ec6a378fbb5a8a2d912a97be22936b09b2a248e648d"
+      },
+      "budget/items@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "798109784a3ab67099b1064fd8ad6aeb34045ca9b404b630f95a5ae184fca916",
+        "declarations_sha256": "502f613183a903513732536385344b2349f50530a4fa4c170f48f5e3138dc758"
+      },
+      "budget/items@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "74fdfa69b22e264dc9df4300f6e77347d7d3152c45d8908fb20508d1a1bd8496",
+        "declarations_sha256": "d2299c36d8f973d564566a23c73b3f8473efbf70d0e3fdfe6de29c56549b36bb"
+      },
+      "budget/items@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "673dd1b7c344f74d46db70c577b730ad3dc2d61d1d0498c868da55eaa9912804",
+        "declarations_sha256": "4fe26017a0c8ab9a90dbcba710f58161e77c0578afa7e1a975c9a5098db38253"
+      },
+      "budget/join@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "f15a5e57af25d96b8c2c7c243847a22a0cbce45b472812820aa76730c90ea37f",
+        "declarations_sha256": "da710f19f31dfca12d9b6be3653aee61e84e659d5dff499e31a891792a7491b5"
+      },
+      "budget/join@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/join@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "26c4d35ca674e413c8d3bb580659f83a1c296376abea4057131bea201adf6bdb",
+        "declarations_sha256": "30c071511be611e585e299551585ed98683ce081dcfe71c48ed464a019c6415e"
+      },
+      "budget/join@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "0f6e9a6d20798fdc55a075bdba4fee55955a182f990f3f8c3254ecf3446f9321",
+        "declarations_sha256": "5d1a6f0788c43ca771f67e64a6b579627584e686fc02415f91ac7eacca744b26"
+      },
+      "budget/join@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "a77de92e8e8935157efe2e6a330892afb74d3b3f9825d750c3fb9abfa5062c02",
+        "declarations_sha256": "4ea8ff9d3cad935660fcff8f10f4b277688499838149f2568194fb3c707b8c81"
+      },
+      "budget/join@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "551497606ea77ed3f952ee876cb46fada037a7eb1c494fa4f02864559ca5a930",
+        "declarations_sha256": "30f738881add25e73c26a5826c9f8cb36effc8146e83c1c11768d9fd261f95d0"
+      },
+      "budget/join@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "3c7948c534939f0eb0a8048958f70df6dfbeb8ca85c828f71dd4105402ef7f00",
+        "declarations_sha256": "d24e5c04160df170f1eb7eefcf912b04ac9050ff10022f347a39772073734a43"
+      },
+      "budget/map_chain@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "bb47f481dd444a63423ac67b03c953f7fe5d0736e064fac9994235dc912a5c53",
+        "declarations_sha256": "f9cba084816e8b71108b4004edff972487822d197034d8ca616002bc15916a3d"
+      },
+      "budget/map_chain@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/map_chain@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "2d05cc12eb26019648e34897015a25396861d44f14b5bb589596ed18b65b7867",
+        "declarations_sha256": "ebf32dae46fcc7af08999e61cb47783987299167fef5ea753056f9737c273203"
+      },
+      "budget/map_chain@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "c2d9f1e15a683e78bf8ae1de7fd2f1ec1534eba956f359eca244b3450947c125",
+        "declarations_sha256": "c021b0a6e09357aa0d502d49809932b614d771c2b35cf218cf8f0c6b185416ed"
+      },
+      "budget/map_chain@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "bfc0dbc9a5b6928bcebd894559c94e4b8f0a255196976cd75e9ad9b62252eaa1",
+        "declarations_sha256": "f0bdbe0d0f94017b26de6c6bf7530e00575ae891f9787173d72bbc435aceb1c5"
+      },
+      "budget/map_chain@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "f6ccabc0df872f4da22f26b37ff557cc64a28327fb669ad83d072913e7319d25",
+        "declarations_sha256": "c7389fcd7b6820debf34d034bd394608260d822ee3a8ede54ef5b32248256547"
+      },
+      "budget/map_chain@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "48481186124c5bc1874484e87cc2785d91011b35e430fa2aed9d5d4b2c1c715e",
+        "declarations_sha256": "d0dcb6ba3086ed0201001dbf6dcfbf8b2e70af8c3327c85f340e3a9e39118e1a"
+      },
+      "budget/prompt@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "77c641169a5da0d0704282ef9cd08754b1e4571f52d3ae85ad32ddd160791a3b",
+        "declarations_sha256": "92fee10f2edc9874cf1088257d5bc9fb9b5724e48a5463ff35dc0ffc3f4c4d72"
+      },
+      "budget/prompt@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/prompt@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "6809de30773857b19daa1a392985d4e381b4571a28baf6dec583713831f7f404",
+        "declarations_sha256": "ba90b2e055403d062d63b69763f9888c13729ba1e6ebbd9f96a89d044bccbe40"
+      },
+      "budget/prompt@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "4b18f7fb7ac249a9f9d193d280ed38da762ff1ebe1ab62c62c233fb649c034d4",
+        "declarations_sha256": "bee6f917fa0446743a825d65120673004024d242eab08b42b99bcf1b6df2cdb3"
+      },
+      "budget/prompt@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "adb8a30d0d044c2656f34353bdb0edc0c6eda93e5256879d38c63e625cc84ba3",
+        "declarations_sha256": "8f8fd1143a04b27bc99f49009e1f21f6b7d1d0e9a2b7b42f1665546527cbe7cc"
+      },
+      "budget/prompt@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "302a4f15cf0ad9921d79bce500ea64436419b8865a47bd6f58f0fc1fafd8a7fd",
+        "declarations_sha256": "dcc902e553798d775b6dda8b0795a6779d2a9c51b8d967b761ca22ce1b980d39"
+      },
+      "budget/prompt@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "4cbc37a282a786312428000a1bb60ec8222940f0a762ae257dc8e12d49d95a22",
+        "declarations_sha256": "86e25901e2a9aa974c94447bd56cd93b6981ceaca764341071faac6eb57369e2"
+      },
+      "budget/prompt_async@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "8bb3108f71a9671e2a3cced2d875c04aaf2201ed09e3dcacc98bc84ead9a877f",
+        "declarations_sha256": "a06c46498ecb0424bdf70f785b33e7cfe2c365b581ed13cfb082b53f6f96ee1b"
+      },
+      "budget/prompt_async@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/prompt_async@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "7f4aeb92eba68f1606f16cb52f87ba328c218b976273cb6fbfeb7513218c3d1f",
+        "declarations_sha256": "a4784661316708c97493b6b3cfb2955a4d1a874c1d87d78519fad3ea099cc023"
+      },
+      "budget/prompt_async@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "2a551a4a074c23beb6715567eafdd57d4036432970ff437ced51f9c6e5212dd5",
+        "declarations_sha256": "08ff985ed97588c11d84ed09762865c484b0294a0d60a54b4b8f1a6e8274acc3"
+      },
+      "budget/prompt_async@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "0f11367ea0bce9fe8723dea4bb0bf6ac3a564d6a36a28c605334e6f2268f9421",
+        "declarations_sha256": "7f10cf51f5171921b0380ca6d2e3fa69e4e89f39aa2405d9cc249e988c0a233b"
+      },
+      "budget/prompt_async@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "0f5048e16bfac2064890488701a85f54e929c7b3b9fb542021ffc84af2a94fbe",
+        "declarations_sha256": "ed40560330124ec9570d56a1b1819ad66cd47c99b5ddbf899e5848ef02fc90e0"
+      },
+      "budget/prompt_async@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "1669d0bbb078e81014762515af1e1fb64e486fb93ceabb1c4c66389da670d204",
+        "declarations_sha256": "de8fe42d8b10f03941785e6e2a65b5187efa5e8fe3f02cc60f95a95f49a43a7d"
+      },
+      "budget/reduce@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "c63b497f86252f85d503acdce0e4df51fa318e1fa7a253068e9538fa253a7a6e",
+        "declarations_sha256": "51bee47f7a31102d93da430a3b0873b9c5509a33298dc61eaf7200e41833ef7c"
+      },
+      "budget/reduce@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/reduce@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "f5f72ff7049f09277c16494438caa00517a0312b92ae4b063b2bceccbcfdc770",
+        "declarations_sha256": "1d4d1812a4b308e2dc153d207b3c2dec6183240ca260391bc95b9b6dd294d747"
+      },
+      "budget/reduce@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "9fd923f557b421e232c5860f1a893afb9894d0fa1503feacba403c03be55d732",
+        "declarations_sha256": "135f203e1ecd7f8633d072a34e2d435d31a7d064bbad63039271c1fc9dcd529c"
+      },
+      "budget/reduce@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "65fcc47fa4bc5f41922eafc355cf5a3af01d9c92d2e9fc863d0d5d60ec5cd3f6",
+        "declarations_sha256": "10b9e9d93b38601f5b6215a5b4c81cdfbfd6719bbdce697f4de6dc72d29facd5"
+      },
+      "budget/reduce@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "b2a5773d049574222bdac20bb93ed24ca0adaf58dcf0add478577a7acc96be57",
+        "declarations_sha256": "2422a89273e61df397b07472a1d0473d1c64f0015bf6b4bb74c0c30f924b162a"
+      },
+      "budget/reduce@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "db8e3fa893b206a7e8cd7bb9a9e9a0215ce3c05be1e6351b471bd5c0d4e46160",
+        "declarations_sha256": "ada940502364c63b6f3be6b36c53c427f3a96c417a86292c3e7291e8c7ba2b16"
+      },
+      "budget/sorts@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "7be277173e42e0304f0c2a253052b57767c838cd9a16b50e8302204d3c5506ad",
+        "declarations_sha256": "a8f5f952c1b930ec3d9f573518b4401eaf760be1fd745426297b243d56e1ff05"
+      },
+      "budget/sorts@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/sorts@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "4474d1a7dbe53fc32d407ea618b5bcc28cf6f890dcf58f25eaeeeb7420fba07d",
+        "declarations_sha256": "96ee5d8c37ff916060f49999a61da64f883c1c5b6214063ef96b8818237e20b8"
+      },
+      "budget/sorts@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "04dbdb48786c93d2b3133416a621e6cab39414d6d4882550ef52c69abe0271d4",
+        "declarations_sha256": "442f49b16f94f51e04bea78e7e86df42775108813c6ea8f54ccb5bd560b1e6e6"
+      },
+      "budget/sorts@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "c4a7f614df2c0d829c6371a98a1935a306e9984938ffface652c00d25fa5adf2",
+        "declarations_sha256": "ba3b9fb7692f490f486cf94e89a4dfaef00a662c8381a9bd3a69774aa72ea1ed"
+      },
+      "budget/sorts@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "c978bd8214f566c4106ff2ee89d1c11088db4b4406530c82405386f8002ad639",
+        "declarations_sha256": "5b0ebac1fce9ab6dff6303b54ea8efe0875f7e815d4798ce56916e8785bb08ca"
+      },
+      "budget/sorts@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "931ef18713813a8ab2175c02bb7ee6d3d329a793f8822ca84b6fbb9527ad0163",
+        "declarations_sha256": "7e84683d8b2842fdad7879fc20726eea9d94714a550c1b71e81bdc690f6729e2"
+      },
+      "budget/stateful@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "5eca90a478a1695a32b6309a575bb5491dd70052a8bf6cd1d82ad9b5bf8863d0",
+        "declarations_sha256": "0f514240756c6db040db9354db8f3672c8be599fe2c7ecfbec6f0998b19c8a03"
+      },
+      "budget/stateful@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/stateful@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "2523258e3075358e4b93c08a116b0f903603bddb47f9aa0d01d24eb3d6239854",
+        "declarations_sha256": "6d16b8b8a66ef7c87f95464cfdbad8cd4c69070a3ac93fe8e5f2051ec44bb846"
+      },
+      "budget/stateful@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "a0098ccbf239be7e41278d0a9d21ae999bec81e266604bb3bc9dc6f0fcd29cc4",
+        "declarations_sha256": "e1e3c436bdd33236b5de5e5f12c35b1aefcd6b171b129dc924a6e894733db986"
+      },
+      "budget/stateful@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "30aeff2b040d7965c732f89287328eca2edaad9a4b961f084952b746e0ca2b9c",
+        "declarations_sha256": "7d063076ca60e25a174c0f8aaf0091822f877ac7d99995fb37692e2a5b41acda"
+      },
+      "budget/stateful@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "71ca93a4d360666d2a18814f0dfa4024674dd8cd05885d3bcb252f9dedb59026",
+        "declarations_sha256": "4b8e635021d3c6f1915d686235a2c3402e2efca44910868f6bd801b50bc40d8e"
+      },
+      "budget/stateful@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "d2096282ca19733bc79fdbf04195d63c83fc364b049006da432e91d2b3a0c01c",
+        "declarations_sha256": "2c67c3a2adbad472eff50d0ffac40537392b0a676920f936bffac9b38bd55c0c"
+      },
+      "budget/worker_memory@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "42bd95607d128034d59262206b843e7c60367dd2e64e2525f39ce25edf4df7a1",
+        "declarations_sha256": "410c1c65cd593db585266c0231a5e9b12ab3852f2411991c5b20346cbef242a5"
+      },
+      "budget/worker_memory@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/worker_memory@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "8ce982e6f872776b0824d2e6aea4bba73982eb5bf43c148e6d01c8311f3b28d7",
+        "declarations_sha256": "06aeee65bc0fd8e5b07fd823cc54fd7738087e13fe5a6f66872816519930623e"
+      },
+      "budget/worker_memory@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "1c8ee7eac1d6bd67ed7d488870ecd19dba624aa5159795ab7536ae6fd4258cb0",
+        "declarations_sha256": "3211df2237999cf465fdc0309e950d87acbb97ffe5088d7e8a60fdd69384e084"
+      },
+      "budget/worker_memory@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "a8367cb9e832bb9627ba30bffd33453ed06553ba9c67a38654ac0e2c97926489",
+        "declarations_sha256": "1b5457d9e93874fd1e8877537e9de28184a490fe82aaa00222e85b9994e12d46"
+      },
+      "budget/worker_memory@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "822478ed823b20d9f4b04a41b4b673035a2a7cd876a23f250dea327daf1e8ac8",
+        "declarations_sha256": "d135af2ca8749685138814b0c804c703a5f510fd7106a6608e87de609036c20f"
+      },
+      "budget/worker_memory@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "de1efe04644012bb8bbbe028c39b72dff7c47ceaf9a55c6e99d0b5a798790bb6",
+        "declarations_sha256": "f4df1e25123c2feb869c46084730ab5cfd99566b57bf097cae8023f121a103ce"
+      },
+      "budget/write_datasink@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "fc9f499650b123a57767b56b09900249ae25c41445df8350f6903823a080a404",
+        "declarations_sha256": "d08d7380143fb70546ef7c8b1135e7451aa0fe36eec1b4d40b180b2d9ad3afa9"
+      },
+      "budget/write_datasink@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/write_datasink@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "f5040b5fe7bbcb59445c23a3733c91009afcbddfa9d7e0c6da69090c6478cb49",
+        "declarations_sha256": "58dc1284c2741b8546445ea14d19b748e2a5eb0ddb9554b19698aa07ac826951"
+      },
+      "budget/write_datasink@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "077cf45e8e194ba4518a2342b12a42322a9407cde1935c08ec56fb0732fd7924",
+        "declarations_sha256": "9748ab66b5089a158008e8ad24ffe5cc179b11b10044e334a50f4675be0045c9"
+      },
+      "budget/write_datasink@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "09238f86246133ecb28240176b0f5213ca503412b8271752718283c77ee02c92",
+        "declarations_sha256": "4d8885eae0782446dadc6702ca44e7a78d1f956e3b602995d2f2930677dc8077"
+      },
+      "budget/write_datasink@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "2dd66def27b9668892f7d20becd3ea4ef76bbc9d2c4444af0a32b241425405d0",
+        "declarations_sha256": "5366396f58192979266947c8ff8f209627650399bc596decc3ef817cf85d225b"
+      },
+      "budget/write_datasink@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "bc0490ad014def919d8a03231c58c2d0ea517c6d78743b0ae5080d043a7f7be8",
+        "declarations_sha256": "c099fe782c23a4463a0c1608de45125d64507342ab407e7b10fb0ee1e74bcf45"
+      },
+      "budget/write_datasink_queue@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "a0d84bb2ae25e6d1653b27b68d44a5baf2333b1cd701eca6d0f94639c560eac4",
+        "declarations_sha256": "8b391c25ffd1e8240ec6aa6bef3de965a2fb79f4ef236fea2a73c9a8211e780f"
+      },
+      "budget/write_datasink_queue@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/write_datasink_queue@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "e6439b5c6e4c78b4cefbdfda7f02173743ee386dba5e1d863f9a71e7bdfe17c9",
+        "declarations_sha256": "10e9dc9b92b6eeb9792b27bb4a35cb110596f83230b9be20a9d888c8110859c0"
+      },
+      "budget/write_datasink_queue@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "0a3f68fab0fdec6926edff80e069af26dc75e44d28a2c4cd124fefaea725367b",
+        "declarations_sha256": "be266b435cb3c16b8f415e0ddd7d5bd1c4d2ba26c013670b2db4305c4f181d57"
+      },
+      "budget/write_datasink_queue@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "e8b33c15b151d3a0c79f0a2c910cb1d0b62c8cf549d1f510751afc0977371378",
+        "declarations_sha256": "54c93788f5ab7831674071e6ca2a8c0d2c1d59f17b1b649d2551471b76b59877"
+      },
+      "budget/write_datasink_queue@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "8bd58758c1ba419dc8c569aff0d68442571cab669cf642a5350d86ef44b38ff3",
+        "declarations_sha256": "1dd9d4aedffc836772f06f97b933f4b7951548a423df256cd7e5d53456f209de"
+      },
+      "budget/write_datasink_queue@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "69759f351ae4dff3d9f7b941e928b9489708bffc594f0158ab861f40002cb0d0",
+        "declarations_sha256": "516f7382baf5b70b7f6524d0947cfaee6f10d2fb70f0063caa358ddc8eff8baf"
+      },
+      "budget/write_file@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "a75472a4b310b129a25940cea2e65e64a3491071487bc1ceffe16000fa2de957",
+        "declarations_sha256": "6101eb75a74f1b2cd3ffd0e44ccb223696caaec2bbcf7983a3872cd4823f542e"
+      },
+      "budget/write_file@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/write_file@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "e1ccbdf4c0cbe77a92ebd75bf8542baca0c3270a8b74b533763fd5287135c8f6",
+        "declarations_sha256": "e4e50ab83f9ca337c34cee7e704cac5e69d74eb2c567435e034dbc20985b8c26"
+      },
+      "budget/write_file@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "91977fdba575d6f804efb1fbb15b230ca2f31766b0a426eea5550bc3f88fd987",
+        "declarations_sha256": "60829fceffd7a9b0980e4ce010c3f4c311665afcf440b42bcda1b205034dad8b"
+      },
+      "budget/write_file@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "2c4598da2a3ddeae7b68812ac1833a5971b52da854fe4d43a114b0782f72064c",
+        "declarations_sha256": "64b862a2c32196b4c45b8ac40cd78ea66c479e3c8aebd808dfb907e047355d01"
+      },
+      "budget/write_file@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "8df118375869d44fb8e255c9f11491809030c621cc2d965024fb5ced11710310",
+        "declarations_sha256": "fb5f5b95fe277221fd6b97959bcd952b138b7306bb9cd2de47e1be8069b7998f"
+      },
+      "budget/write_file@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "78b8d2cc485c95b72ad7a608f3d3cf6474c2db513a1a91fe3ca173e2718c9b20",
+        "declarations_sha256": "1433c18724233dbfdd795af8efe38552e6fd879869535a02d61776e12a18d473"
+      },
+      "budget/write_lance@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "601493eb01fcc741f7c7865f304160a8695ba8ac00ec796d99ef563d75d3c00e",
+        "declarations_sha256": "961b824d63d2458e7cb4f404a08c2ef0e5370946cc68d3a1941fd8265d74109b"
+      },
+      "budget/write_lance@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/write_lance@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "d4778556b817387cdf5af3aff491ac5cd5fbaac9fc15c5786b28ba4136595485",
+        "declarations_sha256": "4dc1eb8e57f193bb74f1232e16d8937d9223e8edb0f039159437cda4127af71f"
+      },
+      "budget/write_lance@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "cc5db5b810e2f41fff238ed22024ee8b09340c1e6b82796d16c4d0dfd30fb994",
+        "declarations_sha256": "28b580db9489daf60a9753521ac19fc6db1d0d5e5423d3a1b3860b134cce7684"
+      },
+      "budget/write_lance@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "7d78a458b9c5b4ddda4235d2e12edbdda8fa9e7ba03e40e670ce9116f6adc306",
+        "declarations_sha256": "4e74a65d19b4fbd0caa121e7b8007a3bc2d80d093c4e758544bfd6af0b84ec4f"
+      },
+      "budget/write_lance@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "0b5985ff991684320140410e383e3108a88f634089a0a01fcebb0692f8807ffb",
+        "declarations_sha256": "ffc3d0d3d10d038a5026e1ccf249ccdf26af3232d05ce21c9696f173833abbdb"
+      },
+      "budget/write_lance@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "95b9b65ca9a4d55cbd7eecc4520b15fa8bbbeb3dde2cb12086df71ec092953f2",
+        "declarations_sha256": "a09b302251a9edac3ee64e2d90762df735456141749ac5196448258afaf897f6"
+      },
+      "budget/write_lance_items@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "4915cf6de2aa6b79bef5d1fee5e5a033343e2bc272fc657aa2dadd3273328516",
+        "declarations_sha256": "32281dc3e80502367d3b32bbc73ac5458fdedc964fd66cee12773571ad047956"
+      },
+      "budget/write_lance_items@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/write_lance_items@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "172c976994383fb5fe5f1bfe535dc1770059a1e5be9930c030c04fc2f9f9a7f8",
+        "declarations_sha256": "6fcb505bc670ce483549e5124a3fe786606a9768f1c4641da8f01e706c30a713"
+      },
+      "budget/write_lance_items@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "9dfd1f3b794ab485a36f8aa9c4326c1fed115d0ad7fe00616b6c8a9544d724a6",
+        "declarations_sha256": "2766d0a916a9f34f6b60321fdbb78526cdad7526b52d90c43d8bd57bd64b1e64"
+      },
+      "budget/write_lance_items@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "4b2a6fc9bbf1b18414393d2101c22c8c1f7ee7616565f29a5a1270867b2b84e5",
+        "declarations_sha256": "bdcc779a7c3091a9a9253b1984d7c0ee1d51b36eaedb041c15b23ad7a2adf36c"
+      },
+      "budget/write_lance_items@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "b5c39e4989f19f9b832864c8af718158d0b1068cd1ae6d4b16a9239fa34c7774",
+        "declarations_sha256": "7b16f9dc346f4ec982486765ed8c3cddbe2a3eafb60cd9edf278de6099155b01"
+      },
+      "budget/write_lance_items@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "0ffbb017c94714c5d6f6334ee99d8f03de6eb18737d4a5ce56cd4dc915ffa1f8",
+        "declarations_sha256": "9a003cf140a039f679a4932b93958ac453b752d8b359282997d214cfd47f016a"
+      },
+      "budget/write_lance_join@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "44a6be90747e9826423adf1353ec92b26c47811bb8ab4afd8f708dc10cbfade9",
+        "declarations_sha256": "3f6b0df374b1491d002769680fa9af95ee552c7ea399a04ceb815b16100b9f39"
+      },
+      "budget/write_lance_join@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/write_lance_join@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "1c1550d641228568aa5a9b0aca038fdd9f17bc39559d3c6d0f1ed4552ba2d27c",
+        "declarations_sha256": "7334f4e2bdef38e3603395f24f42527034c1bbec96d20efbac38d7a17ad30ca4"
+      },
+      "budget/write_lance_join@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "06be206b6df2cf737b39bae91c64d1dedbc56015ec2ad492767f240ca80eefbf",
+        "declarations_sha256": "6c0ed8556245b3753a8100350197d3e402ac0824bae202e74c4bf434ccca5eaa"
+      },
+      "budget/write_lance_join@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "a2733c2403a6f1c6c116177f056693a7a1a868fbbec17cf1b53440a3140b88ab",
+        "declarations_sha256": "e7b9397e5864eaa1273e359e3eb9e8a450c12626ad450e854530ee46893c4721"
+      },
+      "budget/write_lance_join@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "58e14d410d6b4c3e9fe22df2632492f3dc010f8bbaae63f6341a35abb6657ae3",
+        "declarations_sha256": "b79db9765eaccd51ac04bc196513f96cc28ff5cb4de92beb82a1a8b39df80627"
+      },
+      "budget/write_lance_join@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "352a4b3112705b9db1844dd86d52e64acaee2e25376cce7146246b02defa3bf0",
+        "declarations_sha256": "aa12a7e4d5be98e96feb7526004852434d1e676ef00ced73254ed3e5d8fdb973"
+      },
+      "budget/write_lance_prompt@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "0af5e4883a7b96014a88ab340ff371bc8cdec50a16fad46c61d40833dd8ea036",
+        "declarations_sha256": "a6affb2b0a0aa4656bc85df6e048699f7c8c18e426bb83df447f3a98bbfb805c"
+      },
+      "budget/write_lance_prompt@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/write_lance_prompt@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "025e6313eca5d37a8d350d6cee6fdb978ec01835e1570e676c0dff0a6c0035dd",
+        "declarations_sha256": "25c8b6167551833f2166f86b10600e7be93edc82de92ec932618cbaf399e7539"
+      },
+      "budget/write_lance_prompt@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "e8c7ff6df8d1231a677807faf4a22c682404e0ef3d7001dd153f388c9244d7e9",
+        "declarations_sha256": "05ad0122a7a445bde9f21a83ffa5d469411f31e2f5eef8edb95fe111715c92e9"
+      },
+      "budget/write_lance_prompt@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "1ca7242b3d323f026ae07499c25438a78713c4adc73ef6e47005750db5d43158",
+        "declarations_sha256": "ca9e0829474e0e431b053c21c2def28651c112f8b8793668bb82f93f22c7a1c7"
+      },
+      "budget/write_lance_prompt@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "e98f8820b037b069745356efd4dd5bb75266030009959fe71de8ed276c21cde1",
+        "declarations_sha256": "a60cd0d96a4e2dcfec28dc32978418fe636d0d9da98f0c8688026fe5a604d9da"
+      },
+      "budget/write_lance_prompt@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "568128b2a4f3c5f855589e6e14dca34eb0f04e94305c75b2bff56e13b198042b",
+        "declarations_sha256": "054541862cb3eb385910dc0d5bc19614c6b8581faf69e12a4991009a47ecc6c7"
+      },
+      "budget/write_lance_sorted@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "90542132e43c08a4b6f8b94c98916753b6f2fbf9ede735b5b6648c1eee978973",
+        "declarations_sha256": "eb143d2b7ed3b82d8b2f0b35499f64f15b54ab88d2c975d0a2261b27069b3517"
+      },
+      "budget/write_lance_sorted@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/write_lance_sorted@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "11d1903a9eb2432b1f8cee27cbc804a66e5a6965c88149b480a0edce0b0bbda0",
+        "declarations_sha256": "4afc852cbc71f5bddeb02c1b12c22dceab0f9562d9339b4e50d4a164200c02b4"
+      },
+      "budget/write_lance_sorted@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "eac583a74f91ace5e78a5b2b993404c82d53f6d31e68b6a7676358a42a7fd9c1",
+        "declarations_sha256": "0108a481527ef61eb7303f4ce2f755e2a4902288843e4d820834b598dd818909"
+      },
+      "budget/write_lance_sorted@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "fbaa887e7dfba17fb55f076248b0d5718a1ae2fff35230039f80c2c67157f53b",
+        "declarations_sha256": "981beb79b9e239596c7a69181074096f876bd5b7a109877e35193b1a3a0eb165"
+      },
+      "budget/write_lance_sorted@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "bf1fef300d99a7a73ba90821a7760b5546bfba453e24e1ed99a77d0985c8766b",
+        "declarations_sha256": "cc5c65ef058405f7ac0b1ebbf8c690ab7e09df96712c774525cefd3fd423ae4d"
+      },
+      "budget/write_lance_sorted@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "0fc0f76fe34db3ad651746c20c1490aeedaee5d036e11a0f8b73f653a14ddde2",
+        "declarations_sha256": "6515019c4b9044472b04ba0687e33cbdd4ac0e89de21b30919b9eb2d9119d2a2"
+      },
+      "budget/write_lance_two_joins@m192_r8_b32": {
+        "ok": true,
+        "graph_sha256": "0ac11a6cfabb1f2783c6318a7cecabc89bb0172d286e4334b3059ff90bf6370f",
+        "declarations_sha256": "0072ad8b9df6d6f6b985eb2ca14f018e65fe9a923f0019ed860745890a97bb74"
+      },
+      "budget/write_lance_two_joins@m192_state3071": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: terminal state budget cannot hold one block and root"
+      },
+      "budget/write_lance_two_joins@m256_r16_b32": {
+        "ok": true,
+        "graph_sha256": "16a300b057954d779917db23c3022a4b021de8bbc01afcb42ee04ee17b8e4d0c",
+        "declarations_sha256": "507204b36b83680903b497ac084a802e0085c83ff790d2e64c770a567e472720"
+      },
+      "budget/write_lance_two_joins@m64_r8_b20": {
+        "ok": true,
+        "graph_sha256": "2fa0a1d5f888a857ff339746d1baa06f417e372cf0206faa38896c30b7096206",
+        "declarations_sha256": "03f7d89f922c5c01305b4bb72301831e6b130ca36637540107e437744382810a"
+      },
+      "budget/write_lance_two_joins@m80_r8_b16_s128": {
+        "ok": true,
+        "graph_sha256": "1a7466305cd7ebf0220d2c46e264254a23eb56192c3f0a30520034811b351c16",
+        "declarations_sha256": "b59516b77d64ec87c7c59fe28555dfcb83e2bc1fb21ff406d298cca006e91f0e"
+      },
+      "budget/write_lance_two_joins@m80_r8_b20": {
+        "ok": true,
+        "graph_sha256": "f57d3cbb69cbf38dce8533c724426443c39f6a7f30300d12e2e8a063acf63d72",
+        "declarations_sha256": "886499d7e4b5d48f182a0e209565d10592f48261747c818ece1830cfe4f6f652"
+      },
+      "budget/write_lance_two_joins@row4k_batch8k_state16k": {
+        "ok": true,
+        "graph_sha256": "a9958fc2a67a2f5cfbaed1f1dad015ca013ca40bcc155298893c7b81f33336bb",
+        "declarations_sha256": "69568be1ecf6fbf845c4b6817fc0c1f87461b8270007fb19220a36d33c216a94"
+      },
+      "chain_labels_repeat": {
+        "ok": true,
+        "graph_sha256": "037dedccff9c6b5e22e88b684098bcc92a92966f61e9fc700e4a5caf28e5a3f2",
+        "declarations_sha256": "6e67c6e6539614dd92d9ef01b012b22db52b33e11e94a60025b8e16868952703"
+      },
+      "chain_map_filter_map": {
+        "ok": true,
+        "graph_sha256": "65007c783af844927e5635e9660b8bc535eaec0e1c36fb837fc18d56d907346e",
+        "declarations_sha256": "34f09d78fc0d99873739778345402c770fc7359322a373eb59bc0588743b77f1"
+      },
+      "chain_task_group": {
+        "ok": true,
+        "graph_sha256": "865c7f2b71b93d1a1978e49c95e2f4a8d9c442e1c4d16770a9eaa4fbe5038f7d",
+        "declarations_sha256": "45cfdec6c168d5161057b0a9c244a8b7a548599c3f6ac8ca121285fa7b40c101"
+      },
+      "decode_document": {
+        "ok": true,
+        "graph_sha256": "87c0e7b858c27e6a352d480c49fa2157ae585d337435981324d1d98d8eed2b97",
+        "declarations_sha256": "c1efd4d6659161848515224278eaa7a5a200f5595cf9f584e6f312ed892f1ad7"
+      },
+      "deduplicate": {
+        "ok": true,
+        "graph_sha256": "4e8e1e6fe29ee1882b1642a2c662fbc7275c2149aa17fe30117f714c2dd68955",
+        "declarations_sha256": "589e3c54a993752a75b2438a16095ddd17ea11182ebfe20263312504a23e68ba"
+      },
+      "document_embeddings": {
+        "ok": true,
+        "graph_sha256": "06360c5b44c0fca1b4f8a7218a67a9d843f67fe4f9cc93be77edcea7e9f70a6a",
+        "declarations_sha256": "aef9e6b78baf1d77d3051fd8cf8e1e934815f56571c5dd8cdfe5a6460b94aa2b"
+      },
+      "drop_columns": {
+        "ok": true,
+        "graph_sha256": "a5f49a3372aae4989921bfd648d26a0a3893e5cba5c922f9c8fbd123e20d4747",
+        "declarations_sha256": "66aa6e58bb15ddfaaacbb28737f675af3f08fc4aa76a2ac3c145aae709117515"
+      },
+      "encode_image": {
+        "ok": true,
+        "graph_sha256": "ecce6bae6ed784b9529d982bb28aab1e72263ace0fa8fda427783e691a37099b",
+        "declarations_sha256": "b5eda571dd577997b951704a3a666ae5669147bb820819478a2f7cf790c949a8"
+      },
+      "enqueue": {
+        "ok": true,
+        "graph_sha256": "7666dad5b54cc250997bb989918da5481ebcbdb36145849fbb5d333f810c4753",
+        "declarations_sha256": "de93dd5d5cabf8dec9859bcbe9b81ce832d4d4f9be676b8432ac1f12e8794915"
+      },
+      "exclude_keys": {
+        "ok": true,
+        "graph_sha256": "79b864483ddcfbd135dfc2896e67d5c600ec61a9c03e03bd4c780c2034d817f5",
+        "declarations_sha256": "225a0ed48f2a8d0064ad561803f3bbf76cfc40075c9c4e8ac20ed7fd75cc69da"
+      },
+      "executor/map_batches@block_only": {
+        "ok": true,
+        "graph_sha256": "837a9dbad331c111e6b733800e832677db53bea91115c37f4f04e3bc1539585f",
+        "declarations_sha256": "23e67eed54519a74c56e96f310eee5604aab50f0f11cd5b2b4cf575eeceb5e66"
+      },
+      "executor/map_batches@local": {
+        "ok": true,
+        "graph_sha256": "74fbc5378da38c8dd62c57a2c14315b1f1361b777f1cb970a24c667544992a79",
+        "declarations_sha256": "ed264f81a4e8baf6c3ec7192d178bf67a3cfd207ba4b755d2a054d8cb075fc14"
+      },
+      "executor/map_batches@local_without_rows": {
+        "ok": true,
+        "graph_sha256": "6885db7ebce83b4ab6c8323c7cd64324e9e72ff4170d50e28cf77bdbde874d93",
+        "declarations_sha256": "1a7ad1e7669059795a1e52ad7a682b5414d63916734023230580f20f7cd4df8d"
+      },
+      "executor/map_batches_sized@block_only": {
+        "ok": true,
+        "graph_sha256": "8e3b918e5cb2613806f12829fc27fd0c9b7eae0c65dbee0a073b3343972b3c2c",
+        "declarations_sha256": "bbf66030a7da59574f26fc7f54b3bf50b1f0344fe0f8e927cea18bbf65666b8c"
+      },
+      "executor/map_batches_sized@local": {
+        "ok": true,
+        "graph_sha256": "3eb6f5308378e87df0a2d929da03421929da4ae1b0afa86be2931794d3e5fa39",
+        "declarations_sha256": "415a23ddf489a0a1b6643b05df3faad48f276202db5ab9349e8e1fa68c60f3c2"
+      },
+      "executor/map_batches_sized@local_without_rows": {
+        "ok": true,
+        "graph_sha256": "261e78ebf49050050668524f56a011096104f59065bf7d19d6ab51e51d7788e4",
+        "declarations_sha256": "01b8bc82c6d49907545312f5ed9824b48a3ee50478e60d6a0a9f290b7399c801"
+      },
+      "executor/random_shuffle@block_only": {
+        "ok": true,
+        "graph_sha256": "4ad6c92bdea432e40f8e8883fed14f1cbf0899e2e5c6d043db414b2928d470b0",
+        "declarations_sha256": "39e3cb15f18d03d9792fe9b0fe2c2bb393c5c3d5e44d9fb7fa118c023ed56fe5"
+      },
+      "executor/random_shuffle@local": {
+        "ok": true,
+        "graph_sha256": "84484612a49a7628db24177543c1fb0d2b2bd33f2a80b6dcbe233ce72cfd2b69",
+        "declarations_sha256": "09ed7753e1974c02ad2f30fd3ba5ec2ca13bde1c4fde81a2013814f3641a5edb"
+      },
+      "executor/random_shuffle@local_without_rows": {
+        "ok": true,
+        "graph_sha256": "8ff5d66f0fe929a4f23832bafc45186478ca6003d5fb032c11416096389bfbbb",
+        "declarations_sha256": "a36b0737aa8e10a87aa29f949d7f691bdc526241fccda42acab7fbc1b0538efc"
+      },
+      "executor/random_shuffle_blocks@block_only": {
+        "ok": true,
+        "graph_sha256": "d2b36d2ce3cee7c81276d5acf2ccb5614c25520aa61de99786a77b13c46e0fe7",
+        "declarations_sha256": "ba3bd7cc5990db52e52ec946ff2993778194587d59185911cb2f6a9df3c20ac7"
+      },
+      "executor/random_shuffle_blocks@local": {
+        "ok": true,
+        "graph_sha256": "d83579cbad14d5b3a7c2ca133fb96e56c69cdccabbf8eef8d4d4ac4c128f1316",
+        "declarations_sha256": "f0272c31170ef99eac1fd6ddda480d56765bcaf276f6732b57ca2de9e25b0e8b"
+      },
+      "executor/random_shuffle_blocks@local_without_rows": {
+        "ok": true,
+        "graph_sha256": "02740d5800fc20afbba8562f58bad941e58b503b7d0c408b70013200d4dccbbb",
+        "declarations_sha256": "223f982f7ebbaf175b337096447deec7b38b58f54dfae6a2b360dc3310e6e614"
+      },
+      "executor/streaming_map@block_only": {
+        "ok": true,
+        "graph_sha256": "95c2fc2ff651e164d5c729f25fec476ef11e5c32d9c221bc10757dd5a9f88179",
+        "declarations_sha256": "a763eb0e9e52e0c148cefb627dd3f7ea3123a6764c81be88de3b63687a3c5b56"
+      },
+      "executor/streaming_map@local": {
+        "ok": true,
+        "graph_sha256": "f1008cff89d570b1a24879796a565020ee5a3ecdf140d206792035be7c8c61a4",
+        "declarations_sha256": "6a8931fe183bdd33a6eeda042f8c0ded4452c546f4b812e4c0779e7a4496ebcd"
+      },
+      "executor/streaming_map@local_without_rows": {
+        "ok": true,
+        "graph_sha256": "d67a6e6a1fa2ca42dddd9ae2de62c94e414428463cd7b0a32337abc8f45d7ef2",
+        "declarations_sha256": "fc466234d09fa819c9ea96114e4e34aa7b2c66c4f8c560d310f10d4793978297"
+      },
+      "executor/task_chain@block_only": {
+        "ok": true,
+        "graph_sha256": "084cb41b74c56c82bd69030a593424d7d8cbdab34854b63d2977dc619e0117d6",
+        "declarations_sha256": "2f704daf15d6aed101debca9018b68b47a6026ccaedaeca7140dd431bcf3bc84"
+      },
+      "executor/task_chain@local": {
+        "ok": true,
+        "graph_sha256": "a8d94c828c1d2c4b2a5527f807259017c4c3b2fd9b1b4efa05c8eb5808aae4d1",
+        "declarations_sha256": "05f532bc15c599a38dcddbba556e823469cc762ccaf19852ec90e7fc137bbb45"
+      },
+      "executor/task_chain@local_without_rows": {
+        "ok": true,
+        "graph_sha256": "7b8292f89f9fc0cffb5c78e753c9debb7081c06cfe26980c16b0270e2f4ce57d",
+        "declarations_sha256": "c3b8ff0515f59173ff7d54a19e8e3912a59970b003b65f3500ab26dbc1a960d4"
+      },
+      "fetch": {
+        "ok": true,
+        "graph_sha256": "ed0e5c25d37b9c46d36109212e73b0d5df11e1c46433da76beea49d452e02b17",
+        "declarations_sha256": "04dc4907e7b05aa2127a0f5bcf013564780520c9da59258d29055490b35ca5a8"
+      },
+      "filter": {
+        "ok": true,
+        "graph_sha256": "d94c936ba9c4c9a40a6d2dfa40a4a1af8a364c18d1f05a345b1b1e535ad24a4a",
+        "declarations_sha256": "dcf330a8bca293429ff0650edadcb7c725ea9c6a7b66ef96cc06c1ba6363af6a"
+      },
+      "flat_map": {
+        "ok": true,
+        "graph_sha256": "e7c67cafd4a962ab1bfbe0215c9aaf36719f7ff5e28e9f499cdd64cb0457cd5d",
+        "declarations_sha256": "e92e7789a65018e69f0676ce7858dc6f086c6be7a67deba1a73828e5ba8d0f9f"
+      },
+      "graph_actor_target": {
+        "ok": true,
+        "graph_sha256": "b02d6ef35912cd036543ac5ca22a72221275f82d6bd21858812abb7c5bb01010",
+        "declarations_sha256": "37334cec185a477e18067d2cb4f8ba290dbeded920521c107d9cbb4617133da3"
+      },
+      "graph_broadcast": {
+        "ok": true,
+        "graph_sha256": "274f7200101cd512861c12398e37d8d31e18deb6801a05a80537b8598f99186b",
+        "declarations_sha256": "9f2e68a6bfcf68bb811365b2634cc80831e42dad97e66f0788dd5d41a515de07"
+      },
+      "graph_durable": {
+        "ok": true,
+        "graph_sha256": "763b678b4437664414462d0a88c045f0a6ca588a122c50310c80c5da0c1bf4c4",
+        "declarations_sha256": "4d38c081dc645e4cbe83dea87b462daf0370f8ff7770d12a67d378910b7ff7e8"
+      },
+      "graph_hash": {
+        "ok": true,
+        "graph_sha256": "2db1caef848f1b8e3b92a56aa2313bcb89381e1a78a13c47f2a6df49678e2f7a",
+        "declarations_sha256": "d9c7b5546b825e5c13d09ed56c264bbe5afba7fbf73a497e42a5ba6bdbbc6efc"
+      },
+      "graph_literal_prefix": {
+        "ok": true,
+        "graph_sha256": "6ef542329f62a2ec89f1fcbaeb79994abd43e0742fb97d366cea776c66284ab1",
+        "declarations_sha256": "c3910702084c8696654b353da916dbaabb45745248e7b5212b5713efc7e9abf7"
+      },
+      "graph_literal_prefix_target": {
+        "ok": true,
+        "graph_sha256": "c8853efb5440a5b2504f27077ba8383c8a1dcc23ae69fade75b8a44960aadefc",
+        "declarations_sha256": "8729be3173d4027eb211e9b307466abb851890247673e1cc9cb244c4b09dbba7"
+      },
+      "graph_rebalance": {
+        "ok": true,
+        "graph_sha256": "cba9d1b3e7907b4a0d6eda3ab5838694dc4ed0eea1942391dbf8507aab6875a8",
+        "declarations_sha256": "4d779735507c5483d9b585b1ca6b90eb4c4aab10eeb4a2d85f9b93fe2c6eaf15"
+      },
+      "graph_target": {
+        "ok": true,
+        "graph_sha256": "969e19dd7db19ed6a43baf58eb65f18833bedca3d93537a6411bfbae18ba3abe",
+        "declarations_sha256": "60f9785f3a6cf020af2f27c2f3c030d4c01cd6b9097c46991111a118db13741e"
+      },
+      "graph_without_ancestor": {
+        "ok": true,
+        "graph_sha256": "caf781e1f1290fb14fa5a41095894c51f6801363d4044980a2e0f29f46d9c67a",
+        "declarations_sha256": "c113a7c383724bf3a311d3b549de142f41ae759f423795ec20066cf096af5104"
+      },
+      "group_batches": {
+        "ok": true,
+        "graph_sha256": "ccd075afcf4e9b4dcd69c6aa4332c3c293a5785daeb2bb98904156b474c93f35",
+        "declarations_sha256": "bb801ae304aeae9f2c99745165c9816e23a8fcefc009b14db0b19b84b22ab5b7"
+      },
+      "group_batches_streaming": {
+        "ok": true,
+        "graph_sha256": "1e4314e9421eb1c49fc47e6c3db63f01730d137f711868a5292406b22037d2e8",
+        "declarations_sha256": "66854e715238d14f1a7e1f165bac29ba438df8c47ea5c371016fa53e5e13fd22"
+      },
+      "join": {
+        "ok": true,
+        "graph_sha256": "a2dc48f313732ce1ad93e4a71127435dfa2169928ca502f58dff78cec510d06e",
+        "declarations_sha256": "efc75d247b76dcf77f9e573c6d6a450f1e72b260c9843879b2a2db2e2a0d8093"
+      },
+      "join_left": {
+        "ok": true,
+        "graph_sha256": "4e003e866364c66a68ee047398d435a2c85a75d471e12412f7b0e0a84b11ad65",
+        "declarations_sha256": "9b2806e202577d225b9085232dd4d4dd9c04dde13805d78b3afa568d62daf2a5"
+      },
+      "join_twice_reduce": {
+        "ok": true,
+        "graph_sha256": "45a100236348d93c2e91f5a1bc6a836ee64632933d3f84d83dbf1d2852c7de47",
+        "declarations_sha256": "052e741c9600bc5d33bc3454c4bb96f1dd74534b06a2b83af5496ff575b9c7f3"
+      },
+      "limit": {
+        "ok": true,
+        "graph_sha256": "fec02bb9926678681a9d697deec4831f20bbe0957166a00cffdcfcd0558222d3",
+        "declarations_sha256": "dc04780b7fe0b4aafc1986dc0203c45bcd908c759d093ab03f49355bc694a976"
+      },
+      "lookup": {
+        "ok": true,
+        "graph_sha256": "d453b306fa0f3e43673df0b02d609d4db183f2a373fc6b38a4b147f4ae024ba5",
+        "declarations_sha256": "a38ad7b0199feae1683d531ca66b7c91111f3fc4e8b84a1ea89f7dbedaa0788b"
+      },
+      "lookup_lance": {
+        "ok": true,
+        "graph_sha256": "a4011d19b833663c68ab3c88f6742bf5fb0e56a33984276b6d498813bfddddb0",
+        "declarations_sha256": "422b5e8e7c38b0b4e20adecbffb0181512d97ff966444a1e65c52d177c360ab8"
+      },
+      "map": {
+        "ok": true,
+        "graph_sha256": "dfc1bd0b295419dbc3096e399a364f43f7e93ae710e2daec88d4d9c0f606e161",
+        "declarations_sha256": "8e18670b2515216af329310e5a8e791aebce8d81bf288f95f701398d3be7801a"
+      },
+      "map_async": {
+        "ok": true,
+        "graph_sha256": "58351a79b986deae45d04d61289dc9a2e72f64861616f70675f5d66717bd0f0d",
+        "declarations_sha256": "1282b32eed20ef1b3eb932bc79d0dde3ab671b26b0cfff2506ce06c356cc1b1c"
+      },
+      "map_async_labelled": {
+        "ok": true,
+        "graph_sha256": "fa18bb03dafb68ebddc731a1afffeff08e054b0b717ea4b99d0222a9727e28db",
+        "declarations_sha256": "7442f51b38b2480760b77a3be43baee0c2b3944a94fe7350c9fe940df2b97997"
+      },
+      "map_batches": {
+        "ok": true,
+        "graph_sha256": "bed5998a9b85fd6dfaa400dcfa42d7c22e7b27d8fa79354114870e2d6a531d87",
+        "declarations_sha256": "2fffc7c54f5cf1e7075484fde738ead95390e0b17eff1347862335b967cfebcf"
+      },
+      "map_batches_sized": {
+        "ok": true,
+        "graph_sha256": "6ed0f0471cd94ffedbffeeaabbb43204b3df480c1cb36e5aafea653c957b2ea0",
+        "declarations_sha256": "c4682ce57a258577b8571bb4a0d798428631f505bdcf50e36586c5ab46b04cbc"
+      },
+      "map_bound": {
+        "ok": true,
+        "graph_sha256": "4e8c97b156f65a0a08b0700e43e9cf4333f82657bb164f262232c338557ef09a",
+        "declarations_sha256": "9d2143e84ea9690f7bb90c9d514ac3376518ef22843f9d687873d2229859b468"
+      },
+      "map_bound_outputs": {
+        "ok": true,
+        "graph_sha256": "a165f83c2cdaaac953708ed7342af6f460282f2f5a89f4ee79daa4c955c45629",
+        "declarations_sha256": "cd965189e6ef29ac25361de1e1ab5f3e979859b3cb0e8cf933cdc6c065162f2f"
+      },
+      "map_cached": {
+        "ok": true,
+        "graph_sha256": "77004a2dc96f8961102801db47f575b68b8777074bf1640868ea579e1df299d8",
+        "declarations_sha256": "418facc8d86c50fd7dc8fe046ad1b99704d3c4001eae4f62d3661eff3d5e13fa"
+      },
+      "map_cached_async": {
+        "ok": true,
+        "graph_sha256": "d92726141baa6b86b6bfacb42898762c89acdb321c0ec59e4cf1411f55ef4aa7",
+        "declarations_sha256": "ed0a500b6ec829f05be9c9f52f22003ef5b7a1f17eb085984ee4805b4143562b"
+      },
+      "map_cached_stateful": {
+        "ok": true,
+        "graph_sha256": "89c9faf6362c14b2c9be45719d65bbf9831777cecba6096c045a2e0320d674a7",
+        "declarations_sha256": "21a00c4b7edaddad3a3482554bd3b641694d1a24c4d1b5f25cc5d8e2173797a7"
+      },
+      "map_cached_sync": {
+        "ok": true,
+        "graph_sha256": "4b4c6a9365235de214bb640a3bcdd383c8905b125e7ce1a7b03ee98a1897eec4",
+        "declarations_sha256": "65d116aa6121346e6454bfc060889ba0b35e41238a69258cf0f5444e58248e31"
+      },
+      "map_class_factory": {
+        "ok": true,
+        "graph_sha256": "9a2caf744a0704d69c9206191733552cedb2608504ab65b7c8403f1e35355e37",
+        "declarations_sha256": "41157ed6147ffbd444368ce0d8b7e651a76b4f9114f24266097f1ce5f93fd585"
+      },
+      "map_embeddings": {
+        "ok": true,
+        "graph_sha256": "02220c97f5fd069d99a90836094be7f3bbe5bbf6797d711dcd2f66fc6ca611c6",
+        "declarations_sha256": "873f6cf895d901c9bbb77c3585957d4151c2a486b2959550590c4b62383b8910"
+      },
+      "map_embeddings_options": {
+        "ok": true,
+        "graph_sha256": "a2f4a8b338bc7bd416a95917d2742779a0fcd337b627a9ad740df40999ae99c2",
+        "declarations_sha256": "ccf2ecda002e5c4088c0d2504412dc6e3162b0686345aac47b5c2472161c6b62"
+      },
+      "map_embeddings_service": {
+        "ok": true,
+        "graph_sha256": "76be536628a64ee8e0aa95d8c1f3d736092e961149191a4821b2e64fb18c41d9",
+        "declarations_sha256": "d0b720f110aa571ef75c1827c1a67dac96fdea5e2029013decd93044622e33b2"
+      },
+      "map_fn_args": {
+        "ok": true,
+        "graph_sha256": "5763b9d488fada4bd64ac44ecaa874857e2e2b2b02bdc4b75907ce9d1ad7dd96",
+        "declarations_sha256": "0341642e9bc7a31c2eea8ef1fe0717b49085104b2d75c58dd73f323212ba7c0a"
+      },
+      "map_prompt": {
+        "ok": true,
+        "graph_sha256": "a430d69cdbb0a1eb9885f7e41598e409f759c3fcba5caa7a00c92c37fc05865f",
+        "declarations_sha256": "91df349ab4ff43b9883a081633afb621624e53936f5cb16bc95cbc4908f56bcf"
+      },
+      "map_prompt_async": {
+        "ok": true,
+        "graph_sha256": "c14a77c1b796c07ce7ab3fec0dae1adabfe86492ab5d4ca071b2a064431dae0c",
+        "declarations_sha256": "81b4546bc04573893c51c30fc777225af9005c5779edb6534937ddd4f3ac64af"
+      },
+      "map_prompt_async_options": {
+        "ok": true,
+        "graph_sha256": "7553339f193724144a2829469cdb1b9588d9eb50ec2ae827319d5fccef14810f",
+        "declarations_sha256": "b756b2871cce3ecb5536e4d4f2c3957f196bc67849f57021c78408fffea70bff"
+      },
+      "map_prompt_resources": {
+        "ok": true,
+        "graph_sha256": "e6b205165cc1026c54c8a264051a3c0cc341b980e3e9fbc62ad51cd2d8e1ee1a",
+        "declarations_sha256": "888cc3d5237c28ed929a3217a8ebb8a5554c93ba24918ee36ce71a8debde5fac"
+      },
+      "map_prompt_routed": {
+        "ok": true,
+        "graph_sha256": "d507cf580684212cbed97facd66e24fefecc05d844e6fe1c86922afda3c4660f",
+        "declarations_sha256": "ba4dc09e4260499a91c7be4ecad23d917bd295dafad098a8907f1f574d14bae2"
+      },
+      "map_prompt_routed_isolated": {
+        "ok": true,
+        "graph_sha256": "d778533ba40d67f3acca88463a2a68285c8d0160d90cbe6b799b8cc49a342c7d",
+        "declarations_sha256": "9b88652d04157dae5f32b13aa090679d89e0e073833cf652359ebf6a3ec921cb"
+      },
+      "map_prompt_service": {
+        "ok": true,
+        "graph_sha256": "cd2be76843b71152844b3cbd5510c66da5ef922b7672d5d34b80aca2222f42a3",
+        "declarations_sha256": "ceee15fa37c2d57b3a4122fc6d595b4f79d3634de0581722e3be89f9e4caeff1"
+      },
+      "map_stateful_instance": {
+        "ok": true,
+        "graph_sha256": "f04529e894da4a7966023cb8f7c2d6ea4bfc6e6133f099881f97557bb4484aac",
+        "declarations_sha256": "b51265f8b157b66104665801512be21c78f78f13c85cd1539f5a284a064ab720"
+      },
+      "map_streaming": {
+        "ok": true,
+        "graph_sha256": "0bb22bb48cdb1d4543d0cb048e4018a79249809a59e8b3069bfc73a432e06bb8",
+        "declarations_sha256": "7ff27844bef43c42e943c08401cc92d8aaeea467d6d4719054d2632c990e144c"
+      },
+      "map_streaming_catch": {
+        "ok": true,
+        "graph_sha256": "c523ff0210959167ffba6aa3699c9caf3aaca9cc93358d5aa17aca1494e887b9",
+        "declarations_sha256": "f8f0f47f3a11cb2eb1030d7bb078e5b236da72b174bd7dd3d488df67b5451e25"
+      },
+      "map_streaming_labelled": {
+        "ok": true,
+        "graph_sha256": "89c7c4165bace88f7a78e37f8104522d07504e62d18ee0a2485a8902be295560",
+        "declarations_sha256": "2b17706a362134d68097fd0ac18a2e595186a80bc7713a37a8bebb93a888672d"
+      },
+      "map_streaming_thread": {
+        "ok": true,
+        "graph_sha256": "8520f541a82bda06d145ccdc4777191f6c3b6e6d467dc06198ebdab11e260223",
+        "declarations_sha256": "9168328f2f182fb66e9e201f8b5f965b2fc152729144d2aa3594dfadac02b16f"
+      },
+      "map_streaming_worker_scope": {
+        "ok": true,
+        "graph_sha256": "c7cb78077a83419a7bc300243e6b447d379a8bb6db7c801601b70fa99d2556aa",
+        "declarations_sha256": "db53aa19d628ade3c53b92645cf50603186ebd2560c1221f9008d81b212ed593"
+      },
+      "native/agent": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: agent; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/decode_document": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: decode_document; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/deduplicate": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: deduplicate; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/embedding": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: embedding; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/encode_image": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: encode_image; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/group_batches": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: group_batches; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/lance_lookup": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: lance_lookup; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/pack_prompt_inputs": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: pack_prompt_inputs; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/parse_wikitext": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: parse_wikitext; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/prompt": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: prompt; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/queue_ack": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: queue_ack; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/queue_produce": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: queue_produce; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/raw_fetch": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: raw_fetch; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/read_documents": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: read_documents; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/read_local_object": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: read_local_object; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/register_documents": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: register_documents; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/register_documents_batch": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: register_documents_batch; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/save_lance": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: save_lance; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/search_vectors": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: search_vectors; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/search_web": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: search_web; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "native/stream_prepend": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: native declaration cannot be lowered directly: stream_prepend; declare it through its Dataset entry, which lowers to a typed operation"
+      },
+      "pack_prompt_inputs": {
+        "ok": true,
+        "graph_sha256": "974643f5683607aed0d049ff23b4b592f6c57606b29f770e3a359304504fb6b5",
+        "declarations_sha256": "5cde6db184f53e67cbf541c131473498d371723194309a01a2ac05ae67f0f141"
+      },
+      "parse_wikitext": {
+        "ok": true,
+        "graph_sha256": "7da5b83d76d50ad127f132bdc1e804af90935d387954a6956810bdddb94ab295",
+        "declarations_sha256": "8de82cc3feda390e4cceb23e7afc8b524543e0982f7cf5adf6a507e7ac2cf96f"
+      },
+      "prepend": {
+        "ok": true,
+        "graph_sha256": "536c22333b52c6798ecac7dc27e3bfa73b5d4986b2ed79fc08d20dfc82ed1020",
+        "declarations_sha256": "a64a71c837cd58c381a39186427b4efb65661b9d9c33b2f7a52b2fa12cb38a84"
+      },
+      "random_sample": {
+        "ok": true,
+        "graph_sha256": "ece752a48959815c192ecbc47a22ab9dc3bcd901b6e7a01720da06a7008642f6",
+        "declarations_sha256": "33f05f3c4d66ae8b4ed4d780e2930b9d4f8837c5c9eeb64cc9bbb3f17d2a9790"
+      },
+      "random_shuffle": {
+        "ok": true,
+        "graph_sha256": "b0b18fcd016b11a228ca4de7d8fe6be5769eab2d3de3b163c6a437c4772b09a4",
+        "declarations_sha256": "54110809b7833920b9683af4e21cdb53469029a20e6e84d0fd2e4179a6539af1"
+      },
+      "random_shuffle_blocks": {
+        "ok": true,
+        "graph_sha256": "a07d0acfc61ace4b739c2348a702a3562fc6ac600a5826f2348ba6ab36d29be8",
+        "declarations_sha256": "e3195c772dcb78f6d0a6904a11c57dd29f4c8156eda5fa626883692562135f1a"
+      },
+      "randomize_block_order": {
+        "ok": true,
+        "graph_sha256": "01bb656bc820173ff1ecbde89b8d1992fa2fa9bf80111b503bab20747a38150d",
+        "declarations_sha256": "c09f11a751cb05f42c8972ecc375042dad28e4156919a3396a040dafef24a23e"
+      },
+      "read_documents": {
+        "ok": true,
+        "graph_sha256": "49605910d453ba8fffe97b3e26d6f26a7335ca495338e7d419e4e11edb63c27e",
+        "declarations_sha256": "43fc786aa8ec6657ac5eb5bd72fdd4827126d8fe7f5c896d3befd85559a8facd"
+      },
+      "read_object": {
+        "ok": true,
+        "graph_sha256": "ff315f71a64726909b8c97d75a90d0f9a5faf05d08dc4aefc980d854b060a637",
+        "declarations_sha256": "aaccf8e81e08e5397dca35476eac23fc2adf065440866af5ac104b433ce6858c"
+      },
+      "reduce_by_key": {
+        "ok": true,
+        "graph_sha256": "342b7bf4ee6e0391838edd283b1ad8be10ff32a15d0a8ffd09c2a0f57cc020f7",
+        "declarations_sha256": "a20ce152b6a4947758dc5afbc3daa5fc968c30eaf1a33d18d517ef9515ad4d97"
+      },
+      "reduce_by_key_initial": {
+        "ok": true,
+        "graph_sha256": "cd6a23f92bb1f6f2f49f5832f0c43c6577ac45d7b57421f679a59566274da7cf",
+        "declarations_sha256": "9d1668186c73921fdf769d40a7a85f63a67afe70a70e84f9de91f4e696eb6626"
+      },
+      "refuse_depth": {
+        "ok": false,
+        "error": "DataflowError:BUDGET_EXCEEDED: BUDGET_EXCEEDED: plan path exceeds depth budget"
+      },
+      "refuse_nodes": {
+        "ok": false,
+        "error": "DataflowError:BUDGET_EXCEEDED: BUDGET_EXCEEDED: capture exceeds node budget"
+      },
+      "register_documents": {
+        "ok": true,
+        "graph_sha256": "4638cbf26e878c7175143e986977420ffac260d18601d5536572d857396c2b06",
+        "declarations_sha256": "f1c3a0c570bffe673c3999d7e55995c0bfd76e91031c22664011bc81df711558"
+      },
+      "register_documents_batch": {
+        "ok": true,
+        "graph_sha256": "a12e51d166526da6e4ea096193fcad138642361c3de41fc4c415d7d48983cc32",
+        "declarations_sha256": "e6c66a553815826c4956f9526369254de7b4670436449c6688642010c4071389"
+      },
+      "repartition": {
+        "ok": true,
+        "graph_sha256": "92b5cfbcfdbb1fd22e647691923f096c8eb0d4bd69c1f088c8fe2c8bef9f4093",
+        "declarations_sha256": "ef75ebdb61aaba66fba391a51a8a27e1dc0678c840e23280aa36003df8fb4594"
+      },
+      "repartition_keys_without_shuffle": {
+        "ok": false,
+        "error": "DataflowError:INVALID_CONTRACT: INVALID_CONTRACT: repartition keys/sort require shuffle=True"
+      },
+      "repartition_over_partitions": {
+        "ok": false,
+        "error": "DataflowError:BUDGET_EXCEEDED: BUDGET_EXCEEDED: logical block count exceeds max_partitions"
+      },
+      "repartition_shuffle_keys": {
+        "ok": true,
+        "graph_sha256": "a08d3030bf066af16d492dc1d6a63576f711dbdb5a859d97e432136cfacb4202",
+        "declarations_sha256": "74093eab55f7b08d3add3c2ccc4c4338d72e40a5e9e0fb4e2045eb95b7448903"
+      },
+      "report/chain": {
+        "ok": true,
+        "graph_sha256": "0e54af58852f098f333516285c8d2e69b06aa72f290ff73809607e8df5e4ebcd",
+        "declarations_sha256": "088f7627dd5dc592c0c44b4f13d1711dcb2fe61e62858b7d15301866f3084f9f"
+      },
+      "report/chain_terminal_unbound": {
+        "ok": true,
+        "graph_sha256": "d1d3a43b3d0ef200add4e9916751a13944a5ecb34e52950269b0763a36af71ca",
+        "declarations_sha256": "191e22e5531f7a53ccf577015418bcf8590df3620f9a0a3def1e9eaf096692b7"
+      },
+      "report/exclude_keys": {
+        "ok": true,
+        "graph_sha256": "dc6719b4061294fc7260bddf9863a3e0bc7f812d64f1ccdd4d5de9df88ceb812",
+        "declarations_sha256": "08d8132daf0162bd95ccc8da1f9a403db88834087da815a558203e2aed75696d"
+      },
+      "report/graph_broadcast": {
+        "ok": true,
+        "graph_sha256": "6fa4f8d6cf0f0532e063e998eb73b58676999351080f1bf10206bdd94a8c450d",
+        "declarations_sha256": "e1757479af766d8e0aabed62dc3e070d73c0bc08168bf97e9d82ac63d89f203d"
+      },
+      "report/graph_literal_prefix": {
+        "ok": true,
+        "graph_sha256": "9d50a8129f0ceef50e5ca083aa7b7a1e6ed2ca59339cf8af081a5ec1f95e525a",
+        "declarations_sha256": "acd57a9abbbee7181cbf1e8c00f2e7b5f1833046f0cc0d7a84f1c965fdf36052"
+      },
+      "report/graph_target": {
+        "ok": true,
+        "graph_sha256": "2fa7b70b46fe7c06763af98fe8a49c0158e16fbfa0655236cb1bf847ff46653f",
+        "declarations_sha256": "188624193ac2b67b41380d8d14e7ba622469f6538abcf7254509a6ee80571b60"
+      },
+      "report/join": {
+        "ok": true,
+        "graph_sha256": "dde2a0f7b6e5b7645ef4bf110ba814e77710b32efb2a8843b6bd4d616deb5846",
+        "declarations_sha256": "8656a894b462e3ad25a38e1c354853b2d80bddab57ff62d2d8aa47320428485f"
+      },
+      "report/prepend": {
+        "ok": true,
+        "graph_sha256": "f6e04f906f901edf6e2a5d66ebcb0032b2f2bda8993cef302245c0092de109b0",
+        "declarations_sha256": "480800636dc558d9027c0ac4ccd3022ac0d000ffd853665ab372beb7bbf65efb"
+      },
+      "report/shared_prefix_union": {
+        "ok": true,
+        "graph_sha256": "b808ecaebf748da7c70990805ea3214052e7953092cdacc3522d7c75f40dd143",
+        "declarations_sha256": "c732b458769fd0ca61ebf4fbb893fd88da98a6d11c6bb8417a8efc93b8e71141"
+      },
+      "report/take_zero": {
+        "ok": true,
+        "graph_sha256": "17a6818843c52ff01503143099fc5a5003e06a44080852814122f63056921118",
+        "declarations_sha256": "0dc461a81a6ab604722f4cec77a56312dce34f342f01d65b50676a7a5d618de1"
+      },
+      "report/write_lance": {
+        "ok": true,
+        "graph_sha256": "b745286bf795b14b5eceb3bc630389fa82e1850c1179d9d6b768f67539004c01",
+        "declarations_sha256": "0818d8d97ab70b74c3a36be810d04c53e40228ce6192bd47e97eaf3506c698d8"
+      },
+      "resources_compute_pool": {
+        "ok": false,
+        "error": "ValueError: stream backend_options Ray Data compute/worker ranges are unsupported"
+      },
+      "resources_custom": {
+        "ok": true,
+        "graph_sha256": "309671a2abbfd11ea4f54162454dec18077a3f0e39b7fc0c57ae5a40f5ed3c0a",
+        "declarations_sha256": "9d25f9cf7b5dea44778524057a8186f76a6cf4837e655d94239996c90646ba2a"
+      },
+      "resources_gpu": {
+        "ok": true,
+        "graph_sha256": "236a8cca4729e7c44971447eb2967dbaa6ddcdad6cb345d1ab559680e984cd65",
+        "declarations_sha256": "2d15455976ae4742a588a737b40ecea31fa90a0bc54aface36eb578a104f365c"
+      },
+      "resources_gpu_fraction": {
+        "ok": false,
+        "error": "DataflowError:UNSUPPORTED_CAPABILITY: UNSUPPORTED_CAPABILITY: fractional GPU sharing is not declared by the device authority"
+      },
+      "resources_memory_cpu": {
+        "ok": true,
+        "graph_sha256": "0544c01105f4ed7ab25d6377f612d8dc72b1b0d30fc37d6fd28a289d6dfbcb78",
+        "declarations_sha256": "9096b24a662d99a1cfe7075dff84d2e20e4a99329bea7e7cc1f80fa912006675"
+      },
+      "resources_memory_too_small": {
+        "ok": false,
+        "error": "DataflowError:RESOURCE_INFEASIBLE: RESOURCE_INFEASIBLE: worker memory request is below the admitted working set"
+      },
+      "save_lance": {
+        "ok": true,
+        "graph_sha256": "32a92af55dfe3ba05b8e90c5003adef4f4f294bbd8cdef07d92265dd9d8d3a65",
+        "declarations_sha256": "bb432b5fb526982d4a4ae49d1a69a6310f956d0ec437381d6ceb1e3b5b816991"
+      },
+      "save_lance_when": {
+        "ok": true,
+        "graph_sha256": "491f3c6560834bbb43fdb8a8932073388221c6038e1cef1891822a2683c1f687",
+        "declarations_sha256": "75d3a49cd6022bd71447f60116105444d3d7b3fcc0d1f67aa790e53e9258d607"
+      },
+      "search_vectors": {
+        "ok": true,
+        "graph_sha256": "fa81d798552601fd7f6a57bbabbaff255cdd3b98bbc3448211a1c06f67023685",
+        "declarations_sha256": "82adb1ebf93f4f26ee62a80af63d5b6492f713a36ace954553402296667c4330"
+      },
+      "search_web": {
+        "ok": true,
+        "graph_sha256": "cc6d02f54cd338da6f99aeca29683f1abdbdb2812239b9166e90f7c4790e9a1a",
+        "declarations_sha256": "cdc20191b2013aefe287a87aeb7db3f2e61b909783018cd2357faedf81f28a60"
+      },
+      "search_web_foreign_session": {
+        "ok": false,
+        "error": "RecoveryContractError: Native search requires exactly WebSession"
+      },
+      "select_drop_rename": {
+        "ok": true,
+        "graph_sha256": "0c936880b7a76dc81212a7c0c4e5d2377883ff3436e5b888a5d97b1786b43de5",
+        "declarations_sha256": "6cb23643a0c1653625af0397bfd6b314b206e225a90624e9578c72ac33f92190"
+      },
+      "shared_prefix_union": {
+        "ok": true,
+        "graph_sha256": "3de2e39ce2ee3b2c617409a0bb1642cf0b3c6ba5fd3b5402ed66488f4c319ec9",
+        "declarations_sha256": "ecd65c7e7b999f9ed278c768ccf78f7e1bffb229bde9cd0ab6d6bb102b1b770c"
+      },
+      "sort": {
+        "ok": true,
+        "graph_sha256": "b7651ddeea9cd49e0b05a04c129916c9b9827c7abdfd0314459e1e01f596407b",
+        "declarations_sha256": "4583239fe9db7a99c1b3b7dc2a6f0b9880a754821ef8082ebf72ccf087606890"
+      },
+      "sort_descending": {
+        "ok": true,
+        "graph_sha256": "6c2854bd361777590ee9fd5a929c4482ba2f2dab648ba24061327a1b8ccaaf0d",
+        "declarations_sha256": "2040801fb300fc7388a0ef76707656a7653877e4e2767ca3354cebf790e30b10"
+      },
+      "source_arrow": {
+        "ok": true,
+        "graph_sha256": "a93660cb811f2c43c2f16af7a2d9b79f8c04bde685c3cff8a8f22a07e068844c",
+        "declarations_sha256": "5366b1fe6a41b485cbef98ff24484a93ca340c855835f101188d5f41f4c5f970"
+      },
+      "source_csv": {
+        "ok": true,
+        "graph_sha256": "42b421902209d377a82f863d4a8157dcd36cc37b456950fd5d51a00cebc3f45f",
+        "declarations_sha256": "6830fe3d2cd9d344a35d51fea479b3f670d5422fa25578e51412cb33cd54ebf2"
+      },
+      "source_csv_options": {
+        "ok": true,
+        "graph_sha256": "2ea2a65e20962900d93bedb8957a84dc550a34fcf942e50525dcaababef76003",
+        "declarations_sha256": "f795c11456fd408ccf376807c83270e33b0395c7286f9ad1d0bd6efe9416ce14"
+      },
+      "source_datasource": {
+        "ok": true,
+        "graph_sha256": "fcb73a80507d48aff6af8e4265ab27fdcb3c12e45853df38e14fdd2f2614fd0b",
+        "declarations_sha256": "2143b5f3cc0a25c2b7b3929f3f42ffe37037084e3c54dc7a2b7f847e103ecac4"
+      },
+      "source_iter": {
+        "ok": true,
+        "graph_sha256": "111e03579a89cbb3f547836232c434b9d9133b9bd7a9ad55aaa8424dd1c734aa",
+        "declarations_sha256": "872ff16a1d007a95084b2c604db1eb291f06742ab63368c3fe065378515057c9"
+      },
+      "source_json": {
+        "ok": true,
+        "graph_sha256": "6ddb64b7427bab46ce154f45014c82e743e9942318e4f4285db79f575bb979c9",
+        "declarations_sha256": "8ca961576ac0080e8ce4e6345f9ded9440b2b6b6f0e7ced2b8e4d891bdd79ec6"
+      },
+      "source_lance": {
+        "ok": true,
+        "graph_sha256": "5422bda5fdda0c38eb10b4a33085c495bd54f15cb0c6b996dde94749851d882c",
+        "declarations_sha256": "d528797d512854f4482990db300c1925ae4877a4b7a085a93b3c1c8ac4359f87"
+      },
+      "source_lance_columns": {
+        "ok": true,
+        "graph_sha256": "6b14df01b7ec222c5eafc6296ed28bf94751819e77c65b2801ae30f384a97ae5",
+        "declarations_sha256": "0706f65f0c89f6f9d3e5eda30c86970c59f1fc277fbabc715f7ca0d9ae78aa23"
+      },
+      "source_queue": {
+        "ok": true,
+        "graph_sha256": "80080d361c2e8b5235ddaa1418a66b9f0d3889379c65497bb87375c2ed8faaa6",
+        "declarations_sha256": "d900b0b1aaed4578b57d709272bd7403715823aa01bff851e8e2259041c8acd0"
+      },
+      "source_queue_records": {
+        "ok": true,
+        "graph_sha256": "25eb3536073fc7d0c4fd9ffe2f52d389d72f3746192d82287af7afbbcbf8cea7",
+        "declarations_sha256": "ee48333cc471b1deacc545df396189a2d91d5d80c324de29b741d8d5fa3d20da"
+      },
+      "source_range": {
+        "ok": true,
+        "graph_sha256": "f4d5aa76c16e7a9093f1a80911df6e3b8cac3c053fb4dbbf7e02cfc8f18b7120",
+        "declarations_sha256": "ef59d35c3f7e0555323fc0b914407edcdfb643ad433b6b7c7795fcbfe326ab06"
+      },
+      "source_sql": {
+        "ok": true,
+        "graph_sha256": "e82ff877480f2a4ea01b80fc6b52d79a25e60a682a02ed70be0605790a04819e",
+        "declarations_sha256": "25fb18387fdcfb2f9e50d6e09c68b1e72bbc9ae12b36736127633496234bd7c5"
+      },
+      "terminal_aggregate": {
+        "ok": true,
+        "graph_sha256": "5847f65090203f799284e34221e72ef2235b1730523617404e2b044b1b69d722",
+        "declarations_sha256": "4eb8e2c449c1fb4c61ebb1a6347485a34bc2b31a1b0007b4af81bf99d81561b4"
+      },
+      "terminal_collect_summary": {
+        "ok": true,
+        "graph_sha256": "66a8a5689b57d737a17da87a52a555183fc4b52186e35dea58b191a2d948d416",
+        "declarations_sha256": "4c0b1a1b411895910a135651a1e25a72c6d6b4834eff9575428d74fb624737d1"
+      },
+      "terminal_columns": {
+        "ok": true,
+        "graph_sha256": "0910b721057aae2d6d786499f416c40ccf9162aaa8abfd12fe364bafb6652f9d",
+        "declarations_sha256": "79e26fc40998e11a8aba2f80bb55867ba32067d9b378ee264f123c7def032722"
+      },
+      "terminal_count": {
+        "ok": true,
+        "graph_sha256": "9ee0cfeddf7006e58adafbdb3a2d3b5d7285460617ee99862114ed11423e964f",
+        "declarations_sha256": "f7830996fa4879855e6733db20088388b8ed22321980f0e9b9608d450fcc8954"
+      },
+      "terminal_iter_batches": {
+        "ok": true,
+        "graph_sha256": "eb9a01c2d300710040cd35e67e48becc78dfbdb0139af1e62206ba1cd21d2b72",
+        "declarations_sha256": "2fa0b162775deb5c6c45e1d2439e19d9103236a3ae2ad1d0971192e8429c5f5d"
+      },
+      "terminal_iter_rows": {
+        "ok": true,
+        "graph_sha256": "5aa9a3cb397038d786220193eb2bfc4f2fc100a1a4227d535eb1decb125ddc7d",
+        "declarations_sha256": "1a2fc03793e7d9dac397a08b295e535ff57bf938458447e32d0e39a2f5674785"
+      },
+      "terminal_materialize": {
+        "ok": true,
+        "graph_sha256": "bc8bc0621658da5ffc9804ff414c58015f9a60593bb427ad58d6f110ac40c9fc",
+        "declarations_sha256": "a11728c8af65f56d1ba3fc0069415a07f6cf90d76524b09780fe3efd6df2b518"
+      },
+      "terminal_run_stream": {
+        "ok": true,
+        "graph_sha256": "c6f981c1b05ac1918b4796e41b13cb0456eb1a888a789db344ea001bc4068556",
+        "declarations_sha256": "51c5b6ddd42002645ab9ccf5e7fbfb641b4950860d6098cd5a0ecc07a88ec57b"
+      },
+      "terminal_schema": {
+        "ok": true,
+        "graph_sha256": "3e7bc2131f61960fc20b0f5d9592b5a72761ebd99d279c23a766586b07026c63",
+        "declarations_sha256": "1a9a31bda48c40b6d53b4315cbcbdc8cdba3bdae5c90a455ee71f987a306cec8"
+      },
+      "terminal_size_bytes": {
+        "ok": true,
+        "graph_sha256": "00429c2c1363c1b032084efc0e4c780029b020f2529bc5b12794f2628f39c27d",
+        "declarations_sha256": "508420359d43ad0e5c48b784bf5430c91e8034692801a2429d59f4e8d9ea8df1"
+      },
+      "terminal_take_all": {
+        "ok": true,
+        "graph_sha256": "74deb97b258a1bd36e7ca2ad4b2e58a353bef9f565d7774e6a69fa8cc30fc86f",
+        "declarations_sha256": "f0928a0442ae36f20b82ac2b50c9588f44d865ac48a2d27249940369165a5701"
+      },
+      "terminal_take_batch": {
+        "ok": true,
+        "graph_sha256": "a58021584efc977e0ef1871e205f2b2d79dc5bbd8e82c52f5878158f435ce5c9",
+        "declarations_sha256": "eb386484c6ce2b593b6891e8d6c75da380ade63752d0c3b4326c8842dc7dcba0"
+      },
+      "terminal_take_batch_zero": {
+        "ok": true,
+        "graph_sha256": "5b3da285f87c4ed6623277c0e02d859d895b14f2b3bc6cef313835c787af9e67",
+        "declarations_sha256": "7547da26ac72fdbcc43968d9b282bb297fab81d9e73be92f754494372bcebd02"
+      },
+      "terminal_take_zero": {
+        "ok": true,
+        "graph_sha256": "bf8c01966aeaef1f8df382fecd543a34965c081b42e5a9760f52d2c7056fb020",
+        "declarations_sha256": "a4213f7167fad67d20fd645df21ddc7f6713e5617920f9bed9888ab5fd47c799"
+      },
+      "terminal_unknown": {
+        "ok": false,
+        "error": "DataflowError:INVALID_CONTRACT: INVALID_CONTRACT: ActionRequest.kind must be one of aggregate,collect_summary,columns,count,iter_batches,iter_rows,materialize,run_stream,schema,size_bytes,take,take_all,take_batch,write_datasink,write_file,write_lance"
+      },
+      "terminal_write_datasink": {
+        "ok": true,
+        "graph_sha256": "6bdcae89091ddc4d388d440b86d61edf44e7776407353dbb1241674ef04fd5ad",
+        "declarations_sha256": "5da33d662646f4117dcaeecbbe25f0079557b8f29e3493d1f5fd319cf709ff51"
+      },
+      "terminal_write_datasink_missing": {
+        "ok": false,
+        "error": "DataflowError:INVALID_CONTRACT: INVALID_CONTRACT: write terminal requires a registered sink declaration"
+      },
+      "terminal_write_datasink_queue": {
+        "ok": true,
+        "graph_sha256": "046185ce06e6fecfb34775dd7d968a1ec487a38a1701a02f6a6ba537cb2fdf86",
+        "declarations_sha256": "72d9e418414cae0ca8c986a7fe2f2ebee0a551662346ad4ca4e5982007a4e4c4"
+      },
+      "terminal_write_file": {
+        "ok": true,
+        "graph_sha256": "054de8058f0490344e36ca3361a6208b3268d6bef4a407cfa877128ffeb299a1",
+        "declarations_sha256": "aaa64c8fc8c7048ff4691c03709ee7ac9a89a2fa55b0b77a28c4c605645f6d83"
+      },
+      "terminal_write_lance": {
+        "ok": true,
+        "graph_sha256": "69d7242243bd94dc9b419a775ed977d49c969d071f1d10b14a02cb83074c46f1",
+        "declarations_sha256": "f0d858b5f6664207c324364eea931bb6e856ee188c109c5fa23701c95fa9485c"
+      },
+      "terminal_write_lance_join": {
+        "ok": true,
+        "graph_sha256": "dfcdf75ef1f48e109f4e95181544d644366ab9d00efdbd7960060413bf95d205",
+        "declarations_sha256": "65a9d17b75cd06ae818b12b3449db25950a6acee1e97e4a84baba06899c88f66"
+      },
+      "terminal_write_lance_sorted": {
+        "ok": true,
+        "graph_sha256": "2d47bae6e8b3785c30f83b6a553346f53d02d35e59541e0f6554a0c24c1c0573",
+        "declarations_sha256": "faf2dce73a4e746139ebc91441ba27684afed8ce3db4d94a0643df47e823997f"
+      },
+      "union": {
+        "ok": true,
+        "graph_sha256": "f2f06789dcc9462c8edab47beb75edd73a5191568d75f0682b8f9300946f7a8b",
+        "declarations_sha256": "2ecae3b14201288df97db89349bc8c277d44add906e1c1ceaf31ce1b29e1977e"
+      },
+      "union_over_partitions": {
+        "ok": false,
+        "error": "DataflowError:BUDGET_EXCEEDED: BUDGET_EXCEEDED: union input count exceeds partition budget"
+      },
+      "union_three": {
+        "ok": true,
+        "graph_sha256": "9816b3338fd95474d8ebf9482624940211373d628e2af0b7723fbfbea77d4482",
+        "declarations_sha256": "b48c36cb93f9a496fbcc8dbe67aebbffad34ea00bd90dff40d1343c1b6a68d92"
+      }
+    },
+    "captured": {
+      "aggregate": {
+        "ok": true,
+        "graph_sha256": "c82667fb45bdbcb7d45a2cea95694b74eedc7566fc8ed9e4411d2d5be7eea159",
+        "declarations_sha256": "aa94a96c61492ccb64f2c6745d3f8f74b4cdd6f33f424443dbf48de9d2ec5e2c"
+      },
+      "collect_summary": {
+        "ok": true,
+        "graph_sha256": "91977c8a4398fe28c4af3e29b485263457de15b9f041c2eceea5ebb9b24ce732",
+        "declarations_sha256": "df372ad28d2f949ef3291ee700594b5b76f52819de133e3f7184e658c8ba4cf4"
+      },
+      "columns": {
+        "ok": true,
+        "graph_sha256": "527753f6865ccc0856740b0df27fe64a7b29bf528747001c73843958f922b4d9",
+        "declarations_sha256": "df372ad28d2f949ef3291ee700594b5b76f52819de133e3f7184e658c8ba4cf4"
+      },
+      "count": {
+        "ok": true,
+        "graph_sha256": "fbfb60e167badc6a7c735dc8b3e8c32d483741b71effd1edbf699904f3d6fd41",
+        "declarations_sha256": "df372ad28d2f949ef3291ee700594b5b76f52819de133e3f7184e658c8ba4cf4"
+      },
+      "fetch": {
+        "ok": true,
+        "graph_sha256": "d16d2e09ed1496cc5b8c975de2d7e6eabcef386532635f9ab065eff083f8cb20",
+        "declarations_sha256": "da2ce73ddd993897e2bfd05c1aeb87efb4cdd4a9a05fc131ba53137b4083f24e"
+      },
+      "iter_batches": {
+        "ok": true,
+        "graph_sha256": "1087ef2bca830bf8c9184089afa1702d12f8eb33e8355447be295940db330308",
+        "declarations_sha256": "df372ad28d2f949ef3291ee700594b5b76f52819de133e3f7184e658c8ba4cf4"
+      },
+      "iter_rows": {
+        "ok": true,
+        "graph_sha256": "91977c8a4398fe28c4af3e29b485263457de15b9f041c2eceea5ebb9b24ce732",
+        "declarations_sha256": "df372ad28d2f949ef3291ee700594b5b76f52819de133e3f7184e658c8ba4cf4"
+      },
+      "join": {
+        "ok": true,
+        "graph_sha256": "5f842282c8f176455070c4b621600341bd99bd1ecb5c84c121b3aa4bd0c8cc65",
+        "declarations_sha256": "d6bc552fde8dc5ad6916269143666a917ae7806b7f6f676fda84413a553d087c"
+      },
+      "lance_exclude_keys": {
+        "ok": true,
+        "graph_sha256": "16e34a3c15e1c39eb74e2f35fe12f2d3a9d936ae73bb90ffb10ef2ae2c340559",
+        "declarations_sha256": "e115e4926a9ebe5efc250fbd572159c574ed396c7e364c637d658fa440fc7da5"
+      },
+      "map_batches": {
+        "ok": true,
+        "graph_sha256": "0f4499946441b5b24fbc422d51e25a7a5e04f80752e3fd724ee9b6cf11e92506",
+        "declarations_sha256": "f20a6ecdf570d893c207aa224141e6acd62105ebdeb11701d246d5bb882ecd03"
+      },
+      "map_embeddings": {
+        "ok": true,
+        "graph_sha256": "418a41163c6ab57c1ad4fd8dd252312179e5e81ed6044750830f9da6a1e078fe",
+        "declarations_sha256": "f763494aa2c5638cdd9f17a9cd827b645b6f3cbeccd092153e0493223c5720d0"
+      },
+      "map_prompt": {
+        "ok": true,
+        "graph_sha256": "7dfe5316b1ba2ef92502f413f1fb2c40bc74e777f3d06a94996858487b196b00",
+        "declarations_sha256": "95f1725664fa470fbdda0e0d53c339878c53f3d81965dca627e9cd17d261fc74"
+      },
+      "map_prompt_async": {
+        "ok": true,
+        "graph_sha256": "cd701afd26d0acd59371c1d9c93e981c0248f2e1b75f6e9d4c8102f2582dd60c",
+        "declarations_sha256": "acb223e6ea30ee6ffb609118ee9f84e5128958dcf9c79cc75e292dd306e7cc71"
+      },
+      "materialize": {
+        "ok": true,
+        "graph_sha256": "51be63a413bcc981ab215599beef7fb949ae9c9a2de44f34f682a9aeef587f47",
+        "declarations_sha256": "df372ad28d2f949ef3291ee700594b5b76f52819de133e3f7184e658c8ba4cf4"
+      },
+      "random_shuffle": {
+        "ok": true,
+        "graph_sha256": "e88e0e54ea38cca1528f9160b2c7b63d11d39c9b78d05d6fd5acd5273c16737a",
+        "declarations_sha256": "6d2c6c5defb1824bc7867c016143d609d527af15c14dc5f5ada3165cb7f0c0dc"
+      },
+      "run_stream": {
+        "ok": true,
+        "graph_sha256": "52d35ba0546e0d9e90a98f6f4b22f22a308f4bb2d318f35fc47ad91280711983",
+        "declarations_sha256": "d8e9b841a90707aaa79874236b647f9bd4f01962552c00d95fbd871e13a6fa20"
+      },
+      "save_lance": {
+        "ok": true,
+        "graph_sha256": "cf83785f51a02040b85d9b6e226b8e13c6b4310604c0c9e7871d9c767aff3daa",
+        "declarations_sha256": "8e76542f7633d0a4921e4e1fcd150f4c973b58384c205add9b6bb64d1b20993e"
+      },
+      "schema": {
+        "ok": true,
+        "graph_sha256": "70b1f74979a68d867efd6e79e71d6b54fdfdefa75d9d38ac34c49554bc0519ae",
+        "declarations_sha256": "df372ad28d2f949ef3291ee700594b5b76f52819de133e3f7184e658c8ba4cf4"
+      },
+      "size_bytes": {
+        "ok": true,
+        "graph_sha256": "46b425547eb856ab4a1a34ff597f4f8d92587a335a2573850dc89e05acb589c5",
+        "declarations_sha256": "df372ad28d2f949ef3291ee700594b5b76f52819de133e3f7184e658c8ba4cf4"
+      },
+      "sum": {
+        "ok": true,
+        "graph_sha256": "76075c244ef472ceaf5ee612076efac6c4cf0ae430c6d9c31ffa75df0b5b9ba3",
+        "declarations_sha256": "aa94a96c61492ccb64f2c6745d3f8f74b4cdd6f33f424443dbf48de9d2ec5e2c"
+      },
+      "take": {
+        "ok": true,
+        "graph_sha256": "aa2c6ed664c58cdb761c7d020199893c068a8a1fbb868fe58fc197d3ba09b6ff",
+        "declarations_sha256": "df372ad28d2f949ef3291ee700594b5b76f52819de133e3f7184e658c8ba4cf4"
+      },
+      "take_all": {
+        "ok": true,
+        "graph_sha256": "b9ad26dd4d6746e5d8882f6259dd0568ba50ff68f8d9f8c9307c87037afe21fa",
+        "declarations_sha256": "df372ad28d2f949ef3291ee700594b5b76f52819de133e3f7184e658c8ba4cf4"
+      },
+      "take_batch": {
+        "ok": true,
+        "graph_sha256": "a0dc52975ee631625d2cb962f9c923fbe9b2b801b3b21de2d8a1d921797f12f2",
+        "declarations_sha256": "df372ad28d2f949ef3291ee700594b5b76f52819de133e3f7184e658c8ba4cf4"
+      },
+      "take_zero": {
+        "ok": true,
+        "graph_sha256": "1419346124ffc75d0d1146b2605db8f875471a6621c0102d6fc7e21d45218e40",
+        "declarations_sha256": "39553f7ec8ce33ceabf9d36e63b0a81ae11d85d9d95255b5f28e69345cc345d3"
+      },
+      "task_chain": {
+        "ok": true,
+        "graph_sha256": "dda27306ab0818ad4d947a6f44edce74ee0081cf9d0857543fa0f054765c6e4b",
+        "declarations_sha256": "62debaf1fcff31d2e19358b067fcc6465fee5ec3d7a814af9b8b912a8035d08b"
+      },
+      "write_csv": {
+        "ok": true,
+        "graph_sha256": "ef0e5b79c4c63f171f01e427c7db909118288629077843002d5780b79f85c5eb",
+        "declarations_sha256": "df372ad28d2f949ef3291ee700594b5b76f52819de133e3f7184e658c8ba4cf4"
+      },
+      "write_datasink": {
+        "ok": true,
+        "graph_sha256": "e67946e677ee7a764f612b42eaf7e639224fec5c65b7035cbc40801ad356e245",
+        "declarations_sha256": "43eea3072fd6e9d171e38ee68064b2af405c877689502dfc891309f474ce3b7b"
+      },
+      "write_json": {
+        "ok": true,
+        "graph_sha256": "56842f1a04388d6dadf51bb70fe994a1544110a4ceb51da54b4c602b1ee723c7",
+        "declarations_sha256": "df372ad28d2f949ef3291ee700594b5b76f52819de133e3f7184e658c8ba4cf4"
+      },
+      "write_lance": {
+        "ok": true,
+        "graph_sha256": "f148a2eb5dc73d43911a9cb4f25fd5a156598742064a5a5486c929bade7ca8b2",
+        "declarations_sha256": "0dd6a50734d4924365e5e116b8e12918ad0c50f32c2c3b85ef4f627f63e8d0c7"
+      },
+      "write_parquet": {
+        "ok": true,
+        "graph_sha256": "d6e642eb8e960e950b4048c59343385be87ce9e162ee12ba01b94ffe2de96b79",
+        "declarations_sha256": "df372ad28d2f949ef3291ee700594b5b76f52819de133e3f7184e658c8ba4cf4"
+      }
+    }
+  },
+  "true_pipelines": {
+    "suggested_scope": [
+      "candidate_pool",
+      "instruction_variants",
+      "question_tiers",
+      "reference_comparison",
+      "reference_delivery",
+      "repair_pairs",
+      "supplement_candidates"
+    ],
+    "observation_status": "not_verified_on_122edf4",
+    "historical_receipt": "refgen-formal-relocation-20261119/compile-seven-results.json",
+    "actual_model_execution": "not_run",
+    "subprocesses": "unobserved; never counted as zero"
+  },
+  "e2_ready": false,
+  "gaps": [
+    "source-bound true-pipeline complete stage observations",
+    "true-pipeline process manifest and child completion receipts",
+    "required actual execution mapped to proposed invariant set",
+    "production stage reporting not implemented",
+    "history and pre-side-effect refusal checks not run"
+  ]
+}
