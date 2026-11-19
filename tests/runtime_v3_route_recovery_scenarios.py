@@ -494,7 +494,10 @@ def native_unknown_target(fx):
     from runtime_v3_residency_scenarios import _provider
     evidence={}
     try:
-        with _provider(fx,workers=4,fusion=False),RunContext.start(fx.journal_dir/'native-unknown-target') as run:
+        # Same explicit row/batch windows as the routed scenarios above: the fixture seals two
+        # reader replicas by hand, which the default 16-MiB windows no longer fit (7d4c84a8).
+        with _provider(fx,workers=4,fusion=False),RunContext.start(fx.journal_dir/'native-unknown-target',
+                limits={'max_row_bytes':65536,'max_batch_bytes':262144}) as run:
             dataset=data.from_items([{'i':0,'k':0,'target':'undeclared-reader'}]).map(_native_consumer)
             _first_native_action(fx,dataset,run,'target',evidence)
     except DataflowError as error:
