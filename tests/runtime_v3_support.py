@@ -1254,7 +1254,15 @@ def _s_artifact_security(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, A
 
 def _s_performance(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
     from runtime_v3_performance_scenarios import performance
-    return performance(fx, fault)
+    try:
+        return performance(fx, fault)
+    except NotRunError as not_run:
+        # V002: a not-run is recorded in the fixture ledger, never a silent skip. The
+        # report consumer itself stays usable without a fixture (evidence-integrity test).
+        record = getattr(fx, '_record_not_run', None)
+        if record is not None:
+            record('performance', not_run.missing)
+        raise
 
 
 def _s_all_regressions(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
