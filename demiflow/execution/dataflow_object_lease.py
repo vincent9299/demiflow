@@ -241,8 +241,18 @@ def shared_access(root, expected=None, *, require_protocol=False, wait_ms=0):
                 'Published object maintenance exceeded the journal wait budget', retryable=True) from exc
         raise DataflowError('FENCED', 'Published objects are being reconciled') from exc
     try:
-        if lease.waited and protocol_identity(root) != physical:
-            raise DataflowError('FENCED', 'Published object protocol changed while waiting')
+        if lease.waited:
+            current = protocol_identity(root)
+            # The first writer registers the header while holding this very
+            # inode exclusively. A metadata reader may have observed no header
+            # before waiting. Accept only that first registration, verified by
+            # ObjectLease against the held inode/root/nonce after acquisition.
+            # An existing identity (including an explicit journal identity)
+            # can never be replaced or downgraded by this path.
+            first_registration = (physical is None and expected is None
+                                  and current == lease.identity)
+            if current != physical and not first_registration:
+                raise DataflowError('FENCED', 'Published object protocol changed while waiting')
         yield
     finally:
         lease.close()
