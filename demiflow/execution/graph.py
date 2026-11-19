@@ -526,14 +526,29 @@ def _run_graph(graph_spec, executor, *, control_timeout_s):
     graph_credit(declaration, bounds=bounds)
     validate_graph_replay(request, bounds=bounds)
     handle = execute_action(request, policy=policy, bounds=bounds)
+    primary_failure = None
     try:
         handle.result()
         return graph_result(handle._execution)
+    except BaseException as exc:
+        primary_failure = exc
+        raise
     finally:
-        try:
-            record_execution_metadata(request, handle._execution)
-        finally:
-            handle.close()
+        # Close drains final observations. A failure while projecting them
+        # must not replace the business failure or prevent remaining cleanup.
+        failure = primary_failure
+        for label, cleanup in (
+                ('Graph cleanup also failed: ', handle.close),
+                ('Execution metadata also failed: ', lambda: record_execution_metadata(request, handle._execution))):
+            try:
+                cleanup()
+            except BaseException as exc:
+                if failure is None:
+                    failure = exc
+                elif exc is not failure:
+                    failure.add_note(label + str(exc))
+        if primary_failure is None and failure is not None:
+            raise failure
 
 
 def _validate_graph_location(executor, *, host_id, resource_root):

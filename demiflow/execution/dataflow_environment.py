@@ -41,7 +41,11 @@ def native_environment_names(spec, *, depth=0):
         if (any(type(prompt) is not PromptDefinition or type(prompt.model) is not PromptModel
                 for prompt in pack.prompts)):
             raise DataflowError('INVALID_CONTRACT', 'Native prompt environment requires platform model declarations')
-        names = pack.required_environment_names
+        # Offline inputs use the driver's sealed store and never construct an
+        # HTTP provider. Match transport selection rather than treating a zero
+        # request budget (which can also describe online replay) as offline.
+        options = operation.options or {}
+        names = () if any(key in options for key in ('offline_dir', 'offline_store')) else pack.required_environment_names
     elif spec.target is EmbeddingFactory:
         declaration = args[0]
         model = declaration.get('model') if type(declaration) is dict else None

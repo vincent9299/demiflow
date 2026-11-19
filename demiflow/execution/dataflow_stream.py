@@ -32,6 +32,7 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
     callbacks = AsyncInstance(lambda value: value,
         SimpleNamespace(bounds=bounds, check_stop=request.action.context.check_stop))
     stats, handle, failure = StreamStats(), None, None
+    body_failed = False
     tick = time.monotonic()
     previous, reported = 0, 0
     request.action._observation_rows = log_every if on_progress is not None else 0
@@ -96,6 +97,7 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
         stats.metrics['committed_output'] = {'rows': result.rows or 0}
         return stats
     except BaseException as exc:
+        body_failed = True
         failure = exc
         if isinstance(exc, ServiceStopped) and str(exc) == 'operator_stop_file' and handle is not None:
             from .request_limits import COOPERATIVE_STOP_REASON
@@ -109,12 +111,11 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
             handle._execution._observe_progress = None
         request.action._observation_rows = 0
         observe()
-        if handle is not None:
-            from .dataflow_api import record_execution_metadata
-            record_execution_metadata(request, handle._execution)
         def finish_observations():
             observe()
             if handle is not None:
+                from .dataflow_api import record_execution_metadata
+                record_execution_metadata(request, handle._execution)
                 from .dataflow_model_observations import finish_journal_audit
                 finish_journal_audit(handle._execution, stats)
         for cleanup in (handle.close if handle is not None else None, finish_observations,
@@ -129,5 +130,5 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
                     failure = exc
                 else:
                     failure.add_note('stream cleanup: ' + str(exc))
-        if failure is not None and __import__('sys').exc_info()[0] is None:
+        if failure is not None and not body_failed:
             raise failure

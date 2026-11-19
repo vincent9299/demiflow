@@ -127,7 +127,11 @@ def test_concurrent_profile_must_fit_before_any_upstream_launch(tmp_path, monkey
     launches = []
     monkeypatch.setattr(DataflowExecution, '_prepare_launch', lambda *args: launches.append(args))
     with pytest.raises(DataflowError, match='resident budget'):
-        with RunContext.start(tmp_path/'run'), data.local_execution(workers=1, memory_bytes=128 * 1024):
+        # Default windows may adapt to this small run. Explicit row/batch
+        # ceilings make the four concurrent call slots genuinely indivisible.
+        with RunContext.start(tmp_path/'run', limits={
+                'max_row_bytes': 32 * 1024, 'max_batch_bytes': 32 * 1024}), \
+                data.local_execution(workers=1, memory_bytes=128 * 1024):
             data.from_items([{'n': 1}]).map_async(lambda row: row, concurrency=4).take_all()
     assert launches == []
 

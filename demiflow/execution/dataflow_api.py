@@ -320,6 +320,7 @@ def _run_dataset_action(request: ActionRequest) -> object:
         return observed(iterate_batches(handle, batch_size=batch_size,
                                batch_format=arguments.get("batch_format", "default"),
                                drop_last=arguments.get("drop_last", False)))
+    primary_failure = None
     try:
         if request.kind == "take":
             return collect_rows(handle, limit=arguments.get("limit", 20), bounds=bounds)
@@ -354,11 +355,26 @@ def _run_dataset_action(request: ActionRequest) -> object:
         if request.kind in {"schema", "columns", "size_bytes", "collect_summary"}:
             return inspect_result(handle, kind=request.kind)
         return result
+    except BaseException as exc:
+        primary_failure = exc
+        raise
     finally:
-        try:
-            record_execution_metadata(request, handle._execution)
-        finally:
-            handle.close()
+        # Drain carries final failed/cancelled counters. Always publish after
+        # close, retaining the original action/cleanup error if publication
+        # itself fails (as in the streaming terminal's cleanup sequence).
+        failure = primary_failure
+        for label, cleanup in (
+                ('Action cleanup also failed: ', handle.close),
+                ('Execution metadata also failed: ', lambda: record_execution_metadata(request, handle._execution))):
+            try:
+                cleanup()
+            except BaseException as exc:
+                if failure is None:
+                    failure = exc
+                elif exc is not failure:
+                    failure.add_note(label + str(exc))
+        if failure is not None and primary_failure is None:
+            raise failure
 
 
 class _CompileContext:

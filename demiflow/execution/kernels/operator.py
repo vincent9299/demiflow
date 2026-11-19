@@ -1537,6 +1537,14 @@ class OperatorKernel:
                 _close_instance(instance)
             except BaseException as exc:
                 errors.append(exc)
+        from ..dataflow_usage import worker_prompt_usage
+        try:
+            # Calls have drained even if an actor's resource cleanup failed.
+            # Preserve actual request outcomes before discarding their owners;
+            # a close error must neither erase usage nor manufacture success.
+            worker_prompt_usage(self, final=True)
+        except BaseException as exc:
+            errors.append(exc)
         if not errors:
             from ..dataflow_model_observations import worker_model_observations
             try:

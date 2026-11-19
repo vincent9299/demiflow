@@ -7,10 +7,12 @@ def empty_usage():
     return OperatorLLMUsage().to_dict()
 
 
-def worker_prompt_usage(kernel):
+def worker_prompt_usage(kernel, *, final=False):
     from ..operator_llm.runtime import PromptActor
     from ..operator_llm.routed import RoutedPromptActor
     from ..data.result_cache import CacheCall
+    if getattr(kernel, '_closed', False) and not final:
+        return getattr(kernel, '_prompt_usage', None)
     totals, observed = empty_usage(), False
     for instance in getattr(kernel, '_instances', ()):
         owner = kernel._state_owner(instance)
@@ -23,7 +25,10 @@ def worker_prompt_usage(kernel):
             observed = True
             for key, value in child._runtime.coordinator.usage().to_dict().items():
                 totals[key] += value
-    return totals if observed else None
+    if observed:
+        kernel._prompt_usage = totals
+        return totals
+    return None
 
 
 def observe_prompt_usage(execution, event, payload):
