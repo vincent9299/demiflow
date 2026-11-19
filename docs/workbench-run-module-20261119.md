@@ -44,3 +44,11 @@ RefGen 七条流程的只读准入检查均返回 `managed_output_binding_missin
 现有目录 API 按全项目分页，没有按入口建立索引。本版复用该 API：每次分支翻页最多读取 3 页、每页 20 条，过滤所选入口；不一次下载全部历史、不新建运行账本。没有匹配但仍有游标时如实提示继续查看较早记录，不能误报此管道从未运行；分支数值只表示当前载入数。P12 后续若补入口索引，可保持这个 UI 与身份契约，提高稀疏历史的查询效率。
 
 P4 依赖登记、reader 和固定结果独立 Review 已通过。但 e6f954d 组合真实停止恢复验收得到 5 passed / 1 failed：CPU 原生容量根落在 executor 的 attempt 临时目录，supervisor 清理时选择了不同根，原容量域守卫拒绝恢复。该失败没有改测试绕过，完整证据为共享目录 `P4-managed-cpu-cleanup-blocker.json`。运行界面与导航可验收；停止恢复整条链路尚不能宣称在最终组合通过，需原容量/host 合同负责人共同处理。RefGen 原生受管提交仍按用户决定另做。
+
+## 后续 UI 收窄（2026-11-19）
+
+以本节覆盖上节的导航控件：移除“管道与运行”标题、搜索框、状态筛选、最近运行按钮、展开箭头、页码及翻页按钮。管道名为单行轻标题，运行记录为约30px单行（时间与状态）；身份留在tooltip、无障碍标签及右侧详情。每组先显示5次，使用淡色“显示更多”逐步展开，不自动全量读取。底层继续每次最多3×20条有界读取，呈现侧仅缓存run_id/entry/created_at/status，最多200条；深历史加载采用有界窗口，重新选择管道回到最新记录。
+
+产品参考：Codex官方项目/会话组织（https://learn.chatgpt.com/docs/projects）与Linear官方界面整理说明（https://linear.app/now/behind-the-latest-design-refresh）。DeepSeek公开页面受访问限制，没有声称验证其登录后的最新UI。
+
+能力澄清：P4的统一host接口已交付。尚未完成的是工作台将RefGen原生流程接入原有prepare/输出封存/worker/结果读取链；不能把界面可用或权限开关当成已打通。当前预览项目未开放受管提交，宿主准入也不包含RefGen。详见共享证据native-managed-gap.json。
