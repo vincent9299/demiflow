@@ -29,7 +29,7 @@ def test_stream_terminal_uses_original_allocator_and_public_envelope(tmp_path, m
     monkeypatch.setattr(RunResourceState, '_charged', charge)
     with RunContext.start(tmp_path/'run') as run, data.local_execution(workers=workers, memory_bytes=128*1024):
         stats = data.from_items([{'n': n} for n in range(6)]).map_async(_increment, concurrency=1).run_stream()
-        assert stats.stages['committed_output']['emitted'] == 6
+        assert stats.emitted == 6 and stats.metrics['committed_output'] == {'rows': 6}
         assert all(commit['status'] == 'acked' for commit in run.journal.execution_commits('action-1'))
     assert observed[0].policy.max_active_workers == workers
     assert observed[0].bounds.max_resident_bytes == 128 * 1024
