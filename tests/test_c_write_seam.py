@@ -18,7 +18,6 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.chain import seal_write_topology
-from demiflow.execution.local_kernel import keyed_dataset
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.execution.sealed_plans import load_execution_bindings, load_sealed_plan
@@ -40,14 +39,14 @@ def keep(row):
 def relational_dataset():
     left = data.from_items([{"id": i, "a": i} for i in range(8)])
     right = data.from_items([{"id": i, "b": i * 10} for i in range(8)])
-    keyed = keyed_dataset(left, "join", on=("id",), right=right)
+    keyed = left.join(right, on=("id",))
     return keyed.map(enrich, inputs={"id": "id"}, output="v").filter(keep)
 
 
 def drifted_relational_dataset():
     left = data.from_items([{"id": i, "a": i} for i in range(8)])
     right = data.from_items([{"id": i, "b": i * 10} for i in range(8)])
-    keyed = keyed_dataset(left, "join", on=("id",), right=right)
+    keyed = left.join(right, on=("id",))
     return keyed.map(enrich_drift, inputs={"id": "id"}, output="v").filter(keep)
 
 

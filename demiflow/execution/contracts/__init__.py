@@ -6,19 +6,20 @@ protocol objects (K1-K6) live in the sibling modules; resource-management
 objects remain owned by the future ``demiflow.resources`` contracts (module A)
 and are only referenced here, never redefined.
 """
-from .pipeline import (
-    PIPELINE_RUNTIME_ABI,
-    PlatformRuntimeIdentity,
-    PipelineBackend,
-    PipelineBundleRef,
-    PipelineExecutionEnvironment,
-    PipelineRunObservation,
-    PipelineRunObserver,
-    PipelineRunReadiness,
-    PipelineRunRequest,
-    PipelineRunResult,
-    pipeline_bundle_digest,
-)
+from importlib import import_module as _import_module
+
+
+def __getattr__(name):
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(_import_module('.pipeline', __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(__all__))
+
 
 __all__ = [
     "PIPELINE_RUNTIME_ABI",

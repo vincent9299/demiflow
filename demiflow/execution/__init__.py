@@ -1,15 +1,39 @@
-from .contracts import (
-    PipelineBackend, PipelineBundleRef, PipelineExecutionEnvironment,
-    PipelineRunObservation, PipelineRunObserver, PipelineRunReadiness, PipelineRunRequest, PipelineRunResult, PlatformRuntimeIdentity,
-)
-from .readiness import inspect_pipeline_run_readiness
-from .target import PipelineExecutionTarget
-from .package_loader import BundlePackages, RUNTIME_PACKAGE_PATH, load_bundle_packages
-from .run_context import RunContext, current_run
-from .recovery_contract import RunRef, SourcePosition, RecoveryContractError, UnresolvedCommit
+"""Execution facade with original exports resolved only on demand."""
+from importlib import import_module as _import_module
+
+_EXPORTS = {
+    **{name: (".contracts", name) for name in (
+        "PipelineBackend", "PipelineBundleRef", "PipelineExecutionEnvironment",
+        "PipelineRunObservation", "PipelineRunObserver", "PipelineRunReadiness",
+        "PipelineRunRequest", "PipelineRunResult", "PlatformRuntimeIdentity",
+    )},
+    "inspect_pipeline_run_readiness": (".readiness", "inspect_pipeline_run_readiness"),
+    "PipelineExecutionTarget": (".target", "PipelineExecutionTarget"),
+    **{name: (".package_loader", name) for name in (
+        "BundlePackages", "RUNTIME_PACKAGE_PATH", "load_bundle_packages",
+    )},
+    **{name: (".run_context", name) for name in ("RunContext", "current_run")},
+    **{name: (".recovery_contract", name) for name in (
+        "RunRef", "SourcePosition", "RecoveryContractError", "UnresolvedCommit",
+    )},
+}
+
+
+def __getattr__(name):
+    if name not in _EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute = _EXPORTS[name]
+    value = getattr(_import_module(module_name, __name__), attribute)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(__all__))
 
 
 def backend_for(bundle, execution_environment, target):
+    from .target import PipelineExecutionTarget
     del bundle
     if not isinstance(target, PipelineExecutionTarget):
         target = PipelineExecutionTarget.from_mapping(target)

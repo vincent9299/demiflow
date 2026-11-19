@@ -255,22 +255,16 @@ class DataAPI:
         The optional positive scan batch/readahead limits bound wide-row reads;
         they do not change the selected rows or the backend worker count.
         """
-        from ..lance.model import LanceScanSpec
+        from .lance_declaration import make_lance_scan_source
 
-        query = LanceScanSpec(
-            uri=uri, version=version, columns=columns, filter=filter,
+        source = make_lance_scan_source(
+            uri, version=version, columns=columns, filter=filter,
             limit=limit, storage_options=storage_options,
             batch_size=batch_size, batch_readahead=batch_readahead,
-            fragment_readahead=fragment_readahead,
-            projection=projection,
+            fragment_readahead=fragment_readahead, projection=projection,
+            backend_options=backend_options,
         )
-        return Dataset(
-            LanceSource(
-                query,
-                parse_native_options(backend_options, family="source"),
-            ),
-            LogicalPlan(), self._executor,
-        )
+        return Dataset(source, LogicalPlan(), self._executor)
 
     def vector_search_lance(
         self, uri: str, vector: Sequence[float], *, vector_column: str,

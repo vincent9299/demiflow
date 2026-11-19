@@ -183,6 +183,21 @@ class ExecutionPort(Protocol):
     def close(self) -> None: ...
 
 
+
+class PlanView(Protocol):
+    """In-process rebinding view; persistent plans still hold the original Dataset."""
+    _source: SourcePlan
+    _plan: LogicalPlan
+
+    def replace_plan(self, source: SourcePlan, plan: LogicalPlan) -> PlanView: ...
+
+
+@dataclass(frozen=True)
+class CheckpointReadBinding:
+    source: SourcePlan
+    plan: LogicalPlan
+    reference: Mapping[str, str | int] | None
+
 # One context slot shared by SDK assembly and Pipeline drivers. No default host
 # is constructed here: selection remains the existing public assembly's job.
 _current_executor: ContextVar[ExecutionPort | None] = ContextVar('demiflow_dataset_executor', default=None)

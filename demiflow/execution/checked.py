@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ..data import plan as ops
 from ..data.sources import LanceSource, MaterializedSource
+from ..data.execution_contract import PlanView
 from ..data.runtime_contract import RuntimeContractError
 from .local_kernel import KeyedSource, UnionSource
 from .plan_facts import operation_facts, source_facts
@@ -345,10 +346,9 @@ class CheckedExecution:
             if type(op) is ops.StreamPrependOp:
                 if len(parents) != 2:
                     raise RuntimeContractError('Prepend requires main and finite prefix ports')
-                other = op.source_dataset
+                other: PlanView = op.source_dataset
                 prefix_source, prefix_plan = self.plan(other._source,other._plan,parents[1],depth+1)
-                from ..data.dataset import Dataset
-                prefix = Dataset(prefix_source,prefix_plan,other._executor,other._stages)
+                prefix = other.replace_plan(prefix_source, prefix_plan)
                 op = replace(op,source_dataset=prefix)
             elif len(parents) != 1:
                 raise RuntimeContractError('Unary native plan has invalid ports')

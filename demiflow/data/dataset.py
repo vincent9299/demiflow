@@ -104,6 +104,10 @@ class Dataset:
         # 惰性路径不带 stages，终结动作收尾为空操作）
         self._stages = tuple(stages)
 
+    def replace_plan(self, source: SourcePlan, plan: LogicalPlan) -> "Dataset":
+        """Replace a checked plan view without starting execution or copying rows."""
+        return Dataset(source, plan, self._executor, self._stages)
+
     @_flow_api("join", datasets=("self", "other"))
     def join(self, other, *, on, right_on=None, how="inner", suffix="_right", chunk_bytes=32*1024*1024):
         """Native equijoin on either host. Checkpoint async inputs first; null keys do not match.
@@ -115,9 +119,15 @@ class Dataset:
         order is unspecified; no final global sort is added. ``chunk_bytes`` remains accepted for
         compatibility; it does not set the native process memory budget.
         """
-        from ..execution.local_kernel import keyed_dataset
-        return keyed_dataset(self, 'join', on, right=other, right_on=right_on,
-                             how=how, suffix=suffix, chunk_bytes=chunk_bytes)
+        from ..execution.local_kernel import PlanInput
+        from .relational_declaration import compose_keyed_source
+        source = compose_keyed_source(
+            PlanInput(self._source, self._plan, self._executor), 'join', on,
+            right=PlanInput(other._source, other._plan, other._executor) if other is not None else None,
+            right_on=right_on,
+            how=how, suffix=suffix, chunk_bytes=chunk_bytes,
+        )
+        return Dataset(source, LogicalPlan(), self._executor)
 
     @_flow_api('reduce', datasets=('self',), callable='reducer', version=2)
     def reduce_by_key(self, on, reducer, *, initial=None, chunk_bytes=32*1024*1024, fn_kwargs=None):
@@ -132,8 +142,13 @@ class Dataset:
         data codec's supported values; later column operations still require
         mapping rows. False, zero and empty containers are valid outputs.
         """
-        from ..execution.local_kernel import keyed_dataset
-        return keyed_dataset(self, 'reduce', on, reducer=reducer, initial=initial, chunk_bytes=chunk_bytes, reducer_kwargs=fn_kwargs)
+        from ..execution.local_kernel import PlanInput
+        from .relational_declaration import compose_keyed_source
+        source = compose_keyed_source(
+            PlanInput(self._source, self._plan, self._executor), 'reduce', on,
+            reducer=reducer, initial=initial, chunk_bytes=chunk_bytes, reducer_kwargs=fn_kwargs,
+        )
+        return Dataset(source, LogicalPlan(), self._executor)
 
     def exclude_keys(self, other, *, on):
         """Exclude matching keys from a Lance scan, retaining scan order.
@@ -147,15 +162,20 @@ class Dataset:
         """
         from .sources import LanceSource
         from ..lance.model import LanceScanSpec
-        from .local_relational import keys
-        from ..execution.local_kernel import keyed_dataset
+        from .relational_declaration import keys, compose_keyed_source
+        from ..execution.local_kernel import PlanInput
         if (not isinstance(self._source,LanceSource) or not isinstance(self._source.query,LanceScanSpec)
                 or self._plan.operations or self._source.query.projection or self._source.native_options is not None):
             raise ValueError('exclude_keys requires an untransformed read_lance scan without projection/native options')
         fields=keys(on)
         if not fields or len(set(fields))!=len(fields) or any(not isinstance(k,str) or not k or k=='_rowid' for k in fields):
             raise ValueError('exclude_keys requires distinct nonempty key names excluding _rowid')
-        return keyed_dataset(self,'exclude_keys',fields,right=other.select_columns(fields),how='anti')
+        right = other.select_columns(fields)
+        source = compose_keyed_source(
+            PlanInput(self._source, self._plan, self._executor), 'exclude_keys', fields,
+            right=PlanInput(right._source, right._plan, right._executor), how='anti',
+        )
+        return Dataset(source, LogicalPlan(), self._executor)
 
     @_flow_api('group_batches', datasets=('self',),
                normalize=_flow_grouping.normalize_grouping, analyze=_flow_grouping.analyze_grouping)
@@ -193,8 +213,13 @@ class Dataset:
             return Dataset(self._source, self._plan.append(StreamGroupBatchesOp(**vars(operation),
                 on=keys, output=output, chunk_bytes=chunk_bytes, max_groups=max_groups, buffer_bytes=buffer_bytes)),
                 self._executor, self._stages)
-        from ..execution.local_kernel import keyed_dataset
-        return keyed_dataset(self, 'groups', on, max_rows=max_rows, output=output, chunk_bytes=chunk_bytes)
+        from ..execution.local_kernel import PlanInput
+        from .relational_declaration import compose_keyed_source
+        source = compose_keyed_source(
+            PlanInput(self._source, self._plan, self._executor), 'groups', on,
+            max_rows=max_rows, output=output, chunk_bytes=chunk_bytes,
+        )
+        return Dataset(source, LogicalPlan(), self._executor)
 
     def map_cached(self, fn, *, cache_dir, version, synchronous=False, cache_when=None,
                    inputs=None, output=None, outputs=None, when=None, namespace='default',
@@ -221,8 +246,8 @@ class Dataset:
             when=when, namespace=namespace, wait_timeout_s=wait_timeout_s,
             max_input_bytes=max_input_bytes, max_result_bytes=max_result_bytes,
             max_entries=max_entries, max_cache_bytes=max_cache_bytes)
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("cache",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("cache",
             configuration={"cache_dir": str(cache_dir), "version": version,
                            "namespace": namespace, "synchronous": synchronous,
                            "max_entries": max_entries},
@@ -241,8 +266,8 @@ class Dataset:
         never fetch/parse/register, and one input always produces one output.
         """
         from ..kv import Lookup
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("lookup",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("lookup",
             configuration={"key": key, "output": output, "concurrency": concurrency},
             bindings={"key": key})
         return self.map(Lookup(source, key, output, when), execution='thread',
@@ -257,17 +282,14 @@ class Dataset:
         upstream operator declarations and fixed source identities are retained.
         No schema coercion.
         """
-        from .records import UnionDatasource
-        if not all(isinstance(ds,Dataset) for ds in others):raise TypeError('union requires Datasets')
-        from ..execution.local_kernel import UnionSource, PlanInput
-        datasets = (self, *others)
-        inputs = []
-        for ds in datasets:
-            if isinstance(ds._source, UnionSource) and not ds._plan.operations:
-                inputs.extend(ds._source.inputs)
-            else:
-                inputs.append(PlanInput(ds._source, ds._plan))
-        return Dataset(UnionSource(tuple(inputs)), LogicalPlan(), self._executor)
+        if not all(isinstance(ds, Dataset) for ds in others):
+            raise TypeError('union requires Datasets')
+        from ..execution.local_kernel import PlanInput
+        from .relational_declaration import compose_union_sources
+        source = compose_union_sources(tuple(
+            PlanInput(ds._source, ds._plan) for ds in (self, *others)
+        ))
+        return Dataset(source, LogicalPlan(), self._executor)
 
     @_flow_api("checkpoint", datasets=("self",), execution="action")
     def checkpoint(self, path, *, version):
@@ -660,8 +682,8 @@ class Dataset:
         actor = SearchWeb(requests, output, session, when, max_candidates, request_concurrency,
                           checkpoint=checkpoint_path, checkpoint_operator=checkpoint_operator,
                           checkpoint_lease_s=checkpoint_lease_s)
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("search_web",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("search_web",
             configuration={"requests": requests, "output": output,
                            "max_candidates": max_candidates,
                            "request_concurrency": request_concurrency,
@@ -687,8 +709,8 @@ class Dataset:
         actor = ReadLocalObject(reference=reference, output=output, root=root, relocations=relocations,
             layout=layout, max_bytes=max_bytes, error_output=error_output,
             concurrency=concurrency, queue_depth=queue_depth, label=label)
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("read_object",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("read_object",
             configuration={"reference": reference, "output": output, "root": str(root),
                            "layout": layout, "max_bytes": max_bytes, "label": label},
             bindings={"reference": reference})
@@ -705,8 +727,8 @@ class Dataset:
         from ..collect.documents import DecodeDocument
         actor = DecodeDocument(column=column, output=output, max_bytes=max_bytes, max_blocks=max_blocks,
             error_output=error_output, concurrency=concurrency, queue_depth=queue_depth, label=label)
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("decode_document",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("decode_document",
             configuration={"column": column, "output": output, "max_bytes": max_bytes,
                            "max_blocks": max_blocks, "label": label},
             bindings={"column": column})
@@ -726,8 +748,8 @@ class Dataset:
         actor = EncodeImage(column=column, output=output, profile=profile, max_side=max_side, quality=quality,
             max_source_pixels=max_source_pixels, max_bytes=max_bytes, memory_bytes=memory_bytes,
             timeout_s=timeout_s, error_output=error_output, concurrency=concurrency, queue_depth=queue_depth, label=label)
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("encode_image",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("encode_image",
             configuration={"column": column, "output": output, "max_side": max_side,
                            "quality": quality, "max_bytes": max_bytes, "label": label},
             bindings={"column": column})
@@ -742,8 +764,8 @@ class Dataset:
         actor = ParseWikitext(column=column, output=output, max_chars=max_chars, max_nodes=max_nodes,
             max_depth=max_depth, max_bytes=max_bytes, error_output=error_output,
             concurrency=concurrency, queue_depth=queue_depth, label=label)
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("parse_wikitext",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("parse_wikitext",
             configuration={"column": column, "output": output, "max_chars": max_chars,
                            "max_nodes": max_nodes, "max_depth": max_depth, "label": label},
             bindings={"column": column})
@@ -763,8 +785,8 @@ class Dataset:
         from ..execution.raw_fetch import RawFetch
         actor = RawFetch(request=request, output=output, store=store, policy=policy,
                          concurrency=concurrency, queue_depth=queue_depth, label=label)
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("fetch",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("fetch",
             configuration={"request": request, "output": output,
                            "concurrency": concurrency, "label": label},
             bindings={"request": request})
@@ -796,8 +818,8 @@ class Dataset:
             raise ValueError('publish_pause_s requires batch_size > 1')
         if not isinstance(library, DocumentLibrary):
             raise TypeError('register_documents requires a DocumentLibrary declaration')
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("register_documents",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("register_documents",
             configuration={"request": request, "output": output, "batch_size": batch_size,
                            "max_bytes": max_bytes, "concurrency": concurrency, "label": label},
             bindings={"request": request})
@@ -841,8 +863,8 @@ class Dataset:
             raise ValueError('reuse_worker_max_tasks must be 1..8192')
         actor = ReadDocuments(request,output,context,when,document_concurrency,timeout_s,max_bytes,
                               reuse_workers,reuse_worker_max_tasks)
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("read_documents",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("read_documents",
             configuration={"request": request, "output": output,
                            "document_concurrency": document_concurrency,
                            "max_bytes": max_bytes, "concurrency": concurrency, "label": label},
@@ -866,8 +888,8 @@ class Dataset:
         """
         from ..execution.queue_producer import QueueProducer
         actor=QueueProducer(config,producer=producer,messages=messages,queue_depth=queue_depth)
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("enqueue",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("enqueue",
             configuration={"messages": messages, "queue_depth": queue_depth},
             bindings={"messages": messages})
         return self.map_async(actor,concurrency=1,queue_depth=queue_depth,label='enqueue')
@@ -882,8 +904,8 @@ class Dataset:
         """
         from ..execution.queue_ack import QueueAcknowledge
         actor=QueueAcknowledge(config,result=result,queue_depth=queue_depth,keep_row=keep_row)
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("ack_queue",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("ack_queue",
             configuration={"result": result, "queue_depth": queue_depth, "keep_row": keep_row},
             bindings={"result": result})
         return self.map_async(actor,concurrency=1,queue_depth=queue_depth,label='ack_queue')
@@ -906,8 +928,8 @@ class Dataset:
         actor = StreamAdmission(path=path, key=key, unique_on=unique_on, quotas=quotas,
             output=output, when=when, max_entries=max_entries, max_key_bytes=max_key_bytes,
             max_disk_bytes=max_disk_bytes)
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("admit",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("admit",
             configuration={"path": str(path), "key": key, "output": output,
                            "unique_on": list(unique_on), "max_entries": max_entries},
             bindings={"key": key})
@@ -944,8 +966,8 @@ class Dataset:
         from ..execution.recovery_contract import identity
         actor = operation.callable.target.__self__
         actor._deduplicate_declaration = identity(_deduplicate_arguments(actor))
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("deduplicate",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("deduplicate",
             configuration={"on": list(fields), "key": key, "output": output,
                            "keep_duplicates": keep_duplicates, "max_entries": max_entries},
             bindings={"key": key})
@@ -962,8 +984,8 @@ class Dataset:
         cover returned Arrow/Python payloads, not Lance's internal allocation.
         """
         from ..execution.stream_lookup import LanceLookup
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("lookup",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("lookup",
             configuration={"on": list(on) if isinstance(on, (list, tuple)) else on,
                            "output": output, "max_matches": max_matches, "max_bytes": max_bytes},
             bindings={"output": output})
@@ -991,8 +1013,8 @@ class Dataset:
             raise ValueError('Invalid prepend max_row_bytes')
         node = self.map_async(lambda row: row, concurrency=1, queue_depth=1, label='prepend')
         op = node._plan.operations[-1]
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("prepend",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("prepend",
             configuration={"max_rows": max_rows, "max_row_bytes": max_row_bytes},
             bindings={})
         return Dataset(self._source, self._plan.append(StreamPrependOp(**vars(op),
@@ -1029,8 +1051,8 @@ class Dataset:
         declared = self.batch_map(actor.__call__,max_batch=max_batch,flush_interval=flush_interval,
                                   concurrency=1,queue_depth=queue_depth,label='save_'+stage)
         op = declared._plan.operations[-1]
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("save_lance",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("save_lance",
             configuration={"uri": actor.uri, "stage": stage, "mode": mode,
                            "max_batch": max_batch, "queue_depth": queue_depth},
             bindings={"stage": stage})
@@ -1070,8 +1092,8 @@ class Dataset:
             raise ValueError('source_batch_size must be 1..256')
         from ..execution.capabilities import validate_stream_plan
         validate_stream_plan(self._plan, source=self._source)
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("run_stream", configuration={"action": "run_stream"}, bindings={})
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("run_stream", configuration={"action": "run_stream"}, bindings={})
         return self._executor.execute(_actions.RunStream(
             self._source, self._plan, on_progress, on_drain, log_every, cancellation,
             stall_timeout, stop_file, source_batch_size,
@@ -1326,8 +1348,8 @@ class Dataset:
         validate_prompt_options(options)
         from ..operator_llm.runtime import validate_prompt_binding
         validate_prompt_binding(operation, pack)
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("prompt",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("prompt",
             configuration={"prompt_name": operation.prompt_name,
                            "inputs": dict(operation.inputs), "output": operation.output,
                            "outputs": dict(operation.outputs) if operation.outputs else None,
@@ -1370,7 +1392,7 @@ class Dataset:
         cancellation cleanup.
         """
         from ..lance.search import VectorSearch, positive_int
-        from ..execution.dataflow_api import make_native_operation
+        from ..planning.dataflow_declaration import validate_native_operation
         from .plan import VectorSearchOp
         positive_int(concurrency, 'concurrency')
         if queue_depth is not None:
@@ -1386,7 +1408,7 @@ class Dataset:
         from copy import deepcopy
         typed = VectorSearchOp(**vars(operation), query=query, output=output,
                                search_spec=deepcopy(actor.spec))
-        make_native_operation("search_vectors",
+        validate_native_operation("search_vectors",
             configuration={"query": query, "output": output, "search_spec": typed.search_spec,
                            "concurrency": concurrency, "queue_depth": queue_depth, "label": label},
             bindings={"query": query})
@@ -1438,7 +1460,7 @@ class Dataset:
         from ..embeddings.runtime import EmbeddingActor
         from ..embeddings import embedding_execution_config
         from ..inference import _resolve_request_gate
-        from ..execution.dataflow_api import make_native_operation
+        from ..planning.dataflow_declaration import validate_native_operation
         from .plan import EmbeddingMapOp
         execution = embedding_execution_config(batch_size=batch_size, concurrency=concurrency,
             queue_depth=queue_depth, flush_interval=flush_interval, prefetch_batches=prefetch_batches,
@@ -1458,7 +1480,7 @@ class Dataset:
         operation = declared._plan.operations[-1]
         typed = EmbeddingMapOp(**vars(operation), model_contract=actor.model.contract(),
                                inputs=actor.inputs, output=output)
-        make_native_operation("embeddings",
+        validate_native_operation("embeddings",
             configuration={"model_contract": typed.model_contract, "inputs": dict(typed.inputs),
                            "output": output, "max_batch": batch_size, "concurrency": concurrency,
                            "queue_depth": queue_depth, "label": actor.label},
@@ -1667,7 +1689,7 @@ class Dataset:
         declared = self.map_prompt(prompt, config=config, inputs=inputs,
                                    output=output, outputs=outputs, options=options,
                                    max_requests=max_requests)
-        from ..execution.dataflow_api import make_native_operation
+        from ..planning.dataflow_declaration import validate_native_operation
         # This is a passive declaration on either host. The unified compiler
         # seals its factory; the worker constructs the execution-owned actor.
         from ..operator_llm.runtime import PromptActor, InProcessOperatorLLMCoordinator
@@ -1699,7 +1721,7 @@ class Dataset:
         actor._runtime.token_budget = token_budget
         actor._runtime.concurrency = concurrency
         actor.when=when;actor.call_output=call_output;actor.error_output=error_output
-        make_native_operation("prompt",
+        validate_native_operation("prompt",
             configuration={"prompt_name": operation.prompt_name,
                            "inputs": dict(operation.inputs), "output": operation.output,
                            "outputs": dict(operation.outputs) if operation.outputs else None,
@@ -1761,8 +1783,8 @@ class Dataset:
         from .plan import AgentMapOp
         operation = declared._plan.operations[-1]
         agent_op = AgentMapOp(**{**vars(operation), 'label': actor.label}, environment=environment)
-        from ..execution.dataflow_api import make_native_operation
-        make_native_operation("agent",
+        from ..planning.dataflow_declaration import validate_native_operation
+        validate_native_operation("agent",
             configuration={"concurrency": kwargs.get('concurrency', 1),
                            "queue_depth": kwargs.get('queue_depth'),
                            "label": actor.label, "runtime": environment.runtime},

@@ -347,23 +347,22 @@ def test_f005():
 
 
 # ---------------------------------------------------------------------------
-# F006 keyed_dataset
+# F006 relational Dataset assembly
 # ---------------------------------------------------------------------------
 def test_f006(fake_action):
     _binding_assertion()
-    from demiflow.execution.local_kernel import keyed_dataset
     from demiflow.data.api import DataAPI
     from demiflow.data.plan import LogicalPlan
 
     api = DataAPI(_FakeExecutor())
     left = api.from_items([{"k": 1, "v": "a"}])
     right = api.from_items([{"k": 1, "w": "b"}])
-    ds = keyed_dataset(left, "join", ["k"], right=right, right_on=["k"])
+    ds = left.join(right, on=["k"], right_on=["k"])
     assert ds is not None
     assert len(STATE.relational_calls) == 1
     # executor-specific rejection removed: a non-local right executor is accepted
     right_ray = DataAPI(_FakeExecutor("ray")).from_items([{"k": 1, "w": "b"}])
-    ds2 = keyed_dataset(left, "join", ["k"], right=right_ray, right_on=["k"])
+    ds2 = left.join(right_ray, on=["k"], right_on=["k"])
     assert ds2 is not None
 
 

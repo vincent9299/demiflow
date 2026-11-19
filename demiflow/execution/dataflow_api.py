@@ -9,7 +9,6 @@ worker, never here.
 """
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
@@ -29,6 +28,9 @@ from ..data.sources import SourcePlan
 from ..planning.dataflow_compile import lower_action
 from ..planning.dataflow_place import infer_recovery
 from ..planning.dataflow_policy import resolve_runtime_policy
+from ..planning.dataflow_declaration import (
+    normalize_json_mapping as _json_mapping, normalize_native_fields, validate_native_kind,
+)
 
 if TYPE_CHECKING:
     from ..data.datasink import Datasink
@@ -40,7 +42,6 @@ _ACTION_KINDS = frozenset({
     "write_datasink", "write_lance", "write_file", "run_stream", "collect_summary",
 })
 _PROVIDER = {"local": "local", "ray": "ray_core"}
-_MAX_DECLARATION_BYTES = 1024 * 1024
 # Preflight-only bounds for native config validation (C02 default ceilings);
 # the real run resolves its own frozen policy/bounds via P008.
 _PREFLIGHT_BOUNDS = Bounds(
@@ -50,18 +51,6 @@ _PREFLIGHT_BOUNDS = Bounds(
     max_spill_bytes=1024 * 1024 * 1024, max_state_bytes=256 * 1024 * 1024,
     max_pending_events=1024, max_open_files=256, max_output_rows=1000000,
     timeout_ms=60000)
-
-
-def _json_mapping(value: object, label: str) -> dict:
-    if not isinstance(value, Mapping):
-        raise DataflowError("INVALID_CONTRACT", label + " must be a mapping")
-    try:
-        raw = json.dumps(dict(value), sort_keys=True, allow_nan=False)
-    except (TypeError, ValueError) as exc:
-        raise DataflowError("INVALID_CONTRACT", label + " must be bounded Json") from exc
-    if len(raw.encode("utf-8")) > _MAX_DECLARATION_BYTES:
-        raise DataflowError("BUDGET_EXCEEDED", label + " exceeds declaration budget")
-    return dict(value)
 
 
 def _native_operation_factory(*args: object, **kwargs: object) -> object:
@@ -85,23 +74,10 @@ def _native_operation_identity(operation: NativeOperation) -> dict:
 # -- E017 make_native_operation -------------------------------------------
 def make_native_operation(kind: str, configuration: Mapping[str, object], *,
                           bindings: Mapping[str, object]) -> LogicalOp:
-    if type(kind) is not str or not kind:
-        raise DataflowError("INVALID_CONTRACT", "native operation kind must be a non-empty str")
-    config = _json_mapping(configuration, "configuration")
-    binds = _json_mapping(bindings, "bindings")
+    config, binds = normalize_native_fields(kind, configuration, bindings=bindings)
     factory = CallableSpec.create(target=_native_operation_factory)
     operation = NativeOperation(kind=kind, configuration=config, bindings=binds, factory=factory)
-    # Pure config/identity preflight: reports configuration errors before any
-    # run, without constructing a journal, network client or model instance.
-    from ..planning.dataflow_registry import operator_registry
-    # Public declarations may lower to an existing typed op. Validate their
-    # names here; only the compiler with the full typed declaration builds the
-    # model spec (a prompt name alone cannot reconstruct a PromptPack).
-    aliases = {"embeddings": "embedding", "fetch": "raw_fetch", "enqueue": "queue_produce",
-               "ack_queue": "queue_ack", "lookup": "lance_lookup", "prepend": "stream_prepend",
-               "read_object": "read_local_object", "admit": "deduplicate"}
-    if aliases.get(kind, kind) not in operator_registry() and kind not in {"cache", "run_stream"}:
-        raise DataflowError("UNSUPPORTED_CAPABILITY", "unknown native operation: " + kind)
+    validate_native_kind(kind)
     return operation
 
 
