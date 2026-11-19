@@ -204,7 +204,15 @@
     selection = null;
   }
 
-  function error(parent, err) { if (err?.name !== 'AbortError' && parent?.isConnected) { const box=$('div', err.message || String(err), 'error-box'); parent.append(box); return box; } }
+  function error(parent, err) {
+    if (err?.name === 'AbortError' || !parent?.isConnected) return;
+    const headerFailure=!!parent.closest('.workspace-header');
+    const target=headerFailure?main:parent;
+    if(!target?.isConnected)return;
+    const box=$('div',err.message||String(err),'error-box');box.setAttribute('role','alert');
+    if(headerFailure)target.prepend(box);else target.append(box);
+    return box;
+  }
   function renderLoadFailure(parent, err, {retryRead, scope, isCurrent = () => true} = {}) {
     if (!parent?.isConnected || err?.name === 'AbortError' || !isCurrent()) return;
     const box=$('div',undefined,'load-failure');box.setAttribute('role','alert');
