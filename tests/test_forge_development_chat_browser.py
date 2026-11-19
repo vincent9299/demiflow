@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 import pytest
-from test_forge_development_chat_http import app
+from test_forge_development_chat_http import app, legacy_history
 
 
 def test_browser_conversation_navigation_refresh_and_mobile(tmp_path):
@@ -238,5 +238,113 @@ def test_acp_stream_visible_before_completion_and_reconnect(tmp_path):
         expect(first).to_contain_text('Second streamed paragraph.')
         assert first.inner_text().count('First streamed paragraph.')==1
         assert server.development.store.show(workspace,sid)['revision']==1
+        assert not errors,errors
+        browser.close()
+
+
+@pytest.mark.parametrize('remote_compat',[False,True])
+def test_legacy_same_message_ids_stay_in_turn_and_tool_order(tmp_path,remote_compat):
+    """Old saved ACP IDs can repeat both around tools and after a CLI restart."""
+    from playwright.sync_api import sync_playwright, expect
+    with app(tmp_path,acp=True) as (server,workspace,root), sync_playwright() as runtime:
+        sid,rows=legacy_history(server,workspace,root)
+        before=server.development.store.events(workspace,sid)['events']
+        if remote_compat:
+            original=server.development.capabilities
+            def remote_capabilities(*args):return dict(original(*args),backend='existing_http')
+            server.development.capabilities=remote_capabilities
+        browser=runtime.chromium.launch(executable_path='/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome',headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
+        page=browser.new_page(viewport={'width':1440,'height':1000});page.set_default_timeout(15000)
+        errors=[];requests=[]
+        page.on('pageerror',lambda e:errors.append(str(e)))
+        page.on('request',lambda request:requests.append(request.url))
+        page.goto(server.origin+'/#token='+server.token)
+        page.get_by_role('button',name='开发',exact=True).click()
+        expected=['第一轮进展','第一轮工具','第一轮结果','第二轮进展','第二轮工具','第二轮结果']
+        def ordered():
+            expect(page.locator('.development-assistant')).to_have_count(4)
+            expect(page.locator('.development-tool')).to_have_count(2)
+            for index,text in enumerate(expected):
+                expect(page.locator('.development-assistant,.development-tool').nth(index)).to_contain_text(text)
+            nodes=page.locator('.development-assistant,.development-tool').evaluate_all('(nodes)=>nodes.map(node=>node.textContent)')
+            assert len(nodes)==len(expected)
+            assert all(text in node for text,node in zip(expected,nodes)),nodes
+        page.get_by_text('本轮已完成',exact=True).wait_for();ordered()
+        page.reload();page.get_by_text('本轮已完成',exact=True).wait_for();ordered()
+        final=page.locator('.development-assistant').filter(has_text='第二轮结果')
+        final.get_by_role('button',name='分页查看原文').click()
+        dialog=page.get_by_role('dialog');expect(dialog).to_contain_text('第二轮结果')
+        assert all(text not in dialog.inner_text() for text in ('第一轮','第二轮进展','第二轮工具'))
+        expect(dialog.get_by_role('button',name='下一页')).to_be_hidden()
+        if remote_compat:assert not any('/dev-output?' in value for value in requests)
+        else:assert any('/dev-output?' in value and 'turn_id=' in value and 'through_sequence=' in value for value in requests)
+        assert server.development.store.events(workspace,sid)['events']==before
+        assert not errors,errors
+        browser.close()
+
+
+def test_public_acp_process_visible_while_running_and_after_reload(tmp_path):
+    """Observe public provider text, tools and answer in actual streamed order."""
+    from playwright.sync_api import sync_playwright, expect
+    with app(tmp_path,acp=True) as (server,workspace,root), sync_playwright() as runtime:
+        browser=runtime.chromium.launch(executable_path='/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome',headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
+        page=browser.new_page(viewport={'width':1440,'height':1000});page.set_default_timeout(15000)
+        errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+        page.goto(server.origin+'/#token='+server.token)
+        page.get_by_role('button',name='开发',exact=True).click()
+        page.get_by_label('开发要求').fill('public process fixture')
+        page.get_by_role('button',name='发送',exact=True).click()
+        process=page.locator('.development-process')
+        expect(process).to_contain_text('公开过程：先检查现有数据。')
+        assert process.evaluate('(node)=>node.open')
+        expect(page.locator('.development-assistant')).to_contain_text('正在查找数据来源。')
+        sid=server.development.store.list(workspace)['sessions'][0]['id']
+        assert server.development.store.show(workspace,sid)['turn']['cleanup']!='complete'
+        page.reload();expect(process).to_contain_text('公开过程：先检查现有数据。')
+        assert process.inner_text().count('公开过程：先检查现有数据。')==1
+        (root/'release-process').write_text('release')
+        page.get_by_text('本轮已完成',exact=True).wait_for()
+        expect(page.locator('.development-assistant')).to_have_count(2)
+        nodes=page.locator('.development-process,.development-assistant,.development-tool').evaluate_all('(nodes)=>nodes.map(node=>node.textContent)')
+        expected=['公开过程：先检查现有数据。','正在查找数据来源。','读取输入信息','已找到输入，下一步可以开发过滤流程。']
+        for index,text in enumerate(expected):
+            expect(page.locator('.development-process,.development-assistant,.development-tool').nth(index)).to_contain_text(text)
+        nodes=page.locator('.development-process,.development-assistant,.development-tool').evaluate_all('(nodes)=>nodes.map(node=>node.textContent)')
+        assert len(nodes)==len(expected)
+        assert all(text in node for text,node in zip(expected,nodes)),nodes
+        expect(page.locator('.development-streaming')).to_have_count(0)
+        page.reload();expect(page.locator('.development-assistant')).to_have_count(2)
+        assert process.inner_text().count('公开过程：先检查现有数据。')==1
+        assert not errors,errors
+        browser.close()
+
+
+def test_large_public_summary_and_final_keep_message_role_without_duplication(tmp_path):
+    """Exercise the worker's bounded completion-body chunks, including legacy shape."""
+    from playwright.sync_api import sync_playwright, expect
+    with app(tmp_path) as (server,workspace,root), sync_playwright() as runtime:
+        browser=runtime.chromium.launch(executable_path='/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome',headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
+        page=browser.new_page(viewport={'width':1440,'height':1000});page.set_default_timeout(15000)
+        errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+        page.goto(server.origin+'/#token='+server.token)
+        page.get_by_role('button',name='开发',exact=True).click()
+        page.get_by_label('开发要求').fill('public summary fixture')
+        page.get_by_role('button',name='发送',exact=True).click()
+        page.get_by_text('本轮已完成',exact=True).wait_for()
+        def check():
+            process=page.locator('.development-process');answer=page.locator('.development-assistant')
+            expect(process).to_have_count(1);expect(answer).to_have_count(1)
+            expect(process).to_contain_text('Summary end.');expect(answer).to_contain_text('Final answer end.')
+            assert process.inner_text().count('Public summary start.')==1
+            assert answer.inner_text().count('Long final answer start.')==1
+            expect(page.locator('.development-tool')).to_have_count(2)
+            assert 'Actual tool output.' in page.locator('.development-tool').last.text_content()
+            assert 'PRIVATE REASONING' not in page.locator('body').text_content()
+        check();page.reload();page.get_by_text('本轮已完成',exact=True).wait_for();check()
+        page.locator('.development-assistant').get_by_role('button',name='分页查看原文').click()
+        dialog=page.get_by_role('dialog');expect(dialog).to_contain_text('Final answer end.')
+        assert dialog.inner_text().count('Long final answer start.')==1
+        sid=server.development.store.list(workspace)['sessions'][0]['id']
+        assert 'PRIVATE REASONING' not in str(server.development.store.events(workspace,sid))
         assert not errors,errors
         browser.close()

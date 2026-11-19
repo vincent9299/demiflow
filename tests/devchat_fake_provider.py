@@ -53,6 +53,16 @@ for line in sys.stdin:
             send({'id':'server-question','method':'item/tool/requestUserInput','params':{'threadId':thread,'turnId':turn,'itemId':'question',
                 'isBlocking':True,'questions':[{'id':'q1','header':'Choice','question':'Which value?','options':None,'isOther':True,'isSecret':False}]}})
             continue
+        if message.startswith('public summary fixture'):
+            summary='Public summary start.\n\n'+'Summary detail line.\n'*1800+'\nSummary end.'
+            event('item/reasoning/summaryTextDelta',dict(threadId=thread,turnId=turn,itemId='reason',summaryIndex=0,delta='Public summary start.'))
+            event('item/completed',dict(threadId=thread,turnId=turn,item=dict(id='reason',type='reasoning',summary=[summary],content=['PRIVATE REASONING MUST NOT APPEAR'])))
+            event('item/started',dict(threadId=thread,turnId=turn,item=dict(id='tool',type='commandExecution',command='fixture inspection')))
+            event('item/commandExecution/outputDelta',dict(threadId=thread,turnId=turn,itemId='tool',delta='Actual tool output.'))
+            answer='Long final answer start.\n\n'+'Final detail line.\n'*2000+'\nFinal answer end.'
+            event('item/completed',dict(threadId=thread,turnId=turn,item=dict(id='answer',type='agentMessage',text=answer)))
+            event('turn/completed',dict(threadId=thread,turn=dict(id=turn,status='completed')))
+            continue
         if message.startswith('flood'):
             for _ in range(100): event('item/agentMessage/delta',{'threadId':thread,'turnId':turn,'itemId':'answer','delta':'x'*16000})
         event('item/agentMessage/delta',{'threadId':thread,'turnId':turn,'itemId':'answer','delta':'fixture answer <script>unsafe</script>'})

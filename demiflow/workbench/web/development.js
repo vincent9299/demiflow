@@ -210,7 +210,7 @@ SOFTWARE.
   const uid=()=>crypto.randomUUID();
   const iconButton=(label,path)=>{const b=el('button',undefined,'development-icon');b.type='button';b.title=label;b.setAttribute('aria-label',label);const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');const p=document.createElementNS(svg.namespaceURI,'path');p.setAttribute('d',path);svg.append(p);b.append(svg);return b;};
   async function mount({main,api,workspaceId,view,mountText,disposeReaders,openSession,error,register}) {
-    const state={disposed:false,timer:null,session:null,sequence:0,items:new Map(),textBytes:0,pending:new Set(),submission:null,dialogs:new Set()};
+    const state={disposed:false,timer:null,session:null,sequence:0,items:new Map(),textItems:new Map(),lastText:null,pagedText:null,textBytes:0,pending:new Set(),submission:null,dialogs:new Set()};
     const layout=el('section',undefined,'development-layout'),body=el('div',undefined,'development-conversation');
     layout.append(body);main.append(layout);main.classList.add('development-main');active.add(state);
     const handle={get sessionId(){return state.session?.id;},dispose(){state.disposed=true;clearTimeout(state.timer);state.observer?.disconnect();active.delete(state);main.classList.remove('development-main');disposeReaders(layout);for(const dialog of state.dialogs)dialog.remove();state.dialogs.clear();}};register(handle);
@@ -305,19 +305,61 @@ SOFTWARE.
     function trackDialog(dialog){state.dialogs.add(dialog);dialog.addEventListener('close',()=>{state.dialogs.delete(dialog);dialog.remove();},{once:true});}
     function output(item){
       const d=el('dialog'),bar=el('div',undefined,'toolbar'),close=el('button','关闭'),next=el('button','下一页原文'),content=el('pre');let cursor=0;
-      close.onclick=()=>d.close();bar.append(close,next);d.append(el('h2','已保存原文'),bar,content);document.body.append(d);trackDialog(d);
-      async function load(){next.disabled=true;try{const page=await api('dev-output',{session_id:state.displaySession||state.session.id,item_id:item,after_sequence:cursor});cursor=page.next_sequence;content.textContent=page.chunks.map(c=>c.text).join('');next.hidden=cursor>=page.last_sequence;}catch(e){error(d,e);}finally{next.disabled=false;}}
+      const reference={...item.sourceRef},sid=state.displaySession||state.session.id;cursor=reference.from_sequence-1;
+      close.onclick=()=>d.close();bar.append(close,next);d.append(el('h2','已保存原文 · 当前消息片段'),bar,content);document.body.append(d);trackDialog(d);
+      async function load(){next.disabled=true;try{
+        let page;
+        if(capabilities.backend==='existing_http'){
+          // Older owners need no protocol upgrade: filter their existing bounded
+          // event page by the exact persisted identities and visible segment.
+          const saved=await api('dev-events',{session_id:sid,after_sequence:cursor,limit:50});
+          const matches=event=>event.turn_id===reference.turn_id&&(!reference.provider_epoch||event.provider_epoch===reference.provider_epoch)&&event.sequence>=reference.from_sequence&&event.sequence<=reference.through_sequence&&(event.data.item_id===reference.item_id||event.data.id===reference.item_id||event.type==='message.user'&&reference.item_id===event.turn_id+':user'||event.type==='change.observed'&&reference.item_id==='change:'+event.sequence||event.type==='check.reference'&&reference.item_id==='check:'+event.sequence);
+          page={chunks:saved.events.filter(matches).map(event=>({text:event.data.text??JSON.stringify(event.data,null,2)})),next_sequence:Math.min(saved.next_sequence,reference.through_sequence),last_sequence:Math.min(saved.last_sequence,reference.through_sequence)};
+        }else page=await api('dev-output',{session_id:sid,...reference,after_sequence:cursor});
+        cursor=page.next_sequence;content.textContent=page.chunks.map(c=>c.text).join('');next.hidden=cursor>=page.last_sequence;
+      }catch(e){error(d,e);}finally{next.disabled=false;}}
       next.onclick=load;d.showModal();load();
     }
-    function card(id,label){
-      if(state.items.has(id))return state.items.get(id);
-      while(state.items.size>=100){const first=state.items.keys().next().value;const old=state.items.get(first);disposeReaders(old.node);old.node.remove();state.textBytes-=bytes(old.text);state.items.delete(first);earlier.hidden=false;}
-      const chat=label==='你'||label==='助手',node=el(chat?'article':'details',undefined,'development-message'),heading=el(chat?'span':'summary',label),content=el('div'),source=el('button','原文');source.setAttribute('aria-label','分页查看原文');source.className='development-raw';source.onclick=()=>output(id);node.classList.add(chat?(label==='你'?'development-user':'development-assistant'):'development-tool');if(chat)heading.className='sr-only';node.append(heading,content,source);flow.append(node);hero.hidden=true;layout.classList.remove('development-empty');
-      const item={node,content,text:'',source,role:label};state.items.set(id,item);return item;
+    const scoped=(event,kind,id)=>JSON.stringify([event.session_id,event.turn_id,event.provider_epoch||'',kind,id]);
+    function card(id,label,event,rawId=id){
+      let item=state.items.get(id);
+      if(!item){
+        while(state.items.size>=100){const first=state.items.keys().next().value;const old=state.items.get(first);disposeReaders(old.node);old.node.remove();state.textBytes-=bytes(old.text);state.items.delete(first);if(old.textKey&&state.textItems.get(old.textKey)===first)state.textItems.delete(old.textKey);earlier.hidden=false;}
+        const chat=label==='你'||label==='助手',process=label==='模型过程'||label==='思考摘要',node=el(chat?'article':'details',undefined,'development-message'),heading=el(chat?'span':'summary',label),content=el('div'),source=el('button','原文');source.setAttribute('aria-label','分页查看原文');source.className='development-raw';source.onclick=()=>output(item);source.hidden=!event;node.classList.add(chat?(label==='你'?'development-user':'development-assistant'):process?'development-process':'development-tool');if(chat)heading.className='sr-only';if(process)node.open=true;node.append(heading,content,source);flow.append(node);hero.hidden=true;layout.classList.remove('development-empty');
+        item={node,content,text:'',source,role:label};state.items.set(id,item);
+      }
+      if(event){
+        if(!item.sourceRef)item.sourceRef={item_id:rawId,turn_id:event.turn_id,...(event.provider_epoch?{provider_epoch:event.provider_epoch}:{}),from_sequence:event.sequence,through_sequence:event.sequence};
+        else item.sourceRef.through_sequence=event.sequence;
+      }
+      return item;
+    }
+    function finishText(){
+      const item=state.lastText&&state.items.get(state.lastText.id);state.lastText=null;
+      if(item){item.node.classList.remove('development-streaming');putText(item,item.text,false,true);}
+    }
+    function message(event){
+      const d=event.data,key=scoped(event,'message:'+ (d.channel||'answer'),d.item_id),complete=event.type==='message.completed';
+      let id=complete?state.textItems.get(key):state.lastText?.key===key?state.lastText.id:null;
+      if(!id||!state.items.has(id)){
+        finishText();id=key+':'+event.sequence;
+      }
+      const item=card(id,d.channel==='process'?'模型过程':d.channel==='summary'?'思考摘要':'助手',event,d.item_id);
+      item.textKey=key;state.textItems.set(key,id);
+      if(complete){
+        item.node.classList.remove('development-streaming');
+        if(d.paged){
+          // Older workers store large completion bodies as adjacent output
+          // chunks. Replace preceding deltas without changing the prose role.
+          putText(item,'');item.sourceRef.from_sequence=event.sequence;
+          state.lastText={key,id};state.pagedText=key;
+        }else{putText(item,d.text,false,true);if(state.lastText?.id===id)state.lastText=null;}
+      }
+      else{state.lastText={key,id};item.node.classList.add('development-streaming');putText(item,d.text,true);}
     }
     function putText(item,text,append=false,markdown=false){
       const previous=bytes(item.text),value=append?item.text+text:text,n=bytes(value);
-      if(n>65536||state.textBytes-previous+n>1024*1024){item.source.textContent='内容超过预览预算 · 分页查看完整原文';return;}
+      if(n>65536||state.textBytes-previous+n>1024*1024){item.source.textContent='内容超过预览预算 · 分页查看该段原文';return;}
       state.textBytes+=n-previous;item.text=value;
       if(append&&item.content.firstElementChild?.classList.contains('development-stream')){const pre=item.content.firstElementChild;if(pre.firstChild)pre.firstChild.appendData(text);else pre.append(document.createTextNode(text));return;}
       disposeReaders(item.content);item.content.replaceChildren();
@@ -325,25 +367,29 @@ SOFTWARE.
     }
     function project(event){
       const d=event.data;
-      if(event.type==='message.user')putText(card(event.turn_id+':user','你'),d.text);
-      else if(event.type==='message.delta'){const item=card(d.item_id,'助手');item.node.classList.add('development-streaming');putText(item,d.text,true);}
-      else if(event.type==='message.completed'&&!d.paged){const item=card(d.item_id,'助手');item.node.classList.remove('development-streaming');putText(item,d.text,false,true);}
-      else if(event.type==='output.delta')putText(card(d.item_id,'工具输出'),d.text,true);
+      const completionBody=event.type==='output.delta'&&state.pagedText===scoped(event,'message:'+(d.channel||'answer'),d.item_id);
+      if(!completionBody)state.pagedText=null;
+      if(event.type==='message.user'||event.type==='output.delta'&&!completionBody||event.type.startsWith('item.'))finishText();
+      if(event.type==='message.user')putText(card(event.turn_id+':user','你',event),d.text);
+      else if(event.type==='message.delta'||event.type==='message.completed')message(event);
+      else if(completionBody)message({...event,type:'message.delta'});
+      else if(event.type==='output.delta')putText(card(scoped(event,'output',d.item_id),'工具输出',event,d.item_id),d.text,true);
       else if(event.type.startsWith('item.')){
-        const item=card(d.id,d.type==='fileChange'?'文件变更':'工具');putText(item,JSON.stringify(d,null,2));
+        const item=card(scoped(event,'item',d.id),d.type==='fileChange'?'文件变更':'工具',event,d.id);putText(item,JSON.stringify(d,null,2));
       }else if(event.type==='change.observed'){
-        const item=card('change:'+event.sequence,'观察到的变化 · 验证待更新');putText(item,d.files.map(f=>f.path+(f.within_scope?'':' · 超出范围')+'\n'+(f.diff||f.diff_unavailable||'')).join('\n'));
+        const item=card('change:'+event.sequence,'观察到的变化 · 验证待更新',event);putText(item,d.files.map(f=>f.path+(f.within_scope?'':' · 超出范围')+'\n'+(f.diff||f.diff_unavailable||'')).join('\n'));
       }else if(event.type==='development.state'){
         if(!d.busy){const item=card('development:'+event.turn_id,'开发检查记录');item.source.hidden=true;putText(item,developmentLabel(d)+(d.reason?'\n'+d.reason:''));}
       }else if(event.type==='development.repair.started'){
         const item=card('repair:'+event.sequence,'自动修复 · 第 '+d.round+' 次');item.source.hidden=true;
         putText(item,'根据检查与审阅结果继续当前任务。'+(Array.isArray(d.feedback)?'\n'+d.feedback.map(f=>f.reason||'').filter(Boolean).join('\n'):''));
-      }else if(event.type==='check.reference'){putText(card('check:'+event.sequence,'公开开发检查记录'+(d.review_kind==='self'?' · 自身审查':'')),JSON.stringify(d.result,null,2));
+      }else if(event.type==='check.reference'){putText(card('check:'+event.sequence,'公开开发检查记录'+(d.review_kind==='self'?' · 自身审查':''),event),JSON.stringify(d.result,null,2));
       }else if(event.type==='provider.error'){putText(card('error:'+event.sequence,'代理报告错误'),JSON.stringify(d));}
       else if(event.type==='compaction.completed'){if(d.status==='compacted'&&!state.historyOnly){clearTimeline();earlier.hidden=false;}const item=card('archive:'+event.sequence,'历史归档');item.node.classList.add('development-archive-card');item.node.open=true;item.source.hidden=true;putText(item,d.status==='compacted'?'较早上下文已压缩为摘要。原始消息已保留，可从左侧定位查看。':'当前没有需要压缩的较早上下文。');}
       else if(event.type==='history.gap'){putText(card('history:'+event.sequence,'恢复说明'),'代理未回放历史；这里展示的是本应用先前保存的记录。');}
       else if(event.type==='turn.state'&&d.cleanup==='complete'){
-        for(const item of state.items.values())if(item.role==='助手'){item.node.classList.remove('development-streaming');putText(item,item.text,false,true);}
+        finishText();
+        for(const item of state.items.values())if(['助手','模型过程','思考摘要'].includes(item.role)&&item.sourceRef?.turn_id===event.turn_id){item.node.classList.remove('development-streaming');putText(item,item.text,false,true);}
         if(d.result){try{const result=JSON.parse(d.result);if(result.reason)putText(card('result:'+event.turn_id,'本轮结果'),result.reason);}catch{}}
       }
       if(follow.active)follow.toBottom(timeline,scrollMetrics(timeline),'instant');else if(event.type==='message.delta'||event.type==='message.user')newContent.hidden=false;
@@ -405,7 +451,7 @@ SOFTWARE.
     stop.onclick=async()=>{stop.disabled=true;try{await api('dev-cancel',{}, {session_id:state.session.id,turn_id:state.session.turn.id,request_id:uid()});status.textContent='已请求停止，等待所属工具清理。';}catch(e){error(body,e);stop.disabled=false;}};
     recover.onclick=async()=>{try{const value=await api('dev-recover',{}, {session_id:state.session.id,expected_revision:state.session.revision});status.textContent=value.recovery.can_continue?'连接状态已核对，可继续。':'清理归属尚未确认，保留写租约。';}catch(e){error(body,e);}};
     basis.onclick=async()=>{try{const value=await api('dev-context',{session_id:state.session.id,turn_id:state.session.turn.id});if(state.disposed)return;const d=el('dialog'),close=el('button','关闭');close.onclick=()=>d.close();d.append(el('h2','本轮开发依据'),close,el('pre',JSON.stringify(value.context,null,2)));document.body.append(d);trackDialog(d);d.showModal();}catch(e){error(body,e);}};
-    function clearTimeline(){state.feedEpoch=(state.feedEpoch||0)+1;disposeReaders(flow);flow.replaceChildren();state.items.clear();state.textBytes=0;newContent.hidden=true;}
+    function clearTimeline(){state.feedEpoch=(state.feedEpoch||0)+1;disposeReaders(flow);flow.replaceChildren();state.items.clear();state.textItems.clear();state.lastText=null;state.pagedText=null;state.textBytes=0;newContent.hidden=true;}
     async function loadWindow(sid,after){
       state.historyOnly=true;state.displaySession=sid;follow.setFollowing(false);clearTimeline();
       const epoch=state.feedEpoch;state.windowStart=after;earlier.hidden=after===0;latest.hidden=false;availability();

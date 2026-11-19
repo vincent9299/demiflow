@@ -68,7 +68,7 @@ def cli(root, arguments, *, scratch, timeout=30, maximum=1024 * 1024):
     return value
 
 
-def assemble(project, requirement, scratch, limits, *, managed_tasks=None, task_id=None, execution_mode='trusted_local', current_request=None):
+def assemble(project, requirement, scratch, limits, *, managed_tasks=None, task_id=None, execution_mode='trusted_local', current_request=None, input_access=False):
     root = Path(project['root'])
     sources, pages, used = [], [], 0
 
@@ -167,6 +167,12 @@ def assemble(project, requirement, scratch, limits, *, managed_tasks=None, task_
     if managed_tasks is not None: grant['task_id'] = task_id
     header = (
         '你正在 DemiFlow 中执行一个明确授权的项目开发任务。\n'
+        '直接围绕用户的项目需求开展工作，使用用户的语言交流。开始行动和重要转折时，用简短正文说明正在做什么、'
+        '发现了什么和接下来怎么处理；工具调用不能代替这些说明。结束时给出可理解的结果、实际修改或尚待解决的问题。\n'
+        '需求较概括时先利用现有项目和可读取的数据主动探索，推进有依据的可逆工作；输入路径不是必须先填写的业务参数。'
+        '可以提出合理、可调整的默认方案并清楚说明依据和假设，不把每个参数都变成开工前的确认步骤。'
+        '只有影响业务目标或结果含义的关键歧义才在原对话中提出具体问题，并继续不依赖该答案的工作。'
+        '如实际访问能力不足，说明具体受限位置；不要把当前实现或试用样例的限制说成用户必须遵守的产品规则。\n'
         '实际项目目录：' + str(root) + '\n授权与范围：' + wire(grant).decode() + '\n'
         + ('控制器要求受限执行，未经实际外部边界准入不会启动。只在上述范围内工作；'
            if execution_mode == 'restricted' else '这是 trusted_local 部署：宿主权限可用，没有 OS 文件或进程沙箱。只在上述范围内工作；')
@@ -177,11 +183,19 @@ def assemble(project, requirement, scratch, limits, *, managed_tasks=None, task_
         '你的文字与命令输出不代表检查、独立 Review、Freeze 或验收通过。'
         + ('开发规范、检查和验收由控制器调用 Forge 管理 API；开发桥提供项目上下文、问题与真人答复关联、记录和检查请求。'
            if managed_tasks is not None else '使用项目现有验证入口；开发桥只调用公开 CLI。')
+        + ('\n输入数据可通过 development_protocol 的 input 操作自行发现和读取，不要求用户先指定路径或登记数据目录。'
+           'arguments.action 可为 list、find、read、inspect；path 可省略以开始发现，也可指定项目外的绝对路径。'
+           'find 用 pattern 文件名通配符和 depth 限定本次查找；list 用 offset 翻页；read 用 offset/bytes 读取文本。'
+           'inspect 支持 Lance/Parquet，用 limit=0 只看 schema，columns 选择字段，limit 最多 10 行。'
+           '优先查看目录和数据 schema，再读取必要的有限样本；结果中的分页、截断和未读取范围须如实说明。'
+           '原生 shell 不能读取项目外路径时，使用 input 工具，不要让用户去修改配置或搬动数据。'
+           '这个工具只读取输入，不改变现有输出位置、写入规则或运行授权。\n' if input_access else '')
         + '内部模型调用次数和费用未封顶。\n'
         '当前真人要求（原文）：\n' + requirement + '\n权威来源正文：\n'
     )
     manifest = dict(kind=project['kind'], task_id=task_id or project.get('task_id'), grant=grant,
                     requirement=requirement, sources=sources, bytes=used, evidence='missing', binding=binding)
+    if input_access: manifest['input_access'] = 'conversation_readonly'
     if managed_tasks is not None:
         manifest['managed'] = True
         manifest['current_request'] = current_request or dict(text=requirement)
@@ -204,16 +218,16 @@ def assemble(project, requirement, scratch, limits, *, managed_tasks=None, task_
 
 BRIDGE = dict(name='development_protocol', description='Use the existing registered project development CLI. No arbitrary commands or independent acceptance.',
     inputSchema=dict(type='object', additionalProperties=False, required=['operation', 'arguments'], properties={
-        'operation': dict(type='string', enum=['context', 'context_read', 'ack_context', 'note', 'refresh', 'check', 'verify', 'self_review', 'handoff']),
+        'operation': dict(type='string', enum=['context', 'context_read', 'ack_context', 'note', 'refresh', 'check', 'verify', 'self_review', 'handoff', 'input']),
         'arguments': dict(type='object')}))
 
 
 def bridge_spec(project):
     from demiflow.workbench.conversations.development import managed
     if not managed(project): return BRIDGE
-    return dict(name=BRIDGE['name'], description='Read the bound Forge task context or request checks after this turn drains. No verification or acceptance authority.',
+    return dict(name=BRIDGE['name'], description='Read project context, discover/read input data with input (action=list/find/read/inspect, optional path), or request checks after this turn drains. Inputs need no registration. No arbitrary commands, input writes or acceptance authority.',
         inputSchema=dict(type='object', additionalProperties=False, required=['operation', 'arguments'], properties={
-            'operation': dict(type='string', enum=['context', 'context_read', 'ack_context', 'note', 'resolve_question', 'register_flow', 'request_check', 'submit_candidate']),
+            'operation': dict(type='string', enum=['context', 'context_read', 'ack_context', 'note', 'resolve_question', 'register_flow', 'request_check', 'submit_candidate', 'input']),
             'arguments': dict(type='object')}))
 
 
@@ -249,8 +263,9 @@ def bridge(project, request, scratch, *, delivery):
 
 class ProtocolBridge:
     """Per-connection page delivery state shared by Codex and the ACP MCP bridge."""
-    def __init__(self, store, tid, project, scratch):
+    def __init__(self, store, tid, project, scratch, *, input_access=None):
         self.store, self.tid, self.project, self.scratch = store, tid, project, scratch
+        self.input_access = input_access
         turn = store.turn(tid)
         self.epoch = turn['epoch']
         self.deadline = json.loads(turn.get('development_control') or '{}').get('deadline', turn['created']+store.limits.turn_seconds)
@@ -275,10 +290,16 @@ class ProtocolBridge:
         if type(request) is not dict or set(request) != {'operation', 'arguments'} or type(request['arguments']) is not dict:
             reject('Invalid development bridge request')
         operation, args = request['operation'], request['arguments']
-        if self.managed_tasks is not None and operation not in {'context', 'context_read', 'ack_context', 'note', 'resolve_question', 'register_flow', 'request_check', 'submit_candidate'}:
+        if self.managed_tasks is not None and operation not in {'context', 'context_read', 'ack_context', 'note', 'resolve_question', 'register_flow', 'request_check', 'submit_candidate', 'input'}:
             reject('Managed development tools cannot execute verification, refresh authority, or grant acceptance')
         self.require_active()
         self.sent_page = None
+        if operation == 'input':
+            if self.input_access is None:
+                reject('Input discovery is not available in this development connection')
+            answer = self.input_access.invoke(args)
+            self.require_active()
+            return answer
         if operation == 'ack_context':
             if set(args) != {'digest'} or args['digest'] not in self.pages:
                 reject('Unknown delivered context page digest')

@@ -28,7 +28,11 @@ from demiflow.resources.process_observation import unit_stopped
 class Service:
     remote = False
 
-    def __init__(self, config_path):
+    def __init__(self, config_path, *, input_denied_paths=()):
+        # Host authority is not a user-maintained input allowlist. Pass these
+        # paths only to the trusted worker, never to the provider environment.
+        self.input_denied_paths = tuple(dict.fromkeys(str(Path(p).absolute())
+            for p in (config_path, *input_denied_paths)))
         self.deployment = Deployment.load(config_path)
         self.root = self.deployment.state
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -181,6 +185,7 @@ class Service:
                 read_fd, write_fd = os.pipe()
                 worker = Path(__file__).with_name('worker.py')
                 env = dict(PATH='/usr/bin:/bin', LANG='C.UTF-8', PYTHONDONTWRITEBYTECODE='1')
+                env['DEMIFLOW_INPUT_DENIED_PATHS'] = wire(list(self.input_denied_paths), 65536).decode()
                 if self.deployment.value.get('runtime_domain'):
                     env['DEMIFLOW_FORGE_DOMAIN'] = self.deployment.value['runtime_domain']
                 for config in self.deployment.providers.values():
@@ -499,7 +504,7 @@ class Service:
             reject('Development shutdown could not read final cleanup state', 'busy')
 
 
-def connect(config_path):
+def connect(config_path, *, input_denied_paths=()):
     """Choose a closed backend without constructing a second local owner."""
     from demiflow.workbench.conversations.common import read_file
     from demiflow.workbench.conversations.common import strict_json
@@ -508,4 +513,5 @@ def connect(config_path):
     value = strict_json(read_file(config_path, 65536))
     if type(value) is not dict:
         reject('Invalid development deployment fields')
-    return ExistingHTTP(config_path) if value.get('format') == FORMAT else Service(config_path)
+    return ExistingHTTP(config_path) if value.get('format') == FORMAT else Service(
+        config_path, input_denied_paths=input_denied_paths)

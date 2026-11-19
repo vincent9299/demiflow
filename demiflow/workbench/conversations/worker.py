@@ -184,7 +184,7 @@ def run(config_path, tid, lease_fd, parent_fd):
             if len(content.encode()) > 32768:
                 if kind == 'message.completed':
                     # Completion text can duplicate deltas; mark a paged body.
-                    store.event(tid, 'message.completed', dict(item_id=data['item_id'], text='', paged=True))
+                    store.event(tid, 'message.completed', dict(data, text='', paged=True))
                     kind = 'output.delta'
                 for offset in range(0, len(content), 8000):
                     store.event(tid, kind, dict(data, text=content[offset:offset + 8000]))
@@ -204,11 +204,23 @@ def run(config_path, tid, lease_fd, parent_fd):
             store.update(tid, context=wire(manifest).decode(), delivery='not_applicable')
         else:
             managed_tasks = prepare(deployment, store, turn, session, project) if managed(project) else None
+            input_access = None
+            if project['kind'] == 'demiforge_registered':
+                from demiflow.workbench.conversations.inputs import InputAccess
+                denied_inputs = [deployment.state, Path(config_path).resolve()]
+                denied_inputs.extend(Path(p) for p in json.loads(os.environ.pop('DEMIFLOW_INPUT_DENIED_PATHS', '[]')))
+                if deployment.value.get('runtime_domain'):
+                    denied_inputs.append(Path(deployment.value['runtime_domain']))
+                denied_inputs.extend(Path(value['native_credentials']) for value in deployment.providers.values()
+                                     if value.get('native_credentials'))
+                input_access = InputAccess(store, tid, project, scratch, denied_paths=denied_inputs,
+                    runtime_paths=runtime_paths(deployment.providers[session['provider']]), deadline=deadline)
             manifest, prompt = assemble(project, turn['text'], scratch, limits,
                 managed_tasks=managed_tasks, task_id=session['id'] if managed_tasks is not None else None,
-                execution_mode=deployment.mode, current_request=current_request(turn) if managed_tasks is not None else None)
+                execution_mode=deployment.mode, current_request=current_request(turn) if managed_tasks is not None else None,
+                input_access=input_access is not None)
             store.update(tid, context=wire(manifest).decode(), delivery='prepared')
-            protocol_bridge = ProtocolBridge(store, tid, project, scratch)
+            protocol_bridge = ProtocolBridge(store, tid, project, scratch, input_access=input_access)
             store.event(tid, 'context.bound', {'digest': manifest['digest'], 'kind': manifest['kind'],
                 'task_id': manifest['task_id'], 'sources': len(manifest['sources']), 'bytes': manifest['bytes'], 'delivery': 'prepared'})
         tick()

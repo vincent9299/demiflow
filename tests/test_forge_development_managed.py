@@ -579,3 +579,34 @@ def test_enforced_repair_requires_current_developer_receipt_and_backend(managed)
     assert current['repairable'] is True
     authority.execution_identity = dict(backend='fixture', implementation='v2')
     assert api.status('enforced')['repairable'] is False
+
+
+def test_checked_readonly_dialogue_needs_developer_evidence_but_does_not_accept(managed):
+    api, project, authority = managed
+    api.prepare_task('readonly', 'orders', 'Inspect available inputs', ['orders'], ['No production'],
+        contract=dict(allow_tests=True, developer_session_id='developer', require_enforcement=True))
+    read_all(api, 'readonly')
+    current = api.check('readonly')
+    assert current['changed_total'] == 0 and current['gates']['check'] == 'passed'
+    assert current['unchanged_checked'] is False
+    authority.execution_identity = dict(backend='fixture', implementation='v1')
+    receipt = authority.issue_execution('readonly', current['source_fingerprint'], phase='developer',
+        backend='fixture', implementation='v1', execution_id='completed-reader')
+    current = api.record_execution('readonly', current['source_fingerprint'], receipt=receipt)
+    assert current['unchanged_checked'] is True
+    assert current['ready'] is False and current['accepted_fingerprint'] is None
+    assert current['gates']['verify'] == 'missing' and current['execution_evidence']['verifier'] == 'missing'
+    authority.execution_identity = dict(backend='fixture', implementation='v2')
+    assert api.status('readonly')['unchanged_checked'] is False
+    authority.execution_identity = dict(backend='fixture', implementation='v1')
+    (project.root / 'orders/rules.py').write_text('def keep(row): return False\n')
+    assert api.check('readonly')['unchanged_checked'] is False
+
+
+def test_readonly_dialogue_shortcut_rejects_staging_drift(managed):
+    api, project, _ = managed
+    read_all(api)
+    assert api.check('session')['unchanged_checked'] is True
+    with patch('demiflow.forge.development.managed._index_snapshot', return_value={'changed': 'fixture'}):
+        current = api.check('session')
+        assert current['unchanged_checked'] is False and current['gates']['check'] == 'failed'

@@ -224,10 +224,10 @@ def execute(config_path, tid):
         store.gate_state(tid, projection(current, state='checking'), phase='checking')
         current = tasks.check(task_id, expected_fingerprint=fingerprint)
         if needs_input(current): return
-        if (not current.get('changed_total', len(current.get('changed', [])))
-                and current['gates']['check'] == 'passed' and not current.get('violations')):
-            state = None if current.get('accepted_fingerprint') else 'not_applicable'
-            store.gate_state(tid, projection(current, state=state), phase='finished')
+        if current.get('unchanged_checked'):
+            state = 'accepted' if current.get('ready') and current.get('development_state') == 'accepted' else 'not_applicable'
+            store.gate_state(tid, projection(current, state=state,
+                reason='本轮没有修改候选代码，无需新增验证或独立审阅。'), phase='finished')
             return
         if current['gates']['check'] == 'passed':
             if project.get('allow_tests') is True:

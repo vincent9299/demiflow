@@ -258,7 +258,13 @@ class WorkspaceServer(ThreadingHTTPServer):
         self.media_tickets=MediaTickets(authorization_epoch=lambda:hashlib.sha256(self.token.encode()).hexdigest())
         if development_config is not None:
             from demiflow.workbench.conversations.service import connect
-            self.development = connect(development_config)
+            # Keep the Web authority and deployment files outside data lookup.
+            # A token file may live beside ordinary data, so do not exclude its
+            # entire parent (which could be the project root or /tmp).
+            input_denied = [p for p in (self.registry, analysis_config) if p is not None]
+            if token_file is not None:
+                input_denied.extend((Path(token_file), Path(token_file).with_name('ready.json')))
+            self.development = connect(development_config, input_denied_paths=input_denied)
             try:
                 partition = self.development.deployment.validate_runtime(required=self.enable_runs or self.control_only)
                 if partition is not None:

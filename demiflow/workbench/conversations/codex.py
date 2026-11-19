@@ -170,11 +170,31 @@ class Codex:
             return [('done', dict(status={'completed': 'completed', 'failed': 'failed', 'interrupted': 'interrupted'}.get(status, 'failed'), error=params['turn'].get('error')))]
         if method == 'item/agentMessage/delta':
             return [('message.delta', dict(item_id=params['itemId'], text=params['delta']))]
+        if method == 'item/reasoning/summaryTextDelta':
+            # Only the public summary channel. Raw reasoning/encrypted content
+            # remains outside the transcript and is never reconstructed.
+            index=params.get('summaryIndex', 0)
+            if type(index) is not int or not 0 <= index < 128:
+                reject('Reasoning summary index exceeds budget', 'resource_limit')
+            if type(params.get('delta')) is not str: reject('Invalid reasoning summary text')
+            return [('message.delta', dict(item_id=params['itemId']+':summary:'+str(index),
+                                          text=params['delta'], channel='summary'))]
         if method == 'item/commandExecution/outputDelta':
             return [('output.delta', dict(item_id=params['itemId'], text=params['delta']))]
         if method in {'item/started', 'item/completed'}:
             item = params['item']; kind = item.get('type')
-            if kind in {'reasoning', 'userMessage'}: return []
+            if kind == 'reasoning':
+                if method != 'item/completed': return []
+                summary=item.get('summary', [])
+                if type(summary) is not list or len(summary)>128:
+                    reject('Reasoning summary exceeds budget', 'resource_limit')
+                result=[]
+                for index, part in enumerate(summary):
+                    if type(part) is not str: reject('Invalid public reasoning summary')
+                    result.append(('message.completed', dict(item_id=item['id']+':summary:'+str(index),
+                                                            text=part, channel='summary')))
+                return result
+            if kind == 'userMessage': return []
             if len(self.items) >= 128 and item['id'] not in self.items:
                 reject('Provider item count exceeded budget', 'resource_limit')
             safe = {k: v for k, v in item.items() if k in {'id', 'type', 'text', 'status', 'command', 'cwd', 'exitCode', 'durationMs', 'changes', 'name'}}

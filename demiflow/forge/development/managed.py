@@ -851,7 +851,7 @@ class ManagedTasks:
                       run_policy='observe', development_state='incomplete', gates={}, violations=[],
                       accepted_fingerprint=acceptance.get('fingerprint'), ready=False,
                       verification_source='live_tree_rechecked', changed=[], changed_total=0,
-                      truncated=False, feedback=[], execution_evidence={}, repairable=False,
+                      truncated=False, feedback=[], execution_evidence={}, repairable=False, unchanged_checked=False,
                       pending_questions=visible_questions, pending_question_count=len(pending),
                       pending_questions_truncated=(len(visible_questions) != len(pending) or
                           any(len(q['text']) > 2048 for q in pending)))
@@ -935,6 +935,10 @@ class ManagedTasks:
             unresolved = pending
             if unresolved:
                 violations.append('Unresolved task questions remain')
+            # A checked conversation which changed no candidate needs no new
+            # verifier or reviewer. This fact is separate from acceptance:
+            # missing execution evidence must still keep ready=False.
+            unchanged_checked = not changed and gates['check'] == 'passed' and not violations
             execution_ok = True
             if metadata['request']['contract'].get('require_enforcement'):
                 implementations = set()
@@ -967,11 +971,13 @@ class ManagedTasks:
                 repair_safe &= len(implementations) <= 1
                 if not execution_ok:
                     violations.append('Enforced execution requires current trusted developer and verifier completion evidence')
+                unchanged_checked &= result['execution_evidence'].get('developer') == 'passed'
             if (tasks.current(project, state)[3] != fingerprint or stale or
                     _project_identity(self.project_root) != metadata['bound_contract']['project_identity']):
                 repair_safe = False
                 gates = {key: 'stale' for key in gates}
                 violations.append('Candidate changed; current evidence must be refreshed')
+            result['unchanged_checked'] = bool(unchanged_checked and repair_safe and gates['check'] == 'passed')
             result['gates'] = gates
             result['feedback'] = _feedback(state, directory, fingerprint)
             current_failure = any(gates[gate] == 'failed' and record and
@@ -1001,7 +1007,8 @@ class ManagedTasks:
                 result['development_state'] = 'review_pending'
         except (ForgeError, OSError, ValueError, KeyError, TypeError) as error:
             result.update(gates={key: 'stale' for key in ('check', 'verify', 'review')},
-                          development_state='stale', violations=[str(error)[:2048]], ready=False, repairable=False)
+                          development_state='stale', violations=[str(error)[:2048]], ready=False, repairable=False,
+                          unchanged_checked=False)
         return result
 
 

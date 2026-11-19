@@ -44,7 +44,9 @@ def test_acp_capabilities_explicit_intervals_and_permission_context():
     key=provider.start('Human task','submission')
     assert provider.turn=='acp-interval:1'
     assert 'Required source text' in wire.messages[-1]['params']['prompt'][0]['text']
-    assert provider.event({'method':'session/update','params':{'sessionId':'session','update':{'sessionUpdate':'agent_thought_chunk','content':{'type':'text','text':'private'}}}})==[]
+    thought=provider.event({'method':'session/update','params':{'sessionId':'session','update':{'sessionUpdate':'agent_thought_chunk','content':{'type':'text','text':'Public ACP progress'}}}})
+    assert thought[1][0]=='message.delta' and thought[1][1]['channel']=='process'
+    assert thought[1][1]['text']=='Public ACP progress'
     request={'method':'session/request_permission','id':'p','params':{'sessionId':'session','toolCall':{'toolCallId':'call'},'options':[{'kind':'allow_once','optionId':'allow'},{'kind':'reject_once','optionId':'reject'}]}}
     pending=provider.event(request)[0][1]
     assert not pending['allow_once']
@@ -56,6 +58,48 @@ def test_acp_capabilities_explicit_intervals_and_permission_context():
     provider.close_request();assert wire.messages[-1]['method']=='session/close'
     assert provider.completion({'stopReason':'cancelled'})['status']=='cancelled'
     with pytest.raises(ForgeError):provider.event({'method':'session/update','params':{'sessionId':'other'}})
+
+
+def test_acp_public_messages_are_separate_across_processes_tools_and_channels():
+    def fresh(submission):
+        provider=DeepSeek(Wire(),{'model':'fixture'},{'root':'/tmp/project'},saved_session='same-session')
+        provider.start('New requirement',submission)
+        return provider
+    def chunk(provider,kind='agent_message_chunk',message_id=None):
+        update=dict(sessionUpdate=kind,content=dict(type='text',text='Visible provider text'))
+        if message_id is not None:update['messageId']=message_id
+        return provider.event(dict(method='session/update',params=dict(sessionId='same-session',update=update)))[1][1]
+    first=fresh('first-submission');second=fresh('second-submission')
+    # Native request IDs reset after each worker launch, including after repairs.
+    assert first.turn==second.turn=='acp-interval:1'
+    initial=chunk(first)
+    assert initial['item_id']==chunk(first)['item_id']
+    assert initial['item_id']!=chunk(second)['item_id']
+    first.event(dict(method='session/update',params=dict(sessionId='same-session',update=dict(
+        sessionUpdate='tool_call',toolCallId='tool',title='Inspect data',status='completed'))))
+    final=chunk(first)
+    assert final['item_id']!=initial['item_id']
+    thought=chunk(first,'agent_thought_chunk','provider-message')
+    answer=chunk(first,message_id='provider-message')
+    assert thought['channel']=='process' and answer['channel']=='answer'
+    assert thought['item_id']!=answer['item_id']
+    assert chunk(first,message_id='next-message')['item_id']!=answer['item_id']
+
+
+def test_codex_keeps_public_summary_but_never_private_reasoning(tmp_path):
+    provider=Codex(Wire(),{'model':'fixture'},{'root':str(tmp_path),'writes':['code.py']})
+    provider.thread='thread';provider.turn='turn'
+    def event(method,**values):
+        return provider.event(dict(method=method,params=dict(threadId='thread',turnId='turn',**values)))
+    delta=event('item/reasoning/summaryTextDelta',itemId='reason',summaryIndex=0,delta='Check the project.')[0]
+    assert delta[0]=='message.delta' and delta[1]['channel']=='summary'
+    assert event('item/reasoning/textDelta',itemId='reason',contentIndex=0,delta='PRIVATE')==[]
+    assert event('item/started',item=dict(type='reasoning',id='reason',summary=[],content=['PRIVATE']))==[]
+    completed=event('item/completed',item=dict(type='reasoning',id='reason',summary=['Check the project.'],content=['PRIVATE']))[0]
+    assert completed[0]=='message.completed' and completed[1]['item_id']==delta[1]['item_id']
+    assert 'PRIVATE' not in json.dumps(completed)
+    for index in (-1,128,True):
+        with pytest.raises(ForgeError):event('item/reasoning/summaryTextDelta',itemId='reason',summaryIndex=index,delta='Invalid')
 
 
 def test_transport_predecode_wide_frame_and_aggregate_flood(tmp_path):

@@ -6,6 +6,7 @@ first correlated activity or its final response, not session/new or a local writ
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 
@@ -115,6 +116,7 @@ class DeepSeek:
         self.transport,self.config,self.project=transport,config,project
         self.thread,self.turn=saved_session,None
         self.prompt='';self.prompt_key=None;self.items={};self.acknowledged=False
+        self.message_scope=None;self.message_block=0;self.message_kind=None
         self.mcp_servers=[]
 
     def initialize(self):
@@ -147,8 +149,13 @@ class DeepSeek:
     def start(self,message,submission):
         # Context and requirement share one immutable prompt frame. A lost send
         # cannot be retried automatically; no separate model title request exists.
+        scope=hashlib.sha256(wire([self.thread, text(submission, 512)])).hexdigest()[:32]
         self.prompt_key=self.transport.request('session/prompt',dict(sessionId=self.thread,prompt=[dict(type='text',text=self.prompt+'\n\n当前请求：\n'+message)]))
         self.turn='acp-interval:'+self.prompt_key
+        # ACP request IDs restart in each process. They are not persisted message
+        # identities: one conversation can contain many "client-3" intervals.
+        self.message_scope=scope
+        self.message_block=0;self.message_kind=None
         return self.prompt_key
 
     def interrupt(self):
@@ -171,12 +178,23 @@ class DeepSeek:
         if 'id' in event:reject('Unsupported ACP server request')
         if method!='session/update':return []
         update=params.get('update',{});kind=update.get('sessionUpdate')
-        if kind=='agent_thought_chunk':return []
-        if kind=='agent_message_chunk':
+        if kind in {'agent_message_chunk', 'agent_thought_chunk'}:
             content=update.get('content',{})
             if content.get('type')!='text':reject('Only text development messages are supported')
-            return [('activity',{}),('message.delta',dict(item_id=self.turn+':answer',text=content['text']))]
+            if type(content.get('text')) is not str:reject('Invalid ACP message text')
+            message_id=update.get('messageId')
+            if message_id is not None: text(message_id, 512)
+            marker=(kind, message_id)
+            if marker!=self.message_kind:
+                self.message_block+=1;self.message_kind=marker
+            # The pinned third-party ACP adapter explicitly publishes thought
+            # blocks. Preserve that public channel separately from its answer.
+            channel='process' if kind=='agent_thought_chunk' else 'answer'
+            return [('activity',{}),('message.delta',dict(
+                item_id='acp:'+self.message_scope+':'+str(self.message_block),
+                text=content['text'], channel=channel))]
         if kind in {'tool_call','tool_call_update'}:
+            self.message_kind=None
             key=update['toolCallId']
             if len(self.items)>=128 and key not in self.items:reject('ACP tool count exceeded budget')
             item={**self.items.get(key,{}),**update}
