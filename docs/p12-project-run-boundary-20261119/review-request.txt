@@ -1,0 +1,28 @@
+P12 v2.1：项目与运行职责解耦方案，回应 Fable 对 v2 的有条件通过。
+
+审阅入口：同目录 design.html（完整正文），design.json（原始结构化正文）。
+基线 main=e3b645ba97ddb57d9636d3d3f75fb1f6dff3d1f1；
+已核对 integration=1855e0010b8c67d6d73d93b63708fce51f4cccc3。
+两者 workbench 源码一致；integration 后续引擎修复必须保留。
+
+本稿取代 v2（设计提交 4c5b527）作为最新修订；v1、v2 和 Fable 评审原件保留。
+范围：索引摘要由所有者发布、run: 表解析显式组装、刷新职责拆分、Pipeline 预算规则迁移，及为解除间接依赖所需的原有应用代理搬迁。
+第 3 节是改前改后，第 4/4a 节是所有权与完整模块分类，第 5–7 节是输入输出与失败契约，第 8/8a 节是调用迁移和 P4 消费者计划，第 10 节是待执行验收，第 12 节逐条回应本轮评审。
+
+重点判断：
+1. 项目核心是否真正不再经 worker / facade 绕回运行；迁移清单是否遗漏 checks/audit/native/graph/analysis/Notebook。
+2. 索引提交与摘要求值失败是否完整保护已发布源；generation、Missing/unreadable、replace 后 marker 清理失败是否合理。
+3. Fable 已接受旧空根缺索引时 complete=false，直至显式重建；本版收窄了影响范围并写明维护入口。
+4. TableResolver 是否仅为同进程窄能力；固定 attempt/版本/P4 证明/location/媒体权限/expected_* 是否保持。
+5. P4 和 integration 已交付内容是否复用，平台 snapshot/历史是否保持原语义。
+
+本轮主要补订：
+- start 的 begin 放到预留和 launch_failed 异常边界之前；同名 pending 仍要求显式同步。
+- begin 失败不引发后续源转换；_resume 此前合法完成的登记/清理保留，不承诺整次请求零写入。
+- 新应用模块不新增 P4 独立域消费者；DatasetRef 的构造/校验留项目核心，路由不导入平台类型；预计名单零增减。
+- 七个项目核心、三个项目应用模块及 __init__ 全部归类，补 flow_arguments 和 registry→api.serve。
+- 发布诊断采用有界日志和既有目录状态；不修改带摘要文档或成功响应。
+源码依据与逐条判断见 design.json 第 12 节；无关模块优化继续单列，不默认为前置。
+
+source-inventory.json 提供源码摘要、符号、18 个 worker 代理和调用候选。
+verification.json 只记录文档与基线核验。Fable 对 v2 是有条件通过；本轮没有产品实施/回归/合流/发布，也没有声称 Fable 已复核 v2.1 或验收实现。

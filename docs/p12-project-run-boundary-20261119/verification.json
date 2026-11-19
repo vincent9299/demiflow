@@ -1,0 +1,120 @@
+{
+  "status": "v2_1_design_response_verified_not_implemented",
+  "checked_at": "2026-11-19T14:20:11.058343+00:00",
+  "baseline": {
+    "main": "e3b645ba97ddb57d9636d3d3f75fb1f6dff3d1f1",
+    "integration": "1855e0010b8c67d6d73d93b63708fce51f4cccc3"
+  },
+  "design_worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_p12_design_20261119",
+  "branch": "gpt/design/p12-boundary-20261119",
+  "review_source": {
+    "review_path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/CLAUDE-REVIEW-p12-project-run-boundary-v2-20261119.md",
+    "review_sha256": "0b3bdfabac97a1c9d56209e1b54770704fcb6c52b979cb92c1ada7d93197d38f",
+    "fable_verdict_on_v2": "conditional_approval",
+    "this_revision": "设计层面补齐两项阻塞和分类披露；产品未实施，尚无修订版实现验收或 Fable 对 v2.1 的复核结论。"
+  },
+  "checks": {
+    "html_sections_complete": 14,
+    "source_files_bound": 43,
+    "same_at_integration": true,
+    "historical_v2_hash_preserved": true,
+    "fable_review_hash_preserved": true,
+    "project_module_roles_complete": {
+      "core": [
+        "workspace",
+        "checks",
+        "discovery",
+        "definitions",
+        "documents",
+        "io",
+        "index"
+      ],
+      "application": [
+        "registry",
+        "watch",
+        "flow_arguments"
+      ],
+      "initializer": [
+        "__init__"
+      ]
+    },
+    "run_module_roles_complete": {
+      "owner_support": [
+        "manager",
+        "domain",
+        "authority",
+        "requests",
+        "storage",
+        "native_resources",
+        "native_stages",
+        "facts",
+        "view",
+        "context"
+      ],
+      "mixed_admission": [
+        "admission",
+        "native_submission"
+      ],
+      "entry": [
+        "cli",
+        "tools",
+        "operations",
+        "worker"
+      ],
+      "moved_budget": [
+        "limits"
+      ],
+      "initializer": [
+        "__init__"
+      ]
+    },
+    "p4_surface_matches_generated_document": true,
+    "existing_datasetref_consumers": [
+      "demiflow/workbench/projects/discovery.py",
+      "demiflow/workbench/projects/workspace.py",
+      "demiflow/workbench/runs/manager.py"
+    ],
+    "planned_p4_independent_consumer_delta": {
+      "add": [],
+      "remove": []
+    },
+    "referenced_test_files_exist": [
+      "test_forge_analysis_fixed_reads.py",
+      "test_forge_analysis_media_source_export.py",
+      "test_forge_analysis_source_admission.py",
+      "test_forge_audit_runs.py",
+      "test_forge_development_admission.py",
+      "test_forge_history_admission.py",
+      "test_forge_index.py",
+      "test_forge_index_runs.py",
+      "test_forge_project_checks.py",
+      "test_forge_project_management.py",
+      "test_forge_public_api.py",
+      "test_forge_runs.py",
+      "test_runtime_v3_save_product.py",
+      "test_workbench_engine_boundary.py",
+      "test_workbench_managed_plan_preview.py",
+      "test_workbench_native_notebook.py",
+      "test_workbench_parameter_projection.py",
+      "test_workbench_read_admission.py"
+    ],
+    "product_diff_from_main_empty": true
+  },
+  "consensus": "All three review items accepted, with begin-failure invariant scoped to subsequent transitions; prior legitimate resume maintenance is retained.",
+  "product_tests_run": [],
+  "implementation": "not_started",
+  "fable_review": {
+    "v2": "conditional_approval",
+    "v2.1": "not_re_reviewed"
+  },
+  "integration_merge": "not_performed",
+  "deployment": "not_performed",
+  "files": {
+    "CONSENSUS.txt": "831a8affd5f907f60236e9af258f3d64000e702c3c2e53bdb25fd9987b07712f",
+    "design.html": "30a06d5f0d6e5272efb7c1eb0a23e395153e5063c2ecd8e0e3d11f9c557fb7b8",
+    "design.json": "4a0bf5f6ae4af08e9b5dd927729498ab396ff93696111a483dd9fae5a8ba6dc7",
+    "render.py": "b13779211fd45c786c6e2238b9bc00d80f8982295ef1dffc99153a95faaec60e",
+    "review-request.txt": "08bc5e5086ecda4bb3aab2bf382aae9f021f27eab6fe3d3d68077f9a03c42a6a",
+    "source-inventory.json": "aed2a26c3ec34b30ed87308c8c76a99309079e5a278df6f26c34ce29ba0e51ba"
+  }
+}
