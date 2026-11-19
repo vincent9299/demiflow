@@ -233,12 +233,13 @@ def register(main):
     @click.option('--token-file', type=click.Path(path_type=Path, dir_okay=False))
     @click.option('--control-only', is_flag=True)
     @click.option('--analysis-config', type=click.Path(exists=True, dir_okay=False, path_type=Path), help='Explicit reviewed production analysis adapter; disabled by default')
-    def view(root, port, enable_runs, control_only, token_file, enable_config_write, workspace_config_write, analysis_config):
+    @click.option('--notebook-python', type=click.Path(exists=True, dir_okay=False, path_type=Path), help='Python environment with native Jupyter Notebook 7 installed.')
+    def view(root, port, enable_runs, control_only, token_file, enable_config_write, workspace_config_write, analysis_config, notebook_python):
         from demiflow.workbench.api import serve
 
         serve(root, port=port, enable_runs=enable_runs, control_only=control_only, token_file=token_file,
               enable_config_write=enable_config_write,workspace_config_write=workspace_config_write,
-              analysis_config=analysis_config)
+              analysis_config=analysis_config,notebook_python=notebook_python)
 
     from demiflow.workbench.runs.cli import register as register_runs
     register_runs(workspace)

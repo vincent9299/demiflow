@@ -32,26 +32,6 @@ def test_saved_changes_refresh_overview_without_host_or_writes(panel):
     assert not errors
 
 
-def test_case_remains_pinned_and_idle_sync_never_resamples(panel):
-    root, app, page, errors = panel
-    open_panel(app, page)
-    page.get_by_role('button', name='数据', exact=True).click()
-    page.get_by_role('heading', name='单条 case · 8589934592').wait_for()
-    page.get_by_role('tab', name='image_uri', exact=True).first.click()
-    page.get_by_role('button', name='查看本地图片', exact=True).first.click()
-    page.locator('img.case-image').wait_for()
-    url, image = page.url, page.locator('img.case-image').get_attribute('src')
-    requests = []
-    page.on('request', lambda r: requests.append(r.url))
-    (root / 'flows/model.yaml').write_text('model: edited\n')
-    with page.expect_response('**/api/workspaces/*/context'):
-        page.wait_for_timeout(3500)
-    with page.expect_request('**/api/workspaces/*/changes'):
-        pass
-    assert page.url == url and page.locator('img.case-image').get_attribute('src') == image
-    assert not any('/sample' in u or '/media' in u for u in requests)
-    assert len([u for u in requests if '/changes' in u]) >= 2
-    assert not errors
 
 
 def test_external_source_change_marks_report_stale_and_preserves_draft(panel):
@@ -130,22 +110,6 @@ def test_slow_auto_refresh_cannot_navigate_back_or_accumulate_requests(panel):
     assert not page.locator('.error-box').count() and not errors
 
 
-def test_manual_refresh_does_not_override_a_new_case_selection(panel):
-    _, app, page, errors = panel
-    open_panel(app, page)
-    page.get_by_role('button', name='数据', exact=True).click()
-    page.get_by_role('heading', name='单条 case · 8589934592').wait_for()
-    held = []
-    page.route('**/api/workspaces/*/context', lambda route: held.append(route))
-    page.get_by_role('button', name='刷新当前视图', exact=True).click()
-    page.locator('.case-record-selector button').nth(1).click()
-    page.get_by_role('heading', name='单条 case · 8589934593').wait_for()
-    assert len(held) == 1
-    held[0].continue_()
-    page.unroute('**/api/workspaces/*/context')
-    page.wait_for_timeout(3500)
-    assert page.evaluate('ForgeView.decodeView(location.hash).row_id') == '8589934593'
-    assert not page.locator('.error-box').count() and not errors
 
 
 def test_manual_refresh_preserves_node_chosen_during_read(panel):

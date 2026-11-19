@@ -37,6 +37,8 @@ from demiflow.workbench.analysis import http as analysis_http
 ASSETS = Path(__file__).with_name("web")
 # One closed asset allowlist serves both live pages and self-contained reports.
 STATIC_ASSETS = {
+    "/notebooks.js": ("notebooks.js", "text/javascript; charset=utf-8"),
+    "/notebooks.css": ("notebooks.css", "text/css; charset=utf-8"),
     "/run-presentation.js": ("run-presentation.js", "text/javascript; charset=utf-8"),
     "/workbench-runs.css": ("workbench-runs.css", "text/css; charset=utf-8"),
     '/operator-browser.js': ('operator-browser.js', 'text/javascript; charset=utf-8'),
@@ -48,18 +50,6 @@ STATIC_ASSETS = {
     "/development.js": ("development.js", "text/javascript; charset=utf-8"),
     "/development-chat.js": ("development-chat.js", "text/javascript; charset=utf-8"),
     "/development-composer.js": ("development-composer.js", "text/javascript; charset=utf-8"),
-    "/analysis-state.js": ("analysis-state.js", "text/javascript; charset=utf-8"),
-    "/analysis.js": ("analysis.js", "text/javascript; charset=utf-8"),
-    "/analysis-render.js": ("analysis-render.js", "text/javascript; charset=utf-8"),
-    "/analysis-output.js": ("analysis-output.js", "text/javascript; charset=utf-8"),
-    "/analysis-output-media.js": ("analysis-output-media.js", "text/javascript; charset=utf-8"),
-    "/analysis-charts.js": ("analysis-charts.js", "text/javascript; charset=utf-8"),
-    "/analysis-transport.js": ("analysis-transport.js", "text/javascript; charset=utf-8"),
-    "/analysis-output.css": ("analysis-output.css", "text/css; charset=utf-8"),
-    "/analysis-case.css": ("analysis-case.css", "text/css; charset=utf-8"),
-    "/analysis-case-media.js": ("analysis-case-media.js", "text/javascript; charset=utf-8"),
-    "/analysis-case.js": ("analysis-case.js", "text/javascript; charset=utf-8"),
-    "/analysis.css": ("analysis.css", "text/css; charset=utf-8"),
     "/workbench-state.js": ("workbench-state.js", "text/javascript; charset=utf-8"),
     "/workbench-commands.js": ("workbench-commands.js", "text/javascript; charset=utf-8"),
     "/workbench-presentation.js": ("workbench-presentation.js", "text/javascript; charset=utf-8"),
@@ -127,6 +117,7 @@ GET_FIELDS = {
     'report': ({'digest'}, set()), 'diff': ({'left', 'right'}, set()),
 }
 POST_FIELDS = {
+    'notebook-open': (set(), set()),
     'flow-arguments-save': ({'entry', 'revision', 'source_sha256', 'arguments'}, set()),
     'project-capabilities': ({'workspace_id','expected','capabilities'}, set()),
     'parameter-preview': ({'path','expected_sha256','graph_binding','replace'}, set()),
@@ -221,7 +212,7 @@ class WorkspaceServer(ThreadingHTTPServer):
     request_queue_size = 8
 
     def __init__(self, root=None, port=0, *, enable_runs=False, control_only=False, registry=None, api_only=False, token_file=None, development_config=None,
-                 enable_config_write=False, workspace_config_write=False, analysis_config=None):
+                 enable_config_write=False, workspace_config_write=False, analysis_config=None, notebook_python=None):
         if (root is None) == (registry is None):
             raise ForgeError('Select one workspace root or console registry')
         self.registry = Path(registry).absolute() if registry is not None else None
@@ -260,6 +251,8 @@ class WorkspaceServer(ThreadingHTTPServer):
         self.development_readers = threading.BoundedSemaphore(2)
         self.development = None
         self.analysis = None
+        self.notebooks = None
+        notebook_python = notebook_python or os.environ.get('DEMIFLOW_NOTEBOOK_PYTHON')
         self.analysis_requests = threading.BoundedSemaphore(2)
         self.analysis_stops = threading.BoundedSemaphore(1)
         from demiflow.workbench.analysis.media_tickets import MediaTickets
@@ -286,8 +279,13 @@ class WorkspaceServer(ThreadingHTTPServer):
             if analysis_config is not None:
                 from demiflow.workbench.analysis.web_service import WebService
                 self.analysis = WebService(self, analysis_config)
+            if notebook_python:
+                from demiflow.workbench.notebooks.service import Notebooks
+                self.notebooks = Notebooks(self, notebook_python)
             super().__init__(("127.0.0.1", port), Handler)
         except BaseException:
+            if self.notebooks is not None:
+                self.notebooks.close()
             self.native_reader.close()
             if self.analysis is not None:
                 self.analysis.close()
@@ -301,6 +299,8 @@ class WorkspaceServer(ThreadingHTTPServer):
         # Close admission and drain HTTP owners before retiring their shared
         # reader/services. ThreadingMixIn joins only non-daemon request threads.
         try:
+            if self.notebooks is not None:
+                self.notebooks.close()
             super().server_close()
         finally:
             try:
@@ -341,6 +341,8 @@ class WorkspaceServer(ThreadingHTTPServer):
 
     def permission_ceiling(self):
         analysis = self.analysis.ceiling() if self.analysis is not None else dict(analysis_execute=False,analysis_write=False,case_annotate=False)
+        if self.notebooks is not None:
+            analysis = {**analysis, 'analysis_execute': True, 'analysis_write': True}
         return dict(run_submit=self.enable_runs,run_control=self.enable_runs or self.control_only,
                      attach=self.enable_runs,config_write=self.enable_config_write,
                      **analysis)
@@ -614,6 +616,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
+            from demiflow.workbench.notebooks.proxy import route
+            if route(self):return
             from demiflow.workbench.analysis import media_http
             if media_http.get(self):return
             url = urlsplit(self.path)
@@ -637,6 +641,7 @@ class Handler(BaseHTTPRequestHandler):
                                  'project_manage': self.server.registry is not None, 'project_check': True},
                     workbench_permissions={k:self.server.permission_ceiling()[k] for k in console.CAPABILITIES},
                     workbench_contract='demiflow_workbench_graph_v1',console_v3_supported=True,
+                    native_notebook=self.server.notebooks is not None,
                     analysis_connected=self.server.analysis is not None,
                     analysis_execution_profile=self.server.analysis_execution_profile(),
                     analysis_features={'annotation_definitions':True,'case_cursor':True,'catalog_profile':True,'case_media':getattr(self.server.analysis,'features',{}).get('case_media') is True,'annotation_media_basis':getattr(self.server.analysis,'features',{}).get('annotation_media_basis') is True,'case_output_groups':getattr(self.server.analysis,'features',{}).get('case_output_groups') is True,'case_review_filter':getattr(self.server.analysis,'features',{}).get('case_review_filter') is True,'notebook_history':getattr(self.server.analysis,'features',{}).get('notebook_history') is True},
@@ -681,6 +686,7 @@ class Handler(BaseHTTPRequestHandler):
                     value['run_permissions'] = {k:permissions[k] for k in console.PERMISSIONS}
                     value['capabilities'] = {k:permissions[k] for k in console.CAPABILITIES}
                     value['analysis_connected'] = self.server.analysis is not None
+                    value['native_notebook'] = self.server.notebooks is not None
                     value['analysis_execution_profile']=self.server.analysis_execution_profile()
                     value['analysis_features']={'annotation_definitions':True,'case_cursor':True,'catalog_profile':True,'case_media':getattr(self.server.analysis,'features',{}).get('case_media') is True,'annotation_media_basis':getattr(self.server.analysis,'features',{}).get('annotation_media_basis') is True,'case_output_groups':getattr(self.server.analysis,'features',{}).get('case_output_groups') is True,'case_review_filter':getattr(self.server.analysis,'features',{}).get('case_review_filter') is True,'notebook_history':getattr(self.server.analysis,'features',{}).get('notebook_history') is True}
                 elif url.path == '/api/forge-context':
@@ -834,6 +840,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         try:
+            from demiflow.workbench.notebooks.proxy import route
+            if route(self):return
             from demiflow.workbench.analysis import media_http
             if media_http.get(self,head=True):return
             self._authorize();self._send({'error':'Unknown HEAD endpoint'},404)
@@ -841,6 +849,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            from demiflow.workbench.notebooks.proxy import route
+            if route(self):return
             from demiflow.workbench.analysis import media_http
             if media_http.post(self):return
             self._authorize()
@@ -875,7 +885,7 @@ class Handler(BaseHTTPRequestHandler):
                               '/api/project-remove': console.remove,
                               '/api/project-permissions': console.set_permissions,
                               '/api/project-capabilities':console.set_capabilities}[self.path]
-                    value = action(self.server.registry, **request, **({'analysis_service':self.server.analysis}
+                    value = action(self.server.registry, **request, **({'analysis_service':self.server.analysis or self.server.notebooks}
                         if self.path=='/api/project-capabilities' else {}))
                 self._send(value)
                 return
@@ -883,6 +893,12 @@ class Handler(BaseHTTPRequestHandler):
             name = endpoint.removeprefix('/api/')
             if name not in POST_FIELDS:
                 raise ForgeError('Unknown endpoint', code='not_found')
+            if name == 'notebook-open':
+                self._body(name)
+                from demiflow.workbench.notebooks.proxy import open_notebook
+                key = self.path.split('/')[3] if self.path.startswith('/api/workspaces/') else next(iter(self.server.single['projects']))
+                open_notebook(self, key)
+                return
             if name in {'project-create', 'project-register', 'project-remove', 'project-permissions','project-capabilities'}:
                 raise ForgeError('Project management requires a console endpoint', code='invalid_request')
             if name in development_http.POST_FIELDS:
@@ -958,12 +974,25 @@ class Handler(BaseHTTPRequestHandler):
             self._failure(exc)
 
 
+    def _notebook_method(self):
+        try:
+            from demiflow.workbench.notebooks.proxy import route
+            if not route(self):
+                self._send({'error': 'Unknown endpoint'}, 404)
+        except Exception as exc:
+            self._failure(exc)
+
+    do_PUT = _notebook_method
+    do_PATCH = _notebook_method
+    do_DELETE = _notebook_method
+
+
 def serve(root=None, *, port=0, enable_runs=False, control_only=False, registry=None, api_only=False, token_file=None, development_config=None,
-          enable_config_write=False,workspace_config_write=False,analysis_config=None):
+          enable_config_write=False,workspace_config_write=False,analysis_config=None,notebook_python=None):
     server = WorkspaceServer(root, port, enable_runs=enable_runs, control_only=control_only, registry=registry,
                              api_only=api_only, token_file=token_file, development_config=development_config,
                              enable_config_write=enable_config_write,workspace_config_write=workspace_config_write,
-                             analysis_config=analysis_config)
+                             analysis_config=analysis_config,notebook_python=notebook_python)
     print(server.origin + ('/' if token_file is not None else '/#token=' + server.token), flush=True)
     try:
         server.serve_forever(poll_interval=0.2)

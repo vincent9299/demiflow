@@ -87,30 +87,19 @@ def test_tabs_restore_exact_run_version_and_project_despite_late_response(owned_
             'action_id','logical_node_id','occurrence_id','dag_id','plan_id','plan_revision','plan_format','node_id','report_digest'))
         assert run_ref['plan_format']=='v3'
         tab(page,'数据')
-        with page.expect_response(lambda response:endpoint(response,'sample',alias=vf['alias'])) as initial:
-            page.get_by_label('当前数据表',exact=True).select_option(vf['alias'])
-        assert initial.value.status==200
-        expect(page.locator('.data-source-context')).to_contain_text('v2')
-        page.locator('details.bound-versions > summary').click()
-        with page.expect_response(lambda response:endpoint(response,'sample',version=1)) as historical:
-            page.locator('button.version-row[data-version="1"]').click()
-        assert historical.value.status==200 and historical.value.json()['binding']['digest']==vf['versions'][1]['binding']
-        expect(page.locator('.data-source-context')).to_contain_text('v1')
-        expect(page.locator('.case-record-selector button')).to_have_count(2)
-        chosen=page.locator('.case-record-selector button').nth(1)
-        row_id=chosen.get_attribute('data-row-id')
-        chosen.click()
-        page.wait_for_function('row=>ForgeView.decodeView(location.hash)?.row_id===row',arg=row_id)
-        fixed_ref=reference(page)
-        assert fixed_ref['version']==1 and fixed_ref['alias_binding']==vf['alias_binding']
-        assert fixed_ref['binding_digest']==vf['versions'][1]['binding']
+        fixed_ref=dict(v=2,workspace=fx.project_id,kind='table',alias=vf['alias'],version=1,
+                       binding_digest=vf['versions'][1]['binding'],alias_binding=vf['alias_binding'])
+        page.evaluate('ref=>{location.hash=ForgeView.encodeView(ref)}',fixed_ref)
+        expect(page.locator('.dictionary-table[open] .dictionary-version')).to_contain_text('v1')
+        expect(page.locator('.dictionary-table[open] .dictionary-meta')).to_contain_text('2 行')
+        expect_reference(page,fixed_ref)
 
         # Return to this exact run and attempt, rather than a current source graph.
         tab(page,'运行')
         expect_reference(page,run_ref)
         expect(page.locator('.wb-node.selected')).to_have_count(1)
         tab(page,'数据');expect_reference(page,fixed_ref)
-        expect(page.locator('.data-source-context')).to_contain_text('v1')
+        expect(page.locator('.dictionary-table[open] .dictionary-version')).to_contain_text('v1')
 
         # Hold a genuine completed graph read, then leave while restoration is
         # loading. The late response must neither repaint nor replace tab memory.
@@ -146,42 +135,8 @@ def test_tabs_restore_exact_run_version_and_project_despite_late_response(owned_
         page.locator('#project-list [data-workspace="'+fx.project_id+'"]').click()
         expect_reference(page,run_ref)
         tab(page,'数据');expect_reference(page,fixed_ref)
-        expect(page.locator('.data-source-context')).to_contain_text('v1')
+        expect(page.locator('.dictionary-table[open] .dictionary-version')).to_contain_text('v1')
         tab(page,'运行');expect_reference(page,run_ref)
         assert not [item for item in requests if item['method']=='POST'],requests
         fx.record('tab-restore-facts',dict(run=run_ref,fixed_version=fixed_ref,other_project=other,
                   late_real_graph_rejected=True,post_requests=0))
-
-
-@pytest.mark.parametrize('owned_fixture',[{}],indirect=True)
-def test_blocked_tab_and_project_departure_preserve_notebook_editor(owned_fixture,browser):
-    fx=owned_fixture
-    other=console.create(fx.registry,fx.tmp_path/'other-project',name='Blocked departure project')['workspace_id']
-    with tab_page(fx,browser) as (page,requests):
-        tab(page,'数据');page.get_by_role('button',name='Notebook',exact=True).click()
-        source='print("retain the original editor until capture succeeds")'
-        # Fill the real bounded draft Store: capture must refuse a fifth draft.
-        page.evaluate('''project=>{const store=new ForgeAnalysisState.Store();
-          for(let n=0;n<4;n++)store.saveDraft(project,'tab-capacity-'+n,
-            {revision:0,document:{title:'retained '+n,cells:[]}});
-        }''',fx.project_id)
-        page.get_by_label('python 单元代码',exact=True).fill(source)
-        current=reference(page)
-        editor_id=page.get_by_label('选择 Notebook',exact=True).input_value()
-        tab(page,'管道')
-        expect(page.locator('.analysis-notice')).to_contain_text('暂停离开')
-        expect(page.get_by_label('python 单元代码',exact=True)).to_have_value(source)
-        assert reference(page)==current
-        page.locator('#project-switcher').click()
-        page.locator('#project-list [data-workspace="'+other+'"]').click()
-        expect(page.get_by_label('选择 Notebook',exact=True)).to_have_value(editor_id)
-        expect(page.get_by_label('python 单元代码',exact=True)).to_have_value(source)
-        assert reference(page)==current
-        page.evaluate('project=>new ForgeAnalysisState.Store().removeDraft(project,"tab-capacity-0")',fx.project_id)
-        tab(page,'管道');page.locator('.workbench').wait_for()
-        tab(page,'数据');page.get_by_role('button',name='Notebook',exact=True).click()
-        page.get_by_label('选择 Notebook',exact=True).select_option(editor_id)
-        expect(page.get_by_label('python 单元代码',exact=True)).to_have_value(source)
-        assert not [item for item in requests if item['method']=='POST'],requests
-        fx.record('tab-departure-facts',dict(editor=editor_id,source=source,
-                  blocked_tab_preserved=True,blocked_project_preserved=True,capture_then_return_preserved=True))

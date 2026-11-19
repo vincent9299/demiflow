@@ -15,7 +15,7 @@ Two real input classes are provided for the C8 gates (V03/V04/V08/V09):
 
 Explicit doubles, declared so they can never be counted as runtime admission:
   * the Case/metadata world (``case_world=True``) reuses the existing private
-    Records/native-media driver from test_forge_analysis_case_groups_ui_browser.
+    Records/native-media driver from legacy_case_fixture.
     Its ceiling is ``analysis_execute=False`` and ``execution_profile() is None``;
     it proves source/Case/media binding, not kernel execution.
   * ``need_runtime=True`` instead admits the real analysis helper named by
@@ -81,17 +81,13 @@ def source_digests() -> dict:
         'demiflow/workbench/analysis/media_source_export.py',
         'demiflow/workbench/analysis/catalog_versions.py',
         'demiflow/workbench/web/index.html',
+        'demiflow/workbench/web/notebooks.js',
         'demiflow/workbench/web/app.js',
         'demiflow/workbench/web/view.js',
         'demiflow/workbench/web/workbench.js',
         'demiflow/workbench/web/workbench-state.js',
         'demiflow/workbench/web/workbench-graph.js',
         'demiflow/workbench/web/workbench-presentation.js',
-        'demiflow/workbench/web/analysis.js',
-        'demiflow/workbench/web/analysis-output.js',
-        'demiflow/workbench/web/analysis-charts.js',
-        'demiflow/workbench/web/analysis-render.js',
-        'demiflow/workbench/web/analysis-case.js',
     ]
     digests = {}
     for name in names:
@@ -555,18 +551,12 @@ def owned_fixture(tmp_path, monkeypatch, request):
                 driver.__exit__(None, None, None)
 
 
-@contextmanager
-def case_scene(browser, tmp_path, monkeypatch, **options):
-    """Use the semantically migrated Records/Lance fixture without an overlay."""
-    from test_forge_analysis_case_groups_ui_browser import scene
-    with scene(browser, tmp_path, monkeypatch, **options) as value:
-        yield value
 
 
 def _build_case_world(root, tmp_path, project_id, monkeypatch, lock, calls, responses):
     """Real Records/native-media Case v2 world on the shared workspace (explicit double).
 
-    Mirrors test_forge_analysis_case_groups_ui_browser.scene: real Lance rows, real
+    Mirrors legacy_case_fixture.scene: real Lance rows, real
     PNG media, real SQLite Records via the private driver; runtime/watchdog/Task
     scheduling remain explicit doubles and analysis_execute stays False.
     """
@@ -578,7 +568,7 @@ def _build_case_world(root, tmp_path, project_id, monkeypatch, lock, calls, resp
     from demiflow.forge.schema import ForgeError
     from demiflow.forge.platform import content_digest
     from demiflow.workbench.projects import registry as console
-    from test_forge_analysis_case_groups_ui_browser import rpc, cup
+    from legacy_case_fixture import rpc, cup
 
     rows = []
     for i in range(3):

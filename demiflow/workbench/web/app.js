@@ -29,9 +29,9 @@
   window.addEventListener('hashchange', reloadSessionEntry);
   let workspaceId = '', projectList = [], projectNav, projectDigest = '', projectRemovalEnabled = false, projectManageEnabled = false;
   let pendingOriginalPath = null;
-  let developmentView = null, workbenchView = null, analysisView = null, analysisTransport = null;
+  let developmentView = null, workbenchView = null, notebooksView = null;
   const readers = new Set();
-  // Cleanup registry only: view-scoped DOM handles (A07 profile, charts) disposed
+  // Cleanup registry only: view-scoped DOM handles disposed
   // after a successful canLeave and before the DOM is cleared. No business state.
   const currentViewHandles = new Set();
   function registerViewHandle(handle) {
@@ -48,12 +48,11 @@
     currentViewHandles.clear();
   }
   function canLeaveViews() {
-    for (const controller of [developmentView, workbenchView, analysisView]) if (controller?.canLeave && !controller.canLeave()) return false;
+    for (const controller of [developmentView, workbenchView, notebooksView]) if (controller?.canLeave && !controller.canLeave()) return false;
     return true;
   }
   function disposeReaders(root) {
-    if (!root) { disposeViewHandles(); developmentView?.dispose(); developmentView = null; workbenchView?.dispose(); workbenchView=null; analysisView?.dispose();analysisView=null;analysisTransport?.dispose();analysisTransport=null; }
-    if(root)for(const img of root.querySelectorAll('img.case-image')){const url=img.getAttribute('src');if(blobs.delete(url)){mediaBytes-=blobSizes.get(url)||0;blobSizes.delete(url);URL.revokeObjectURL(url);}img.remove();}
+    if (!root) { disposeViewHandles(); developmentView?.dispose(); developmentView = null; workbenchView?.dispose(); workbenchView=null; notebooksView?.dispose();notebooksView=null; }
     for (const reader of readers) if (!root || root.contains(reader.element)) {reader.dispose(); readers.delete(reader);}
   }
   function mountText(parent, text, {sourceOnly=false, compactSource=false, continuousSource=false, resolveLink, defaultMode='preview'}={}) {
@@ -100,8 +99,6 @@
   const canRun=permission=>context?.run_permissions?.[permission]??!!context?.runs_enabled;
   let updates = {}, activeWrites = 0, authFailed = false;
   let readController = new AbortController(), activeReads = 0;
-  const blobs = new Set(),blobSizes=new Map();
-  let mediaBytes = 0;
   const staleRequest = () => new DOMException('页面选择已变化', 'AbortError');
   function pageKind(reference = pendingView || view) {
     const kind = reference?.kind || 'overview';
@@ -140,16 +137,14 @@
     }
     return saved?.get(page) || target(page);
   }
-  function revokeImages() { for (const url of blobs) URL.revokeObjectURL(url); blobs.clear();blobSizes.clear(); mediaBytes = 0; }
   async function api(path, query = {}, body, projectId = workspaceId, options = {}) {
     if (offline) throw new Error('离线报告不能读取工作区或重新检查');
     const write=!!body&&!['plan-preview','plan-node-detail','plan-pipeline-source','analysis-source-register','analysis-case-group-bindings','analysis-case-page','analysis-annotation-heads','analysis-annotation-definitions','analysis-field-preview','analysis-source-from-handle','analysis-case-media','analysis-artifact-media-current','analysis-media'].includes(path);
-    const cleanup=options.cleanup===true&&path==='analysis-media'&&body?.action==='revoke';
-    if(options.range&&!['analysis-output-media','analysis-artifact-media'].includes(path))throw new Error('不支持的媒体 Range 路由');
+    const cleanup=false;
     const epoch = viewEpoch;
     const url = (['projects','capabilities','project-create','project-register','project-remove','project-permissions','project-capabilities'].includes(path) ? '/api/' + path : '/api/workspaces/' + projectId + '/' + path) + (Object.keys(query).length ? '?' + new URLSearchParams(query) : '');
     if (url.length > 8192) throw new Error('查询链接超出长度限制，请缩小字段投影');
-    const analysis=path.startsWith('analysis-'),payload=body?V.boundedJSON(body,65536):null;
+    const payload=body?V.boundedJSON(body,65536):null;
     const signal=cleanup?AbortSignal.timeout(5000):write?AbortSignal.timeout(65000):AbortSignal.any([readController.signal,...(options.signal?[options.signal]:[]),AbortSignal.timeout(65000)]);
     const run=async()=>{
     if (!write && activeReads >= 8) throw new Error('busy：页面读取已达并发上限');
@@ -159,7 +154,7 @@
       const started=Date.now();let attempts=0;
       for(;;){
       const response = await fetch(url, {
-        method: body ? 'POST' : 'GET', headers: {'X-Forge-Token': token, ...(body ? {'Content-Type':'application/json'} : {}),...(options.range?{Range:options.range}:{})},
+        method: body ? 'POST' : 'GET', headers: {'X-Forge-Token': token, ...(body ? {'Content-Type':'application/json'} : {})},
         ...(body ? {body: payload} : {}),
         ...(cleanup?{keepalive:true}:{}),
         signal
@@ -184,7 +179,7 @@
         const projectRead=err.operationStarted===false&&(
           !body&&['projects','capabilities','context','changes','graph','project-operators','operator-definition','operator-history','flow-arguments','project-documents','project-markdown'].includes(path)
           ||!!body&&['plan-preview','plan-node-detail','plan-pipeline-source'].includes(path));
-        if((analysis||projectRead)&&!write&&!cleanup&&err.code==='busy'&&!signal.aborted&&attempts<12&&Date.now()-started<20000){
+        if(projectRead&&!write&&!cleanup&&err.code==='busy'&&!signal.aborted&&attempts<12&&Date.now()-started<20000){
           const wait=Math.min(2000,100*2**Math.min(attempts++,5));
           await new Promise((resolve,reject)=>{let timer;const cancel=()=>{clearTimeout(timer);signal.removeEventListener('abort',cancel);reject(staleRequest());};signal.addEventListener('abort',cancel,{once:true});if(signal.aborted){cancel();return;}timer=setTimeout(()=>{signal.removeEventListener('abort',cancel);resolve();},wait);});
           continue;
@@ -195,22 +190,15 @@
         else if (write && err.operationStarted !== false && response.status >= 500) err.message += ' 写入结果可能尚未确认，请先查询，不要直接重复提交。';
         throw err;
       }
-      if(options.outputRange){
-        if(!['analysis-output-media','analysis-artifact-media'].includes(path)||response.status!==206||response.headers.get('X-Forge-Binding')!==(path==='analysis-artifact-media'?JSON.parse(query.reference).expected_binding:query.expected_binding))throw new Error('媒体字节绑定身份不一致');
-        return response;
-      }
       let value;
-      try { value = path === 'media' ? await response.blob() : await response.json(); }
+      try { value = await response.json(); }
       catch { if(!write&&(epoch!==viewEpoch||options.signal?.aborted))throw staleRequest();throw new Error(write ? '未能读取操作响应，请先核对操作结果，不要直接重复提交。' : '服务响应无法读取，请刷新后重试。'); }
       if (!write && !cleanup && epoch !== viewEpoch) throw staleRequest();
-      if (path === 'media' && response.headers.get('X-Forge-Binding') !== query.expected_binding) throw new Error('图片绑定身份不一致');
       return value;
       }
     } finally { if (!write) activeReads--; else activeWrites--; }
     };
-    if(!analysis||path==='analysis-stop-generation')return run();
-    const priority=cleanup?2:['analysis-case-media','analysis-artifact-media-current','analysis-output-inspect'].includes(path)?0:1;
-    return ForgeAnalysisTransport.schedule(run,{signal,priority});
+    return run();
   }
   function clearSelection() {
     selection = null;
@@ -271,17 +259,6 @@
     selection = value;
     if (route && viewState === 'ready') { view = value; putHistory(value, 'replace'); }
   }
-  function contextActions(parent, reference) {
-    if (offline) return;
-    const value = V.validateView(reference), bar = $('div', undefined, 'toolbar context-actions');
-    parent.append(bar);
-    button('复制定位链接', async () => {
-      const link = location.origin + location.pathname + V.encodeView(value);
-      try { await navigator.clipboard.writeText(link); }
-      catch { const text = $('textarea'); text.readOnly = true; text.value = link; text.setAttribute('aria-label','定位链接'); bar.append(text); text.select(); }
-    }, bar);
-    raw(bar, '完整定位引用', value);
-  }
   async function openView(value, {historyMode = 'push'} = {}) {
     if(!canLeaveViews())return;
     value = V.validateView(value);
@@ -289,7 +266,7 @@
     if(value.v === 1)value={...value,v:2,workspace:workspaceId};
     rememberTab();
     readController.abort();readController=new AbortController();
-    const epoch = ++viewEpoch; selectionEpoch++; revokeImages();disposeReaders();updates={};
+    const epoch = ++viewEpoch; selectionEpoch++; disposeReaders();updates={};
     pendingView = value; clearSelection(); viewState = 'loading'; main.replaceChildren();main.classList.remove('bound-case-active','original-case-active','original-table-active','workbench-active','data-active','data-notebook-active','data-case-config-active','data-catalog-expanded','data-catalog-collapsed');projectHeading();
     if(value.kind==='table_request'){
       putHistory(value,historyMode);historyMode='replace';
@@ -313,11 +290,12 @@
         if(epoch!==viewEpoch)throw staleRequest();
         const resolved=V.validateView(reference);
         if(resolved.v!==2||resolved.workspace!==workspaceId||resolved.kind!=='table')throw new Error('workspace_mismatch：数据引用属于另一个工作区');
-        value=resolved;pendingView=value;main.querySelector('.view-loading')?.remove();
+        value=resolved;if(viewState==='ready'){view=value;pendingView=null;}else{pendingView=value;}main.querySelector('.view-loading')?.remove();
         putHistory(value,'replace');projectHeading();
       });
       else if (pipelinePage(page)) {main.classList.add('workbench-active');const mounted=await pipeline(value);value=mounted.reference;}
       if (epoch !== viewEpoch) throw staleRequest();
+      main.querySelector('.view-loading')?.remove();
       view = value; pendingView = null; viewState = 'ready';
       if (!selection) clearSelection();
       putHistory(value, historyMode);
@@ -502,61 +480,6 @@
     }
     render();
   }
-  function originalData(onOpen=()=>{},onSource=()=>{},{catalogParent=main,viewerParent=null}={}) {
-    const p=panel('原项目声明的数据',catalogParent),listing=$('div',undefined,'original-listing'),viewer=$('div',undefined,'original-viewer'),stale=$('p','原项目声明已变化。已打开的内容保留；请返回当前表并重新选择数据，核对最新依据。','notice');stale.hidden=true;p.classList.add('original-data','table-catalog');p.append(listing,stale);(viewerParent||p).append(viewer);
-    let selectedDigest=null,sequence=0,profileHandle=null;
-    function render(){
-      listing.replaceChildren($('p','读取已有引用，不新增数据登记。未声明版本的表在打开时固定版本，翻页与 Case 详情保持该版本。','muted'));
-      const refs=context.project?.tables||[];
-      table(listing,['数据位置','声明版本','可用性','依据'],refs.map(t=>({value:t,cells:[t.path,t.version===null?'文档未声明 · 打开时固定':'v'+t.version,({available:'可查看',missing:'路径不存在',outside_project:'项目外 · 未授权读取'}[t.status]||t.status),t.evidence.join('\n')]})),open);
-      if(!refs.length)listing.append($('p','尚未识别到可解析的数据引用；不代表项目没有数据。','notice'));
-      stale.hidden=!selectedDigest||selectedDigest===context.project?.digest;
-    }
-    async function open(ref){
-      if(ref.status!=='available')throw new Error('此声明无法读取：'+ref.status+'。平台不会扩大数据访问范围。');
-      const seq=++sequence,expected=context.project.digest;selectionEpoch++;
-      const metadata=await api('project-table',{id:ref.id,expected});
-      if(seq!==sequence||!viewer.isConnected)throw staleRequest();
-      selectedDigest=expected;stale.hidden=true;
-      onOpen();
-      profileHandle?.dispose();disposeReaders(viewer);viewer.replaceChildren($('h3',ref.path),$('p','本次查看固定为 v'+metadata.version+' · '+metadata.row_count+' 行','notice'));
-      raw(viewer,'字段与来源',metadata);
-      const controls=$('div',undefined,'toolbar'),columns=$('input');columns.placeholder='字段投影（逗号分隔；默认前 16 列）';columns.setAttribute('aria-label','原项目数据字段');columns.className='wide';controls.append(columns);viewer.append(controls);
-      const rows=$('div'),pager=$('div',undefined,'toolbar'),detail=$('div',undefined,'original-case-body');viewer.append(rows,pager,detail);
-      let offset=0,pageSequence=0;
-      const query={id:ref.id,expected,version:metadata.version,binding:metadata.binding};
-      profileHandle=registerViewHandle(catalogProfile(viewer,'project-table-profile',()=>({...query,columns:columns.value.trim()?V.validateColumns(columns.value.split(',').map(value=>value.trim()).filter(Boolean)):Object.keys(metadata.fields||{}).slice(0,16)})));
-      async function load(){
-        const page=++pageSequence;selectionEpoch++;rows.hidden=false;pager.hidden=false;detail.hidden=false;
-        const projection=columns.value.trim()?V.validateColumns(columns.value.split(',').map(v=>v.trim()).filter(Boolean)):null;
-        const result=await api('project-sample',{...query,offset,limit:20,...(projection?{columns:JSON.stringify(projection)}:{})});
-        if(seq!==sequence||page!==pageSequence||!rows.isConnected)throw staleRequest();
-        if(result.columns.length)onSource({label:ref.path+' · v'+metadata.version,title:ref.path,version:metadata.version,rows:metadata.row_count,fields:Object.keys(metadata.fields||{}).length,
-          locator:{kind:'project_table',id:ref.id,discovery:expected,version:metadata.version,binding:metadata.binding,columns:result.columns.filter(name=>name!=='_rowid')}});
-        disposeReaders(detail);rows.replaceChildren();pager.replaceChildren();detail.replaceChildren();
-        table(rows,['_rowid',...result.columns],result.rows.map(r=>({value:r,cells:['_rowid',...result.columns].map(k=>{const text=typeof r[k]==='string'?r[k]:JSON.stringify(r[k]);return text?.length>140?text.slice(0,140)+'…':text;})})),async row=>{
-          if(typeof row._rowid==='number'?!Number.isSafeInteger(row._rowid):typeof row._rowid!=='string'||!/^\d{1,20}$/.test(row._rowid))throw new Error('此行定位无法精确表示；请使用 CLI 读取。');
-          const chosen=++selectionEpoch;
-          const value=await api('project-sample',{...query,row_id:row._rowid,columns:JSON.stringify(result.columns)});
-          if(chosen!==selectionEpoch||page!==pageSequence||seq!==sequence||!detail.isConnected)throw staleRequest();
-          if(value.rows.length!==1||String(value.rows[0]._rowid)!==String(row._rowid))throw new Error('指定 Case 已不可读取');
-          disposeReaders(detail);const bound=document.getElementById('case-browser');if(bound){disposeReaders(bound);bound.querySelector('.case-detail')?.replaceChildren();}detail.replaceChildren($('h1','Case · '+row._rowid+' · v'+metadata.version),$('p',context.name+' → '+ref.path+' → Case '+row._rowid,'muted small'));
-          button('返回当前表',()=>{main.classList.remove('original-case-active');detail.hidden=true;disposeReaders(detail);detail.replaceChildren();rows.hidden=false;pager.hidden=false;rows.querySelector('tbody tr')?.focus();},detail);
-          detail.append($('p','来源：原项目声明 · 固定版本 v'+metadata.version+'；未读取的字段与外部资源不作推断。','notice'));
-          renderCase(detail,null,value.rows[0],{});raw(detail,'字段、版本与来源',metadata);detail.hidden=false;rows.hidden=true;pager.hidden=true;main.classList.add('original-case-active');main.classList.remove('bound-case-active');detail.scrollIntoView({block:'start'});
-        });
-        pager.append($('span',(result.rows.length?offset+1:0)+'–'+(offset+result.rows.length)+' / '+result.row_count+' 行','muted'));
-        button('上一页',async()=>{offset=Math.max(0,offset-20);await load();},pager,offset===0);
-        button('下一页',async()=>{offset+=20;await load();},pager,!result.has_more);
-      }
-      button('读取字段',async()=>{offset=0;await load();},controls);
-      button('重新查看声明版本',()=>open(ref),controls);
-      await load();
-    }
-    render();
-    if(pendingOriginalPath){const path=pendingOriginalPath;pendingOriginalPath=null;const ref=context.project?.tables.find(t=>t.path===path&&t.status==='available');if(ref)open(ref).catch(err=>error(viewer,err));}
-    return render;
-  }
   function sourceInventory(parent=main) {
     if(!context.source_files?.length&&!context.source_diagnostics?.length)return;
     const files=panel('原项目源码',parent);
@@ -708,596 +631,16 @@
   async function openTable(alias, expected) {
     await openView(target('table_request',{alias,...(expected?{expected_binding:expected}:{})}));
   }
-  function insertAnalysisTemplate({language,sourceAlias,field,filter},analysisHandle){
-    if(!analysisHandle||typeof analysisHandle.insertTemplate!=='function')return false;
-    if(language!=='sql'&&language!=='python')return false;
-    if(typeof sourceAlias!=='string'||!/^[A-Za-z_][A-Za-z0-9_]{0,79}$/.test(sourceAlias))return false;
-    const ident=name=>typeof name==='string'&&name.length>0&&name.length<=256&&!/[\u0000-\u001f]/.test(name)?'"'+name.replace(/"/g,'""')+'"':null;
-    const literal=value=>{
-      if(typeof value==='boolean')return {sql:value?'TRUE':'FALSE',py:value?'True':'False'};
-      if(typeof value==='number')return Number.isFinite(value)?{sql:String(value),py:String(value)}:null;
-      if(typeof value==='string')return value.includes('\u0000')?null:{sql:"'"+value.replace(/'/g,"''")+"'",py:JSON.stringify(value)};
-      return null;
-    };
-    let where='',pyWhere='',title='查询模板 · '+sourceAlias;
-    if(filter!==undefined&&filter!==null){
-      if(typeof filter!=='object'||Array.isArray(filter))return false;
-      const column=ident(filter.field),key=JSON.stringify(filter.field);
-      if(!column||typeof filter.field!=='string')return false;
-      if(filter.op==='is_null'){where=column+' IS NULL';pyWhere='row.get('+key+') is None';}
-      else if(filter.op==='eq'){const v=literal(filter.value);if(!v)return false;where=column+' = '+v.sql;pyWhere='row.get('+key+') == '+v.py;}
-      else if(filter.op==='contains'){if(typeof filter.value!=='string')return false;const v=literal(filter.value);if(!v)return false;where='strpos('+column+', '+v.sql+') > 0';pyWhere='isinstance(row.get('+key+'), str) and '+v.py+' in row['+key+']';}
-      else if(filter.op==='in'){
-        if(!Array.isArray(filter.value)||!filter.value.length||filter.value.length>64)return false;
-        const parts=filter.value.map(literal);if(parts.some(part=>!part))return false;
-        where=column+' IN ('+parts.map(part=>part.sql).join(', ')+')';pyWhere='row.get('+key+') in ['+parts.map(part=>part.py).join(', ')+']';
-      }
-      else if(filter.op==='range'){
-        const lower=filter.value?.lower,upper=filter.value?.upper;
-        if(typeof lower!=='number'||typeof upper!=='number')return false;
-        const a=literal(lower),b=literal(upper);if(!a||!b)return false;
-        where=column+' >= '+a.sql+' AND '+column+' <= '+b.sql;pyWhere='isinstance(row.get('+key+'), (int, float)) and '+a.py+' <= row['+key+'] <= '+b.py;
-      }
-      else return false;
-      title='筛选模板 · '+sourceAlias+'.'+filter.field;
-    }
-    let source;
-    if(language==='sql'){
-      const projection=filter?'*':field?ident(field):'*';
-      if(!projection)return false;
-      source='SELECT '+projection+' FROM '+ident(sourceAlias)+(where?' WHERE '+where:'')+' LIMIT 20';
-    }else{
-      const key=field===undefined||field===null?null:JSON.stringify(field);
-      if(field!==undefined&&field!==null&&(typeof field!=='string'||!field||field.length>256))return false;
-      source=filter
-        ?'# 有界样例筛选草稿：只过滤已读取的样例行，不代表全表结果。\nrows = source('+JSON.stringify(sourceAlias)+").sample(limit=100)['rows']\nfiltered = [row for row in rows if "+pyWhere+']\nfiltered[:20]'
-        :'rows = source('+JSON.stringify(sourceAlias)+").sample(limit=20)['rows']\n"+(key?'[row.get('+key+') for row in rows]':'rows');
-    }
-    if(source.length>16384)return false;
-    return analysisHandle.insertTemplate({language,source,title:title.slice(0,120)})===true;
-  }
-  function catalogProfile(parent,endpoint,parameters){
-    const details=$('details',undefined,'catalog-profile'),output=$('div');details.append($('summary','字段分布'),output);parent.append(details);
-    const controls=$('div',undefined,'toolbar profile-controls'),fieldChoice=select([],'');fieldChoice.setAttribute('aria-label','分布字段');
-    output.append($('p','按当前固定版本与字段投影读取统计；默认前 16 列。最多扫描前 1000 行 / 8 MiB 投影数据。只有真实枚举计数画成条形，不是完整直方图。','muted small'),controls);
-    const failureHost=$('div'),results=$('div'),draftHost=$('div');output.append(failureHost,results,draftHost);
-    let controller=null,disposed=false,loaded=false,lastFields=[],lastField='';
-    const handle={element:details,ready:null,dispose(){disposed=true;controller?.abort();controller=null;},select(name){details.open=true;if(loaded&&lastFields.includes(name)){fieldChoice.value=name;openField(name);}else read(name).then(()=>openField(name));}};
-    function openField(name){const item=results.querySelector('[data-field="'+CSS.escape(name)+'"]');if(item){item.open=true;item.scrollIntoView({block:'nearest'});}}
-    function showDraft(field,entry){
-      const filter=entry===null?{op:'is_null',field}:{op:'eq',field,value:entry.value};
-      draftHost.replaceChildren();
-      const box=$('div',undefined,'filter-draft');draftHost.append(box);
-      box.append($('h4','筛选草稿 · '+field),$('p','这是可见草稿，样例并未筛过全表。应用到 Case 请把 typed_filter 粘贴到其筛选器；插入 Notebook 的是显式模板，由你运行。','muted small'),$('pre',json(filter)));
-      const bar=$('div',undefined,'toolbar');box.append(bar);
-      const aliasInput=$('input');aliasInput.value='data';aliasInput.maxLength=80;aliasInput.setAttribute('aria-label','Notebook 数据源绑定名');
-      const aliasLabel=$('label','绑定名');aliasLabel.append(aliasInput);bar.append(aliasLabel);
-      button('复制 typed_filter',async()=>{
-        try{await navigator.clipboard.writeText(json(filter));}
-        catch{const text=$('textarea');text.readOnly=true;text.value=json(filter);text.setAttribute('aria-label','typed_filter 草稿');box.append(text);text.select();}
-      },bar);
-      const status=$('p',undefined,'muted small');
-      const insert=language=>{
-        const accepted=insertAnalysisTemplate({language,sourceAlias:aliasInput.value.trim(),field,filter},analysisView);
-        status.textContent=accepted?'已插入 Notebook 草稿单元（未运行）。':'Notebook 未接受该模板：空间不足或当前不可插入。草稿保留，可复制 typed_filter。';
-        status.className=accepted?'notice':'notice';
-      };
-      const sqlButton=button('插入 SQL 模板',()=>insert('sql'),bar),pyButton=button('插入 Python 模板',()=>insert('python'),bar);
-      if(!analysisView||typeof analysisView.insertTemplate!=='function'){sqlButton.disabled=true;pyButton.disabled=true;status.textContent='当前 Notebook 尚未提供模板插入；可复制 typed_filter 到 Case 筛选器。';}
-      box.append(status);
-    }
-    async function read(fieldName){
-      if(disposed)return;
-      controller?.abort();controller=new AbortController();
-      const epoch=viewEpoch,project=workspaceId;
-      failureHost.replaceChildren();
-      handle.ready=(async()=>{
-        const payload=parameters();
-        if(!payload.columns?.length)throw new Error('请先选择统计字段');
-        const value=await api(endpoint,{...payload,columns:JSON.stringify(payload.columns)},undefined,project,{signal:controller.signal});
-        if(disposed||epoch!==viewEpoch||workspaceId!==project||!results.isConnected)throw staleRequest();
-        const expected=payload.version_binding||payload.expected_binding||payload.binding;
-        if(value.binding!==expected)throw new Error('统计来源与当前固定版本不一致');
-        loaded=true;lastFields=value.fields.map(field=>field.name);
-        const chosen=fieldName&&lastFields.includes(fieldName)?fieldName:lastFields.includes(fieldChoice.value)?fieldChoice.value:lastFields[0];
-        lastField=chosen||'';
-        fieldChoice.replaceChildren(...lastFields.map(name=>{const option=$('option',name);option.value=name;return option;}));
-        if(lastField)fieldChoice.value=lastField;
-        const coverage=value.coverage;
-        results.replaceChildren($('p',(coverage.complete?'全表覆盖':'当前结果页抽样')+' · '+coverage.rows_scanned+' / '+coverage.total_rows+' 行 · '+coverage.logical_bytes_scanned+' 投影字节'+(coverage.stopped_by?' · 停止原因 '+coverage.stopped_by:''),'notice'));
-        for(const field of value.fields){
-          const item=$('details',undefined,'profile-field');item.dataset.field=field.name;
-          item.append($('summary',field.name+' · 空值 '+field.null_count+' · 其他短值 '+field.other_short_primitive_count));
-          item.append($('p','最小 '+JSON.stringify(field.minimum)+' · 最大 '+JSON.stringify(field.maximum)+' · 非有限 '+field.nonfinite_count+' · 复杂值 '+field.complex_count+' · 长值 '+field.long_or_unrepresentable_count,'profile-facts'));
-          const bars=$('div',undefined,'profile-bars');item.append(bars);
-          const entries=[...(field.null_count?[{value:null,count:field.null_count}]:[]),...field.enumeration];
-          const max=Math.max(1,...entries.map(entry=>entry.count));
-          for(const entry of entries){
-            const row=$('button',undefined,'profile-bar'+(entry.value===null?' profile-bar-null':''));row.type='button';
-            row.setAttribute('aria-label','生成筛选草稿：'+field.name+(entry.value===null?' 为空':' 等于 '+JSON.stringify(entry.value))+'，'+entry.count+' 行');
-            const label=$('span',entry.value===null?'null（空值）':JSON.stringify(entry.value),'profile-bar-label');label.title=entry.value===null?'null':JSON.stringify(entry.value);
-            const track=$('span',undefined,'profile-bar-track'),fill=$('span',undefined,'profile-bar-fill');fill.style.width=Math.max(2,Math.round(entry.count/max*100))+'%';track.append(fill);
-            row.append(label,track,$('span',String(entry.count),'profile-bar-count'));
-            row.onclick=()=>showDraft(field.name,entry.value===null?null:entry);
-            bars.append(row);
-          }
-          if(!entries.length)bars.append($('p','该字段在此覆盖内没有可画的枚举计数。','muted small'));
-          if(field.name===lastField)item.open=true;
-          results.append(item);
-        }
-        draftHost.replaceChildren();
-        return value;
-      })();
-      try{return await handle.ready;}
-      catch(err){
-        handle.ready=null;
-        if(err?.name==='AbortError'||disposed||epoch!==viewEpoch||!failureHost.isConnected)return;
-        renderLoadFailure(failureHost,err,{retryRead:()=>read(fieldName),scope:{project,operation:endpoint,label:'字段分布'},isCurrent:()=>!disposed&&epoch===viewEpoch&&failureHost.isConnected});
-      }
-    }
-    controls.append(fieldChoice);
-    button('读取分布',()=>read(),controls);
-    fieldChoice.onchange=()=>read(fieldChoice.value);
-    return handle;
-  }
   async function tables(request,onBinding=()=>{}) {
-    main.classList.add('data-active');
-    const openingOriginal=!!pendingOriginalPath,dataHeader=$('section',undefined,'data-header'),catalogTools=$('div',undefined,'data-toolbar'),modeTools=$('div',undefined,'data-analysis-modes');dataHeader.append(catalogTools,modeTools);main.append(dataHeader);
-    const notebookActions=$('div',undefined,'data-mode-actions'),caseActions=$('div',undefined,'data-mode-actions');
-    let catalogExpanded=!context.tables.length||openingOriginal;
-    const catalogToggle=button('',()=>setCatalog(!catalogExpanded),catalogTools);
-    const dataBody=$('div',undefined,'data-body'),directory=$('aside',undefined,'data-directory'),dataContent=$('div',undefined,'data-content');dataBody.append(directory,dataContent);main.append(dataBody);
-    const activeSource=$('div',undefined,'data-source-context'),tableChoice=select([],''),sourceFacts=$('span','选择数据表','muted small');tableChoice.setAttribute('aria-label','当前数据表');activeSource.append(tableChoice,sourceFacts);catalogTools.append(activeSource);
-    const samplePanel=$('section',undefined,'data-samples');samplePanel.hidden=!!context.analysis_connected;dataContent.append(samplePanel);let samplesRequested=false,readSamples=null;
-    const samplesToggle=button('数据样例与字段分布',async()=>{samplesRequested=samplePanel.hidden;samplePanel.hidden=!samplesRequested;samplesToggle.setAttribute('aria-expanded',String(!samplePanel.hidden));if(samplesRequested&&readSamples)await readSamples();},catalogTools);samplesToggle.setAttribute('aria-expanded',String(!samplePanel.hidden));
-    const analysisHost=$('div',undefined,'analysis-workspace');dataContent.append(analysisHost);analysisHost.hidden=true;
-    const analysisProject=workspaceId,analysisEpoch=viewEpoch;
-    let notebookActive=false,catalogSource=null,caseContext=null,alias=request.alias,fixed=null;
-    function paintDataContext(){
-      const activeCase=!notebookActive&&context.analysis_connected,selected=activeCase?(caseContext||{phase:'loading',source:null,label:'Case 固定来源'}):null;
-      const matches=selected?.source?.kind==='fixed_lance'&&catalogSource&&selected.source.binding===catalogSource.locator.binding&&selected.source.rows===catalogSource.rows;
-      tableChoice.replaceChildren();
-      const option=$('option',selected?(matches?catalogSource.title:selected.label||'Case 固定来源'):(catalogSource?.title||'选择数据表'));option.value='current';tableChoice.append(option);tableChoice.value='current';
-      for(const item of context.tables.filter(item=>!item.run_id)){const choice=$('option',item.alias+' · v'+item.reference.ref.lance_version);choice.value=item.alias;tableChoice.append(choice);}
-      const facts=selected?(matches?catalogSource:{rows:selected.source?.rows,fields:selected.source?.schema?.length}):catalogSource;
-      const parts=[];
-      if(activeCase&&selected?.source&&!matches)parts.push('当前分析固定来源');
-      else if(catalogSource)parts.push('目录表');
-      if(facts?.version!==undefined)parts.push('固定版本 v'+facts.version+((!selected||matches)&&catalogSource?.locator?.version!==undefined?'（历史固定）':''));
-      else if(selected?.source?.digest)parts.push('固定快照 '+selected.source.digest.slice(0,12));
-      if(Number.isSafeInteger(facts?.rows))parts.push(facts.rows+' 行');
-      if(Number.isSafeInteger(facts?.fields)&&facts.fields>0)parts.push(facts.fields+' 字段');
-      if(activeCase&&!caseContext)parts.push('固定来源见下方 Case 分析');
-      else if(activeCase&&caseContext?.phase==='loading')parts.push('Case 来源待核对');
-      if(activeCase&&caseContext?.phase==='unavailable')parts.push('Case 来源暂不可用');
-      if(notebookActive)parts.push('当前表 · 可添加为 Notebook 数据源');
-      sourceFacts.textContent=parts.join(' · ')||'在数据目录选择固定版本表';
-      sourceFacts.title=selected?.source?.digest||catalogSource?.label||'';
-      // The sample reader belongs to the catalog table. An adopted Notebook
-      // snapshot must never relabel that old sample as the new Case source.
-      // An explicit historical pin keeps its own labelled reader reachable.
-      const historicalPin=fixed?.version!==null&&fixed?.version!==undefined;
-      samplesToggle.disabled=!!selected&&(!matches||selected.phase!=='ready')&&!historicalPin;
-      if(samplesToggle.disabled){samplePanel.hidden=true;samplesToggle.setAttribute('aria-expanded','false');samplesToggle.title='此 Case 使用独立固定来源；材料与字段在下方按该来源读取。';}
-      else samplesToggle.title=historicalPin?'查看历史固定版本的数据样例与字段分布':'查看当前目录表的数据样例与字段分布';
-    }
-    tableChoice.onchange=()=>{const alias=tableChoice.value;tableChoice.value='current';if(alias!=='current'){const item=context.tables.find(item=>item.alias===alias);if(item)openTable(item.alias,item.binding_digest).catch(err=>{if(!err?.presented)error(dataContent,err);});}};
-    function selectDataSource(source){if(!analysisView?.canLeave())return false;const sameLocator=!!catalogSource&&json(catalogSource.locator)===json(source.locator);catalogSource=source;if(!sameLocator)caseContext=null;analysisView?.setSource(source);paintDataContext();return true;}
-    analysisTransport=ForgeAnalysisTransport.create({project:analysisProject,api,isCurrent:()=>workspaceId===analysisProject&&viewEpoch===analysisEpoch&&analysisHost.isConnected});
-    analysisView=ForgeAnalysis.mount({parent:analysisHost,api,project:workspaceId,connected:!!context.analysis_connected,
-      executionProfile:context.analysis_execution_profile||null,toolbarHost:{notebook:notebookActions,case:caseActions},
-      permissions:context.capabilities||{},features:context.analysis_features||{},mountText,disposeReaders,resolveMedia:analysisTransport.resolveMedia,
-      fieldMedia:context.analysis_features?.case_media===true?analysisTransport.fieldMedia:undefined,caseResolveMedia:context.analysis_features?.case_media===true?analysisTransport.resolveCaseMedia:undefined,
-      onCaseContext:value=>{if(viewEpoch!==analysisEpoch||workspaceId!==analysisProject||!analysisHost.isConnected)return;caseContext=value;analysisHost.classList.toggle('analysis-case-source-shared',value?.phase==='ready');paintDataContext();},
-      onCase:(descriptor,evidence)=>{try{if(analysisView?.setPresentation({descriptor,...evidence,label:'Notebook 固定输出'}))dataMode(false);}catch(err){error(analysisHost,err);}},
-      onTable:async value=>{try{
-        const fixedSource=value?.source_snapshot?await api('analysis-source',{digest:value.source_snapshot},undefined,analysisProject):
-          await api('analysis-source-from-handle',{}, {handle:{id:value.id,generation:value.generation,digest:value.digest}},analysisProject);
-        if(viewEpoch!==analysisEpoch||!analysisHost.isConnected)return;
-        const columns=(value.columns||fixedSource.schema.map(field=>field.name)).slice(0,16);
-        const descriptor={version:1,source_snapshot:fixedSource.digest,case_key:fixedSource.case_key,
-          fields:columns.map((field,index)=>({id:'f'+index,field,label:field,role:'context',format:fixedSource.schema.find(item=>item.name===field)?.type==='utf8'?'text':'json'})),
-          filters:null,grouping:[],sort:[],layout:'card',questions:[]};
-        if(analysisView?.setPresentation({descriptor,label:'Notebook 固定表'}))dataMode(false);
-      }catch(err){if(analysisHost.isConnected&&err.name!=='AbortError')error(analysisHost,err);}},
-      media:async(host,reference,isCurrent)=>{
-        if(!isCurrent())throw staleRequest();
-        const historical=Object.hasOwn(reference,'version');
-        const blob=await api('media',{alias:reference.alias,expected_binding:historical?reference.alias_binding:reference.binding_digest,row_id:reference.row_id,field:reference.field,...(historical?{version:reference.version,version_binding:reference.binding_digest}:{})});
-        if(!isCurrent()||!host.isConnected)throw staleRequest();
-        if(mediaBytes+blob.size>32*1024*1024||blobs.size>=64)throw new Error('图片缓存已满，请重新打开数据页释放');
-        const url=URL.createObjectURL(blob);mediaBytes+=blob.size;blobs.add(url);blobSizes.set(url,blob.size);
-        const image=$('img');image.src=url;image.alt=reference.field;image.className='case-image';host.append(image,$('p','图片来自固定行引用；外部图片内容由已有图片读取规则核对。','muted small'));
-      }});
-    const notebookMode=button('Notebook',()=>dataMode(true),modeTools),caseMode=button('Case 分析',()=>dataMode(false),modeTools);modeTools.append(notebookActions,caseActions);
-    function dataMode(notebook){if(analysisView&&!analysisView.canLeave())return;const configuredCase=!notebook&&!!context.analysis_connected;if(analysisView&&!analysisView.setMode(notebook))return;notebookActive=notebook;notebookActions.hidden=!notebook;caseActions.hidden=notebook||!configuredCase;analysisHost.hidden=!notebook&&!configuredCase;samplePanel.hidden=notebook||configuredCase?!samplesRequested:false;samplesToggle.setAttribute('aria-expanded',String(!samplePanel.hidden));main.classList.toggle('data-notebook-active',notebook);main.classList.toggle('data-case-config-active',configuredCase);notebookMode.setAttribute('aria-pressed',String(notebook));caseMode.setAttribute('aria-pressed',String(!notebook));paintDataContext();}
-    dataMode(false);
-    function setCatalog(expanded){catalogExpanded=expanded;directory.hidden=!expanded;main.classList.toggle('data-catalog-expanded',expanded);main.classList.toggle('data-catalog-collapsed',!expanded);catalogToggle.textContent=expanded?'收起数据目录':'展开数据目录';catalogToggle.setAttribute('aria-expanded',String(expanded));}
-    setCatalog(catalogExpanded);
-    const listing = panel('已绑定的数据表',directory);listing.classList.add('table-catalog');
-    function catalogRow(name,meta,title,active,action){
-      const row=$('button',undefined,'catalog-row'+(active?' active':''));row.type='button';row.title=title;
-      if(active)row.setAttribute('aria-current','true');
-      const nameSpan=$('span',name,'catalog-row-name');nameSpan.title=title;
-      row.append(nameSpan,$('span',meta,'catalog-row-meta'));
-      row.onclick=()=>action().catch(err=>{if(err?.name!=='AbortError'&&!err?.presented&&dataContent.isConnected)renderLoadFailure(dataContent,err,{scope:{project:workspaceId,operation:'table',label:name},isCurrent:()=>dataContent.isConnected});});
-      return row;
-    }
-    function listTables(){
-      listing.replaceChildren($('h2','已绑定的数据表'));
-      const rowsHost=$('div',undefined,'catalog-rows');listing.append(rowsHost);
-      const items=context.tables.filter(t=>!t.run_id);
-      for(const t of items){
-        const title=t.alias+' · '+t.reference.location_id+' / '+t.reference.ref.dataset_id+' · v'+t.reference.ref.lance_version;
-        rowsHost.append(catalogRow(t.alias,'v'+t.reference.ref.lance_version+' · '+t.reference.ref.row_count+' 行',title,t.alias===alias,()=>openTable(t.alias,t.binding_digest)));
-      }
-      if(!items.length)listing.append($('p','尚未绑定数据表。','catalog-empty'));
-    }
-    const refreshOriginal=originalData(()=>{
-      main.classList.remove('bound-case-active','original-case-active');main.classList.add('original-table-active');
-      const bound=document.getElementById('case-browser');if(bound){disposeReaders(bound);bound.querySelector('.case-detail')?.replaceChildren();}
-      samplesRequested=true;samplePanel.hidden=false;samplesToggle.setAttribute('aria-expanded','true');
-      setCatalog(false);
-      if(!pendingView){view=target('tables');choose(view);putHistory(view,'replace');projectHeading();}
-    },source=>selectDataSource(source),{catalogParent:directory,viewerParent:samplePanel});
-    listTables();updates.tables=()=>{listTables();refreshOriginal();};
-    const results = panel('运行产物 · 已核验的固定版本',directory);results.classList.add('table-catalog'); let resultOffset = 0, resultRequest = 0, resultPage = [];
-    async function loadResults() {
-        const sequence=++resultRequest;
-        const value = await api('runs',{offset:resultOffset,limit:20}); if (sequence!==resultRequest||!results.isConnected) throw staleRequest();
-        resultPage=value.runs;
-        results.replaceChildren($('h2','运行产物 · 已核验的固定版本'));
-        const rowsHost=$('div',undefined,'catalog-rows');results.append(rowsHost);let rowCount=0;
-        for (const run of value.runs) for (const output of run.outputs) if (output.result) {
-          addResultTable(run,output);rowCount++;
-          const title=(run.parameter_path||run.entry)+' · '+run.run_id+' · '+output.name+' · v'+output.result.ref.lance_version;
-          rowsHost.append(catalogRow(output.name+' · '+run.run_id,(run.parameter_path||run.entry)+' · v'+output.result.ref.lance_version+' · '+output.result.ref.row_count+' 行',title,false,()=>openResult(run,output)));
-        }
-        if (!rowCount) results.append($('p','这页运行尚无已核验产物。','catalog-empty'));
-        const bar=$('div',undefined,'toolbar');results.append(bar);
-        button('较新运行产物',async()=>{resultOffset=Math.max(0,resultOffset-20);await loadResults();},bar,resultOffset===0);
-        button('较早运行产物',async()=>{resultOffset+=20;await loadResults();},bar,resultOffset+20>=value.total);
-    }
-    updates.context=fresh=>{for(const run of resultPage)for(const output of run.outputs)if(output.result)addResultTable(run,output,fresh);analysisView?.updatePermissions(fresh.capabilities||{});};
-    updates.results=loadResults;await loadResults();
-    if(request.view_id){
-      if(!context.analysis_connected)throw new Error('当前项目尚未接入 Case 视图读取；链接和已保存配置保持原值。');
-      analysisView.setPresentation({view_ref:{id:request.view_id,revision:request.revision},label:'已保存的 Case 视图 · v'+request.revision});
-      return;
-    }
-    if(openingOriginal&&!request.alias)return;
-    const holder=$('div');holder.id='case-browser';samplePanel.append(holder);
-    let expected=request.kind==='table_request'?request.expected_binding:request.binding_digest;
-    if (!alias) { const first=context.tables[0]; if (!first) return; alias=first.alias;expected=first.binding_digest; }
-    // Fixed catalog context: aliasBinding is the alias's current preview binding;
-    // binding/version describe the version actually read (possibly historical).
-    let profileHandle=null,shownFixed=null,offset=request.offset||0,pageRequest=0,versionsLoaded=false,versionsPending=false;
-    const p=panel(null,holder);p.classList.add('bound-table');
-    const headerHost=$('div'),pinnedBar=$('div',undefined,'version-pinned');pinnedBar.hidden=true;
-    const versionDetails=$('details',undefined,'bound-versions'),versionHost=$('div');versionDetails.append($('summary','版本'),versionHost);versionDetails.hidden=true;
-    versionDetails.addEventListener('toggle',()=>{if(versionDetails.open)loadVersions();});
-    const tools=$('div',undefined,'toolbar'),projection=$('input');projection.placeholder='字段投影（逗号分隔；默认前 16 列）';projection.className='wide';projection.setAttribute('aria-label','字段投影');projection.maxLength=4096;projection.value=(request.columns||[]).join(',');
-    const pageSize=select(['20','5','50','100'],'20');pageSize.setAttribute('aria-label','每页行数');tools.append(projection,pageSize);
-    const profileHost=$('div'),caseRail=$('div',undefined,'case-record-selector');
-    const loadingNote=$('p','正在按固定版本读取…','busy');loadingNote.hidden=true;
-    const failureHost=$('div'),rowsSourceNote=$('p',undefined,'muted small rows-source-note');rowsSourceNote.hidden=true;
-    const rowsBox=$('div'),pager=$('div',undefined,'toolbar end'),details=$('div',undefined,'case-detail');
-    p.append(headerHost,versionDetails,tools,profileHost,caseRail,loadingNote,failureHost,rowsSourceNote,rowsBox,pager);holder.append(details);
-    button('读取',async()=>{offset=0;await load();},tools);
-    const columns=()=>projection.value.trim()?V.validateColumns(projection.value.split(',').map(v=>v.trim()).filter(Boolean)):null;
-    const versionQueryFor=context=>context.version!==null?{version:context.version,version_binding:context.binding.digest}:{};
-    const tableView=(extra={})=>target('table',{alias,binding_digest:fixed.binding.digest,...(fixed.version!==null?{version:fixed.version,alias_binding:fixed.aliasBinding}:{}),...extra});
-    function rebuildProfile(){
-      profileHandle?.dispose();profileHost.replaceChildren();
-      profileHandle=registerViewHandle(catalogProfile(profileHost,'table-profile',()=>({alias,expected_binding:fixed.aliasBinding,...versionQueryFor(fixed),columns:columns()||Object.keys(fixed.description.metadata?.fields||{}).slice(0,16)})));
-    }
-    function paintVersionMarkers(){
-      for(const row of versionHost.querySelectorAll('.version-row')){
-        const active=fixed.version===Number(row.dataset.version);
-        row.classList.toggle('active',active);row.setAttribute('aria-pressed',String(active));
-      }
-    }
-    function paintBoundHeader(){
-      disposeReaders(headerHost);headerHost.replaceChildren();
-      const binding=fixed.binding,display=fixed.display,description=fixed.description;
-      if(!context.analysis_connected)headerHost.append($('h2',display.title||alias));
-      raw(headerHost,'当前表的固定来源',{alias,uri:binding.uri,reference:binding.reference,...(fixed.version!==null?{version:fixed.version,alias_binding:fixed.aliasBinding}:{})});
-      if(description.reference.provenance?.kind==='historical')headerHost.append($('p','历史结果 · '+(description.reference.provenance.note||'只读固定引用；没有补造新 Flow 的执行记录。'),'notice'));
-      if(alias.startsWith('run:'))headerHost.append($('p','实际运行结果 · '+alias,'notice'));
-      headerHost.append($('p','样例与分布按'+(fixed.version!==null?'历史固定版本':'绑定版本')+' v'+binding.reference.ref.lance_version+'；查看历史版本不改变目录绑定，也不调用 attach。','muted small'));
-      pinnedBar.replaceChildren();pinnedBar.hidden=fixed.version===null;
-      if(fixed.version!==null){
-        pinnedBar.append($('span','目录表 '+alias+' · 正在查看历史固定 v'+fixed.version));
-        button('回到目录当前版本',()=>pinCurrentVersion(),pinnedBar);
-      }
-      headerHost.append(pinnedBar);
-      const fieldsMeta=description.metadata?.fields||{};
-      const fieldDetails=$('details',undefined,'bound-fields'),fieldHost=$('div');fieldDetails.append($('summary','字段 · '+Object.keys(fieldsMeta).length),fieldHost);headerHost.append(fieldDetails);
-      fieldDetails.addEventListener('toggle',()=>{
-        if(!fieldDetails.open||fieldHost.children.length)return;
-        const names=(description.columns?.length?description.columns:Object.keys(fieldsMeta)).filter(name=>name!=='_rowid');
-        const t=table(fieldHost,['字段','类型','可空','分布'],names.map(name=>{const type=fieldsMeta[name]?.type||{};return {value:name,cells:[name,(type.kind||'未知')+(type.physical?' · '+type.physical:''),type.nullable?'是':'否','']};}));
-        for(const tr of t.querySelectorAll('tbody tr')){
-          const name=tr.firstChild.textContent,b=$('button','分布');b.type='button';b.className='field-profile-button';b.setAttribute('aria-label','查看字段 '+name+' 的分布');
-          b.onclick=()=>profileHandle?.select(name);
-          tr.lastChild.append(b);
-        }
-      });
-    }
-    function applyFixed(next){
-      fixed=next;offset=0;
-      clearSelection();disposeReaders(details);details.replaceChildren();caseRail.replaceChildren();main.classList.remove('bound-case-active');
-      failureHost.replaceChildren();
-      paintBoundHeader();rebuildProfile();paintVersionMarkers();paintDataContext();
-    }
-    async function selectTableVersion({alias:versionAlias,aliasBinding,version,columns:desiredColumns},ticket,{present=true}={}){
-      const stale=()=>ticket.epoch!==viewEpoch||ticket.project!==workspaceId||!p.isConnected;
-      try{
-        if(stale())throw staleRequest();
-        if(versionAlias!==alias)throw new Error('版本选择属于另一个数据表');
-        if(!Number.isSafeInteger(version)||version<1)throw new Error('版本必须是正整数');
-        const chosen=await api('table-versions',{alias,expected_binding:aliasBinding,version});
-        if(stale())throw staleRequest();
-        const selected=chosen.selected;
-        if(!selected||selected.version!==version)throw new Error('该版本没有可固定的登记事实');
-        if(selected.alias_binding!==aliasBinding)throw new Error('目录别名绑定已变化，请重新打开当前表');
-        const versionBinding=selected.binding;
-        if(!versionBinding||!/^[0-9a-f]{64}$/.test(versionBinding.digest||''))throw new Error('版本绑定身份缺失');
-        const described=await api('table',{alias,expected_binding:aliasBinding,version,version_binding:versionBinding.digest});
-        if(stale())throw staleRequest();
-        if(described.binding?.digest!==versionBinding.digest||described.binding?.alias!==alias)throw new Error('版本读取与登记绑定不一致');
-        if(described.metadata?.version!==version||selected.metadata?.version!==version)throw new Error('版本登记事实与实际读取不一致');
-        if(selected.metadata&&described.metadata&&(selected.metadata.schema_hash!==described.metadata.schema_hash||selected.metadata.row_count!==described.metadata.row_count))throw new Error('版本登记事实与实际读取不一致');
-        const projectionColumns=(desiredColumns?.length?desiredColumns:(described.columns||[]).filter(name=>name!=='_rowid').slice(0,16));
-        applyFixed({alias,aliasBinding,binding:versionBinding,version,description:described,display:described.reference.display||{}});
-        projection.value=projectionColumns.join(',');
-        await load(false);
-        return {project:workspaceId,locator:{kind:'workspace_table',alias,binding:versionBinding.digest,columns:projectionColumns,version,alias_binding:aliasBinding},
-          label:alias+' · v'+version,title:fixed.display.title||alias,version,rows:described.metadata?.row_count??null,fields:Object.keys(described.metadata?.fields||{}).length||null};
-      }catch(err){
-        if(err?.name==='AbortError'||stale())return null;
-        if(present&&!err.presented&&p.isConnected){failureHost.replaceChildren();renderLoadFailure(failureHost,err,{scope:{project:workspaceId,operation:'table-versions',label:'历史版本'},isCurrent:()=>!stale()});}
-        return null;
-      }
-    }
-    async function pinCurrentVersion(){
-      const ticket={epoch:viewEpoch,project:workspaceId};
-      try{
-        const described=await api('table',{alias,expected_binding:fixed.aliasBinding});
-        if(ticket.epoch!==viewEpoch||ticket.project!==workspaceId||!p.isConnected)throw staleRequest();
-        applyFixed({alias,aliasBinding:described.binding.digest,binding:described.binding,version:null,description:described,display:described.reference.display||{}});
-        projection.value=(request.columns||described.columns||[]).filter(name=>name!=='_rowid').slice(0,16).join(',');
-        const t={alias,uri:described.binding.uri,reference:described.binding.reference,binding_digest:described.binding.digest};
-        const at=context.tables.findIndex(item=>item.alias===alias);
-        if(at<0)context.tables.push(t);else context.tables[at]={...context.tables[at],...t};
-        await load(false);
-      }catch(err){
-        if(err?.name==='AbortError'||ticket.epoch!==viewEpoch)return;
-        if(!err.presented&&p.isConnected)renderLoadFailure(pinnedBar.isConnected?pinnedBar:p,err,{scope:{project:workspaceId,operation:'table',label:'目录当前版本'},isCurrent:()=>ticket.epoch===viewEpoch&&p.isConnected});
-      }
-    }
-    async function loadVersions(){
-      if(!fixed||versionsLoaded||versionsPending)return;
-      const epoch=viewEpoch,aliasBinding=fixed.aliasBinding;versionsPending=true;versionHost.replaceChildren($('p','正在读取登记版本…','busy'));
-      try{
-        const value=await api('table-versions',{alias,expected_binding:aliasBinding});
-        if(epoch!==viewEpoch||!versionHost.isConnected)throw staleRequest();
-        if(value.binding?.digest!==aliasBinding||fixed.aliasBinding!==aliasBinding)throw new Error('版本来源与目录别名绑定不一致');
-        versionHost.replaceChildren();
-        const aliasVersion=value.binding?.reference?.ref?.lance_version;
-        if(value.reason==='run_output_sealed_version')versionHost.append($('p','运行产物固定于单一 sealed 版本，没有登记版本历史。','muted small'));
-        else if(!value.versions.length)versionHost.append($('p','此表尚未在数据目录登记版本；仅绑定版本可预览。','muted small'));
-        if(value.versions.length){
-          const rowsHost=$('div',undefined,'catalog-rows');versionHost.append(rowsHost);
-          for(const item of value.versions){
-            const row=$('button',undefined,'catalog-row version-row');row.type='button';row.dataset.version=String(item.lance_version);
-            row.title='固定查看 v'+item.lance_version+' 的样例与分布；不改变目录绑定';
-            row.append($('span','v'+item.lance_version+(item.lance_version===aliasVersion?' · 目录当前绑定':''),'catalog-row-name'),
-              $('span',String(item.row_count)+' 行 · '+(item.content_digest||'schema '+item.schema_name+'@'+item.schema_version),'catalog-row-meta'));
-            row.onclick=async()=>{row.disabled=true;try{await selectTableVersion({alias,aliasBinding,version:item.lance_version},{epoch:viewEpoch,project:workspaceId});}finally{row.disabled=false;}};
-            rowsHost.append(row);
-          }
-          versionHost.append($('p','点击版本固定查看该版本的样例与分布；不会改变目录绑定。'+(value.truncated?'仅显示前 128 个登记版本（共 '+value.total_registered+' 个）。':''),'muted small'));
-        }
-        paintVersionMarkers();versionsLoaded=true;
-      }catch(err){if(err?.name!=='AbortError'&&epoch===viewEpoch&&versionHost.isConnected){versionHost.replaceChildren();renderLoadFailure(versionHost,err,{retryRead:loadVersions,scope:{project:workspaceId,operation:'table-versions',label:'登记版本'},isCurrent:()=>epoch===viewEpoch&&versionHost.isConnected});}}
-      finally{versionsPending=false;}
-    }
-    async function initFixed(){
-      if(request.kind==='table_request'&&Object.hasOwn(request,'version')){
-        const selection=await selectTableVersion({alias,aliasBinding:request.alias_binding,version:request.version,columns:request.columns},{epoch:viewEpoch,project:workspaceId},{present:false});
-        if(!selection)throw new Error('历史版本链接未能固定；请返回目录重新选择版本。');
-        onBinding(tableView({columns:selection.locator.columns,offset:0}));
-        return true;
-      }
-      const historical=Object.hasOwn(request,'version');
-      const description=await api('table',{alias,...(historical?{expected_binding:request.alias_binding,version:request.version,version_binding:request.binding_digest}:expected?{expected_binding:expected}:{})});
-      if(historical&&(description.metadata?.version!==request.version||description.binding?.digest!==request.binding_digest))throw new Error('历史版本读取与链接身份不一致');
-      fixed={alias,aliasBinding:historical?request.alias_binding:description.binding.digest,binding:description.binding,version:historical?request.version:null,description,display:description.reference.display||{}};
-      if(request.kind==='table_request'){
-        request=target('table',{alias,binding_digest:description.binding.digest,...(request.columns?{columns:request.columns}:{}),...(request.offset!==undefined?{offset:request.offset}:{})});
-        onBinding(request);
-      }
-      return false;
-    }
-    async function showCase(rowId,shownColumns,route=false) {
-      const seq=++selectionEpoch,caseFixed=fixed;clearSelection();viewState='loading';
-      disposeReaders(details);details.replaceChildren($('p','正在读取 Case…','busy'));
-      try {
-        const detail=await api('sample',{alias,expected_binding:caseFixed.aliasBinding,...versionQueryFor(caseFixed),row_id:String(rowId),columns:JSON.stringify(shownColumns)});
-        if(seq!==selectionEpoch||!details.isConnected)throw staleRequest();
-        if(detail.binding.digest!==caseFixed.binding.digest||detail.rows.length!==1||String(detail.rows[0]._rowid)!==String(rowId))throw new Error('指定 Case 已不可读取');
-        const row=detail.rows[0],reference=target('case',{alias,binding_digest:caseFixed.binding.digest,row_id:String(rowId),columns:detail.columns,...(caseFixed.version!==null?{version:caseFixed.version,alias_binding:caseFixed.aliasBinding}:{})});
-        disposeReaders(details);details.replaceChildren();main.classList.add('bound-case-active');main.classList.remove('original-case-active');
-        for(const b of caseRail.children)b.setAttribute('aria-pressed',String(b.dataset.rowId===String(rowId)));
-        const left=panel('单条 case · '+rowId,details);left.classList.add('case-reading');left.querySelector('h2').replaceWith($('h1','单条 case · '+rowId));
-        left.prepend($('p',context.name+' → '+alias+' → Case '+rowId,'muted small'));
-        button('返回当前表',async()=>{disposeReaders(details);details.replaceChildren();main.classList.remove('bound-case-active');rowsBox.hidden=false;pager.hidden=false;view=tableView({columns:shownColumns,offset});choose(view);putHistory(view,'replace');projectHeading();rowsBox.scrollIntoView({block:'start'});rowsBox.querySelector('tbody tr')?.focus();},left);
-        left.append($('p','表别名：'+alias+' · 固定版本 v'+caseFixed.binding.reference.ref.lance_version+(caseFixed.version!==null?'（历史固定）':'')+' · 来源：'+caseFixed.binding.uri,'notice'));
-        const right=$('details',undefined,'panel case-comparison');right.append($('summary','按明确业务键对照'));details.append(right);
-        rowsBox.classList.add('case-record-list');rowsBox.setAttribute('aria-label','当前固定版本记录');
-        renderCase(left,reference,row,caseFixed.display);if(!pendingView)viewState='ready';choose(reference,route);projectHeading();
-        right.append($('p','选择业务键匹配另一张表；不会按行号假定一一对应。','muted small'));
-        const options=context.tables.map(x=>x.alias),other=select(options,options.find(x=>x!==alias)),key=select([{value:'',label:'选择业务键…'},...detail.columns]);
-        const targetKey=$('input');targetKey.placeholder='对侧键（默认同名）';targetKey.setAttribute('aria-label','对侧业务键');key.setAttribute('aria-label','业务键');other.setAttribute('aria-label','对照表');
-        const bar=$('div',undefined,'toolbar');bar.append(other,key,targetKey);right.append(bar);const output=$('div');right.append(output);right.addEventListener('toggle',()=>{if(!right.open){disposeReaders(output);output.replaceChildren();}});
-        button('查找对应 case',async()=>{
-          if(!key.value)throw new Error('请先明确选择业务键');
-          const selected=context.tables.find(t=>t.alias===other.value);disposeReaders(output);output.replaceChildren($('p','读取对应记录…','busy'));
-          const described=await api('table',{alias:other.value,...(selected?.binding_digest?{expected_binding:selected.binding_digest}:{})});
-          const result=await api('sample',{alias:described.binding.alias,expected_binding:described.binding.digest,match:JSON.stringify({field:targetKey.value||key.value,value:row[key.value]}),limit:20});
-          if(seq!==selectionEpoch||!output.isConnected)throw staleRequest();
-          output.replaceChildren();output.append($('p',result.rows.length===0?'未找到匹配记录':result.rows.length===1?'匹配 1 条记录':`匹配 ${result.rows.length}${result.has_more?' 条或更多':' 条'}记录；业务键不唯一`,'notice'));
-          for(const match of result.rows){
-            const item=$('details'),host=$('div');item.append($('summary','Case '+match._rowid+' · '+described.binding.alias),host);output.append(item);
-            item.addEventListener('toggle',()=>{disposeReaders(host);host.replaceChildren();if(item.open){for(const other of output.querySelectorAll(':scope > details'))if(other!==item){other.open=false;disposeReaders(other);}
-              renderCase(host,target('case',{alias:described.binding.alias,binding_digest:result.binding.digest,row_id:String(match._rowid),columns:result.columns}),match,described.reference.display||{});}});
-          }
-        },bar);
-      } catch(err) {if(seq===selectionEpoch){viewState='error';clearSelection();details.replaceChildren();if(err?.name!=='AbortError'&&!err.presented)renderLoadFailure(details,err,{retryRead:()=>showCase(rowId,shownColumns,route),scope:{project:workspaceId,operation:'sample',label:'Case '+rowId},isCurrent:()=>seq===selectionEpoch&&details.isConnected});}throw err;}
-    }
-    async function load(initial=false) {
-      const page=++pageRequest,seq=++selectionEpoch,readFixed=fixed;
-      clearSelection();viewState='loading';disposeReaders(details);
-      rowsBox.hidden=false;pager.hidden=false;details.replaceChildren();
-      failureHost.replaceChildren();loadingNote.hidden=false;
-      try {
-        const result=await api('sample',{alias,expected_binding:readFixed.aliasBinding,...versionQueryFor(readFixed),offset,limit:pageSize.value,...(columns()?{columns:JSON.stringify(columns())}:{})});
-        if(page!==pageRequest||seq!==selectionEpoch||!rowsBox.isConnected)throw staleRequest();
-        if(result.binding?.digest!==readFixed.binding.digest)throw new Error('样例来源与当前固定版本不一致');
-        shownFixed=readFixed;samplesLoaded=true;
-        rowsSourceNote.hidden=false;
-        rowsSourceNote.textContent='当前样例：'+alias+' · v'+readFixed.binding.reference.ref.lance_version+(readFixed.version!==null?'（历史固定）':'（目录绑定）')+' · '+readFixed.binding.digest.slice(0,12);
-        if(result.columns.length)selectDataSource({label:alias+' · v'+readFixed.binding.reference.ref.lance_version,title:readFixed.display.title||alias,version:readFixed.binding.reference.ref.lance_version,rows:readFixed.binding.reference.ref.row_count,fields:Object.keys(readFixed.description.metadata?.fields||{}).length||result.columns.filter(name=>name!=='_rowid').length,
-          locator:{kind:'workspace_table',alias,binding:readFixed.binding.digest,columns:result.columns.filter(name=>name!=='_rowid'),...(readFixed.version!==null?{version:readFixed.version,alias_binding:readFixed.aliasBinding}:{})}});
-        rowsBox.replaceChildren();pager.replaceChildren();caseRail.replaceChildren();
-        for(const row of result.rows){const label=result.columns.filter(k=>k!=='_rowid').slice(0,2).map(k=>typeof row[k]==='string'?row[k].slice(0,55):String(row[k]).slice(0,25)).join(' · ');const b=button('Case '+row._rowid+' · '+label,()=>showCase(row._rowid,result.columns,true),caseRail);b.dataset.rowId=String(row._rowid);b.setAttribute('aria-pressed','false');}
-        table(rowsBox,['_rowid',...result.columns],result.rows.map(row=>({value:row,cells:['_rowid',...result.columns].map(k=>{const v=row[k],text=typeof v==='string'?v:JSON.stringify(v);return text&&text.length>140?text.slice(0,140)+'…':text;})})),async(row,tr)=>{
-          if(pendingView){await openView(target('case',{alias,binding_digest:readFixed.binding.digest,row_id:String(row._rowid),columns:result.columns,...(readFixed.version!==null?{version:readFixed.version,alias_binding:readFixed.aliasBinding}:{})}));return;}
-          for(const r of rowsBox.querySelectorAll('tr'))r.classList.remove('selected');tr.classList.add('selected');await showCase(row._rowid,result.columns,true);
-        });
-        if(!result.rows.length)rowsBox.append($('p','当前页没有记录。','muted'));
-        pager.append($('span',`${result.rows.length?offset+1:0}–${offset+result.rows.length} / ${result.row_count} 行 · 展示文本可缩略，详情读取不静默截断`,'muted small'));
-        const controls=$('div',undefined,'toolbar');pager.append(controls);
-        button('上一页',async()=>{offset=Math.max(0,offset-Number(pageSize.value));await load();},controls,offset===0);
-        button('下一页',async()=>{offset+=Number(pageSize.value);await load();},controls,!result.has_more);
-        if(!initial){view=tableView({columns:result.columns,offset});putHistory(view,'replace');}
-        const rowId=initial&&request.kind==='case'?request.row_id:result.rows[0]?._rowid;
-        if(rowId!==undefined&&(!context.analysis_connected||request.kind==='case'))await showCase(rowId,result.columns);
-        else {if(!pendingView)viewState='ready';choose(tableView({columns:result.columns,offset}));}
-      }catch(err){
-        if(err?.name!=='AbortError'&&page===pageRequest&&rowsBox.isConnected){
-          viewState='error';clearSelection();
-          if(!err.presented)renderLoadFailure(failureHost,err,{retryRead:()=>load(),scope:{project:workspaceId,operation:'sample',label:shownFixed?'样例（保留 v'+shownFixed.binding.reference.ref.lance_version+' 旧页）':'样例'},isCurrent:()=>page===pageRequest&&rowsBox.isConnected});
-        }
-        throw err;
-      }finally{if(page===pageRequest)loadingNote.hidden=true;}
-    }
-    // The fixed schema is sufficient to register a Case/Notebook source.
-    // Keep the separate catalog sample reader behind its explicit disclosure.
-    let samplesLoaded=false,samplePending=null;
-    readSamples=()=>{
-      if(samplesLoaded)return Promise.resolve();
-      if(samplePending)return samplePending;
-      samplePending=load(true).then(()=>{samplesLoaded=true;}).finally(()=>{samplePending=null;});
-      return samplePending;
-    };
-    const resolved=await initFixed();
-    if(!resolved){paintBoundHeader();rebuildProfile();}
-    versionDetails.hidden=false;if(versionDetails.open)loadVersions();
-    if(fixed.version!==null){samplesRequested=true;samplePanel.hidden=false;samplesToggle.setAttribute('aria-expanded','true');}
-    if(fixed.version===null){
-      const t={alias,uri:fixed.binding.uri,reference:fixed.binding.reference,binding_digest:fixed.binding.digest};
-      const at=context.tables.findIndex(item=>item.alias===alias);
-      if(at<0)context.tables.push(t);else context.tables[at]={...context.tables[at],...t};
-    }
-    updates.tables=async()=>{
-      listTables();refreshOriginal();if(main.classList.contains('original-table-active'))return;
-      if(fixed.version!==null){
-        try{
-          const latest=await api('table',{alias,expected_binding:fixed.aliasBinding,version:fixed.version,version_binding:fixed.binding.digest});
-          if(latest.binding?.digest!==fixed.binding.digest)throw new Error('固定版本来源已变化');
-        }catch(err){if(err?.name!=='AbortError'&&!err.presented&&p.isConnected&&fixed.version!==null){failureHost.replaceChildren();renderLoadFailure(failureHost,err,{scope:{project:workspaceId,operation:'table',label:'历史固定来源'},isCurrent:()=>p.isConnected&&fixed.version!==null});}}
-        return;
-      }
-      const latest=await api('table',{alias,expected_binding:fixed.aliasBinding});
-      if(latest.binding.digest!==fixed.binding.digest)await openView(view||request,{historyMode:'replace'});
-    };
-    listTables();
-    const declared=[...new Set((fixed.display.fields||[]).map(field=>field.path[0]))];
-    const projected=request.columns||(declared.length?declared:fixed.description.columns?.slice(0,16));
-    // Older servers lack ordered columns: retain their native sample path
-    // instead of deriving a new source identity from sorted object keys.
-    if(resolved){/* historical table_request already loaded and registered */}
-    else if(context.analysis_connected&&request.kind!=='case'&&!samplesRequested&&projected){
-      const selected=V.validateColumns(projected.filter(name=>name!=='_rowid'));
-      selectDataSource({label:alias+' · v'+fixed.binding.reference.ref.lance_version,title:fixed.display.title||alias,version:fixed.binding.reference.ref.lance_version,rows:fixed.binding.reference.ref.row_count,fields:Object.keys(fixed.description.metadata?.fields||{}).length||selected.length,
-        locator:{kind:'workspace_table',alias,binding:fixed.binding.digest,columns:selected,...(fixed.version!==null?{version:fixed.version,alias_binding:fixed.aliasBinding}:{})}});
-    }else await readSamples();
+    const project=workspaceId,epoch=viewEpoch;
+    const localApi=(path,query,body)=>{if(epoch!==viewEpoch)throw staleRequest();return api(path,query,body,project);};
+    const originalPath=pendingOriginalPath;pendingOriginalPath=null;
+    const mounted=await ForgeNotebooks.mount({parent:main,api:localApi,project,context,request,originalPath,onBinding});
+    if(epoch!==viewEpoch){mounted.dispose();throw staleRequest();}
+    notebooksView=mounted;
+    updates.context=fresh=>mounted.updateContext(fresh);
+    updates.tables=()=>mounted.updateContext(context);
   }
-  function renderCase(parent,reference,row,display={}) {
-    if(!row){parent.append($('p','记录不存在或已不可读取'));return;}
-    const historical=!!reference&&Object.hasOwn(reference,'version');
-    const caseVersionQuery=historical?{version:reference.version,version_binding:reference.binding_digest}:{};
-    const caseExpectedBinding=historical?reference.alias_binding:reference?.binding_digest;
-    const body=$('div',undefined,'case-fields');parent.append(body);
-    const entries=[],fieldModes=new Map(),structureOpen=new Map();let visits=0,fieldGeneration=0,activeIndex=-1,activeReader=null;
-    function walk(value,parts,path,spec){
-      if(++visits>2048||entries.length>=64)throw new Error('展示字段展开超过上限，请缩小展示声明或读取范围。');
-      if(!parts.length){entries.push({key:spec.label||path.join('.'),value,path,spec});return;}
-      const [part,...rest]=parts;
-      if(part==='*'){if(Array.isArray(value))value.forEach((item,index)=>walk(item,rest,[...path,index],spec));}
-      else if(value!==null&&typeof value==='object'&&Object.hasOwn(value,part))walk(value[part],rest,[...path,part],spec);
-    }
-    if(display.fields?.length)for(const spec of display.fields)walk(row,spec.path,[],spec);
-    else for(const [key,value] of Object.entries(row))entries.push({key,value,path:[key],spec:null});
-    const isPath=value=>typeof value==='string'&&!/\s/.test(value)&&(/^(?:\/|file:|\.\.?\/)/.test(value)||/\.(?:py|json|ya?ml|toml|log|txt|png|jpe?g|webp|gif)$/i.test(value));
-    function structuredString(value){
-      if(typeof value!=='string'||value.length>65536||!/^\s*[\[{]/.test(value))return false;
-      try{const parsed=JSON.parse(value);return parsed!==null&&typeof parsed==='object';}catch{return false;}
-    }
-    const readable=entry=>typeof entry.value==='string'&&(entry.spec?.kind==='text'||!entry.spec&&!isPath(entry.value)&&!structuredString(entry.value)&&(entry.value.length>=240||/[\r\n]/.test(entry.value)));
-    const identity=$('dl',undefined,'case-identity details');
-    for(const entry of entries.filter(e=>!e.spec&&e.path[0]!=='_rowid'&&e.value!==null&&typeof e.value!=='object'&&!readable(e))){
-      const text=String(entry.value);if(text.length>160)continue;
-      identity.append($('dt',entry.key),$('dd',text));
-    }
-    if(identity.children.length)body.append(identity);
-    const tabs=$('div',undefined,'field-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Case 字段');
-    const host=$('div',undefined,'case-field');host.setAttribute('role','tabpanel');host.id='field-panel-'+(++renderCase.serial);body.append(tabs,host);
-    function activate(index,focus=false){
-      if(index===activeIndex)return;
-      if(activeReader)fieldModes.set(activeIndex,activeReader.element.dataset.mode);
-      if(activeIndex>=0)structureOpen.set(activeIndex,!!host.querySelector('details')?.open);
-      activeIndex=index;activeReader=null;
-      const generation=++fieldGeneration;const entry=entries[index];disposeReaders(host);host.replaceChildren($('h3',entry.key));
-      for(const [i,tab]of [...tabs.children].entries()){tab.setAttribute('aria-selected',String(i===index));tab.tabIndex=i===index?0:-1;if(i===index){host.setAttribute('aria-labelledby',tab.id);if(focus)tab.focus();}}
-      const {key,value,path,spec}=entry;
-      if(readable(entry))activeReader=mountText(host,value,{defaultMode:fieldModes.get(index)||'preview'});
-      else if(value&&typeof value==='object'){const d=raw(host,'展开结构化内容',value);d.open=structureOpen.get(index)||false;}
-      else if(typeof value==='string'&&(value.length>=240||/[\r\n]/.test(value)))mountText(host,value,{sourceOnly:true});
-      else host.append($('pre',value===null?'null':String(value),'scalar-value'));
-      if(reference&&spec?.kind==='evidence'&&value!==null)button('查看历史调用证据',async()=>{const detail=await api('table-evidence',{alias:reference.alias,expected_binding:caseExpectedBinding,row_id:reference.row_id,field_path:JSON.stringify(path),...caseVersionQuery});if(host.isConnected&&generation===fieldGeneration)raw(host,'历史调用记录 · 不代表本次 Flow 已验证',detail.document);},host);
-      const runId=reference?.alias.startsWith('run:')?reference.alias.split(':')[1]:null;
-      if(runId&&value&&typeof value==='object'){
-        let visited=0,found=0;const references=new Set();const walk=(v,depth=0)=>{if(!v||typeof v!=='object'||depth>8||++visited>256||found>=16)return;
-          if(typeof v.journal_path==='string'&&typeof v.request_id==='string'&&['request','response','error'].includes(v.kind)){const key=json([v.journal_path,v.request_id,v.kind,v.attempt||1]);if(references.has(key))return;references.add(key);found++;button('查看调用证据 · '+v.kind,async()=>{const detail=await api('run-evidence',{run_id:runId,reference:JSON.stringify(v)});if(host.isConnected&&generation===fieldGeneration)raw(host,'原生调用证据 · '+v.kind,detail.document);},host);return;}
-          for(const child of Object.values(v))walk(child,depth+1);};walk(value);
-      }
-      if(reference&&(spec?.kind==='image'&&value!==null||!spec&&typeof value==='string'&&/\.(png|jpe?g|webp|gif)$/i.test(value)))button('查看本地图片',async()=>{
-        const epoch=selectionEpoch,fieldIndex=index;
-        const blob=await api('media',{alias:reference.alias,expected_binding:caseExpectedBinding,row_id:reference.row_id,...(spec?{field_path:JSON.stringify(path)}:{field:key}),...caseVersionQuery});
-        if(!host.isConnected||epoch!==selectionEpoch||tabs.children[fieldIndex]?.getAttribute('aria-selected')!=='true')throw staleRequest();
-        if(mediaBytes+blob.size>32*1024*1024||blobs.size>=64)throw new Error('图片缓存预算已满，请重新打开数据表页释放');
-        mediaBytes+=blob.size;const url=URL.createObjectURL(blob);blobs.add(url);blobSizes.set(url,blob.size);const img=$('img');img.src=url;img.alt=key;img.className='case-image';host.append(img,$('p',spec?'图片读取已核对固定行中的 SHA256。':'图片来自该表位置内的文件；表版本本身不固定外部图片内容。','muted small'));
-      },host);
-    }
-    entries.forEach((entry,index)=>{const tab=$('button',entry.key);tab.type='button';tab.setAttribute('role','tab');tab.id=host.id+'-'+index;tab.setAttribute('aria-controls',host.id);tab.onclick=()=>activate(index);tab.onkeydown=event=>{let next;if(event.key==='ArrowRight')next=(index+1)%entries.length;if(event.key==='ArrowLeft')next=(index+entries.length-1)%entries.length;if(event.key==='Home')next=0;if(event.key==='End')next=entries.length-1;if(next!==undefined){event.preventDefault();activate(next,true);}};tabs.append(tab);});
-    const first=entries.findIndex(readable);if(entries.length)activate(first>=0?first:Math.max(0,entries.findIndex(e=>e.path[0]!=='_rowid')));
-    const identityInfo={row_id:String(row._rowid),...(reference?{alias:reference.alias,binding_digest:reference.binding_digest}:{}),...(historical?{version:reference.version,alias_binding:reference.alias_binding}:{}),note:'row_id 是当前固定版本内的行定位，不是跨表业务键。'};
-    raw(body,'行定位与来源明细',identityInfo);raw(body,'原始记录',row);if(reference)contextActions(body,reference);
-  }
-  renderCase.serial=0;
   function addResultTable(run,output,destination=context){
     const alias='run:'+run.run_id+':'+output.name+(run.attempt!=null?':'+run.attempt:'');
     if(!output.result)return alias;
@@ -1372,7 +715,7 @@
   function clearProject(message='在原项目目录中阅读说明、查看数据与 Case、核对流程和检查结果。') {
     if(!canLeaveViews())return;
     readController.abort();readController=new AbortController();
-    viewEpoch++;selectionEpoch++;auditRequest++;revokeImages();disposeReaders();closeProjectPicker();
+    viewEpoch++;selectionEpoch++;auditRequest++;disposeReaders();closeProjectPicker();
     workspaceId='';context=null;view=null;pendingView=null;initialView=null;selection=null;
     viewState='ready';changes=null;lastObserved=null;updates={};
     continueInput='';auditState=null;auditError=null;pendingOriginalPath=null;
@@ -1422,7 +765,7 @@
     rememberTab();
     clearTimeout(syncTimer);readController.abort();readController=new AbortController();
     document.getElementById('workspace-status').open=false;
-    const epoch=++viewEpoch;selectionEpoch++;revokeImages();disposeReaders();closeProjectPicker();
+    const epoch=++viewEpoch;selectionEpoch++;disposeReaders();closeProjectPicker();
     workspaceId=id;context=null;view=null;pendingView=null;selection=null;viewState='loading';
     changes=null;lastObserved=null;updates={};continueInput='';forcePending=false;
     auditState=null;auditError=null;renderAudit();
@@ -1493,7 +836,7 @@
     window.addEventListener('resize',revealTab);
     document.addEventListener('click',event=>{if(!status.contains(event.target))status.open=false;if(!picker.contains(event.target)&&!toggle.contains(event.target))closeProjectPicker();});
     document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!document.querySelector('dialog[open]')){if(!picker.hidden){event.preventDefault();closeProjectPicker({restoreFocus:true});}else if(status.open){status.open=false;statusSummary.focus();}}});
-    window.addEventListener('pagehide',()=>{disposeReaders();revokeImages();readController.abort();clearTimeout(syncTimer);});
+    window.addEventListener('pagehide',()=>{disposeReaders();readController.abort();clearTimeout(syncTimer);});
     projectHeading();
     main.append($('p','正在读取工作区…','busy'));
     try {

@@ -246,30 +246,6 @@ def test_large_source_graph_has_bounded_index_and_local_navigation(isolated,brow
         assert not errors,errors
 
 
-def test_data_catalog_collapse_keeps_fixed_case_and_avoids_resampling(isolated,browser):
-    with service(isolated) as app,page_for(browser,app) as (page,errors):
-        page.locator('.function-nav').get_by_role('button',name='数据',exact=True).click()
-        page.get_by_role('heading',name='单条 case · 8589934592',exact=True).wait_for()
-        expect(page.locator('.data-source-context')).to_contain_text('固定版本 v')
-        reference=page.url;reads=[]
-        page.on('request',lambda r:reads.append(r.url) if '/sample?' in r.url or '/media?' in r.url else None)
-        for width in (1440,390,320):
-            page.set_viewport_size({'width':width,'height':1050})
-            page.get_by_role('button',name='展开数据目录',exact=True).click()
-            expect(page.locator('.table-catalog').first).to_be_visible()
-            page.get_by_role('button',name='收起数据目录',exact=True).click()
-            expect(page.locator('.table-catalog').first).not_to_be_visible()
-            expect(page.get_by_role('heading',name='单条 case · 8589934592',exact=True)).to_be_visible()
-            assert page.url==reference
-            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
-            screenshot(page,'data-catalog-'+str(width))
-        page.set_viewport_size({'width':1440,'height':1050})
-        page.get_by_role('button',name='Notebook',exact=True).click()
-        expect(page.locator('.data-source-context')).to_contain_text('固定版本 v')
-        expect(page.locator('.data-samples')).not_to_be_visible()
-        expect(page.get_by_label('python 单元代码',exact=True)).to_be_visible()
-        screenshot(page,'notebook-default-shared-context')
-        assert not reads and not errors,dict(reads=reads,errors=errors)
 
 
 def test_original_declared_project_without_native_flows_is_usable_and_honest(original,tmp_path,browser):
