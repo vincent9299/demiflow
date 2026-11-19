@@ -20,6 +20,14 @@
  */
 (() => {
   'use strict';
+  function connectionStatus(caps={}) {
+    // Older local services expose provider configuration without the two flags.
+    // This is a display projection only; sending still requires enabled/start.
+    const configured=caps.service_configured??(caps.enabled===true||!!caps.providers?.length);
+    const authorized=caps.project_authorized??(caps.enabled===true);
+    const label=!configured?'尚未配置开发代理':!authorized?'本项目未启用开发':caps.read_only?'开发历史只读':!caps.start?'开发代理暂不可用':'开发代理可用';
+    return {configured,authorized,label};
+  }
   let serial=0;
   const encoder=new TextEncoder(), bytes=value=>encoder.encode(value).length;
   const finite=value=>typeof value==='number'&&Number.isFinite(value)&&value>=0;
@@ -141,8 +149,9 @@
       modelName.textContent=modelLabel(provider);effort.textContent=effortLabel(provider);effort.hidden=!effort.textContent;
       modelTrigger.title=provider?modelLabel(provider)+(effort.textContent?' '+effort.textContent:'')+' · '+provider.id:'未提供可用开发代理';
       modelTrigger.hidden=!(caps.providers||[]).length;
-      accessLabel.textContent=readonly||state.historyOnly?'Read only':unavailable?'Not connected':caps.mode==='restricted'?'Managed access':caps.mode==='trusted_local'?'Trusted local':'Project access';
-      access.title=readonly||state.historyOnly?'当前仅可查看历史记录。':unavailable?'尚未连接可用的项目开发代理。':caps.mode==='restricted'?'项目开发受 Forge 管理；输入可在对话中发现和引用，写入仍限项目授权范围。':caps.mode==='trusted_local'?'可信本地执行；当前未声明 OS 防篡改边界。':'按当前项目的已授权开发范围执行。';
+      const connection=connectionStatus(caps);
+      accessLabel.textContent=readonly||state.historyOnly?'Read only':unavailable?connection.label:caps.mode==='restricted'?'Managed access':caps.mode==='trusted_local'?'Trusted local':'Project access';
+      access.title=readonly||state.historyOnly?'当前仅可查看历史记录。':unavailable?connection.label+'。在右上角项目设置查看开发代理配置。':caps.mode==='restricted'?'项目开发受 Forge 管理；输入可在对话中发现和引用，写入仍限项目授权范围。':caps.mode==='trusted_local'?'可信本地执行；当前未声明 OS 防篡改边界。':'按当前项目的已授权开发范围执行。';
       access.setAttribute('aria-label','查看当前开发权限：'+accessLabel.textContent);
       add.disabled=input.disabled||state.attaching;file.disabled=add.disabled;reference.disabled=!options.onReference||add.disabled;attachment.disabled=add.disabled;
       for(const item of modelMenu.querySelectorAll('[data-provider]'))item.setAttribute('aria-checked',String(item.dataset.provider===(session?.provider||providers.value)));
@@ -201,5 +210,5 @@
     }
     update();return {form,input,send,stop,providers,update,dispose,resize};
   }
-  window.ForgeDevelopmentComposer=Object.freeze({create});
+  window.ForgeDevelopmentComposer=Object.freeze({create,connectionStatus});
 })();
