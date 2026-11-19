@@ -69,9 +69,8 @@
 .definition-source .reading-source-nav{justify-content:flex-end}.definition-source .reading-source-nav button,.wb-downstream button{border:0;background:transparent;box-shadow:none;font-size:12px;color:#6279b6}
 .wb-downstream{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:18px 0}.wb-wiring-binding{font-size:13px;color:#536176}
 .wb-source-tabs button[hidden]{display:none}
-/* Each function owns one project-scoped directory. The canvas and run reader
-   remain in their existing main container when that directory is collapsed. */
-.workbench .wb-workspace-layout.wb-project-layout{display:grid;grid-template-columns:232px minmax(0,1fr);gap:22px;align-items:start}
+/* Each function owns one persistent project-scoped directory. */
+.workbench .wb-workspace-layout.wb-project-layout{display:grid;grid-template-columns:256px minmax(0,1fr);gap:22px;align-items:start}
 .workbench .wb-workspace-layout>.wb-section-navigation{box-sizing:border-box;min-width:0;max-height:calc(100dvh - 90px);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;position:sticky;top:70px;margin:0;padding:18px 10px;background:#f8f9fc;border:0;border-right:1px solid var(--op-line);border-radius:0;align-self:start}
 .workbench .wb-navigation-heading{display:flex;align-items:baseline;gap:8px;justify-content:space-between;margin:0 8px 12px}
 .workbench .wb-flow-record{display:flex;flex-direction:column;align-items:stretch;gap:3px;width:100%;min-width:0;border:0;border-radius:7px;background:transparent;padding:11px 9px;margin:3px 0;text-align:left;box-shadow:none}
@@ -80,17 +79,32 @@
 .workbench .wb-flow-record:hover:not(:disabled){background:#f0f2f8}
 .workbench .wb-flow-record.selected{background:#eef2ff;color:var(--op-accent)}
 .workbench .wb-flow-record:focus-visible,.workbench .wb-run-record:focus-visible{outline:2px solid var(--op-accent);outline-offset:-2px}
-.workbench .wb-navigation-toggle{order:-1;flex:none;border:0;background:transparent;box-shadow:none;padding:5px 7px;color:var(--op-muted)}
-.workbench .wb-navigation-toggle::before{content:'☰';margin-right:6px;font-size:14px}
-.workbench .wb-run-group{min-width:0;margin:15px 0 12px}
-.workbench .wb-run-group-heading{font-size:11px;font-weight:600;color:var(--op-muted);line-height:1.65;margin:0 8px 6px;overflow-wrap:anywhere}
-.workbench .wb-run-group .wb-run-record{grid-template-columns:minmax(0,1fr) auto}
-.workbench .wb-run-group .wb-run-record>.wb-record-time{grid-column:1/-1;font-size:10px}
-.workbench .wb-run-group .wb-run-record>.wb-tag{justify-self:start}
-.workbench .wb-run-group .wb-run-record>.wb-record-duration{justify-self:end;font-size:10px}
-@media(max-width:1200px){.workbench .wb-workspace-layout.wb-project-layout{grid-template-columns:200px minmax(0,1fr);gap:14px}}
+@media(max-width:1200px){.workbench .wb-workspace-layout.wb-project-layout{grid-template-columns:224px minmax(0,1fr);gap:14px}}
 @media(max-width:680px){
   .workbench .wb-workspace-layout.wb-project-layout{grid-template-columns:minmax(0,1fr);gap:12px}
   .workbench .wb-workspace-layout>.wb-section-navigation{position:static;max-height:42dvh;border-right:0;border-bottom:1px solid var(--op-line);padding:12px 8px}
-  .workbench .wb-navigation-toggle{font-size:12px}
 }
+
+/* Pipelines own their run branches; attempts stay in the selected run. */
+.workbench .wb-run-group{margin:4px 0;}
+.workbench .wb-run-group-heading{display:flex;align-items:center;gap:7px;cursor:pointer;list-style:none;margin:0;padding:10px 6px;color:var(--op-ink);border-radius:6px;font-size:12px}
+.workbench .wb-run-group-heading::-webkit-details-marker{display:none}
+.workbench .wb-run-group-heading::before{content:'›';font-size:18px;color:var(--op-muted);width:10px;flex:none;transition:transform .12s}
+.workbench .wb-run-group[open]>.wb-run-group-heading::before{transform:rotate(90deg)}
+.workbench .wb-run-group-heading:hover{background:#edf0f6}
+.workbench .wb-run-group-heading strong{min-width:0;font-weight:550;overflow-wrap:anywhere}
+.workbench .wb-run-count{flex:none;white-space:nowrap;margin-left:auto;color:var(--op-muted);font-size:10px}
+.workbench .wb-run-branch{margin:0 0 8px 12px;padding-left:10px;border-left:1px solid #e1e6ef}
+.workbench .wb-run-group .wb-run-record{display:grid!important;grid-template-columns:minmax(0,1fr) auto;gap:5px!important;padding:9px 7px!important}
+.workbench .wb-run-group .wb-run-record strong{font-size:11px;font-weight:500}
+.workbench .wb-run-group .wb-run-record>.wb-record-time{grid-column:1;font-size:10px}
+.workbench .wb-run-group .wb-run-record>.wb-tag{font-size:10px;justify-self:end}
+.workbench .wb-run-group .wb-run-record>.wb-record-duration{grid-column:2;grid-row:2}
+.workbench .wb-history-heading input{width:100%;min-width:0;border:0;background:#edf0f6;padding:7px 9px;font:inherit;font-size:12px;border-radius:6px}
+.workbench .wb-history-heading .wb-recent-runs{border:0;background:transparent;text-align:left;padding:7px 8px;font-size:12px;box-shadow:none}
+.workbench .wb-recent-runs[aria-pressed=true]{color:var(--op-accent);background:#edf1ff}
+.workbench .wb-run-pager{display:flex;justify-content:space-between;gap:2px}
+.workbench .wb-run-pager button{border:0;background:transparent;box-shadow:none;padding:5px 2px;font-size:10px}
+.workbench .wb-history-page{font-size:10px;margin:10px 6px 4px}
+.workbench .wb-run-branch>p{font-size:11px;line-height:1.7}
+@media(max-width:680px){.workbench .wb-workspace-layout>.wb-section-navigation{max-height:30dvh}.workbench .wb-history-heading{flex-direction:column;align-items:stretch}}

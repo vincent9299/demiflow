@@ -109,24 +109,17 @@ def test_pipeline_directory_preserves_drafts_late_selection_and_narrow_space(roo
 
         for width in (390, 320):
             page.set_viewport_size({'width': width, 'height': 920})
-            expect(page.locator('.wb-flow-navigation')).to_be_hidden()
-            toggle = page.locator('.wb-navigation-toggle')
-            expect(toggle).to_have_attribute('aria-expanded', 'false')
-            expect(page.locator('.wb-selectors')).to_be_hidden()
-            container = page.locator('.wb-workspace-layout').bounding_box()
-            content = page.locator('.wb-workspace-main').bounding_box()
-            assert abs(container['width'] - content['width']) < 2
-            toggle.click()
             expect(page.locator('.wb-flow-navigation')).to_be_visible()
-            toggle.click()
-            expect(page.locator('.wb-flow-navigation')).to_be_hidden()
+            expect(page.locator('.wb-navigation-toggle')).to_have_count(0)
+            expect(page.locator('.wb-selectors')).to_be_hidden()
+            expect(flow(page, FIRST)).to_be_visible()
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
         screenshot(page, 'project-pipeline-navigation-320')
         assert not any(url.endswith(('/flow-arguments-save', '/run-prepare', '/run-start')) for url in writes)
         assert not errors, errors
 
 
-def test_run_directory_groups_current_page_and_restores_real_prepared_run(root, browser):
+def test_run_directory_pipeline_branches_page_and_restore_real_prepared_run(root, browser):
     two_flows(root)
     value = prepared(root)
     with service(root, enable_runs=True) as app, page_for(browser, app) as (page, errors):
@@ -141,23 +134,24 @@ def test_run_directory_groups_current_page_and_restores_real_prepared_run(root, 
             query = parse_qs(urlsplit(route.request.url).query)
             seen.append(query)
             assert query.get('limit') == ['20']
-            old = query.get('cursor') == ['fixture-older']
+            cursor = query.get('cursor', ['fixture-offset-0'])[0]
+            offset = int(cursor.removeprefix('fixture-offset-'))
             route.fulfill(status=200, content_type='application/json', body=json.dumps({
-                'runs': rows[20:] if old else rows[:20], 'total': len(rows),
-                'next_cursor': None if old else 'fixture-older', 'index': {'complete': True}}))
+                'runs': rows[offset:offset+20], 'total': len(rows),
+                'next_cursor': 'fixture-offset-' + str(offset+20) if offset+20<len(rows) else None, 'index': {'complete': True}}))
         page.route('**/runs?*', run_page)
         tab(page, 'monitor')
         expect(page.locator('.wb-run-record')).to_have_count(20)
         expect(page.locator('.wb-run-group')).to_have_count(2)
-        expect(page.locator('.wb-history-heading')).to_contain_text('第 1 页 · 本页 20 条 · 全项目共 22 条')
+        expect(page.locator('.wb-history-page')).to_contain_text('第 1 页 · 本页 20 条 · 共 22 条')
         assert not any(query.get('cursor') for query in seen)
         for row in page.locator('.wb-run-record').all():
-            assert row.locator('.wb-record-time').inner_text().startswith('2023-')
+            assert row.locator('strong').inner_text().startswith('2023-')
             assert row.locator('.wb-tag').inner_text()
         page.get_by_label('筛选本页运行状态', exact=True).select_option('failed')
         assert page.locator('.wb-run-record').count() == 6
         page.get_by_role('button', name='较早记录', exact=True).click()
-        expect(page.locator('.wb-history-heading')).to_contain_text('第 2 页 · 本页 2 条')
+        expect(page.locator('.wb-history-page')).to_contain_text('第 2 页 · 本页 2 条')
         expect(page.locator('.wb-run-record')).to_have_count(1)
         expect(page.get_by_role('button', name='较早记录', exact=True)).to_be_disabled()
         page.get_by_label('筛选本页运行状态', exact=True).select_option('')
@@ -170,14 +164,64 @@ def test_run_directory_groups_current_page_and_restores_real_prepared_run(root, 
         page.wait_for_function('id=>ForgeView.decodeView(location.hash)?.run_id===id', arg=value['run_id'])
         page.reload()
         expect(page.locator('.wb-run-record.selected')).to_have_attribute('data-run', value['run_id'])
-        page.locator('.wb-navigation-toggle').click()
-        expect(page.locator('.wb-history')).to_be_hidden()
-        page.get_by_role('button', name='运行记录', exact=True).click()
-        expect(page.locator('.wb-history')).to_be_visible()
+        expect(page.locator('.wb-navigation-toggle')).to_have_count(0)
+        # A pipeline branch filters the real bounded directory rather than
+        # losing the other project flows or mixing their run identities.
+        group = page.locator('.wb-run-group[data-entry="' + FIRST + '"]')
+        group.locator('summary').click()
+        expect(group.locator('.wb-run-record')).to_have_count(11)
+        expect(page.locator('.wb-run-group')).to_have_count(2)
+        expect(page.locator('.wb-run-record')).to_have_count(11)
+        group.get_by_role('button', name='较早记录', exact=True).click()
+        expect(group.locator('.wb-run-record')).to_have_count(1)
+        expect(group.locator('.wb-run-record')).to_contain_text('fixture-21')
+        expect(group.get_by_role('button', name='较早记录', exact=True)).to_be_disabled()
+        # Search only filters the directory; it does not overwrite the viewed run.
+        page.get_by_label('查找管道', exact=True).fill('navigation.py')
+        expect(group).to_be_hidden()
+        expect(page.locator('.wb-run-group[data-entry="' + SECOND + '"]')).to_be_visible()
+        expect(page.locator('.wb-run-bar')).to_contain_text(value['run_id'][-10:])
+        page.get_by_label('查找管道', exact=True).fill('')
+        page.get_by_role('button', name='最近运行', exact=True).click()
+        expect(page.locator('.wb-run-record')).to_have_count(20)
+        # A late list response from another branch cannot replace this one.
+        page.evaluate('''() => {
+          const original=fetch.bind(window);window.runListHeld=false;
+          window.fetch=async(...args)=>{
+            const response=await original(...args),url=new URL(String(args[0]),location.href);
+            if(url.pathname.endsWith('/runs')&&!runListHeld){runListHeld=true;return new Promise(resolve=>window.releaseRunList=()=>resolve(response));}
+            return response;
+          };
+        }''')
+        page.locator('.wb-run-group[data-entry="' + SECOND + '"] summary').click()
+        page.wait_for_function('() => window.runListHeld')
+        group.locator('summary').click()
+        expect(group.locator('.wb-run-record')).to_have_count(11)
+        page.evaluate('releaseRunList()')
+        expect(page.locator('.wb-run-record')).to_have_count(11)
+        assert group.locator('.wb-run-record').first.bounding_box()['height'] < 70
+        count = group.locator('.wb-run-count')
+        expect(count).to_have_text('11')
+        assert count.bounding_box()['height'] < 22
+        screenshot(page, 'project-run-tree-desktop')
+        # Hundreds of repeats must not trigger an unbounded history download.
+        # The first bounded scan may have no matches; its continuation remains usable.
+        rows[:] = [dict(real, run_id='sparse-navigation-' + str(i), entry=SECOND) for i in range(84)] + [real]
+        page.get_by_role('button', name='最近运行', exact=True).click()
+        expect(page.locator('.wb-run-record')).to_have_count(20)
+        before_scan = len(seen)
+        group.locator('summary').click()
+        expect(group).to_contain_text('当前历史范围没有此管道的记录')
+        assert len(seen) - before_scan == 3
+        expect(group.get_by_role('button', name='较早记录', exact=True)).to_be_enabled()
+        group.get_by_role('button', name='较早记录', exact=True).click()
+        expect(group.locator('.wb-run-record')).to_have_count(1)
+        expect(group.locator('.wb-run-record')).to_have_attribute('data-run', value['run_id'])
+        expect(group.get_by_role('button', name='较早记录', exact=True)).to_be_disabled()
         page.set_viewport_size({'width': 390, 'height': 920})
-        expect(page.locator('.wb-history')).to_be_hidden()
-        expect(page.locator('.wb-navigation-toggle')).to_have_text('运行列表')
+        expect(page.locator('.wb-history')).to_be_visible()
+        expect(page.locator('.wb-navigation-toggle')).to_have_count(0)
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
-        assert len(rows) == 22 and all(query.get('limit') == ['20'] for query in seen)
+        assert len(rows) == 85 and all(query.get('limit') == ['20'] for query in seen)
         screenshot(page, 'project-run-navigation-390')
         assert not errors, errors
