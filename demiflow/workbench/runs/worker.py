@@ -129,7 +129,7 @@ def execute(root, run_id, attempt=None):
         run.finish(dict(outcome='succeeded', finished_at=time.time()))
     except BaseException as exc:
         import traceback
-        traceback.print_exc(limit=12)
+        traceback.print_exc(limit=-12)
         # Previous independent writes remain available even if a later action failed.
         try:
             runs.register_results(root, run_id, attempt=attempt)
@@ -426,7 +426,7 @@ def _supervise(root, run_id, lease, attempt=None):
         final_status, final_details = status, details
     except BaseException as exc:
         import traceback
-        traceback.print_exc(limit=12)
+        traceback.print_exc(limit=-12)
         accounting_valid = process is None
         final_status = 'failed'
         final_details = dict(error={'type': type(exc).__name__, 'message': str(exc)[:2048]},
@@ -523,7 +523,7 @@ if __name__ == '__main__':
                 try:
                     supervise(Path(root), run_id, int(sys.argv[4]), attempt)
                 except BaseException:
-                    traceback.print_exc(limit=12)
+                    traceback.print_exc(limit=-12)
                     raise
         finally:
             logger.close()
