@@ -617,8 +617,9 @@ class DataflowExecution:
         gpu_budget = int(sum(host.logical_resources.get('gpu', 0) for host in self._services.hosts))
         if gpu_budget:
             budget['accelerator_gpu'] = gpu_budget
+        from .dataflow_services import resource_scope_binding
         self._services.resources.state.open_scope(self._fence(), ResourceScope(
-            self._scheduler.scope_id, self._run_id(), {"provider": self._policy.provider},
+            self._scheduler.scope_id, self._run_id(), resource_scope_binding(self._services.resources, self._policy),
             self._fence(), budget))
         self._scope_open = True
         if self._action.replaying and self._action.context.journal.source_binding(

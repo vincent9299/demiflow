@@ -765,10 +765,16 @@ class RunJournal:
                 pass
             yield None
 
-    def claim_execution(self, configuration, fence):
+    def claim_execution(self, configuration, fence, *, recover_resources=False):
         with self._publication_lease(configuration['limits'].get('admission_timeout_s', 30)):
             self._check_maintenance_deadline()
             attempt = self._claim_execution(configuration, fence)
+        if recover_resources:
+            # Only callers holding the original runtime lease opt in. Old
+            # physical workers must retire before their object leases can let
+            # published GC finish, including receipt-only action replay.
+            from .dataflow_resource_recovery import recover_execution_resources
+            recover_execution_resources(self, configuration, fence)
         self._reconcile_published_gc(fence)
         return attempt
 
@@ -814,16 +820,33 @@ class RunJournal:
             if (not exclusive_here(self.directory / '.dataflow-store') and
                     db.execute("SELECT 1 FROM runtime_dataflow_gc WHERE status!='done' LIMIT 1").fetchone()):
                 raise ExecutionConflict('Published artifact reconciliation must finish before publication')
-            row = db.execute('SELECT attempt,fence FROM runtime_owner').fetchone()
-            state = json.loads(db.execute('SELECT document FROM execution_state').fetchone()[0])
-            if row is None or row != (state['attempt'], fence):
-                raise ExecutionConflict('Stale execution owner cannot publish or mutate progress')
-            configuration = json.loads(db.execute('SELECT document FROM runtime_identity').fetchone()[0])
-            page_size = db.execute('PRAGMA page_size').fetchone()[0]
-            maximum = configuration['limits']['max_control_bytes'] // page_size
-            if maximum < db.execute('PRAGMA page_count').fetchone()[0]:
-                raise RecoveryContractError('Execution control store exceeds disk budget')
-            db.execute('PRAGMA max_page_count=' + str(maximum))
+            self._check_execution_owner(db, fence)
+            yield db
+
+    def _check_execution_owner(self, db, fence):
+        from .recovery_contract import RecoveryContractError
+        row = db.execute('SELECT attempt,fence FROM runtime_owner').fetchone()
+        state = json.loads(db.execute('SELECT document FROM execution_state').fetchone()[0])
+        if row is None or row != (state['attempt'], fence):
+            raise ExecutionConflict('Stale execution owner cannot publish or mutate progress')
+        configuration = json.loads(db.execute('SELECT document FROM runtime_identity').fetchone()[0])
+        page_size = db.execute('PRAGMA page_size').fetchone()[0]
+        maximum = configuration['limits']['max_control_bytes'] // page_size
+        if maximum < db.execute('PRAGMA page_count').fetchone()[0]:
+            raise RecoveryContractError('Execution control store exceeds disk budget')
+        db.execute('PRAGMA max_page_count=' + str(maximum))
+
+    @contextmanager
+    def _resource_cleanup_guard(self, fence):
+        """Fence only resource retirement, whose exit proof must precede GC.
+
+        RunResourceState's cleanup-only instance restricts this transaction to
+        ABANDON, ensure_absent and cleanup observations. Publication and normal
+        resource admission continue through execution_guard and its GC gate.
+        """
+        self._check_maintenance_deadline()
+        with self._transaction() as db:
+            self._check_execution_owner(db, fence)
             yield db
 
     def release_execution(self, fence):
