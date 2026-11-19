@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import signal
+
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,7 @@ import uuid
 from demiflow.forge.development.managed import ReviewAuthority
 from demiflow.forge.development.project import ForgeError
 from demiflow.resources.process_observation import UNIT_ENV
+from demiflow.workbench.conversations.versions import is_qualified
 from .common import wire
 from .deepseek import DeepSeek
 from .policy import proxy_environment
@@ -39,7 +41,7 @@ def review_authority(state_root):
 def review_capabilities(provider_name, config):
     available = False
     reason = 'No independently qualified model-only review route is configured'
-    if provider_name == 'deepseek' and config.get('version') == '0.2.1-rc.2':
+    if provider_name == 'deepseek' and is_qualified('deepseek', config.get('version')):
         executable = Path(config.get('executable', '')).resolve()
         route = config.get('model_provider', 'deepseek-official')
         credentials = (bool(config.get('native_credentials')) if route == 'deepseek-account'
@@ -48,7 +50,7 @@ def review_capabilities(provider_name, config):
                      Path(config.get('node', '')).is_file() and credentials and
                      route in {'deepseek-account', 'deepseek-official'})
         if available: reason = 'Pinned native LLM service; one independent request with no tools'
-    elif provider_name == 'codex' and config.get('version') == '0.164.0':
+    elif provider_name == 'codex' and is_qualified('codex', config.get('version')):
         url = urlsplit(config.get('base_url', ''))
         available = bool(config.get('credential_env') and os.environ.get(config['credential_env']) and
             url.scheme in {'https', 'http'} and url.hostname and not url.username and not url.password and

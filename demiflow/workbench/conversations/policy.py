@@ -16,6 +16,7 @@ from demiflow.workbench.conversations.common import safe_path
 from demiflow.workbench.conversations.common import strict_json
 from demiflow.workbench.conversations.common import text
 from demiflow.workbench.conversations.execution import execution_facts
+from demiflow.workbench.conversations.versions import is_qualified
 
 PROXY_ENVIRONMENT = ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'NO_PROXY', 'no_proxy')
 
@@ -172,7 +173,7 @@ class Deployment:
             path = Path(provider['executable'])
             if not path.is_absolute() or not path.is_file():
                 reject('Provider executable must be an installed absolute path')
-            if provider['version'] != {'codex': '0.164.0', 'deepseek': '0.2.1-rc.2'}[name]:
+            if not is_qualified(name, provider['version']):
                 reject('Provider version has not been qualified')
             text(provider['model'], 128)
             if provider.get('native_credentials'):
