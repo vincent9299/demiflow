@@ -46,6 +46,7 @@
 .wb-result-preview table{table-layout:auto;width:max-content;min-width:100%}
 .wb-result-preview th,.wb-result-preview td{width:220px;min-width:180px;max-width:320px;overflow-wrap:anywhere;vertical-align:top}
 .wb-result-preview th{position:sticky;top:0;background:#f5f7fb;z-index:1;white-space:nowrap}
+.wb-result-preview th:first-child{width:220px}
 .workbench .wb-run-group .wb-run-record[hidden]{display:none!important}
 .workbench .wb-runs-layout .wb-run-group .wb-run-record{grid-template-columns:minmax(0,1fr) auto;padding:3px 8px!important;gap:8px!important;margin:1px 0;height:28px;min-height:28px;border-radius:5px!important}
 .workbench .wb-run-group .wb-run-record>strong{grid-column:1;grid-row:1;font-size:12px;font-weight:400;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
