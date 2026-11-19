@@ -700,7 +700,8 @@ def test_w009(tmp_path):
 # --- W010 facts._physical_summary ------------------------------------------
 
 def test_w010():
-    from demiflow.workbench.runs import facts
+    # The historical-layout summary is produced by the engine reader since P4.
+    from demiflow.execution import sealed_plan_facts as facts
     graph, occs = make_graph("a0")
     physical = make_physical(graph, limitations=("limit",))
     view = hist.build_plan_view(graph, make_sealed(), physical, observations=())
@@ -740,12 +741,18 @@ def test_w011():
     assert entry["code_pin_ref"] == view["code_pin_ref"]
     assert entry["identity_bridge"]["available"] is False
     # v1/v2 entry keeps the historical shape.
+    # The engine reader hands the workbench the summarised physical plan in plan_view
+    # (P4); the workbench passes it through without re-deriving it.
+    from demiflow.execution import sealed_plan_facts
+    physical_plan = {"plan_id": "p", "plan_revision": 1, "recovery": {},
+                     "worker_groups": [], "stages": [], "channels": []}
+    summary = sealed_plan_facts._physical_summary(physical_plan)
     v1_result = {"action_id": "a0", "plan_id": "p", "sealed_at": 1, "logical_dag": {"nodes": []},
-                 "physical_plan": {"plan_id": "p", "plan_revision": 1, "recovery": {},
-                                   "worker_groups": [], "stages": [], "channels": []},
+                 "physical_plan": physical_plan, "plan_view": {"physical": summary},
                  "artifact_manifest_ref": {"manifest_id": "m", "sha256": sha("m")}}
     v1_entry = facts._sealed_entry(v1_result)
     assert "version" not in v1_entry and v1_entry["dag"] == {"nodes": []}
+    assert v1_entry["physical"] is summary
 
 
 # --- W012 facts.join_node_observations -------------------------------------

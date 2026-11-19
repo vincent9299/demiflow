@@ -61,6 +61,7 @@ def read_native_execution(workspace, run_id, *, attempt, owned_root):
     from demiflow.execution.run_journal import RunJournal
     from demiflow.execution.sealed_plans import load_sealed_plan
     from demiflow.workbench.runs import manager as runs, facts
+    from demiflow.execution.publication_facts import inspect_write_receipt
     from demiflow.workbench.graph import model
 
     workspace = _owned(workspace, owned_root)
@@ -124,7 +125,7 @@ def read_native_execution(workspace, run_id, *, attempt, owned_root):
             continue
         action_id = output['action_id']
         assert any(p['action_id'] == action_id for p in plans)
-        receipt = runs._native_execution_receipt(journal, action_id)
+        receipt = inspect_write_receipt(journal, action_id)
         assert receipt is not None and output['result'] is not None
         reference = output['result']['ref']
         _, resolved, uri = runs.result_table(workspace, run_id, output['name'])
