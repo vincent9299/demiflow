@@ -1,5 +1,7 @@
 # demiflow
 
+开发、合流、验收、发布与归档必须遵循 [DemiFlow 发版规范](docs/repository-rules.md)。
+
 声明式数据管线引擎（自 [Demiurge](https://github.com/vincent9299/Demiurge) 独立化，2026-09-04 起独立维护）。
 
 新增、修改和评审代码须遵守 [开发约束：有限资源](AGENTS.md)。预算必须贯穿读取、转换、并发、临时结果和写入，不能默认输入字段很小；资源保证以各接口实际覆盖的分配范围为准。
