@@ -27,7 +27,8 @@ def runner(*, fanout=1, rows=128):
     r.outputs=[]
     def finish(port,wait_for_calls=False):
         yield from range(rows)
-    kernel=NS(pending_calls=False,cooperative_finish=True,finish_replayable=True,finish=finish)
+    kernel=NS(pending_calls=False,cooperative_finish=True,finish_replayable=True,finish=finish,
+        _spec=NS(kind='relational'))
     r.e=NS(_node_specs={'op':NS(kind='relational')},_channels=channels,
         _kernels={('op','p'):kernel},_cancel_event=threading.Event())
     incoming=NS(edge_id='input',producer='producer',consumer='op',input_port='main')
@@ -39,6 +40,9 @@ def runner(*, fanout=1, rows=128):
             lease=channels.reserve(spec.channel_id,spec.consumer_partitions[0],rows=1,size_bytes=4096,operation_id=key)
             r._credits[key]=(lease,None);r._credit_payloads[key]={'record':record}
     r._output=output;r._finish_node=lambda occ:r._finished.add(occ)
+    # No finite input reader in this carrier: its step consumes nothing.
+    r._finite_input=NS(step=lambda *,max_records,deadline_ms:0)
+    r._relational_regions={};r._region_members=frozenset()
     return r
 
 

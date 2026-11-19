@@ -143,7 +143,9 @@ def test_publish_does_not_sleep_over_credit_ack_between_check_and_wait():
     value.bounds = bounds()
     value.services = SimpleNamespace(check_stop=lambda: None)
     value.e._next_operation_id = lambda kind: 'new-delivery'
+    value.e._kernels = {}
     value._peer = SimpleNamespace(
+        _bytes=0,
         release=lambda key: operations.append(('release', key)),
         put=lambda raw: operations.append(('put', raw)) or {'key':'new-buffer'})
     value._send = lambda kind,payload: sent.append((kind,payload))

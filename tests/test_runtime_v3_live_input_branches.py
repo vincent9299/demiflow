@@ -59,8 +59,8 @@ def test_live_iterator_partial_cut_cannot_resume_a_new_attempt(tmp_path, monkeyp
     source = _live_source(str(tmp_path/'calls'), 10)
     original = DataflowCheckpointCoordinator.commit
     images = []
-    def stop_after_commit(coordinator, cut_id, *, sinks):
-        image = original(coordinator, cut_id, sinks=sinks)
+    def stop_after_commit(coordinator, cut_id, **options):
+        image = original(coordinator, cut_id, **options)
         images.append(image)
         assert not image.cut.final
         raise StopAfterCut()
