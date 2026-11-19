@@ -114,6 +114,9 @@ def run(*, source, target, other):
             assert all(o['result']['ref']['row_count'] == 3 for o in resumed['outputs'])
             page.get_by_label('运行尝试', exact=True).select_option('1')
             expect(page.locator('.wb-run-bar')).to_contain_text('历史尝试 · 只读')
+            # Selecting an old attempt must not replace the latest run summary.
+            expect(page.locator('.wb-run-record')).to_contain_text('已完成')
+            expect(page.locator('.wb-run-record')).not_to_contain_text('已停止')
             expect(page.locator('.wb-inspector')).not_to_be_visible()
             expect(page.locator('.wb-run-bar').get_by_role('button', name='停止', exact=True)).to_have_count(0)
             expect(page.get_by_role('button', name='恢复运行', exact=True)).to_have_count(0)

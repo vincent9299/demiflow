@@ -1340,7 +1340,7 @@
         const refreshGraph=()=>data().graph&&fetchGraph(target.ticket,{preserveSelection:true});
         if(value.unchanged){paintRunFacts(value.freshness);if(active(run.status)&&Date.now()-lastRunGraphAt>=5000)await refreshGraph();return;}
         snapshot=value;run={...run,...value,attempts:run.attempts?.map(a=>a.attempt===value.attempt?{...a,status:value.status}:a)};
-        if(records){const i=records.runs.findIndex(r=>r.run_id===run.run_id);if(i>=0){
+        if(records&&run.attempt===run.current_attempt){const i=records.runs.findIndex(r=>r.run_id===run.run_id);if(i>=0){
           const previousStatus=records.runs[i].status;records.runs[i]={...records.runs[i],...run};
           if(previousStatus!==run.status)paintHistory();
           else for(const row of historyPanel.querySelectorAll('.wb-run-record'))if(row.dataset.run===run.run_id){
