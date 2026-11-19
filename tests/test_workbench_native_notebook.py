@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 import time
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 import http.client
 
 import pytest
@@ -125,6 +125,9 @@ def test_native_edit_execute_save_reopen_and_dictionary(browser,native_project,t
     with service(None,registry=path,notebook_python=PYTHON) as app:
         context=browser.new_context(viewport={'width':1440,'height':900})
         page=context.new_page();errors=[];page.on('pageerror',lambda error:errors.append(error.stack))
+        network=[]
+        page.on('requestfailed',lambda request:network.append(dict(path=urlsplit(request.url).path,error=request.failure)))
+        page.on('response',lambda response:network.append(dict(path=urlsplit(response.url).path,status=response.status)) if response.status>=400 else None)
         try:
             view=quote(json.dumps(dict(v=2,workspace=key,kind='tables')))
             page.goto(app.origin+'/#token='+app.token+'&view='+view)
@@ -159,6 +162,7 @@ def test_native_edit_execute_save_reopen_and_dictionary(browser,native_project,t
             assert not errors, "\n".join(errors)
         finally:
             (tmp_path/'browser-errors.json').write_text(json.dumps(errors,indent=2))
+            (tmp_path/'network-errors.json').write_text(json.dumps(network,indent=2))
             page.screenshot(path=str(tmp_path/'last-page.png'))
             for f in page.frames:
                 if '/jupyter/' in f.url:
@@ -176,6 +180,27 @@ def test_native_edit_execute_save_reopen_and_dictionary(browser,native_project,t
                     text=(instance.state/'server.log').read_text()
                     (tmp_path/'jupyter.log').write_text(text.replace(instance.token,'REDACTED'))
             context.close()
+
+
+def test_native_cold_loads_do_not_drop_script_chunks(browser,native_project,tmp_path):
+    _,path,key=native_project
+    facts=[]
+    with service(None,registry=path,notebook_python=PYTHON) as app:
+        try:
+            for index in range(4):
+                context=browser.new_context(viewport={'width':1440,'height':900})
+                page=context.new_page();row=dict(index=index,network=[],errors=[]);facts.append(row)
+                page.on('response',lambda response:row['network'].append(dict(path=urlsplit(response.url).path,status=response.status)) if response.status>=400 else None)
+                page.on('pageerror',lambda error:row['errors'].append(str(error)))
+                try:
+                    view=quote(json.dumps(dict(v=2,workspace=key,kind='tables')))
+                    page.goto(app.origin+'/#token='+app.token+'&view='+view)
+                    frame=page.frame_locator('iframe.native-notebook-frame')
+                    expect(frame.locator('.jp-Notebook')).to_be_visible(timeout=60000)
+                    frame.locator('body').evaluate('async()=>{await window.jupyterapp.restored;await window.jupyterapp.shell.currentWidget.sessionContext.ready;}')
+                    assert not row['errors'] and not row['network'],row
+                finally:context.close()
+        finally:(tmp_path/'cold-loads.json').write_text(json.dumps(facts,indent=2))
 
 
 def test_native_interrupt_restart_drafts_project_switch_and_rename(browser,native_project,tmp_path):

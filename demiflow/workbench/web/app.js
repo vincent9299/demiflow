@@ -849,15 +849,17 @@
       if(projectManageEnabled){const manage=$('div',undefined,'project-actions');manage.id='project-actions';manage.hidden=true;projectHeader.append(manage);iconButton('新建项目',()=>projectDialog(true),manage,['M12 5v14M5 12h14']);iconButton('注册已有项目',()=>projectDialog(false),manage,['M3 7V5h6l2 2h10v13H3z','M12 10v7m-3-3 3 3 3-3']);}
       await refreshProjects();
       if(initialError)throw initialError;
+      // Register before rendering: the first page can be visible while its
+      // trailing audit reads are still pending, including after a reload.
+      window.addEventListener('popstate',async()=>{
+        closeProjectPicker();
+        if(reloadSessionEntry())return;
+        try{const value=V.decodeView(location.hash)||target('overview');const id=projectFor(value);if(id!==workspaceId)await switchProject(id,value,'none');else await openView(value,{historyMode:'none'});}
+        catch(err){if(!err?.presented)error(main,err);}
+      });
       if(!projectList.length)clearProject();
       else await switchProject(initialView?projectFor(initialView):projectList[0].workspace_id,initialView,'replace');
     }catch(err){if(err.name!=='AbortError'){viewState='error';if(!err.presented)error(main,err);syncStatus('暂未更新：'+err.message,true);if(!context)main.append($('p','请从 workbench view 输出的带会话 token 地址打开。','muted'));}}
-    window.addEventListener('popstate',async()=>{
-      closeProjectPicker();
-      if(reloadSessionEntry())return;
-      try{const value=V.decodeView(location.hash)||target('overview');const id=projectFor(value);if(id!==workspaceId)await switchProject(id,value,'none');else await openView(value,{historyMode:'none'});}
-      catch(err){if(!err?.presented)error(main,err);}
-    });
     document.addEventListener('visibilitychange',()=>{
       if(document.hidden){clearTimeout(syncTimer);syncStatus('页面隐藏，暂停自动同步');return;}
       syncView().catch(()=>{});

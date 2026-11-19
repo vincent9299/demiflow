@@ -389,7 +389,11 @@ class WorkspaceServer(ThreadingHTTPServer):
         return {**value,'freshness':freshness}
 
     def process_request(self, request, address):
-        if not self.requests.acquire(blocking=False):
+        # Native Notebook boots many script chunks together. Let the bounded
+        # accept queue back-pressure a short burst instead of dropping a chunk
+        # while an earlier response is finishing. The ten-worker limit stays
+        # unchanged; sustained saturation still returns 503 after one second.
+        if not self.requests.acquire(timeout=1 if self.notebooks is not None else 0):
             try:
                 raw = b'{"code":"busy","error":"Request capacity exceeded","operation_started":false}'
                 request.settimeout(1)
