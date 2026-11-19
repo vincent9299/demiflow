@@ -14912,19 +14912,12 @@
     "failed_reports_sha256": "6f20349d919fc1964275906bb34318aface56d3206abf0101120542dd1431305"
    },
    "skip": "",
-   "cause": {
-    "flip_commit": "cf5de618",
-    "committed": "2026-11-17 02:57",
-    "subject": "Bind region live window and preserve actual per-node input observations",
-    "method": "在 Ray 环境、DEMIFLOW_V3_PROVIDER=ray_core 下二分调用阶段：用例最后一次修改的提交 9272433 调用通过，前一个提交 3d8de2c 调用通过，cf5de618 起调用失败（10 步，结果前后一致）",
-    "confidence": "high",
-    "note": "收尾阶段的文件描述符泄漏报错（baseline=12 now=24）在 9272433 就有，不是这个提交带来的；在这个 Ray 环境里该用例从最后一次修改起就没有完全通过过"
-   },
+   "cause": null,
    "ruling": {
-    "verdict": "product_regression",
+    "verdict": "undetermined",
     "by": "Claude，用户授权裁决（2026-11-19）",
-    "required": "负责人确认 cf5de618 之后生产者所有者丢失是否还能恢复到原确认",
-    "note": "疑似，把握中等。测试杀掉生产者 actor 后，动作现在以 ActorDiedError 失败，而不是恢复到原来的确认（前一个提交调用阶段通过）。收尾阶段的文件描述符泄漏报错从这个用例最后一次修改起就有，和这个提交无关。"
+    "required": "先让这个用例稳定下来（或确认不稳定的原因），再谈定性；收尾阶段的文件描述符泄漏请在负责人的 Ray 环境里确认",
+    "note": "无法定性：调用阶段不稳定。重复运行（Ray 环境，ray_core 提供方）：74d2f99 上 6 次里 4 次失败；我原先二分到的 cf5de618 上 4 次里 2 次失败，它的前一个提交上 4 次里也有 1 次失败。所以那次二分不成立，我撤回了“疑似产品退化”的裁决和定位。收尾阶段的文件描述符泄漏报错（baseline=12 now=24）每次都有，从这个用例最后一次修改起就有。"
    }
   },
   {
@@ -19815,6 +19808,31 @@
    },
    "failure": "见清单里的记录",
    "method": "单独运行这一个用例（标准环境，pytest，五个私有目录，没有回执），在未改动的 74d2f99 检出和分支检出上交替进行"
+  },
+  {
+   "lane": "standard",
+   "nodeid": "tests/test_runtime_v3_cache_frontier.py::test_real_driver_process_death_recovers_original_ack_and_suffix_cache[default]",
+   "outcome": "unstable",
+   "known_state": "基线的两次运行和第一次分支头重跑都通过，所以清单里没有它的记录；第二次分支头重跑时失败",
+   "runs": {
+    "74d2f99": "这个测试函数（6 个参数）跑 6 轮，3 轮各有 2 个参数失败",
+    "批次 2 分支头": "6 轮里 2 轮各有 2 个参数失败"
+   },
+   "failure": "第二个进程重开运行日志时 sqlite3.OperationalError: attempt to write a readonly database（驱动进程被杀之后）",
+   "method": "单独运行这一个用例，在不同提交的检出上重复（标准环境，pytest，五个私有目录，没有回执）"
+  },
+  {
+   "lane": "ray",
+   "nodeid": "tests/test_runtime_v3_node_loss.py::test_actual_producer_owner_loss_recovers_original_ack",
+   "outcome": "unstable",
+   "known_state": "基线运行时调用阶段失败、收尾阶段报错，清单里有它的记录；第二次分支头重跑时调用阶段通过",
+   "runs": {
+    "74d2f99": "调用阶段 6 次里 4 次失败",
+    "cf5de618": "4 次里 2 次失败",
+    "cf5de618 的前一个提交": "4 次里 1 次失败"
+   },
+   "failure": "调用阶段 ActorDiedError；收尾阶段的文件描述符泄漏每次都有",
+   "method": "单独运行这一个用例，在不同提交的检出上重复（Ray 环境，DEMIFLOW_V3_PROVIDER=ray_core，pytest，TMPDIR=/tmp，没有回执）"
   }
  ],
  "history": [
