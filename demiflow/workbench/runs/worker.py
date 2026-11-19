@@ -37,6 +37,15 @@ def allocation_guard(limits, *, native_execution=None):
 
 
 def execute(root, run_id, attempt=None):
+    from demiflow.workbench.runs.manager import directory
+    from demiflow.execution.host.control import RunJournal
+    # Callbacks and stop polls own separate bounded connections from the engine
+    # driver. Keep them for the process lifetime, without retaining transactions.
+    with RunJournal(directory(root, run_id), attempt=attempt).connection_scope() as run:
+        return _execute(root, run_id, run, attempt)
+
+
+def _execute(root, run_id, run, attempt=None):
     import importlib
     import signal
     import time
@@ -50,7 +59,6 @@ def execute(root, run_id, attempt=None):
     bind_parent()
     target, value = runs._load(root, run_id)
     manifest = value['manifest']
-    run = RunJournal(target, attempt=attempt)
     run.execution_status()
     work = runs.attempt_directory(target, 'work', attempt)
     stopped = [False]
@@ -231,7 +239,7 @@ class RunLog:
             self.stream = None
 
 
-def _supervise(root, run_id, lease, attempt=None):
+def _supervise(root, run_id, lease, attempt=None, *, run):
     import selectors
     import signal
     import subprocess
@@ -250,7 +258,6 @@ def _supervise(root, run_id, lease, attempt=None):
     from demiflow.workbench.runs.storage import scratch_bytes
     from demiflow.workbench.runs.storage import clean_stopped, cleanup_deadline, remove_attempt_work
     object_roots = object_locations(manifest=manifest, target=target)
-    run = RunJournal(target, attempt=attempt)
     run.execution_status()
     work = runs.attempt_directory(target, 'work', attempt)
     logs = runs.attempt_directory(target, 'logs', attempt)
@@ -492,7 +499,10 @@ def supervise(root, run_id, lease, attempt=None):
     # The inherited execution lease covers initialization and every finalization
     # failure, including accounting, cleanup and index publication.
     try:
-        return _supervise(root, run_id, lease, attempt)
+        from demiflow.workbench.runs.manager import directory
+        from demiflow.execution.host.control import RunJournal
+        with RunJournal(directory(root, run_id), attempt=attempt).connection_scope() as run:
+            return _supervise(root, run_id, lease, attempt, run=run)
     finally:
         os.close(lease)
 
