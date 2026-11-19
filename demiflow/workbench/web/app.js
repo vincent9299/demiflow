@@ -712,7 +712,7 @@
     else dialog.append($('p','此服务未授予项目管理权限。','notice'));
     button('关闭',()=>dialog.close(),dialog);document.body.append(dialog);dialog.addEventListener('close',()=>dialog.remove(),{once:true});dialog.showModal();
   }
-  function clearProject(message='在原项目目录中阅读说明、查看数据与 Case、核对流程和检查结果。') {
+  function clearProject(message='在项目中阅读说明、用 Notebook 分析数据、核对流程和检查结果。') {
     if(!canLeaveViews())return;
     readController.abort();readController=new AbortController();
     viewEpoch++;selectionEpoch++;auditRequest++;disposeReaders();closeProjectPicker();
@@ -823,7 +823,7 @@
     const actions=$('div',undefined,'header-actions');
     const settings=iconButton('项目设置',settingsDialog,actions,['M4 7h10m4 0h2M4 17h2m4 0h10M14 4v6M10 14v6']);settings.id='project-settings';
     iconButton('刷新当前视图',refreshView,actions,['M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 11-2l3 3M4 16l3 3a7 7 0 0 0 11-2']);
-    iconButton('帮助',()=>documentDialog('使用 DemiFlow','DemiFlow 从原项目出发：阅读 README，查看固定版本数据与 Case，核对入口、配置和规范检查，再按权限准备运行。\n\n刷新和自动同步只读取当前状态；检查会保存报告。未识别不表示没有内容，静态检查通过不表示行为验证或语义审查已完成。'),actions,['M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0','M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01']);header.append(actions);
+    iconButton('帮助',()=>documentDialog('使用 DemiFlow','DemiFlow 从原项目出发：阅读文档，用原生 Jupyter 分析数据，核对入口、配置和规范检查，再按权限准备运行。\n\n刷新和自动同步只读取当前状态；检查会保存报告。未识别不表示没有内容，静态检查通过不表示行为验证或语义审查已完成。'),actions,['M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0','M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01']);header.append(actions);
     const crumb=$('span','项目总览','sr-only');crumb.id='workspace-path';title.append(crumb);
     const status=$('details',undefined,'workspace-status'),statusSummary=$('summary'),statusPanel=$('div',undefined,'workspace-status-panel');status.id='workspace-status';status.hidden=true;
     statusSummary.setAttribute('aria-label','工作区状态');
