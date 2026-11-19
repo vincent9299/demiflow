@@ -1936,5 +1936,24 @@
     "required actual execution mapped to proposed invariant set",
     "production stage reporting not implemented",
     "history and pre-side-effect refusal checks not run"
-  ]
+  ],
+  "design_v2_narrow_probe": {
+    "source_sha": "122edf4bd0c827338846abd0114f0b36cf8c1b6d",
+    "design_parent_sha": "8f0c689081da543dadeb497eb32f2cd52683e245",
+    "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/E/design-v2/source-reference-receipt.json",
+    "receipt_sha256": "9ca14718f55b53ec03bb201ca4dbdecb659234261d444a493fce5860f895add9",
+    "script": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/E/design-v2/probe-source-reference.py",
+    "script_sha256": "41dfa65650c7ac484f08cc6008bbaa7f3474d40bc0b90f368dc4f126d6e9b7d0",
+    "stdout": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/E/design-v2/probe-source-reference.stdout.log",
+    "stderr": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/E/design-v2/probe-source-reference.stderr.log",
+    "result": "3 cases checked; {} and [{}] reproduce collector TypeError after shape finding; [] produces shape and source findings without error",
+    "baseline_tests_and_full_corpus_rerun": false,
+    "implementation_verified": false,
+    "additional_pending_checks": [
+      "full configuration_findings/report scan stays total across existing finite JSON matrix, including dependent rules",
+      "source_reference bad-shape cases retain findings and skip unsafe lookup",
+      "combined prior and later independent findings are preserved",
+      "unexpected checker exception retains partial findings and marks incomplete"
+    ]
+  }
 }

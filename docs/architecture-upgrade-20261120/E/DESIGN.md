@@ -1,6 +1,8 @@
-# E：P2 配置不变量门槛与窄拒绝设计 v1
+# E：P2 配置不变量门槛与窄拒绝设计 v2
 
 本设计绑定 `main-20261119-3` / `122edf4bd0c827338846abd0114f0b36cf8c1b6d`。任务树 `/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/compiler/config-invariants-20261120`，分支 `gpt/compiler/config-invariants-20261120`。作者 E；日期 2026-11-20；状态 **仅设计，待父协调/Fable 审阅；E2 不具备切换证据**。本提交不修改产品或测试实现。
+
+v2 仅接受父协调 PARENT-REVIEW 的窄补充：total 合同覆盖 shape、跨字段/跨节点规则以及完整收集过程，保证坏字段不使已收集 findings 丢失。v1 与其47项基线/完整语料证据原样保留；本轮只复核 source_reference 的三个反例。Fable 因额度中断，仍无独立通过；本轮不调用 Fable 或更换模型。
 
 建议批准 E1 的证据和窄校验准备工作。只有本文件第 7 节门槛实际全部满足且父协调裁定后，才由原作者做 E2；当前保留生产告警。设计通过不等于证据门槛通过，也不等于发版、预览换版或业务运行授权。
 
@@ -94,7 +96,7 @@ P2 v4 §4.4/§5/§6 和 GPT 回复要求先补证据再收紧；2026-11-20 TASK-
 | `task_outside_scope` | 已知其他 transform 不带 task 三键 | 存在即报告；不扩大 TASK_KINDS | 确定 invariant 候选 |
 | `native_key_owner` | native_key 存在只随 acquire/search | finalize/producer 无 key 合法；不能补推业务输入 | 确定 invariant 候选 |
 | `batch_default_conflict` | default_batch_size 不与 truthy declared batch_size 同时出现 | 未声明且无 executor 时缺失合法；沿用现有 truthiness，不顺便改 0/None 的 SDK 规则 | 确定 invariant 候选 |
-| `source_reference` | lance_key_source 存在时指向本图 source | 缺失是否必需仍由 writer/现有声明决定；不加历史必填 | 确定 invariant 候选 |
+| `source_reference` | lance_key_source 先通过非空 str 形状检查，才查本图 source；坏形状已有 shape finding，跳过依赖该形状的引用查找 | 缺失是否必需仍由 writer/现有声明决定；不加历史必填；不能把可 hash 的 tuple 当合法文本 | 确定 invariant 候选；完整扫描的 total 合同适用 |
 | `shared_membership` | shared_actor mapping 的 members 包含本 occurrence | 无 shared 合法；不升级历史无 actor_binding_version 的图 | 确定 invariant 候选；runtime shared_binding 原校验保留 |
 | `carrier_pair` | output_carrier 的真实出边有匹配 input_carrier；现 writer 仅 compact join→write_lance | 未启用 compact 时两键皆无合法；None 不可当合法 text | 暂不直接提升。E1 证明唯一消费边或按每条边校验，补 fanout/顺序反例，再定该项 |
 | `check_error` | validator 内部异常/未完成 | 绝不算零 | E1 test/evidence 失败；生产继续 warning。E2 仅明确 invariant 能拒绝，不把 validator 异常当用户配置错误 |
@@ -135,13 +137,21 @@ source/model/dataclass 声明的字段只做当前准入观测，不新建字段
 
 ## 4. E1 拟实现：让证据能区分“零”“未观察”“检查失败”
 
-1. 在原 schema 模块内引入稳定 finding 分类；28 个 shape 对所有合法 JSON 类型必须是 total predicate。当前 `{}` 作为 native_operation 或 publication_workspace.schema 会触发 TypeError，report 又返回空：本次已实测，见 `check-error-counterexamples.json`。修复仅把这类明确类型错变成 shape finding，仍告警；不改图。
+1. 在原 schema 模块内引入稳定 finding 分类；**total 合同覆盖完整扫描，不只28个 shape predicate**。输入范围是现有 DTO 接受的有界 finite JSON 配置（含冻结后的 MappingProxyType/tuple），不包含任意恶意 Python 对象或绕过 DTO 的畸形图结构。shape、跨字段、跨节点和收集阶段都不得因坏字段类型崩溃或丢失已产生 findings。v1 已复现 native_operation={} 与 publication_workspace.schema={} 的 shape 异常；v2 补充 lance_key_source={} 和 [{}] 在 shape finding 之后的 source 引用查找异常。修复仍只报告、不改图、不增加生产拒绝。
 2. 保留 `configuration_findings`/`report_configuration` 的实际消费者。内部扫描以 nodes + `(producer_occurrence, consumer_occurrence)` 边视图为输入，不依赖无效 DataflowGraph DTO、不重算 dag_id、不复制 configuration 或序列化图。最终 public wrapper 同源使用它。
 3. 在 `capture_graph` 的四个完整节点边界记录阶段：capture（含声明、模型、源和 terminal budget）；graph；budget（codec/publication fit）；shared/final（共享绑定后及既有 validate_graph 后）。细粒度 declaration/source/model 归于 capture 的 writer 覆盖，不能说它们各有一张独立完整图。单 `compile_kernel_spec` 预检保持独立范围。
 4. 报告带结构化固定字段：阶段、进程 PID、action 的安全定位、node/edge 数、finding 分类计数、check_completed；现日志默认仍仅 warnings。成功 DEBUG 仍可让现插件观察。每阶段上限 20 条具体 finding，余项只计数；阶段是固定常数，最终报告不重复记录 shared 这一相同图；不输出配置值、模型正文、路径凭据。只追加有界元数据，不在生产落盘、不建观测数据库。
 5. pytest 插件以结构化字段判断，保留少数确有反例的 `reports_on_purpose`；逐项说明，不能批量豁免。普通不编译的单测允许 0 图，但声明要作为编译证据的 case 必须有 expected阶段/产物或预期拒绝；少阶段、checker error、未记录 case、少进程完成回执都是缺口。
 6. 新增测试/证据工具 `tests/configuration_schema_evidence.py`：显式安装进程内 observer、输出有限每进程 JSON 回执，不通过 import 自动改生产 logger。它复用实际判定，不重写 schema。父进程只汇总本轮声明的 PID/角色与已完成回执，不把自身 logger 当 worker 遥测；无完成记录是 unobserved/not-run，不能补成 0。
 7. 优先给已有 compile corpus 增加稳定阶段观察与失败反例；不改函数身份夹具 `compile_contract_functions.py` 或结构 golden 来追绿。当前阶段探针在 shared-review 中只是临时测量工具，批准实施后持久的验证逻辑才落 tests。
+
+完整扫描的执行约束：
+
+- 每条语义规则先确认自己依赖的字段形状有效，再执行字典索引、成员查询或跨字段比较。复用本节点已经计算的形状判定或局部安全类型前置，不新建规则框架、第二份 schema 表或插件系统。
+- 对当前已知且适用 shape 的字段，形状非法先产生既有同源 `compiler_key_shape` finding；依赖该字段形状的语义规则跳过，不再猜其含义。可选的关联定位也只能是同源有界诊断，不能使同一形状错变成不可控重复报告。其他无依赖的规则与后续节点继续检查，已收集 findings 保留。admitted/声明同名字段优先规则保持；未知或不适用的字段不借此新增拒绝规则，后续语义操作仍须做局部安全类型前置，不能直接拿未经确认的值索引。
+- `lance_key_source` 必须先满足非空 str，再执行 `by_occurrence.get`。`{}` 冻结为 mappingproxy；`[{}]` 冻结为含 mappingproxy 的 tuple，二者在当前查找中不可 hash。`[]` 冻结为空 tuple，可 hash，当前实际结果是 shape+source 两条 finding，不能把它描述为同样抛错。修复后这三者都至少保留 shape finding，依赖非法形状的 source_reference 不执行；不能仅判断 hashability 来替代字段类型合同。
+- task 规则依赖 streaming_map 等条件、native_key_owner 依赖 native_operation、shared_membership 依赖 shared_actor 的安全结构、carrier_pair 依赖两端 carrier 文本时，同样遵守“先形状、后语义”。只跳过受坏字段影响的规则，不因一个字段错误提前返回整节点或整图。
+- 对已报告坏形状的依赖规则有意不执行，表示该字段合法性已经完成检查，不是无记录的未观察，也不产生 check_error；正常扫描完成仍带非零 findings。真正的非预期内部异常必须保留已经收集的 findings，并额外记录有界 check_error/check_completed=false，不能以返回空覆盖部分结果。
 
 阶段边界消息只观察已存在图，不产生源码/数据副作用。E1 仍不抛生产配置错误。任何 stage 检查自身异常应 warning + check_completed=false，测试明确失败，绝不返回“完整零报告”回执。现有 DataflowError、编译 bounds 拒绝、能力拒绝和错误顺序保持。
 
@@ -163,7 +173,7 @@ E2 不随 E1 自动落地，不以空 enforcement allowlist 的代码宣称完�
 
 不在 load_dataflow/load_sealed_dataflow、worker bundle 读取、KernelSpec/Graph DTO 构造器、read_history/result_reader 或恢复 journal 中插入新 schema validator。预封存 first-attempt 仍按原载体，不重新编译替代。
 
-内部 checker error 继续是 warning + incomplete（生产不因未证明规则增加拒绝）。E1 必须消除所有已知合法 JSON 触发的检查异常，E2 发布验收中只要仍有 checker error 或注入反例无法到达相应规则就不得切换。本策略把新拒绝限于已证明的不变量；不是宣称 check_error 提供了 fail-closed 准入保证。
+内部 checker error 继续是 warning + incomplete（生产不因未证明规则增加拒绝）。E1 必须消除所有已知有界 finite JSON 配置在 shape 或跨字段/跨节点扫描中触发的检查异常，E2 发布验收中只要仍有 checker error 或注入反例无法到达相应规则就不得切换。本策略把新拒绝限于已证明的不变量；不是宣称 check_error 提供了 fail-closed 准入保证。
 
 ## 6. 资源、身份和历史契约
 
@@ -199,7 +209,8 @@ E2 必须同时具备：
 | 本树47项 schema/corpus/inventory/compile_inputs 测试 | 显式 `-p configuration_schema_gate`，47 passed，0 failed/error/skipped；12.98s | 驱动范围内当前行为；未覆盖真实业务进程 |
 | 完整 corpus | 348 direct：293 compiled/55 refused；30 captured全编译；323个成功case | 结构与固定 baseline 相等；55拒绝逐项保留，不能算 schema 成功检查 |
 | 各阶段只读探针 | capture/graph/budget/shared/final各354次、323 unique cases；0 findings/0 check errors | 中间阶段是本次 wrapper 观测；原生生产只 final 354条DEBUG；重复来自真实默认窗口编译，不是354个业务 |
-| 负例探针 | native_operation={}、publication_workspace.schema={} 均 TypeError；report返回空但warning | 暴露 E1 必修证据歧义，不是 corpus 正例失败；原日志保存 |
+| v1 负例探针 | native_operation={}、publication_workspace.schema={} 均 TypeError；report返回空但warning | 暴露 E1 必修证据歧义，不是 corpus 正例失败；原日志保存 |
+| v2 窄反例探针 | source_reference：lance_key_source={}、[{}] 先yield shape finding再TypeError，report返回空；[] 则得到shape+source两条finding | 确认全扫描需total；只运行此3例，不代表修复已实现；raw stdout/stderr和receipt见tasks/E/design-v2 |
 | RefGen 七流程历史共享回执 | `refgen-formal-relocation-20261119/compile-seven-results.json`；7条compiled；REPORT列10项真实Dataset/Lance夹具通过 | 平台 e993cfd 且 UI 曾 dirty；未记录 schema 插件/阶段/子进程 complete，不能绑到122edf4零报告；替代外部模型，不是真模型执行 |
 | 旧 P2 delivery | 323图和旧四组驱动观察零报告 | 旧提交/旧环境、driver scope；不转抄为本次成绩 |
 
@@ -213,7 +224,7 @@ E2 必须同时具备：
 
 | 拟改文件/符号 | E1/E2 | 原因/消费者 |
 |---|---|---|
-| `planning/dataflow_configuration.py` | E1 分类、total predicates、阶段报告；E2 窄拒绝函数 | 唯一规则源；compiler和现有schema测试消费 |
+| `planning/dataflow_configuration.py` | E1 分类、完整扫描 total 合同、阶段报告；E2 窄拒绝函数 | 唯一规则源；compiler和现有schema测试消费 |
 | `planning/dataflow_compile.py:capture_graph/lower_action` | E1 阶段边界报告；E2 内部purpose | actual new compiler出口；不改lowering、writer或注册表 |
 | `planning/dataflow_policy.py:fit_default_stream_windows` | 仅E2传probe | 保留预算探测，不把历史入口间接加严 |
 | `execution/dataflow_schema.py:validate_literal_schema_replay` | 仅E2显式history_revalidation | 原SOURCE_CHANGED比较不变 |
@@ -231,7 +242,7 @@ E2 必须同时具备：
 
 ## 9. 实施顺序和契约验收矩阵
 
-- E1a：固定基线、现调用者与规则分类；修复 total-predicate 检查失败歧义；不改拒绝行为。提交后跑schema负例和有限JSON矩阵。
+- E1a：固定基线、现调用者与规则分类；修复完整扫描的 total 合同及 findings 保留歧义；不改拒绝行为。扩展现有schema负例和有限JSON矩阵，既测 shape，又实际运行依赖它的跨字段/跨节点收集过程。
 - E1b：阶段报告和opt-in证据工具；跑完整固定语料，核baseline结构/全图wire/声明/报告绑定/标签及55拒绝；对新增观察本身验证无新副作用。
 - E1c：真实管道证据分层汇总。缺口保持明确；以E1候选固定SHA交父协调/Fable。门槛未过则到此交付，状态E1-ready/E2-not-ready；不偷偷预留默认拒绝开关。
 - E2a（有条件）：加入已审的窄invariant集合和new/probe/history_revalidation消费者，错误有界；单独提交。
@@ -240,7 +251,8 @@ E2 必须同时具备：
 | 验收 | 具体行为/反例 | 证据及未验状态 |
 |---|---|---|
 | 分类 | unknown key/kind保持warning；known shape、identity、task、native_key等逐项code；同名声明不误伤 | 现18种变异全保留，再补None/bool/list/mapping；新分类待实施 |
-| total predicate | 28键在合法finite JSON各类型无异常；native_operation/publication反例成为shape；checker异常不计零 | 已证明两个基线缺陷；修复验收未跑 |
+| 完整扫描 total 合同 | 现有有限JSON矩阵覆盖28键的shape和各依赖规则，实际调用完整configuration_findings/report；source_reference补{}、[]、[{}]等，形状错先报告再跳过依赖语义；无关规则/后续节点继续 | v1两类shape缺陷与v2 source查找缺陷已复现；修复未实现/未验 |
+| findings 不丢失 | 在source反例上叠加前序occurrence错误和后续terminal错误，断言已有shape/identity/terminal findings均保留；意外checker异常保留partial findings并记incomplete，不能返回假零 | 待E1实施；不只单测COMPILER_KEYS.shape，不加新框架 |
 | corpus | 378条结果；323图各成熟阶段；capability拒绝不伪报成功 | 基线完成，候选待跑；完整命令在receipt |
 | 阶段覆盖 | 正常每stage有completed；阶段失败有结束状态；缺stage或无图不是零 | 当前仅探针，产品/持久守卫待实现 |
 | 默认值/报告桥 | six compile_inputs测试，map batch/partitions/task默认、None与缺失、execute/reuse和routed末端对应 | 基线6项在47内通过，候选重验 |
@@ -255,10 +267,10 @@ E2 必须同时具备：
 | 冷导入/边界 | `test_runtime_v3_compile_imports.py`、package ratchet、相关model symbol测试 | 未跑；仅受影响集合，不跑四线 |
 | 资源/诊断 | 固定小bounds、>20 findings、超长未知key、不输出配置值、取消/timeout回执incomplete | 待实施，不新增通用资源系统 |
 
-当前47项结果来自 pytest 原XML collection/execution：47 collected/executed/passed；0 failed/error/skipped；0 timeout；本次选定47范围内0 not-run。其余上述验证未执行，不并入47通过数。没有执行合入闸、全仓四线、Ray、多机、真实模型、工作台浏览器或真实业务。旧发布四线 tested_commit 是3640116而 release_commit为122edf4，本次不把其成绩改绑。
+v1 已执行的47项结果来自原 pytest XML collection/execution（v2 未重跑，不改绑测试源码）：47 collected/executed/passed；0 failed/error/skipped；0 timeout；本次选定47范围内0 not-run。其余上述验证未执行，不并入47通过数。没有执行合入闸、全仓四线、Ray、多机、真实模型、工作台浏览器或真实业务。旧发布四线 tested_commit 是3640116而 release_commit为122edf4，本次不把其成绩改绑。
 
 ## 10. 评审需要裁定和交接
 
 请求父协调/Fable 审：是否批准 E1；阶段成熟边界与内部purpose是否足够保护历史；carrier规则的多边语义；窄E2集合与证据要求是否适当。建议接受所有核心缺口为E2阻塞，E1仍独立推进。真实业务范围和必需执行证据由父协调依据已有授权组织，不由本作者启动新业务。无需用户决定新身份策略或兼容承诺，因为本任务不改变它们。
 
-本设计阶段交付 full base/design SHA、文档/源/证据 SHA-256、clean状态、原始日志、真实测试命令/环境和not-run清单；共享位置 `tasks/E/design-v1/`。父协调写review request/回应/状态，E作者不运行Fable、不更改CURRENT/INDEX/GUARDS。阶段完成返回并释放名额，后续修订与实现仍由原作者完成。
+本设计阶段交付 full base/design SHA、文档/源/证据 SHA-256、clean状态、原始日志、真实测试命令/环境和not-run清单；本轮共享位置 `tasks/E/design-v2/`，v1 的 `tasks/E/design-v1/` 原样保留。父协调写review request/回应/状态，E作者不运行Fable、不更改CURRENT/INDEX/GUARDS。阶段完成返回并释放名额，后续修订与实现仍由原作者完成。

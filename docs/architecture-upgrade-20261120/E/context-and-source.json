@@ -364,5 +364,26 @@
       "sha256": "913b226d4c631306fdae95070a0fe55a94f0f548dab97191c5d0d280e0d4d380",
       "limitation": "older source / no complete configuration stage and process observation; not E2 zero-report evidence"
     }
-  ]
+  ],
+  "design_v2_review": {
+    "scope": "narrow full-scan total contract revision; no product/test changes",
+    "files": [
+      {
+        "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/reviews/E-design-v1/PARENT-REVIEW.txt",
+        "sha256": "0caa3196ccd51641ee3b30141f0fb5732f5e26410eeb98bfe276ef2fc1783399",
+        "reading": "read-full"
+      },
+      {
+        "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/reviews/E-design-v1/parent-probe.py",
+        "sha256": "0886c5ff493c0da3331abcc01d3e1f0327336a70c7646863ddedfe7dc53faff3",
+        "reading": "read-full"
+      },
+      {
+        "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/reviews/E-design-v1/parent-probe-receipt.json",
+        "sha256": "1e9860ea7b42793a9b3c35878dac2dc11112bfbd1522c8abb294a515cdafa1ed",
+        "reading": "read-full"
+      }
+    ],
+    "fable_status": "quota-interrupted; no independent approval; no author invocation"
+  }
 }
