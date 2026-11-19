@@ -2,9 +2,6 @@
 main.native-data-active{padding:0!important;max-width:none!important;overflow:hidden}
 .native-data-workspace{display:grid;grid-template-columns:240px minmax(0,1fr);height:calc(100dvh - 68px);min-height:340px;background:#fff}
 .data-dictionary{min-width:0;padding:20px 12px;background:#f8f9fb;border-right:1px solid #e8eaf0;overflow:auto}
-.dictionary-heading{padding:0 10px 14px}
-.dictionary-heading h2{margin:0;font-size:14px;font-weight:600;color:#394252}
-.data-dictionary input[type=search]{width:100%;min-width:0;height:32px;padding:5px 10px;border:1px solid #e5e7ed;border-radius:7px;background:transparent;font-size:12px;margin-bottom:12px}
 .dictionary-table{margin:2px 0;border:0!important;background:transparent!important;padding:0!important}
 .dictionary-table>summary{display:flex;align-items:center;gap:8px;position:relative;list-style:none;border-radius:6px;padding:8px 8px 8px 22px;font-size:13px;color:#394252}
 .dictionary-table>summary::-webkit-details-marker{display:none}
@@ -27,4 +24,4 @@ main.native-data-active{padding:0!important;max-width:none!important;overflow:hi
 .native-notebook-frame{position:fixed;border:0;background:white;z-index:2}
 .native-notebook-frame[hidden]{display:none!important}
 @media(max-width:760px){.native-data-workspace{grid-template-columns:170px minmax(0,1fr);height:calc(100dvh - 110px)}.data-dictionary{padding:12px 6px}.dictionary-field{font-size:11px}}
-@media(max-width:480px){.native-data-workspace{grid-template-columns:125px minmax(0,1fr)}.dictionary-heading{padding:0 4px 10px}.dictionary-heading h2{font-size:12px}.dictionary-table>summary{font-size:11px}.dictionary-fields{padding-left:12px}.dictionary-field{flex-wrap:wrap;gap:0}.dictionary-field small{width:100%}.dictionary-version{display:none}.data-dictionary input[type=search]{font-size:11px;padding:5px}.native-notebook-status{margin:16px;font-size:12px}}
+@media(max-width:480px){.native-data-workspace{grid-template-columns:125px minmax(0,1fr)}.dictionary-table>summary{font-size:11px}.dictionary-fields{padding-left:12px}.dictionary-field{flex-wrap:wrap;gap:0}.dictionary-field small{width:100%}.dictionary-version{display:none}.native-notebook-status{margin:16px;font-size:12px}}

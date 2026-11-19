@@ -2,6 +2,29 @@
 (() => {
   'use strict';
   const $ = (tag, text, className) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (className) n.className = className; return n; };
+  // Shared navigation chrome; each view keeps ownership of its data and filters.
+  function navigationHeader({title,choices=[],value,onChange,searchLabel,onSearch,placeholder}) {
+    const element=$('div',undefined,'side-navigation-tools'),heading=$('div',undefined,'side-navigation-heading');
+    let choice;
+    if(choices.length){
+      const picker=$('label',undefined,'side-navigation-picker');choice=$('select');choice.setAttribute('aria-label',title);
+      for(const item of choices){const option=$('option',item.label);option.value=item.value;choice.append(option);}
+      choice.value=value;choice.onchange=()=>onChange(choice.value);
+      picker.append(choice,icon(['m8 10 4 4 4-4']));heading.append(picker);
+    }else heading.append($('h2',title,'side-navigation-title'));
+    const toggle=$('button',undefined,'side-navigation-search-toggle');toggle.type='button';toggle.title=searchLabel;toggle.setAttribute('aria-label',searchLabel);toggle.setAttribute('aria-expanded','false');
+    toggle.append(icon(['M21 21l-5-5','M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0']));
+    const actions=$('div',undefined,'side-navigation-actions');actions.append(toggle);heading.append(actions);
+    const field=$('div',undefined,'side-navigation-search'),search=$('input');field.hidden=true;
+    search.type='search';search.maxLength=128;search.placeholder=placeholder||searchLabel;search.setAttribute('aria-label',searchLabel);
+    search.oninput=()=>onSearch(search.value);
+    function close(){field.hidden=true;toggle.setAttribute('aria-expanded','false');search.value='';onSearch('');toggle.focus();}
+    toggle.onclick=()=>{if(!field.hidden){close();return;}field.hidden=false;toggle.setAttribute('aria-expanded','true');search.focus();};
+    field.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();}};
+    field.append(search);element.append(heading,field);
+    return {element,actions,search,setValue(next){if(choice)choice.value=next;}};
+  }
+  globalThis.ForgeNavigation=Object.freeze({header:navigationHeader});
   const json = value => JSON.stringify(value, null, 2);
   const offline = window.FORGE_EXPORT;
   const V = window.ForgeView;
@@ -543,10 +566,16 @@
     const toggle=button('文档目录',()=>{directory.hidden=!directory.hidden;layout.classList.toggle('document-catalog-closed',directory.hidden);toggle.setAttribute('aria-expanded',String(!directory.hidden));},bar);
     toggle.setAttribute('aria-controls',directory.id);toggle.setAttribute('aria-expanded',String(!matchMedia('(max-width:760px)').matches));
     directory.hidden=matchMedia('(max-width:760px)').matches;layout.classList.toggle('document-catalog-closed',directory.hidden);
-    directory.append($('h2','文档','document-directory-heading'));layout.append(directory,viewer);main.append(bar,layout);main.classList.add('readme-main');
+    const directoryHeader=ForgeNavigation.header({title:'文档',searchLabel:'搜索文档',placeholder:'筛选已展开的目录',onSearch:filterDocuments});
+    directory.append(directoryHeader.element);viewer.append(bar);layout.append(directory,viewer);main.append(layout);main.classList.add('readme-main');
     let disposed=false;const current=()=>!disposed&&epoch===viewEpoch&&project===workspaceId;
     registerViewHandle({dispose(){disposed=true;main.classList.remove('readme-main');}});
     const navigateDocument=path=>{if(current())return openView(target('overview',{document:path}));};
+    function filterDocuments(){
+      const term=directoryHeader.search.value.trim().toLocaleLowerCase();
+      for(const item of directory.querySelectorAll('.document-item'))item.hidden=!item.dataset.document.toLocaleLowerCase().includes(term);
+      for(const group of [...directory.querySelectorAll('.document-folder')].reverse())group.hidden=!!term&&!group.dataset.document.toLocaleLowerCase().includes(term)&&!group.querySelector('.document-item:not([hidden]),.document-folder:not([hidden])');
+    }
     async function folder(host,path='',offset=0){
       if(!current()||host.dataset.loading==='true')return;
       host.dataset.loading='true';
@@ -567,6 +596,7 @@
         }
         if(!result.entries.length&&offset===0)host.append($('p','没有 Markdown 文档','document-empty'));
         if(result.next_offset!==null){const next=button('更多文件',()=>folder(host,path,result.next_offset),host);next.className='document-page';}
+        filterDocuments();
       }catch(err){if(current()&&err.name!=='AbortError'){const message=$('p',err.message,'document-list-error');host.querySelector(':scope > .document-list-error')?.remove();host.append(message);}}
       finally{delete host.dataset.loading;}
     }

@@ -151,9 +151,8 @@
     parent.classList.add('native-data-active');
     const root=node('div',undefined,'native-data-workspace');parent.append(root);
     const dictionary=node('aside',undefined,'data-dictionary');dictionary.setAttribute('aria-label','数据字典');
-    const header=node('div',undefined,'dictionary-heading');header.append(node('h2','数据字典'));
-    const search=node('input');search.type='search';search.placeholder='搜索表或字段';search.setAttribute('aria-label','搜索数据字典');search.maxLength=128;
-    dictionary.append(header,search);
+    const navigation=ForgeNavigation.header({title:'数据字典',searchLabel:'搜索数据字典',placeholder:'表名或已读取字段',onSearch:()=>filterTables()});
+    const {search}=navigation;dictionary.append(navigation.element);
     const list=node('div',undefined,'dictionary-list');dictionary.append(list);
     const native=node('div',undefined,'native-notebook-host');native.setAttribute('aria-label','Notebook 工作区');
     const status=node('p','正在连接 Jupyter…','native-notebook-status');native.append(status);root.append(dictionary,native);
@@ -219,7 +218,7 @@
             request=resolved;onBinding?.(resolved);
           }
         }catch(error){if(alive())content.replaceChildren(node('p',error.message,'dictionary-meta'));}
-        finally{entry.loading=false;}
+        finally{entry.loading=false;if(alive())filterTables();}
       });
       if(request.alias===item.alias||originalPath===item.original?.path)row.open=true;
     }
@@ -235,12 +234,13 @@
       for(const item of entries)add(item);
       list.querySelector('.dictionary-empty')?.remove();
       if(!tables.size)list.append(node('p','尚未登记数据表。其他输入文件可以直接在 Notebook 中读取。','dictionary-empty'));
+      filterTables();
     }
     populate(context);
-    search.oninput=()=>{
+    function filterTables(){
       const value=search.value.trim().toLocaleLowerCase();
       for(const {row,item,fieldNames} of tables.values())row.hidden=![item.label,...fieldNames].some(name=>name.toLocaleLowerCase().includes(value));
-    };
+    }
     if(context.native_notebook){
       attach(native,project,api,alive).then(value=>{if(!alive())return;session=value;status.hidden=!!value;resize();}).catch(fail);
     }else{status.textContent='此服务尚未启用原生 Jupyter Notebook。';}

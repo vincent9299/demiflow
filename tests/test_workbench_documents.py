@@ -68,6 +68,11 @@ def test_markdown_directory_switch_links_refresh_back_and_mobile(docs, browser):
     before={str(p.relative_to(root)):p.read_bytes() for p in root.rglob('*') if p.is_file()}
     with service(None,registry=path) as app,opened(browser,app) as (page,requests):
         expect(page.get_by_role('navigation',name='Markdown 文档目录')).to_be_visible()
+        expect(page.get_by_role('searchbox',name='搜索文档')).to_be_hidden()
+        page.get_by_role('button',name='搜索文档',exact=True).click()
+        page.get_by_role('searchbox',name='搜索文档').fill('notes')
+        expect(page.locator('.document-item:visible')).to_have_count(1)
+        page.keyboard.press('Escape')
         page.locator('.document-folder > summary').filter(has_text='docs').click()
         page.locator('.document-item[data-document="docs/guide.md"]').click()
         expect(page.get_by_role('heading',name='User guide',exact=True)).to_be_visible()

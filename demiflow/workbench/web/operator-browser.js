@@ -3,11 +3,13 @@
   'use strict';
   const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!=null)n.textContent=text;if(cls)n.className=cls;return n;};
   function mount({host,request,mountText,disposeReaders,project}){
-    let index=null,selected=null,revision='current',sequence=0,disposed=false,detail=null;
+    let index=null,selected=null,revision='current',sequence=0,disposed=false,detail=null,activeKind='code';
     const root=el('div',null,'op-browser'),tree=el('nav',null,'op-tree'),viewer=el('section',null,'op-viewer');
     tree.setAttribute('aria-label','项目算子目录');viewer.setAttribute('aria-label','算子定义');
-    const search=el('input'),list=el('div',null,'op-tree-items');search.type='search';search.placeholder='查找算子…';search.setAttribute('aria-label','查找算子');
-    tree.append(search,list);root.append(tree,viewer);host.replaceChildren(root);
+    const navigation=ForgeNavigation.header({title:'算子分类',choices:[{value:'code',label:'代码算子'},{value:'prompt',label:'Prompt 算子'}],value:activeKind,
+      onChange:value=>{activeKind=value;paintTree();},searchLabel:'查找算子',onSearch:()=>paintTree()});
+    const {search}=navigation,list=el('div',null,'op-tree-items');
+    tree.append(navigation.element,list);root.append(tree,viewer);host.replaceChildren(root);
     const key='demiflow.operator-selection.'+project;
     try{selected=sessionStorage.getItem(key);}catch{}
     function button(text,action,parent,cls='op-text-button'){
@@ -16,10 +18,10 @@
     function showError(error){if(!disposed){const n=el('p',error.message,'op-error');n.setAttribute('role','alert');viewer.replaceChildren(n);}}
     function paintTree(){
       list.replaceChildren();const term=search.value.trim().toLocaleLowerCase();
-      for(const [kind,label] of [['code','代码算子'],['prompt','Prompt']]){
+      for(const kind of [activeKind]){
         const rows=(index?.definitions||[]).filter(d=>d.kind===kind&&(d.symbol+' '+d.path+' '+d.description).toLocaleLowerCase().includes(term));
         if(!rows.length)continue;
-        const group=el('details',null,'op-tree-group');group.open=true;group.append(el('summary',label));
+        const group=el('div',null,'op-tree-group');
         const paths=new Map();for(const row of rows){if(!paths.has(row.path))paths.set(row.path,[]);paths.get(row.path).push(row);}
         for(const [path,items]of paths){
           const folder=el('details',null,'op-tree-file');folder.open=!!term||items.some(i=>i.id===selected)||paths.size<4;
@@ -35,7 +37,8 @@
       list.querySelector('[aria-pressed=true]')?.scrollIntoView({block:'nearest'});
     }
     async function open(id,version='current'){
-      selected=id;revision=version;const ticket=++sequence;paintTree();
+      selected=id;revision=version;activeKind=index.definitions.find(item=>item.id===id)?.kind||activeKind;navigation.setValue(activeKind);
+      const ticket=++sequence;paintTree();
       try{sessionStorage.setItem(key,id);}catch{}
       disposeReaders(viewer);viewer.replaceChildren(el('p','读取定义…','op-muted'));
       const value=await request('operator-definition',{id,revision:version});
