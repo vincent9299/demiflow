@@ -39,3 +39,9 @@ All tests explicitly use the task worktree on `PYTHONPATH`, assert the imported 
 The earlier reports remain available under `slow-proof/`, `slow-proof2/`, `registration/`, `targeted/`, `owned-loss/`, and `final-registration/`. The first observer-monkeypatch approach triggered the real code-pin guard and was discarded; the delivered test does not monkeypatch platform observation logic.
 
 No whole-repository green claim, no main update, no push, no preview restart. Integration and cross-lane usage verification belong to the parent coordinator.
+
+## 合流后的异常优先级补修
+
+独立review发现最终metadata失败会覆盖graph业务/关闭原始错误。现在显式记录本action的primary_failure，close和metadata依次都尝试；后续错误附注到原异常，独立收尾失败仍抛出。不能用sys.exc_info判断是否有本action的原错，因为调用方可能正在处理不相关的异常。
+
+新增真实graph成功/业务ValueError两分支，均在调用方except块内执行，并令真实metadata投影之后抛错。成功graph仍报告metadata错误；失败graph保留原ValueError及附注。初测把原生图恢复的ValueError误写为DataflowError，保留失败证据；按真实既有错误契约修正测试类型后2 passed。原graph-local另外3项通过。证据/tmp/demiflow-regression-closure-20261119/{graph-errors,graph-errors-final}。
