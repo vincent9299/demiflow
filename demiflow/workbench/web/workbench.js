@@ -31,7 +31,7 @@
     let settingsBasis=null,issueScope='flow',scopedCheckButton=null;
     let runInspector='observations',runDefinition=null,definitionSequence=0,runFlowFilter='';
     const runUI=globalThis.ForgeRunPresentation;
-    let pipelineCodeOpen=false,pipelineSequence=0,pipelineReadKey=null;
+    let pipelineCodeOpen=false,pipelineSequence=0,pipelineReadKey=null,flowCollapse,runCollapse;
     let planPreview=null,previewSelection=null,previewSequence=0,previewBusy=false;
     let activePage=view.panel||(['run','run_compare','runs'].includes(view.kind)?'monitor':'flows'),detailOpen=false,locationFields=null,userNavigation=0;
     function rememberView(fields){locationFields=fields;saveView({...fields,panel:activePage});}
@@ -254,7 +254,7 @@
       outputMenu.hidden=monitoring&&hasRun;
       results.hidden=!resultsActive;
       const navigationVisible=!operatorsActive&&(!monitoring||historyOpen);
-      historyPanel.hidden=!monitoring||!navigationVisible;flowNavigation.hidden=activePage!=='flows'||!navigationVisible;
+      runCollapse?.setActive(monitoring&&navigationVisible);flowCollapse?.setActive(activePage==='flows'&&navigationVisible);
       layout.classList.toggle('wb-runs-layout',monitoring&&navigationVisible);layout.classList.toggle('wb-project-layout',navigationVisible);
       const codeShown=pipelineCodeOpen&&activePage==='flows';
       pipelineCode.hidden=!codeShown;graphHost.hidden=codeShown;
@@ -1050,7 +1050,7 @@
     }
     async function openRun(id,attempt=null,mode='monitor'){
       activePage=mode==='operators'?'operators':mode==='config'?'flows':'monitor';detailOpen=false;
-      historyOpen=activePage==='monitor';historyPanel.hidden=!historyOpen;historyButton.setAttribute('aria-expanded',String(historyOpen));
+      historyOpen=activePage==='monitor';runCollapse?.setActive(historyOpen);historyButton.setAttribute('aria-expanded',String(historyOpen));
       sourceOpen=true;sourceBody.hidden=sourceTabs.hidden=false;runInspector='observations';detailKind='observations';
       const initial=transition({run:id,attempt,report:null,mode});run=null;comparison=null;
       runBar.hidden=false;runBar.replaceChildren($('span','正在读取运行记录…','wb-caption'));
@@ -1421,6 +1421,8 @@
     const layout=$('div',undefined,'wb-workspace-layout'),runMain=$('div',undefined,'wb-workspace-main');
     root.prepend(layout);layout.append(flowNavigation,historyPanel,runMain);
     for(const element of [...root.children])if(element!==layout)runMain.append(element);
+    flowCollapse=ForgeNavigation.collapsible({layout,sidebar:flowNavigation,header:flowHeader,label:'管道目录',active:activePage==='flows'});
+    runCollapse=ForgeNavigation.collapsible({layout,sidebar:historyPanel,header:runHeader,label:'运行目录',active:activePage==='monitor'});
     // Runtime facts remain one compact strip; trend and diagnostics are optional.
     let metricSequence=0,lastObservationRevision=null;
     async function refreshTrend(force=false){

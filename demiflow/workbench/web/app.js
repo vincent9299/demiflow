@@ -3,15 +3,9 @@
   'use strict';
   const $ = (tag, text, className) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (className) n.className = className; return n; };
   // Shared navigation chrome; each view keeps ownership of its data and filters.
-  function navigationHeader({title,choices=[],value,onChange,searchLabel,onSearch,placeholder}) {
+  function navigationHeader({title,searchLabel,onSearch,placeholder}) {
     const element=$('div',undefined,'side-navigation-tools'),heading=$('div',undefined,'side-navigation-heading');
-    let choice;
-    if(choices.length){
-      const picker=$('label',undefined,'side-navigation-picker');choice=$('select');choice.setAttribute('aria-label',title);
-      for(const item of choices){const option=$('option',item.label);option.value=item.value;choice.append(option);}
-      choice.value=value;choice.onchange=()=>onChange(choice.value);
-      picker.append(choice,icon(['m8 10 4 4 4-4']));heading.append(picker);
-    }else heading.append($('h2',title,'side-navigation-title'));
+    heading.append($('h2',title,'side-navigation-title'));
     const toggle=$('button',undefined,'side-navigation-search-toggle');toggle.type='button';toggle.title=searchLabel;toggle.setAttribute('aria-label',searchLabel);toggle.setAttribute('aria-expanded','false');
     toggle.append(icon(['M21 21l-5-5','M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0']));
     const actions=$('div',undefined,'side-navigation-actions');actions.append(toggle);heading.append(actions);
@@ -22,9 +16,25 @@
     toggle.onclick=()=>{if(!field.hidden){close();return;}field.hidden=false;toggle.setAttribute('aria-expanded','true');search.focus();};
     field.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();}};
     field.append(search);element.append(heading,field);
-    return {element,actions,search,setValue(next){if(choice)choice.value=next;}};
+    return {element,actions,search};
   }
-  globalThis.ForgeNavigation=Object.freeze({header:navigationHeader});
+  let navigationSequence=0;
+  function collapsibleNavigation({layout,sidebar,header,label,initialOpen=true,active=true}) {
+    let open=initialOpen;
+    const reopen=$('div',undefined,'side-navigation-reopen'),toggle=$('button',undefined,'side-navigation-toggle');toggle.type='button';
+    if(!sidebar.id)sidebar.id='side-navigation-'+(++navigationSequence);
+    toggle.setAttribute('aria-label',label);toggle.setAttribute('aria-controls',sidebar.id);toggle.append(icon(['M3 4h18v16H3zM9 4v16']));
+    layout.prepend(reopen);
+    function render(){
+      sidebar.hidden=!active||!open;reopen.hidden=!active||open;
+      const target=open?header.actions:reopen;if(toggle.parentElement!==target)target.append(toggle);
+      toggle.setAttribute('aria-expanded',String(open));toggle.title=(open?'收起':'展开')+label;
+      layout.classList.toggle('side-navigation-closed',!!layout.querySelector(':scope > .side-navigation-reopen:not([hidden])'));
+    }
+    toggle.onclick=()=>{open=!open;render();toggle.focus();};render();
+    return {setActive(value){active=value;render();}};
+  }
+  globalThis.ForgeNavigation=Object.freeze({header:navigationHeader,collapsible:collapsibleNavigation});
   const json = value => JSON.stringify(value, null, 2);
   const offline = window.FORGE_EXPORT;
   const V = window.ForgeView;
@@ -562,12 +572,9 @@
     const epoch=viewEpoch,project=workspaceId,documentPath=reference.document||'README.md';
     const layout=$('div',undefined,'document-workspace'),directory=$('nav',undefined,'document-directory'),viewer=$('div',undefined,'document-viewer');
     directory.id='document-directory';directory.setAttribute('aria-label','Markdown 文档目录');
-    const bar=$('div',undefined,'document-toolbar');
-    const toggle=button('文档目录',()=>{directory.hidden=!directory.hidden;layout.classList.toggle('document-catalog-closed',directory.hidden);toggle.setAttribute('aria-expanded',String(!directory.hidden));},bar);
-    toggle.setAttribute('aria-controls',directory.id);toggle.setAttribute('aria-expanded',String(!matchMedia('(max-width:760px)').matches));
-    directory.hidden=matchMedia('(max-width:760px)').matches;layout.classList.toggle('document-catalog-closed',directory.hidden);
     const directoryHeader=ForgeNavigation.header({title:'文档',searchLabel:'搜索文档',placeholder:'筛选已展开的目录',onSearch:filterDocuments});
-    directory.append(directoryHeader.element);viewer.append(bar);layout.append(directory,viewer);main.append(layout);main.classList.add('readme-main');
+    directory.append(directoryHeader.element);layout.append(directory,viewer);main.append(layout);main.classList.add('readme-main');
+    ForgeNavigation.collapsible({layout,sidebar:directory,header:directoryHeader,label:'文档目录',initialOpen:!matchMedia('(max-width:760px)').matches});
     let disposed=false;const current=()=>!disposed&&epoch===viewEpoch&&project===workspaceId;
     registerViewHandle({dispose(){disposed=true;main.classList.remove('readme-main');}});
     const navigateDocument=path=>{if(current())return openView(target('overview',{document:path}));};

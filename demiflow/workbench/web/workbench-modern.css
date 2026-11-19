@@ -18,9 +18,9 @@
 .op-tree-group{margin:0}
 .op-tree-file>summary::before{content:'›';display:inline-block;width:15px;transform:rotate(0deg);color:#919bad;font-size:16px;font-weight:400;transition:transform .12s}
 .op-tree-file[open]>summary::before{transform:rotate(90deg)}
-.op-tree-file{margin:3px 0}.op-tree-file>summary{font-size:12px;color:#718095;padding:6px 8px;list-style:none;cursor:pointer;overflow-wrap:anywhere}
+.workbench .op-tree-file{margin:1px 0}.op-tree-file>summary{font-size:12px;color:#718095;padding:4px 8px;list-style:none;cursor:pointer;overflow-wrap:anywhere}
 .op-tree-file>summary:hover{color:var(--op-ink)}
-.op-browser .op-tree-leaf{display:flex;align-items:center;gap:8px;text-align:left;width:calc(100% - 12px);margin:2px 0 2px 12px;padding:7px 8px;border:0;box-shadow:none;background:transparent;color:#4c5970;border-radius:6px;font-size:13px;overflow-wrap:anywhere;line-height:1.5}
+.op-browser .op-tree-leaf{display:flex;align-items:center;gap:8px;text-align:left;width:calc(100% - 12px);margin:1px 0 1px 12px;padding:4px 8px;border:0;box-shadow:none;background:transparent;color:#4c5970;border-radius:6px;font-size:13px;overflow-wrap:anywhere;line-height:1.5}
 .op-tree-leaf>span:last-child{min-width:0;overflow-wrap:anywhere}.op-browser .op-tree-leaf:hover{background:#eef1f7}.op-browser .op-tree-leaf[aria-pressed=true]{background:#e9eefc;color:#3c5aba;font-weight:500}
 .op-glyph{font-family:ui-monospace,monospace;font-size:13px;color:#7287c3;flex:0 0 15px;text-align:center}
 .op-viewer{position:relative;min-width:0;padding:28px 34px 38px}.op-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}
@@ -70,7 +70,7 @@
 /* Each function owns one persistent project-scoped directory. */
 .workbench .wb-workspace-layout.wb-project-layout{display:grid;grid-template-columns:240px minmax(0,1fr);gap:0;align-items:start}
 .workbench .wb-workspace-layout>.wb-section-navigation{box-sizing:border-box;min-width:0;height:calc(100dvh - 44px);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;position:sticky;top:44px;margin:0;padding:20px 12px;background:#f8f9fb;border:0;border-right:1px solid #e8eaf0;border-radius:0;align-self:start}
-.workbench .wb-flow-record{display:flex;flex-direction:column;align-items:stretch;gap:3px;width:100%;min-width:0;border:0;border-radius:7px;background:transparent;padding:11px 9px;margin:3px 0;text-align:left;box-shadow:none}
+.workbench .wb-flow-record{display:flex;flex-direction:column;align-items:stretch;gap:2px;width:100%;min-width:0;border:0;border-radius:7px;background:transparent;padding:7px 9px;margin:1px 0;text-align:left;box-shadow:none}
 .workbench .wb-flow-record strong{font-size:13px;font-weight:400;overflow-wrap:anywhere}
 .workbench .wb-flow-record .wb-caption{font-size:10px;line-height:1.6;overflow-wrap:anywhere}
 .workbench .wb-flow-record:hover:not(:disabled){background:#f0f2f8}
@@ -82,8 +82,8 @@
 }
 
 /* Quiet pipeline groups, like a conversation sidebar. */
-.workbench .wb-run-group{min-width:0;margin:0 0 8px}
-.workbench .wb-run-group-heading{display:block;width:100%;min-width:0;height:28px;padding:4px 8px;margin:0;border:0;border-radius:5px;background:transparent;box-shadow:none;text-align:left;font-family:inherit;font-size:12px;font-weight:500;line-height:20px;color:#727983;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.workbench .wb-run-group{min-width:0;margin:0 0 4px}
+.workbench .wb-run-group-heading{display:block;width:100%;min-width:0;height:26px;padding:3px 8px;margin:0;border:0;border-radius:5px;background:transparent;box-shadow:none;text-align:left;font-family:inherit;font-size:12px;font-weight:500;line-height:20px;color:#727983;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .workbench .wb-run-group-heading:hover{background:#f0f1f3;color:#30343b}
 .workbench .wb-run-branch{margin:0;padding:0;border:0}
 .workbench .wb-run-more{border:0;background:transparent;box-shadow:none;color:#8b9098;font-size:11px;line-height:20px;padding:2px 8px;margin:0;text-align:left}
@@ -94,3 +94,7 @@
 .wb-workspace-main{padding:14px 20px;min-width:0}
 .workbench[data-page=operators] .wb-workspace-main{padding:0}
 @media(max-width:760px){.wb-workspace-main{padding:10px 12px}}
+
+.op-category-tabs{display:flex;flex:none;gap:2px;margin:0 4px 8px;padding:2px;border-radius:6px;background:#eceff4}
+.workbench .op-category-tabs button{flex:1;min-width:0;white-space:nowrap;padding:4px 2px;border:0;border-radius:4px;background:transparent;color:#7d8799;font-size:12px;line-height:20px;box-shadow:none}
+.workbench .op-category-tabs button[aria-selected=true]{background:#fff;color:#394252;font-weight:600;box-shadow:0 1px 3px #202c4310}

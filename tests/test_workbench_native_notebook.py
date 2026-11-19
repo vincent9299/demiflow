@@ -144,6 +144,15 @@ def test_native_edit_execute_save_reopen_and_dictionary(browser,native_project,t
             editor.fill('answer = 40 + 2\nprint("native-ok", answer)')
             editor.press('Shift+Enter')
             expect(frame.locator('.jp-OutputArea-output')).to_contain_text('native-ok 42',timeout=30000)
+            session=page.locator('iframe.native-notebook-frame').evaluate('f=>f.contentWindow.jupyterapp.shell.currentWidget.sessionContext.session.id')
+            width_before=page.locator('iframe.native-notebook-frame').bounding_box()['width']
+            page.get_by_role('button',name='数据字典目录',exact=True).click()
+            expect(page.locator('.data-dictionary')).to_be_hidden()
+            page.wait_for_function('width=>document.querySelector("iframe.native-notebook-frame").getBoundingClientRect().width>width',arg=width_before)
+            expect(frame.locator('.jp-OutputArea-output')).to_contain_text('native-ok 42')
+            page.get_by_role('button',name='数据字典目录',exact=True).click()
+            expect(page.locator('.data-dictionary')).to_be_visible()
+            assert page.locator('iframe.native-notebook-frame').evaluate('f=>f.contentWindow.jupyterapp.shell.currentWidget.sessionContext.session.id')==session
             page.screenshot(path=str(tmp_path/'native-notebook.png'))
             print('SCREENSHOT',tmp_path/'native-notebook.png')
             # Use the native document context to save, exactly as File -> Save.

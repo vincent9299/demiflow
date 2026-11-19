@@ -6,10 +6,18 @@
     let index=null,selected=null,revision='current',sequence=0,disposed=false,detail=null,activeKind='code';
     const root=el('div',null,'op-browser'),tree=el('nav',null,'op-tree'),viewer=el('section',null,'op-viewer');
     tree.setAttribute('aria-label','项目算子目录');viewer.setAttribute('aria-label','算子定义');
-    const navigation=ForgeNavigation.header({title:'算子分类',choices:[{value:'code',label:'代码算子'},{value:'prompt',label:'Prompt 算子'}],value:activeKind,
-      onChange:value=>{activeKind=value;paintTree();},searchLabel:'查找算子',onSearch:()=>paintTree()});
+    const navigation=ForgeNavigation.header({title:'算子',searchLabel:'查找算子',onSearch:()=>paintTree()});
+    const categories=el('div',null,'op-category-tabs');categories.setAttribute('role','tablist');categories.setAttribute('aria-label','算子分类');
+    for(const [kind,label] of [['code','代码算子'],['prompt','Prompt 算子']]){
+      const tab=el('button',label);tab.type='button';tab.setAttribute('role','tab');tab.dataset.kind=kind;
+      tab.onclick=()=>{activeKind=kind;paintTree();};
+      tab.onkeydown=event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const index=event.key==='Home'?0:event.key==='End'?1:kind==='code'?1:0;categories.children[index].click();categories.children[index].focus();}};
+      categories.append(tab);
+    }
     const {search}=navigation,list=el('div',null,'op-tree-items');
-    tree.append(navigation.element,list);root.append(tree,viewer);host.replaceChildren(root);
+    list.setAttribute('role','tabpanel');list.setAttribute('aria-label','代码算子');
+    tree.append(navigation.element,categories,list);root.append(tree,viewer);host.replaceChildren(root);
+    ForgeNavigation.collapsible({layout:root,sidebar:tree,header:navigation,label:'算子目录'});
     const key='demiflow.operator-selection.'+project;
     try{selected=sessionStorage.getItem(key);}catch{}
     function button(text,action,parent,cls='op-text-button'){
@@ -17,6 +25,8 @@
     }
     function showError(error){if(!disposed){const n=el('p',error.message,'op-error');n.setAttribute('role','alert');viewer.replaceChildren(n);}}
     function paintTree(){
+      for(const tab of categories.children){const active=tab.dataset.kind===activeKind;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;}
+      list.setAttribute('aria-label',activeKind==='code'?'代码算子':'Prompt 算子');
       list.replaceChildren();const term=search.value.trim().toLocaleLowerCase();
       for(const kind of [activeKind]){
         const rows=(index?.definitions||[]).filter(d=>d.kind===kind&&(d.symbol+' '+d.path+' '+d.description).toLocaleLowerCase().includes(term));
@@ -37,7 +47,7 @@
       list.querySelector('[aria-pressed=true]')?.scrollIntoView({block:'nearest'});
     }
     async function open(id,version='current'){
-      selected=id;revision=version;activeKind=index.definitions.find(item=>item.id===id)?.kind||activeKind;navigation.setValue(activeKind);
+      selected=id;revision=version;activeKind=index.definitions.find(item=>item.id===id)?.kind||activeKind;
       const ticket=++sequence;paintTree();
       try{sessionStorage.setItem(key,id);}catch{}
       disposeReaders(viewer);viewer.replaceChildren(el('p','读取定义…','op-muted'));
