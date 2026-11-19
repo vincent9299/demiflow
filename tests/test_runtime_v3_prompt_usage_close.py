@@ -112,7 +112,8 @@ def test_final_prompt_usage_survives_client_close_failure(server, monkeypatch, m
 
 
 @pytest.mark.parametrize('handling_unrelated_error', [False, True])
-def test_final_metadata_failure_is_not_suppressed_after_success(server, monkeypatch, handling_unrelated_error):
+@pytest.mark.parametrize('action', ['materialize', 'run_stream'])
+def test_final_metadata_failure_is_not_suppressed_after_success(server, monkeypatch, handling_unrelated_error, action):
     from demiflow.execution import dataflow_api
     record = dataflow_api.record_execution_metadata
     def fail_metadata(request, execution):
@@ -122,9 +123,11 @@ def test_final_metadata_failure_is_not_suppressed_after_success(server, monkeypa
     api = DataAPI(workers=1, block_size=1)
     ds = api.from_items([{'item': 1}]).map_prompt(
         'enrich', config=parse_prompt_pack(PACK), inputs={'payload': 'item'}, output='answer', max_requests=1)
+    if action == 'run_stream':
+        ds = ds.map_async(lambda row: row, concurrency=1)
     def execute():
         with pytest.raises(RuntimeError, match='actual final metadata failure'):
-            ds.materialize()
+            getattr(ds, action)()
     if handling_unrelated_error:
         try:
             raise ValueError('unrelated caller error already being handled')
