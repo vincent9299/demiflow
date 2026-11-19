@@ -1,0 +1,4096 @@
+{
+  "format": "p12_design_source_inventory_v2",
+  "main": "e3b645ba97ddb57d9636d3d3f75fb1f6dff3d1f1",
+  "integration": "1855e0010b8c67d6d73d93b63708fce51f4cccc3",
+  "source_root": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_p12_design_20261119",
+  "integration_descends_from_main": true,
+  "integration_diff": [
+    "demiflow/execution/dataflow_api.py",
+    "demiflow/execution/dataflow_environment.py",
+    "demiflow/execution/dataflow_handles.py",
+    "demiflow/execution/dataflow_hosts.py",
+    "demiflow/execution/dataflow_stream.py",
+    "demiflow/execution/dataflow_usage.py",
+    "demiflow/execution/graph.py",
+    "demiflow/execution/kernels/operator.py",
+    "demiflow/execution/worker/dataflow_execution.py",
+    "demiflow/planning/dataflow_budget.py",
+    "demiflow/planning/dataflow_policy.py",
+    "docs/regression-closure-20261119/default-budgets.md",
+    "docs/regression-closure-20261119/graph-lifecycle.md",
+    "docs/regression-closure-20261119/lance-merge-timeout.md",
+    "docs/regression-closure-20261119/native-final-ack.md",
+    "tests/test_runtime_v3_default_windows.py",
+    "tests/test_runtime_v3_graph_cleanup_errors.py",
+    "tests/test_runtime_v3_late_final.py",
+    "tests/test_runtime_v3_prompt_usage_close.py",
+    "tests/test_runtime_v3_public_budgets.py",
+    "tests/test_runtime_v3_routed_environment.py",
+    "tests/test_runtime_v3_stream_budgets.py",
+    "tests/test_runtime_v3_worker_connection_loss.py",
+    "tests/test_u3_graph_local.py"
+  ],
+  "workbench_diff": [],
+  "sources": [
+    {
+      "path": "demiflow/workbench/projects/workspace.py",
+      "sha256": "63089fad3f43ac77a726967d96041b7994bdca023a1d9fcef5520f3ff9420d23",
+      "integration_sha256": "63089fad3f43ac77a726967d96041b7994bdca023a1d9fcef5520f3ff9420d23",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "project_name",
+          "line": 42
+        },
+        {
+          "name": "init_workspace",
+          "line": 57
+        },
+        {
+          "name": "load_workspace",
+          "line": 113
+        },
+        {
+          "name": "_audit_workspace",
+          "line": 171
+        },
+        {
+          "name": "_publish_audit_policy",
+          "line": 180
+        },
+        {
+          "name": "enable_audit",
+          "line": 188
+        },
+        {
+          "name": "bind_audit_report",
+          "line": 199
+        },
+        {
+          "name": "unbind_audit_report",
+          "line": 216
+        },
+        {
+          "name": "_author_roots",
+          "line": 226
+        },
+        {
+          "name": "_scope_baseline",
+          "line": 237
+        },
+        {
+          "name": "_capture_change_baseline",
+          "line": 251
+        },
+        {
+          "name": "_store_scope",
+          "line": 267
+        },
+        {
+          "name": "begin_change_scope",
+          "line": 305
+        },
+        {
+          "name": "import_change_scope",
+          "line": 318
+        },
+        {
+          "name": "amend_change_scope",
+          "line": 325
+        },
+        {
+          "name": "end_change_scope",
+          "line": 337
+        },
+        {
+          "name": "_check_change_scope",
+          "line": 347
+        },
+        {
+          "name": "audit_lease",
+          "line": 362
+        },
+        {
+          "name": "_audit_cache",
+          "line": 381
+        },
+        {
+          "name": "_audit_publish",
+          "line": 416
+        },
+        {
+          "name": "audit_status",
+          "line": 442
+        },
+        {
+          "name": "_audit_check",
+          "line": 484
+        },
+        {
+          "name": "audit_check",
+          "line": 503
+        },
+        {
+          "name": "_audit_hint",
+          "line": 525
+        },
+        {
+          "name": "audit_observe",
+          "line": 549
+        },
+        {
+          "name": "set_budgets",
+          "line": 576
+        },
+        {
+          "name": "validate_entry",
+          "line": 588
+        },
+        {
+          "name": "validate_parameter_path",
+          "line": 599
+        },
+        {
+          "name": "read_parameters",
+          "line": 606
+        },
+        {
+          "name": "source_text",
+          "line": 611
+        },
+        {
+          "name": "_register_flow_value",
+          "line": 626
+        },
+        {
+          "name": "plan_flow_registration",
+          "line": 646
+        },
+        {
+          "name": "register_flow",
+          "line": 661
+        },
+        {
+          "name": "unregister_flow",
+          "line": 671
+        },
+        {
+          "name": "location_root",
+          "line": 683
+        },
+        {
+          "name": "add_location",
+          "line": 692
+        },
+        {
+          "name": "bind_platform",
+          "line": 716
+        },
+        {
+          "name": "table_files",
+          "line": 738
+        },
+        {
+          "name": "table_binding",
+          "line": 760
+        },
+        {
+          "name": "table_identity",
+          "line": 791
+        },
+        {
+          "name": "preview_binding",
+          "line": 797
+        },
+        {
+          "name": "describe_table",
+          "line": 804
+        },
+        {
+          "name": "table_versions",
+          "line": 813
+        },
+        {
+          "name": "attach_table",
+          "line": 819
+        },
+        {
+          "name": "detach_table",
+          "line": 896
+        },
+        {
+          "name": "set_table_view",
+          "line": 907
+        },
+        {
+          "name": "resolve_arguments",
+          "line": 923
+        },
+        {
+          "name": "inspect_flow",
+          "line": 998
+        },
+        {
+          "name": "check_project",
+          "line": 1006
+        },
+        {
+          "name": "project_check_status",
+          "line": 1011
+        },
+        {
+          "name": "sample_table",
+          "line": 1016
+        },
+        {
+          "name": "profile_table",
+          "line": 1036
+        },
+        {
+          "name": "project_profile",
+          "line": 1044
+        },
+        {
+          "name": "table_media",
+          "line": 1049
+        },
+        {
+          "name": "table_evidence",
+          "line": 1062
+        },
+        {
+          "name": "_inspect_flow",
+          "line": 1071
+        },
+        {
+          "name": "resolve_flow_resources",
+          "line": 1158
+        },
+        {
+          "name": "load_report",
+          "line": 1256
+        },
+        {
+          "name": "workspace_policy",
+          "line": 1271
+        },
+        {
+          "name": "report_status",
+          "line": 1303
+        },
+        {
+          "name": "_report_status",
+          "line": 1309
+        },
+        {
+          "name": "diff_reports",
+          "line": 1371
+        },
+        {
+          "name": "author_roots",
+          "line": 1386
+        },
+        {
+          "name": "source_files",
+          "line": 1441
+        },
+        {
+          "name": "source_inventory",
+          "line": 1474
+        },
+        {
+          "name": "report_files",
+          "line": 1498
+        },
+        {
+          "name": "list_reports",
+          "line": 1516
+        },
+        {
+          "name": "workspace_changes",
+          "line": 1541
+        },
+        {
+          "name": "workspace_context",
+          "line": 1591
+        },
+        {
+          "name": "discover_project",
+          "line": 1697
+        },
+        {
+          "name": "project_document",
+          "line": 1703
+        },
+        {
+          "name": "project_table",
+          "line": 1709
+        },
+        {
+          "name": "project_sample",
+          "line": 1714
+        },
+        {
+          "name": "verify_run_basis",
+          "line": 1720
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 17,
+          "module": "demiflow.workbench.projects.io",
+          "names": [
+            "workspace_id"
+          ]
+        },
+        {
+          "line": 18,
+          "module": "demiflow.workbench.projects.io",
+          "names": [
+            "identifier"
+          ]
+        },
+        {
+          "line": 19,
+          "module": "demiflow.workbench.projects.io",
+          "names": [
+            "relative_path"
+          ]
+        },
+        {
+          "line": 20,
+          "module": "demiflow.workbench.projects.io",
+          "names": [
+            "read_control"
+          ]
+        },
+        {
+          "line": 21,
+          "module": "demiflow.workbench.projects.io",
+          "names": [
+            "control_lock"
+          ]
+        },
+        {
+          "line": 22,
+          "module": "demiflow.workbench.projects.io",
+          "names": [
+            "write_control"
+          ]
+        },
+        {
+          "line": 97,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "index"
+          ]
+        },
+        {
+          "line": 126,
+          "module": "demiflow.workbench.runs.limits",
+          "names": [
+            "limits_with"
+          ]
+        },
+        {
+          "line": 306,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 505,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 551,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 577,
+          "module": "demiflow.workbench.runs.limits",
+          "names": [
+            "limits_with"
+          ]
+        },
+        {
+          "line": 764,
+          "module": "demiflow.workbench.runs.manager",
+          "names": [
+            "result_table"
+          ]
+        },
+        {
+          "line": 781,
+          "module": "demiflow.workbench.catalog",
+          "names": [
+            "validate"
+          ]
+        },
+        {
+          "line": 805,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 814,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 832,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 909,
+          "module": "demiflow.workbench.catalog",
+          "names": [
+            "validate"
+          ]
+        },
+        {
+          "line": 910,
+          "module": "demiflow.workbench.catalog",
+          "names": [
+            "validate_fields"
+          ]
+        },
+        {
+          "line": 911,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 999,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 1007,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 1012,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 1020,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 1037,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 1045,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 1050,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 1063,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 1142,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "index"
+          ]
+        },
+        {
+          "line": 1304,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 1398,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "index"
+          ]
+        },
+        {
+          "line": 1517,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "index"
+          ]
+        },
+        {
+          "line": 1543,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "index"
+          ]
+        },
+        {
+          "line": 1567,
+          "module": "demiflow.workbench.runs.manager",
+          "names": [
+            "_run_ids"
+          ]
+        },
+        {
+          "line": 1579,
+          "module": "demiflow.workbench.projects.discovery",
+          "names": [
+            "discover"
+          ]
+        },
+        {
+          "line": 1593,
+          "module": "demiflow.workbench.runs.limits",
+          "names": [
+            "limits_with"
+          ]
+        },
+        {
+          "line": 1596,
+          "module": "demiflow.workbench.projects.discovery",
+          "names": [
+            "discover"
+          ]
+        },
+        {
+          "line": 1698,
+          "module": "demiflow.workbench.projects.discovery",
+          "names": [
+            "discover"
+          ]
+        },
+        {
+          "line": 1704,
+          "module": "demiflow.workbench.projects.discovery",
+          "names": [
+            "document"
+          ]
+        },
+        {
+          "line": 1710,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 1715,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/projects/index.py",
+      "sha256": "dfcdc67517f62e4c389b3cb97e5978c5e6e461ecbc79e2d5e3e199d361c82030",
+      "integration_sha256": "dfcdc67517f62e4c389b3cb97e5978c5e6e461ecbc79e2d5e3e199d361c82030",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "_identity",
+          "line": 27
+        },
+        {
+          "name": "_path",
+          "line": 33
+        },
+        {
+          "name": "_pending",
+          "line": 37
+        },
+        {
+          "name": "_connect",
+          "line": 51
+        },
+        {
+          "name": "_create",
+          "line": 73
+        },
+        {
+          "name": "_metadata",
+          "line": 86
+        },
+        {
+          "name": "_ensure",
+          "line": 95
+        },
+        {
+          "name": "begin",
+          "line": 114
+        },
+        {
+          "name": "_source",
+          "line": 135
+        },
+        {
+          "name": "_insert",
+          "line": 164
+        },
+        {
+          "name": "publish",
+          "line": 176
+        },
+        {
+          "name": "synchronize",
+          "line": 203
+        },
+        {
+          "name": "status",
+          "line": 218
+        },
+        {
+          "name": "page",
+          "line": 234
+        },
+        {
+          "name": "rebuild",
+          "line": 274
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 18,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        },
+        {
+          "line": 138,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "manager"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/projects/io.py",
+      "sha256": "259bbe4c7019d9093c77d89e5430f1374c5a7bccf2fcb37598eaa64217e68322",
+      "integration_sha256": "259bbe4c7019d9093c77d89e5430f1374c5a7bccf2fcb37598eaa64217e68322",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "identifier",
+          "line": 17
+        },
+        {
+          "name": "relative_path",
+          "line": 25
+        },
+        {
+          "name": "read_control",
+          "line": 42
+        },
+        {
+          "name": "control_lock",
+          "line": 61
+        },
+        {
+          "name": "write_control",
+          "line": 74
+        },
+        {
+          "name": "workspace_id",
+          "line": 109
+        }
+      ],
+      "workbench_imports": []
+    },
+    {
+      "path": "demiflow/workbench/projects/checks.py",
+      "sha256": "655e1d2f5c77c2aaf429d4834c46f77f9553f849a2b8f0ef117c1f6900f74a53",
+      "integration_sha256": "655e1d2f5c77c2aaf429d4834c46f77f9553f849a2b8f0ef117c1f6900f74a53",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "check",
+          "line": 18
+        },
+        {
+          "name": "status",
+          "line": 136
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 10,
+          "module": "demiflow.workbench.projects.discovery",
+          "names": [
+            "discover"
+          ]
+        },
+        {
+          "line": 19,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        },
+        {
+          "line": 137,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/projects/discovery.py",
+      "sha256": "74490e82dd2839a04fef57098d40dad1072309b7a2f11e7c945b62268e5c7f61",
+      "integration_sha256": "74490e82dd2839a04fef57098d40dad1072309b7a2f11e7c945b62268e5c7f61",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "_json",
+          "line": 30
+        },
+        {
+          "name": "discover",
+          "line": 48
+        },
+        {
+          "name": "document",
+          "line": 400
+        },
+        {
+          "name": "table",
+          "line": 412
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 49,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        },
+        {
+          "line": 401,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        },
+        {
+          "line": 414,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/projects/registry.py",
+      "sha256": "9a1d5858086589800724a51cd6021b744b254f481a1556f90accadacdb7dca8e",
+      "integration_sha256": "9a1d5858086589800724a51cd6021b744b254f481a1556f90accadacdb7dca8e",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "identity",
+          "line": 19
+        },
+        {
+          "name": "load_registry",
+          "line": 25
+        },
+        {
+          "name": "_locked",
+          "line": 55
+        },
+        {
+          "name": "create",
+          "line": 69
+        },
+        {
+          "name": "add",
+          "line": 81
+        },
+        {
+          "name": "remove",
+          "line": 116
+        },
+        {
+          "name": "resolve_workspace",
+          "line": 130
+        },
+        {
+          "name": "projects",
+          "line": 142
+        },
+        {
+          "name": "permissions",
+          "line": 157
+        },
+        {
+          "name": "capabilities",
+          "line": 161
+        },
+        {
+          "name": "migrate",
+          "line": 166
+        },
+        {
+          "name": "set_capabilities",
+          "line": 189
+        },
+        {
+          "name": "set_permissions",
+          "line": 225
+        },
+        {
+          "name": "register",
+          "line": 247
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 8,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        },
+        {
+          "line": 204,
+          "module": "demiflow.workbench.analysis.web_service",
+          "names": [
+            "WebService"
+          ]
+        },
+        {
+          "line": 205,
+          "module": "demiflow.workbench.notebooks.service",
+          "names": [
+            "Notebooks"
+          ]
+        },
+        {
+          "line": 307,
+          "module": "demiflow.workbench.api",
+          "names": [
+            "serve"
+          ]
+        },
+        {
+          "line": 331,
+          "module": "demiflow.workbench.projects.watch",
+          "names": [
+            "watch"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/projects/watch.py",
+      "sha256": "f8c03540b0fc72e9d8d632abb100265c0ff333eb77ba9a386d7c99c314e50393",
+      "integration_sha256": "f8c03540b0fc72e9d8d632abb100265c0ff333eb77ba9a386d7c99c314e50393",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "_step",
+          "line": 17
+        },
+        {
+          "name": "watch",
+          "line": 49
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 11,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "registry"
+          ]
+        },
+        {
+          "line": 12,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/runs/manager.py",
+      "sha256": "e7dce9c58938f48451f94304d503d22fa3a15a7c0a9283189fcc4f78ad3168d4",
+      "integration_sha256": "e7dce9c58938f48451f94304d503d22fa3a15a7c0a9283189fcc4f78ad3168d4",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "_attempt",
+          "line": 47
+        },
+        {
+          "name": "directory",
+          "line": 58
+        },
+        {
+          "name": "journal",
+          "line": 64
+        },
+        {
+          "name": "attempt_directory",
+          "line": 68
+        },
+        {
+          "name": "execution_lock",
+          "line": 76
+        },
+        {
+          "name": "_run_ids",
+          "line": 89
+        },
+        {
+          "name": "_lease_owner",
+          "line": 105
+        },
+        {
+          "name": "_claim_lease",
+          "line": 128
+        },
+        {
+          "name": "refresh_index",
+          "line": 135
+        },
+        {
+          "name": "_copy_checked",
+          "line": 152
+        },
+        {
+          "name": "_tree_bytes",
+          "line": 166
+        },
+        {
+          "name": "durable_tree",
+          "line": 198
+        },
+        {
+          "name": "prepare",
+          "line": 229
+        },
+        {
+          "name": "_fact_actions",
+          "line": 250
+        },
+        {
+          "name": "_prepare",
+          "line": 256
+        },
+        {
+          "name": "_load",
+          "line": 518
+        },
+        {
+          "name": "_report",
+          "line": 533
+        },
+        {
+          "name": "show",
+          "line": 540
+        },
+        {
+          "name": "_describe",
+          "line": 559
+        },
+        {
+          "name": "list_runs",
+          "line": 584
+        },
+        {
+          "name": "process_matches",
+          "line": 620
+        },
+        {
+          "name": "verify_seal",
+          "line": 624
+        },
+        {
+          "name": "_launch_unit",
+          "line": 655
+        },
+        {
+          "name": "start",
+          "line": 676
+        },
+        {
+          "name": "_preflight",
+          "line": 787
+        },
+        {
+          "name": "_check_basis",
+          "line": 812
+        },
+        {
+          "name": "_output_metadata",
+          "line": 821
+        },
+        {
+          "name": "_verified_output",
+          "line": 827
+        },
+        {
+          "name": "validate_output_targets",
+          "line": 842
+        },
+        {
+          "name": "remaining_limits",
+          "line": 875
+        },
+        {
+          "name": "resume",
+          "line": 889
+        },
+        {
+          "name": "_resume",
+          "line": 908
+        },
+        {
+          "name": "worker_environment",
+          "line": 976
+        },
+        {
+          "name": "evidence",
+          "line": 1008
+        },
+        {
+          "name": "cancel",
+          "line": 1026
+        },
+        {
+          "name": "result_table",
+          "line": 1043
+        },
+        {
+          "name": "attach_result",
+          "line": 1071
+        },
+        {
+          "name": "register_results",
+          "line": 1088
+        },
+        {
+          "name": "execution_stopped",
+          "line": 1141
+        },
+        {
+          "name": "reconcile",
+          "line": 1151
+        },
+        {
+          "name": "_reconcile",
+          "line": 1159
+        },
+        {
+          "name": "compare",
+          "line": 1228
+        },
+        {
+          "name": "source",
+          "line": 1236
+        },
+        {
+          "name": "retain_logs",
+          "line": 1252
+        },
+        {
+          "name": "logs",
+          "line": 1279
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 21,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        },
+        {
+          "line": 22,
+          "module": "demiflow.workbench.process",
+          "names": [
+            "process_identity"
+          ]
+        },
+        {
+          "line": 23,
+          "module": "demiflow.workbench.runs.authority",
+          "names": [
+            "LocalAuthority"
+          ]
+        },
+        {
+          "line": 24,
+          "module": "demiflow.workbench.runs.admission",
+          "names": [
+            "inputs"
+          ]
+        },
+        {
+          "line": 33,
+          "module": "demiflow.workbench.runs.limits",
+          "names": [
+            "DEFAULT_LIMITS"
+          ]
+        },
+        {
+          "line": 34,
+          "module": "demiflow.workbench.runs.limits",
+          "names": [
+            "limits_with"
+          ]
+        },
+        {
+          "line": 137,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "index"
+          ]
+        },
+        {
+          "line": 230,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 233,
+          "module": "demiflow.workbench.runs.domain",
+          "names": [
+            "preparation_lock"
+          ]
+        },
+        {
+          "line": 236,
+          "module": "demiflow.workbench.runs.native_resources",
+          "names": [
+            "trusted_deployment",
+            "capacity_domain",
+            "trusted_process_environment"
+          ]
+        },
+        {
+          "line": 245,
+          "module": "demiflow.workbench.runs.requests",
+          "names": [
+            "prepare"
+          ]
+        },
+        {
+          "line": 264,
+          "module": "demiflow.workbench.conversations",
+          "names": [
+            "admission"
+          ]
+        },
+        {
+          "line": 328,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "native_submission"
+          ]
+        },
+        {
+          "line": 332,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "native_resources"
+          ]
+        },
+        {
+          "line": 343,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "native_resources"
+          ]
+        },
+        {
+          "line": 439,
+          "module": "demiflow.workbench.runs.domain",
+          "names": [
+            "SEALED_BYTES"
+          ]
+        },
+        {
+          "line": 440,
+          "module": "demiflow.workbench.runs.native_resources",
+          "names": [
+            "environment_names"
+          ]
+        },
+        {
+          "line": 455,
+          "module": "demiflow.workbench.runs.storage",
+          "names": [
+            "object_locations"
+          ]
+        },
+        {
+          "line": 457,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "index"
+          ]
+        },
+        {
+          "line": 465,
+          "module": "demiflow.workbench.runs.domain",
+          "names": [
+            "history_admission"
+          ]
+        },
+        {
+          "line": 466,
+          "module": "demiflow.workbench.host_partition",
+          "names": [
+            "policy"
+          ]
+        },
+        {
+          "line": 467,
+          "module": "demiflow.workbench.host_partition",
+          "names": [
+            "location"
+          ]
+        },
+        {
+          "line": 585,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "index"
+          ]
+        },
+        {
+          "line": 626,
+          "module": "demiflow.workbench.runs.native_resources",
+          "names": [
+            "verify"
+          ]
+        },
+        {
+          "line": 677,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 688,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "domain"
+          ]
+        },
+        {
+          "line": 705,
+          "module": "demiflow.workbench.conversations",
+          "names": [
+            "admission"
+          ]
+        },
+        {
+          "line": 709,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "index"
+          ]
+        },
+        {
+          "line": 798,
+          "module": "demiflow.workbench.conversations",
+          "names": [
+            "admission"
+          ]
+        },
+        {
+          "line": 802,
+          "module": "demiflow.workbench.runs.requests",
+          "names": [
+            "read"
+          ]
+        },
+        {
+          "line": 815,
+          "module": "demiflow.workbench.runs.native_submission",
+          "names": [
+            "verify_basis"
+          ]
+        },
+        {
+          "line": 823,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 890,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 902,
+          "module": "demiflow.workbench.runs.domain",
+          "names": [
+            "preparation_lock"
+          ]
+        },
+        {
+          "line": 939,
+          "module": "demiflow.workbench.runs.storage",
+          "names": [
+            "cleanup_deadline",
+            "clean_stopped"
+          ]
+        },
+        {
+          "line": 959,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "index"
+          ]
+        },
+        {
+          "line": 988,
+          "module": "demiflow.workbench.runs.native_resources",
+          "names": [
+            "environment",
+            "executable_directories"
+          ]
+        },
+        {
+          "line": 993,
+          "module": "demiflow.workbench.runs.native_resources",
+          "names": [
+            "capacity_domain"
+          ]
+        },
+        {
+          "line": 1011,
+          "module": "demiflow.workbench.catalog",
+          "names": [
+            "validate_reference"
+          ]
+        },
+        {
+          "line": 1012,
+          "module": "demiflow.workbench.catalog",
+          "names": [
+            "read_evidence"
+          ]
+        },
+        {
+          "line": 1030,
+          "module": "demiflow.workbench.runs.view",
+          "names": [
+            "control_state"
+          ]
+        },
+        {
+          "line": 1031,
+          "module": "demiflow.workbench.runs.view",
+          "names": [
+            "snapshot"
+          ]
+        },
+        {
+          "line": 1096,
+          "module": "demiflow.workbench.runs.storage",
+          "names": [
+            "cleanup_deadline"
+          ]
+        },
+        {
+          "line": 1152,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 1153,
+          "module": "demiflow.workbench.runs.domain",
+          "names": [
+            "preparation_lock"
+          ]
+        },
+        {
+          "line": 1160,
+          "module": "demiflow.workbench.runs.storage",
+          "names": [
+            "cleanup_deadline",
+            "remove_attempt_work",
+            "clean_stopped"
+          ]
+        },
+        {
+          "line": 1176,
+          "module": "demiflow.workbench.runs.domain",
+          "names": [
+            "reserved"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/runs/limits.py",
+      "sha256": "2c5d82d0f8b5313a141d04cb3f88ef58a2ac62755a95c1bb637a3ace79d02104",
+      "integration_sha256": "2c5d82d0f8b5313a141d04cb3f88ef58a2ac62755a95c1bb637a3ace79d02104",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "_overlay",
+          "line": 17
+        },
+        {
+          "name": "limits_with",
+          "line": 27
+        }
+      ],
+      "workbench_imports": []
+    },
+    {
+      "path": "demiflow/workbench/runs/admission.py",
+      "sha256": "6dfd46f3b9d9521959c2a95fdf008d29077c562d90ca2760d2cc3ca773346ea4",
+      "integration_sha256": "6dfd46f3b9d9521959c2a95fdf008d29077c562d90ca2760d2cc3ca773346ea4",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "inputs",
+          "line": 8
+        },
+        {
+          "name": "describe",
+          "line": 21
+        },
+        {
+          "name": "_describe",
+          "line": 36
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 3,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        },
+        {
+          "line": 4,
+          "module": "demiflow.workbench.runs.limits",
+          "names": [
+            "limits_with"
+          ]
+        },
+        {
+          "line": 22,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 23,
+          "module": "demiflow.workbench.runs.domain",
+          "names": [
+            "preparation_lock"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/runs/native_submission.py",
+      "sha256": "69447e3d5721fa1953a24ba30c0d53697f96b9920117c77e5c927973b940826b",
+      "integration_sha256": "69447e3d5721fa1953a24ba30c0d53697f96b9920117c77e5c927973b940826b",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "inspect_submission",
+          "line": 17
+        },
+        {
+          "name": "prepare",
+          "line": 97
+        },
+        {
+          "name": "verify_basis",
+          "line": 134
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 12,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        },
+        {
+          "line": 21,
+          "module": "demiflow.workbench.graph.preview",
+          "names": [
+            "_Sources",
+            "_Discard",
+            "_import_root"
+          ]
+        },
+        {
+          "line": 22,
+          "module": "demiflow.workbench.graph.preview_guard",
+          "names": [
+            "enter_readonly"
+          ]
+        },
+        {
+          "line": 23,
+          "module": "demiflow.workbench.projects.discovery",
+          "names": [
+            "discover"
+          ]
+        },
+        {
+          "line": 60,
+          "module": "demiflow.workbench.graph.plan_callsite",
+          "names": [
+            "PlanCallsites",
+            "pipeline_material"
+          ]
+        },
+        {
+          "line": 61,
+          "module": "demiflow.workbench.graph.plan_details",
+          "names": [
+            "build_plan_details"
+          ]
+        },
+        {
+          "line": 98,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/runs/worker.py",
+      "sha256": "71464079ef0c5f26e6a1cca6ce150a75176a5dbed025eab49b0357e1718def66",
+      "integration_sha256": "71464079ef0c5f26e6a1cca6ce150a75176a5dbed025eab49b0357e1718def66",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "allocation_guard",
+          "line": 12
+        },
+        {
+          "name": "execute",
+          "line": 39
+        },
+        {
+          "name": "_execute",
+          "line": 48
+        },
+        {
+          "name": "_source_imports",
+          "line": 156
+        },
+        {
+          "name": "_tree_rss",
+          "line": 186
+        },
+        {
+          "name": "_adopt_descendants",
+          "line": 191
+        },
+        {
+          "name": "_stop_group",
+          "line": 199
+        },
+        {
+          "name": "_drain_descendants",
+          "line": 206
+        },
+        {
+          "name": "RunLog",
+          "line": 211
+        },
+        {
+          "name": "_supervise",
+          "line": 242
+        },
+        {
+          "name": "supervise",
+          "line": 498
+        },
+        {
+          "name": "SupervisorLog",
+          "line": 510
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 9,
+          "module": "demiflow.workbench.process",
+          "names": [
+            "process_identity"
+          ]
+        },
+        {
+          "line": 24,
+          "module": "demiflow.workbench.runs.native_resources",
+          "names": [
+            "validate"
+          ]
+        },
+        {
+          "line": 40,
+          "module": "demiflow.workbench.runs.manager",
+          "names": [
+            "directory"
+          ]
+        },
+        {
+          "line": 52,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "manager"
+          ]
+        },
+        {
+          "line": 247,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "manager"
+          ]
+        },
+        {
+          "line": 257,
+          "module": "demiflow.workbench.runs.storage",
+          "names": [
+            "object_locations"
+          ]
+        },
+        {
+          "line": 258,
+          "module": "demiflow.workbench.runs.storage",
+          "names": [
+            "scratch_bytes"
+          ]
+        },
+        {
+          "line": 259,
+          "module": "demiflow.workbench.runs.storage",
+          "names": [
+            "clean_stopped",
+            "cleanup_deadline",
+            "remove_attempt_work"
+          ]
+        },
+        {
+          "line": 502,
+          "module": "demiflow.workbench.runs.manager",
+          "names": [
+            "directory"
+          ]
+        },
+        {
+          "line": 528,
+          "module": "demiflow.workbench.runs.manager",
+          "names": [
+            "directory"
+          ]
+        },
+        {
+          "line": 542,
+          "module": "demiflow.workbench.runs.manager",
+          "names": [
+            "directory"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/runs/cli.py",
+      "sha256": "baa1ef65d638d768bde73fc5dd0f9a7c7b805055abe8d234c382ee9eb76aed7d",
+      "integration_sha256": "baa1ef65d638d768bde73fc5dd0f9a7c7b805055abe8d234c382ee9eb76aed7d",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "register",
+          "line": 10
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 6,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "manager"
+          ]
+        },
+        {
+          "line": 7,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "operations"
+          ]
+        },
+        {
+          "line": 174,
+          "module": "demiflow.workbench.runs.requests",
+          "names": [
+            "request_id"
+          ]
+        },
+        {
+          "line": 183,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "requests"
+          ]
+        },
+        {
+          "line": 193,
+          "module": "demiflow.workbench.runs.view",
+          "names": [
+            "snapshot"
+          ]
+        },
+        {
+          "line": 203,
+          "module": "demiflow.workbench.runs.view",
+          "names": [
+            "events"
+          ]
+        },
+        {
+          "line": 214,
+          "module": "demiflow.workbench.runs.view",
+          "names": [
+            "metrics"
+          ]
+        },
+        {
+          "line": 223,
+          "module": "demiflow.workbench.runs.admission",
+          "names": [
+            "describe"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/runs/requests.py",
+      "sha256": "e875f5e262bb70586d1af604cd1b20c3430e982270c3c26b37ef443fcba56124",
+      "integration_sha256": "e875f5e262bb70586d1af604cd1b20c3430e982270c3c26b37ef443fcba56124",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "request_id",
+          "line": 25
+        },
+        {
+          "name": "validate",
+          "line": 29
+        },
+        {
+          "name": "locked",
+          "line": 38
+        },
+        {
+          "name": "read",
+          "line": 58
+        },
+        {
+          "name": "_capacity",
+          "line": 72
+        },
+        {
+          "name": "prepare",
+          "line": 110
+        },
+        {
+          "name": "_ready",
+          "line": 178
+        },
+        {
+          "name": "reconcile",
+          "line": 186
+        },
+        {
+          "name": "_incomplete_seal",
+          "line": 196
+        },
+        {
+          "name": "_reconcile",
+          "line": 225
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 130,
+          "module": "demiflow.workbench.runs.manager",
+          "names": [
+            "show"
+          ]
+        },
+        {
+          "line": 162,
+          "module": "demiflow.workbench.runs.manager",
+          "names": [
+            "directory"
+          ]
+        },
+        {
+          "line": 179,
+          "module": "demiflow.workbench.runs.manager",
+          "names": [
+            "directory"
+          ]
+        },
+        {
+          "line": 180,
+          "module": "demiflow.workbench.runs.manager",
+          "names": [
+            "RunJournal"
+          ]
+        },
+        {
+          "line": 187,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 188,
+          "module": "demiflow.workbench.runs.domain",
+          "names": [
+            "preparation_lock"
+          ]
+        },
+        {
+          "line": 226,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "manager"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/worker.py",
+      "sha256": "8b50dbb0b3282c0fe580750286f370429d55f74081efbc180848b7bf8da5c07e",
+      "integration_sha256": "8b50dbb0b3282c0fe580750286f370429d55f74081efbc180848b7bf8da5c07e",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "operation",
+          "line": 13
+        },
+        {
+          "name": "prepare_native",
+          "line": 66
+        },
+        {
+          "name": "dispatch",
+          "line": 100
+        },
+        {
+          "name": "main",
+          "line": 336
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 17,
+          "module": "demiflow.workbench.host_partition",
+          "names": [
+            "PREPARATION_RSS"
+          ]
+        },
+        {
+          "line": 18,
+          "module": "demiflow.workbench.host_partition",
+          "names": [
+            "location"
+          ]
+        },
+        {
+          "line": 19,
+          "module": "demiflow.workbench.host_partition",
+          "names": [
+            "READONLY_RSS"
+          ]
+        },
+        {
+          "line": 21,
+          "module": "demiflow.workbench.reader",
+          "names": [
+            "current"
+          ]
+        },
+        {
+          "line": 22,
+          "module": "demiflow.workbench.reader",
+          "names": [
+            "ALLOWED"
+          ]
+        },
+        {
+          "line": 23,
+          "module": "demiflow.workbench.reader",
+          "names": [
+            "in_native_dispatch"
+          ]
+        },
+        {
+          "line": 30,
+          "module": "demiflow.workbench.conversations.inspection",
+          "names": [
+            "preview_launcher"
+          ]
+        },
+        {
+          "line": 116,
+          "module": "demiflow.workbench.analysis.source_export",
+          "names": [
+            "export"
+          ]
+        },
+        {
+          "line": 121,
+          "module": "demiflow.workbench.analysis.media_source_export",
+          "names": [
+            "export"
+          ]
+        },
+        {
+          "line": 126,
+          "module": "demiflow.workbench.analysis.media_source_export",
+          "names": [
+            "resolve_fields"
+          ]
+        },
+        {
+          "line": 131,
+          "module": "demiflow.workbench.analysis.source_query",
+          "names": [
+            "read"
+          ]
+        },
+        {
+          "line": 136,
+          "module": "demiflow.workbench.analysis.catalog_profile",
+          "names": [
+            "profile"
+          ]
+        },
+        {
+          "line": 137,
+          "module": "demiflow.workbench.analysis",
+          "names": [
+            "contracts"
+          ]
+        },
+        {
+          "line": 146,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "checks"
+          ]
+        },
+        {
+          "line": 151,
+          "module": "demiflow.workbench.projects.discovery",
+          "names": [
+            "table"
+          ]
+        },
+        {
+          "line": 152,
+          "module": "demiflow.workbench.projects.workspace",
+          "names": [
+            "load_workspace"
+          ]
+        },
+        {
+          "line": 156,
+          "module": "demiflow.workbench.projects.workspace",
+          "names": [
+            "_inspect_flow"
+          ]
+        },
+        {
+          "line": 160,
+          "module": "demiflow.workbench.graph.preview",
+          "names": [
+            "_preview"
+          ]
+        },
+        {
+          "line": 163,
+          "module": "demiflow.workbench.runs.native_submission",
+          "names": [
+            "inspect_submission"
+          ]
+        },
+        {
+          "line": 166,
+          "module": "demiflow.workbench.graph.model",
+          "names": [
+            "_source_tree"
+          ]
+        },
+        {
+          "line": 169,
+          "module": "demiflow.workbench.graph.parameters",
+          "names": [
+            "_entry_arguments"
+          ]
+        },
+        {
+          "line": 172,
+          "module": "demiflow.workbench.runs.requests",
+          "names": [
+            "_reconcile"
+          ]
+        },
+        {
+          "line": 175,
+          "module": "demiflow.workbench.runs.admission",
+          "names": [
+            "_describe"
+          ]
+        },
+        {
+          "line": 178,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "manager"
+          ]
+        },
+        {
+          "line": 179,
+          "module": "demiflow.workbench.runs.authority",
+          "names": [
+            "from_bootstrap"
+          ]
+        },
+        {
+          "line": 180,
+          "module": "demiflow.workbench.runs.operations",
+          "names": [
+            "worker_arguments"
+          ]
+        },
+        {
+          "line": 186,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "manager"
+          ]
+        },
+        {
+          "line": 189,
+          "module": "demiflow.workbench.projects.workspace",
+          "names": [
+            "_report_status"
+          ]
+        },
+        {
+          "line": 193,
+          "module": "demiflow.workbench.projects.workspace",
+          "names": [
+            "_capture_change_baseline"
+          ]
+        },
+        {
+          "line": 196,
+          "module": "demiflow.workbench.projects.workspace",
+          "names": [
+            "_check_change_scope"
+          ]
+        },
+        {
+          "line": 201,
+          "module": "demiflow.workbench.projects.workspace",
+          "names": [
+            "_audit_check"
+          ]
+        },
+        {
+          "line": 204,
+          "module": "demiflow.workbench.projects.workspace",
+          "names": [
+            "_audit_hint"
+          ]
+        },
+        {
+          "line": 208,
+          "module": "demiflow.workbench.projects.workspace",
+          "names": [
+            "load_workspace"
+          ]
+        },
+        {
+          "line": 209,
+          "module": "demiflow.workbench.projects.workspace",
+          "names": [
+            "table_binding"
+          ]
+        },
+        {
+          "line": 210,
+          "module": "demiflow.workbench.projects.workspace",
+          "names": [
+            "preview_binding"
+          ]
+        },
+        {
+          "line": 211,
+          "module": "demiflow.workbench.projects.workspace",
+          "names": [
+            "location_root"
+          ]
+        },
+        {
+          "line": 212,
+          "module": "demiflow.workbench.projects.workspace",
+          "names": [
+            "relative_path"
+          ]
+        },
+        {
+          "line": 236,
+          "module": "demiflow.workbench.analysis.catalog_versions",
+          "names": [
+            "resolve_version"
+          ]
+        },
+        {
+          "line": 266,
+          "module": "demiflow.workbench.analysis.catalog_versions",
+          "names": [
+            "resolve_version"
+          ]
+        },
+        {
+          "line": 284,
+          "module": "demiflow.workbench",
+          "names": [
+            "catalog"
+          ]
+        },
+        {
+          "line": 342,
+          "module": "demiflow.workbench.reader",
+          "names": [
+            "serve"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/reader.py",
+      "sha256": "8bf243687eea84f62eb61b220391df768535017badb47782c3a0c481f523a8a9",
+      "integration_sha256": "8bf243687eea84f62eb61b220391df768535017badb47782c3a0c481f523a8a9",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "using",
+          "line": 35
+        },
+        {
+          "name": "current",
+          "line": 40
+        },
+        {
+          "name": "in_native_dispatch",
+          "line": 42
+        },
+        {
+          "name": "Reader",
+          "line": 46
+        },
+        {
+          "name": "_read_exact",
+          "line": 346
+        },
+        {
+          "name": "serve",
+          "line": 356
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 64,
+          "module": "demiflow.workbench.process",
+          "names": [
+            "process_identity"
+          ]
+        },
+        {
+          "line": 141,
+          "module": "demiflow.workbench.process",
+          "names": [
+            "process_identity"
+          ]
+        },
+        {
+          "line": 186,
+          "module": "demiflow.workbench.process",
+          "names": [
+            "process_identity"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/host_partition.py",
+      "sha256": "d981763a751a99ec1e2c29db885d0af6af28c0a42ac974aadc2bef6d5a777cfe",
+      "integration_sha256": "d981763a751a99ec1e2c29db885d0af6af28c0a42ac974aadc2bef6d5a777cfe",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "location",
+          "line": 33
+        },
+        {
+          "name": "policy",
+          "line": 46
+        },
+        {
+          "name": "_path",
+          "line": 66
+        },
+        {
+          "name": "_ancestor",
+          "line": 74
+        },
+        {
+          "name": "_analysis",
+          "line": 81
+        },
+        {
+          "name": "load",
+          "line": 119
+        },
+        {
+          "name": "load_analysis",
+          "line": 208
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 83,
+          "module": "demiflow.workbench.analysis.resource_profile",
+          "names": [
+            "profile"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/api.py",
+      "sha256": "00a8f226f1b709c7dbf2012ef1fb06216bf9448f3590d31501ce96ec6ca55f6f",
+      "integration_sha256": "00a8f226f1b709c7dbf2012ef1fb06216bf9448f3590d31501ce96ec6ca55f6f",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "SessionUnauthorized",
+          "line": 154
+        },
+        {
+          "name": "RequestNotDispatched",
+          "line": 158
+        },
+        {
+          "name": "_session_token",
+          "line": 165
+        },
+        {
+          "name": "_json",
+          "line": 180
+        },
+        {
+          "name": "_fields",
+          "line": 201
+        },
+        {
+          "name": "WorkspaceServer",
+          "line": 207
+        },
+        {
+          "name": "Handler",
+          "line": 428
+        },
+        {
+          "name": "serve",
+          "line": 1012
+        },
+        {
+          "name": "export_report",
+          "line": 1027
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 27,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        },
+        {
+          "line": 28,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "registry"
+          ]
+        },
+        {
+          "line": 29,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "operations"
+          ]
+        },
+        {
+          "line": 30,
+          "module": "demiflow.workbench.runs.authority",
+          "names": [
+            "for_http"
+          ]
+        },
+        {
+          "line": 34,
+          "module": "demiflow.workbench.conversations",
+          "names": [
+            "http"
+          ]
+        },
+        {
+          "line": 35,
+          "module": "demiflow.workbench.analysis",
+          "names": [
+            "http"
+          ]
+        },
+        {
+          "line": 244,
+          "module": "demiflow.workbench.reader",
+          "names": [
+            "Reader"
+          ]
+        },
+        {
+          "line": 250,
+          "module": "demiflow.workbench.graph.preview_snapshots",
+          "names": [
+            "PreviewSnapshots"
+          ]
+        },
+        {
+          "line": 260,
+          "module": "demiflow.workbench.analysis.media_tickets",
+          "names": [
+            "MediaTickets"
+          ]
+        },
+        {
+          "line": 263,
+          "module": "demiflow.workbench.conversations.service",
+          "names": [
+            "connect"
+          ]
+        },
+        {
+          "line": 274,
+          "module": "demiflow.workbench.host_partition",
+          "names": [
+            "location"
+          ]
+        },
+        {
+          "line": 282,
+          "module": "demiflow.workbench.conversations.global_settings",
+          "names": [
+            "GlobalSettings"
+          ]
+        },
+        {
+          "line": 286,
+          "module": "demiflow.workbench.analysis.web_service",
+          "names": [
+            "WebService"
+          ]
+        },
+        {
+          "line": 289,
+          "module": "demiflow.workbench.notebooks.service",
+          "names": [
+            "Notebooks"
+          ]
+        },
+        {
+          "line": 377,
+          "module": "demiflow.workbench.runs.view",
+          "names": [
+            "snapshot"
+          ]
+        },
+        {
+          "line": 508,
+          "module": "demiflow.workbench.reader",
+          "names": [
+            "using"
+          ]
+        },
+        {
+          "line": 515,
+          "module": "demiflow.workbench.conversations.existing_http",
+          "names": [
+            "ForwardedError"
+          ]
+        },
+        {
+          "line": 530,
+          "module": "demiflow.workbench.runs.view",
+          "names": [
+            "ObservationResetRequired"
+          ]
+        },
+        {
+          "line": 599,
+          "module": "demiflow.workbench.graph.preview_snapshots",
+          "names": [
+            "validate_basis"
+          ]
+        },
+        {
+          "line": 603,
+          "module": "demiflow.workbench.graph.preview_snapshots",
+          "names": [
+            "validate_request"
+          ]
+        },
+        {
+          "line": 629,
+          "module": "demiflow.workbench.notebooks.proxy",
+          "names": [
+            "route"
+          ]
+        },
+        {
+          "line": 631,
+          "module": "demiflow.workbench.analysis",
+          "names": [
+            "media_http"
+          ]
+        },
+        {
+          "line": 646,
+          "module": "demiflow.workbench.conversations.global_settings",
+          "names": [
+            "unavailable"
+          ]
+        },
+        {
+          "line": 693,
+          "module": "demiflow.workbench.analysis.output_transport",
+          "names": [
+            "OutputRange"
+          ]
+        },
+        {
+          "line": 715,
+          "module": "demiflow.workbench.runs.context",
+          "names": [
+            "query"
+          ]
+        },
+        {
+          "line": 720,
+          "module": "demiflow.workbench.runs.tools",
+          "names": [
+            "describe"
+          ]
+        },
+        {
+          "line": 723,
+          "module": "demiflow.workbench.graph.model",
+          "names": [
+            "get"
+          ]
+        },
+        {
+          "line": 729,
+          "module": "demiflow.workbench.graph.source_view",
+          "names": [
+            "pipeline"
+          ]
+        },
+        {
+          "line": 732,
+          "module": "demiflow.workbench.graph.source_view",
+          "names": [
+            "get"
+          ]
+        },
+        {
+          "line": 735,
+          "module": "demiflow.workbench.graph.parameters",
+          "names": [
+            "state"
+          ]
+        },
+        {
+          "line": 738,
+          "module": "demiflow.workbench.runs.view",
+          "names": [
+            "observations"
+          ]
+        },
+        {
+          "line": 744,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "view"
+          ]
+        },
+        {
+          "line": 750,
+          "module": "demiflow.workbench.runs.requests",
+          "names": [
+            "read"
+          ]
+        },
+        {
+          "line": 755,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "definitions"
+          ]
+        },
+        {
+          "line": 760,
+          "module": "demiflow.workbench.projects.flow_arguments",
+          "names": [
+            "read"
+          ]
+        },
+        {
+          "line": 763,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "documents"
+          ]
+        },
+        {
+          "line": 789,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "manager"
+          ]
+        },
+        {
+          "line": 859,
+          "module": "demiflow.workbench.notebooks.proxy",
+          "names": [
+            "route"
+          ]
+        },
+        {
+          "line": 861,
+          "module": "demiflow.workbench.analysis",
+          "names": [
+            "media_http"
+          ]
+        },
+        {
+          "line": 868,
+          "module": "demiflow.workbench.notebooks.proxy",
+          "names": [
+            "route"
+          ]
+        },
+        {
+          "line": 870,
+          "module": "demiflow.workbench.analysis",
+          "names": [
+            "media_http"
+          ]
+        },
+        {
+          "line": 920,
+          "module": "demiflow.workbench.notebooks.proxy",
+          "names": [
+            "open_notebook"
+          ]
+        },
+        {
+          "line": 951,
+          "module": "demiflow.workbench.projects.flow_arguments",
+          "names": [
+            "save"
+          ]
+        },
+        {
+          "line": 958,
+          "module": "demiflow.workbench.graph",
+          "names": [
+            "parameters"
+          ]
+        },
+        {
+          "line": 973,
+          "module": "demiflow.workbench.runs.admission",
+          "names": [
+            "describe"
+          ]
+        },
+        {
+          "line": 976,
+          "module": "demiflow.workbench.runs.requests",
+          "names": [
+            "reconcile"
+          ]
+        },
+        {
+          "line": 981,
+          "module": "demiflow.workbench.graph.preview",
+          "names": [
+            "preview"
+          ]
+        },
+        {
+          "line": 989,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "manager"
+          ]
+        },
+        {
+          "line": 1001,
+          "module": "demiflow.workbench.notebooks.proxy",
+          "names": [
+            "route"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/cli.py",
+      "sha256": "007566970b5094aa01de48e35b752bff3dc3949491013780f37793a2a5fc2087",
+      "integration_sha256": "007566970b5094aa01de48e35b752bff3dc3949491013780f37793a2a5fc2087",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "register",
+          "line": 12
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 9,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        },
+        {
+          "line": 20,
+          "module": "demiflow.workbench.projects.registry",
+          "names": [
+            "register"
+          ]
+        },
+        {
+          "line": 210,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "index"
+          ]
+        },
+        {
+          "line": 238,
+          "module": "demiflow.workbench.api",
+          "names": [
+            "serve"
+          ]
+        },
+        {
+          "line": 244,
+          "module": "demiflow.workbench.runs.cli",
+          "names": [
+            "register"
+          ]
+        },
+        {
+          "line": 452,
+          "module": "demiflow.workbench.api",
+          "names": [
+            "export_report"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/graph/model.py",
+      "sha256": "f0b03136e1e29da0048fd5c942b79db5299e006d21a3ee1f12904f56a74e50cc",
+      "integration_sha256": "f0b03136e1e29da0048fd5c942b79db5299e006d21a3ee1f12904f56a74e50cc",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "_scope_nodes",
+          "line": 23
+        },
+        {
+          "name": "_declared",
+          "line": 34
+        },
+        {
+          "name": "_source",
+          "line": 51
+        },
+        {
+          "name": "_entry_definition",
+          "line": 56
+        },
+        {
+          "name": "_source_tree",
+          "line": 101
+        },
+        {
+          "name": "_join_sealed_observations",
+          "line": 203
+        },
+        {
+          "name": "get",
+          "line": 254
+        },
+        {
+          "name": "_arguments",
+          "line": 405
+        },
+        {
+          "name": "_match",
+          "line": 418
+        },
+        {
+          "name": "from_binding",
+          "line": 423
+        },
+        {
+          "name": "_resolve_bridge_node",
+          "line": 429
+        },
+        {
+          "name": "_resolve_bridge_action",
+          "line": 457
+        },
+        {
+          "name": "bound_source",
+          "line": 486
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 7,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        },
+        {
+          "line": 40,
+          "module": "demiflow.workbench.projects.discovery",
+          "names": [
+            "discover"
+          ]
+        },
+        {
+          "line": 52,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 211,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "facts"
+          ]
+        },
+        {
+          "line": 212,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "view"
+          ]
+        },
+        {
+          "line": 285,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "manager"
+          ]
+        },
+        {
+          "line": 317,
+          "module": "demiflow.workbench.graph",
+          "names": [
+            "logical"
+          ]
+        },
+        {
+          "line": 329,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "facts"
+          ]
+        },
+        {
+          "line": 361,
+          "module": "demiflow.workbench.graph.parameters",
+          "names": [
+            "public_model"
+          ]
+        },
+        {
+          "line": 435,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "facts"
+          ]
+        },
+        {
+          "line": 465,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "facts"
+          ]
+        },
+        {
+          "line": 507,
+          "module": "demiflow.workbench.graph.parameters",
+          "names": [
+            "public_model"
+          ]
+        },
+        {
+          "line": 518,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "manager"
+          ]
+        },
+        {
+          "line": 530,
+          "module": "demiflow.workbench.runs",
+          "names": [
+            "facts"
+          ]
+        },
+        {
+          "line": 545,
+          "module": "demiflow.workbench.graph.parameters",
+          "names": [
+            "public_model"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/graph/preview.py",
+      "sha256": "9828eb324add4779649a51c23e8599f38dade381ead8db84af04acbfd99e9c74",
+      "integration_sha256": "9828eb324add4779649a51c23e8599f38dade381ead8db84af04acbfd99e9c74",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "preview",
+          "line": 23
+        },
+        {
+          "name": "_import_root",
+          "line": 28
+        },
+        {
+          "name": "_parameters",
+          "line": 40
+        },
+        {
+          "name": "_Sources",
+          "line": 72
+        },
+        {
+          "name": "_Discard",
+          "line": 112
+        },
+        {
+          "name": "_preview",
+          "line": 117
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 20,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        },
+        {
+          "line": 24,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 45,
+          "module": "demiflow.workbench.projects.discovery",
+          "names": [
+            "_json"
+          ]
+        },
+        {
+          "line": 121,
+          "module": "demiflow.workbench.projects.discovery",
+          "names": [
+            "discover"
+          ]
+        },
+        {
+          "line": 122,
+          "module": "demiflow.workbench.graph.preview_guard",
+          "names": [
+            "enter_readonly"
+          ]
+        },
+        {
+          "line": 166,
+          "module": "demiflow.workbench.graph.plan_callsite",
+          "names": [
+            "PlanCallsites",
+            "pipeline_material"
+          ]
+        },
+        {
+          "line": 169,
+          "module": "demiflow.workbench.graph.plan_details",
+          "names": [
+            "build_plan_details"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/graph/parameters.py",
+      "sha256": "ecde1d7c96f9fe99f5a172bee8dce6c2a07d8451ef406340ecdee51c8d1d16fb",
+      "integration_sha256": "ecde1d7c96f9fe99f5a172bee8dce6c2a07d8451ef406340ecdee51c8d1d16fb",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "_sha",
+          "line": 27
+        },
+        {
+          "name": "_pointer",
+          "line": 31
+        },
+        {
+          "name": "_decode",
+          "line": 35
+        },
+        {
+          "name": "_read_registered_bytes",
+          "line": 68
+        },
+        {
+          "name": "read_file",
+          "line": 77
+        },
+        {
+          "name": "_entry_arguments",
+          "line": 85
+        },
+        {
+          "name": "public_model",
+          "line": 105
+        },
+        {
+          "name": "state",
+          "line": 198
+        },
+        {
+          "name": "_candidate",
+          "line": 209
+        },
+        {
+          "name": "preview",
+          "line": 265
+        },
+        {
+          "name": "update",
+          "line": 269
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 16,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        },
+        {
+          "line": 130,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "operation"
+          ]
+        },
+        {
+          "line": 210,
+          "module": "demiflow.workbench.graph.model",
+          "names": [
+            "from_binding"
+          ]
+        },
+        {
+          "line": 292,
+          "module": "demiflow.workbench.graph.model",
+          "names": [
+            "from_binding"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/analysis/catalog_versions.py",
+      "sha256": "1fcf0abc7c7f50d4f8100ffea59f8714fbfc0ad2bd711797d66f448eedcdf730",
+      "integration_sha256": "1fcf0abc7c7f50d4f8100ffea59f8714fbfc0ad2bd711797d66f448eedcdf730",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "_freeze",
+          "line": 19
+        },
+        {
+          "name": "_thaw",
+          "line": 27
+        },
+        {
+          "name": "VersionResolution",
+          "line": 36
+        },
+        {
+          "name": "resolve_version",
+          "line": 54
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 16,
+          "module": "demiflow.workbench.analysis",
+          "names": [
+            "contracts"
+          ]
+        },
+        {
+          "line": 57,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/analysis/source_export.py",
+      "sha256": "656da3c5386c01377b2700b8cbc2e62150d40f252b8af32012167eb88861b197",
+      "integration_sha256": "656da3c5386c01377b2700b8cbc2e62150d40f252b8af32012167eb88861b197",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "fixed_input",
+          "line": 23
+        },
+        {
+          "name": "export",
+          "line": 50
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 17,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        },
+        {
+          "line": 18,
+          "module": "demiflow.workbench.analysis",
+          "names": [
+            "contracts"
+          ]
+        },
+        {
+          "line": 19,
+          "module": "demiflow.workbench.analysis.sources",
+          "names": [
+            "locator"
+          ]
+        },
+        {
+          "line": 20,
+          "module": "demiflow.workbench.analysis.web_sources",
+          "names": [
+            "_snapshot"
+          ]
+        },
+        {
+          "line": 26,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "discovery"
+          ]
+        },
+        {
+          "line": 31,
+          "module": "demiflow.workbench.analysis.catalog_versions",
+          "names": [
+            "resolve_version"
+          ]
+        },
+        {
+          "line": 67,
+          "module": "demiflow.workbench.analysis.arrow_bridge",
+          "names": [
+            "encode_batches"
+          ]
+        },
+        {
+          "line": 68,
+          "module": "demiflow.workbench.analysis.arrow_bridge",
+          "names": [
+            "schema_description"
+          ]
+        },
+        {
+          "line": 69,
+          "module": "demiflow.workbench.analysis.arrow_bridge",
+          "names": [
+            "schema_digest"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/analysis/media_source_export.py",
+      "sha256": "b169a2dbd8366cc7d88c397a65431f9babe298bd349f37af2a93bcb84b571e07",
+      "integration_sha256": "b169a2dbd8366cc7d88c397a65431f9babe298bd349f37af2a93bcb84b571e07",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "_public_path",
+          "line": 27
+        },
+        {
+          "name": "_open",
+          "line": 35
+        },
+        {
+          "name": "export",
+          "line": 47
+        },
+        {
+          "name": "_selection",
+          "line": 55
+        },
+        {
+          "name": "_recheck",
+          "line": 102
+        },
+        {
+          "name": "resolve_fields",
+          "line": 121
+        },
+        {
+          "name": "_export",
+          "line": 137
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 13,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        },
+        {
+          "line": 14,
+          "module": "demiflow.workbench",
+          "names": [
+            "catalog"
+          ]
+        },
+        {
+          "line": 18,
+          "module": "demiflow.workbench.analysis",
+          "names": [
+            "contracts"
+          ]
+        },
+        {
+          "line": 19,
+          "module": "demiflow.workbench.analysis.source_export",
+          "names": [
+            "fixed_input"
+          ]
+        },
+        {
+          "line": 20,
+          "module": "demiflow.workbench.analysis.registered_media",
+          "names": [
+            "source_witness"
+          ]
+        },
+        {
+          "line": 21,
+          "module": "demiflow.workbench.analysis.filesystem_identity",
+          "names": [
+            "identity"
+          ]
+        },
+        {
+          "line": 67,
+          "module": "demiflow.workbench.analysis.catalog_versions",
+          "names": [
+            "resolve_version"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/analysis/web_sources.py",
+      "sha256": "eb0a8b3f0ab4111988c627fb2d310c5b918832bfcd44a1d089fd34cb86a74135",
+      "integration_sha256": "eb0a8b3f0ab4111988c627fb2d310c5b918832bfcd44a1d089fd34cb86a74135",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "_snapshot",
+          "line": 15
+        },
+        {
+          "name": "resolve",
+          "line": 41
+        },
+        {
+          "name": "verify",
+          "line": 60
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 9,
+          "module": "demiflow.workbench.projects",
+          "names": [
+            "workspace"
+          ]
+        },
+        {
+          "line": 10,
+          "module": "demiflow.workbench.analysis",
+          "names": [
+            "contracts"
+          ]
+        },
+        {
+          "line": 11,
+          "module": "demiflow.workbench.analysis.records",
+          "names": [
+            "Records"
+          ]
+        },
+        {
+          "line": 12,
+          "module": "demiflow.workbench.analysis.sources",
+          "names": [
+            "locator"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/analysis/catalog_profile.py",
+      "sha256": "3f9141a2a2fe11968e392db7918acc03f19ce570c2d22334a60d49a164876ed9",
+      "integration_sha256": "3f9141a2a2fe11968e392db7918acc03f19ce570c2d22334a60d49a164876ed9",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "profile",
+          "line": 11
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 6,
+          "module": "demiflow.workbench.analysis",
+          "names": [
+            "contracts"
+          ]
+        },
+        {
+          "line": 7,
+          "module": "demiflow.workbench.analysis.source_export",
+          "names": [
+            "fixed_input"
+          ]
+        },
+        {
+          "line": 8,
+          "module": "demiflow.workbench.analysis.source_query",
+          "names": [
+            "read"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/notebooks/data.py",
+      "sha256": "d2839d17c45b4dcdde2b6744c5336a872f9d52dc2a5ebc700c81397d49f220b4",
+      "integration_sha256": "d2839d17c45b4dcdde2b6744c5336a872f9d52dc2a5ebc700c81397d49f220b4",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "sample",
+          "line": 6
+        },
+        {
+          "name": "project_sample",
+          "line": 16
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 8,
+          "module": "demiflow.workbench.projects.workspace",
+          "names": [
+            "sample_table"
+          ]
+        },
+        {
+          "line": 18,
+          "module": "demiflow.workbench.projects.workspace",
+          "names": [
+            "project_sample"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/notebooks/service.py",
+      "sha256": "609362377b81a648721c5e0edc130325498b21400563b3ca69a81dfe74838ab5",
+      "integration_sha256": "609362377b81a648721c5e0edc130325498b21400563b3ca69a81dfe74838ab5",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "Instance",
+          "line": 26
+        },
+        {
+          "name": "Notebooks",
+          "line": 42
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 205,
+          "module": "demiflow.workbench.analysis.contracts",
+          "names": [
+            "export_notebook"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/conversations/inspection.py",
+      "sha256": "a37eb443f9c86fbd431f590cb6fabc582c236d550e3617d3becc739a145cd42d",
+      "integration_sha256": "a37eb443f9c86fbd431f590cb6fabc582c236d550e3617d3becc739a145cd42d",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "limit_native_allocations",
+          "line": 15
+        },
+        {
+          "name": "preview_launcher",
+          "line": 25
+        },
+        {
+          "name": "main",
+          "line": 79
+        }
+      ],
+      "workbench_imports": [
+        {
+          "line": 98,
+          "module": "demiflow.workbench.graph",
+          "names": [
+            "preview_guard"
+          ]
+        },
+        {
+          "line": 102,
+          "module": "demiflow.workbench.worker",
+          "names": [
+            "dispatch"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demiflow/execution/host/inspection.py",
+      "sha256": "a8959ffc76185e2d117e6918269068c0acd2d8a0b01f243b692eb0313c4403bb",
+      "integration_sha256": "a8959ffc76185e2d117e6918269068c0acd2d8a0b01f243b692eb0313c4403bb",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "__getattr__",
+          "line": 9
+        },
+        {
+          "name": "__dir__",
+          "line": 18
+        }
+      ],
+      "workbench_imports": []
+    },
+    {
+      "path": "demiflow/execution/host/control.py",
+      "sha256": "51f5655f35e037291327437b5cabf65a9c153518a13deb5a316425e303afa8c7",
+      "integration_sha256": "51f5655f35e037291327437b5cabf65a9c153518a13deb5a316425e303afa8c7",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "__getattr__",
+          "line": 9
+        },
+        {
+          "name": "__dir__",
+          "line": 18
+        }
+      ],
+      "workbench_imports": []
+    },
+    {
+      "path": "demiflow/lance/refs.py",
+      "sha256": "cfaec21b66da29b5967e0bcb24aa699d937a8b77dd150b269d323799bd3ea274",
+      "integration_sha256": "cfaec21b66da29b5967e0bcb24aa699d937a8b77dd150b269d323799bd3ea274",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "_clean_text",
+          "line": 23
+        },
+        {
+          "name": "DatasetRef",
+          "line": 30
+        }
+      ],
+      "workbench_imports": []
+    },
+    {
+      "path": "demiflow/forge/platform_snapshot.py",
+      "sha256": "b89057365df6ae51b2ac7a49062a3c0b22d544cd924eb33039880d7da260157b",
+      "integration_sha256": "b89057365df6ae51b2ac7a49062a3c0b22d544cd924eb33039880d7da260157b",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "_relative_path",
+          "line": 24
+        },
+        {
+          "name": "_file_state",
+          "line": 31
+        },
+        {
+          "name": "source_inventory",
+          "line": 35
+        },
+        {
+          "name": "_seal",
+          "line": 89
+        },
+        {
+          "name": "build_snapshot",
+          "line": 98
+        },
+        {
+          "name": "_diagnostics",
+          "line": 126
+        },
+        {
+          "name": "_complete",
+          "line": 130
+        },
+        {
+          "name": "write_snapshot",
+          "line": 134
+        },
+        {
+          "name": "load_snapshot",
+          "line": 163
+        },
+        {
+          "name": "compare_snapshots",
+          "line": 241
+        },
+        {
+          "name": "check_snapshot",
+          "line": 277
+        }
+      ],
+      "workbench_imports": []
+    },
+    {
+      "path": "demiflow/forge/platform_environment.py",
+      "sha256": "1ae856549592f015001e0005bc25742e6d8eef4db271594198eddd25f11f36df",
+      "integration_sha256": "1ae856549592f015001e0005bc25742e6d8eef4db271594198eddd25f11f36df",
+      "same_at_integration": true,
+      "top_level_symbols": [
+        {
+          "name": "read_bounded",
+          "line": 23
+        },
+        {
+          "name": "platform_declaration",
+          "line": 51
+        },
+        {
+          "name": "_metadata_directory",
+          "line": 84
+        },
+        {
+          "name": "_direct_url",
+          "line": 93
+        },
+        {
+          "name": "environment_inventory",
+          "line": 112
+        }
+      ],
+      "workbench_imports": []
+    },
+    {
+      "path": "docs/architecture-master-intent-v1.md",
+      "sha256": "a07a6396ae8a8674efe13f09f3f21628e344a641b712881bf760f7638a99a5e8",
+      "integration_sha256": "a07a6396ae8a8674efe13f09f3f21628e344a641b712881bf760f7638a99a5e8",
+      "same_at_integration": true
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "ec08fd0134f23b9d7265af37aca163d493bac94fb986cb3793d43bcfc23f1c18",
+      "integration_sha256": "ec08fd0134f23b9d7265af37aca163d493bac94fb986cb3793d43bcfc23f1c18",
+      "same_at_integration": true
+    }
+  ],
+  "direct_workspace_worker_proxies": [
+    {
+      "name": "begin_change_scope",
+      "line": 305
+    },
+    {
+      "name": "audit_check",
+      "line": 503
+    },
+    {
+      "name": "audit_observe",
+      "line": 549
+    },
+    {
+      "name": "describe_table",
+      "line": 804
+    },
+    {
+      "name": "table_versions",
+      "line": 813
+    },
+    {
+      "name": "attach_table",
+      "line": 819
+    },
+    {
+      "name": "set_table_view",
+      "line": 907
+    },
+    {
+      "name": "inspect_flow",
+      "line": 998
+    },
+    {
+      "name": "check_project",
+      "line": 1006
+    },
+    {
+      "name": "project_check_status",
+      "line": 1011
+    },
+    {
+      "name": "sample_table",
+      "line": 1016
+    },
+    {
+      "name": "profile_table",
+      "line": 1036
+    },
+    {
+      "name": "project_profile",
+      "line": 1044
+    },
+    {
+      "name": "table_media",
+      "line": 1049
+    },
+    {
+      "name": "table_evidence",
+      "line": 1062
+    },
+    {
+      "name": "report_status",
+      "line": 1303
+    },
+    {
+      "name": "project_table",
+      "line": 1709
+    },
+    {
+      "name": "project_sample",
+      "line": 1714
+    }
+  ],
+  "callsite_candidates": [
+    {
+      "path": "demiflow/workbench/analysis/catalog_versions.py",
+      "line": 64,
+      "text": "control, ref, uri = ws.table_binding(root, workspace, alias)"
+    },
+    {
+      "path": "demiflow/workbench/analysis/catalog_versions.py",
+      "line": 90,
+      "text": "control_after, ref_after, uri_after = ws.table_binding(root, workspace_after, alias)"
+    },
+    {
+      "path": "demiflow/workbench/analysis/media_source_export.py",
+      "line": 62,
+      "text": "control,ref,current_uri=ws.table_binding(root,workspace,source_locator['alias'])"
+    },
+    {
+      "path": "demiflow/workbench/analysis/media_source_export.py",
+      "line": 113,
+      "text": "control_now,_,_=ws.table_binding(root,workspace_now,source_locator['alias'])"
+    },
+    {
+      "path": "demiflow/workbench/analysis/source_export.py",
+      "line": 37,
+      "text": "control, ref, uri = ws.table_binding(root, workspace, value[\"alias\"])"
+    },
+    {
+      "path": "demiflow/workbench/analysis/web_sources.py",
+      "line": 74,
+      "text": "result = ws.sample_table(root, locator[\"alias\"], expected_binding=locator[\"alias_binding\"],"
+    },
+    {
+      "path": "demiflow/workbench/analysis/web_sources.py",
+      "line": 77,
+      "text": "result = ws.sample_table(root, locator[\"alias\"], expected_binding=locator[\"binding\"], **arguments)"
+    },
+    {
+      "path": "demiflow/workbench/analysis/web_sources.py",
+      "line": 79,
+      "text": "result = ws.project_sample(root, locator[\"id\"], expected=locator[\"discovery\"],"
+    },
+    {
+      "path": "demiflow/workbench/api.py",
+      "line": 774,
+      "text": "value = api.project_sample(root, query['id'], expected=query['expected'],"
+    },
+    {
+      "path": "demiflow/workbench/api.py",
+      "line": 779,
+      "text": "value = api.workspace_changes(root)"
+    },
+    {
+      "path": "demiflow/workbench/api.py",
+      "line": 814,
+      "text": "value = api.report_status(root, query[\"digest\"])"
+    },
+    {
+      "path": "demiflow/workbench/api.py",
+      "line": 817,
+      "text": "value = api.sample_table("
+    },
+    {
+      "path": "demiflow/workbench/api.py",
+      "line": 979,
+      "text": "value = api.inspect_flow(root, **request)"
+    },
+    {
+      "path": "demiflow/workbench/api.py",
+      "line": 986,
+      "text": "value = api.audit_check(root, kind=request['kind'], expected_policy=request['expected_policy'],"
+    },
+    {
+      "path": "demiflow/workbench/api.py",
+      "line": 993,
+      "text": "value = runs.attach_result(root, **request)"
+    },
+    {
+      "path": "demiflow/workbench/cli.py",
+      "line": 84,
+      "text": "return api.project_sample(root, identity, expected=expected, version=version, binding=binding,"
+    },
+    {
+      "path": "demiflow/workbench/cli.py",
+      "line": 114,
+      "text": "output(lambda: api.audit_check(root, kind=kind, report_digest=digest, expected_policy=expected_policy), True)"
+    },
+    {
+      "path": "demiflow/workbench/cli.py",
+      "line": 127,
+      "text": "output(lambda: api.bind_audit_report(root, digest, expected=expected), True)"
+    },
+    {
+      "path": "demiflow/workbench/cli.py",
+      "line": 149,
+      "text": "return api.begin_change_scope(root, expected=expected, **value)"
+    },
+    {
+      "path": "demiflow/workbench/cli.py",
+      "line": 179,
+      "text": "output(lambda: api.workspace_changes(root), pretty)"
+    },
+    {
+      "path": "demiflow/workbench/cli.py",
+      "line": 214,
+      "text": "return index.rebuild(root) if rebuild else index.synchronize(root) if synchronize else index.status(root)"
+    },
+    {
+      "path": "demiflow/workbench/cli.py",
+      "line": 283,
+      "text": "lambda: api.attach_table("
+    },
+    {
+      "path": "demiflow/workbench/cli.py",
+      "line": 344,
+      "text": "return api.set_table_view(root, alias, **value, expected=expected)"
+    },
+    {
+      "path": "demiflow/workbench/cli.py",
+      "line": 358,
+      "text": "lambda: api.sample_table("
+    },
+    {
+      "path": "demiflow/workbench/cli.py",
+      "line": 433,
+      "text": "report = api.inspect_flow(root, entry, params=params)"
+    },
+    {
+      "path": "demiflow/workbench/cli.py",
+      "line": 437,
+      "text": "binding = api.bind_audit_report(root, report['digest'], expected=expected_workspace)"
+    },
+    {
+      "path": "demiflow/workbench/cli.py",
+      "line": 455,
+      "text": "return api.report_status(root, digest)"
+    },
+    {
+      "path": "demiflow/workbench/conversations/registration.py",
+      "line": 18,
+      "text": "from demiflow.workbench.projects.workspace import plan_flow_registration"
+    },
+    {
+      "path": "demiflow/workbench/graph/model.py",
+      "line": 277,
+      "text": "result = ws.report_status(root, report_digest)"
+    },
+    {
+      "path": "demiflow/workbench/graph/parameters.py",
+      "line": 237,
+      "text": "ws.table_binding(root,control,candidate)"
+    },
+    {
+      "path": "demiflow/workbench/graph/preview.py",
+      "line": 51,
+      "text": "arguments, _, _, _ = ws.resolve_arguments(root, control, document)"
+    },
+    {
+      "path": "demiflow/workbench/notebooks/data.py",
+      "line": 8,
+      "text": "from demiflow.workbench.projects.workspace import sample_table"
+    },
+    {
+      "path": "demiflow/workbench/notebooks/data.py",
+      "line": 18,
+      "text": "from demiflow.workbench.projects.workspace import project_sample as read"
+    },
+    {
+      "path": "demiflow/workbench/projects/checks.py",
+      "line": 38,
+      "text": "report = ws._inspect_flow(root, entry, params=params, save=True)"
+    },
+    {
+      "path": "demiflow/workbench/projects/checks.py",
+      "line": 86,
+      "text": "if item['digest'] and ws._report_status(root, item['digest'], platform_check=False)['status'] != item['status']:"
+    },
+    {
+      "path": "demiflow/workbench/projects/checks.py",
+      "line": 160,
+      "text": "if item['digest'] and ws._report_status(root, item['digest'], platform_check=False)['status'] != item['status']:"
+    },
+    {
+      "path": "demiflow/workbench/projects/watch.py",
+      "line": 30,
+      "text": "observed = ws.audit_observe(root, expected_policy=policy, session=session, previous_hint=state['hint'])"
+    },
+    {
+      "path": "demiflow/workbench/projects/watch.py",
+      "line": 43,
+      "text": "ws.audit_check(root, kind=row['kind'], report_digest=row['identity'] if row['kind'] == 'report' else None,"
+    },
+    {
+      "path": "demiflow/workbench/projects/workspace.py",
+      "line": 126,
+      "text": "from demiflow.workbench.runs.limits import limits_with"
+    },
+    {
+      "path": "demiflow/workbench/projects/workspace.py",
+      "line": 577,
+      "text": "from demiflow.workbench.runs.limits import limits_with"
+    },
+    {
+      "path": "demiflow/workbench/projects/workspace.py",
+      "line": 1154,
+      "text": "index.publish(root, marker)"
+    },
+    {
+      "path": "demiflow/workbench/projects/workspace.py",
+      "line": 1593,
+      "text": "from demiflow.workbench.runs.limits import limits_with"
+    },
+    {
+      "path": "demiflow/workbench/runs/admission.py",
+      "line": 4,
+      "text": "from demiflow.workbench.runs.limits import limits_with"
+    },
+    {
+      "path": "demiflow/workbench/runs/admission.py",
+      "line": 40,
+      "text": "arguments = ws.resolve_arguments(root, workspace, parameters)"
+    },
+    {
+      "path": "demiflow/workbench/runs/cli.py",
+      "line": 144,
+      "text": "emit(lambda: runs.attach_result(root, run_id, output, alias,"
+    },
+    {
+      "path": "demiflow/workbench/runs/manager.py",
+      "line": 33,
+      "text": "from demiflow.workbench.runs.limits import DEFAULT_LIMITS"
+    },
+    {
+      "path": "demiflow/workbench/runs/manager.py",
+      "line": 34,
+      "text": "from demiflow.workbench.runs.limits import limits_with"
+    },
+    {
+      "path": "demiflow/workbench/runs/manager.py",
+      "line": 147,
+      "text": "return index.publish(root, marker)"
+    },
+    {
+      "path": "demiflow/workbench/runs/manager.py",
+      "line": 276,
+      "text": "ws.resolve_arguments(root, workspace, original)"
+    },
+    {
+      "path": "demiflow/workbench/runs/manager.py",
+      "line": 286,
+      "text": "ws.resolve_arguments(root, workspace, effective)"
+    },
+    {
+      "path": "demiflow/workbench/runs/manager.py",
+      "line": 340,
+      "text": "report = ws._inspect_flow(root, entry, params=effective, save=True)"
+    },
+    {
+      "path": "demiflow/workbench/runs/manager.py",
+      "line": 500,
+      "text": "ws.verify_run_basis(root, manifest)"
+    },
+    {
+      "path": "demiflow/workbench/runs/manager.py",
+      "line": 511,
+      "text": "index.publish(root, marker)"
+    },
+    {
+      "path": "demiflow/workbench/runs/manager.py",
+      "line": 733,
+      "text": "index.publish(root, marker)"
+    },
+    {
+      "path": "demiflow/workbench/runs/manager.py",
+      "line": 780,
+      "text": "index.publish(root, marker)"
+    },
+    {
+      "path": "demiflow/workbench/runs/manager.py",
+      "line": 818,
+      "text": "ws.verify_run_basis(root, m)"
+    },
+    {
+      "path": "demiflow/workbench/runs/manager.py",
+      "line": 972,
+      "text": "index.publish(root, marker)"
+    },
+    {
+      "path": "demiflow/workbench/runs/manager.py",
+      "line": 1082,
+      "text": "return ws.attach_table(root, alias, relative_uri=ref.relative_uri, version=ref.lance_version,"
+    },
+    {
+      "path": "demiflow/workbench/runs/native_submission.py",
+      "line": 32,
+      "text": "arguments, tables, targets, _ = ws.resolve_arguments(root, control, parameters)"
+    },
+    {
+      "path": "demiflow/workbench/worker.py",
+      "line": 152,
+      "text": "from demiflow.workbench.projects.workspace import load_workspace"
+    },
+    {
+      "path": "demiflow/workbench/worker.py",
+      "line": 156,
+      "text": "from demiflow.workbench.projects.workspace import _inspect_flow"
+    },
+    {
+      "path": "demiflow/workbench/worker.py",
+      "line": 189,
+      "text": "from demiflow.workbench.projects.workspace import _report_status"
+    },
+    {
+      "path": "demiflow/workbench/worker.py",
+      "line": 193,
+      "text": "from demiflow.workbench.projects.workspace import _capture_change_baseline"
+    },
+    {
+      "path": "demiflow/workbench/worker.py",
+      "line": 196,
+      "text": "from demiflow.workbench.projects.workspace import _check_change_scope"
+    },
+    {
+      "path": "demiflow/workbench/worker.py",
+      "line": 201,
+      "text": "from demiflow.workbench.projects.workspace import _audit_check"
+    },
+    {
+      "path": "demiflow/workbench/worker.py",
+      "line": 204,
+      "text": "from demiflow.workbench.projects.workspace import _audit_hint"
+    },
+    {
+      "path": "demiflow/workbench/worker.py",
+      "line": 208,
+      "text": "from demiflow.workbench.projects.workspace import load_workspace"
+    },
+    {
+      "path": "demiflow/workbench/worker.py",
+      "line": 209,
+      "text": "from demiflow.workbench.projects.workspace import table_binding"
+    },
+    {
+      "path": "demiflow/workbench/worker.py",
+      "line": 210,
+      "text": "from demiflow.workbench.projects.workspace import preview_binding"
+    },
+    {
+      "path": "demiflow/workbench/worker.py",
+      "line": 211,
+      "text": "from demiflow.workbench.projects.workspace import location_root"
+    },
+    {
+      "path": "demiflow/workbench/worker.py",
+      "line": 212,
+      "text": "from demiflow.workbench.projects.workspace import relative_path"
+    }
+  ],
+  "callsite_note": "搜索候选供逐项迁移；不作为动态调用图或全仓无环的证明。AST 符号与 import 含函数内延迟导入。",
+  "evidence_records": [
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/integration-followups-20261119/CURRENT.json",
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/regression-closure-20261119/CURRENT.json",
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/p12-project-run-boundary-20261119/design.json"
+  ]
+}

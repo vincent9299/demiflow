@@ -1,0 +1,23 @@
+请审阅 P12 v2：项目与运行职责解耦方案。
+
+审阅入口：同目录 design.html（完整正文），design.json（原始结构化正文）。
+基线 main=e3b645ba97ddb57d9636d3d3f75fb1f6dff3d1f1；
+已核对 integration=1855e0010b8c67d6d73d93b63708fce51f4cccc3。
+两者 workbench 源码一致；integration 后续引擎修复必须保留。
+
+本稿取代旧 9d1ed56 草案作为当前待审版本；旧稿原件保留。
+范围：索引摘要由所有者发布、run: 表解析显式组装、刷新职责拆分、Pipeline 预算规则迁移，及为解除间接依赖所需的原有应用代理搬迁。
+第 3 节是改前改后，第 4 节是所有权，第 5–7 节是输入输出与失败契约，第 8 节是调用迁移，第 10 节是待执行验收，第 11 节是重点审阅问题。
+
+重点判断：
+1. 项目核心是否真正不再经 worker / facade 绕回运行；迁移清单是否遗漏 checks/audit/native/graph/analysis/Notebook。
+2. 索引提交与摘要求值失败是否完整保护已发布源；generation、Missing/unreadable、replace 后 marker 清理失败是否合理。
+3. 旧无索引根首次建库 complete=false，直至显式重建的保守变化是否接受。
+4. TableResolver 是否仅为同进程窄能力；固定 attempt/版本/P4 证明/location/媒体权限/expected_* 是否保持。
+5. P4 和 integration 已交付内容是否复用，平台 snapshot/历史是否保持原语义。
+
+请给出通过 / 有条件通过 / 需修改及具体阻塞项，最好引用本文节号、源码位置和可观察后果。
+无关模块优化请单列建议，不默认为本批前置。
+
+source-inventory.json 提供源码摘要、符号、18 个 worker 代理和调用候选。
+verification.json 只记录文档与基线核验。本轮未实施、未运行产品回归、未合流/发布，也尚无 Fable 审阅结论。

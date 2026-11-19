@@ -1,0 +1,61 @@
+{
+  "status": "design_packet_verified_not_product_implemented",
+  "checked_at": "2026-11-19T13:56:53.089065+00:00",
+  "baseline": {
+    "main": "e3b645ba97ddb57d9636d3d3f75fb1f6dff3d1f1",
+    "integration": "1855e0010b8c67d6d73d93b63708fce51f4cccc3"
+  },
+  "design_worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_p12_design_20261119",
+  "branch": "gpt/design/p12-boundary-20261119",
+  "checks": {
+    "json_valid": true,
+    "html_contains_all_design_sections": 11,
+    "html_links_and_anchors_valid": true,
+    "source_files_bound_and_unchanged": 37,
+    "source_files_same_at_integration": 37,
+    "workbench_diff_empty": true,
+    "integration_diff_files": 24,
+    "direct_workspace_worker_proxies": 18,
+    "callsite_candidates": 71,
+    "referenced_test_files_exist": [
+      "test_forge_analysis_fixed_reads.py",
+      "test_forge_analysis_media_source_export.py",
+      "test_forge_analysis_source_admission.py",
+      "test_forge_audit_runs.py",
+      "test_forge_development_admission.py",
+      "test_forge_history_admission.py",
+      "test_forge_index.py",
+      "test_forge_index_runs.py",
+      "test_forge_project_checks.py",
+      "test_forge_project_management.py",
+      "test_forge_public_api.py",
+      "test_forge_runs.py",
+      "test_runtime_v3_save_product.py",
+      "test_workbench_managed_plan_preview.py",
+      "test_workbench_native_notebook.py",
+      "test_workbench_parameter_projection.py",
+      "test_workbench_read_admission.py"
+    ],
+    "renderer_ast_valid": true,
+    "tracked_product_and_test_diff_empty": true
+  },
+  "files": {
+    "design.html": "d9de11d7cc3c6597b63df9b8184fa66035c175728a5d505c6ac0a19b11d3f9dc",
+    "design.json": "b357eab63676d749b0b5d9db3acb9f854ad459f096c1e8cac831c689c25f78be",
+    "render.py": "701dccdbdb63359ba71eaebf5fa505778108734b1be6cc9e419fbfb99ecb17a4",
+    "review-request.txt": "0031caf443037638e2f54906c7750d1b1c43a1781956cd7ae611c144f45f8b9b",
+    "source-inventory.json": "d8db959846c226df9486b542b0400d155d3a02c2e7464a963aded50f8511cf71"
+  },
+  "historical_packet_sha256": {
+    "design.json": "5db64de56400bef2ada9a043822e92edce354a9414a620d27a664e4aab26531d",
+    "design.html": "85884103e9e686d70577aea88f7ee227a894216ab08a3df3f61725790efabdb1",
+    "source-inventory.json": "a4d62415047c068c55faf7078d646ee42de0bc721832d952bc87eabcf45ac65a",
+    "review-request.txt": "6f0ae2f4c89bd97e1a5ef650ef31ef5259eb334e391bfe4556ca6be7bf6f35cd"
+  },
+  "product_tests_run": [],
+  "fable_review": "pending",
+  "implementation": "not_started",
+  "integration_merge": "not_performed",
+  "deployment": "not_performed",
+  "test_evidence_note": "304 distinct passes and six 199-case gates belong to existing integration records, not to P12 verification."
+}
