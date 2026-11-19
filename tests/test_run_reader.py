@@ -165,3 +165,19 @@ def test_reader_modules_do_not_load_hosts(module):
         'assert not any(n.startswith(("demiflow.workbench","demiflow.forge")) for n in sys.modules)',
         str(root), module], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
+
+
+def test_read_run_binds_identity_before_open_returns(tmp_path, monkeypatch):
+    target, _ = run_fixture(tmp_path)
+    original = run_reader.open_journal
+    def replaced(*args, **kwargs):
+        db = original(*args, **kwargs)
+        (target / 'run.sqlite').rename(target / 'original.sqlite')
+        shutil.copyfile(target / 'original.sqlite', target / 'run.sqlite')
+        return db
+    monkeypatch.setattr(run_reader, 'open_journal', replaced)
+    descriptors = len(os.listdir('/proc/self/fd'))
+    with pytest.raises(RunReadError, match='identity changed'):
+        with read_run(target):
+            pytest.fail('A replaced pathname reached the reader body')
+    assert len(os.listdir('/proc/self/fd')) <= descriptors

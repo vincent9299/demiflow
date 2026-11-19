@@ -104,7 +104,7 @@ def run_materialize(config):
         # operation. The writer runs here, not as a DataFusion UDF/callback.
         # Its final RSS guard is the 1GiB native cgroup; do not claim the query
         # subprocess's 512MiB sampled RSS guard measures this parent writer.
-        with session._admit():
+        with session.borrow_resources():
             snapshot = lance.write_dataset(pa.RecordBatchReader.from_batches(schema, batches()), str(target),
                 schema=schema, mode="create", max_rows_per_file=100000, max_rows_per_group=1024,
                 max_bytes_per_file=64*1024*1024)

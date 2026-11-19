@@ -151,7 +151,7 @@ def validate_reference(reference):
 
 def evidence(row, path, field, base):
     from demiflow.forge.io import no_symlinks
-    from demiflow.execution.artifacts import resolve_local_artifact
+    from demiflow.execution.host.inspection import resolve_local_artifact
     reference = at(row, path)
     validate_reference(reference)
     target = Path(reference['journal_path'])

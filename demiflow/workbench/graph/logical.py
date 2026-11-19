@@ -38,9 +38,9 @@ def _error(action_id, code, exc):
 
 
 def _project_action(action_id, nodes, edges):
-    from demiflow.execution.plan_facts import execution_instances
-    from demiflow.execution.recovery_contract import identity
-    from demiflow.planning.dag import compile_declared_dag
+    from demiflow.execution.host.inspection import execution_instances
+    from demiflow.execution.host.inspection import identity
+    from demiflow.execution.host.inspection import compile_declared_dag
 
     skeleton = [dict(id=n['id'], role=n.get('role')) for n in nodes]
     if action_id not in {n['id'] for n in skeleton}:

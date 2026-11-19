@@ -189,11 +189,11 @@ def _overlap(a, b):
 
 def _owner_finished(owner):
     from demiflow.workbench.runs import manager as runs
-    from demiflow.execution.run_reader import RunReadError
+    from demiflow.execution.host.inspection import RunReadError
 
     try:
         target = runs.directory(owner["root"], owner["run_id"])
-        from demiflow.execution.run_reader import read_run
+        from demiflow.execution.host.inspection import read_run
         with read_run(target) as reader:
             state = reader.attempt_state(owner["attempt"])
         if state is None:
@@ -696,38 +696,17 @@ class _HistoryScan:
 
     @contextmanager
     def journal(self, fd):
+        from demiflow.execution.host.inspection import observe_storage, RunReadError
         self.check()
         try:
-            descriptor = os.open("run.sqlite", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
-        except FileNotFoundError:
-            yield None
-            try:
-                os.stat("run.sqlite", dir_fd=fd, follow_symlinks=False)
-            except FileNotFoundError:
-                return
-            raise ForgeError("Historical journal appeared during admission", code="busy")
-        try:
-            info = os.fstat(descriptor)
-            if not stat.S_ISREG(info.st_mode) or info.st_size > 64 * MiB:
-                raise ForgeError("Historical journal type/size exceeds budget", code="resource_limit")
-            self.linked(fd, "run.sqlite", info)
-            # Linux /proc anchor follows the already pinned run directory.
-            # The storage reader remains mode=ro; no schema initialization.
-            journal = Path("/proc/self/fd") / str(fd)
-            yield journal
-            current = self.linked(fd, "run.sqlite", info)
-            if current.st_size > 64 * MiB:
-                raise ForgeError("Historical journal exceeds budget", code="resource_limit")
-        finally:
-            os.close(descriptor)
+            with observe_storage(directory_fd=fd, deadline=self.deadline) as observation:
+                yield observation
+        except RunReadError as exc:
+            raise ForgeError(str(exc), code=exc.code or 'busy') from exc
 
     def snapshot(self, journal, run_id):
-        from demiflow.workbench.runs.storage import storage_snapshot
-
         self.check()
-        value = (storage_snapshot(journal) if journal is not None else
-                 dict(state=None, manifest=None, identity=None, object_roots=[],
-                      manifest_digest=None, identity_digest=None))
+        value = journal.snapshot()
         self.check()
         state, manifest = value["state"], value["manifest"]
         if state is not None and ("status" not in state or

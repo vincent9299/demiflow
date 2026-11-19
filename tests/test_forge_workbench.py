@@ -267,7 +267,11 @@ def test_observation_pages_are_occurrence_and_attempt_bound(isolated):
     assert caught.value.code=='conflict'
     journal.transition({'prepared'},'failed',recoverable=True)
     old=journal.execution_status()
-    journal.begin_attempt(expected_attempt=1,expected_revision=old['revision'])
+    target, observed = runs._load(isolated, run['run_id'], detail='identity')
+    manifest = observed['manifest']
+    journal.begin_attempt(expected_attempt=1,expected_revision=old['revision'],
+        nodes=[(item['action_id'], item['node_id'], item['occurrence']) for item in manifest['observation_instances']],
+        actions=runs._fact_actions(runs._report(target, manifest), manifest['outputs']))
     with pytest.raises(ForgeError) as caught:
         run_view.observations(isolated,run['run_id'],attempt=2,node_id=node,cursor=page['cursor'])
     assert caught.value.code=='conflict'

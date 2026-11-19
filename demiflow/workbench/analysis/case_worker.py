@@ -48,7 +48,7 @@ def execute(value):
     with DataFusionSession(resource_directory=job_path('/var/lib/demiflow-analysis/native-slots'),
             options=DataFusionOptions(**NATIVE_OPTIONS),max_concurrent=1,slot_capacity=NATIVE_CAPACITY,
             temp_directory=job_path('/scratch/native'),diagnostics_directory=job_path('/scratch/diagnostics'),managed_diagnostics=True) as session:
-        with session._admit():
+        with session.borrow_resources():
             result=reader(value['witness']['source'],job_path('/objects/'+value['witness']['artifact']['id']),value['query'])
             c.encoded(result,maximum=56*1024)
             return result

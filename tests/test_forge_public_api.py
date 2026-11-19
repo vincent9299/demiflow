@@ -45,7 +45,11 @@ def next_attempt(root, value, *, running=False):
     old = journal.execution_status()
     journal.transition({old['status']}, 'failed', recoverable=True)
     old = journal.execution_status()
-    new = journal.begin_attempt(expected_attempt=old['attempt'], expected_revision=old['revision'])
+    target, observed = runs._load(root, value['run_id'], detail='identity')
+    manifest = observed['manifest']
+    new = journal.begin_attempt(expected_attempt=old['attempt'], expected_revision=old['revision'],
+        nodes=[(item['action_id'], item['node_id'], item['occurrence']) for item in manifest['observation_instances']],
+        actions=runs._fact_actions(runs._report(target, manifest), manifest['outputs']))
     if running:
         journal.transition({'prepared'}, 'running')
     return new['attempt']

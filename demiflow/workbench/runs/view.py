@@ -8,8 +8,8 @@ from demiflow.workbench.runs import manager as runs
 from demiflow.forge.platform import bounded_json
 from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
-from demiflow.execution import run_telemetry
-from demiflow.execution.run_reader import RunReadError, read_run
+from demiflow.execution.host.inspection import latest as telemetry_latest, series as telemetry_series, OBSERVATION_COUNT
+from demiflow.execution.host.inspection import RunReadError, read_run
 
 
 class ObservationResetRequired(ForgeError):
@@ -40,7 +40,6 @@ def _reading(root, run_id, *, deadline=None, cursor=None):
 
 def observations(root, run_id, *, attempt, node_id=None, action_id=None, cursor=None, limit=32):
     """One 96KiB occurrence page, pinned to an explicit observation revision."""
-    from demiflow.execution.run_journal import OBSERVATION_COUNT
     if type(limit) is not int or not 1<=limit<=64 or type(attempt) is not int:
         raise ForgeError('Invalid observation page',code='invalid_request')
     for value in (node_id,action_id):
@@ -169,48 +168,12 @@ def snapshot(root, run_id, *, attempt=None, revision=None):
         observations = reader.observation_summaries(attempt)
         outputs = []
         for name, spec in summary["outputs"].items():
-            # Required facts are projected separately from arbitrary action
-            # values. Most recent committed attempt retains its own identity.
-            facts = {}
-            retained = None
-            candidates = reader.output_facts(attempt, spec["action_id"])
-            facts = candidates.get(attempt, {})
-            if not any(
-                k in facts
-                for k in ("receipt", "recovered", "stage_commit", "stage_recovered")
-            ):
-                for a, previous in candidates.items():
-                    if a != attempt and (
-                        "stage_commit" in previous
-                        or "stage_recovered" in previous
-                        or any(
-                            previous.get(k, (None,))[0] == "committed"
-                            for k in ("receipt", "recovered")
-                        )
-                    ):
-                        facts, retained = previous, a
-                        break
-            committed = (
-                "stage_commit" in facts
-                or "stage_recovered" in facts
-                or any(
-                    facts.get(k, (None,))[0] == "committed"
-                    for k in ("receipt", "recovered")
-                )
-            )
-            status = (
-                "committed"
-                if committed
-                else (
-                    ("writing" if state["status"] in runs.ACTIVE else "unknown")
-                    if "intent" in facts
-                    else "not_started"
-                )
-            )
-            reference = (
-                facts.get("recovered_result") or facts.get("result") or (None, None)
-            )[1]
-            ref = json.loads(reference) if reference else None
+            projection = reader.output_projection(attempt, spec["action_id"])
+            retained = projection['retained_from_attempt']
+            status = ('committed' if projection['committed'] else
+                      ('writing' if state['status'] in runs.ACTIVE and not projection['failed'] else 'unknown')
+                      if projection['has_intent'] else 'not_started')
+            ref = projection['result_ref']
             outputs.append(
                 dict(
                     name=name,
@@ -225,7 +188,7 @@ def snapshot(root, run_id, *, attempt=None, revision=None):
                     result_digest=content_digest(ref) if ref else None,
                 )
             )
-    telemetry = run_telemetry.latest(target, attempt)
+    telemetry = telemetry_latest(target, attempt)
     alive = (
         runs.process_matches(state.get("supervisor"))
         if attempt == current and state["status"] in runs.ACTIVE
@@ -326,6 +289,6 @@ def events(root, run_id, *, attempt=None, cursor=None, limit=100):
 def metrics(root, run_id, *, attempt=None, points=600, resolution="raw"):
     with _reading(root, run_id) as (target, reader):
         state, _ = reader.state(attempt)
-    return run_telemetry.series(
+    return telemetry_series(
         target, attempt=state.get("attempt"), points=points, resolution=resolution
     )

@@ -5,7 +5,7 @@ Native engine admission, available disk and process accounting still apply.
 """
 from demiflow.forge.schema import ForgeError
 
-from demiflow.execution.runtime_limits import DEFAULT_LIMITS
+from demiflow.execution.host.control import DEFAULT_LIMITS
 
 DEPLOYMENT_LIMITS = dict(timeout_s=7 * 86400, admission_timeout_s=600, cancel_grace_s=3600,
     memory_bytes=8 * 1024**3, max_rss_bytes=24 * 1024**3,
@@ -25,7 +25,7 @@ def _overlay(values, base, ceiling, label):
 
 
 def limits_with(values=None, *, policy=None):
-    from demiflow.execution.payload_limits import resolve_payload_bounds
+    from demiflow.execution.host.control import resolve_payload_bounds
     def effective(overrides, base, ceiling, label, inherited_explicit=()):
         result = _overlay(overrides, base, ceiling, label)
         result.update(resolve_payload_bounds(result, overrides,
