@@ -109,12 +109,11 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
             handle._execution._observe_progress = None
         request.action._observation_rows = 0
         observe()
-        if handle is not None:
-            from .dataflow_api import record_execution_metadata
-            record_execution_metadata(request, handle._execution)
         def finish_observations():
             observe()
             if handle is not None:
+                from .dataflow_api import record_execution_metadata
+                record_execution_metadata(request, handle._execution)
                 from .dataflow_model_observations import finish_journal_audit
                 finish_journal_audit(handle._execution, stats)
         for cleanup in (handle.close if handle is not None else None, finish_observations,

@@ -505,10 +505,11 @@ class DataflowWorkerExecutor:
             # their final failed invocation and prior misses are still facts.
             try:
                 runner = getattr(self, '_runner', None)
-                if runner is not None and getattr(kernel, 'observations', None) is not None:
+                if runner is not None:
                     payload = runner._metrics_payload(key[0])
                     if any(payload.get(field) is not None for field in (
-                            'actor_lifecycle', 'callback_observations', 'output_handoff')):
+                            'actor_lifecycle', 'callback_observations', 'output_handoff',
+                            'prompt_usage', 'model_observations')):
                         from ..contracts.dataflow_codec import encode_wire
                         import json
                         raw = encode_wire(self._event('progress', payload=payload),

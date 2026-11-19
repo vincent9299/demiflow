@@ -98,3 +98,28 @@ def test_nested_native_declarations_keep_the_original_depth_limit():
     spec=declaration()
     for _ in range(5):spec=CallableSpec.create(CacheFactory,fn_constructor_args=(spec,))
     with pytest.raises(DataflowError,match='depth bound'):native_environment_names(spec)
+
+
+@pytest.mark.parametrize('storage', ['offline_dir', 'offline_store'])
+def test_offline_routes_require_no_online_credentials_but_keep_online_siblings(storage, monkeypatch):
+    spec = declaration()
+    children, *rest = spec.constructor_args
+    offline_operation, settings = children['a'].constructor_args
+    options = {storage: '/tmp/demiflow-offline-fixture' if storage == 'offline_dir'
+               else {'path': '/tmp/demiflow-offline-fixture.sqlite'}}
+    offline = CallableSpec.create(PromptFactory, fn_constructor_args=(
+        replace(offline_operation, options=options, max_requests=0), settings))
+    def forbidden(*args, **kwargs):
+        raise AssertionError('environment selection must not instantiate clients or actors')
+    monkeypatch.setattr(CallableSpec, 'instantiate', forbidden)
+    assert native_environment_names(offline) == ()
+    mixed = CallableSpec.create(RoutedPromptFactory, fn_constructor_args=({'a': offline, 'b': children['b']}, *rest))
+    assert native_environment_names(mixed) == ('ROUTE_B_KEY', 'ROUTE_B_URL')
+    all_offline = CallableSpec.create(RoutedPromptFactory, fn_constructor_args=({'a': offline, 'b': offline}, *rest))
+    assert native_environment_names(all_offline) == ()
+    cached = CallableSpec.create(CacheFactory, fn_constructor_args=(all_offline,))
+    assert native_environment_names(cached) == ()
+    # max_requests=0 alone is not an offline declaration: no blanket bypass.
+    online_zero = CallableSpec.create(PromptFactory, fn_constructor_args=(
+        replace(offline_operation, max_requests=0), settings))
+    assert native_environment_names(online_zero) == ('ROUTE_A_KEY', 'ROUTE_A_URL')
