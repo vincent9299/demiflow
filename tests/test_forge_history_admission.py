@@ -15,6 +15,7 @@ import pytest
 
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.run_reader import storage_snapshot as native_storage_snapshot
 from demiflow.workbench.runs import storage as run_storage
 from demiflow.workbench.runs import domain as run_domain
 from demiflow.forge.schema import ForgeError
@@ -110,11 +111,11 @@ def test_owned_namespace_including_run_reserved_names_is_all_charged(tmp_path):
 def test_snapshot_is_readonly_bounded_and_ends_each_transaction(tmp_path):
     target, journal = run_fixture(tmp_path)
     before = (target / 'run.sqlite').read_bytes()
-    first = run_storage.storage_snapshot(target)
+    first = native_storage_snapshot(target)
     assert first['state']['status'] == 'prepared'
     assert (target / 'run.sqlite').read_bytes() == before
     journal.transition({'prepared'}, 'starting')
-    second = run_storage.storage_snapshot(target)
+    second = native_storage_snapshot(target)
     assert second['state']['status'] == 'starting'
     # The only write was the explicit native transition, never a read migration.
     assert first['manifest'] == second['manifest']
@@ -389,7 +390,7 @@ def test_root_row_count_limit_and_unicode_byte_limit(tmp_path):
     for i in range(64):
         database(target, 'INSERT INTO runtime_object_roots VALUES (?,?,?,?)',
                  (f'{i:064x}', f'/logical-{i}', f'/physical-{i}', 'a' * 32))
-    assert len(run_storage.storage_snapshot(journal.directory)['object_roots']) == 64
+    assert len(native_storage_snapshot(journal.directory)['object_roots']) == 64
     database(target, 'INSERT INTO runtime_object_roots VALUES (?,?,?,?)',
              (f'{64:064x}', '/extra', '/physical-extra', 'a' * 32))
     with pytest.raises(ForgeError, match='count exceeds ceiling'):
@@ -502,7 +503,7 @@ def test_decode_does_not_hold_a_sql_read_transaction(tmp_path, monkeypatch):
             db.rollback()
         return original(*args, **kwargs)
     monkeypatch.setattr(run_reader, '_bounded_object', decode)
-    assert run_storage.storage_snapshot(target)['state']['status'] == 'prepared'
+    assert native_storage_snapshot(target)['state']['status'] == 'prepared'
 
 
 def test_disappearing_file_is_not_silently_charged_zero(tmp_path, monkeypatch):
@@ -766,10 +767,10 @@ def test_projection_drops_large_values_but_full_document_changes_are_detected(tm
     value = dict(run_id=target.name if table=='manifest' else 'a'*32, ignored='x'*10000)
     database(target, 'DELETE FROM '+table)
     database(target, 'INSERT INTO '+table+'(singleton,document) VALUES (1,?)', (json.dumps(value),))
-    before = run_storage.storage_snapshot(journal.directory)
+    before = native_storage_snapshot(journal.directory)
     value['ignored'] = 'y'*10000
     database(target, 'UPDATE '+table+' SET document=?', (json.dumps(value),))
-    after = run_storage.storage_snapshot(journal.directory)
+    after = native_storage_snapshot(journal.directory)
     key = 'manifest' if table=='manifest' else 'identity'
     assert before[key] == after[key]
     assert 'ignored' not in after[key]
@@ -779,8 +780,8 @@ def test_projection_drops_large_values_but_full_document_changes_are_detected(tm
 def test_digest_distinguishes_missing_manifest_from_empty_object(tmp_path):
     target, journal = run_fixture(tmp_path)
     database(target,'DELETE FROM manifest')
-    absent=run_storage.storage_snapshot(journal.directory)
+    absent=native_storage_snapshot(journal.directory)
     database(target,'INSERT INTO manifest VALUES (1,?)',('{}',))
-    empty=run_storage.storage_snapshot(journal.directory)
+    empty=native_storage_snapshot(journal.directory)
     assert absent['manifest'] is None and absent['manifest_digest'] is None
     assert empty['manifest']=={} and empty['manifest_digest'] is not None

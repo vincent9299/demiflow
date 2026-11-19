@@ -1,28 +1,25 @@
-"""Lane L gate G-L: LocalDatasetExecutor thinning to the unified v3 entry.
+"""Lane L gate: public SDK actions use the Local execution port.
 
-Every test calls the real ``LocalDatasetExecutor`` symbols from this worktree.
-E/F/C peers (``dataflow_api``, ``dataflow_inputs``, ``contracts.dataflow``) are
-absent in this lane's tree, so each test installs spec-bound test-domain doubles
-in ``sys.modules`` matching the frozen signatures (E015/E016/E018, F001, C086).
-The doubles only record requests and return contract-typed results; they are not
-a second executor. An import hook blocks ``ray.data`` for the whole process and
-records any attempt, so a regression to the old Ray Data route fails loudly.
-
-These are unit-contract tests (G-L). Full Local/Ray semantic equivalence and
-finite-resource counterexamples are owned by G-API / V006 / V023 at integration.
+Real Dataset validation and action scopes reach the production runtime bridge;
+only dataflow execution and input construction are replaced with unit doubles.
+These tests pin provider/argument forwarding, no fallback, metadata ownership,
+retained graph delegation and resource cleanup. Real data behavior is exercised
+by the per-method suites, not inferred from the doubles.
 """
 
 from __future__ import annotations
 
 import hashlib
-import importlib
 import sys
-import types
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from demiflow.data.dataset import Dataset
+from demiflow.data.execution_contract import InputSpec
+from demiflow.data.aggregate import Sum, Mean
 
 TREE = Path(__file__).resolve().parents[1]
 
@@ -49,27 +46,18 @@ KINDS = {
 RETIRED = (
     '_require_ray_backend', '_apply_plan', '_execution_capabilities',
     '_bind_plan', '_execute_plan', '_write_file_body',
+    'count', 'take', 'take_batch', 'aggregate', 'iter_rows', 'iter_batches',
+    'materialize', 'materialize_stream', 'size_bytes', 'write_datasink',
+    'write_lance', 'write_file', 'from_items', 'from_arrow', 'from_numpy', 'from_pandas',
 )
 
-PUBLIC_MODIFY = (
-    '__init__', 'from_items', 'from_arrow', 'from_numpy', 'from_pandas',
-    'iter_rows', 'iter_batches', 'materialize', 'take', 'take_batch', 'count',
-    'aggregate', 'schema', 'columns', 'size_bytes', 'num_blocks', 'stats',
-    'execution_metadata', 'write_datasink', 'write_lance', 'write_file', 'close',
-    'plan', 'operator_llm_usage', 'materialize_stream', 'materialize_graph',
-)
+
 
 
 # --------------------------------------------------------------------------- #
 # Spec-bound test-domain doubles (E/F/C peers).
 # --------------------------------------------------------------------------- #
-@dataclass(frozen=True)
-class ActionProgram:
-    """C086 frozen program card; kind in {'aggregate', 'sink'}."""
-    name: str
-    kind: str
-    value: object
-
+from demiflow.execution.contracts.dataflow import ActionProgram
 
 class FakeInputHandle:
     """F001/T neutral MaterializedHandle: num_blocks()/rows()/release()."""
@@ -134,6 +122,10 @@ class FakeEngine:
 
     def run_dataset_action(self, request):
         self.execute_calls.append((request.kind, request.plan_id))
+        request.executor._last_metadata = ExecutionMetadata(
+            source_name=type(request.source).__name__, rows_read=7, rows_output=2,
+            diagnostics={'engine_fact': 'preserved'},
+        )
         if self.error is not None:
             raise self.error
         return self.result
@@ -165,21 +157,14 @@ class _BlockRayData:
 
 
 def _install_fakes(monkeypatch, engine):
-    api = types.ModuleType('demiflow.execution.dataflow_api')
-    api.make_action_request = engine.make_action_request
-    api.run_dataset_action = engine.run_dataset_action
-    api.explain_dataset = engine.explain_dataset
-
-    inputs = types.ModuleType('demiflow.execution.dataflow_inputs')
-    inputs.build_input_handle = engine.build_input_handle
-    inputs.InputMaterializedHandle = FakeInputHandle
-
-    contracts = types.ModuleType('demiflow.execution.contracts.dataflow')
-    contracts.ActionProgram = ActionProgram
-
-    monkeypatch.setitem(sys.modules, 'demiflow.execution.dataflow_api', api)
-    monkeypatch.setitem(sys.modules, 'demiflow.execution.dataflow_inputs', inputs)
-    monkeypatch.setitem(sys.modules, 'demiflow.execution.contracts.dataflow', contracts)
+    import demiflow.execution.dataflow_api as api
+    import demiflow.execution.dataflow_inputs as inputs
+    import demiflow.execution.input_runtime as input_runtime
+    monkeypatch.setattr(api, 'make_action_request', engine.make_action_request)
+    monkeypatch.setattr(api, 'run_dataset_action', engine.run_dataset_action)
+    monkeypatch.setattr(api, 'explain_dataset', engine.explain_dataset)
+    monkeypatch.setattr(inputs, 'build_input_handle', engine.build_input_handle)
+    monkeypatch.setattr(input_runtime, 'build_input_handle', engine.build_input_handle)
 
 
 # --------------------------------------------------------------------------- #
@@ -266,7 +251,7 @@ def test_l001(ex, engine, _no_ray_data):
     # unified_chain=False must not silently restore old semantics: a public
     # action still forwards to the unified entry, not a retired route.
     engine.result = [{'id': 0}]
-    other.take(_source(), _plan(), 1)
+    Dataset(_source(), _plan(), other).take(1)
     assert engine.execute_calls == [('take', engine.requests[-1].plan_id)]
     other.close()
     with pytest.raises(ValueError):
@@ -280,20 +265,20 @@ def test_l001(ex, engine, _no_ray_data):
 # L002-L005 from_* — neutral F001 handle, no run created, no ray.data.
 # --------------------------------------------------------------------------- #
 def test_l002(ex, engine):
-    handle = ex.from_items([{'id': 0}, {'id': 1}])
+    handle = ex.prepare_input(InputSpec('items', [{'id': 0}, {'id': 1}]))
     assert isinstance(handle, FakeInputHandle)
     assert engine.input_calls == [('items', [{'id': 0}, {'id': 1}], None)]
     assert engine.execute_calls == [], 'from_items must not create a run'
     assert list(handle.rows()) == [{'id': 0}, {'id': 1}]
     with pytest.raises(TypeError):
-        ex.from_items(iter([{'id': 0}]))  # generator is not a materialized list
+        ex.prepare_input(InputSpec('items', iter([{'id': 0}])))  # generator is not a materialized list
     _assert_retired_absent()
 
 
 def test_l003(ex, engine):
     import pyarrow as pa
     table = pa.table({'id': [0, 1]})
-    handle = ex.from_arrow(table)
+    handle = ex.prepare_input(InputSpec('arrow', table))
     assert isinstance(handle, FakeInputHandle)
     assert engine.input_calls[0][0] == 'arrow'
     assert engine.input_calls[0][1] is table, 'arrow must not be lowered to pylist'
@@ -304,7 +289,7 @@ def test_l003(ex, engine):
 def test_l004(ex, engine):
     import numpy as np
     array = np.asarray([0, 1])
-    handle = ex.from_numpy(array)
+    handle = ex.prepare_input(InputSpec('numpy', array))
     assert isinstance(handle, FakeInputHandle)
     assert engine.input_calls[0][0] == 'numpy'
     assert engine.input_calls[0][1] is array
@@ -315,7 +300,7 @@ def test_l004(ex, engine):
 def test_l005(ex, engine):
     import pandas as pd
     frame = pd.DataFrame({'id': [0, 1]})
-    handle = ex.from_pandas(frame)
+    handle = ex.prepare_input(InputSpec('pandas', frame))
     assert isinstance(handle, FakeInputHandle)
     assert engine.input_calls[0][0] == 'pandas'
     assert engine.input_calls[0][1] is frame
@@ -328,19 +313,18 @@ def test_l005(ex, engine):
 # --------------------------------------------------------------------------- #
 def test_l006(ex, engine):
     engine.result = iter([{'id': 0}, {'id': 1}])
-    rows = list(ex.iter_rows(_source(), _plan()))
+    rows = list(list(Dataset(_source(), _plan(), ex).iter_rows()))
     assert rows == [{'id': 0}, {'id': 1}]
     req = engine.requests[-1]
     assert req.kind == 'iter_rows' and req.arguments == {}
     assert engine.execute_calls == [('iter_rows', req.plan_id)]
-    _assert_no_fallback(ex, engine, lambda: ex.iter_rows(_source(), _plan()))
+    _assert_no_fallback(ex, engine, lambda: list(Dataset(_source(), _plan(), ex).iter_rows()))
     _assert_retired_absent()
 
 
 def test_l007(ex, engine):
     engine.result = iter([{'id': [0, 1]}])
-    batches = list(ex.iter_batches(_source(), _plan(), prefetch_batches=2,
-                                   batch_size=8, batch_format='pyarrow', drop_last=True))
+    batches = list(list(Dataset(_source(), _plan(), ex).iter_batches(prefetch_batches=2, batch_size=8, batch_format='pyarrow', drop_last=True)))
     assert batches == [{'id': [0, 1]}]
     req = engine.requests[-1]
     assert req.kind == 'iter_batches'
@@ -352,31 +336,31 @@ def test_l007(ex, engine):
 def test_l008(ex, engine):
     handle = FakeInputHandle([{'id': 0}])
     engine.result = handle
-    result = ex.materialize(_source(), _plan())
+    result = Dataset(_source(), _plan(), ex).materialize()._source.handle
     assert result is handle
     req = engine.requests[-1]
     assert req.kind == 'materialize' and req.arguments == {}
     assert ex._last_metadata is not None
-    _assert_no_fallback(ex, engine, lambda: ex.materialize(_source(), _plan()))
+    _assert_no_fallback(ex, engine, lambda: Dataset(_source(), _plan(), ex).materialize()._source.handle)
     _assert_retired_absent()
 
 
 def test_l009(ex, engine):
     engine.result = [{'id': 0}]
-    assert ex.take(_source(), _plan(), 3) == [{'id': 0}]
+    assert Dataset(_source(), _plan(), ex).take(3) == [{'id': 0}]
     req = engine.requests[-1]
     assert req.kind == 'take' and req.arguments == {'limit': 3}
     # take(0) must still reach admission, not short-circuit locally.
     engine.requests.clear()
-    ex.take(_source(), _plan(), 0)
+    Dataset(_source(), _plan(), ex).take(0)
     assert engine.requests[-1].arguments == {'limit': 0}
-    _assert_no_fallback(ex, engine, lambda: ex.take(_source(), _plan(), 1))
+    _assert_no_fallback(ex, engine, lambda: Dataset(_source(), _plan(), ex).take(1))
     _assert_retired_absent()
 
 
 def test_l010(ex, engine):
     engine.result = {'id': [0, 1]}
-    assert ex.take_batch(_source(), _plan(), 8, batch_format='pyarrow') == {'id': [0, 1]}
+    assert Dataset(_source(), _plan(), ex).take_batch(8, batch_format='pyarrow') == {'id': [0, 1]}
     req = engine.requests[-1]
     assert req.kind == 'take_batch'
     assert req.arguments == {'batch_size': 8, 'batch_format': 'pyarrow'}
@@ -385,17 +369,17 @@ def test_l010(ex, engine):
 
 def test_l011(ex, engine):
     engine.result = 2
-    assert ex.count(_source(), _plan()) == 2
+    assert Dataset(_source(), _plan(), ex).count() == 2
     req = engine.requests[-1]
     assert req.kind == 'count' and req.arguments == {}
-    _assert_no_fallback(ex, engine, lambda: ex.count(_source(), _plan()))
+    _assert_no_fallback(ex, engine, lambda: Dataset(_source(), _plan(), ex).count())
     _assert_retired_absent()
 
 
 def test_l012(ex, engine):
     engine.result = {'total': 3}
-    agg = SimpleNamespace(name='total', kind='sum')
-    assert ex.aggregate(_source(), _plan(), (agg,)) == {'total': 3}
+    agg = Sum('id', alias_name='total')
+    assert Dataset(_source(), _plan(), ex).aggregate(*(agg,)) == {'total': 3}
     req = engine.requests[-1]
     assert req.kind == 'aggregate'
     assert req.arguments == {'names': ['total']}
@@ -436,10 +420,10 @@ def test_l014(ex, engine):
 
 def test_l015(ex, engine):
     engine.result = 128
-    assert ex.size_bytes(_source(), _plan()) == 128
+    assert Dataset(_source(), _plan(), ex).size_bytes() == 128
     req = engine.requests[-1]
     assert req.kind == 'size_bytes' and req.arguments == {}
-    _assert_no_fallback(ex, engine, lambda: ex.size_bytes(_source(), _plan()))
+    _assert_no_fallback(ex, engine, lambda: Dataset(_source(), _plan(), ex).size_bytes())
     _assert_retired_absent()
 
 
@@ -480,7 +464,7 @@ def test_l017(ex, engine):
     assert 'not executed' in ex.stats(_source(), _plan())
     assert engine.execute_calls == []
     engine.result = 2
-    ex.count(_source(), _plan())
+    Dataset(_source(), _plan(), ex).count()
     text = ex.stats(_source(), _plan())
     assert 'ItemsSource' in text
     assert engine.execute_calls == [('count', engine.requests[-1].plan_id)]
@@ -491,11 +475,13 @@ def test_l018(ex, engine):
     assert ex.execution_metadata(_source(), _plan()) is None
     assert engine.execute_calls == []
     engine.result = 2
-    ex.count(_source(), _plan())
+    Dataset(_source(), _plan(), ex).count()
     metadata = ex.execution_metadata(_source(), _plan())
     assert isinstance(metadata, ExecutionMetadata)
     assert metadata.source_name == 'ItemsSource'
     assert metadata.run_ref is ex._run_ref
+    assert metadata.rows_read == 7 and metadata.rows_output == 2
+    assert metadata.diagnostics == {'engine_fact': 'preserved'}
     assert engine.execute_calls == [('count', engine.requests[-1].plan_id)]
     _assert_retired_absent()
 
@@ -504,42 +490,46 @@ def test_l018(ex, engine):
 # L019-L021 write terminals — sink/programs forwarding, Ray option guard.
 # --------------------------------------------------------------------------- #
 def test_l019(ex, engine):
+    class Sink:
+        def recovery_identity(self):
+            return {'kind': 'unit-sink'}
     engine.result = WriteResult(written_rows=2)
-    sink = object()
-    result = ex.write_datasink(_source(), _plan(), sink)
-    assert result == WriteResult(written_rows=2)
+    sink = Sink()
+    dataset = Dataset(_source(), _plan(), ex)
+    assert dataset.write_datasink(sink) is None
     req = engine.requests[-1]
     assert req.kind == 'write_datasink' and req.sink is sink and req.arguments == {}
-    with pytest.raises(UnsupportedExecutionOptionError):
-        ex.write_datasink(_source(), _plan(), sink, native_options={'num_cpus': 1})
-    _assert_no_fallback(ex, engine, lambda: ex.write_datasink(_source(), _plan(), sink))
+    dataset.write_datasink(sink, backend_options={'ray': {'worker_resources': {'cpu': 1}}})
+    assert engine.requests[-1].arguments['native_options']['worker_resources'] == {'cpu': 1.0}
+    _assert_no_fallback(ex, engine, lambda: dataset.write_datasink(sink))
     _assert_retired_absent()
 
 
-def test_l020(ex, engine):
-    receipt = SimpleNamespace(written_rows=2)
+def test_l020(ex, engine, tmp_path):
+    from demiflow.lance.model import LanceWriteReceipt
+    uri = str(tmp_path / 'result.lance')
+    receipt = LanceWriteReceipt('request', uri, None, 1, 2, 2, 'schema', 'committed')
     engine.result = receipt
-    spec = object()
-    assert ex.write_lance(_source(), _plan(), spec) is receipt
+    dataset = Dataset(_source(), _plan(), ex)
+    assert dataset.write_lance(uri, return_receipt=True) is receipt
     req = engine.requests[-1]
     assert req.kind == 'write_lance'
     assert len(req.programs) == 1
-    assert req.programs[0].kind == 'sink' and req.programs[0].value is spec
-    with pytest.raises(UnsupportedExecutionOptionError):
-        ex.write_lance(_source(), _plan(), spec, native_options={'num_gpus': 1})
+    assert req.programs[0].kind == 'sink' and req.programs[0].value.uri == uri
+    assert dataset.write_lance(uri, backend_options={'ray': {'worker_resources': {'cpu': 1}}}) is None
+    assert engine.requests[-1].arguments['native_options']['worker_resources'] == {'cpu': 1.0}
     _assert_retired_absent()
 
 
-def test_l021(ex, engine):
+def test_l021(ex, engine, tmp_path):
     engine.result = WriteResult(written_rows=2, target='out.json')
-    result = ex.write_file(_source(), _plan(), 'json', '/tmp/demiflow-l/out.json', {'lines': True})
-    assert result.target == 'out.json'
+    target = str(tmp_path / 'out.json')
+    dataset = Dataset(_source(), _plan(), ex)
+    assert dataset.write_json(target, lines=True) is None
     req = engine.requests[-1]
     assert req.kind == 'write_file'
-    assert req.arguments == {'format': 'json', 'path': '/tmp/demiflow-l/out.json',
-                             'options': {'lines': True}}
-    _assert_no_fallback(ex, engine,
-                        lambda: ex.write_file(_source(), _plan(), 'json', '/tmp/demiflow-l/x', {}))
+    assert req.arguments == {'format': 'json', 'path': target, 'options': {'lines': True}}
+    _assert_no_fallback(ex, engine, lambda: dataset.write_json(target))
     _assert_retired_absent()
 
 
@@ -620,23 +610,6 @@ def test_l024(ex, engine):
 # --------------------------------------------------------------------------- #
 # L025 materialize_stream — same unified materialize entry, override respected.
 # --------------------------------------------------------------------------- #
-def test_l025(ex, engine):
-    handle = FakeInputHandle([{'id': 0}])
-    engine.result = handle
-    dataset = SimpleNamespace(_source=_source(), _plan=_plan())
-    result = ex.materialize_stream(dataset)
-    assert result is handle
-    req = engine.requests[-1]
-    assert req.kind == 'materialize'
-    assert req.source is dataset._source and req.plan is dataset._plan
-    # Explicit override replaces the dataset's captured source/plan.
-    override_source = ItemsSource(items=({'id': 5},))
-    override_plan = LogicalPlan()
-    ex.materialize_stream(dataset, source=override_source, plan=override_plan)
-    req2 = engine.requests[-1]
-    assert req2.source is override_source and req2.plan is override_plan
-    _assert_no_fallback(ex, engine, lambda: ex.materialize_stream(dataset))
-    _assert_retired_absent()
 
 
 # --------------------------------------------------------------------------- #
@@ -686,40 +659,40 @@ def test_l027(ex, engine):
     _retire_card('_require_ray_backend', None)
     # sort/repartition no longer refuse on a backend gate; they forward unified.
     engine.result = [{'id': 0}]
-    ex.take(_source(), _plan(), 1)
+    Dataset(_source(), _plan(), ex).take(1)
     assert engine.execute_calls[-1][0] == 'take'
 
 
 def test_l028(ex, engine):
     _retire_card('_apply_plan', None)
     engine.result = iter([{'id': 0}])
-    assert list(ex.iter_rows(_source(), _plan())) == [{'id': 0}]
+    assert list(list(Dataset(_source(), _plan(), ex).iter_rows())) == [{'id': 0}]
     assert engine.execute_calls[-1][0] == 'iter_rows'
 
 
 def test_l029(ex, engine):
     _retire_card('_execution_capabilities', None)
     engine.result = [{'id': 0}]
-    assert ex.take(_source(), _plan(), 1) == [{'id': 0}]
+    assert Dataset(_source(), _plan(), ex).take(1) == [{'id': 0}]
     assert engine.execute_calls[-1][0] == 'take'
 
 
 def test_l030(ex, engine):
     _retire_card('_bind_plan', None)
     engine.result = FakeInputHandle([{'id': 0}])
-    ex.materialize(_source(), _plan())
+    Dataset(_source(), _plan(), ex).materialize()._source.handle
     assert engine.execute_calls[-1][0] == 'materialize'
 
 
 def test_l031(ex, engine):
     _retire_card('_execute_plan', None)
     engine.result = 2
-    assert ex.count(_source(), _plan()) == 2
+    assert Dataset(_source(), _plan(), ex).count() == 2
     assert engine.execute_calls[-1][0] == 'count'
 
 
 def test_l032(ex, engine):
     _retire_card('_write_file_body', None)
     engine.result = WriteResult(written_rows=1)
-    ex.write_file(_source(), _plan(), 'json', '/tmp/demiflow-l/out.json', {})
+    Dataset(_source(), _plan(), ex)._write_file('json', '/tmp/demiflow-l/out.json', {})
     assert engine.execute_calls[-1][0] == 'write_file'

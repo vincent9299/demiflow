@@ -1,7 +1,10 @@
 """A019 · take_batch delegates to take (which admits) and shapes the batch."""
+from demiflow.data.dataset import Dataset
+import pytest
+
 from demiflow import data
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from _runtime_v3_executor_scope import call, observed_source
+from _runtime_v3_executor_scope import observed_source
 
 
 def _plain():
@@ -16,21 +19,21 @@ def _stream():
 def test_plain_take_batch_returns_prefix():
     ex = LocalDatasetExecutor()
     ds = _plain()
-    batch = call(ex, 'take_batch', ds._source, ds._plan, 3, batch_format="pyarrow")
+    batch = Dataset(ds._source, ds._plan, ex).take_batch(3, batch_format='pyarrow')
     assert [r["id"] for r in batch.to_pylist()] == [0, 1, 2]
 
 
 def test_streaming_take_batch_returns_prefix():
     ex = LocalDatasetExecutor()
     ds = _stream()
-    batch = call(ex, 'take_batch', ds._source, ds._plan, 2, batch_format="pyarrow")
+    batch = Dataset(ds._source, ds._plan, ex).take_batch(2, batch_format='pyarrow')
     assert sorted(r["id"] for r in batch.to_pylist()) == [0, 1]
 
 
-def test_take_batch_zero_is_empty(tmp_path):
+def test_take_batch_zero_rejected_before_source_read(tmp_path):
     ex = LocalDatasetExecutor()
     ds = _plain()
     source, marker = observed_source(tmp_path)
-    batch = call(ex, 'take_batch', source, ds._plan, 0, batch_format="pyarrow")
-    assert batch.to_pylist() == []
+    with pytest.raises(ValueError, match='batch_size must be positive'):
+        Dataset(source, ds._plan, ex).take_batch(0, batch_format='pyarrow')
     assert not marker.exists()

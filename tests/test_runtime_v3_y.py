@@ -18,6 +18,10 @@ from typing import Any
 
 import pytest
 
+from demiflow.data.dataset import Dataset
+from demiflow.data.execution_contract import InputSpec
+from demiflow.data.aggregate import Sum, Mean
+
 WORKTREE = Path(__file__).resolve().parents[1]
 TEST_FILE = Path(__file__).resolve()
 
@@ -109,6 +113,7 @@ class FakeActionRequest:
     programs: tuple
     provider: str
     action: object
+    executor: object
 
 
 class FakeInputHandle:
@@ -204,7 +209,8 @@ class _FakeEngine:
     def build_input_handle(self, value, *, format, bounds=None, override_num_blocks=None):
         if format not in _VALID_FORMATS:
             raise ValueError(f"input format invalid: {format!r}")
-        self.input_calls.append({"value": value, "format": format, "bounds": bounds})
+        self.input_calls.append({"value": value, "format": format, "bounds": bounds,
+                                 "override_num_blocks": override_num_blocks})
         return FakeInputHandle(value=value, format=format)
 
     def make_action_request(self, executor, source, plan, *, kind, arguments,
@@ -221,7 +227,7 @@ class _FakeEngine:
         request = FakeActionRequest(
             kind=kind, source=source, plan=plan, arguments=dict(arguments),
             sink=sink, programs=tuple(programs), provider=executor.PROVIDER,
-            action=object(),
+            action=object(), executor=executor,
         )
         self.requests.append(request)
         return request
@@ -230,6 +236,11 @@ class _FakeEngine:
         if not isinstance(request, FakeActionRequest):
             raise TypeError("run_dataset_action requires an ActionRequest")
         self.run_calls.append(request)
+        from demiflow.data.stats import ExecutionMetadata
+        request.executor._last_metadata = ExecutionMetadata(
+            source_name=type(request.source).__name__, rows_read=7, rows_output=2,
+            diagnostics={'engine_fact': 'preserved'},
+        )
         if self.next_result is not None:
             return self.next_result
         return _default_result(request.kind)
@@ -319,11 +330,13 @@ def _reset_engine(monkeypatch):
     """Unit-test the Ray adapter against explicit facade seams, never sys.modules."""
     import demiflow.execution.dataflow_api as api
     import demiflow.execution.dataflow_inputs as inputs
+    import demiflow.execution.input_runtime as input_runtime
     import demiflow.planning.dataflow_policy as policy
     monkeypatch.setattr(api, "make_action_request", ENGINE.make_action_request)
     monkeypatch.setattr(api, "run_dataset_action", ENGINE.run_dataset_action)
     monkeypatch.setattr(api, "explain_dataset", ENGINE.explain_dataset)
     monkeypatch.setattr(inputs, "build_input_handle", ENGINE.build_input_handle)
+    monkeypatch.setattr(input_runtime, "build_input_handle", ENGINE.build_input_handle)
     monkeypatch.setattr(policy, "resolve_runtime_policy", ENGINE.resolve_runtime_policy)
     monkeypatch.setattr(ray_module, "resolve_runtime_policy", ENGINE.resolve_runtime_policy)
     ENGINE.reset()
@@ -354,7 +367,8 @@ class _Aggregate:
 
 
 class _Datasink:
-    pass
+    def recovery_identity(self):
+        return {'kind': 'unit-sink'}
 
 
 # --- Y001: __init__ maps provider to the unified policy; unified switches compat-only ---
@@ -370,22 +384,23 @@ def test_y001(executor):
 
 
 def test_y002(executor):
-    result = executor.from_items([{"id": 1}])
+    result = executor.prepare_input(InputSpec('items', [{'id': 1}]))
     assert isinstance(result, FakeInputHandle)
     assert ENGINE.input_calls[-1]["format"] == "items"
     assert result.value == [{"id": 1}]
     assert ENGINE.run_calls == []
-    # override_num_blocks is accepted but unused; no bounds are imposed (parity L).
-    hinted = executor.from_items([{"id": 1}], override_num_blocks=0)
+    # The neutral input builder owns block hints; the port forwards them.
+    hinted = executor.prepare_input(InputSpec('items', [{'id': 1}], override_num_blocks=0))
+    assert ENGINE.input_calls[-1]["override_num_blocks"] == 0
     assert isinstance(hinted, FakeInputHandle)
     assert ENGINE.input_calls[-1]["bounds"] is None
     with pytest.raises(TypeError):
-        executor.from_items("not-a-list")
+        executor.prepare_input(InputSpec('items', 'not-a-list'))
 
 
 def test_y003(executor):
     table = object()
-    result = executor.from_arrow(table)
+    result = executor.prepare_input(InputSpec('arrow', table))
     assert isinstance(result, FakeInputHandle)
     assert ENGINE.input_calls[-1]["format"] == "arrow"
     assert result.value is table
@@ -394,7 +409,7 @@ def test_y003(executor):
 
 def test_y004(executor):
     array = object()
-    result = executor.from_numpy(array)
+    result = executor.prepare_input(InputSpec('numpy', array))
     assert isinstance(result, FakeInputHandle)
     assert ENGINE.input_calls[-1]["format"] == "numpy"
     assert ENGINE.run_calls == []
@@ -402,13 +417,14 @@ def test_y004(executor):
 
 def test_y005(executor):
     frame = object()
-    result = executor.from_pandas(frame, override_num_blocks=2)
+    result = executor.prepare_input(InputSpec('pandas', frame, override_num_blocks=2))
     assert isinstance(result, FakeInputHandle)
     assert ENGINE.input_calls[-1]["format"] == "pandas"
     assert ENGINE.input_calls[-1]["bounds"] is None
     assert ENGINE.run_calls == []
-    # Negative hint is accepted but unused; no bounds validation (parity L).
-    executor.from_pandas(frame, override_num_blocks=-1)
+    # Historical negative block hints also reach the neutral input builder.
+    executor.prepare_input(InputSpec('pandas', frame, override_num_blocks=-1))
+    assert ENGINE.input_calls[-1]['override_num_blocks'] == -1
     assert ENGINE.input_calls[-1]["bounds"] is None
 
 
@@ -429,45 +445,44 @@ def _assert_terminal(executor, source, plan, kind, call, expected_arguments=None
 
 def test_y006(executor, source, plan):
     _assert_terminal(executor, source, plan, "iter_rows",
-                     lambda: executor.iter_rows(source, plan))
+                     lambda: list(Dataset(source, plan, executor).iter_rows()))
 
 
 def test_y007(executor, source, plan):
     _assert_terminal(
         executor, source, plan, "iter_batches",
-        lambda: executor.iter_batches(source, plan, prefetch_batches=3,
-                                      batch_size=64, batch_format="pandas", drop_last=True),
+        lambda: list(Dataset(source, plan, executor).iter_batches(prefetch_batches=3, batch_size=64, batch_format='pandas', drop_last=True)),
         {"prefetch_batches": 3, "batch_size": 64, "batch_format": "pandas", "drop_last": True},
     )
 
 
 def test_y008(executor, source, plan):
     result = _assert_terminal(executor, source, plan, "materialize",
-                              lambda: executor.materialize(source, plan))
+                              lambda: Dataset(source, plan, executor).materialize()._source.handle)
     assert isinstance(result, FakeResultHandle)
 
 
 def test_y009(executor, source, plan):
     _assert_terminal(executor, source, plan, "take",
-                     lambda: executor.take(source, plan, 5), {"limit": 5})
+                     lambda: Dataset(source, plan, executor).take(5), {"limit": 5})
 
 
 def test_y010(executor, source, plan):
     _assert_terminal(executor, source, plan, "take_batch",
-                     lambda: executor.take_batch(source, plan, 32, batch_format="arrow"),
-                     {"batch_size": 32, "batch_format": "arrow"})
+                     lambda: Dataset(source, plan, executor).take_batch(32, batch_format='pyarrow'),
+                     {"batch_size": 32, "batch_format": "pyarrow"})
 
 
 def test_y011(executor, source, plan):
     result = _assert_terminal(executor, source, plan, "count",
-                              lambda: executor.count(source, plan))
+                              lambda: Dataset(source, plan, executor).count())
     assert result == 1
 
 
 def test_y012(executor, source, plan):
-    aggregates = (_Aggregate("sum"), _Aggregate("mean"))
+    aggregates = (Sum("id", alias_name="sum"), Mean("id", alias_name="mean"))
     ENGINE.reset()
-    executor.aggregate(source, plan, aggregates)
+    Dataset(source, plan, executor).aggregate(*aggregates)
     request = ENGINE.requests[0]
     assert request.kind == "aggregate"
     assert request.arguments["names"] == ["sum", "mean"]
@@ -500,7 +515,7 @@ def test_y014(executor, source, plan):
 
 def test_y015(executor, source, plan):
     result = _assert_terminal(executor, source, plan, "size_bytes",
-                              lambda: executor.size_bytes(source, plan))
+                              lambda: Dataset(source, plan, executor).size_bytes())
     assert result == 8
 
 
@@ -515,7 +530,7 @@ def test_y016(executor, plan):
 def test_y017(executor, source, plan):
     assert "not executed" in executor.stats(source, plan)
     ENGINE.next_result = FakeResultHandle("materialize")
-    executor.materialize(source, plan)
+    Dataset(source, plan, executor).materialize()._source.handle
     # stats reflects the executor-held ExecutionMetadata, not the result handle.
     rendered = executor.stats(source, plan)
     assert "not executed" not in rendered
@@ -526,58 +541,58 @@ def test_y018(executor, source, plan):
     from demiflow.data.stats import ExecutionMetadata
     assert executor.execution_metadata(source, plan) is None
     ENGINE.next_result = FakeResultHandle("materialize")
-    executor.materialize(source, plan)
+    Dataset(source, plan, executor).materialize()._source.handle
     metadata = executor.execution_metadata(source, plan)
     assert isinstance(metadata, ExecutionMetadata)
     assert metadata.source_name == "ItemsSource"
     assert metadata.run_ref is None
+    assert metadata.rows_read == 7 and metadata.rows_output == 2
+    assert metadata.diagnostics == {'engine_fact': 'preserved'}
 
 
 def test_y019(executor, source, plan):
+    from demiflow.data.datasink import WriteResult
     datasink = _Datasink()
-    ENGINE.reset()
-    # Ray is a valid native target: native_options are forwarded to the unified
-    # engine (P009 normalize_native_options owns the ActorPoolStrategy migration
-    # diagnostic); the adapter never instantiates Ray Data itself.
-    native = {"num_cpus": 2, "concurrency": 4}
-    executor.write_datasink(source, plan, datasink, native_options=native)
+    ENGINE.next_result = WriteResult(written_rows=2)
+    dataset = Dataset(source, plan, executor)
+    native = {'ray': {'worker_resources': {'cpu': 2}}}
+    assert dataset.write_datasink(datasink, backend_options=native) is None
     request = ENGINE.requests[0]
-    assert request.kind == "write_datasink"
-    assert request.sink is datasink
-    assert request.arguments["native_options"] == native
+    assert request.kind == 'write_datasink' and request.sink is datasink
+    assert request.arguments['native_options']['worker_resources'] == {'cpu': 2.0}
     assert ENGINE.run_calls == [request]
-    # Without native_options the argument is absent (no silent fabrication).
     ENGINE.reset()
-    executor.write_datasink(source, plan, datasink)
-    assert "native_options" not in ENGINE.requests[0].arguments
+    ENGINE.next_result = WriteResult(written_rows=2)
+    dataset.write_datasink(datasink)
+    assert 'native_options' not in ENGINE.requests[0].arguments
 
 
-def test_y020(executor, source, plan):
-    spec = object()
-    ENGINE.reset()
-    native = {"num_gpus": 1}
-    executor.write_lance(source, plan, spec, native_options=native)
+def test_y020(executor, source, plan, tmp_path):
+    from demiflow.lance.model import LanceWriteReceipt
+    uri = str(tmp_path / 'result.lance')
+    receipt = LanceWriteReceipt('request', uri, None, 1, 2, 2, 'schema', 'committed')
+    ENGINE.next_result = receipt
+    native = {'ray': {'worker_resources': {'gpu': 1}}}
+    assert Dataset(source, plan, executor).write_lance(uri, return_receipt=True,
+                                                    backend_options=native) is receipt
     request = ENGINE.requests[0]
-    assert request.kind == "write_lance"
+    assert request.kind == 'write_lance'
     assert len(request.programs) == 1
-    assert request.programs[0].kind == "sink"
-    assert request.programs[0].value is spec
-    assert request.arguments["native_options"] == native
+    assert request.programs[0].kind == 'sink' and request.programs[0].value.uri == uri
+    assert request.arguments['native_options']['worker_resources'] == {'gpu': 1.0}
     assert ENGINE.run_calls == [request]
 
 
-def test_y021(executor, source, plan):
-    ENGINE.reset()
-    options = {"compression": "snappy", "_demiflow_native_options": {"x": 1}}
-    executor.write_file(source, plan, "parquet", "/tmp/demiflow-y/out", options)
+def test_y021(executor, source, plan, tmp_path):
+    from demiflow.data.datasink import WriteResult
+    ENGINE.next_result = WriteResult(written_rows=2)
+    options = {'compression': 'snappy'}
+    target = str(tmp_path / 'out.parquet')
+    Dataset(source, plan, executor).write_parquet(target, **options)
     request = ENGINE.requests[0]
-    assert request.kind == "write_file"
-    assert request.arguments["format"] == "parquet"
-    assert request.arguments["path"] == "/tmp/demiflow-y/out"
-    # options forwarded verbatim as a copy; no native_options extraction (parity L).
-    assert request.arguments["options"] == options
-    assert "native_options" not in request.arguments
-    assert request.arguments["options"] is not options
+    assert request.kind == 'write_file'
+    assert request.arguments == {'format': 'parquet', 'path': target, 'options': options}
+    assert request.arguments['options'] is not options
     assert ENGINE.run_calls == [request]
 
 
@@ -585,7 +600,7 @@ def test_y022(executor, source, plan):
     # Caller-owned result handles are never released by close (parity L).
     owned = FakeResultHandle("materialize")
     ENGINE.next_result = owned
-    executor.materialize(source, plan)
+    Dataset(source, plan, executor).materialize()._source.handle
     other = FakeResultHandle("materialize")
     # The executor's own hosted resource scope IS released on close.
     scope = FakeResultHandle("host")
@@ -614,7 +629,7 @@ def test_y024(executor, source, plan):
     # Every stable usage dimension is present and zero before actual execution.
     assert executor.operator_llm_usage() == empty
     ENGINE.next_result = FakeResultHandle("materialize")
-    executor.materialize(source, plan)
+    Dataset(source, plan, executor).materialize()._source.handle
     assert executor.operator_llm_usage() == empty
 
     class _Coordinator:
@@ -636,14 +651,6 @@ def test_y024(executor, source, plan):
     assert executor._dataflow_prompt_usage == observed
 
 
-def test_y025(executor, source, plan):
-    dataset = types.SimpleNamespace(_source=source, _plan=plan)
-    ENGINE.reset()
-    executor.materialize_stream(dataset)
-    request = ENGINE.requests[0]
-    assert request.kind == "materialize"
-    assert request.source is source and request.plan is plan
-    assert ENGINE.run_calls == [request]
 
 
 def test_y026(executor, source, plan, monkeypatch):

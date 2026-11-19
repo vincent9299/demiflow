@@ -288,8 +288,7 @@ def test_native_operation_has_one_type_authority():
 
 @pytest.mark.parametrize("override", [None, 0, -1, 1, 2, 4, 12])
 def test_input_block_boundaries_and_history_match_pre_v3(override):
-    from demiflow.execution.executors.local import LocalDatasetExecutor
-    from demiflow.execution.executors.ray import RayDatasetExecutor
+    from demiflow.execution.dataflow_inputs import build_input_handle
     from demiflow.execution.recovery_identity import describe
     from demiflow.execution.recovery_contract import identity
     from demiflow.data.sources import MaterializedSource
@@ -299,15 +298,14 @@ def test_input_block_boundaries_and_history_match_pre_v3(override):
     expected = tuple(tuple(rows[i:i + size]) for i in range(0, len(rows), size))
     # The formula is copied verbatim from 267b914's LocalDatasetExecutor.from_items;
     # no new projection may silently replace the historical materialization ID.
-    for executor in (LocalDatasetExecutor(), RayDatasetExecutor()):
-        handle = executor.from_items(rows, override_num_blocks=override)
-        try:
-            assert handle.blocks == expected
-            assert handle.num_blocks() == len(expected)
-            assert source_identity(MaterializedSource(handle, len(rows))) == {
-                "literal_materialization": identity(describe(expected)), "rows": len(rows)}
-        finally:
-            handle.release()
+    handle = build_input_handle(rows, format="items", override_num_blocks=override)
+    try:
+        assert handle.blocks == expected
+        assert handle.num_blocks() == len(expected)
+        assert source_identity(MaterializedSource(handle, len(rows))) == {
+            "literal_materialization": identity(describe(expected)), "rows": len(rows)}
+    finally:
+        handle.release()
 
 
 def test_real_native_cut_commit_and_recovery_with_typed_sink_record(tmp_path):

@@ -4,7 +4,6 @@ from collections.abc import Mapping
 import hashlib
 import json
 from pathlib import Path
-from types import FunctionType
 
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.workbench.projects import workspace as ws
@@ -69,29 +68,18 @@ def safe_json(value, *, depth=0, budget=None):
     raise ValueError('配置不是可直接呈现的 JSON')
 
 
-def _implementation(declaration, root, sources, prompts):
-    spec = declaration.callable_spec
-    target = spec.target if spec is not None else None
-    identity = declaration.code_identity.get('target', {})
-    if prompts.prompts:
-        predicates = [item.predicate for item in prompts.prompts if item.predicate is not None]
-        if len(predicates) == 1:
-            target = predicates[0]
-            path = Path(target.__code__.co_filename)
-            relative = path.relative_to(root).as_posix() if path.is_relative_to(root) else None
-            identity = dict(module=target.__module__, name=target.__qualname__, source_hash=sources.get(relative))
-    is_class = type(target) is type
-    method = vars(target).get('__call__') if is_class else target
-    if type(method) is not FunctionType or not isinstance(identity, Mapping):
-        return unavailable('本节点没有已绑定的业务函数源码；原生算子可查看 API 调用与入参。')
-    if identity.get('module') != target.__module__ or identity.get('name') != target.__qualname__:
-        return unavailable('函数身份与编译声明不一致。')
+def _implementation(reference, root, sources):
+    if reference.availability != 'available':
+        return unavailable('函数身份与编译声明不一致。' if reference.reason == 'identity_mismatch'
+                           else '本节点没有已绑定的业务函数源码；原生算子可查看 API 调用与入参。')
+    method = reference.function
+    is_class = reference.kind == 'callable_class'
     path = Path(method.__code__.co_filename)
     if not path.is_absolute() or not path.is_relative_to(root):
         return unavailable('函数不在本次项目源码范围内。')
     relative = path.relative_to(root).as_posix()
     expected = sources.get(relative)
-    if not expected or (not is_class and identity.get('source_hash') != expected):
+    if not expected or (reference.kind == 'function' and reference.source_hash != expected):
         return unavailable('函数源码未绑定本次解析的文件摘要。')
     ws.no_symlinks(path)
     raw = read_bounded(path, 4 * 1024**2)
@@ -105,9 +93,9 @@ def _implementation(declaration, root, sources, prompts):
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             start = min([node.lineno] + [d.lineno for d in node.decorator_list])
-            if not is_class and start == line and node.name == target.__name__:
+            if not is_class and start == line and node.name == reference.name:
                 candidates.append((node, start))
-        elif is_class and isinstance(node, ast.ClassDef) and node.name == target.__name__:
+        elif is_class and isinstance(node, ast.ClassDef) and node.name == reference.name:
             calls = [n for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == '__call__']
             if len(calls) == 1 and min([calls[0].lineno, *(d.lineno for d in calls[0].decorator_list)]) == line:
                 candidates.append((node, min([node.lineno, *(d.lineno for d in node.decorator_list)])))
@@ -147,16 +135,12 @@ def _prompt_detail(prompts):
                     metadata=metadata[0] if len(metadata) == 1 else {'routes': metadata})
 
 
-def _configuration_detail(node, callsite=None):
-    configuration = safe_json(node.kernel.configuration)
-    public = {k: v for k, v in configuration.items() if k not in {'occurrence_id', 'program'}}
-    title = '算子入参'
-    # This is the public Lance API's immutable scan declaration, not a
-    # pipeline-specific mapping or another input to execution.
-    query = configuration.get('query')
-    if node.kernel.kind == 'lance' and type(query) is dict and type(query.get('fields')) is dict:
-        public = query['fields']
-        title = '读取入参'
+def _configuration_detail(projected, callsite=None):
+    if projected.availability != 'available':
+        return unavailable(projected.reason)
+    configuration = safe_json(projected.engine_configuration)
+    public = safe_json(projected.arguments)
+    title = '读取入参' if projected.argument_kind == 'read' else '算子入参'
     call = callsite.get('metadata', {}) if callsite and callsite.get('availability') == 'available' else {}
     if call:
         public = {p['name']: p['value'] for p in call['arguments']}
@@ -174,27 +158,22 @@ def build_plan_details(compiled, *, sources, root, callsites=None, bounds=None):
         raise ValueError('Plan materials exceed node budget')
     if callsites is not None:
         callsites.check_compilation(compiled.graph)
-    from demiflow.execution.program_materials import program_prompt_materials
-    declarations = {d.occurrence_id: d for d in compiled.declarations}
+    from demiflow.execution.host.inspection import compiled_node_materials
+    projected = compiled_node_materials(compiled, bounds=bounds)
     from .plan_schema import build_schema_details
-    schemas = build_schema_details(compiled, bounds=bounds) if bounds is not None else {}
+    schemas = build_schema_details(projected) if bounds is not None else {}
     result, total = {}, 0
     for node in compiled.graph.nodes:
         details = {kind: unavailable('本节点没有已核验的这类材料。') for kind in KINDS}
-        declaration = declarations.get(node.occurrence_id)
-        if declaration is not None:
-            prompts = program_prompt_materials(declaration)
-            details['implementation'] = _implementation(declaration, root, sources, prompts)
-            spec = declaration.callable_spec
-            target = spec.target if spec is not None else None
-            details['implementation']['referenced'] = (type(target) is FunctionType
-                or type(target) is type and not target.__module__.startswith('demiflow.')
-                or any(item.predicate is not None for item in prompts.prompts))
+        native = projected[node.occurrence_id]
+        details['implementation'] = _implementation(native.implementation, root, sources)
+        details['implementation']['referenced'] = native.implementation.referenced
+        prompts = native.prompts
+        if prompts is not None:
             try:
                 details['prompt'] = _prompt_detail(prompts)
             except ValueError as exc:
-                # Presentation has a narrower budget than legal execution.
-                # A missing material must not discard the actual compiled DAG.
+                # Presentation cannot turn an accepted compilation into failure.
                 details['prompt'] = unavailable(str(exc))
             details['prompt']['referenced'] = prompts.state != 'none'
         details['callsite'] = (callsites.detail(node.occurrence_id) if callsites is not None
@@ -209,7 +188,7 @@ def build_plan_details(compiled, *, sources, root, callsites=None, bounds=None):
             details['schema'] = material(json.dumps(schema_meta, ensure_ascii=False, indent=2), language='json', metadata=schema_meta)
 
         try:
-            details['configuration'] = _configuration_detail(node, details['callsite'])
+            details['configuration'] = _configuration_detail(native.configuration, details['callsite'])
         except ValueError as exc:
             details['configuration'] = unavailable(str(exc))
         for kind, detail in details.items():

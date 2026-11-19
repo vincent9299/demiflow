@@ -42,10 +42,10 @@ def execute(root, run_id, attempt=None):
     import time
     from demiflow.workbench.runs import manager as runs
     from demiflow.forge.platform_worker import bind_parent
-    from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.checked import CheckedExecution
-    from demiflow.execution.local_kernel import local_execution
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.host.control import RunJournal
+    from demiflow.execution.host.control import CheckedExecution
+    from demiflow.execution.host.control import local_execution
+    from demiflow.execution.host.control import RunContext
 
     bind_parent()
     target, value = runs._load(root, run_id)
@@ -225,14 +225,13 @@ class RunLog:
             self.stream = None
 
 
-def supervise(root, run_id, lease, attempt=None):
+def _supervise(root, run_id, lease, attempt=None):
     import selectors
     import signal
     import subprocess
     import time
-    import shutil
     from demiflow.workbench.runs import manager as runs
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.host.control import RunJournal
     from demiflow.resources.process_observation import inherited_unit
     from demiflow.resources.process_observation import signal_owned
     from demiflow.resources.process_observation import UNIT_ENV
@@ -243,7 +242,7 @@ def supervise(root, run_id, lease, attempt=None):
     prior_usage = value['state'].get('usage', {})
     from demiflow.workbench.runs.storage import object_locations
     from demiflow.workbench.runs.storage import scratch_bytes
-    from demiflow.workbench.runs.storage import clean_stopped
+    from demiflow.workbench.runs.storage import clean_stopped, cleanup_deadline, remove_attempt_work
     object_roots = object_locations(manifest=manifest, target=target)
     run = RunJournal(target, attempt=attempt)
     run.execution_status()
@@ -264,7 +263,8 @@ def supervise(root, run_id, lease, attempt=None):
     peaks = dict(rss_bytes=0, scratch_bytes=0, output_bytes=0, evidence_bytes=0)
     terminate = [False]
     signal.signal(signal.SIGTERM, lambda *_: terminate.__setitem__(0, True))
-    run.transition({'starting'}, 'starting', supervisor=process_identity(os.getpid()))
+    supervisor_identity = process_identity(os.getpid())
+    run.transition({'starting'}, 'starting', supervisor=supervisor_identity)
 
     def sample_output():
         nonlocal accounting_valid
@@ -345,7 +345,7 @@ def supervise(root, run_id, lease, attempt=None):
                     if control_rss > 256*1024**2:
                         raise RuntimeError('Supervisor control memory budget exceeded')
                     if observer is not None and observer.poll() is None:
-                        from demiflow.execution.run_telemetry import latest
+                        from demiflow.execution.host.inspection import latest
                         observed = latest(target, attempt)
                         stalled = now-observer_started > 5 and (observed.get('age_s', 10)>5)
                         if stalled or _tree_rss(observer.pid)>128*1024**2:
@@ -440,13 +440,20 @@ def supervise(root, run_id, lease, attempt=None):
             output_watch.close()
         # Work is private to this stopped attempt; committed tables and recovery
         # facts live elsewhere. Never follow symlinks or remove external paths.
+        maintenance_deadline = None
         try:
             cleanup = 'pending'
             if children_drained:
-                runs._tree_bytes(work)
-                if work.exists():
-                    shutil.rmtree(work)
-                clean_stopped(run)
+                maintenance_deadline = cleanup_deadline()
+                remove_attempt_work(work, deadline=maintenance_deadline)
+
+                def stopped_snapshot(snapshot):
+                    return (children_drained and (process is None or process.poll() is not None)
+                        and snapshot['attempt'] == attempt
+                        and snapshot['supervisor'] == supervisor_identity
+                        and snapshot['unit_identity'] == value['state'].get('unit_identity'))
+
+                clean_stopped(run, confirm_stopped=stopped_snapshot, deadline=maintenance_deadline)
                 cleanup = 'complete'
         except Exception as exc:
             cleanup = 'pending'
@@ -466,7 +473,16 @@ def supervise(root, run_id, lease, attempt=None):
                                stop_phase='unconfirmed', cleanup='pending', reason='owned_processes_unconfirmed')
         except (OSError, ValueError):
             pass
-        runs.refresh_index(root, run_id)
+        if maintenance_deadline is None or time.monotonic() < maintenance_deadline:
+            runs.refresh_index(root, run_id, deadline=maintenance_deadline)
+
+
+def supervise(root, run_id, lease, attempt=None):
+    # The inherited execution lease covers initialization and every finalization
+    # failure, including accounting, cleanup and index publication.
+    try:
+        return _supervise(root, run_id, lease, attempt)
+    finally:
         os.close(lease)
 
 
@@ -503,7 +519,7 @@ if __name__ == '__main__':
     elif mode == 'observe':
         from demiflow.forge.platform_worker import bind_parent
         from demiflow.workbench.runs.manager import directory
-        from demiflow.execution.run_telemetry import observe
+        from demiflow.execution.host.control import observe
         bind_parent()
         observe(directory(root,run_id),int(sys.argv[4]),int(sys.argv[5]),float(sys.argv[6]))
     elif mode == 'execute':

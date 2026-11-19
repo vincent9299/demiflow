@@ -12,9 +12,8 @@ provider/return-value adapter form; the only intended difference is provider
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
-from ...data.datasink import Datasink, WriteResult as DemiflowWriteResult
 from ...data.plan import LogicalPlan, reject_streaming_map_options
 from ...data.sources import MaterializedSource, SourcePlan
 from ...data.stats import ExecutionMetadata
@@ -60,26 +59,6 @@ class RayDatasetExecutor(DatasetExecutor):
         from ..dataflow_usage import executor_prompt_usage
         return executor_prompt_usage(self)
 
-    def from_items(self, items: list[Any], *, override_num_blocks: int | None = None) -> Any:
-        if not isinstance(items, list):
-            raise TypeError("from_items requires a materialized list")
-        from ..dataflow_inputs import build_input_handle
-        return build_input_handle(items, format="items", override_num_blocks=override_num_blocks)
-
-    def from_arrow(self, tables: Any) -> Any:
-        from ..dataflow_inputs import build_input_handle
-        return build_input_handle(tables, format="arrow")
-
-    def from_numpy(self, arrays: Any) -> Any:
-        from ..dataflow_inputs import build_input_handle
-        return build_input_handle(arrays, format="numpy")
-
-    def from_pandas(
-        self, frames: Any, *, override_num_blocks: int | None = None,
-    ) -> Any:
-        from ..dataflow_inputs import build_input_handle
-        return build_input_handle(frames, format="pandas", override_num_blocks=override_num_blocks)
-
     def plan(
         self, source, plan, action_kind, *, terminal_category="action",
         terminal_native_options=None, source_parallelism_cap=None,
@@ -99,78 +78,9 @@ class RayDatasetExecutor(DatasetExecutor):
             options['terminal_parallelism_cap'] = terminal_parallelism_cap
         return explain_dataset(source, plan, provider=self.PROVIDER, options=options)
 
-    def _run(
-        self, source: SourcePlan, plan: LogicalPlan, kind: str,
-        arguments: dict[str, Any], *, sink: Datasink | None = None,
-        programs: tuple = (),
-    ) -> Any:
-        from ..dataflow_api import make_action_request, run_dataset_action
-        request = make_action_request(
-            self, source, plan, kind=kind, arguments=arguments,
-            sink=sink, programs=programs,
-        )
-        result = run_dataset_action(request)
-        self._last_metadata = ExecutionMetadata(source_name=type(source).__name__)
-        return result
-
-    def iter_rows(self, source: SourcePlan, plan: LogicalPlan) -> Iterable[object]:
-        from ..dataflow_api import make_action_request, run_dataset_action
-        request = make_action_request(self, source, plan, kind="iter_rows", arguments={})
-        return run_dataset_action(request)
-
-    def iter_batches(
-        self, source: SourcePlan, plan: LogicalPlan, *, prefetch_batches: int = 1,
-        batch_size: int | None = 256, batch_format: str | None = "default", drop_last: bool = False,
-    ) -> Iterable[Any]:
-        from ..dataflow_api import make_action_request, run_dataset_action
-        request = make_action_request(self, source, plan, kind="iter_batches", arguments={
-            "prefetch_batches": prefetch_batches, "batch_size": batch_size,
-            "batch_format": batch_format, "drop_last": drop_last,
-        })
-        return run_dataset_action(request)
-
-    def materialize(self, source: SourcePlan, plan: LogicalPlan) -> Any:
-        return self._run(source, plan, "materialize", {})
-
-    def materialize_stream(self, dataset, *, source=None, plan=None):
-        selected_source = dataset._source if source is None else source
-        selected_plan = dataset._plan if plan is None else plan
-        return self._run(selected_source, selected_plan, "materialize", {})
-
     def materialize_graph(self, graph_spec):
         from ..graph import run_ray_graph
         return run_ray_graph(graph_spec, _executor=self)
-
-    def take(
-        self, source: SourcePlan, plan: LogicalPlan, limit: int,
-    ) -> list[dict[str, Any]]:
-        return self._run(source, plan, "take", {"limit": limit})
-
-    def take_batch(
-        self, source: SourcePlan, plan: LogicalPlan, batch_size: int,
-        *, batch_format: str,
-    ) -> Any:
-        return self._run(source, plan, "take_batch", {
-            "batch_size": batch_size, "batch_format": batch_format,
-        })
-
-    def count(self, source: SourcePlan, plan: LogicalPlan) -> int:
-        return self._run(source, plan, "count", {})
-
-    def aggregate(
-        self, source: SourcePlan, plan: LogicalPlan,
-        aggregates: tuple[Any, ...],
-    ) -> Any:
-        from ..contracts.dataflow import ActionProgram
-        programs = tuple(
-            ActionProgram(name="aggregate-" + str(index), kind="aggregate", value=aggregate)
-            for index, aggregate in enumerate(aggregates)
-        )
-        return self._run(
-            source, plan, "aggregate",
-            {"names": [aggregate.name for aggregate in aggregates]},
-            programs=programs,
-        )
 
     def schema(self, source: SourcePlan, plan: LogicalPlan, *, fetch_if_missing: bool = True) -> Any:
         if not fetch_if_missing:
@@ -189,9 +99,6 @@ class RayDatasetExecutor(DatasetExecutor):
         request = make_action_request(self, source, plan, kind="columns",
                                       arguments={"fetch_if_missing": fetch_if_missing})
         return run_dataset_action(request)
-
-    def size_bytes(self, source: SourcePlan, plan: LogicalPlan) -> int:
-        return int(self._run(source, plan, "size_bytes", {}))
 
     def num_blocks(self, source: SourcePlan, plan: LogicalPlan) -> int:
         if not isinstance(source, MaterializedSource) or not plan.is_empty:
@@ -212,40 +119,6 @@ class RayDatasetExecutor(DatasetExecutor):
         if self._last_metadata is not None:
             return replace(self._last_metadata, run_ref=self._run_ref)
         return None
-
-    def write_datasink(
-        self, source: SourcePlan, plan: LogicalPlan, datasink: Datasink,
-        *, native_options=None,
-    ) -> DemiflowWriteResult:
-        arguments: dict[str, Any] = {}
-        if native_options is not None:
-            arguments["native_options"] = native_options
-        from ..dataflow_api import make_action_request, run_dataset_action
-        request = make_action_request(self, source, plan, kind="write_datasink",
-                                      arguments=arguments, sink=datasink)
-        return run_dataset_action(request)
-
-    def write_lance(self, source, plan, spec, *, native_options=None):
-        from ..contracts.dataflow import ActionProgram
-        arguments: dict[str, Any] = {}
-        if native_options is not None:
-            arguments["native_options"] = native_options
-        from ..dataflow_api import make_action_request, run_dataset_action
-        request = make_action_request(
-            self, source, plan, kind="write_lance", arguments=arguments,
-            programs=(ActionProgram(name="write_lance", kind="sink", value=spec),),
-        )
-        return run_dataset_action(request)
-
-    def write_file(
-        self, source: SourcePlan, plan: LogicalPlan, format_name: str,
-        path: str, options: dict[str, Any],
-    ) -> DemiflowWriteResult:
-        from ..dataflow_api import make_action_request, run_dataset_action
-        request = make_action_request(self, source, plan, kind="write_file", arguments={
-            "format": format_name, "path": path, "options": dict(options),
-        })
-        return run_dataset_action(request)
 
     def close(self) -> None:
         # Release only this executor's hosted resource scope; unified ActionHandles

@@ -72,42 +72,6 @@ class KeyedSource(SourcePlan):
     reducer_kwargs: dict | None = None
 
 
-def keyed_dataset(left, kind, on, *, right=None, right_on=None, how="inner",
-                  suffix="_right", reducer=None, initial=None,
-                  chunk_bytes=32 * 1024 * 1024, max_rows=32, output="items", reducer_kwargs=None):
-    from ..data.dataset import Dataset
-    from ..data.plan import LogicalPlan, reject_streaming_map_options
-    from ..data.local_relational import keys
-    reject_streaming_map_options(left._plan, 'local relational')
-    if right is not None:
-        reject_streaming_map_options(right._plan, 'local relational')
-    fields = tuple(keys(on))
-    rfields = tuple(keys(right_on or on))
-    if not fields or any(not isinstance(k, str) or not k for k in fields):
-        raise ValueError("nonempty key field names are required")
-    if chunk_bytes < 1:
-        raise ValueError("chunk_bytes must be positive")
-    if right is not None:
-        if how not in {"inner", "left", "semi", "anti"} or len(fields) != len(rfields):
-            raise ValueError("invalid join type or key arity")
-    if kind == "groups" and (max_rows < 1 or output in fields or output in {"group_index", "group_last"}):
-        raise ValueError("invalid grouping fields or max_rows")
-    if kind == "reduce" and not callable(reducer):
-        raise TypeError("reducer must be callable")
-    source = KeyedSource(kind, PlanInput(left._source, left._plan, left._executor), fields,
-        PlanInput(right._source, right._plan, right._executor) if right is not None else None,
-        rfields, how, suffix, reducer, initial, chunk_bytes, max_rows, output,
-        reducer_kwargs=dict(reducer_kwargs or {}))
-    from ..planning.dataflow_compile import expand_relational_inputs
-    from ..planning.dataflow_policy import resolve_runtime_policy
-    from .contracts.dataflow_errors import DataflowError
-    _, bounds = resolve_runtime_policy({}, {}, provider="local")
-    bindings = expand_relational_inputs(source, path=(), bounds=bounds)
-    if len(bindings) != (2 if right is not None else 1):
-        raise DataflowError("INVALID_CONTRACT", "relational input port multiplicity was not preserved")
-    return Dataset(source, LogicalPlan(), left._executor)
-
-
 class LocalExecutionSession:
     """Inspection handle; statistics reflect the latest action, not an estimate."""
     def __init__(self, executor):
@@ -160,7 +124,7 @@ def local_execution(*, workers=4, worker_mode=None, partitions=None,
     suffix to the byte-unchanged legacy in-driver write_queue_datasink fallback.
     Pass unified_queue_chain=False for the explicit legacy in-driver path.
     """
-    from ..data.api import _current_executor, _use_executor
+    from ..data.execution_contract import _current_executor, _use_executor
     from .executors.local import LocalDatasetExecutor
     from ..planning.policy import parse_platform_planning_policy
     planning_policy = parse_platform_planning_policy(planning)

@@ -4,24 +4,14 @@ Logical object locations come from the checked resource closure. Physical
 namespaces and orphan decisions remain owned by the one native RunJournal.
 """
 
-import fcntl
-import hashlib
-import json
 import os
 from pathlib import Path
 import stat
 import time
-import uuid
 
 from demiflow.forge.io import no_symlinks
 from demiflow.forge.schema import ForgeError
-from demiflow.execution.run_journal import RunJournal
-
-
-
-
-
-from demiflow.execution.run_reader import read_run, storage_snapshot, RunReadError
+from demiflow.execution.host.inspection import observe_storage, RunReadError
 
 
 def object_locations(*, report=None, manifest=None, target=None):
@@ -62,72 +52,52 @@ def object_locations(*, report=None, manifest=None, target=None):
 
 
 def owned_objects(target, allowed=None):
-    journal = RunJournal(target)
-    records = journal.object_roots()
-    if not records:
-        return []
-    if allowed is None:
-        try:
-            with read_run(target) as reader:
-                manifest = reader.document('manifest', 8 * 1024**2)
-        except RunReadError as exc:
-            raise ForgeError(str(exc), code=exc.code or 'operation_rejected') from exc
-        if manifest is None:
-            raise ForgeError("Historical run manifest exceeds budget")
-        allowed = object_locations(manifest=manifest, target=target)
-    binding = journal.recovery_identity()
-    return _checked_owned_objects(records, allowed, binding)
+    try:
+        with observe_storage(target) as observation:
+            footprint = observation.native_footprint()
+            if not footprint['object_roots']:
+                return []
+            if allowed is None:
+                manifest = observation.snapshot()['manifest']
+                if manifest is None:
+                    raise ForgeError("Owned objects have no historical manifest")
+                allowed = object_locations(manifest=manifest, target=target)
+            return _checked_owned_objects(footprint['object_roots'], allowed)
+    except RunReadError as exc:
+        raise ForgeError(str(exc), code=exc.code or 'operation_rejected') from exc
 
 
-def _checked_owned_objects(records, allowed, binding):
-    """One namespace validator for ordinary native polls and history admission."""
-    if not records:
-        return []
-    native_id = _native_run_id(binding)
-    from demiflow.execution.publication_facts import object_namespace
+def _checked_owned_objects(records, allowed):
+    """Authorize native-validated ranges against this product's locations."""
     paths = []
     for record in records:
-        logical = record["logical_root"]
-        if logical not in allowed or record != object_namespace(native_id, logical):
+        if record['logical_root'] not in allowed:
             raise ForgeError("Owned object namespace differs from checked locations")
-        path = no_symlinks(Path(record["physical_root"]))
+        path = no_symlinks(Path(record['physical_root']))
         if path not in paths:
             paths.append(path)
     return paths
 
 
-def _native_run_id(binding):
-    if not binding:
-        raise ForgeError("Owned objects have no native run identity")
-    native_id = binding.get("run_id")
-    if (
-        type(native_id) is not str
-        or len(native_id) != 32
-        or any(c not in "0123456789abcdef" for c in native_id)
-    ):
-        raise ForgeError("Owned objects have invalid native run identity")
-    return native_id
-
-
 def history_objects(snapshot, target):
     """Resolve only the namespaces from a bounded native storage snapshot."""
-    if snapshot['identity'] is not None:
-        _native_run_id(snapshot['identity'])
     if not snapshot['object_roots']:
         return []
     manifest = snapshot['manifest']
     if manifest is None:
         raise ForgeError('Owned objects have no historical manifest')
     allowed = object_locations(manifest=manifest, target=target)
-    return _checked_owned_objects(snapshot['object_roots'], allowed, snapshot['identity'])
+    return _checked_owned_objects(snapshot['object_roots'], allowed)
 
 
 def scratch_bytes(target, work, allowed):
-    roots = [
-        work,
-        *(target / name for name in ("state", "materializations", "scratch")),
-        *owned_objects(target, allowed),
-    ]
+    try:
+        with observe_storage(target) as observation:
+            footprint = observation.native_footprint()
+            roots = [work, *(target / name for name in footprint['relative_roots']),
+                     *_checked_owned_objects(footprint['object_roots'], allowed)]
+    except RunReadError as exc:
+        raise ForgeError(str(exc), code=exc.code or 'operation_rejected') from exc
     pending = [(no_symlinks(Path(p)), 0) for p in roots]
     total = 0
     seen = set()
@@ -166,36 +136,80 @@ def scratch_bytes(target, work, allowed):
     return total
 
 
-def clean_stopped(run):
-    """Caller holds the Forge lease and has proven execution children stopped.
+def cleanup_deadline():
+    """One existing control-operation budget, starting after process draining."""
+    from demiflow.forge.operation_budget import child_deadline, OPERATION_SECONDS
+    return child_deadline(OPERATION_SECONDS)
 
-    Take the native execution lock before transferring its dead owner solely
-    for the existing fenced orphan cleanup. Never execute an action, advance
-    progress, start another attempt, or remove a prepared/committed artifact.
-    """
-    fd = os.open(
-        run.directory / ".runtime.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600
-    )
+
+def remove_attempt_work(work, *, deadline):
+    """Remove only a caller-proven stopped attempt's private directory."""
+    from demiflow.forge.operation_budget import check
+    work = no_symlinks(Path(work).absolute())
+    check(deadline)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    parent = os.open('/', flags)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        for _ in range(4):
-            state = run.execution_status()
-            if state.get("execution_stopped") is True:
-                break
-            if run.transition(
-                {state["status"]}, state["status"], execution_stopped=True
-            ):
-                break
-        else:
-            raise ForgeError("Stopped execution state kept changing")
-        binding = run.recovery_identity()
-        if binding is None:
-            return
-        fence = uuid.uuid4().hex
-        run.claim_execution(binding, fence)
+        # Every component is resolved from its already-held parent. A replaced
+        # ancestor cannot redirect this cleanup into a foreign work directory.
+        for part in work.parent.parts[1:]:
+            check(deadline)
+            previous = parent
+            parent = os.open(part, flags, dir_fd=previous)
+            os.close(previous)
+    except FileNotFoundError:
+        os.close(parent)
+        return
+    except BaseException:
+        os.close(parent)
+        raise
+    count = 0
+
+    def remove(parent_fd, name, depth):
+        nonlocal count
+        check(deadline)
+        count += 1
+        if depth > 24 or count > 65536:
+            raise ForgeError('Attempt work cleanup exceeds entry/depth budget', code='resource_limit')
         try:
-            run.clean_orphans(fence)
+            visible = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        if not (stat.S_ISDIR(visible.st_mode) or stat.S_ISREG(visible.st_mode)):
+            raise ForgeError('Attempt work contains a symlink or special entry')
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+        if stat.S_ISDIR(visible.st_mode):
+            flags |= os.O_DIRECTORY
+        descriptor = os.open(name, flags, dir_fd=parent_fd)
+        try:
+            held = os.fstat(descriptor)
+            identity = (held.st_dev, held.st_ino)
+            if identity != (visible.st_dev, visible.st_ino):
+                raise ForgeError('Attempt work identity changed')
+            if stat.S_ISDIR(held.st_mode):
+                with os.scandir(descriptor) as entries:
+                    for entry in entries:
+                        check(deadline)
+                        remove(descriptor, entry.name, depth + 1)
+            check(deadline)
+            visible = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            if identity != (visible.st_dev, visible.st_ino):
+                raise ForgeError('Attempt work identity changed during cleanup')
+            if stat.S_ISDIR(held.st_mode):
+                os.rmdir(name, dir_fd=parent_fd)
+            else:
+                os.unlink(name, dir_fd=parent_fd)
         finally:
-            run.release_execution(fence)
+            os.close(descriptor)
+
+    try:
+        remove(parent, work.name, 0)
     finally:
-        os.close(fd)
+        os.close(parent)
+
+
+def clean_stopped(run, *, expected_revision=None, confirm_stopped, deadline):
+    """Delegate native ownership and GC exclusively to their original owner."""
+    from demiflow.execution.host.control import clean_stopped_execution
+    return clean_stopped_execution(run, expected_attempt=run.attempt,
+        expected_revision=expected_revision, confirm_stopped=confirm_stopped, deadline=deadline)

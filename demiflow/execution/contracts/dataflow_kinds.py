@@ -39,6 +39,15 @@ from typing import Mapping
 TYPED = "typed"
 NATIVE = "native"
 
+# Authoring aliases only affect admission, not the declared operation.kind.
+# The two declaration-only names are not additional runtime kernel registrations.
+NATIVE_DECLARATION_ALIASES = MappingProxyType({
+    "embeddings": "embedding", "fetch": "raw_fetch", "enqueue": "queue_produce",
+    "ack_queue": "queue_ack", "lookup": "lance_lookup", "prepend": "stream_prepend",
+    "read_object": "read_local_object", "admit": "deduplicate",
+})
+NATIVE_DECLARATION_ONLY = frozenset({"cache", "run_stream"})
+
 # Kernel families. The kernel factory admits a kind that is in at least one.
 FAMILIES = ("unary", "batch", "model", "relational", "ordering", "aggregate", "stream_group")
 ROLES = FAMILIES + (

@@ -137,8 +137,15 @@ def _source(root, kind, identity):
     if kind == 'run':
         from demiflow.workbench.runs import manager as runs
         target = runs.directory(root, identity)
-        if not (target / 'run.sqlite').exists():
+        if not target.exists():
             return None
+        from demiflow.execution.host.inspection import observe_storage, RunReadError
+        try:
+            with observe_storage(target) as observation:
+                if not observation.exists:
+                    return None
+        except RunReadError as exc:
+            raise ForgeError(str(exc), code=exc.code or 'operation_rejected') from exc
         _, value = runs._load(root, identity, detail='identity')
         manifest = value['manifest']
         created, digest = manifest['created_at'], manifest['digest']

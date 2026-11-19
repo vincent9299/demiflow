@@ -117,7 +117,7 @@ class _Discard(io.TextIOBase):
 def _preview(root, *, entry, params=None):
     """Called only by the fixed one-shot workspace worker, never the server."""
     from contextlib import redirect_stdout
-    from demiflow.execution.plan_capture import capture_pipeline, build_logical_plan_view
+    from demiflow.execution.host.inspection import capture_pipeline, build_logical_plan_view
     from demiflow.workbench.projects.discovery import discover
     from demiflow.workbench.graph.preview_guard import enter_readonly
 

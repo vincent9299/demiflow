@@ -59,21 +59,34 @@ def test_native_save_prepare_execute_and_fixed_result(root):
     assert bundle['physical'].bounds.max_spill_bytes <= prepared['limits']['max_scratch_bytes']
     versions=lance.dataset(stage['uri']).versions()
     assert len(versions)==3
-    from demiflow.workbench.runs.native_stages import verify
+    from demiflow.execution.host.inspection import verify_published_output
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    def verify_recorded():
+        return verify_published_output(journal.directory, stage['action_id'],
+            expected_uri=stage['uri'], expected_schema_identity=stage['schema_identity'],
+            publication='native_stage_v3', report_digest=result['report_digest'],
+            metadata_reader=runs._output_metadata)
     assert result['state']['cleanup']=='complete'
     with sqlite3.connect(journal.path) as db:
         db.execute("UPDATE runtime_commits SET status='prepared' WHERE commit_id=?",(commit['commit_id'],))
     try:
-        with pytest.raises(ValueError,match='ACK'):
-            verify(runs.directory(root,result['run_id']),journal,stage,commit,report_digest=result['report_digest'])
+        with pytest.raises(RecoveryContractError,match='ACK'):
+            verify_recorded()
     finally:
         with sqlite3.connect(journal.path) as db:
             db.execute("UPDATE runtime_commits SET status='acked' WHERE commit_id=?",(commit['commit_id'],))
     for changed in ({'scope_id':'wrong'},{'report_node_id':'wrong'},{'parent_action_id':'wrong'},
                     {'reference':{'uri':stage['uri'],'version':1}}):
-        with pytest.raises(ValueError):
-            verify(runs.directory(root,result['run_id']),RunJournal(runs.directory(root,result['run_id'])),
-                   stage,{**commit,**changed},report_digest=result['report_digest'])
+        with sqlite3.connect(journal.path) as db:
+            originals=db.execute("SELECT attempt,kind,document FROM action_events WHERE action_id=? AND kind IN ('stage_commit','stage_recovered')",(stage['action_id'],)).fetchall()
+            db.execute("UPDATE action_events SET document=? WHERE action_id=? AND kind IN ('stage_commit','stage_recovered')",(json.dumps({**commit,**changed}),stage['action_id']))
+        try:
+            with pytest.raises(RecoveryContractError):
+                verify_recorded()
+        finally:
+            with sqlite3.connect(journal.path) as db:
+                for attempt,kind,document in originals:
+                    db.execute('UPDATE action_events SET document=? WHERE action_id=? AND attempt=? AND kind=?',(document,stage['action_id'],attempt,kind))
 
 
 def test_stage_stays_visible_after_later_failure_and_reconcile_without_events(root):
@@ -227,8 +240,8 @@ def test_replayed_old_ack_never_regresses_stage_projection():
     assert len(service._last_acked)==len(service._acked_ordinals)==1
 
 
-def test_old_checkpoint_fixed_result_adapter_remains_readable(root,monkeypatch):
-    """Historical adapter fixture; this does not execute retired checkpoint APIs."""
+def test_old_checkpoint_fixed_result_adapter_remains_readable(root):
+    """Read real legacy facts without executing retired checkpoint APIs."""
     from demiflow.lance.refs import DatasetRef
     from demiflow.lance.storage import schema_hash
     from demiflow.lance.schema import schema_identity
@@ -237,14 +250,28 @@ def test_old_checkpoint_fixed_result_adapter_remains_readable(root,monkeypatch):
     table=pa.Table.from_pylist([{'case_id':'historical'}],schema=schema)
     lance.write_dataset(table,str(target))
     ref=DatasetRef('stage',target.name,1,'stage','1',schema_hash(schema),1,store_id='local')
-    item={'name':'stage','mode':'checkpoint','checkpoint_node':'original-checkpoint',
-          'schema_identity':schema_identity(schema),'uri':str(target),'relative_uri':target.name,
-          'location_id':'local','receipt':None,'result':{'ref':ref.to_dict()},
-          'commit':{'checkpoint_node':'original-checkpoint','schema_identity':schema_identity(schema),
-                    'reference':{'uri':str(target),'version':1}}}
-    monkeypatch.setattr(runs,'show',lambda *a,**k:{'outputs':[item]})
+    run_id='r'+'0'*24
+    action_id='legacy-checkpoint'
+    output={'action_id':action_id,'mode':'checkpoint','checkpoint_node':'original-checkpoint',
+            'schema_identity':schema_identity(schema),'uri':str(target),'relative_uri':target.name,
+            'location_id':'local','dataset_id':'stage','schema_name':'stage','schema_version':'1'}
+    manifest={'format':'demiflow_forge_run_manifest_v2','run_id':run_id,'root':str(root.absolute()),
+              'entry':'flows/historical.py:run','created_at':0.0,'parameter_path':None,
+              'limits':{},'report_digest':'0'*64,'outputs':{'stage':output}}
+    manifest['digest']=runs.content_digest(manifest)
+    journal=RunJournal(runs.directory(root,run_id))
+    journal.initialize(manifest,attempts=False)
+    journal.transition({None},'succeeded')
+    journal.action_event(action_id,'stage_commit',{
+        'checkpoint_node':'original-checkpoint','schema_identity':schema_identity(schema),
+        'reference':{'uri':str(target),'version':1}})
+    journal.action_event(action_id,'result',{'ref':ref.to_dict(),'location_id':'local'})
+    _,actual,path=runs.result_table(root,run_id,'stage')
+    assert actual==ref and path==target
+    assert lance.dataset(path,version=actual.lance_version).to_table().to_pylist()==[{'case_id':'historical'}]
     lance.write_dataset(pa.Table.from_pylist([{'case_id':'new'}],schema=schema),str(target),mode='append')
-    _,actual,path=runs.result_table(root,'r'+'0'*24,'stage')
+    assert lance.dataset(str(target)).version==2
+    _,actual,path=runs.result_table(root,run_id,'stage')
     assert actual==ref and path==target
     assert lance.dataset(path,version=actual.lance_version).to_table().to_pylist()==[{'case_id':'historical'}]
 

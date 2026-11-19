@@ -24,10 +24,11 @@ from concurrent.futures.process import BrokenProcessPool
 from contextlib import ExitStack
 from pathlib import Path
 
+from .relational_declaration import keys
+
 
 def canonical(value):return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))
 def digest(value):return hashlib.sha256(canonical(value).encode()).hexdigest()
-def keys(value):return [value] if isinstance(value,str) else list(value)
 def key_of(row,fields):return canonical([row[k] for k in fields])
 
 

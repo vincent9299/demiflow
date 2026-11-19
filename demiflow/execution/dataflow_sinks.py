@@ -747,7 +747,7 @@ def inspect_native_write_receipt(journal, action_id):
     if seal is None:
         return None
     store, bounds = _v3_read_store(journal.directory, store_id=seal['physical_ref']['store_id'])
-    graph, physical, _ = load_dataflow(journal.directory, action_id, store=store, bounds=bounds)
+    graph, physical, _ = load_dataflow(journal.directory, action_id, store=store, bounds=bounds, _reader=journal)
     native_action = observation_action(journal, action_id, action['declaration'], binding)
     native = LanceSink(native_action, spec_from_identity(action['declaration']['sink']))
     sink = NativeTerminalSink(native=native, sink_id='write_lance', store=store,

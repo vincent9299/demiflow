@@ -51,6 +51,203 @@ def create_target_absent_binding(run_id, action_id, declaration, intent):
                 uri=spec.uri, mode='create')
 
 
+def _open_runtime_lease(directory):
+    descriptor = os.open(directory / '.runtime.lock',
+                         os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
+def _maintenance_snapshot(journal, expected_attempt, expected_revision, confirm_stopped,
+                          *, terminal=False, action_id=None):
+    """Read native inputs without initializing or migrating historical journals."""
+    import json
+    from ..errors import ExecutionConflict
+    from .run_reader import read_run
+    from .recovery_contract import MAX_DOCUMENT_BYTES
+    journal._check_maintenance_deadline()
+    with read_run(journal.directory, deadline=journal._maintenance_deadline) as reader:
+        state = reader.document('execution_state', 65536)
+        if (state is None or state.get('attempt') != expected_attempt
+                or expected_attempt is not None and type(state.get('attempt')) is not int
+                or expected_attempt is None and reader.has_table('attempts')
+                or journal.attempt is not None and journal.attempt != expected_attempt):
+            raise ExecutionConflict('Stopped execution attempt differs')
+        revision = state.get('revision')
+        if type(revision) is not int or revision < 0:
+            raise ExecutionConflict('Invalid stopped execution revision')
+        if (expected_revision is None and (terminal or state.get('status') not in
+                {'starting', 'running', 'stopping'}) or expected_revision is not None
+                and expected_revision != revision):
+            raise ExecutionConflict('Stopped execution revision differs or is required')
+        if terminal and state.get('status') not in {'succeeded', 'failed', 'cancelled', 'interrupted'}:
+            raise ExecutionConflict('Create absence admission requires a terminal attempt')
+
+        def document(table, column, where='', parameters=()):
+            if not reader.has_table(table):
+                return None
+            row = reader.db.execute('SELECT substr(CAST(' + column + ' AS BLOB),1,?) FROM ' +
+                table + where + ' LIMIT 1', (MAX_DOCUMENT_BYTES + 1, *parameters)).fetchone()
+            if row is None or row[0] is None:
+                return None
+            if not isinstance(row[0], bytes) or len(row[0]) > MAX_DOCUMENT_BYTES:
+                raise RecoveryContractError('Native maintenance input exceeds document budget')
+            value = json.loads(row[0])
+            if type(value) is not dict:
+                raise RecoveryContractError('Invalid native maintenance document')
+            return value
+
+        configuration = document('runtime_identity', 'document')
+        if configuration is None:
+            for table in ('runtime_owner', 'runtime_dataflow_gc'):
+                if reader.has_table(table) and reader.db.execute('SELECT 1 FROM ' + table + ' LIMIT 1').fetchone():
+                    raise ExecutionConflict('Native ownership or GC has no execution identity')
+        elif expected_attempt is None:
+            raise ExecutionConflict('Native maintenance requires an identified attempt')
+        binding = None
+        if action_id is not None and configuration is not None:
+            declaration = document('runtime_actions', 'declaration', ' WHERE action_id=?', (action_id,))
+            columns = {row[1] for row in reader.db.execute('PRAGMA table_info(action_events)')}
+            intent = (document('action_events', 'document',
+                " WHERE attempt=? AND action_id=? AND kind='intent'", (expected_attempt, action_id))
+                if 'attempt' in columns else None)
+            committed = reader.has_table('runtime_commits') and reader.db.execute(
+                'SELECT 1 FROM runtime_commits WHERE action_id=? LIMIT 1', (action_id,)).fetchone()
+            if not committed:
+                binding = create_target_absent_binding(configuration['run_id'], action_id, declaration, intent)
+            recorded = document('runtime_sources', 'document', ' WHERE action_id=?',
+                                (action_id + '-create-target-absent',))
+            if binding is not None and recorded is not None and recorded != binding:
+                raise RecoveryContractError('Fixed source binding differs')
+        else:
+            declaration = None
+    snapshot = {name: state.get(name) for name in (
+        'attempt', 'revision', 'status', 'execution_stopped', 'reason')}
+    if (type(snapshot['status']) is not str
+            or snapshot['execution_stopped'] is not None and type(snapshot['execution_stopped']) is not bool
+            or snapshot['reason'] is not None and type(snapshot['reason']) is not str):
+        raise ExecutionConflict('Invalid stopped execution proof fields')
+    for name in ('unit_identity', 'supervisor', 'worker'):
+        value = state.get(name)
+        if value is None:
+            snapshot[name] = None
+            continue
+        fields = {'device': int, 'inode': int} if name == 'unit_identity' else {'pid': int, 'start': str, 'boot': str}
+        if type(value) is not dict or any(type(value.get(key)) is not kind for key, kind in fields.items()):
+            raise ExecutionConflict('Invalid stopped execution process identity')
+        snapshot[name] = {key: value[key] for key in fields}
+    if confirm_stopped(snapshot) is not True:
+        raise ExecutionConflict('Execution stop is not proven')
+    journal._check_maintenance_deadline()
+    return state, configuration, binding, declaration
+
+
+@contextmanager
+def _stopped_maintenance(journal, expected_attempt, expected_revision, deadline):
+    import math
+    if type(deadline) not in (int, float) or not math.isfinite(deadline) or deadline <= 0:
+        raise ValueError('Invalid maintenance deadline')
+    if expected_attempt is not None and (type(expected_attempt) is not int or not 1 <= expected_attempt <= 32):
+        raise ValueError('Invalid maintenance attempt')
+    if expected_revision is not None and (type(expected_revision) is not int or expected_revision < 0):
+        raise ValueError('Invalid maintenance revision')
+    # Validate the original read policy before even creating a lock file.
+    from .run_reader import read_run
+    maintenance = RunJournal(journal.directory, attempt=journal.attempt, _maintenance_deadline=deadline)
+    maintenance._check_maintenance_deadline()
+    with read_run(journal.directory, deadline=deadline):
+        pass
+    try:
+        descriptor = _open_runtime_lease(maintenance.directory)
+    except BlockingIOError as exc:
+        from ..errors import ExecutionConflict
+        raise ExecutionConflict('Stopped execution runtime lease is busy') from exc
+    try:
+        with maintenance.connection_scope():
+            yield maintenance
+    finally:
+        os.close(descriptor)
+
+
+@contextmanager
+def _maintenance_owner(journal, configuration):
+    """Claim can fail after committing its owner: protect the claim itself."""
+    fence = uuid.uuid4().hex
+    try:
+        journal.claim_execution(configuration, fence)
+        yield fence
+    finally:
+        journal._check_maintenance_deadline()
+        # Never release another owner's fence, including after a partial claim.
+        with journal._connection() as db:
+            own = db.execute('SELECT 1 FROM runtime_owner WHERE fence=?', (fence,)).fetchone()
+        if own:
+            journal.release_execution(fence)
+
+
+def clean_stopped_execution(journal, *, expected_attempt, confirm_stopped, deadline,
+                            expected_revision=None):
+    """Clean a proven stopped native execution without changing host lifecycle."""
+    with _stopped_maintenance(journal, expected_attempt, expected_revision, deadline) as maintenance:
+        state, configuration, _, _ = _maintenance_snapshot(maintenance, expected_attempt,
+            expected_revision, confirm_stopped)
+        if configuration is not None:
+            with _maintenance_owner(maintenance, configuration) as fence:
+                maintenance.clean_orphans(fence)
+        return dict(attempt=expected_attempt, revision=state['revision'], native_work=configuration is not None)
+
+
+def admit_absent_create(journal, *, action_id, expected_attempt, expected_revision,
+                        expected_uri, confirm_stopped, deadline):
+    """Record current absence against the selected attempt's original write identity."""
+    from .recovery_contract import identifier
+    from ..errors import LanceResourceNotFound, ExecutionConflict
+    from .lance_sink import spec_from_identity
+    from ..lance.reconcile import reconcile_lance_create
+    from ..lance.storage import inspect_lance
+    identifier(action_id)
+    if type(expected_uri) is not str or not expected_uri or len(expected_uri.encode()) > 4096:
+        raise ValueError('Invalid expected create URI')
+    if expected_revision is None:
+        raise ValueError('Create admission requires a revision')
+    with _stopped_maintenance(journal, expected_attempt, expected_revision, deadline) as maintenance:
+        state, configuration, binding, declaration = _maintenance_snapshot(maintenance, expected_attempt,
+            expected_revision, confirm_stopped, terminal=True, action_id=action_id)
+        result = dict(attempt=expected_attempt, revision=state['revision'], admitted=False)
+        if binding is None or binding['uri'] != expected_uri:
+            return result
+        spec = spec_from_identity(declaration['sink'])
+        maintenance._check_maintenance_deadline()
+        try:
+            receipt = reconcile_lance_create(spec.uri, request_hash=binding['request_hash'],
+                                             operation_id=binding['operation_id'])
+        except LanceResourceNotFound:
+            receipt = None
+        maintenance._check_maintenance_deadline()
+        if receipt is not None:
+            return result
+        try:
+            inspect_lance(spec.uri, None, spec.storage_options)
+        except LanceResourceNotFound:
+            pass
+        else:
+            maintenance._check_maintenance_deadline()
+            return result
+        maintenance._check_maintenance_deadline()
+        _, current_configuration, current_binding, _ = _maintenance_snapshot(maintenance, expected_attempt,
+            expected_revision, confirm_stopped, terminal=True, action_id=action_id)
+        if current_configuration != configuration or current_binding != binding:
+            raise ExecutionConflict('Create admission identity changed during storage verification')
+        with _maintenance_owner(maintenance, configuration) as fence:
+            maintenance.bind_source(fence, action_id + '-create-target-absent', binding)
+        result['admitted'] = True
+        return result
+
+
 class RunContext:
     """Platform control scope. Pipeline/operator arguments never carry this."""
 
@@ -144,10 +341,8 @@ class RunContext:
         if current_run() is not None:
             raise RecoveryContractError("A driver cannot nest independent run contexts")
         self.directory.mkdir(parents=True, exist_ok=True)
-        self._lease = os.open(self.directory / ".runtime.lock",
-                              os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+        self._lease = _open_runtime_lease(self.directory)
         try:
-            fcntl.flock(self._lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
             from .recovery_identity import platform_identity
             revision = platform_identity()
             old = self.journal.recovery_identity()

@@ -203,34 +203,20 @@ def _incomplete_seal(target, identity, run_id, root):
                 raise ForgeError(
                     "Preparation contains unknown execution/ownership evidence"
                 )
-    path = target / "run.sqlite"
-    if not path.exists():
-        return True
-    no_symlinks(path)
-    if not path.is_file() or path.stat().st_size > 64 * 1024**2:
-        raise ForgeError("Preparation journal exceeds budget")
-    from demiflow.execution.run_reader import read_run, RunReadError
+    from demiflow.execution.host.inspection import read_run, RunReadError, observe_storage
     try:
-        with read_run(target) as reader:
-            tables = reader.tables()
-            if len(tables) > 32:
-                raise ForgeError("Preparation journal shape exceeds budget")
-            state = reader.document("execution_state", 65536)
-            if state is not None:
-                if state.get("status") is not None:
+        with observe_storage(target) as observation:
+            if not observation.exists:
+                return True
+            with read_run(target) as reader:
+                evidence = reader.preparation_evidence()
+                if evidence['status'] == 'not_proven':
                     return False
-                if state != {"status": None, "revision": 0, "attempt": 1}:
-                    raise ForgeError("Unknown preparation state")
-            manifest = reader.document("manifest", 8 * 1024**2)
-            if manifest is not None and (
-                manifest.get("prepare_request_id") != identity
-                or manifest.get("run_id") != run_id
-                or manifest.get("root") != str(Path(root).absolute())
-            ):
-                raise ForgeError("Preparation ownership differs")
-            for table in ("action_events", "completion", "stages", "activities"):
-                if reader.has_rows(table):
-                    raise ForgeError("Preparation contains execution facts")
+                if evidence['manifest_present'] and (
+                    evidence['prepare_request_id'] != identity or evidence['run_id'] != run_id
+                    or evidence['root'] != str(Path(root).absolute())
+                ):
+                    raise ForgeError("Preparation ownership differs")
     except RunReadError as exc:
         raise ForgeError(str(exc), code=exc.code or 'operation_rejected') from exc
     return True

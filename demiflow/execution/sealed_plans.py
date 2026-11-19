@@ -136,18 +136,19 @@ def _v3_read_store(directory, *, store_id):
     return store, bounds
 
 
-def _load_sealed_v3(directory, action_id, marker):
+def _load_sealed_v3(directory, action_id, marker, *, _reader=None, _max_carrier_bytes=None, _deadline=None):
     """v3 branch: read and fully validate the original artifacts via load_dataflow."""
     from .dataflow_seal import load_dataflow
     from .dataflow_history import _ref_from_json
     ref = _ref_from_json(marker["physical_ref"], "physical_ref")
     store, bounds = _v3_read_store(directory, store_id=ref.store_id)
-    graph, physical, sealed = load_dataflow(Path(directory), action_id, store=store, bounds=bounds)
+    graph, physical, sealed = load_dataflow(Path(directory), action_id, store=store, bounds=bounds, _reader=_reader,
+                                             _max_carrier_bytes=_max_carrier_bytes, _deadline=_deadline)
     return {"version": "v3", "facts": marker, "graph": graph,
             "physical": physical, "sealed": sealed}
 
 
-def load_sealed_plan(directory, action_id, *, version=None) -> dict:
+def load_sealed_plan(directory, action_id, *, version=None, _reader=None, _max_carrier_bytes=None, _deadline=None) -> dict:
     """Read the original F1 sealed plan; readable even without execution bindings.
 
     An explicit v3 branch delegates to ``load_dataflow`` when the action carries a
@@ -160,12 +161,13 @@ def load_sealed_plan(directory, action_id, *, version=None) -> dict:
     _check_action_id(action_id)
     if version not in (None, 'v2', 'v3'):
         raise PlanContractError('invalid_contract', 'Unknown sealed plan version')
-    journal = RunJournal(directory)
+    journal = RunJournal(directory) if _reader is None else _reader
     if not journal.path.is_file():
         raise PlanContractError("missing_plan", "run journal is absent")
     v3_marker = journal.source_binding(action_id + "-dataflow-sealed")
     if version != 'v2' and v3_marker is not None:
-        return _load_sealed_v3(directory, action_id, v3_marker)
+        return _load_sealed_v3(directory, action_id, v3_marker, _reader=_reader,
+                               _max_carrier_bytes=_max_carrier_bytes, _deadline=_deadline)
     if version == 'v3':
         raise PlanContractError('missing_plan', 'action has no v3 sealed plan')
     facts = journal.source_binding(action_id + _SEALED_PLAN_KEY)

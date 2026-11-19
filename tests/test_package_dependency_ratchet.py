@@ -26,13 +26,25 @@ LEAVES = {'resources', '_compat'}    # import no other demiflow package
 # (importer package, imported package) -> most private-name imports allowed.
 # 'root' is the top-level modules of ``demiflow/`` (errors, objects, cli, ...).
 PRIVATE_IMPORT_BUDGET = {
-    ('execution', 'data'): 10, ('execution', 'lance'): 10, ('workbench', 'resources'): 8,
+    ('execution', 'data'): 7, ('execution', 'lance'): 10, ('workbench', 'resources'): 8,
     ('execution', 'planning'): 7, ('execution', 'root'): 4, ('root', 'operator_llm'): 3,
     ('data', 'root'): 3, ('execution', 'operator_llm'): 3, ('execution', 'resources'): 3,
     ('workbench', 'execution'): 3, ('data', 'execution'): 2, ('execution', 'services'): 2,
     ('workbench', 'root'): 2, ('planning', 'execution'): 2, ('operator_llm', 'root'): 1,
-    ('execution', 'collect'): 1, ('embeddings', 'operator_llm'): 1, ('pipeline', 'data'): 1,
+    ('execution', 'collect'): 1, ('embeddings', 'operator_llm'): 1,
     ('lance', 'execution'): 1,
+}
+
+# P1 moved the sole executor context into a pure SDK contract. These exact
+# assembly edges are guarded by test_p1_dependency_boundary; they are not a
+# package-wide private-name allowance. The checkpoint selector is the existing
+# canonical public entry's assembly seam, not a runtime-core dependency.
+P1_ASSEMBLY_IMPORTS = {
+    ('demiflow.execution.local_kernel', 'demiflow.data.execution_contract', '_current_executor'),
+    ('demiflow.execution.local_kernel', 'demiflow.data.execution_contract', '_use_executor'),
+    ('demiflow.execution.stream_checkpoint', 'demiflow.data.execution_contract', '_current_executor'),
+    ('demiflow.pipeline.core', 'demiflow.data.execution_contract', '_use_executor'),
+    ('demiflow.execution.stream_checkpoint', 'demiflow.data.api', '_select_executor'),
 }
 
 # Pre-v3 execution modules. runtime-v3 has one orchestration entry
@@ -48,7 +60,9 @@ PRE_V3_MODULES = {
         'demiflow.execution.worker.bootstrap', 'demiflow.execution.worker.execution',
         'demiflow.execution.worker.graph_execution', 'demiflow.execution.worker.queue_transform'},
     'demiflow.execution.stream': {
-        'demiflow.data.dataset', 'demiflow.execution.dataflow_stream',
+        'demiflow.data.dataset',
+        'demiflow.data.execution_contract',  # TYPE_CHECKING only: original StreamStats identity
+        'demiflow.execution.dataflow_stream',
         'demiflow.execution.request_limits', 'demiflow.execution.worker.execution',
         'demiflow.execution.worker.graph_execution', 'demiflow.execution.worker.queue_transform'},
     'demiflow.execution.plan_interpreter': {
@@ -182,7 +196,8 @@ def test_cross_package_private_imports_do_not_grow():
     found = defaultdict(set)
     for importer, imported, name in IMPORTS:
         source, target = _package(importer), _package(imported)
-        if source != target and name.startswith('_') and not name.startswith('__'):
+        if (source != target and name.startswith('_') and not name.startswith('__')
+                and (importer, imported, name) not in P1_ASSEMBLY_IMPORTS):
             found[(source, target)].add((importer, imported, name))
     over = {pair: items for pair, items in found.items()
             if len(items) > PRIVATE_IMPORT_BUDGET.get(pair, 0)}
@@ -238,7 +253,8 @@ def test_budgets_are_not_stale_by_more_than_they_help():
     found = Counter()
     for importer, imported, name in IMPORTS:
         source, target = _package(importer), _package(imported)
-        if source != target and name.startswith('_') and not name.startswith('__'):
+        if (source != target and name.startswith('_') and not name.startswith('__')
+                and (importer, imported, name) not in P1_ASSEMBLY_IMPORTS):
             found[(source, target)] += 1
     slack = {pair: (budget, found[pair]) for pair, budget in PRIVATE_IMPORT_BUDGET.items()
              if budget - found[pair] > 3}

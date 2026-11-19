@@ -1,9 +1,9 @@
 """A018 · count preserves actual published data without rerunning its upstream."""
+from demiflow.data.dataset import Dataset
 from demiflow import data
 from demiflow.data.plan import LogicalPlan
 from demiflow.data.sources import MaterializedSource
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from _runtime_v3_executor_scope import call
 
 
 def _plain():
@@ -35,10 +35,10 @@ def test_materialized_count_preserves_real_published_count_without_recomputing(t
 def test_plain_count_counts_rows():
     ex = LocalDatasetExecutor()
     ds = _plain()
-    assert call(ex, 'count', ds._source, ds._plan) == 6
+    assert Dataset(ds._source, ds._plan, ex).count() == 6
 
 
 def test_streaming_count_counts_rows():
     ex = LocalDatasetExecutor()
     ds = _stream()
-    assert call(ex, 'count', ds._source, ds._plan) == 6
+    assert Dataset(ds._source, ds._plan, ex).count() == 6

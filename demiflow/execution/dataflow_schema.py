@@ -74,11 +74,11 @@ def stream_lance_output_schema(schema, output_ref):
         pa.struct([pa.field('uri', pa.string()), pa.field('version', pa.int64())]), nullable=True))
 
 
-def terminal_schema(graph, physical, *, terminal, bounds):
-    """Interpret immutable type metadata; never invoke a source or user function."""
+def node_schemas(graph, physical=None, *, bounds):
+    """Interpret all nodes once; None means no physical source snapshots."""
     if len(graph.nodes) > bounds.max_nodes or len(graph.edges) > bounds.max_edges:
         raise DataflowError('BUDGET_EXCEEDED', 'Schema graph exceeds metadata bounds')
-    sources = {source.source_id: source for source in physical.sources}
+    sources = {source.source_id: source for source in physical.sources} if physical is not None else {}
     nodes = {node.occurrence_id: node for node in graph.nodes}
     incoming, outgoing = {key: [] for key in nodes}, {key: [] for key in nodes}
     for edge in graph.edges:
@@ -145,7 +145,12 @@ def terminal_schema(graph, physical, *, terminal, bounds):
                 ready.append(child)
     if len(known) != len(nodes):
         raise DataflowError('INVALID_CONTRACT', 'Cannot interpret schema in a cyclic graph')
-    return known.get(terminal)
+    return known
+
+
+def terminal_schema(graph, physical, *, terminal, bounds):
+    """Interpret immutable type metadata; preserve the original terminal API."""
+    return node_schemas(graph, physical, bounds=bounds).get(terminal)
 
 
 def result_schema_ref(result, *, services):

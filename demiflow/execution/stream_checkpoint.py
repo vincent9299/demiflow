@@ -334,34 +334,15 @@ def read_checkpoint(checkpoint, stage, *, columns=None):
     The returned Dataset remains bound to that version if the checkpoint later
     advances. This never reads a table head or accepts a user-supplied receipt.
     """
-    from .checked import action, current
-    from ..data.api import DataAPI, _current_executor
-    import pyarrow as pa
-    if type(checkpoint) is not StreamCheckpoint or checkpoint.declared_outputs is None:
-        raise ValueError('Read requires a declared native checkpoint')
-    owner = current()
-    facts = owner.checkpoint_facts(checkpoint) if owner is not None else checkpoint.contract_arguments
-    arguments = normalize_checkpoint_read(dict(checkpoint=facts, stage=stage, columns=columns))
-    declared = checkpoint.declared_outputs.get(stage)
-    if declared is None:
-        raise ValueError('Read stage is absent from declared checkpoint')
-    with action('read_checkpoint', None, None, arguments=arguments) as checked:
-        with checkpoint.lock:
-            checkpoint.validate_ownership()
-            if checkpoint.state['pending'] is not None:
-                raise ValueError('Checkpoint has an unresolved commit; reopen it for recovery')
-            ref = dict(checkpoint.state['outputs'][stage]) if stage in checkpoint.state['outputs'] else None
-        api = DataAPI(_current_executor.get())
-        if ref is None:
-            schema = declared['schema']
-            if columns:
-                schema = pa.schema([schema.field(name) for name in columns], metadata=schema.metadata)
-            result = api.from_arrow(pa.Table.from_pylist([], schema=schema))
-        else:
-            from ..lance.schema import schema_identity
-            if schema_identity(lance.dataset(**ref).schema) != schema_identity(declared['schema']):
-                raise ValueError('Checkpoint committed schema differs from its declaration')
-            result = api.read_lance(ref['uri'], version=ref['version'], columns=columns,
-                                    batch_readahead=1, fragment_readahead=1)
-        checked.checkpoint_read(result._source, ref)
-        return result
+    from .checkpoint_read import _read_checkpoint_binding
+    from ..data.api import _select_executor
+    from ..data.dataset import Dataset, MaterializedDataset
+    from ..data.execution_contract import _current_executor
+    from ..data.sources import MaterializedSource
+
+    binding, executor = _read_checkpoint_binding(
+        checkpoint, stage, columns=columns,
+        select_executor=lambda: _select_executor(_current_executor.get()),
+    )
+    dataset_type = MaterializedDataset if isinstance(binding.source, MaterializedSource) else Dataset
+    return dataset_type(binding.source, binding.plan, executor)

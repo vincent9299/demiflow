@@ -23,6 +23,7 @@ and ``requests.py`` without changing what it selects or how it is bounded.
 from contextlib import closing, contextmanager
 import hashlib
 import json
+import math
 from pathlib import Path
 import sqlite3
 import stat
@@ -33,14 +34,14 @@ from .recovery_contract import document as _checked_document
 from .run_journal import OBSERVATION_COUNT, _node_document, _node_key
 
 __all__ = ['JOURNAL_BYTES', 'RunReadError', 'RunReader', 'open_journal', 'read_run',
-           'storage_snapshot']
+           'storage_snapshot', 'observe_storage']
 
 JOURNAL_BYTES = 64 * 1024**2
 _MANIFEST_BYTES = 8 * 1024**2
 _STATE_BYTES = 65536
 _OBSERVATION_RECORD_BYTES = 8192
 _OUTPUT_KINDS = ('intent', 'receipt', 'recovered', 'stage_commit', 'stage_recovered',
-                 'result', 'recovered_result')
+                 'result', 'recovered_result', 'failed')
 _STATE_PROJECTION = ('attempt', 'revision', 'status', 'execution_stopped', 'cleanup',
                      'usage_complete', 'launch_phase', 'stop_phase')
 _SUMMARY_FIELDS = ('state', 'rows_input', 'rows_output', 'calls', 'errors', 'elapsed_s',
@@ -86,10 +87,16 @@ def open_journal(directory, *, timeout=1.0, max_bytes=JOURNAL_BYTES, cached_stat
             raise RunReadError('Symlink in run journal path: ' + str(part))
     if not path.is_file() or path.stat().st_size > max_bytes:
         raise RunReadError('Run journal unavailable or exceeds budget')
+    before = path.stat(follow_symlinks=False)
     options = {} if cached_statements is None else {'cached_statements': cached_statements}
     db = sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True, timeout=timeout, **options)
     try:
         db.execute('PRAGMA cache_size=-2048')
+        after = path.stat(follow_symlinks=False)
+        if (not stat.S_ISREG(after.st_mode) or after.st_size > max_bytes
+                or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
+                or any(part.is_symlink() for part in (path, *path.parents))):
+            raise RunReadError('Run journal identity changed while opening')
     except BaseException:
         db.close()
         raise
@@ -102,12 +109,27 @@ def read_run(directory, *, timeout=1.0, deadline=None, transaction=True):
 
     ``deadline`` (``time.monotonic()`` value) interrupts a long statement.
     """
+    if deadline is not None and (type(deadline) not in (int, float) or not math.isfinite(deadline)):
+        raise RunReadError('Invalid read deadline', code='invalid_request')
+    path = Path(directory) / 'run.sqlite'
+    try:
+        identity = path.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise RunReadError('Run journal unavailable') from exc
     with closing(open_journal(directory, timeout=timeout)) as db:
+        opened = path.stat(follow_symlinks=False)
+        if (opened.st_dev, opened.st_ino) != (identity.st_dev, identity.st_ino):
+            raise RunReadError('Run journal identity changed while opening')
         if deadline is not None:
             db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
         if transaction:
             db.execute('BEGIN')
         yield RunReader(db)
+        after = path.stat(follow_symlinks=False)
+        if (not stat.S_ISREG(after.st_mode) or after.st_size > JOURNAL_BYTES
+                or (after.st_dev, after.st_ino) != (identity.st_dev, identity.st_ino)
+                or any(part.is_symlink() for part in (path, *path.parents))):
+            raise RunReadError('Run journal identity changed while reading')
 
 
 class RunReader:
@@ -179,6 +201,8 @@ class RunReader:
         if not raw or not isinstance(raw[0], bytes) or len(raw[0]) > _STATE_BYTES:
             raise RunReadError('Invalid run state')
         current = json.loads(raw[0])
+        if attempt is not None and current.get('attempt') is None:
+            raise RunReadError('Historical journal has no attempt contract', code='invalid_request')
         if attempt is not None and attempt != current.get('attempt'):
             raw = self.db.execute('SELECT substr(CAST(document AS BLOB),1,65537) FROM attempts WHERE attempt=? LIMIT 1', (attempt,)).fetchone()
             if not raw or not isinstance(raw[0], bytes) or len(raw[0]) > _STATE_BYTES:
@@ -188,10 +212,13 @@ class RunReader:
 
     def attempt_state(self, attempt):
         """The recorded document of one attempt, or ``None`` when absent or oversized."""
-        row = self.db.execute('SELECT substr(document,1,65537) FROM attempts WHERE attempt=? LIMIT 1', (attempt,)).fetchone()
-        if not row or len(row[0]) > _STATE_BYTES:
+        row = self.db.execute('SELECT substr(CAST(document AS BLOB),1,262145) FROM attempts WHERE attempt=? LIMIT 1', (attempt,)).fetchone()
+        if not row or len(row[0]) > 262144:
             return None
-        return json.loads(row[0])
+        try:
+            return _bounded_object(row[0], characters=65536)
+        except (ValueError, RecoveryContractError, UnicodeError):
+            return None
 
     def state_projection(self, attempt=None):
         """``(selected, current)`` scalar control fields only; each at most 4 KiB."""
@@ -318,8 +345,8 @@ class RunReader:
 
     # -- action and control events -------------------------------------------
     def action_sequence(self, attempt):
-        return self.db.execute('SELECT coalesce(max(sequence),0) FROM action_events WHERE attempt=?',
-                               (attempt,)).fetchone()[0]
+        scope, args = (' WHERE attempt=?', (attempt,)) if self._modern_events() else ('', ())
+        return self.db.execute('SELECT coalesce(max(sequence),0) FROM action_events' + scope, args).fetchone()[0]
 
     def output_facts(self, attempt, action_id):
         """``{attempt: {kind: (status, reference)}}`` newest first, up to ``attempt``.
@@ -335,6 +362,182 @@ class RunReader:
             candidates.setdefault(found, {})[kind] = (status, reference)
         return candidates
 
+    def _modern_events(self):
+        return 'attempt' in {row[1] for row in self.db.execute('PRAGMA table_info(action_events)')}
+
+    def _events(self, *, attempt=None, action_id=None, kinds=None, through=False):
+        clauses, args = [], []
+        modern = self._modern_events()
+        if modern and attempt is not None:
+            clauses.append('attempt' + ('<=?' if through else '=?'))
+            args.append(attempt)
+        if action_id is not None:
+            clauses.append('action_id=?'); args.append(action_id)
+        if kinds:
+            clauses.append('kind IN (' + ','.join('?' for _ in kinds) + ')'); args.extend(kinds)
+        where = ' WHERE ' + ' AND '.join(clauses) if clauses else ''
+        count, size = self.db.execute('SELECT count(*),coalesce(sum(length(CAST(document AS BLOB))),0) FROM action_events' + where, args).fetchone()
+        limit = 256 if through else 10000
+        if count > limit or size > 16 * 1024**2:
+            raise RunReadError('Action history exceeds budget', code='resource_limit')
+        found, seen = [], set()
+        selector = 'attempt' if modern else '1'
+        rows = self.db.execute('SELECT ' + selector + ',sequence,action_id,kind,document FROM action_events' + where + ' ORDER BY ' + ('attempt,' if modern else '') + 'sequence LIMIT ?', (*args, limit + 1))
+        for a, seq, aid, kind, raw in rows:
+            if type(a) is not int or not 1 <= a <= 32 or (a, aid, kind) in seen:
+                raise RunReadError('Ambiguous action history')
+            seen.add((a, aid, kind))
+            value = _bounded_object(raw.encode() if isinstance(raw, str) else raw, _object=False)
+            if kind in _OUTPUT_KINDS and kind != 'failed' and type(value) is not dict:
+                raise RunReadError('Invalid output fact document')
+            found.append(dict(attempt=a, sequence=seq, action_id=aid, kind=kind, value=value))
+        return found
+
+    def _output_selection(self, selected_attempt, action_id):
+        _check_attempt(selected_attempt)
+        if type(action_id) is not str or not 1 <= len(action_id) <= 64:
+            raise RunReadError('Invalid output action', code='invalid_request')
+        candidates = {}
+        for event in self._events(attempt=selected_attempt, action_id=action_id, kinds=_OUTPUT_KINDS, through=True):
+            candidates.setdefault(event['attempt'], {})[event['kind']] = event['value']
+        current = candidates.get(selected_attempt, {})
+        selected, retained = current, None
+        if not any(k in current for k in ('receipt', 'recovered', 'stage_commit', 'stage_recovered')):
+            for a in sorted(candidates, reverse=True):
+                old = candidates[a]
+                receipt = old.get('recovered') or old.get('receipt')
+                if a < selected_attempt and (old.get('stage_recovered') or old.get('stage_commit') or receipt and receipt.get('status') == 'committed'):
+                    selected, retained = old, a
+                    break
+        return current, selected, retained
+
+    def output_projection(self, selected_attempt, action_id, *, diagnostics=False):
+        """Interpret publication history once, without consulting target storage."""
+        if not self._modern_events():
+            if selected_attempt not in (None, 1):
+                raise RunReadError('Historical journal has no attempt contract', code='invalid_request')
+            state, current_attempt = self.state()
+            selected_attempt = 1
+        else:
+            state, current_attempt = self.state(selected_attempt)
+        current, selected, retained = self._output_selection(selected_attempt, action_id)
+        receipt = selected.get('recovered') or selected.get('receipt')
+        commit = selected.get('stage_recovered') or selected.get('stage_commit')
+        evidence = None
+        if commit:
+            ref = commit.get('reference')
+            if (type(ref) is not dict or type(ref.get('uri')) is not str
+                    or type(ref.get('version')) is not int or ref['version'] < 1):
+                raise RunReadError('Invalid committed stage reference')
+            evidence = dict(kind='stage_recovered' if selected.get('stage_recovered') else 'stage_commit',
+                            attempt=retained or selected_attempt, uri=ref['uri'], version=ref['version'],
+                            schema_hash=None, row_count=None, schema_identity=commit.get('schema_identity'),
+                            checkpoint_node=commit.get('checkpoint_node'))
+        elif receipt and receipt.get('status') == 'committed':
+            from ..lance.model import LanceWriteReceipt
+            try:
+                parsed = LanceWriteReceipt.from_dict(receipt)
+            except (ValueError, TypeError, KeyError) as exc:
+                raise RunReadError('Invalid committed write receipt') from exc
+            evidence = dict(kind='recovered' if selected.get('recovered') else 'receipt',
+                            attempt=retained or selected_attempt, uri=parsed.uri, version=parsed.committed_version,
+                            schema_hash=parsed.schema_hash, row_count=parsed.written_rows,
+                            schema_identity=None, checkpoint_node=None)
+        result = selected.get('recovered_result') or selected.get('result')
+        if result is not None and (type(result) is not dict or type(result.get('ref')) is not dict):
+            raise RunReadError('Invalid recorded result reference')
+        current_state = self.document('execution_state', _STATE_BYTES) or {}
+        value = dict(action_id=action_id, attempt=selected_attempt, current_attempt=current_attempt,
+                     revision=current_state.get('revision', 0), action_sequence=self.action_sequence(selected_attempt),
+                     has_intent='intent' in current, failed='failed' in current, error=current.get('failed'),
+                     committed=evidence is not None, evidence=evidence, result=result,
+                     result_ref=result.get('ref') if result else None, retained_from_attempt=retained)
+        if diagnostics:
+            value.update(receipt=receipt, commit=commit)
+        return value
+
+    def list_attempts(self):
+        if not self.has_table('attempts'):
+            return []
+        values = []
+        for raw, in self.db.execute('SELECT substr(CAST(document AS BLOB),1,65537) FROM attempts ORDER BY attempt LIMIT 33'):
+            if len(values) == 32 or len(raw) > _STATE_BYTES:
+                raise RunReadError('Attempt history exceeds budget', code='resource_limit')
+            values.append(_bounded_object(raw))
+        return values
+
+    def execution_view(self, *, detail='full', action_ids=None, attempt=None):
+        if detail not in {'full', 'summary', 'identity'} or (action_ids is not None and
+                (type(action_ids) not in (list, tuple) or len(action_ids) > 10000
+                 or any(type(a) is not str or not 1 <= len(a) <= 64 for a in action_ids))):
+            raise RunReadError('Invalid execution view', code='invalid_request')
+        manifest = self.document('manifest', _MANIFEST_BYTES)
+        state, current = self.state(attempt)
+        selected = state.get('attempt', 1)
+        events = [] if detail == 'identity' else self._events(attempt=selected)
+        if action_ids is not None:
+            events = [e for e in events if e['action_id'] in action_ids]
+        actions = {}
+        for event in events:
+            actions.setdefault(event['action_id'], {})[event['kind']] = event['value']
+        completion, observations = None, []
+        modern = self._modern_events()
+        scope, args = (' WHERE attempt=?', (selected,)) if modern else ('', ())
+        if detail == 'full':
+            if self.has_table('completion'):
+                row = self.db.execute('SELECT substr(CAST(document AS BLOB),1,?) FROM completion' + scope + ' LIMIT 1', (MAX_DOCUMENT_BYTES + 1, *args)).fetchone()
+                if row:
+                    if len(row[0]) > MAX_DOCUMENT_BYTES:
+                        raise RunReadError('Completion exceeds budget', code='resource_limit')
+                    completion = _bounded_object(row[0], _object=False)
+            if self.has_table('node_observations'):
+                count, size = self.db.execute('SELECT count(*),coalesce(sum(length(CAST(document AS BLOB))),0) FROM node_observations' + scope, args).fetchone()
+                if count > OBSERVATION_COUNT or size > 8 * 1024**2:
+                    raise RunReadError('Node observation store exceeds budget', code='resource_limit')
+                observations = [dict(action_id=a, node_id=n, occurrence=o, **_bounded_object(raw.encode()))
+                                for a, n, o, raw in self.db.execute('SELECT action_id,node_id,occurrence,document FROM node_observations' + scope + ' ORDER BY action_id,node_id,occurrence', args)]
+        outputs = {}
+        if detail != 'identity':
+            for spec in (manifest or {}).get('outputs', {}).values():
+                aid = spec['action_id']
+                if action_ids is None or aid in action_ids:
+                    outputs[aid] = self.output_projection(selected, aid, diagnostics=True)
+        return dict(manifest=manifest, state=state, completion=completion, observations=observations,
+                    events=[{k:v for k,v in e.items() if k != 'attempt'} for e in events],
+                    actions=actions, current_attempt=current, revision=(self.document('execution_state', _STATE_BYTES) or {}).get('revision', 0),
+                    output_projections=outputs)
+
+    def preparation_evidence(self):
+        """Conservative evidence only; directory ownership remains the host's."""
+        if len(self.tables()) > 32:
+            raise RunReadError('Preparation journal shape exceeds budget')
+        state = self.document('execution_state', _STATE_BYTES)
+        empty = dict(prepare_request_id=None, run_id=None, root=None)
+        if state is not None:
+            if state.get('status') is not None:
+                return dict(status='not_proven', manifest_present=False, **empty)
+            if state != {'status': None, 'revision': 0, 'attempt': 1}:
+                raise RunReadError('Unknown preparation state')
+        manifest = self.document('manifest', _MANIFEST_BYTES)
+        if manifest is not None:
+            empty = {key: manifest.get(key) for key in empty}
+        if any(self.has_rows(t) for t in ('action_events', 'completion', 'stages', 'activities')):
+            raise RunReadError('Preparation contains execution facts')
+        return dict(status='never_started', manifest_present=manifest is not None, **empty)
+
+    def native_maintenance_state(self):
+        present = self.has_table('runtime_identity')
+        identity = self.db.execute('SELECT 1 FROM runtime_identity LIMIT 1').fetchone() if present else None
+        owner = self.has_table('runtime_owner')
+        gc = self.has_table('runtime_dataflow_gc')
+        if identity and not (owner and gc):
+            raise RunReadError('Incomplete native maintenance schema')
+        owned = owner and self.db.execute('SELECT 1 FROM runtime_owner LIMIT 1').fetchone() is not None
+        pending = gc and self.db.execute("SELECT 1 FROM runtime_dataflow_gc WHERE status!='done' LIMIT 1").fetchone() is not None
+        if not identity and (owned or gc and self.db.execute('SELECT 1 FROM runtime_dataflow_gc LIMIT 1').fetchone()):
+            raise RunReadError('Native maintenance facts have no recovery identity')
+        return dict(owner_released=not owned, gc_settled=not pending)
+
     def control_sequence(self, attempt):
         """Highest control event sequence of the attempt, or ``None`` without the table."""
         if not self.has_table('control_events'):
@@ -349,7 +552,7 @@ class RunReader:
             (attempt, after, limit))
 
 
-def _bounded_object(raw, *, characters=None):
+def _bounded_object(raw, *, characters=None, _object=True):
     """Bound decoded metadata before allocating JSON container objects."""
     if raw is None:
         return None
@@ -382,12 +585,12 @@ def _bounded_object(raw, *, characters=None):
     def invalid_constant(value):
         raise RecoveryContractError('Invalid historical JSON constant: ' + value)
     value = json.loads(text, parse_constant=invalid_constant)
-    if type(value) is not dict:
+    if _object and type(value) is not dict:
         raise RecoveryContractError('Invalid historical metadata document')
     return value
 
 
-def storage_snapshot(directory):
+def storage_snapshot(directory, *, _file_fd=None, _deadline=None, _footprint_only=False):
     """Bounded native ownership/control facts in a short read transaction.
 
     No schema initialization or writer connection. Close the read transaction
@@ -407,15 +610,18 @@ def storage_snapshot(directory):
         return info.st_dev, info.st_ino
 
     identity = file_identity()
-    with closing(sqlite3.connect(path.resolve().as_uri() + '?mode=ro',
+    uri = (path.resolve().as_uri() if _file_fd is None else 'file:/proc/self/fd/' + str(_file_fd))
+    with closing(sqlite3.connect(uri + '?mode=ro',
                                  uri=True, timeout=0.1, cached_statements=8)) as db:
+        if _deadline is not None:
+            db.set_progress_handler(lambda: int(time.monotonic() >= _deadline), 1000)
         db.execute('PRAGMA cache_size=-2048')
         try:
             db.execute('BEGIN')
             tables = {r[0] for r in db.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
                 "('manifest','execution_state','runtime_identity','runtime_object_roots') LIMIT 5")}
-            if 'execution_state' not in tables:
+            if not _footprint_only and 'execution_state' not in tables:
                 raise RecoveryContractError('Historical journal has no execution state table')
 
             def document(table, maximum):
@@ -436,7 +642,7 @@ def storage_snapshot(directory):
                     raise RecoveryContractError('Historical ' + table + ' exceeds byte budget')
                 return raw
 
-            state = document('execution_state', 4 * 65536)
+            state = None if _footprint_only else document('execution_state', 4 * 65536)
             records = []
             if 'runtime_object_roots' in tables:
                 fields = ('root_id', 'logical_root', 'physical_root', 'run_id')
@@ -461,7 +667,7 @@ def storage_snapshot(directory):
                 records.sort(key=lambda record: record['root_id'])
             # Validate/hash complete documents, then retain only storage
             # fields. No large source inventories live across traversal.
-            manifest = document('manifest', _MANIFEST_BYTES)
+            manifest = None if _footprint_only else document('manifest', _MANIFEST_BYTES)
             binding = document('runtime_identity', MAX_DOCUMENT_BYTES)
         finally:
             if db.in_transaction:
@@ -483,3 +689,343 @@ def storage_snapshot(directory):
     binding, identity_digest = projected(binding, ('run_id',))
     return dict(state=state, manifest=manifest, identity=binding, object_roots=records,
                 manifest_digest=manifest_digest, identity_digest=identity_digest)
+
+
+class _ReadonlyJournal:
+    """Private native reader protocol; deliberately has no writer methods.
+
+    Each connection is a short, bounded read. Native publication helpers can
+    inspect their own receipts without borrowing a live writer or its leases.
+    """
+    def __init__(self, directory, *, attempt=None, deadline=None):
+        self.directory = Path(directory)
+        self.path = self.directory / 'run.sqlite'
+        self.attempt, self.deadline = attempt, deadline
+
+    def check_read(self):
+        if self.deadline is not None and time.monotonic() >= self.deadline:
+            raise RunReadError('Native read deadline exceeded', code='resource_limit')
+
+    @contextmanager
+    def _connection(self):
+        self.check_read()
+        with read_run(self.directory, deadline=self.deadline) as reader:
+            yield reader.db
+        self.check_read()
+
+    def _one(self, table, column='document', *, where='', args=(), maximum=MAX_DOCUMENT_BYTES):
+        # This helper is private; its fixed callers own all SQL identifiers.
+        with self._connection() as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
+                return None
+            row = db.execute('SELECT substr(CAST(' + column + ' AS BLOB),1,?) FROM ' + table + where + ' LIMIT 2', (maximum + 1, *args)).fetchall()
+            if len(row) > 1:
+                raise RunReadError('Ambiguous native document')
+            if not row or row[0][0] is None:
+                return None
+            raw = row[0][0]
+            if len(raw) > maximum:
+                raise RunReadError('Native document exceeds budget', code='resource_limit')
+            return _bounded_object(raw)
+
+    def recovery_identity(self):
+        return self._one('runtime_identity')
+
+    def source_binding(self, action_id):
+        return self._one('runtime_sources', where=' WHERE action_id=?', args=(action_id,))
+
+    def execution_status(self):
+        with read_run(self.directory, deadline=self.deadline) as reader:
+            return reader.state(self.attempt if reader._modern_events() else None)[0]
+
+    def execution_action(self, action_id):
+        with self._connection() as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='runtime_actions'").fetchone():
+                return None
+            row = db.execute('SELECT ' + ','.join('substr(CAST(' + c + ' AS BLOB),1,1048577)' for c in ('declaration','snapshot','result')) + ' FROM runtime_actions WHERE action_id=?', (action_id,)).fetchone()
+            if row is None:
+                return None
+            if any(raw is not None and len(raw) > MAX_DOCUMENT_BYTES for raw in row):
+                raise RunReadError('Native action exceeds budget', code='resource_limit')
+            return dict(zip(('declaration','snapshot','result'), (_bounded_object(raw, _object=index == 0) if raw is not None else None for index, raw in enumerate(row))))
+
+    @staticmethod
+    def _commit(db, commit_id):
+        row = db.execute('SELECT action_id,sequence,status,substr(CAST(intent AS BLOB),1,1048577),substr(CAST(prepared AS BLOB),1,1048577) FROM runtime_commits WHERE commit_id=?', (commit_id,)).fetchone()
+        if row is None:
+            return None
+        raw_receipts = db.execute('SELECT sink_id,substr(CAST(document AS BLOB),1,1048577) FROM runtime_receipts WHERE commit_id=? LIMIT 65', (commit_id,)).fetchall()
+        if len(raw_receipts) > 64 or any(raw is not None and len(raw) > MAX_DOCUMENT_BYTES for raw in (*row[3:], *(r[1] for r in raw_receipts))):
+            raise RunReadError('Native commit exceeds budget', code='resource_limit')
+        receipts = {k: _bounded_object(raw) for k, raw in raw_receipts}
+        return dict(commit_id=commit_id, action_id=row[0], sequence=row[1], status=row[2],
+                    intent=_bounded_object(row[3]), prepared=_bounded_object(row[4]) if row[4] else None,
+                    receipts=receipts)
+
+    def execution_commit(self, commit_id):
+        with self._connection() as db:
+            return self._commit(db, commit_id)
+
+    def latest_execution_commit(self, action_id, *, confirmed=False):
+        with self._connection() as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='runtime_commits'").fetchone():
+                return None
+            row = db.execute('SELECT commit_id FROM runtime_commits WHERE action_id=?' + (" AND status!='pending'" if confirmed else '') + ' ORDER BY sequence DESC LIMIT 1', (action_id,)).fetchone()
+            return self._commit(db, row[0]) if row else None
+
+    def execution_commits(self, action_id):
+        with self._connection() as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='runtime_commits'").fetchone():
+                return []
+            rows = db.execute('SELECT commit_id FROM runtime_commits WHERE action_id=? ORDER BY sequence LIMIT 16385', (action_id,)).fetchall()
+            if len(rows) > 16384:
+                raise RunReadError('Native commit history exceeds budget', code='resource_limit')
+            # All callers currently need the last commit. Bound aggregate bytes
+            # nevertheless so this compatibility method cannot amplify history.
+            total = 0; result = []
+            for key, in rows:
+                item = self._commit(db, key)
+                total += len(_compact(item, JOURNAL_BYTES))
+                if total > JOURNAL_BYTES:
+                    raise RunReadError('Native commit history exceeds byte budget', code='resource_limit')
+                result.append(item)
+            return result
+
+
+class _StorageObservation:
+    """Linux namespace proof around SQLite's path-based readonly opens.
+
+    The held main fd is not a SQLite fd. Inotify proves that path resolution
+    cannot be redirected unnoticed between the checked chain and SQLite open.
+    In-place writer transactions and SQLite SHM coordination remain legal.
+    """
+    _MUTATION = 0x40 | 0x80 | 0x100 | 0x200
+    _SELF = 0x400 | 0x800 | 0x2000 | 0x8000
+    _OVERFLOW = 0x4000
+
+    def __init__(self, directory, directory_fd, deadline):
+        import ctypes
+        import os
+        if deadline is not None and (type(deadline) not in (int, float) or not math.isfinite(deadline)):
+            raise RunReadError('Invalid storage deadline', code='invalid_request')
+        self.deadline = deadline
+        self._fds, self._chain, self._watches = [], [], {}
+        self._watch_fd = self._main_fd = None
+        self._directory_fd = None
+        self._identity = None
+        try:
+            if (directory is None) == (directory_fd is None):
+                raise RunReadError('Provide exactly one storage directory', code='invalid_request')
+            if directory_fd is not None:
+                if type(directory_fd) is not int:
+                    raise RunReadError('Invalid directory descriptor', code='invalid_request')
+                borrowed = os.dup(directory_fd); self._fds.append(borrowed)
+                info = os.fstat(borrowed)
+                if not stat.S_ISDIR(info.st_mode):
+                    raise RunReadError('Storage descriptor is not a directory')
+                name = os.readlink('/proc/self/fd/' + str(borrowed))
+                if name.endswith(' (deleted)'):
+                    raise RunReadError('Storage directory is unlinked')
+                directory = name
+                self._borrowed_identity = info.st_dev, info.st_ino
+            else:
+                self._borrowed_identity = None
+            path = Path(directory).absolute()
+            if '..' in path.parts or len(path.parts) > 64:
+                raise RunReadError('Storage directory ancestry exceeds budget')
+            libc = ctypes.CDLL(None, use_errno=True)
+            init = libc.inotify_init1
+            init.argtypes = [ctypes.c_int]; init.restype = ctypes.c_int
+            self._add = libc.inotify_add_watch
+            self._add.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
+            self._add.restype = ctypes.c_int
+            self._watch_fd = init(os.O_NONBLOCK | os.O_CLOEXEC)
+            if self._watch_fd < 0:
+                self._watch_fd = None
+                raise RunReadError('Storage namespace observation is unavailable')
+            parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            self._fds.append(parent)
+            for part in path.parts[1:]:
+                self._watch(parent, part)
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+                self._fds.append(child)
+                info = os.fstat(child)
+                self._chain.append((parent, part, (info.st_dev, info.st_ino)))
+                parent = child
+                self._events()
+            self._directory_fd = parent
+            info = os.fstat(parent)
+            if self._borrowed_identity is not None and self._borrowed_identity != (info.st_dev, info.st_ino):
+                raise RunReadError('Storage directory identity changed')
+            self._watch(parent, 'run.sqlite')
+            try:
+                self._main_fd = os.open('run.sqlite', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent)
+            except FileNotFoundError:
+                pass
+            self.exists = self._main_fd is not None
+            if self.exists:
+                info = os.fstat(self._main_fd)
+                self._regular(info)
+                self._identity = info.st_dev, info.st_ino
+            self._check()
+            self.change_token = self._token()
+        except BaseException:
+            self.close()
+            raise
+
+    def _watch(self, fd, name):
+        import os
+        if len(self._watches) >= 64:
+            raise RunReadError('Storage watch budget exceeded', code='resource_limit')
+        wd = self._add(self._watch_fd, os.fsencode('/proc/self/fd/' + str(fd)), self._MUTATION | self._SELF)
+        if wd < 0:
+            raise RunReadError('Storage namespace watch is unavailable')
+        self._watches.setdefault(wd, set()).add(name)
+
+    def _events(self):
+        import os
+        import struct
+        used = 0
+        while True:
+            try:
+                raw = os.read(self._watch_fd, 65536)
+            except BlockingIOError:
+                break
+            if not raw:
+                raise RunReadError('Storage namespace watch closed')
+            used += len(raw)
+            if used > 1024 * 1024:
+                raise RunReadError('Storage namespace event budget exceeded', code='resource_limit')
+            offset = 0
+            while offset < len(raw):
+                if len(raw) - offset < 16:
+                    raise RunReadError('Invalid storage namespace event')
+                wd, mask, _, size = struct.unpack_from('iIII', raw, offset)
+                end = offset + 16 + size
+                if end > len(raw):
+                    raise RunReadError('Invalid storage namespace event')
+                name = os.fsdecode(raw[offset + 16:end].split(b'\0', 1)[0])
+                if mask & (self._SELF | self._OVERFLOW) or wd not in self._watches or (mask & self._MUTATION and name in self._watches[wd]):
+                    raise RunReadError('Storage namespace identity changed')
+                offset = end
+
+    @staticmethod
+    def _regular(info):
+        if not stat.S_ISREG(info.st_mode) or info.st_size > JOURNAL_BYTES:
+            raise RunReadError('Historical journal type/size exceeds budget', code='resource_limit')
+
+    def _check(self):
+        import os
+        if self.deadline is not None and time.monotonic() >= self.deadline:
+            raise RunReadError('Storage observation deadline exceeded', code='resource_limit')
+        self._events()
+        for parent, name, expected in self._chain:
+            current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if not stat.S_ISDIR(current.st_mode) or (current.st_dev, current.st_ino) != expected:
+                raise RunReadError('Storage directory identity changed')
+        try:
+            linked = os.stat('run.sqlite', dir_fd=self._directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            if self.exists:
+                raise RunReadError('Storage journal identity changed')
+        else:
+            if not self.exists:
+                raise RunReadError('Storage journal appeared during observation')
+            self._regular(linked)
+            pinned = os.fstat(self._main_fd); self._regular(pinned)
+            if (linked.st_dev, linked.st_ino) != self._identity or (pinned.st_dev,pinned.st_ino) != self._identity:
+                raise RunReadError('Storage journal identity changed')
+        self._sidecars()
+        self._events()
+
+    def _sidecars(self):
+        import os
+        for name in ('run.sqlite-wal', 'run.sqlite-journal', 'run.sqlite-shm'):
+            try:
+                info = os.stat(name, dir_fd=self._directory_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                raise RunReadError('Storage sidecar is not a regular file')
+
+    def _token(self):
+        import os
+        parts = []
+        for name in ('run.sqlite', 'run.sqlite-wal', 'run.sqlite-journal'):
+            try:
+                st = os.stat(name, dir_fd=self._directory_fd, follow_symlinks=False)
+                if not stat.S_ISREG(st.st_mode):
+                    raise RunReadError('Storage sidecar is not a regular file')
+                parts.append((name,st.st_dev,st.st_ino,st.st_size,st.st_mtime_ns,st.st_ctime_ns))
+            except FileNotFoundError:
+                parts.append((name,None))
+        return hashlib.sha256(_compact(parts, 8192)).hexdigest()
+
+    def snapshot(self):
+        self._check()
+        if not self.exists:
+            value = dict(state=None, manifest=None, identity=None, object_roots=[], manifest_digest=None, identity_digest=None)
+        else:
+            try:
+                value = storage_snapshot(Path('/proc/self/fd') / str(self._directory_fd),
+                                         _file_fd=self._main_fd, _deadline=self.deadline)
+            except RecoveryContractError as exc:
+                raise RunReadError(str(exc)) from exc
+        self._check()
+        _checked_native_roots(value)
+        return value
+
+    def native_footprint(self):
+        self._check()
+        value = (storage_snapshot(Path('/proc/self/fd') / str(self._directory_fd),
+                                  _file_fd=self._main_fd, _deadline=self.deadline, _footprint_only=True)
+                 if self.exists else dict(identity=None, object_roots=[]))
+        self._check()
+        _checked_native_roots(value)
+        return dict(relative_roots=('state','materializations','scratch'),
+                    object_roots=tuple(value['object_roots'] or ()),
+                    native_run_id=(value['identity'] or {}).get('run_id'))
+
+    def close(self):
+        import os
+        if self._main_fd is not None:
+            os.close(self._main_fd); self._main_fd = None
+        if self._watch_fd is not None:
+            os.close(self._watch_fd); self._watch_fd = None
+        for fd in reversed(self._fds):
+            os.close(fd)
+        self._fds = []
+
+
+def _checked_native_roots(value):
+    """Original namespace ownership algorithm, kept inside its native domain."""
+    from .publication_facts import object_namespace
+    identity = value['identity']
+    run_id = identity.get('run_id') if identity else None
+    if identity is not None and (type(run_id) is not str or len(run_id) != 32 or any(c not in '0123456789abcdef' for c in run_id)):
+        raise RunReadError('Owned objects have invalid native run identity')
+    for record in value['object_roots'] or ():
+        if run_id is None or record != object_namespace(run_id, record['logical_root']):
+            raise RunReadError('Owned object namespace differs from native identity')
+
+
+@contextmanager
+def observe_storage(directory=None, *, directory_fd=None, deadline=None):
+    """Observe one native inode across bounded, independent readonly snapshots."""
+    try:
+        observation = _StorageObservation(directory, directory_fd, deadline)
+    except (OSError, AttributeError) as exc:
+        raise RunReadError('Storage namespace observation unavailable: ' + str(exc)) from exc
+    try:
+        try:
+            yield observation
+        except BaseException as original:
+            try:
+                observation._check()
+            except BaseException as changed:
+                original.add_note('Storage observation also failed: ' + str(changed))
+            raise
+        else:
+            observation._check()
+    finally:
+        observation.close()

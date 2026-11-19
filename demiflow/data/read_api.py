@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Iterator, Mapping, Sequence
 from .flow_contract import flow_api as _flow_api
-from .api import DataAPI, _current_executor
+from .api import DataAPI, _select_executor
+from .execution_contract import InputSpec, _current_executor
 from .dataset import Dataset, MaterializedDataset
 from ..execution import queue_flow as _queue_flow
 
@@ -81,16 +82,14 @@ def from_items(items: list[Any]) -> MaterializedDataset:
     such as one aggregate-analysis request. Prefer lazy external sources for
     external data. Do not collect an external Dataset and pass its rows back
     to ``from_items`` solely to write the same detail rows."""
-    from ..execution.checked import action, current
-    if current() is not None:
-        from .runtime_contract import check_size
-        if type(items) is not list or not 1 <= len(items) <= 128:
-            raise ValueError('Managed from_items requires 1..128 explicit summary rows')
-        check_size(items, 256 * 1024)
-    with action('from_items', None, None, arguments={'items': items}) as checked:
-        result = DataAPI(_current_executor.get()).from_items(items)
-        checked.materialized(result._source.handle)
-        return result
+    from ..execution.input_runtime import prepare_public_items
+    from .plan import LogicalPlan
+    from .sources import MaterializedSource
+    handle, executor = prepare_public_items(
+        InputSpec('public_items', items),
+        select_executor=lambda: _select_executor(_current_executor.get()),
+    )
+    return MaterializedDataset(MaterializedSource(handle, handle.row_count), LogicalPlan(), executor)
 
 
 def from_iter(factory: Callable[[], Iterator[Any]]) -> Dataset:

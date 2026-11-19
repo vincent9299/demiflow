@@ -50,7 +50,11 @@ def test_historical_attempt_survives_node_navigation_and_reload(panel):
     control = runs.journal(root, run['run_id'])
     assert control.transition({'prepared'}, 'interrupted')
     old = runs.show(root, run['run_id'])
-    control.begin_attempt(expected_attempt=1, expected_revision=old['state']['revision'])
+    target, observed = runs._load(root, run['run_id'], detail='identity')
+    manifest = observed['manifest']
+    control.begin_attempt(expected_attempt=1, expected_revision=old['state']['revision'],
+        nodes=[(item['action_id'], item['node_id'], item['occurrence']) for item in manifest['observation_instances']],
+        actions=runs._fact_actions(runs._report(target, manifest), manifest['outputs']))
     open_panel(app, page, dict(v=1, workspace=str(root), kind='run', run_id=run['run_id'], attempt=1))
     page.get_by_text('历史尝试 · 只读', exact=True).wait_for()
     page.locator('.wb-graph .wb-node').last.click()

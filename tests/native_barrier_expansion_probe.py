@@ -8,6 +8,7 @@ import time
 
 from demiflow import data
 from demiflow.data.plan import LogicalPlan
+from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
 from demiflow.execution.run_context import RunContext, current_action
 from demiflow.execution.recovery_identity import plan_identity
 from demiflow.execution.stream_materialize import StreamMaterialization
@@ -68,7 +69,9 @@ with RunContext.start(root, limits={'timeout_s': 600, 'max_row_bytes': 4096,
             StreamMaterialization.bind_stages = original_bind
     else:
         with run.action(plan_identity('materialize', graph._source, graph._plan)) as action:
-            terminal = StreamMaterialization(action, lambda: graph._executor.iter_rows(graph._source, LogicalPlan()), object_specs={str(root/'assets'): 128})
+            terminal = StreamMaterialization(action, lambda: run_dataset_action(make_action_request(
+            graph._executor, graph._source, LogicalPlan(), kind='iter_rows', arguments={}
+        )), object_specs={str(root/'assets'): 128})
             # This local fixture shares one store; declaring the owner interval is
             # the same cut native PromptActor ownership discovers automatically.
             original = terminal.bind_stages

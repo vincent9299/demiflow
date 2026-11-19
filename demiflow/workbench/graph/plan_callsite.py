@@ -150,23 +150,26 @@ class PlanCallsites:
             return
         if location is None:
             return
-        source = object.__getattribute__(returned, '_source')
-        plan = object.__getattribute__(returned, '_plan')
+        from demiflow.execution.host.inspection import dataset_declaration_links
+        links = dataset_declaration_links(returned)
+        if links is None:
+            return
+        source, operations = links
         receiver = frame.f_locals.get('self')
         if type(receiver) in self.dataset_types:
-            old_source = object.__getattribute__(receiver, '_source')
-            old_ops = object.__getattribute__(receiver, '_plan').operations
+            previous = dataset_declaration_links(receiver)
+            if previous is None:
+                return
+            old_source, old_ops = previous
         else:
             old_source, old_ops = None, ()
         if source is not old_source:
             self._remember(source, location)
-        # Immutable plan operations are the compiler's identity authority. A
-        # chained call owns only its new objects, never a previously built prefix.
-        if len(plan.operations) <= 1024 and len(old_ops) <= 1024:
-            old_ids = {id(op) for op in old_ops}
-            for operation in plan.operations:
-                if id(operation) not in old_ids:
-                    self._remember(operation, location)
+        # Borrowed object identities identify only the new part of this call.
+        old_ids = {id(op) for op in old_ops}
+        for operation in operations:
+            if id(operation) not in old_ids:
+                self._remember(operation, location)
 
     def bind_compilation(self, provenance):
         """Consume the real compiler's final IDs, while the SDK action is active."""
