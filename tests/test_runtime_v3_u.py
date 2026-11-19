@@ -90,6 +90,12 @@ def _reset_record(monkeypatch):
     monkeypatch.setattr(dataflow_api, "make_action_request", request)
     for name in ("make_native_operation", "run_dataset_action"):
         monkeypatch.setattr(dataflow_api, name, getattr(recording, name))
+    # An SDK entry now preflights its declaration through the pure validator and
+    # discards the result; record the declaration at that boundary as well.
+    from demiflow.planning import dataflow_declaration
+    def preflight(kind, configuration, *, bindings):
+        recording.make_native_operation(kind, configuration, bindings=bindings)
+    monkeypatch.setattr(dataflow_declaration, "validate_native_operation", preflight)
     RECORD.reset()
     yield
     RECORD.reset()

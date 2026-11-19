@@ -31,6 +31,10 @@ SEAL = 'execution/dataflow_seal.py'
 KINDS = 'execution/contracts/dataflow_kinds.py'
 API = 'execution/dataflow_api.py'
 SDK = 'data/dataset.py'
+DECLARATION = 'planning/dataflow_declaration.py'
+# An SDK entry preflights through the pure validator, which returns nothing. The node
+# constructor is recognised too: an entry that called it and kept the result would be listed as used.
+PREFLIGHT = ('validate_native_operation', 'make_native_operation')
 NATIVE_DECLARATION = 'execution/dataflow_model_factory.py'
 PLAN_FACTS = 'execution/plan_facts.py'
 LEGACY_TRAITS = 'planning/traits.py'
@@ -251,21 +255,18 @@ def entries():
             continue
         for node in ast.walk(function):
             call = node.value if isinstance(node, (ast.Expr, ast.Assign, ast.Return)) else None
-            if not (isinstance(call, ast.Call) and getattr(call.func, 'id', None) == 'make_native_operation'):
+            if not (isinstance(call, ast.Call) and getattr(call.func, 'id', None) in PREFLIGHT):
                 continue
             item = [function.name, call.args[0].value]
             (discarded if isinstance(node, ast.Expr) else used).append(item)
-    api = ast.parse(source(API))
-    aliases, exempt = {}, []
-    for function in ast.walk(api):
-        if isinstance(function, ast.FunctionDef) and function.name == 'make_native_operation':
-            for node in ast.walk(function):
-                if isinstance(node, ast.Assign) and getattr(node.targets[0], 'id', None) == 'aliases':
-                    aliases = {key.value: value.value for key, value in zip(node.value.keys, node.value.values)}
-                if isinstance(node, ast.Compare) and isinstance(node.left, ast.Name) and node.left.id == 'kind':
-                    for comparator in node.comparators:
-                        if isinstance(comparator, ast.Set):
-                            exempt = sorted(item.value for item in comparator.elts)
+    # The registry check both entries share reads its aliases and exemptions from the kind table.
+    declaration = ast.parse(source(DECLARATION))
+    read = {node.id for function in ast.walk(declaration)
+            if isinstance(function, ast.FunctionDef) and function.name == 'validate_native_kind'
+            for node in ast.walk(function) if isinstance(node, ast.Name)}
+    kinds = kind_table()
+    aliases = dict(kinds.value('NATIVE_DECLARATION_ALIASES')) if 'NATIVE_DECLARATION_ALIASES' in read else {}
+    exempt = sorted(kinds.value('NATIVE_DECLARATION_ONLY')) if 'NATIVE_DECLARATION_ONLY' in read else []
     return {'preflight_result_discarded': sorted(discarded), 'preflight_result_used': sorted(used),
             'aliases': aliases, 'names_exempt_from_registry': exempt}
 
