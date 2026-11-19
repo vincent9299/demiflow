@@ -9,8 +9,32 @@ import hashlib
 import os
 from pathlib import Path
 import tempfile
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from ..resources.capacity import inherited_envelope
+
+_DOMAIN = ContextVar('demiflow_local_capacity_domain', default=None)
+
+
+@contextmanager
+def local_capacity_domain(directory):
+    """Select a sealed host domain for maintenance without changing process env.
+
+    This selects the existing allocator's directory, never an allocation or
+    cleanup authority. Original provider identity and lease checks still apply.
+    Child processes must receive the same directory through deployment env.
+    """
+    if type(directory) is not str or not 1 <= len(directory.encode()) <= 4096:
+        raise ValueError('Invalid local capacity domain')
+    root = Path(directory)
+    if not root.is_absolute() or str(root.resolve()) != directory:
+        raise ValueError('Local capacity domain must be canonical and absolute')
+    token = _DOMAIN.set(root)
+    try:
+        yield root
+    finally:
+        _DOMAIN.reset(token)
 
 
 def local_capacity():
@@ -37,5 +61,5 @@ def local_capacity():
               Path('/proc/self/cgroup').read_text())
     default = Path(tempfile.gettempdir()) / ('demiflow-capacity-' +
               hashlib.sha256(domain.encode()).hexdigest()[:24])
-    root = Path(os.environ.get('DEMIFLOW_RESOURCE_ROOT', default)).resolve()
+    root = _DOMAIN.get() or Path(os.environ.get('DEMIFLOW_RESOURCE_ROOT', default)).resolve()
     return root, {'cpu_millis': cpus, 'memory_bytes': memory}

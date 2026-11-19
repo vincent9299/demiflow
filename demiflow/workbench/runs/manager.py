@@ -233,7 +233,8 @@ def prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None,
     from demiflow.workbench.runs.domain import preparation_lock
     from functools import partial
     args = dict(params=params, outputs=outputs, new_outputs=new_outputs, limits=limits, inputs=inputs,telemetry=telemetry)
-    from demiflow.workbench.runs.native_resources import trusted_deployment
+    from demiflow.workbench.runs.native_resources import trusted_deployment, capacity_domain
+    args['capacity_domain'] = capacity_domain()
     native_deployment = trusted_deployment(workspace=root)
     if native_deployment is not None:
         args['native_deployment'] = native_deployment
@@ -252,7 +253,8 @@ def _fact_actions(report, outputs):
 
 
 def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None, inputs=None,
-             reserved_run_id=None, prepare_request_id=None, telemetry=True, authority=None, native_deployment=None):
+             reserved_run_id=None, prepare_request_id=None, telemetry=True, authority=None, native_deployment=None,
+             capacity_domain=None):
     operation_budget.check()
     if type(telemetry) is not bool:
         raise ForgeError('telemetry must be boolean',code='invalid_request')
@@ -328,7 +330,10 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     if report.get('status') != 'checked':
         raise ForgeError('Flow is not checked: ' + json.dumps(report.get('diagnostics', []), ensure_ascii=False)[:4096])
     from demiflow.workbench.runs import native_resources
+    capacity_domain = native_resources.capacity_domain(capacity_domain)
     native_execution = native_resources.select(report, native_deployment, workspace=root)
+    if native_execution and native_execution['resource_root'] != capacity_domain:
+        raise ForgeError('Native deployment and capacity domain differ')
     if not 1 <= len(report['actions']) <= 32:
         raise ForgeError('Run action budget exceeded')
     from demiflow.execution.host.inspection import VERSION as capability_version
@@ -460,7 +465,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                 journal_version=2,
                 created_at=time.time(), report_digest=report['digest'], original_parameters=original,
                 parameter_path=str(parameter_path.relative_to(root)) if parameter_path else None,
-                outputs=output_specs, limits=limits, workspace=workspace,
+                outputs=output_specs, limits=limits, workspace=workspace, capacity_domain=capacity_domain,
                 observation_instances=observation_instances,
                 credential_names=sorted(credentials), evidence=ledgers, request_budgets=list(budgets.values()),
                 object_locations=object_locations(report=report),
@@ -729,7 +734,8 @@ def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authorit
                     if attempt is not None:
                         command.append(str(attempt))
                     env = worker_environment(target, value['manifest']['limits'], value['manifest'].get('credential_names', []),
-                                             native_execution=value['manifest'].get('native_execution'))
+                                             native_execution=value['manifest'].get('native_execution'),
+                                             capacity_domain=value['manifest'].get('capacity_domain'))
                     env['DEMIFLOW_EXECUTION_UNIT_FD'] = str(unit)
                     operation_budget.check()
                     spawn_attempted = True
@@ -941,7 +947,7 @@ def _resume(root, run_id, *, expected, expected_attempt, authority=None):
     return show(root, run_id)
 
 
-def worker_environment(target, limits=None, credential_names=(), *, native_execution=None):
+def worker_environment(target, limits=None, credential_names=(), *, native_execution=None, capacity_domain=None):
     limits = limits or DEFAULT_LIMITS
     result = dict(PATH=os.path.dirname(sys.executable) + ':/usr/bin:/bin', LANG='C.UTF-8',
         PYTHONDONTWRITEBYTECODE='1', PYTHONNOUSERSITE='1',
@@ -955,6 +961,12 @@ def worker_environment(target, limits=None, credential_names=(), *, native_execu
         LANCE_MEM_POOL_SIZE=str(limits['memory_bytes']), LANCE_MAX_TEMP_DIRECTORY_SIZE=str(limits['max_scratch_bytes']))
     from demiflow.workbench.runs.native_resources import environment
     result.update(environment(target, native_execution))
+    if capacity_domain is not None:
+        from demiflow.workbench.runs.native_resources import capacity_domain as validate_domain
+        root = validate_domain(capacity_domain)
+        if result.get('DEMIFLOW_RESOURCE_ROOT', root) != root:
+            raise ForgeError('Native deployment and capacity domain differ')
+        result['DEMIFLOW_RESOURCE_ROOT'] = root
     for name in credential_names:
         if not re.fullmatch(r'[A-Z_][A-Z0-9_]{0,127}', name) or name in result or name in {'HOME', 'LD_PRELOAD', 'LD_LIBRARY_PATH'} or name.startswith(('PYTHON', 'DEMIFLOW_', 'CUDA_')):
             raise ForgeError('Credential name conflicts with worker control environment')
@@ -1156,11 +1168,11 @@ def _reconcile(root, run_id, *, expected_attempt):
 
         try:
             errors = register_results(root, run_id, recover=True, maintenance_deadline=deadline)
-            if not completed:
-                remove_attempt_work(work, deadline=deadline)
             current = run.execution_status()
             clean_stopped(run, expected_revision=current['revision'],
                           confirm_stopped=stopped, deadline=deadline)
+            if not completed:
+                remove_attempt_work(work, deadline=deadline)
             if not completed:
                 current = run.execution_status()
                 if not run.transition({current['status']}, current['status'],

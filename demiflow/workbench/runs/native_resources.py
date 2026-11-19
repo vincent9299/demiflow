@@ -19,6 +19,15 @@ INVENTORY = 'native-device-inventory.json'
 MAX_BYTES = 65536
 
 
+def capacity_domain(value=None):
+    """Capture the trusted deployment domain before inspector TMPDIR changes."""
+    from demiflow.execution.host.control import local_capacity, local_capacity_domain
+    root = str(local_capacity()[0]) if value is None else value
+    with local_capacity_domain(root):
+        pass
+    return root
+
+
 def validate(value):
     """Validate an already sealed/trusted declaration without allocating."""
     if type(value) is not dict or set(value) != {

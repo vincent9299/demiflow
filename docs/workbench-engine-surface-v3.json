@@ -35,6 +35,14 @@
         "demiflow.execution.run_context",
         "clean_stopped_execution"
       ],
+      "local_capacity": [
+        "demiflow.execution.dataflow_capacity",
+        "local_capacity"
+      ],
+      "local_capacity_domain": [
+        "demiflow.execution.dataflow_capacity",
+        "local_capacity_domain"
+      ],
       "local_execution": [
         "demiflow.execution.local_kernel",
         "local_execution"

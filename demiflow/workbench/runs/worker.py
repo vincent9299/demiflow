@@ -290,7 +290,8 @@ def _supervise(root, run_id, lease, attempt=None):
         from demiflow.execution.output_watch import OutputWatch
         output_watch = OutputWatch([output['uri'] for output in manifest['outputs'].values()])
         env = runs.worker_environment(target, limits, manifest.get('credential_names', []),
-                                      native_execution=manifest.get('native_execution'))
+                                      native_execution=manifest.get('native_execution'),
+                                      capacity_domain=manifest.get('capacity_domain'))
         env['DEMIFLOW_INSPECTION_PARENT'] = str(os.getpid())
         env['TMPDIR'] = str(work)
         unit_fds = inherited_unit()
@@ -445,8 +446,6 @@ def _supervise(root, run_id, lease, attempt=None):
             cleanup = 'pending'
             if children_drained:
                 maintenance_deadline = cleanup_deadline()
-                remove_attempt_work(work, deadline=maintenance_deadline)
-
                 def stopped_snapshot(snapshot):
                     return (children_drained and (process is None or process.poll() is not None)
                         and snapshot['attempt'] == attempt
@@ -454,6 +453,7 @@ def _supervise(root, run_id, lease, attempt=None):
                         and snapshot['unit_identity'] == value['state'].get('unit_identity'))
 
                 clean_stopped(run, confirm_stopped=stopped_snapshot, deadline=maintenance_deadline)
+                remove_attempt_work(work, deadline=maintenance_deadline)
                 cleanup = 'complete'
         except Exception as exc:
             cleanup = 'pending'
