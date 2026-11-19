@@ -320,7 +320,7 @@ class InputAccess:
 def _inspect_table(request):
     """Fixed child operation. No SQL, expressions, Python, plugins or imports from inputs."""
     import pyarrow as pa
-    from demiflow.lance.preview import _json_value, _rows
+    from demiflow.lance.preview import preview_value, sample_open_table
     pa.set_cpu_count(2)
     pa.set_io_thread_count(2)
     path = Path(request['path'])
@@ -397,14 +397,14 @@ def _inspect_table(request):
     limit = request['limit']
     if limit and names:
         if request['format'] == 'lance':
-            rows = _rows(dataset, names, offset=0, limit=limit, maximum=16384)
+            rows = sample_open_table(dataset, columns=names, limit=limit, maximum=16384)
         else:
             reader = dataset.iter_batches(batch_size=1, columns=names, use_threads=False)
             try:
                 for batch in reader:
                     if batch.nbytes > 16384 or batch.get_total_buffer_size() > 65536:
                         raise ValueError('Decoded input sample exceeds its byte budget')
-                    rows.extend(_json_value(row) for row in batch.to_pylist())
+                    rows.extend(preview_value(row) for row in batch.to_pylist())
                     wire(rows, 16384)
                     if len(rows) >= limit:
                         break

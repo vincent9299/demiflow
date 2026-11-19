@@ -190,6 +190,17 @@ def _json_value(value, depth=0):
     return value
 
 
+def preview_value(value):
+    """Convert an already bounded decoded value to the preview representation.
+
+    Bytes use a base64 tag, temporal values use ISO text, and non-finite floats
+    use a tagged value. This performs no I/O and is also used for Parquet
+    samples. The caller admits native buffers before conversion and enforces
+    the final JSON response budget; this is not a persisted record codec.
+    """
+    return _json_value(value)
+
+
 def _column(schema, name):
     """Resolve a literal column or a bounded struct path; never accept SQL."""
     import pyarrow as pa
@@ -269,6 +280,23 @@ def _rows(ds, columns, *, offset, limit, filter=None, maximum=256 * 1024):
         if close:
             close()
     return rows
+
+
+def sample_open_table(dataset, *, columns, limit=5, maximum=16 * 1024):
+    """Read a bounded leading sample from an already opened Lance snapshot.
+
+    The caller owns path authorization, physical-file checks and snapshot
+    selection. This function neither opens a path nor resolves a newer version.
+    It requires the existing isolated allocation-limited worker and returns
+    at most 100 rows with up to 16 projected fields plus string row IDs, using
+    the original preview value representation and scanner/close behavior.
+    ``maximum`` bounds decoded batch and encoded row bytes, not process RSS;
+    the worker allocation limit remains necessary for native decoding.
+    No arbitrary filter or offset is part of this sample interface.
+    """
+    if type(maximum) is not int or not 1 <= maximum <= 256 * 1024:
+        raise ValueError('Preview sample byte budget must be 1..262144')
+    return _rows(dataset, columns, offset=0, limit=limit, maximum=maximum)
 
 
 def sample_table(
