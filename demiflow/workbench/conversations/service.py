@@ -102,23 +102,31 @@ class Service:
         session=self.store.primary(workspace,root_identity(root),self.policy_hash)
         return dict(session=self.show(workspace,session['id']) if session else None)
 
-    def create_project(self, workspace, root, request_id, provider_id):
+    def create_project(self, workspace, root, request_id, provider_id, new_conversation=False):
+        if type(new_conversation) is not bool:
+            reject('new_conversation must be a boolean', 'invalid_request')
         self.project(workspace,root);identifier(provider_id)
         if provider_id not in self.deployment.providers:reject('Provider is not configured')
-        return self.store.ensure_project(workspace,root_identity(root),provider_id,request_id,self.policy_hash)
+        create = self.store.create_conversation if new_conversation else self.store.ensure_project
+        return dict(create(workspace,root_identity(root),provider_id,request_id,self.policy_hash), writable=True)
+
+    def sessions(self, workspace, root, offset=0, limit=20):
+        self.project(workspace, root)
+        return self.store.list(workspace, offset, limit, identity=root_identity(root),
+                               policy_hash=self.policy_hash, providers=self.deployment.providers)
 
     def start_project(self, workspace, root, session_id, submission_id, expected_revision, text):
-        self._require_primary(workspace,root,session_id)
+        self._require_writable(workspace,root,session_id)
         return self.start(workspace,root,session_id,submission_id,expected_revision,text)
 
-    def _require_primary(self, workspace, root, session_id):
+    def _require_writable(self, workspace, root, session_id):
         self.project(workspace,root)
-        session=self.store.show(workspace,session_id)
-        primary=self.create_project(workspace,root,'project-bind',session['provider'])
-        if primary['id']!=session_id:reject('This is a read-only earlier conversation', 'conflict')
+        if not self.store.writable(workspace, session_id, root_identity(root), self.policy_hash,
+                                   self.deployment.providers, pin=True):
+            reject('This is a read-only earlier conversation or its grant changed', 'conflict')
 
     def compact(self, workspace, root, session_id, submission_id, expected_revision):
-        self._require_primary(workspace,root,session_id)
+        self._require_writable(workspace,root,session_id)
         session=self.store.session(session_id)
         if not session['provider_session'] or not self.store.has_dispatched(session_id):
             reject('No provider conversation is available to compact', 'conflict')
@@ -363,6 +371,15 @@ class Service:
         with self.lock:
             self._reap()
             value = self.store.show(workspace, sid)
+        value['writable'] = False
+        project = self.deployment.projects.get(workspace)
+        if project:
+            try:
+                self.project(workspace, project['root'])
+                value['writable'] = self.store.writable(workspace, sid, root_identity(project['root']),
+                    self.policy_hash, self.deployment.providers)
+            except (ValueError, OSError):
+                pass  # Old history stays readable after its root or grant changed.
         turn = value.get('turn')
         session = self.store.session(sid) if turn and turn.get('development') else None
         if turn and turn.get('development') and not turn['development']['busy']:

@@ -76,15 +76,11 @@ def test_tabs_restore_exact_run_version_and_project_despite_late_response(owned_
     other=console.create(fx.registry,fx.tmp_path/'other-project',name='Tab isolation project')['workspace_id']
     run_id=fx.run_facts['run_id'];vf=fx.version_facts
     with tab_page(fx,browser) as (page,requests):
-        tab(page,'管道');page.locator('.wb-node').first.wait_for()
-        with page.expect_response(lambda response:endpoint(response,'graph',params='flows/select_b.json')):
-            page.get_by_label('配置',exact=True).select_option('flows/select_b.json')
-        page.get_by_role('button',name='整图配置',exact=True).click()
-        page.get_by_label('配置 /arguments/minimum',exact=True).fill('0.77')
-        page.get_by_role('button',name='运行记录',exact=True).click()
+        # The current run module owns sealed-run navigation. Current pipeline
+        # configuration no longer doubles as the historical monitoring page.
+        tab(page,'运行')
         page.locator('.wb-run-record[data-run="'+run_id+'"]').click()
-        expect(page.locator('.wb-basis')).to_contain_text('封存运行图')
-        page.locator('.wb-node').filter(has_text='above_threshold').click()
+        page.locator('.wb-node').first.click()
         run_ref=reference(page)
         assert run_ref['run_id']==run_id and run_ref['attempt']==fx.run_facts['attempt']
         assert all(run_ref.get(key) is not None for key in (
@@ -109,11 +105,10 @@ def test_tabs_restore_exact_run_version_and_project_despite_late_response(owned_
         assert fixed_ref['version']==1 and fixed_ref['alias_binding']==vf['alias_binding']
         assert fixed_ref['binding_digest']==vf['versions'][1]['binding']
 
-        # The original defect opened default select_a source instead of this run.
-        tab(page,'管道')
-        expect(page.locator('.wb-basis')).to_contain_text('封存运行图')
+        # Return to this exact run and attempt, rather than a current source graph.
+        tab(page,'运行')
         expect_reference(page,run_ref)
-        expect(page.locator('.wb-node.selected')).to_contain_text('above_threshold')
+        expect(page.locator('.wb-node.selected')).to_have_count(1)
         tab(page,'数据');expect_reference(page,fixed_ref)
         expect(page.locator('.data-source-context')).to_contain_text('v1')
 
@@ -133,13 +128,13 @@ def test_tabs_restore_exact_run_version_and_project_despite_late_response(owned_
             return response;
           };
         }''',run_id)
-        tab(page,'管道');page.wait_for_function('() => tabLate.held')
+        tab(page,'运行');page.wait_for_function('() => tabLate.held')
         tab(page,'Readme');expect(page.locator('#project-readme')).to_be_visible()
         readme_ref=reference(page)
         page.evaluate('() => releaseTabGraph()');page.wait_for_function('() => tabLate.returned')
         expect_reference(page,readme_ref)
-        tab(page,'管道');expect_reference(page,run_ref)
-        expect(page.locator('.wb-node.selected')).to_contain_text('above_threshold')
+        tab(page,'运行');expect_reference(page,run_ref)
+        expect(page.locator('.wb-node.selected')).to_have_count(1)
 
         # A separate project gets its own default page; returning restores A's
         # complete run locator and its independent fixed historical data locator.
@@ -152,15 +147,10 @@ def test_tabs_restore_exact_run_version_and_project_despite_late_response(owned_
         expect_reference(page,run_ref)
         tab(page,'数据');expect_reference(page,fixed_ref)
         expect(page.locator('.data-source-context')).to_contain_text('v1')
-        tab(page,'管道');expect_reference(page,run_ref)
-        page.get_by_role('button',name='返回当前配置',exact=True).click()
-        page.get_by_label('配置',exact=True).select_option('flows/select_b.json')
-        page.get_by_role('button',name='整图配置',exact=True).click()
-        expect(page.get_by_label('配置 /arguments/minimum',exact=True)).to_have_value('0.77')
-        assert json.loads((fx.root/'flows/select_b.json').read_text())['arguments']['minimum']==0.9
+        tab(page,'运行');expect_reference(page,run_ref)
         assert not [item for item in requests if item['method']=='POST'],requests
         fx.record('tab-restore-facts',dict(run=run_ref,fixed_version=fixed_ref,other_project=other,
-                  late_real_graph_rejected=True,parameter_draft_retained=True,post_requests=0))
+                  late_real_graph_rejected=True,post_requests=0))
 
 
 @pytest.mark.parametrize('owned_fixture',[{}],indirect=True)
@@ -188,7 +178,7 @@ def test_blocked_tab_and_project_departure_preserve_notebook_editor(owned_fixtur
         expect(page.get_by_label('python 单元代码',exact=True)).to_have_value(source)
         assert reference(page)==current
         page.evaluate('project=>new ForgeAnalysisState.Store().removeDraft(project,"tab-capacity-0")',fx.project_id)
-        tab(page,'管道');page.locator('.wb-node').first.wait_for()
+        tab(page,'管道');page.locator('.workbench').wait_for()
         tab(page,'数据');page.get_by_role('button',name='Notebook',exact=True).click()
         page.get_by_label('选择 Notebook',exact=True).select_option(editor_id)
         expect(page.get_by_label('python 单元代码',exact=True)).to_have_value(source)

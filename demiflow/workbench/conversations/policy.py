@@ -276,7 +276,7 @@ class Deployment:
         available = any(p['available'] for p in providers)
         independent = managed and any(p['independent_review'] == 'model_only' for p in providers)
         return dict(format='demiflow_development_chat_v1', enabled=permitted, start=available,
-            conversation_stats=True,
+            conversation_stats=True, multiple_conversations=True,
             mode=self.mode, filesystem_enforcement=execution['filesystem_enforcement'], reason=execution['reason'],
             # Capability is not an acceptance receipt. The task projection alone
             # can claim enforced after both execution phases and review verify.

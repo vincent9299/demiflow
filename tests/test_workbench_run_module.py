@@ -187,7 +187,7 @@ def run(*, directory):
     ws.register_flow(root, 'flows/native.py:run', params='flows/native.json')
     with service(root, enable_runs=True) as app, page_for(browser, app) as (page, errors):
         page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
-        page.get_by_label('流程', exact=True).select_option('flows/native.py:run')
+        page.locator('.wb-flow-record[data-entry="flows/native.py:run"]').click()
         button = page.locator('.wb-actions').get_by_role('button', name='运行', exact=True)
         expect(button).to_be_enabled()
         button.click()

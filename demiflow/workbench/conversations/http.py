@@ -12,7 +12,7 @@ from demiflow.workbench.conversations.common import wire
 GET_FIELDS = {
     'dev-capabilities': (set(), set()),
     'dev-conversation': (set(),set()),
-    'dev-project-turns': (set(),{'offset','limit','kind'}),
+    'dev-project-turns': (set(),{'offset','limit','kind','session_id'}),
     'dev-sessions': (set(), {'offset', 'limit'}),
     'dev-session': ({'session_id'}, set()),
     'dev-stats': ({'session_id'}, set()),
@@ -22,7 +22,7 @@ GET_FIELDS = {
 }
 POST_FIELDS = {
     'dev-compact': ({'session_id','submission_id','expected_revision'},set()),
-    'dev-session-create': ({'request_id', 'provider_id'}, set()),
+    'dev-session-create': ({'request_id', 'provider_id'}, {'new_conversation'}),
     'dev-turn-start': ({'session_id', 'submission_id', 'expected_revision', 'text'}, set()),
     'dev-input': ({'session_id', 'turn_id', 'pending_request_id', 'expected_digest', 'answer'}, set()),
     'dev-cancel': ({'session_id', 'turn_id', 'request_id'}, set()),
@@ -50,10 +50,10 @@ def get(server, workspace, root, name, query, *, consumer_closed=None):
     if getattr(service, 'remote', False):
         return service.forward(workspace, root, name, query, consumer_closed=consumer_closed)
     if name=='dev-conversation':return service.conversation(workspace,root)
-    if name=='dev-project-turns':return service.store.project_turns(workspace,int(query.get('offset',0)),int(query.get('limit',20)),query.get('kind','all'))
+    if name=='dev-project-turns':return service.store.project_turns(workspace,int(query.get('offset',0)),int(query.get('limit',20)),query.get('kind','all'),query.get('session_id'))
     sid = query.get('session_id')
     if name == 'dev-sessions':
-        return service.store.list(workspace, int(query.get('offset', 0)), int(query.get('limit', 20)))
+        return service.sessions(workspace, root, int(query.get('offset', 0)), int(query.get('limit', 20)))
     if name == 'dev-session': return service.show(workspace, sid)
     if name == 'dev-stats':
         from .stats import read
@@ -120,6 +120,8 @@ def get(server, workspace, root, name, query, *, consumer_closed=None):
 
 
 def post(server, workspace, root, name, request, *, consumer_closed=None):
+    if name == 'dev-session-create' and 'new_conversation' in request and type(request['new_conversation']) is not bool:
+        reject('new_conversation must be a boolean', 'invalid_request')
     service = server.development
     if service is None: reject('Project development is not enabled')
     if getattr(service, 'remote', False):

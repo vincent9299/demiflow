@@ -25,7 +25,8 @@
     let controller=new AbortController(),disposed=false,run=null,snapshot=null,working=null,lastRun=null;
     let busy=false,historyOpen=false,sourceKind='configuration',detailKind='observations',sourceSequence=0,nodeSequence=0;
     let logOffset=0,logBody='',eventCursor=null,eventRows=[],lastMetricAt=0,lastEventAt=0;
-    let records=null,cursors=[null],page=0,listSequence=0,sourceOpen=true,comparison=null,outputFingerprint=null,runFilter='';
+    let records=null,cursors=[null],page=0,firstPage=1,listSequence=0,sourceOpen=true,comparison=null,outputFingerprint=null,runFilter='';
+    const narrowNavigation=matchMedia('(max-width:680px)'),navigationCollapsed={flows:narrowNavigation.matches,monitor:narrowNavigation.matches};
     let observationCursor=null,observationPages=[],graphSequence=0,scopeNode=null,nodeOffset=0,inspectorWhole=false;
     let lastRunGraphAt=0,graphStatus=null,graphModel=null,actionExplicit=false;
     let settingsBasis=null,issueScope='flow',scopedCheckButton=null;
@@ -71,7 +72,10 @@
     function raw(label,value,parent){const n=details(label,parent);n.append($('pre',json(value),'wb-code'));return n;}
     const toolbar=$('div',undefined,'wb-toolbar'),selectors=$('div',undefined,'wb-selectors'),actions=$('div',undefined,'wb-actions');
     const entryChoice=select('流程',[],null);
-    field('流程',entryChoice,selectors);toolbar.append(selectors,actions);root.append(toolbar);
+    // The original select remains the single selection binding; the directory
+    // below is its visible control, including keyboard access.
+    field('流程',entryChoice,selectors);selectors.hidden=true;toolbar.append(selectors,actions);root.append(toolbar);
+    const navigationToggle=button('管道列表',()=>{navigationCollapsed[activePage]=!navigationCollapsed[activePage];updateActions();},toolbar,{cls:'wb-navigation-toggle'});
     const more=details('更多',actions);more.className='wb-more';const moreBody=$('div',undefined,'wb-more-body');more.append(moreBody);
     function positionMore(){
       if(!more.open)return;
@@ -85,13 +89,14 @@
     root.addEventListener('click',event=>{if(!more.contains(event.target))more.open=false;});
     root.addEventListener('keydown',event=>{if(event.key==='Escape'&&more.open){more.open=false;more.querySelector('summary').focus();}});
     const checkButton=button('检查',()=>{more.open=false;return check();},moreBody),runButton=button('运行',()=>confirmSubmit(),actions,{cls:'primary'});
-    const historyButton=button('运行记录',async()=>{more.open=false;activePage='monitor';state.setMode(run?'monitor':'history');historyOpen=!historyOpen;updateActions();rememberPanel();if(historyOpen)await listRuns();},moreBody);
+    const historyButton=button('运行记录',async()=>{more.open=false;activePage='monitor';state.setMode(run?'monitor':'history');historyOpen=true;navigationCollapsed.monitor=false;updateActions();rememberPanel();await listRuns();},moreBody);
     historyButton.setAttribute('aria-expanded','false');
     button('接入与权限',()=>{more.open=false;settings.hidden=!settings.hidden;paintSettings();},moreBody,{cls:'quiet'});
     const notice=$('div',undefined,'wb-notice');notice.hidden=true;notice.setAttribute('role','status');root.append(notice);
     const accessState=$('p',undefined,'wb-access wb-caption');accessState.hidden=true;const accessInfo=details('权限说明',moreBody);accessInfo.append(accessState);
     const settings=$('div',undefined,'wb-settings');settings.hidden=true;root.append(settings);
-    const historyPanel=$('div',undefined,'wb-history');historyPanel.hidden=true;root.append(historyPanel);
+    const historyPanel=$('nav',undefined,'wb-history wb-section-navigation');historyPanel.hidden=true;historyPanel.id='wb-run-navigation';historyPanel.setAttribute('aria-label','运行记录导航');root.append(historyPanel);
+    const flowNavigation=$('nav',undefined,'wb-flow-navigation wb-section-navigation');flowNavigation.id='wb-flow-navigation';flowNavigation.setAttribute('aria-label','项目管道');flowNavigation.hidden=true;root.append(flowNavigation);
     button('检查问题',()=>changeMode('checks'),moreBody);
     const outputMenu=button('输出结果',()=>changeMode('results'),moreBody);
     const basisLabel=$('span',undefined,'wb-basis');
@@ -199,14 +204,28 @@
     function paintSelectors(){
       const selectedEntry=run?.entry||working?.entry;
       entryChoice.replaceChildren();for(const item of choices()){const option=$('option',item.label);option.value=item.value;entryChoice.append(option);}entryChoice.value=selectedEntry||'';
-      entryChoice.disabled=!!run||!entryChoice.options.length;entryChoice.parentElement.hidden=entryChoice.options.length<=1;entryChoice.title=selectedEntry||'';
+      entryChoice.disabled=!!run||!entryChoice.options.length;entryChoice.parentElement.hidden=true;entryChoice.title=selectedEntry||'';
+      paintFlowNavigation();
       updateActions();
     }
+    function paintFlowNavigation(){
+      const entries=choices();flowNavigation.replaceChildren();
+      const heading=$('div',undefined,'wb-navigation-heading');heading.append($('strong','管道'),$('span',entries.length+' 条','wb-caption'));flowNavigation.append(heading);
+      if(!entries.length)flowNavigation.append($('p','当前项目尚无管道。','wb-caption'));
+      for(const item of entries){
+        const row=button('',async()=>{if(working?.entry===item.value&&!run)return;entryChoice.value=item.value;await entryChoice.onchange();if(narrowNavigation.matches&&working?.entry===item.value){navigationCollapsed.flows=true;updateActions();}},flowNavigation,{cls:'wb-flow-record',disabled:!!run});
+        const name=runUI.flowName(ctx,item.value);row.append($('strong',name));if(name!==item.value)row.append($('span',item.value,'wb-caption'));
+        row.dataset.entry=item.value;row.title=item.value;row.setAttribute('aria-label',item.value);const selected=item.value===(run?.entry||working?.entry);
+        row.classList.toggle('selected',selected);row.setAttribute('aria-pressed',String(selected));if(selected)row.setAttribute('aria-current','page');
+      }
+    }
+    function navigationBreakpoint(event){navigationCollapsed.flows=navigationCollapsed.monitor=event.matches;updateActions();}
+    narrowNavigation.addEventListener('change',navigationBreakpoint);
     function updateActions(){
       if(!root.isConnected)return;
       const resultsActive=data().mode==='results',definitionActive=data().mode==='run_definition',checksActive=data().mode==='checks',operatorsActive=data().mode==='operators';
       const monitoring=activePage==='monitor',hasRun=!!run;
-      selectors.hidden=monitoring||operatorsActive;planContext.hidden=monitoring||operatorsActive;toolbar.hidden=operatorsActive;argumentsButton.hidden=monitoring||operatorsActive||!!run;argumentsButton.disabled=!working?.entry;argumentsButton.setAttribute('aria-pressed',String(argumentEditor.visible()));
+      selectors.hidden=true;planContext.hidden=monitoring||operatorsActive;toolbar.hidden=operatorsActive;argumentsButton.hidden=monitoring||operatorsActive||!!run;argumentsButton.disabled=!working?.entry;argumentsButton.setAttribute('aria-pressed',String(argumentEditor.visible()));
       if(monitoring&&historyButton.parentElement!==actions)actions.insertBefore(historyButton,more);
       else if(!monitoring&&historyButton.parentElement!==moreBody)moreBody.prepend(historyButton);
       body.hidden=resultsActive||definitionActive||operatorsActive||argumentEditor.visible()||(monitoring&&!hasRun);operators.hidden=!operatorsActive;checks.hidden=!checksActive;
@@ -221,7 +240,12 @@
       monitorTabs.hidden=!monitoring||!hasRun;
       monitorStatus.setAttribute('aria-pressed',String(!resultsActive&&!definitionActive));monitorDefinition.setAttribute('aria-pressed',String(definitionActive));monitorOutputs.setAttribute('aria-pressed',String(resultsActive));
       outputMenu.hidden=monitoring&&hasRun;
-      results.hidden=!resultsActive;historyPanel.hidden=!monitoring||!historyOpen;layout.classList.toggle('wb-runs-layout',monitoring&&historyOpen);
+      results.hidden=!resultsActive;
+      const navigationVisible=!operatorsActive&&!navigationCollapsed[activePage]&&(!monitoring||historyOpen);
+      historyPanel.hidden=!monitoring||!navigationVisible;flowNavigation.hidden=activePage!=='flows'||!navigationVisible;
+      layout.classList.toggle('wb-runs-layout',monitoring&&navigationVisible);layout.classList.toggle('wb-project-layout',navigationVisible);
+      navigationToggle.hidden=operatorsActive;navigationToggle.textContent=navigationVisible?'收起列表':monitoring?'运行列表':'管道列表';
+      navigationToggle.setAttribute('aria-expanded',String(navigationVisible));navigationToggle.setAttribute('aria-controls',monitoring?historyPanel.id:flowNavigation.id);
       const codeShown=pipelineCodeOpen&&activePage==='flows';
       pipelineCode.hidden=!codeShown;graphHost.hidden=codeShown;
       nodeJump.hidden=codeShown;expandGraph.hidden=codeShown||!document.fullscreenEnabled;
@@ -249,7 +273,7 @@
       previewButton.textContent=previewBusy?'正在解析…':'解析执行计划';
       previewButton.title=dirty?'先保存业务参数，解析使用已保存值':previewHelp;
       previewButton.hidden=monitoring||!!run;runButton.hidden=monitoring||!!run;
-      historyButton.setAttribute('aria-expanded',String(historyOpen));
+      historyButton.setAttribute('aria-expanded',String(monitoring&&navigationVisible));
       const diagnostics=data().graph?.diagnostics||[];
       issuesButton.hidden=!diagnostics.length||checksActive;
       issuesButton.textContent='问题 '+diagnostics.length;issuesButton.title='查看当前图依据中的诊断；不代表执行状态';
@@ -268,7 +292,7 @@
       guardSettings();
     }
     function uniqueParams(entry){const paths=ctx.flows.find(f=>f.entry===entry)?.parameters||[];return paths.length===1?paths[0]:null;}
-    entryChoice.onchange=async()=>{if(disposed)return;const entry=entryChoice.value;try{await useWorking(entry,uniqueParams(entry));if(working?.entry===entry&&!argumentEditor.dirty())await compilePlanPreview();}catch(error){if(!disposed&&working?.entry===entry&&error.name!=='AbortError')message(error.message,'error-box');}};
+    entryChoice.onchange=async()=>{if(disposed)return;const entry=entryChoice.value;try{await useWorking(entry,uniqueParams(entry));if(working?.entry===entry&&!argumentEditor.dirty())await compilePlanPreview();}catch(error){if(!disposed&&working?.entry===entry&&error.name!=='AbortError')message(error.message,'error-box');}finally{if(!disposed)paintSelectors();}};
     function diagnosticTarget(d){return (d.related_nodes||[])[0]||data().graph?.nodes.find(n=>n.source===d.path&&n.line===d.line)?.id;}
     function renderDiagnostics(items,parent,onLocate=null){
       if(!items.length){parent.append($('p','此范围没有诊断；是否通过仍以检查状态和覆盖为准。','wb-caption'));return;}
@@ -1099,7 +1123,7 @@
     }
     function paintHistory(){
       if(!records)return;historyPanel.replaceChildren();
-      const top=$('div',undefined,'wb-history-heading');top.append($('strong','运行记录'),$('span','本页 '+records.runs.length+' 条 · 全项目共 '+records.total+' 条'+(records.index?.complete===false?' · 列表待同步':''),'wb-caption'));historyPanel.append(top);
+      const top=$('div',undefined,'wb-history-heading');top.append($('strong','运行记录'),$('span','第 '+(firstPage+page)+' 页 · 本页 '+records.runs.length+' 条 · 全项目共 '+records.total+' 条'+(records.index?.complete===false?' · 列表待同步':''),'wb-caption'));historyPanel.append(top);
       const flowFilter=select('筛选本页流程',[{value:'',label:'全部流程'},...choices()],runFlowFilter);
       flowFilter.onchange=()=>{runFlowFilter=flowFilter.value;paintHistory();};top.append(flowFilter);
       const filter=select('筛选本页运行状态',[{value:'',label:'全部状态'},...Object.entries(labels).map(([value,label])=>({value,label}))],runFilter);
@@ -1107,17 +1131,19 @@
       if(!records.runs.length)historyPanel.append($('p','当前页没有运行记录。运行会在检查和封存后产生独立记录。','wb-caption'));
       const visible=records.runs.filter(item=>(!runFilter||item.status===runFilter)&&(!runFlowFilter||item.entry===runFlowFilter));
       if(records.runs.length&&!visible.length)historyPanel.append($('p','本页没有符合筛选条件的运行。','wb-caption'));
-      for(const item of visible){const row=button('',()=>openRun(item.run_id),historyPanel,{cls:'wb-run-record'});
-        row.replaceChildren($('strong',runUI.flowName(ctx,item.entry)),$('span',timeText(item.created_at),'wb-caption'),
+      const groups=new Map();for(const item of visible){if(!groups.has(item.entry))groups.set(item.entry,[]);groups.get(item.entry).push(item);}
+      for(const[entry,items]of groups){const group=$('section',undefined,'wb-run-group'),heading=$('h3',runUI.flowName(ctx,entry),'wb-run-group-heading');group.dataset.entry=entry;heading.title=entry;group.append(heading);historyPanel.append(group);
+      for(const item of items){const row=button('',async()=>{await openRun(item.run_id);if(narrowNavigation.matches&&data().run===item.run_id){navigationCollapsed.monitor=true;updateActions();}},group,{cls:'wb-run-record'});
+        row.replaceChildren($('strong',item.run_id.slice(-10)),$('span',timeText(item.created_at),'wb-caption wb-record-time'),
           $('span',runUI.labels[item.status]||item.status,'wb-tag'),$('span',runUI.duration(item.state),'wb-caption wb-record-duration'));
         row.dataset.run=item.run_id;row.setAttribute('aria-label',item.run_id+' · '+item.entry+' · '+(labels[item.status]||item.status));
         if(item.state?.error){const err=item.state.error;row.append($('span',typeof err==='string'?err:(err.message||err.type||'执行失败'),'wb-record-error'));}
-        row.classList.toggle('selected',item.run_id===data().run);}
+        row.classList.toggle('selected',item.run_id===data().run);}}
       markHistorySelection();
       const pager=$('div',undefined,'wb-inline-actions');historyPanel.append(pager);
-      button(page===0?'刷新记录':'最新记录',async()=>{cursors=[null];page=0;await listRuns();},pager);
+      button(firstPage+page===1?'刷新记录':'最新记录',async()=>{cursors=[null];page=0;firstPage=1;await listRuns();},pager);
       button('较新记录',async()=>{page--;await listRuns();},pager,{disabled:page===0});
-      button('较早记录',async()=>{if(cursors.length>=32){cursors=cursors.slice(1);page--;}cursors=cursors.slice(0,page+1);cursors.push(records.next_cursor);page++;await listRuns();},pager,{disabled:!records.next_cursor});
+      button('较早记录',async()=>{if(cursors.length>=32){cursors=cursors.slice(1);page--;firstPage++;}cursors=cursors.slice(0,page+1);cursors.push(records.next_cursor);page++;await listRuns();},pager,{disabled:!records.next_cursor});
     }
     function paintResults(){
       const fingerprint=json([comparison,run?.run_id,run?.attempt,run?.current_attempt,run?.outputs,can('attach'),can('run_submit')]);
@@ -1318,7 +1344,7 @@
     const trend=details('性能趋势 · 整次运行',root),trendPlot=$('div',undefined,'wb-trend');trend.append(trendPlot);trend.hidden=true;
     root.insertBefore(trend,body);
     const layout=$('div',undefined,'wb-workspace-layout'),runMain=$('div',undefined,'wb-workspace-main');
-    root.prepend(layout);layout.append(historyPanel,runMain);
+    root.prepend(layout);layout.append(flowNavigation,historyPanel,runMain);
     for(const element of [...root.children])if(element!==layout)runMain.append(element);
     // Runtime facts remain one compact strip; trend and diagnostics are optional.
     let metricSequence=0,lastObservationRevision=null;
@@ -1380,7 +1406,7 @@
       },
       dirty:()=>argumentEditor.dirty()||!!working&&Object.keys(getDraft().values).length>0,
       projectCheckSettled:()=>{if(!disposed&&documents.open&&projectInfoDirty)refreshProjectInfo();},
-      dispose:()=>{disposed=true;operatorBrowser.dispose();argumentEditor.dispose();document.removeEventListener('fullscreenchange',fullscreenChanged);window.removeEventListener('resize',positionMore);window.removeEventListener('scroll',positionMore,true);if(document.fullscreenElement===body)document.exitFullscreen().catch(()=>{});observer.dispose();graph.dispose();controller.abort();state.dispose();disposeReaders(sourceBody);disposeReaders(runDetailBody);disposeReaders(pipelineCode);},
+      dispose:()=>{disposed=true;operatorBrowser.dispose();argumentEditor.dispose();narrowNavigation.removeEventListener('change',navigationBreakpoint);document.removeEventListener('fullscreenchange',fullscreenChanged);window.removeEventListener('resize',positionMore);window.removeEventListener('scroll',positionMore,true);if(document.fullscreenElement===body)document.exitFullscreen().catch(()=>{});observer.dispose();graph.dispose();controller.abort();state.dispose();disposeReaders(sourceBody);disposeReaders(runDetailBody);disposeReaders(pipelineCode);},
     });
     options.register?.(handle);
     let firstEntry=view.entry||ctx.flows[0]?.entry||choices()[0]?.value||null;

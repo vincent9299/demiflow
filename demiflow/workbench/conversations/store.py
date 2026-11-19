@@ -60,6 +60,9 @@ class Store:
                   id TEXT PRIMARY KEY, turn TEXT NOT NULL, epoch TEXT NOT NULL, digest TEXT NOT NULL,
                   request TEXT NOT NULL, expires REAL NOT NULL, answer TEXT, status TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS project_conversations(workspace TEXT PRIMARY KEY, session TEXT NOT NULL UNIQUE);
+                CREATE TABLE IF NOT EXISTS project_conversation_members(
+                  workspace TEXT NOT NULL, session TEXT NOT NULL UNIQUE,
+                  PRIMARY KEY(workspace,session));
                 CREATE INDEX IF NOT EXISTS events_turn ON events(turn,sequence);
                 CREATE INDEX IF NOT EXISTS turns_session ON turns(session, created);
                 CREATE INDEX IF NOT EXISTS pending_turn ON pending(turn);
@@ -156,6 +159,7 @@ class Store:
         # Old records remain unchanged. Prefer the newest usable conversation
         # with messages over an unused empty session; old grants never upgrade.
         row = db.execute("""SELECT * FROM sessions WHERE workspace=? AND root=? AND policy_hash=?
+            AND NOT EXISTS(SELECT 1 FROM project_conversation_members m WHERE m.workspace=sessions.workspace AND m.session=sessions.id)
             ORDER BY (revision>0) DESC,coalesce((SELECT max(created) FROM turns WHERE session=sessions.id),created) DESC,id LIMIT 1""",
             (workspace, wire(identity).decode(), policy_hash)).fetchone()
         return dict(row) if row else None
@@ -182,17 +186,62 @@ class Store:
             db.execute('INSERT OR IGNORE INTO project_conversations(workspace,session) VALUES(?,?)',(workspace,sid))
             return self._session(db,workspace,sid)
 
-    def project_turns(self, workspace, offset=0, limit=20, kind="all"):
+    def create_conversation(self, workspace, identity, provider, request_id, policy_hash):
+        """Explicit writable membership is created with the session, never inferred from history."""
+        identifier(request_id)
+        with self.connect(write=True) as db:
+            old = db.execute('SELECT * FROM sessions WHERE workspace=? AND request_key=?',
+                             (workspace, request_id)).fetchone()
+            if old:
+                member = db.execute('SELECT 1 FROM project_conversation_members WHERE workspace=? AND session=?',
+                                    (workspace, old['id'])).fetchone()
+                if (not member or old['provider'] != provider or old['policy_hash'] != policy_hash
+                        or json.loads(old['root']) != identity):
+                    reject('Session idempotency key has different content or membership', 'conflict')
+                return dict(old)
+            if db.execute('SELECT count(*) FROM sessions').fetchone()[0] >= self.limits.sessions:
+                reject('Session count budget exhausted', 'resource_limit')
+            # Pin the old migration choice before adding an empty conversation.
+            # Otherwise creating a member could silently replace an unpinned main.
+            primary = self._primary(db, workspace, identity, policy_hash)
+            sid = 'd' + secrets.token_hex(16)
+            db.execute('INSERT INTO sessions(id,workspace,root,provider,request_key,policy_hash,created) VALUES(?,?,?,?,?,?,?)',
+                       (sid, workspace, wire(identity).decode(), provider, request_id, policy_hash, time.time()))
+            db.execute('INSERT INTO project_conversation_members(workspace,session) VALUES(?,?)', (workspace, sid))
+            db.execute('INSERT OR IGNORE INTO project_conversations(workspace,session) VALUES(?,?)',
+                       (workspace, primary['id'] if primary else sid))
+            return self._session(db, workspace, sid)
+
+    def writable(self, workspace, sid, identity, policy_hash, providers, *, pin=False):
+        with self.connect(write=pin) as db:
+            session = self._session(db, workspace, sid)
+            primary = self._primary(db, workspace, identity, policy_hash)
+            current = (session['policy_hash'] == policy_hash and json.loads(session['root']) == identity
+                       and session['provider'] in providers)
+            member = db.execute('SELECT 1 FROM project_conversation_members WHERE workspace=? AND session=?',
+                                (workspace, sid)).fetchone()
+            allowed = bool(current and (member or primary and primary['id'] == sid))
+            if allowed and pin and primary:
+                db.execute('INSERT OR IGNORE INTO project_conversations(workspace,session) VALUES(?,?)',
+                           (workspace, primary['id']))
+            return allowed
+
+    def project_turns(self, workspace, offset=0, limit=20, kind="all", session_id=None):
         integer(offset,0,self.limits.sessions*self.limits.turns);integer(limit,1,20)
         if kind not in {'all','timeline'}:reject('Unknown history filter','invalid_request')
         predicate = "AND (t.operation='compact' OR json_extract(t.result,'$.changed_files')>0 OR EXISTS(SELECT 1 FROM events e WHERE e.turn=t.id AND json_extract(e.body,'$.type')='check.reference'))" if kind=='timeline' else '' 
         with self.connect() as db:
+            args = [workspace]
+            if session_id is not None:
+                self._session(db, workspace, session_id)
+                predicate += ' AND t.session=?'
+                args.append(session_id)
             rows=db.execute(f"""SELECT t.id,t.session,t.created,t.state,t.cleanup,t.operation,
                 substr(t.text,1,80) AS title,t.result,
                 (SELECT min(sequence) FROM events WHERE turn=t.id) AS sequence,
                 EXISTS(SELECT 1 FROM events WHERE turn=t.id AND json_extract(body,'$.type')='check.reference') AS checks
                 FROM turns t JOIN sessions s ON s.id=t.session WHERE s.workspace=? {predicate}
-                ORDER BY t.created DESC,t.id LIMIT ? OFFSET ?""",(workspace,limit+1,offset)).fetchall()
+                ORDER BY t.created DESC,t.id LIMIT ? OFFSET ?""",(*args,limit+1,offset)).fetchall()
             result=[]
             for row in rows[:limit]:
                 value=dict(row);facts=json.loads(value.pop('result') or '{}')
@@ -200,12 +249,38 @@ class Store:
                 result.append(value)
             return dict(turns=result,next_offset=offset+limit if len(rows)>limit else None)
 
-    def list(self, workspace, offset=0, limit=20):
+    def list(self, workspace, offset=0, limit=20, *, identity=None, policy_hash=None, providers=()):
         integer(offset, 0, self.limits.sessions); integer(limit, 1, 20)
         with self.connect() as db:
-            rows = db.execute('SELECT id,title,provider,created,revision FROM sessions WHERE workspace=? ORDER BY created DESC,id LIMIT ? OFFSET ?',
-                              (workspace, limit + 1, offset)).fetchall()
-            return dict(sessions=[dict(r) for r in rows[:limit]], next_offset=offset + limit if len(rows) > limit else None)
+            primary = self._primary(db, workspace, identity, policy_hash) if identity is not None else None
+            rows = db.execute('''SELECT s.id,s.title,s.provider,s.created,s.revision,s.root,s.policy_hash,
+                EXISTS(SELECT 1 FROM project_conversation_members m WHERE m.workspace=s.workspace AND m.session=s.id) AS member,
+                t.id AS turn_id,t.state,t.cleanup,json_extract(t.development,'$.busy') AS development_busy
+                FROM sessions s LEFT JOIN turns t ON t.id=(
+                    SELECT id FROM turns WHERE session=s.id ORDER BY created DESC,id DESC LIMIT 1)
+                WHERE s.workspace=? ORDER BY s.created DESC,s.id LIMIT ? OFFSET ?''',
+                (workspace, limit + 1, offset)).fetchall()
+            sessions = []
+            for row in rows[:limit]:
+                value = {k: row[k] for k in ('id', 'title', 'provider', 'created', 'revision')}
+                value['writable'] = bool(identity is not None and json.loads(row['root']) == identity
+                    and row['policy_hash'] == policy_hash and row['provider'] in providers
+                    and (row['member'] or primary and primary['id'] == row['id']))
+                value['turn'] = dict(id=row['turn_id'], state=row['state'], cleanup=row['cleanup'],
+                    development=dict(busy=bool(row['development_busy']))) if row['turn_id'] else None
+                sessions.append(value)
+            busy, active_session_id = False, None
+            if identity is not None:
+                root = Path(identity['path'])
+                for writer in db.execute('''SELECT s.id,s.workspace,s.root FROM turns t JOIN sessions s ON s.id=t.session
+                        WHERE t.cleanup!='complete' OR t.gate_cleanup!='complete' OR t.gate_phase='repair_pending' '''):
+                    other = Path(json.loads(writer['root'])['path'])
+                    if root == other or root in other.parents or other in root.parents:
+                        busy = True
+                        if writer['workspace'] == workspace:
+                            active_session_id = writer['id']
+            return dict(sessions=sessions, next_offset=offset + limit if len(rows) > limit else None,
+                        writer_busy=busy, active_session_id=active_session_id)
 
     def show(self, workspace, sid):
         with self.connect() as db:

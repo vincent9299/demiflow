@@ -1,5 +1,6 @@
 /* Pipeline workbench layout. Public shell/data styles live in style.css (A);
    SVG node/edge styles live in workbench-graph.css (C). Only .wb-* here. */
+.workbench [hidden]{display:none!important}
 .workbench{font-size:13px;min-width:0;color:#28313f}
 .workbench h3{font-size:15px;line-height:1.5;margin:0 0 10px}
 .workbench p{margin:6px 0;overflow-wrap:anywhere}.workbench small{font-size:11px;color:#7a8497}

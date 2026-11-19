@@ -92,7 +92,7 @@
   }
   function validateView(value) {
     if (!object(value)) throw new Error('不支持的视图类型');
-    if(value.document&&(value.document.includes('\\')||value.document.split('/').some(part=>!part||part.startsWith('.'))))throw new Error('文档路径必须位于项目内');
+    if(typeof value.document==='string'&&(value.document.includes('\\')||value.document.split('/').some(part=>!part||part.startsWith('.'))))throw new Error('文档路径必须位于项目内');
     const variants=value.v===2?schemasV2:schemas;
     if (!Object.hasOwn(variants,value.kind)) throw new Error('不支持的视图类型');
     const spec = variants[value.kind], keys = Object.keys(value);

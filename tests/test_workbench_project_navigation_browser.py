@@ -23,6 +23,10 @@ def test_project_picker_search_keyboard_and_scoped_back_navigation(tmp_path, mon
         (root/'README.md').write_text('# '+name+' content\nOriginal project text.')
         keys[name] = registry.add(path, root, name=name)['workspace_id']
     with service(None, registry=path) as app, opened(browser, app, width=width) as (page, requests):
+        # Registry serialization orders opaque IDs; choose Alpha explicitly.
+        page.locator('#project-switcher').click()
+        page.locator('#project-list [data-workspace="'+keys['Alpha']+'"]').click()
+        page.wait_for_function("id=>ForgeView.decodeView(location.hash)?.workspace===id", arg=keys['Alpha'])
         page.evaluate("sessionStorage.setItem('demiflow-sidebar-collapsed','1')")
         page.reload()
         switcher = page.locator('#project-switcher')

@@ -182,7 +182,7 @@
         // Keep transient admission contention inside the original project read.
         // Result-source selection and all writes retain their explicit recovery.
         const projectRead=err.operationStarted===false&&(
-          !body&&['projects','capabilities','context','changes','graph','project-operators','operator-definition','operator-history','flow-arguments'].includes(path)
+          !body&&['projects','capabilities','context','changes','graph','project-operators','operator-definition','operator-history','flow-arguments','project-documents','project-markdown'].includes(path)
           ||!!body&&['plan-preview','plan-node-detail','plan-pipeline-source'].includes(path));
         if((analysis||projectRead)&&!write&&!cleanup&&err.code==='busy'&&!signal.aborted&&attempts<12&&Date.now()-started<20000){
           const wait=Math.min(2000,100*2**Math.min(attempts++,5));
@@ -299,7 +299,8 @@
     try {
       const page = pageKind();
       if (page === 'development') {
-        const mounted = await ForgeDevelopment.mount({main, api, workspaceId, view:value, mountText, disposeReaders,
+        const project=workspaceId,developmentApi=(path,query,body)=>{if(epoch!==viewEpoch)throw staleRequest();return api(path,query,body,project);};
+        const mounted = await ForgeDevelopment.mount({main, api:developmentApi, workspaceId:project, view:value, mountText, disposeReaders,
           openNew:()=>epoch===viewEpoch?openView(target('development_new')):undefined,
           openSession:id=>epoch===viewEpoch?openView(target('development_session',{session_id:id})):undefined,
           error, register:handle=>{if(epoch===viewEpoch)developmentView=handle;else handle.dispose();}});
