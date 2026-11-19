@@ -34,7 +34,7 @@ def run_read(config):
             options=DataFusionOptions(**NATIVE_OPTIONS), max_concurrent=1, slot_capacity=NATIVE_CAPACITY,
             temp_directory=job_path("/scratch/native"), diagnostics_directory=job_path("/scratch/diagnostics"), managed_diagnostics=True) as session:
         # Reuse the same native slot for its trusted reader, not a Python UDF.
-        with session._admit():
+        with session.borrow_resources():
             snapshot = lance.dataset(path, version=1)
             if snapshot.count_rows() > 100000:
                 c.reject("Native Arrow read exceeds row quota", code="resource_limit")

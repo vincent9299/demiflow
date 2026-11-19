@@ -32,7 +32,8 @@ from demiflow.forge.schema import ForgeError
 from demiflow.forge import operation_budget
 from demiflow.workbench.runs.limits import DEFAULT_LIMITS
 from demiflow.workbench.runs.limits import limits_with
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.host.control import RunJournal
+from demiflow.execution.host.inspection import read_run, RunReadError
 from demiflow.errors import ExecutionConflict
 
 FORMAT = 'demiflow_forge_run_manifest_v5'
@@ -131,12 +132,18 @@ def _claim_lease(lease, run_id):
     os.fsync(lease)
 
 
-def refresh_index(root, run_id):
+def refresh_index(root, run_id, *, deadline=None):
     """Best-effort activity hint; source journal and execution lease own state."""
     from demiflow.workbench.projects import index
     try:
+        if deadline is not None and time.monotonic() >= deadline:
+            return 'Index refresh deferred after maintenance deadline'
         with ws.control_lock(root):
+            if deadline is not None and time.monotonic() >= deadline:
+                return 'Index refresh deferred after maintenance deadline'
             marker = index.begin(root, 'run', run_id)
+            if deadline is not None and time.monotonic() >= deadline:
+                return 'Index publication deferred after maintenance deadline'
             return index.publish(root, marker)
     except Exception as error:
         return str(error)[:1024]
@@ -324,8 +331,8 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     native_execution = native_resources.select(report, native_deployment, workspace=root)
     if not 1 <= len(report['actions']) <= 32:
         raise ForgeError('Run action budget exceeded')
-    from demiflow.execution.capabilities import VERSION as capability_version
-    from demiflow.execution.capabilities import stream_residency
+    from demiflow.execution.host.inspection import VERSION as capability_version
+    from demiflow.execution.host.inspection import stream_residency
     by_id = {node['id']: node for node in report['nodes']}
     parents = {identity: [] for identity in by_id}
     for edge in sorted(report['edges'], key=lambda value: value['port']):
@@ -348,7 +355,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                 current = parents[current][0]
             try:
                 if payload_defaults:
-                    from demiflow.execution.payload_limits import stream_limits
+                    from demiflow.execution.host.control import stream_limits
                     # Seal the admitted defaults into the original manifest; every
                     # reader, checked call and physical worker receives these caps.
                     limits = stream_limits(facts, limits, adjustable_fields=payload_defaults)
@@ -388,8 +395,8 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
         depths[node['id']] = 1 + max((depths[parent] for parent in parents[node['id']]), default=0)
     if max(depths.values(), default=0) > 128:
         raise ForgeError('Run native plan depth exceeds 128')
-    from demiflow.execution.plan_facts import execution_instances
-    from demiflow.execution.run_journal import OBSERVATION_COUNT
+    from demiflow.execution.host.inspection import execution_instances
+    from demiflow.execution.host.inspection import OBSERVATION_COUNT
     try:
         observation_instances = execution_instances(report['nodes'], report['edges'], report['actions'], maximum=OBSERVATION_COUNT)
     except ValueError as exc:
@@ -487,42 +494,17 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
 
 def _load(root, run_id, *, detail='full', action_ids=None, attempt=None):
     target = directory(root, run_id)
-    ws.no_symlinks(target / 'run.sqlite')
-    value = RunJournal(target, attempt=attempt).execution_view(detail=detail, action_ids=action_ids)
+    try:
+        with read_run(target, deadline=operation_budget.current_deadline()) as reader:
+            value = reader.execution_view(detail=detail, action_ids=action_ids, attempt=attempt)
+    except RunReadError as exc:
+        raise ForgeError(str(exc), code=exc.code or 'operation_rejected') from exc
     m = value['manifest']
     if not m or m.get('format') not in {FORMAT, PREVIOUS_FORMAT, LEGACY_EXECUTABLE_FORMAT, 'demiflow_forge_run_manifest_v1', 'demiflow_forge_run_manifest_v2'} or m.get('run_id') != run_id or m.get('root') != str(Path(root).absolute()):
         raise ForgeError('Invalid or relocated run manifest')
     if content_digest({k: v for k, v in m.items() if k != 'digest'}) != m['digest']:
         raise ForgeError('Run manifest digest differs')
-    if detail in {'full', 'summary'} and value['state'].get('attempt', 1) > 1:
-        value['prior_events'] = RunJournal(target).action_history([o['action_id'] for o in m['outputs'].values()],
-            before_attempt=value['state']['attempt'],
-            kinds=['intent', 'receipt', 'recovered', 'stage_commit', 'stage_recovered', 'result', 'recovered_result'])
     return target, value
-
-
-def prior_actions(value):
-    """Latest committed native fact per output, retaining its attempt identity."""
-    attempts = {}
-    for event in value.get('prior_events', []):
-        attempts.setdefault((event['attempt'], event['action_id']), {})[event['kind']] = event['value']
-    latest = {}
-    for (attempt, identity), facts in sorted(attempts.items()):
-        receipt = facts.get('recovered') or facts.get('receipt')
-        if facts.get('stage_recovered') or facts.get('stage_commit') or receipt and receipt['status'] == 'committed':
-            latest[identity] = (attempt, facts)
-    return latest
-
-
-def prior_writes(value):
-    result = {}
-    for identity, (attempt, facts) in prior_actions(value).items():
-        receipt = facts.get('recovered') or facts.get('receipt')
-        if receipt and receipt['status'] == 'committed':
-            if 'intent' not in facts:
-                raise ForgeError('Previous committed write has no owned intent')
-            result[identity] = {'attempt': attempt, 'receipt': receipt, 'intent': facts['intent']}
-    return result
 
 
 def _report(target, manifest):
@@ -542,7 +524,8 @@ def show(root, run_id, *, include_report=False, attempt=None, compact=False):
         result.pop('observations',None)
         result['observation_scope']='paged_run_observations'
     if include_report or compact:
-        history = RunJournal(target).list_attempts()
+        with read_run(target, deadline=operation_budget.current_deadline()) as reader:
+            history = reader.list_attempts()
         result['current_attempt'] = history[-1]['attempt'] if history else None
         result['attempts'] = history
     if include_report:
@@ -552,29 +535,21 @@ def show(root, run_id, *, include_report=False, attempt=None, compact=False):
 
 def _describe(run_id, value):
     m, state = value['manifest'], value['state']
-    actions = {}
-    for event in value['events']:
-        actions.setdefault(event['action_id'], {})[event['kind']] = event['value']
     outputs = []
-    previous = prior_actions(value)
     for name, spec in m['outputs'].items():
-        facts = actions.get(spec['action_id'], {})
-        retained = None
-        error = facts.get('failed')
-        if not any(k in facts for k in ('receipt', 'recovered', 'stage_commit', 'stage_recovered')) and spec['action_id'] in previous:
-            retained, facts = previous[spec['action_id']]
-        receipt = facts.get('recovered') or facts.get('receipt')
-        commit = facts.get('stage_recovered') or facts.get('stage_commit')
-        status = 'committed' if commit or receipt and receipt['status'] == 'committed' else 'unknown' if 'intent' in facts else 'not_started'
-        if status == 'unknown' and state['status'] in ACTIVE and 'failed' not in facts:
+        facts = value['output_projections'][spec['action_id']]
+        status = 'committed' if facts['committed'] else 'unknown' if facts['has_intent'] else 'not_started'
+        if status == 'unknown' and state['status'] in ACTIVE and not facts['failed']:
             status = 'writing'
-        result = facts.get('recovered_result') or facts.get('result')
-        outputs.append(dict(name=name, **spec, status=status, receipt=receipt, commit=commit, retained_from_attempt=retained,
-                            result=result, result_digest=content_digest(result['ref']) if result else None, error=error))
+        result = facts['result']
+        outputs.append(dict(name=name, **spec, status=status,
+            receipt=facts.get('receipt'), commit=facts.get('commit'),
+            retained_from_attempt=facts['retained_from_attempt'], result=result,
+            result_digest=content_digest(result['ref']) if result else None, error=facts['error']))
     result = dict(run_id=run_id, digest=m['digest'], status=state['status'], state=state,
         attempt=state.get('attempt'),
         entry=m['entry'], created_at=m['created_at'], parameter_path=m['parameter_path'],
-        outputs=outputs, actions=actions, limits=m['limits'], report_digest=m['report_digest'])
+        outputs=outputs, actions=value['actions'], limits=m['limits'], report_digest=m['report_digest'])
     result['observations'] = [dict(item, run_id=run_id,
                                   completeness='incomplete' if state['status'] in TERMINAL and item['state'] in {'pending', 'running'} else 'recorded')
                               for item in value.get('observations', [])]
@@ -811,49 +786,58 @@ def _check_basis(root, target, m, *, phase='preflight'):
     ws.verify_run_basis(root, m)
 
 
-def validate_output_targets(value):
+def _output_metadata(uri, version):
+    """Keep output IO in the existing bounded metadata worker."""
+    from demiflow.workbench.worker import operation
+    return operation('metadata', uri, version=version)
+
+
+def _verified_output(target, manifest, output, *, attempt, recover=False,
+                     require_current_head=False, deadline=None):
+    from demiflow.execution.host.inspection import verify_write_receipt, verify_published_output
+    options = dict(expected_uri=output['uri'], attempt=attempt, recover=recover,
+                   require_current_head=require_current_head, deadline=deadline,
+                   metadata_reader=_output_metadata)
+    if output.get('mode') == 'checkpoint' or output.get('publication') == 'native_stage_v3':
+        return verify_published_output(target, output['action_id'],
+            expected_schema_identity=output['schema_identity'],
+            expected_checkpoint_node=output.get('checkpoint_node'),
+            publication=output.get('publication'), report_digest=manifest['report_digest'],
+            parents=list(_report(target, manifest)['actions']) if recover else None, **options)
+    return verify_write_receipt(target, output['action_id'], **options)
+
+
+def validate_output_targets(value, *, deadline=None):
     """An existing target must be proven owned, never merely named in a seal."""
     from demiflow.lance.storage import inspect_lance
-    from demiflow.lance.storage import open_lance_dataset
-    previous = prior_actions(value)
+    if deadline is None:
+        deadline = operation_budget.current_deadline()
+    manifest = value['manifest']
+    target = directory(manifest['root'], manifest['run_id'])
     details = _describe(value['manifest']['run_id'], value)
     for output in details['outputs']:
+        operation_budget.check(deadline)
         ws.no_symlinks(Path(output['uri']))
-        receipt, commit = output['receipt'], output['commit']
         if output.get('publication') == 'native_stage_v3':
             from .native_stages import admit_prepared
-            manifest = value['manifest']
-            target = directory(manifest['root'], manifest['run_id'])
             owned = admit_prepared(target, RunJournal(target), manifest, output)
             if owned is not None:
                 if inspect_lance(output['uri']).resolved_version != owned['version']:
                     raise ForgeError('Owned native stage head changed outside its original publication')
                 continue  # Admission only; original coordinator still owns ACK/recovery.
         if output['status'] == 'committed':
-            if output.get('publication') == 'native_stage_v3':
-                from .native_stages import verify
-                manifest = value['manifest']
-                target = directory(manifest['root'], manifest['run_id'])
-                verify(target, RunJournal(target), output, commit, report_digest=manifest['report_digest'])
-            version = commit['reference']['version'] if commit else receipt['committed_version']
-            if inspect_lance(output['uri']).resolved_version != version:
-                raise ForgeError('Owned output head changed outside this run')
-            if receipt:
-                facts = details['actions'].get(output['action_id'], {})
-                if output['retained_from_attempt'] is not None:
-                    facts = previous[output['action_id']][1]
-                intent = facts.get('intent', {})
-                table = open_lance_dataset(output['uri'], version, ())
-                marker = (table.read_transaction(version).transaction_properties or {}).get('__lance_commit_message')
-                if (receipt['uri'] != output['uri'] or receipt['request_hash'] != intent.get('request_hash')
-                        or marker != 'demiflow-lance:' + str(intent.get('operation_id'))):
-                    raise ForgeError('Owned output commit evidence differs')
+            verified = _verified_output(target, manifest, output,
+                attempt=value['state'].get('attempt'), require_current_head=True,
+                deadline=deadline)
+            if verified is None:
+                raise ForgeError('Owned output has no verified native publication')
             continue
         if output.get('mode', 'create') in {'create', 'checkpoint'} and Path(output['uri']).exists():
             raise ForgeError('Create target already exists')
         if output.get('mode') == 'overwrite':
             if inspect_lance(output['uri']).resolved_version != output['expected_version']:
                 raise ForgeError('Overwrite CAS baseline changed')
+    operation_budget.check(deadline)
 
 
 def remaining_limits(limits, state):
@@ -877,7 +861,7 @@ def resume(root, run_id, *, expected, expected_attempt, authority=None):
     # Same-engine resume admission with a concrete reason before any business start.
     # History is read-only: this never rewrites source nor creates a replacement
     # successful run; per-action compatibility is enforced by the recovery path.
-    from demiflow.execution.recovery_identity import platform_identity
+    from demiflow.execution.host.inspection import platform_identity
     binding = RunJournal(directory(root, run_id)).recovery_identity()
     if binding is None:
         raise ForgeError('该运行没有统一恢复契约，不能恢复历史；请新建运行。', code='conflict')
@@ -913,33 +897,46 @@ def _resume(root, run_id, *, expected, expected_attempt, authority=None):
         if state.get('cleanup') != 'complete':
             raise ForgeError('Explicitly reconcile pending cleanup before resuming', code='conflict')
         remaining_limits(manifest['limits'], state)
-        recovery_journal = RunJournal(target)
+        from demiflow.execution.host.inspection import action_recovery_facts
         for action_id in _fact_actions(_report(target, manifest), manifest['outputs']):
-            action = recovery_journal.execution_action(action_id)
-            if (action is not None and action['result'] is None and
-                    recovery_journal.source_binding(action_id + '-state-recovery-restriction') is not None):
+            facts = action_recovery_facts(target, action_id, attempt=expected_attempt,
+                                          deadline=operation_budget.current_deadline())
+            if facts['recovery_restricted']:
                 raise ForgeError('该执行的资源 actor 未声明状态恢复钩子，不能从中断处恢复；请新建运行。')
         _check_basis(root, target, manifest, phase='resume')
-        errors = register_results(root, run_id, recover=True)
+        from demiflow.workbench.runs.storage import cleanup_deadline, clean_stopped
+        deadline = cleanup_deadline()
+        errors = register_results(root, run_id, recover=True, maintenance_deadline=deadline)
         if errors:
             raise ForgeError('Resume reconciliation failed: ' + '; '.join(errors))
         _, value = _load(root, run_id)
-        validate_output_targets(value)
+        clean_stopped(RunJournal(target, attempt=expected_attempt),
+            expected_revision=value['state']['revision'], deadline=deadline,
+            confirm_stopped=lambda snapshot: execution_stopped(target, snapshot))
+        _, value = _load(root, run_id)
+        _attempt(value['state'].get('attempt'), expected_attempt)
+        if value['state'].get('cleanup') != 'complete' or value['state'].get('usage_complete') is not True:
+            raise ForgeError('Resume cleanup or final accounting is no longer complete', code='conflict')
+        remaining_limits(manifest['limits'], value['state'])
+        with read_run(target, deadline=deadline) as reader:
+            native = reader.native_maintenance_state()
+        if not native['owner_released'] or not native['gc_settled']:
+            raise ForgeError('Native maintenance is not settled', code='conflict')
+        validate_output_targets(value, deadline=deadline)
         control = RunJournal(target)
         from demiflow.workbench.projects import index
         with ws.control_lock(root):
             _check_basis(root, target, manifest, phase='resume')
-            operation_budget.check()
+            operation_budget.check(deadline)
             marker = index.begin(root, 'run', run_id)
             report = _report(target, manifest)
-            with control._transaction() as db:
-                control._reserve_capacity(db, nodes=len(manifest['observation_instances']), actions=len(_fact_actions(report,manifest['outputs'])))
-            operation_budget.check()
+            operation_budget.check(deadline)
             with authority.guard(root, 'run_submit'):
-                state = control.begin_attempt(expected_attempt=expected_attempt, expected_revision=value['state']['revision'])
-                run = RunJournal(target, attempt=state['attempt'])
-                run.reserve_nodes([(item['action_id'], item['node_id'], item['occurrence']) for item in manifest['observation_instances']])
-                run.reserve_actions(_fact_actions(report,manifest['outputs']))
+                control.begin_attempt(expected_attempt=expected_attempt,
+                    expected_revision=value['state']['revision'],
+                    nodes=[(item['action_id'], item['node_id'], item['occurrence'])
+                           for item in manifest['observation_instances']],
+                    actions=_fact_actions(report, manifest['outputs']))
                 index.publish(root, marker)
     return show(root, run_id)
 
@@ -1004,29 +1001,18 @@ def cancel(root, run_id, *, expected_attempt=_CURRENT_ATTEMPT,compact=False, aut
 
 
 def result_table(root, run_id, name, *, attempt=None):
-    item = next((o for o in show(root, run_id, attempt=attempt)['outputs'] if o['name'] == name), None)
+    target, value = _load(root, run_id, attempt=attempt)
+    item = next((o for o in _describe(run_id, value)['outputs'] if o['name'] == name), None)
     if item is None or item['result'] is None:
         raise ForgeError('This output has no verified fixed table reference')
     from demiflow.lance.refs import DatasetRef
     ref = DatasetRef.from_dict(item['result']['ref'])
-    receipt = item['receipt']
-    if item.get('publication') == 'native_stage_v3':
-        from .native_stages import verify
-        target = directory(root, run_id)
-        original = verify(target, RunJournal(target), item, item['commit'],
-                          report_digest=show(root, run_id, attempt=attempt)['report_digest'])
-        verified = original == {'uri': item['uri'], 'version': ref.lance_version}
-    elif item.get('mode') == 'checkpoint':
-        commit = item['commit']
-        verified = (commit is not None and commit['checkpoint_node'] == item['checkpoint_node']
-                    and commit['schema_identity'] == item['schema_identity']
-                    and commit['reference'] == {'uri': item['uri'], 'version': ref.lance_version})
-    else:
-        verified = (receipt is not None and receipt['status'] == 'committed'
-                    and ref.lance_version == receipt['committed_version']
-                    and ref.schema_hash == receipt['schema_hash'] and ref.row_count == receipt['written_rows'])
-    if (not verified or ref.relative_uri != item['relative_uri'] or ref.store_id != item['location_id']):
-        raise ForgeError('Run result reference differs from its native receipt')
+    verified = _verified_output(target, value['manifest'], item,
+        attempt=value['state'].get('attempt'), deadline=operation_budget.current_deadline())
+    if (verified is None or verified['version'] != ref.lance_version
+            or verified['schema_hash'] != ref.schema_hash or verified['row_count'] != ref.row_count
+            or ref.relative_uri != item['relative_uri'] or ref.store_id != item['location_id']):
+        raise ForgeError('Run result reference differs from its verified native publication')
     root, workspace, _ = ws.load_workspace(root)
     if ref.store_id not in workspace['locations']:
         raise ForgeError('Result location is no longer declared')
@@ -1055,148 +1041,57 @@ def attach_result(root, run_id, output, alias, *, attempt, expected_result):
                            expected_ref=ref)
 
 
-def register_results(root, run_id, *, recover=False, attempt=None):
-    from demiflow.lance.model import LanceWriteReceipt
-    from demiflow.workbench.worker import operation
+def register_results(root, run_id, *, recover=False, attempt=None, maintenance_deadline=None):
     from demiflow.lance.refs import DatasetRef
+    from demiflow.execution.host.inspection import action_recovery_facts
+    from demiflow.execution.host.control import admit_absent_create
     target, value = _load(root, run_id, attempt=attempt)
-    run = RunJournal(target, attempt=value['state'].get('attempt'))
-    errors = []  # Recovery belongs to native RunJournal commits, never UI events.
-    if recover:
-        from .native_stages import recover as recover_stages
-        try:
-            recover_stages(target, run, value['manifest'])
-        except Exception as exc:
-            errors.append('native stages: ' + str(exc)[:512])
-        _, value = _load(root, run_id, attempt=attempt)
-    details = _describe(run_id, value)
-    for output in details['outputs']:
-        if output['result'] and (output.get('mode') != 'checkpoint' and output.get('publication') != 'native_stage_v3' or output['commit'] is not None
-                and output['result']['ref']['lance_version'] == output['commit']['reference']['version']):
+    selected = value['state'].get('attempt')
+    run = RunJournal(target, attempt=selected)
+    if recover and maintenance_deadline is None:
+        from demiflow.workbench.runs.storage import cleanup_deadline
+        maintenance_deadline = cleanup_deadline()
+    deadline = maintenance_deadline if recover else operation_budget.current_deadline()
+    errors = []
+    for name, output in value['manifest']['outputs'].items():
+        projection = value['output_projections'][output['action_id']]
+        evidence = projection['evidence']
+        if projection['result'] and (output.get('mode') != 'checkpoint'
+                and output.get('publication') != 'native_stage_v3' or evidence is not None
+                and projection['result_ref']['lance_version'] == evidence['version']):
             continue
         try:
-            if output.get('mode') == 'checkpoint' or output.get('publication') == 'native_stage_v3':
-                commit = output['commit']
-                if commit is None:
-                    continue
-                reference = commit['reference']
-                if output.get('publication') == 'native_stage_v3':
-                    from .native_stages import verify
-                    reference = verify(target, run, output, commit, report_digest=value['manifest']['report_digest'])
-                elif (commit['checkpoint_node'] != output['checkpoint_node'] or reference['uri'] != output['uri']
-                        or commit['schema_identity'] != output['schema_identity']):
-                    raise ForgeError('Stage commit identity differs from its declared owner')
-                actual = operation('metadata', output['uri'], version=reference['version'])
-                if actual['schema_identity'] != output['schema_identity']:
-                    raise ForgeError('Committed stage schema differs from its declaration')
-                ref = DatasetRef(output['dataset_id'], output['relative_uri'], reference['version'],
-                    output['schema_name'], output['schema_version'], actual['schema_hash'], actual['row_count'], store_id=output['location_id'])
-                kind = 'recovered_result' if 'stage_recovered' in details['actions'].get(output['action_id'], {}) else 'result'
-                run.action_event(output['action_id'], kind, {'ref': ref.to_dict(), 'location_id': output['location_id']})
+            verified = _verified_output(target, value['manifest'], output,
+                attempt=selected, recover=recover, deadline=deadline)
+            if verified is None:
+                if recover and output.get('mode', 'create') == 'create':
+                    facts = action_recovery_facts(target, output['action_id'],
+                                                  attempt=selected, deadline=deadline)
+                    if facts['absence_eligible']:
+                        admit_absent_create(run, action_id=output['action_id'],
+                            expected_attempt=selected, expected_revision=facts['revision'],
+                            expected_uri=output['uri'], deadline=deadline,
+                            confirm_stopped=lambda snapshot: execution_stopped(target, snapshot))
                 continue
-            receipt = output['receipt']
-            if (not receipt or receipt['status'] != 'committed') and recover:
-                receipt = _native_execution_receipt(run, output['action_id'])
-                if receipt is not None:
-                    run.action_event(output['action_id'], 'recovered', receipt)
-                elif _admit_absent_create(run, output,
-                        details['actions'].get(output['action_id'], {}).get('intent')):
-                    # Admission is not a receipt/result: no table exists to read.
-                    continue
-            if not receipt or receipt['status'] != 'committed':
-                continue
-            receipt = LanceWriteReceipt.from_dict(receipt)
-            intent = details['actions'].get(output['action_id'], {}).get('intent')
-            native = run.execution_action(output['action_id'])
-            if native is not None:
-                from demiflow.execution.lance_sink import spec_from_identity
-                if native['declaration'].get('kind') != 'write_table':
-                    raise ForgeError('Output does not name an original native write action')
-                original = spec_from_identity(native['declaration']['sink'])
-                request_hash = original.content_hash
-                if intent is not None and intent.get('request_hash') != request_hash:
-                    raise ForgeError('Write observation differs from the original native declaration')
-            elif intent is not None:
-                # Old observed writes retain their original receipt contract.
-                request_hash = intent['request_hash']
-            else:
-                raise ForgeError('Write receipt has no original request identity')
-            if receipt.uri != output['uri'] or receipt.request_hash != request_hash:
-                raise ForgeError('Write receipt identity differs')
-            actual = operation('metadata', output['uri'], version=receipt.committed_version)
-            if actual['schema_hash'] != receipt.schema_hash or actual['row_count'] != receipt.written_rows:
-                raise ForgeError('Committed table differs from receipt')
-            ref = DatasetRef(output['dataset_id'], output['relative_uri'], receipt.committed_version,
-                output['schema_name'], output['schema_version'], actual['schema_hash'], actual['row_count'], store_id=output['location_id'])
-            run.action_event(output['action_id'], 'result', {'ref': ref.to_dict(), 'location_id': output['location_id']})
+            recording = verified['recording']
+            if recording is not None:
+                if (recording['action_id'] != output['action_id']
+                        or recording['attempt'] != (selected if selected is not None else 1)
+                        or recording['kind'] not in {'recovered', 'stage_recovered'}):
+                    raise ForgeError('Recovered publication is bound to a different action or attempt')
+                run.action_event(output['action_id'], recording['kind'], recording['value'])
+            if verified['action_id'] != output['action_id'] or verified['uri'] != output['uri']:
+                raise ForgeError('Verified publication differs from the sealed output')
+            ref = DatasetRef(output['dataset_id'], output['relative_uri'], verified['version'],
+                output['schema_name'], output['schema_version'], verified['schema_hash'],
+                verified['row_count'], store_id=output['location_id'])
+            if verified['result_kind'] not in {'result', 'recovered_result'}:
+                raise ForgeError('Invalid result registration kind')
+            run.action_event(output['action_id'], verified['result_kind'],
+                             {'ref': ref.to_dict(), 'location_id': output['location_id']})
         except Exception as exc:
-            errors.append(output['name'] + ': ' + str(exc)[:512])
+            errors.append(name + ': ' + str(exc)[:512])
     return errors
-
-
-def _admit_absent_create(run, output, intent):
-    """Record only confirmed absence, using the stopped driver's existing fence."""
-    from demiflow.errors import LanceResourceNotFound
-    from demiflow.execution.lance_sink import spec_from_identity
-    from demiflow.execution.run_context import create_target_absent_binding
-    from demiflow.lance.reconcile import reconcile_lance_create
-    from demiflow.lance.storage import inspect_lance
-
-    action_id = output['action_id']
-    configuration = run.recovery_identity()
-    native = run.execution_action(action_id)
-    if configuration is None or native is None or run.execution_commits(action_id):
-        return False
-    binding = create_target_absent_binding(configuration['run_id'], action_id,
-                                          native['declaration'], intent)
-    if (binding is None or output.get('mode') != 'create'
-            or output.get('uri') != binding['uri']):
-        return False
-    spec = spec_from_identity(native['declaration']['sink'])
-    try:
-        try:
-            receipt = reconcile_lance_create(spec.uri, request_hash=binding['request_hash'],
-                                             operation_id=binding['operation_id'])
-        except LanceResourceNotFound:
-            # The native reconciler raises for an absent dataset, rather than
-            # returning None. This supplies no receipt; still require the
-            # separate, current inspect_lance absence proof below.
-            receipt = None
-        if receipt is not None:
-            return False  # Published without a journal commit is outside this slice.
-        try:
-            inspect_lance(spec.uri, None, spec.storage_options)
-        except LanceResourceNotFound:
-            pass
-        else:
-            return False
-    except Exception:
-        return False  # IO, permission and corruption are never absence evidence.
-
-    # Never steal ownership from an active driver. Resume already holds the
-    # workspace execution lock; also take the same runtime lease as RunContext.
-    descriptor = os.open(run.directory / '.runtime.lock',
-                         os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
-    try:
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return False
-        state = RunJournal(run.directory).execution_status()
-        if (state['status'] not in TERMINAL or state['attempt'] != run.attempt
-                or not execution_stopped(run.directory, state)):
-            return False
-        fence = uuid.uuid4().hex
-        run.claim_execution(configuration, fence)
-        try:
-            # This immutable cross-attempt fact only admits replay. The sink's
-            # create conflict check remains the authority at publication time.
-            run.bind_source(fence, action_id + '-create-target-absent', binding)
-        finally:
-            run.release_execution(fence)
-    finally:
-        os.close(descriptor)
-    return True
 
 
 def execution_stopped(target, state):
@@ -1218,39 +1113,69 @@ def reconcile(root, run_id, *, expected_attempt=_CURRENT_ATTEMPT):
 
 
 def _reconcile(root, run_id, *, expected_attempt):
+    from demiflow.workbench.runs.storage import cleanup_deadline, remove_attempt_work, clean_stopped
     with execution_lock(root):
         target, value = _load(root, run_id)
         state = value['state']
         _attempt(state.get('attempt'), expected_attempt)
         if process_matches(state.get('supervisor')) or process_matches(state.get('worker')):
             raise ForgeError('Run processes have not stopped')
-        if value['manifest']['format'] == FORMAT and not execution_stopped(target, state):
+        modern = value['manifest']['format'] == FORMAT
+        if modern and not execution_stopped(target, state):
             raise ForgeError('Owned execution unit has not stopped; capacity remains reserved')
         run = RunJournal(target, attempt=state.get('attempt'))
-        from demiflow.workbench.runs.domain import reserved
-        if state['status']=='prepared' and reserved(root,run_id,state.get('attempt')):
-            run.transition({'prepared'},'failed',reason='launch_failed',recoverable=True,execution_stopped=True)
-        if state['status'] in ACTIVE:
-            if state.get('launch_phase') == 'admitted':
-                usage = state.get('usage', {})
-                run.record_usage(elapsed_ms=usage.get('elapsed_ms', 0), output_bytes=usage.get('output_bytes', 0), complete=True)
-                run.transition(ACTIVE, 'cancelled' if state['status'] == 'stopping' else 'failed',
-                               reason='launch_failed', recoverable=True, execution_stopped=True, stop_phase='confirmed')
-            else:
-                run.transition(ACTIVE, 'interrupted', reason='supervisor_lost', execution_stopped=True, stop_phase='confirmed')
-        errors = register_results(root, run_id, recover=True)
-        # Explicit recovery also reclaims private scratch left by a dead supervisor.
+        completed = state.get('cleanup') == 'complete'
         work = attempt_directory(target, 'work', state.get('attempt'))
-        _tree_bytes(work)
-        shutil.rmtree(work, ignore_errors=True)
-        current = run.execution_status()
-        run.transition({current['status']}, current['status'], cleanup='pending')
-        if not work.exists():
-            from demiflow.workbench.runs.storage import clean_stopped
-            clean_stopped(run)
+        if completed and os.path.lexists(work):
+            raise ForgeError('Completed cleanup contradicts remaining private work', code='conflict')
+        if not completed:
+            from demiflow.workbench.runs.domain import reserved
+            if state['status'] == 'prepared' and reserved(root, run_id, state.get('attempt')):
+                run.transition({'prepared'}, 'failed', reason='launch_failed',
+                               recoverable=True, execution_stopped=True)
+            if state['status'] in ACTIVE:
+                if state.get('launch_phase') == 'admitted':
+                    usage = state.get('usage', {})
+                    run.record_usage(elapsed_ms=usage.get('elapsed_ms', 0),
+                                     output_bytes=usage.get('output_bytes', 0), complete=True)
+                    run.transition(ACTIVE, 'cancelled' if state['status'] == 'stopping' else 'failed',
+                                   reason='launch_failed', recoverable=True,
+                                   execution_stopped=True, stop_phase='confirmed')
+                else:
+                    run.transition(ACTIVE, 'interrupted', reason='supervisor_lost',
+                                   execution_stopped=True, stop_phase='confirmed')
+        deadline = cleanup_deadline()
+
+        def stopped(snapshot):
+            if modern:
+                return execution_stopped(target, snapshot)
+            # Known historical hosts predate execution-unit files. Retain their
+            # original process-identity proof; the native runtime lease is also held.
+            return not any(process_matches(snapshot.get(name)) for name in ('supervisor', 'worker'))
+
+        try:
+            errors = register_results(root, run_id, recover=True, maintenance_deadline=deadline)
+            if not completed:
+                remove_attempt_work(work, deadline=deadline)
             current = run.execution_status()
-            run.transition({current['status']}, current['status'], cleanup='complete')
-        refresh_index(root, run_id)
+            clean_stopped(run, expected_revision=current['revision'],
+                          confirm_stopped=stopped, deadline=deadline)
+            if not completed:
+                current = run.execution_status()
+                if not run.transition({current['status']}, current['status'],
+                                      execution_stopped=True, stop_phase='confirmed', cleanup='complete'):
+                    raise ForgeError('Cleanup state changed before final registration', code='conflict')
+        except Exception as exc:
+            if not completed:
+                try:
+                    current = run.execution_status()
+                    run.transition({current['status']}, current['status'], cleanup='pending',
+                        cleanup_error=dict(type=type(exc).__name__, message=str(exc)[:1024]))
+                except (OSError, ValueError):
+                    pass  # A failed final registration never establishes completion.
+            raise
+        finally:
+            refresh_index(root, run_id, deadline=deadline)
     result = show(root, run_id)
     result['reconciliation_errors'] = errors
     return result
@@ -1355,6 +1280,3 @@ def logs(root, run_id, *, offset=0, limit=65536, attempt=None):
     pending,_=decoder.getstate()
     return dict(text=text,next_offset=position-len(pending),
                 truncated=offset<base or skipped>0,base_offset=base)
-
-
-from demiflow.execution.publication_facts import inspect_write_receipt as _native_execution_receipt

@@ -1541,6 +1541,7 @@ def list_reports(root, *, offset=0, limit=20, cursor=None):
 def workspace_changes(root):
     """Metadata hints, not bindings or snapshots. Never read datasets or journals."""
     from demiflow.workbench.projects import index
+    from demiflow.execution.host.inspection import observe_storage
 
     root = Path(root).absolute()
     no_symlinks(root)
@@ -1565,9 +1566,14 @@ def workspace_changes(root):
     if info.get('reason') == 'index_not_initialized':
         from demiflow.workbench.runs.manager import _run_ids
         active = _run_ids(root, maximum=128)
-    runs = {run_id: stamp([root / '.forge/runs' / run_id / name
-                          for name in ('run.sqlite', 'run.sqlite-wal', 'run.sqlite-journal')])
-            for run_id in active}
+    runs = {}
+    for run_id in active:
+        target = relative_path(root, '.forge/runs/' + run_id)
+        if not target.exists():
+            runs[run_id] = content_digest(None)  # A stale catalogue entry is only a refresh hint.
+            continue
+        with observe_storage(target) as observation:
+            runs[run_id] = observation.change_token
     value = read_control(root / 'workspace.json')
     source_paths, source_diagnostics = source_inventory(root, value)
     from demiflow.workbench.projects.discovery import discover

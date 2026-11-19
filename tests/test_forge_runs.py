@@ -244,7 +244,8 @@ def test_create_reconciliation_uses_marker_and_preserves_fixed_version(root, mon
                 CommitCoordinator(action).commit(1, outputs={'lance': (LanceSink(action, spec),
                     [pa.table({'case_id': ['recovered']})])}, position=SourcePosition('fixed', 1))
     monkeypatch.setattr(protocol, 'fault_point', lambda *args: None)
-    data.from_items([{'case_id': 'later'}]).write_lance(output['uri'], mode='append')
+    # An external writer advances the head independently of native recovery.
+    lance.write_dataset(pa.Table.from_pylist([{'case_id': 'later'}]), output['uri'], mode='append')
     result = runs.reconcile(root, value['run_id'])
     assert result['status'] == 'interrupted'
     assert result['reconciliation_errors'] == [], result['reconciliation_errors']
@@ -266,7 +267,8 @@ def test_wrong_marker_never_promoted_and_registration_recovery(root):
     spec = LanceWriteSpec(uri=output['uri'], mode='create')
     run.action_event(output['action_id'], 'intent', {'kind': 'write_table', 'request_hash': spec.content_hash, 'operation_id': 'different-attempt'})
     # Even the exact same URI and write specification cannot prove attempt ownership.
-    data.from_items([{'id': 1}]).write_lance(output['uri'], mode='create')
+    lance.write_dataset(pa.Table.from_pylist([{'id': 1}]), output['uri'], mode='create',
+                        commit_message='demiflow-lance:unrelated-writer')
     result = runs.reconcile(root, value['run_id'])
     assert result['outputs'][0]['status'] == 'unknown'
     assert result['outputs'][0]['result'] is None

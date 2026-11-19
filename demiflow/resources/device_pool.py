@@ -30,7 +30,8 @@ def _positive_int(value, name):
     return value
 
 
-def _validate_inventory(inventory):
+def validate_inventory(inventory):
+    """Validate a bounded declaration without opening or allocating resources."""
     if type(inventory) is not dict or set(inventory) != {"devices"}:
         raise ResourceError("INVALID_SPEC", "device inventory needs a devices list")
     devices = inventory["devices"]
@@ -54,6 +55,10 @@ def _validate_inventory(inventory):
             entry["max_residents"] = _positive_int(device["max_residents"], "device.max_residents")
         normalized.append(entry)
     return normalized
+
+
+# Native callers retain their historical import with the same implementation.
+_validate_inventory = validate_inventory
 
 
 def _validate_accelerators(accelerators):
@@ -89,7 +94,7 @@ class DevicePool:
 
     def __init__(self, root, *, inventory):
         self.root = Path(root).resolve()
-        self.inventory = _validate_inventory(inventory)
+        self.inventory = validate_inventory(inventory)
         self._devices = {device["device_id"]: device for device in self.inventory}
         self.root.mkdir(parents=True, exist_ok=True)
         self._records = self.root / "allocations"

@@ -38,9 +38,9 @@ def stage_binding(journal, directory, parent, node, report_digest):
 
 def native_stage_commit(journal, directory, *, scope_id, commit_id, report_digest):
     with journal._connection() as db:
-        row = db.execute('SELECT parent_action_id,declaration FROM runtime_commit_scopes '
+        row = db.execute('SELECT parent_action_id,substr(CAST(declaration AS BLOB),1,65537) FROM runtime_commit_scopes '
                          'WHERE scope_id=?', (scope_id,)).fetchone()
-    if row is None or len(row[1].encode()) > 65536:
+    if row is None or len(row[1]) > 65536:
         raise RecoveryContractError('Native stage scope is missing or oversized')
     parent, raw = row
     declaration = json.loads(raw)

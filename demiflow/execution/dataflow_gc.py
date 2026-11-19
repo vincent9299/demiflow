@@ -120,15 +120,18 @@ def _exclusive(journal, fence):
         yield
 
 
-def recover_published_gc(journal, fence):
+def recover_published_gc(journal, fence, *, deadline=None):
     result = {'removed': 0, 'bytes': 0, 'blocked': None}
     try:
+        _check_time(deadline)
         with _exclusive(journal, fence):
             for item in journal.dataflow_gc_intents():
-                result['bytes'] += _reconcile(journal, fence, item)
+                _check_time(deadline)
+                result['bytes'] += _reconcile(journal, fence, item, deadline=deadline)
                 result['removed'] += 1
             if journal.pending_dataflow_gc():
                 raise UnprovenGC('GC recovery page exhausted')
+            _check_time(deadline)
     except Exception as exc:
         result['blocked'] = str(exc)
     return result

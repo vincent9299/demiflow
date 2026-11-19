@@ -3,6 +3,7 @@
 from demiflow.workbench import host_partition
 from contextlib import closing
 import sqlite3
+import time
 import pytest
 
 from demiflow.execution.run_context import RunContext
@@ -49,6 +50,8 @@ def test_live_native_owner_cannot_be_replaced_by_cleanup(tmp_path):
     from demiflow.workbench.runs.storage import clean_stopped
     from demiflow.workbench.runs.storage import owned_objects
     from demiflow.workbench.runs.storage import scratch_bytes
+    from demiflow.errors import ExecutionConflict
+    from demiflow.workbench.runs.manager import execution_stopped
 
     location = tmp_path / "objects"
     _, target, journal = control_fixture(tmp_path / "project", objects=[str(location)])
@@ -56,8 +59,10 @@ def test_live_native_owner_cannot_be_replaced_by_cleanup(tmp_path):
     with RunContext.attach(journal) as native:
         namespace = native.object_namespace(location)
         assert owned_objects(target, [str(location)]) == [namespace]
-        with pytest.raises(BlockingIOError):
-            clean_stopped(journal)
+        with pytest.raises(ExecutionConflict, match='lease is busy'):
+            clean_stopped(journal, expected_revision=journal.execution_status()['revision'],
+                confirm_stopped=lambda snapshot: execution_stopped(target, snapshot),
+                deadline=time.monotonic() + 10)
         assert journal.execution_status().get("execution_stopped") is not True
         assert (
             scratch_bytes(target, target / "work/attempt-1", [str(location)])
@@ -119,16 +124,24 @@ with RunContext.attach(RunJournal(Path(sys.argv[1]),attempt=1)) as native:
     owner = json.loads((domain / "slot-0.json").read_text())
     assert not run_domain._owner_finished(owner)
     before = run_domain.history_admission(tmp_path / "project", reserve=0)
+    from demiflow.execution.run_journal import RunJournal
+    from demiflow.workbench.runs.manager import execution_stopped
+    journal = RunJournal(target, attempt=1)
+
+    def clean():
+        return clean_stopped(journal, expected_revision=journal.execution_status()['revision'],
+            confirm_stopped=lambda snapshot: execution_stopped(target, snapshot), deadline=time.monotonic() + 10)
+
     with monkeypatch.context() as scope:
 
-        def fail(_):
+        def fail(self, fence):
             raise OSError("owned native cleanup fault")
 
-        scope.setattr(journal, "clean_orphans", fail)
+        scope.setattr(type(journal), "clean_orphans", fail)
         with pytest.raises(OSError, match="cleanup fault"):
-            clean_stopped(journal)
+            clean()
     assert orphan.exists() and not run_domain._owner_finished(owner)
-    clean_stopped(journal)
+    clean()
     assert not orphan.exists() and (namespace / ".owner").exists()
     assert run_domain.history_admission(tmp_path / "project", reserve=0) <= before - 73
     assert journal.recovery_identity() == binding
@@ -216,7 +229,7 @@ def test_object_owner_record_cannot_redirect_accounting(tmp_path, damage):
                 ),
             )
         db.commit()
-    with pytest.raises(ForgeError, match="checked locations|native run identity"):
+    with pytest.raises(ForgeError, match="checked locations|native (run )?identity"):
         owned_objects(target, [str(location)])
 
 

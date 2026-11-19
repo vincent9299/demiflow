@@ -90,9 +90,13 @@ def _node_document(document):
 
 
 class RunJournal:
-    def __init__(self, directory, *, attempt=None):
+    def __init__(self, directory, *, attempt=None, _maintenance_deadline=None):
         if attempt is not None and (type(attempt) is not int or not 1 <= attempt <= 32):
             raise ValueError('Attempt must be 1..32')
+        if (_maintenance_deadline is not None and
+                (type(_maintenance_deadline) not in (int, float)
+                 or not math.isfinite(_maintenance_deadline) or _maintenance_deadline <= 0)):
+            raise ValueError('Maintenance deadline must be a finite monotonic time')
         self.directory = Path(directory)
         self.path = self.directory / 'run.sqlite'
         self.attempt = attempt
@@ -100,6 +104,14 @@ class RunJournal:
         self._connection_lock = threading.RLock()
         self._reader_lock = threading.RLock()
         self._connections = None
+        # Only stopped-execution commands construct a dedicated scoped instance.
+        # Never install a temporary deadline on a live driver's shared journal.
+        self._maintenance_deadline = _maintenance_deadline
+
+    def _check_maintenance_deadline(self):
+        deadline = self._maintenance_deadline
+        if deadline is not None and time.monotonic() >= deadline:
+            raise ExecutionConflict('Stopped execution maintenance deadline expired')
 
     @contextmanager
     def connection_scope(self):
@@ -352,18 +364,28 @@ class RunJournal:
         if manifest + node_count*(OBSERVATION_BYTES+1024) + action_bytes + 8*1024**2 > 60*1024**2:
             raise ValueError('Reliable journal reservation exceeds capacity')
 
-    def reserve_actions(self, identities):
+    @staticmethod
+    def _action_reservation_keys(identities):
         if type(identities) is not list or len(identities) > 128 or any(type(i) is not str or len(i)>64 for i in identities):
             raise ValueError('Invalid action reservation')
+        return set(identities)
+
+    @classmethod
+    def _reserve_actions_in(cls, db, identities, *, attempt):
+        if not cls._managed(db):
+            return
+        old = {r[0] for r in db.execute('SELECT action_id FROM forge_action_reservations WHERE attempt=?', (attempt,))}
+        new = identities - old
+        cls._reserve_capacity(db, actions=len(new))
+        db.executemany('INSERT INTO forge_action_reservations VALUES (?,?)', [(attempt, i) for i in new])
+
+    def reserve_actions(self, identities):
+        keys = self._action_reservation_keys(identities)
         with self._transaction() as db:
             if not self._managed(db):
                 return
             _, scope = self._scope(db)
-            attempt = scope[0]
-            old = {r[0] for r in db.execute('SELECT action_id FROM forge_action_reservations WHERE attempt=?', (attempt,))}
-            new = set(identities)-old
-            self._reserve_capacity(db, actions=len(new))
-            db.executemany('INSERT INTO forge_action_reservations VALUES (?,?)', [(attempt, i) for i in new])
+            self._reserve_actions_in(db, keys, attempt=scope[0])
 
     def stage(self, name, fingerprint, dataset_ref):
         value = encoded(dataset_ref).decode()
@@ -414,14 +436,17 @@ class RunJournal:
                 db.execute('UPDATE attempts SET document=? WHERE attempt=?', (raw, value['attempt']))
             return True
 
-    def begin_attempt(self, *, expected_attempt, expected_revision):
+    def begin_attempt(self, *, expected_attempt, expected_revision, nodes=None, actions=None):
         """CAS a new prepared attempt; callers additionally own the execution lease.
 
         This does not authorize a particular failure for retry, change the
-        immutable manifest, reset usage, or reconcile external writes.
+        immutable manifest, reset usage, or reconcile external writes. Managed
+        attempts reserve their complete node/action set in this same transaction.
         """
         if type(expected_attempt) is not int or type(expected_revision) is not int:
             raise ValueError('Attempt and revision must be exact integers')
+        node_keys = None if nodes is None else self._node_reservation_keys(nodes)
+        action_keys = None if actions is None else self._action_reservation_keys(actions)
         with self._transaction() as db:
             if not self._modern(db):
                 raise ValueError('Historical journal cannot resume under a new contract')
@@ -430,6 +455,12 @@ class RunJournal:
                 raise ExecutionConflict('Attempt or execution revision changed')
             if old['status'] not in {'cancelled', 'interrupted', 'failed'} or expected_attempt >= 32:
                 raise ValueError('Execution status or attempt budget forbids resume')
+            if self._managed(db) and (node_keys is None or action_keys is None):
+                raise ValueError('Managed attempts require node and action reservations')
+            if self._managed(db) and (
+                    db.execute('SELECT 1 FROM runtime_owner LIMIT 1').fetchone() is not None
+                    or db.execute("SELECT 1 FROM runtime_dataflow_gc WHERE status!='done' LIMIT 1").fetchone() is not None):
+                raise ExecutionConflict('Native execution ownership or published GC is not settled')
             value = {'attempt': expected_attempt + 1, 'status': 'prepared', 'revision': expected_revision + 1,
                      'updated_at': time.time(), 'usage': old.get('usage', {}),
                      'usage_complete': old.get('usage_complete', False),
@@ -437,6 +468,10 @@ class RunJournal:
             raw = encoded(value).decode()
             db.execute('INSERT INTO attempts VALUES (?,?)', (value['attempt'], raw))
             db.execute('UPDATE execution_state SET document=? WHERE singleton=1', (raw,))
+            if node_keys is not None:
+                self._reserve_nodes_in(db, node_keys, attempt=value['attempt'])
+            if action_keys is not None:
+                self._reserve_actions_in(db, action_keys, attempt=value['attempt'])
             return value
 
     def record_usage(self, *, elapsed_ms, output_bytes, complete=False):
@@ -575,24 +610,34 @@ class RunJournal:
                     'events': [dict(sequence=seq, action_id=aid, kind=kind, value=json.loads(raw))
                                for seq, aid, kind, raw in rows]}
 
-    def reserve_nodes(self, identities):
-        """Reserve every terminal document before any execution or side effect."""
+    @staticmethod
+    def _node_reservation_keys(identities):
         if type(identities) is not list or len(identities) > OBSERVATION_COUNT:
             raise ValueError('Node observation reservation exceeds count/byte budget')
         keys = [_node_key(*identity) for identity in identities]
         if len(set(keys)) != len(keys):
             raise ValueError('Duplicate node execution identity')
+        return keys
+
+    @classmethod
+    def _reserve_nodes_in(cls, db, keys, *, attempt):
+        scope, parameters = (' WHERE attempt=?', (attempt,)) if attempt is not None else ('', ())
+        existing = set(db.execute('SELECT action_id,node_id,occurrence FROM node_observations' + scope + ' LIMIT ?', (*parameters, OBSERVATION_COUNT + 1)))
+        if len(existing | set(keys)) > OBSERVATION_COUNT:
+            raise ValueError('Node observation reservation exceeds total byte budget')
+        cls._reserve_capacity(db, nodes=len(set(keys)-existing))
+        total = db.execute('SELECT count(*) FROM node_observations').fetchone()[0]
+        if total + len(set(keys) - existing) > OBSERVATION_COUNT * 4:
+            raise ValueError('Cumulative node reservation exceeds 32 MiB')
+        raw = _node_document({'sequence': 0, 'state': 'pending'})
+        db.executemany('INSERT OR IGNORE INTO node_observations VALUES (' + ('?,' if scope else '') + '?,?,?,0,0,?)', [(*parameters, *key, raw) for key in keys])
+
+    def reserve_nodes(self, identities):
+        """Reserve every terminal document before any execution or side effect."""
+        keys = self._node_reservation_keys(identities)
         with self._transaction() as db:
-            scope, parameters = self._scope(db)
-            existing = set(db.execute('SELECT action_id,node_id,occurrence FROM node_observations' + scope + ' LIMIT ?', (*parameters, OBSERVATION_COUNT + 1)))
-            if len(existing | set(keys)) > OBSERVATION_COUNT:
-                raise ValueError('Node observation reservation exceeds total byte budget')
-            self._reserve_capacity(db, nodes=len(set(keys)-existing))
-            total = db.execute('SELECT count(*) FROM node_observations').fetchone()[0]
-            if total + len(set(keys) - existing) > OBSERVATION_COUNT * 4:
-                raise ValueError('Cumulative node reservation exceeds 32 MiB')
-            raw = _node_document({'sequence': 0, 'state': 'pending'})
-            db.executemany('INSERT OR IGNORE INTO node_observations VALUES (' + ('?,' if scope else '') + '?,?,?,0,0,?)', [(*parameters, *key, raw) for key in keys])
+            _, parameters = self._scope(db)
+            self._reserve_nodes_in(db, keys, attempt=parameters[0] if parameters else None)
 
     def observe_nodes(self, updates):
         """Batch latest snapshots; stale progress can never overwrite a terminal."""
@@ -692,10 +737,15 @@ class RunJournal:
         """Serialize fence replacement with publication, without holding SQLite."""
         import fcntl
         path = self.directory / '.publication.lock'
+        self._check_maintenance_deadline()
+        deadline = (min(time.monotonic() + timeout, self._maintenance_deadline)
+                    if self._maintenance_deadline is not None else None)
         descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
-        deadline = time.monotonic() + timeout
+        if deadline is None:
+            deadline = time.monotonic() + timeout
         try:
             while True:
+                self._check_maintenance_deadline()
                 try:
                     fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     break
@@ -717,17 +767,20 @@ class RunJournal:
 
     def claim_execution(self, configuration, fence):
         with self._publication_lease(configuration['limits'].get('admission_timeout_s', 30)):
+            self._check_maintenance_deadline()
             attempt = self._claim_execution(configuration, fence)
         self._reconcile_published_gc(fence)
         return attempt
 
     def _reconcile_published_gc(self, fence):
+        self._check_maintenance_deadline()
         from .dataflow_object_lease import exclusive_here
         if not exclusive_here(self.directory / '.dataflow-store') and self.pending_dataflow_gc():
             from .dataflow_gc import recover_published_gc
-            result = recover_published_gc(self, fence)
+            result = recover_published_gc(self, fence, deadline=self._maintenance_deadline)
             if result.get('blocked'):
                 raise ExecutionConflict('Published artifact reconciliation is still owned or unknown: ' + result['blocked'])
+        self._check_maintenance_deadline()
 
     def _claim_execution(self, configuration, fence):
         from .recovery_contract import document, identifier, RecoveryContractError
@@ -1641,13 +1694,16 @@ class RunJournal:
         from .recovery_contract import RecoveryContractError
         after, removed = '', 0
         while True:
+            self._check_maintenance_deadline()
             with self._connection() as db:
                 rows = db.execute("SELECT path FROM runtime_artifacts AS a WHERE protected=0 AND path>? AND NOT EXISTS (SELECT 1 FROM runtime_commits AS c WHERE c.commit_id=a.commit_id AND c.prepared IS NOT NULL) ORDER BY path LIMIT 64", (after,)).fetchall()
                 paths = [(name, self._artifact_path(db, name)) for (name,) in rows]
             if not paths:
+                self._check_maintenance_deadline()
                 return removed
             with self.publication_guard(fence):
                 for name, path in paths:
+                    self._check_maintenance_deadline()
                     if any(p.is_symlink() for p in (path, *path.parents)):
                         raise RecoveryContractError('Orphan path contains a symlink')
                     if path.exists():

@@ -618,9 +618,19 @@ def seal_dataflow(action: RunAction, graph: DataflowGraph, physical: PhysicalDat
 
 
 # -- D013 -----------------------------------------------------------------
-def load_dataflow(directory: Path, action_id: str, *, store, bounds: Bounds):
+def load_dataflow(directory: Path, action_id: str, *, store, bounds: Bounds, _reader=None,
+                  _max_carrier_bytes=None, _deadline=None):
     identifier(action_id)
-    journal = RunJournal(directory)
+    def check_read():
+        import time
+        import math
+        if _deadline is not None and (type(_deadline) not in (int, float) or not math.isfinite(_deadline) or time.monotonic() >= _deadline):
+            raise DataflowError('BUDGET_EXCEEDED', 'Historical read deadline exceeded or invalid')
+        check = getattr(_reader, 'check_read', None)
+        if check is not None:
+            check()
+    check_read()
+    journal = RunJournal(directory) if _reader is None else _reader
     if not journal.path.is_file():
         raise DataflowError("INCOMPATIBLE_HISTORY", "Run journal is absent")
     facts = journal.source_binding(action_id + _SEAL_KEY)
@@ -631,12 +641,22 @@ def load_dataflow(directory: Path, action_id: str, *, store, bounds: Bounds):
                             "Historical action schema " + str(binding.schema_version)
                             + " is not a v3 sealed dataflow")
     _validate_seal_marker(facts)
+    if _max_carrier_bytes is not None:
+        if type(_max_carrier_bytes) is not int or _max_carrier_bytes <= 0:
+            raise DataflowError('INVALID_CONTRACT', 'Invalid carrier read budget')
+        references = [facts[key] for key in ('logical_ref','physical_ref','code_pin_ref','identity_bridge_ref','constants_ref')]
+        references.extend(facts['programs']); references.extend(facts['source_refs'])
+        for raw_ref in references:
+            check_read()
+            if _artifact_from_json(raw_ref).size_bytes > _max_carrier_bytes:
+                raise DataflowError('BUDGET_EXCEEDED', 'Historical carrier exceeds read budget')
     if facts.get("action_id") != action_id:
         raise DataflowError("INVALID_CONTRACT", "Sealed action differs from the requested action")
     logical_ref = _artifact_from_json(facts["logical_ref"])
     graph = decode_wire(_read_bytes(store, logical_ref, max_bytes=bounds.max_control_bytes,
                                     media_type=GRAPH_MEDIA),
                         type_name="DataflowGraph", bounds=bounds)
+    check_read()
     physical_ref = _artifact_from_json(facts["physical_ref"])
     physical = decode_wire(_read_bytes(store, physical_ref, max_bytes=bounds.max_control_bytes,
                                        media_type=PHYSICAL_MEDIA),
@@ -655,12 +675,15 @@ def load_dataflow(directory: Path, action_id: str, *, store, bounds: Bounds):
     source_refs = tuple(_artifact_from_json(r) for r in facts["source_refs"])
     constants_ref = _artifact_from_json(facts["constants_ref"])
     for ref in (*programs, code_pin_ref, identity_bridge_ref, *source_refs, constants_ref):
+        check_read()
         if not store.inspect(ref):
             raise DataflowError("CORRUPT_ARTIFACT", "Sealed artifact is missing; partial seal is not loadable")
+        check_read()
     sealed = SealedExecution(logical_ref=logical_ref, physical_ref=physical_ref,
                              programs=programs, code_pin_ref=code_pin_ref,
                              identity_bridge_ref=identity_bridge_ref, source_refs=source_refs,
                              constants_ref=constants_ref)
+    check_read()
     return graph, physical, sealed
 
 

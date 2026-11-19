@@ -37,10 +37,10 @@ def validate(value):
     # deployment supplied, finite, and independent of the unchanged RSS guard.
     if type(ceiling) is not int or not 1024**3 <= ceiling <= 128*1024**4:
         raise ForgeError('GPU virtual address ceiling must be finite in 1 GiB..128 TiB')
-    from demiflow.resources.device_pool import _validate_inventory
+    from demiflow.resources.device_pool import validate_inventory
     from demiflow.resources.contracts import ResourceError
     try:
-        devices = _validate_inventory(value['device_inventory'])
+        devices = validate_inventory(value['device_inventory'])
     except ResourceError as exc:
         raise ForgeError('Invalid managed device inventory: ' + str(exc)) from exc
     if any(device['type'] != 'gpu' for device in devices):

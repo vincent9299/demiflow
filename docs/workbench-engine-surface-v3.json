@@ -1,0 +1,919 @@
+{
+  "constructor_keywords": {
+    "RunJournal": [
+      "directory",
+      "attempt"
+    ],
+    "demiflow.execution.host.control.RunJournal": [
+      "directory",
+      "attempt"
+    ]
+  },
+  "exports": {
+    "control": {
+      "CheckedExecution": [
+        "demiflow.execution.checked",
+        "CheckedExecution"
+      ],
+      "DEFAULT_LIMITS": [
+        "demiflow.execution.runtime_limits",
+        "DEFAULT_LIMITS"
+      ],
+      "RunContext": [
+        "demiflow.execution.run_context",
+        "RunContext"
+      ],
+      "RunJournal": [
+        "demiflow.execution.run_journal",
+        "RunJournal"
+      ],
+      "admit_absent_create": [
+        "demiflow.execution.run_context",
+        "admit_absent_create"
+      ],
+      "clean_stopped_execution": [
+        "demiflow.execution.run_context",
+        "clean_stopped_execution"
+      ],
+      "local_execution": [
+        "demiflow.execution.local_kernel",
+        "local_execution"
+      ],
+      "observe": [
+        "demiflow.execution.run_telemetry",
+        "observe"
+      ],
+      "resolve_payload_bounds": [
+        "demiflow.execution.payload_limits",
+        "resolve_payload_bounds"
+      ],
+      "stream_limits": [
+        "demiflow.execution.payload_limits",
+        "stream_limits"
+      ]
+    },
+    "inspection": {
+      "OBSERVATION_COUNT": [
+        "demiflow.execution.run_journal",
+        "OBSERVATION_COUNT"
+      ],
+      "PlanContractError": [
+        "demiflow.execution.sealed_plan_facts",
+        "PlanContractError"
+      ],
+      "PreparedPublicationUnresolved": [
+        "demiflow.execution.publication_facts",
+        "PreparedPublicationUnresolved"
+      ],
+      "PublicationMismatch": [
+        "demiflow.execution.publication_facts",
+        "PublicationMismatch"
+      ],
+      "RunReadError": [
+        "demiflow.execution.run_reader",
+        "RunReadError"
+      ],
+      "VERSION": [
+        "demiflow.execution.capabilities",
+        "VERSION"
+      ],
+      "action_recovery_facts": [
+        "demiflow.execution.publication_facts",
+        "action_recovery_facts"
+      ],
+      "admit_prepared_stage": [
+        "demiflow.execution.publication_facts",
+        "admit_prepared_stage"
+      ],
+      "build_logical_plan_view": [
+        "demiflow.execution.plan_capture",
+        "build_logical_plan_view"
+      ],
+      "capture_pipeline": [
+        "demiflow.execution.plan_capture",
+        "capture_pipeline"
+      ],
+      "compile_declared_dag": [
+        "demiflow.planning.dag",
+        "compile_declared_dag"
+      ],
+      "compiled_node_materials": [
+        "demiflow.execution.program_materials",
+        "compiled_node_materials"
+      ],
+      "dataset_declaration_links": [
+        "demiflow.data.declaration_inspection",
+        "dataset_declaration_links"
+      ],
+      "execution_instances": [
+        "demiflow.execution.plan_facts",
+        "execution_instances"
+      ],
+      "identity": [
+        "demiflow.execution.recovery_contract",
+        "identity"
+      ],
+      "latest": [
+        "demiflow.execution.run_telemetry",
+        "latest"
+      ],
+      "observe_storage": [
+        "demiflow.execution.run_reader",
+        "observe_storage"
+      ],
+      "platform_identity": [
+        "demiflow.execution.recovery_identity",
+        "platform_identity"
+      ],
+      "read_action_plan": [
+        "demiflow.execution.sealed_plan_facts",
+        "read_action_plan"
+      ],
+      "read_run": [
+        "demiflow.execution.run_reader",
+        "read_run"
+      ],
+      "read_verified_identity_bridge": [
+        "demiflow.execution.sealed_plan_facts",
+        "read_verified_identity_bridge"
+      ],
+      "resolve_local_artifact": [
+        "demiflow.execution.artifacts",
+        "resolve_local_artifact"
+      ],
+      "series": [
+        "demiflow.execution.run_telemetry",
+        "series"
+      ],
+      "stream_residency": [
+        "demiflow.execution.capabilities",
+        "stream_residency"
+      ],
+      "verify_published_output": [
+        "demiflow.execution.publication_facts",
+        "verify_published_output"
+      ],
+      "verify_write_receipt": [
+        "demiflow.execution.publication_facts",
+        "verify_write_receipt"
+      ]
+    }
+  },
+  "independent_imports": {
+    "demiflow.agent_transport": {
+      "encode": [
+        "demiflow/workbench/conversations/common.py"
+      ],
+      "strict_json": [
+        "demiflow/workbench/conversations/common.py",
+        "demiflow/workbench/conversations/transport.py"
+      ]
+    },
+    "demiflow.data.api": {
+      "DataAPI": [
+        "demiflow/workbench/graph/plan_callsite.py"
+      ]
+    },
+    "demiflow.data.dataset": {
+      "Dataset": [
+        "demiflow/workbench/graph/plan_callsite.py"
+      ],
+      "MaterializedDataset": [
+        "demiflow/workbench/graph/plan_callsite.py"
+      ]
+    },
+    "demiflow.errors": {
+      "DemiflowError": [
+        "demiflow/workbench/projects/workspace.py",
+        "demiflow/workbench/worker.py"
+      ],
+      "ExecutionConflict": [
+        "demiflow/workbench/runs/manager.py",
+        "demiflow/workbench/worker.py"
+      ],
+      "LanceWriteError": [
+        "demiflow/workbench/runs/worker.py"
+      ],
+      "PipelineRunTimeout": [
+        "demiflow/workbench/runs/worker.py"
+      ],
+      "StallError": [
+        "demiflow/workbench/runs/worker.py"
+      ]
+    },
+    "demiflow.execution.datafusion": {
+      "DataFusionOptions": [
+        "demiflow/workbench/analysis/case_worker.py",
+        "demiflow/workbench/analysis/materialize.py",
+        "demiflow/workbench/analysis/query.py",
+        "demiflow/workbench/analysis/read_worker.py"
+      ],
+      "DataFusionSession": [
+        "demiflow/workbench/analysis/case_worker.py",
+        "demiflow/workbench/analysis/materialize.py",
+        "demiflow/workbench/analysis/query.py",
+        "demiflow/workbench/analysis/read_worker.py"
+      ]
+    },
+    "demiflow.execution.output_watch": {
+      "OutputWatch": [
+        "demiflow/workbench/runs/worker.py"
+      ]
+    },
+    "demiflow.lance": {
+      "preview": [
+        "demiflow/workbench/analysis/case_query.py",
+        "demiflow/workbench/analysis/catalog_versions.py",
+        "demiflow/workbench/analysis/media_source_export.py",
+        "demiflow/workbench/analysis/source_export.py",
+        "demiflow/workbench/analysis/source_query.py",
+        "demiflow/workbench/projects/discovery.py",
+        "demiflow/workbench/worker.py"
+      ]
+    },
+    "demiflow.lance.preview": {
+      "_json_value": [
+        "demiflow/workbench/conversations/inputs.py"
+      ],
+      "_rows": [
+        "demiflow/workbench/conversations/inputs.py"
+      ],
+      "describe_table": [
+        "demiflow/workbench/projects/workspace.py"
+      ],
+      "image_bytes_preview": [
+        "demiflow/workbench/catalog.py"
+      ]
+    },
+    "demiflow.lance.refs": {
+      "DatasetRef": [
+        "demiflow/workbench/projects/discovery.py",
+        "demiflow/workbench/projects/workspace.py",
+        "demiflow/workbench/runs/manager.py"
+      ]
+    },
+    "demiflow.lance.registry": {
+      "Catalog": [
+        "demiflow/workbench/analysis/catalog_versions.py",
+        "demiflow/workbench/worker.py"
+      ]
+    },
+    "demiflow.lance.storage": {
+      "inspect_lance": [
+        "demiflow/workbench/runs/manager.py"
+      ]
+    },
+    "demiflow.objects": {
+      "_local_path": [
+        "demiflow/workbench/analysis/media_source_export.py",
+        "demiflow/workbench/projects/workspace.py"
+      ],
+      "local_object_uri": [
+        "demiflow/workbench/analysis/media_source_export.py",
+        "demiflow/workbench/catalog.py"
+      ],
+      "read_local_object": [
+        "demiflow/workbench/catalog.py"
+      ]
+    },
+    "demiflow.operator_llm.call_ref": {
+      "PromptRecordRef": [
+        "demiflow/workbench/catalog.py"
+      ]
+    },
+    "demiflow.operator_llm.sqlite_journal": {
+      "MAX_DISK_BYTES": [
+        "demiflow/workbench/projects/workspace.py"
+      ]
+    },
+    "demiflow.operator_llm.template": {
+      "inspect_template": [
+        "demiflow/workbench/definition_contracts.py"
+      ]
+    },
+    "demiflow.resources.contracts": {
+      "ResourceError": [
+        "demiflow/workbench/runs/native_resources.py"
+      ]
+    },
+    "demiflow.resources.device_pool": {
+      "validate_inventory": [
+        "demiflow/workbench/runs/native_resources.py"
+      ]
+    },
+    "demiflow.resources.process_observation": {
+      "UNIT_ENV": [
+        "demiflow/workbench/conversations/execution.py",
+        "demiflow/workbench/conversations/inspection.py",
+        "demiflow/workbench/conversations/review.py",
+        "demiflow/workbench/runs/worker.py"
+      ],
+      "_pidfd": [
+        "demiflow/workbench/analysis/runtime.py",
+        "demiflow/workbench/analysis/trusted_local.py",
+        "demiflow/workbench/reader.py"
+      ],
+      "_signal_fd": [
+        "demiflow/workbench/analysis/runtime.py",
+        "demiflow/workbench/analysis/trusted_local.py",
+        "demiflow/workbench/reader.py"
+      ],
+      "descendants": [
+        "demiflow/workbench/analysis/trusted_local.py",
+        "demiflow/workbench/analysis/trusted_runner.py",
+        "demiflow/workbench/conversations/development.py",
+        "demiflow/workbench/conversations/worker.py",
+        "demiflow/workbench/reader.py",
+        "demiflow/workbench/runs/worker.py"
+      ],
+      "drain_owned": [
+        "demiflow/workbench/analysis/trusted_runner.py",
+        "demiflow/workbench/conversations/development.py",
+        "demiflow/workbench/conversations/worker.py",
+        "demiflow/workbench/runs/worker.py"
+      ],
+      "inherited_unit": [
+        "demiflow/workbench/runs/worker.py"
+      ],
+      "require_pidfds": [
+        "demiflow/workbench/analysis/runtime.py",
+        "demiflow/workbench/analysis/trusted_local.py",
+        "demiflow/workbench/conversations/development.py",
+        "demiflow/workbench/conversations/worker.py",
+        "demiflow/workbench/runs/manager.py"
+      ],
+      "signal_owned": [
+        "demiflow/workbench/analysis/trusted_runner.py",
+        "demiflow/workbench/conversations/development.py",
+        "demiflow/workbench/conversations/worker.py",
+        "demiflow/workbench/reader.py",
+        "demiflow/workbench/runs/worker.py"
+      ],
+      "unit_stopped": [
+        "demiflow/workbench/analysis/controller.py",
+        "demiflow/workbench/analysis/local_read_retirement.py",
+        "demiflow/workbench/analysis/outbox.py",
+        "demiflow/workbench/analysis/read_retirement.py",
+        "demiflow/workbench/analysis/runtime.py",
+        "demiflow/workbench/analysis/trusted_local.py",
+        "demiflow/workbench/conversations/service.py",
+        "demiflow/workbench/runs/manager.py"
+      ]
+    }
+  },
+  "independent_module_members": {
+    "demiflow.lance.preview": {
+      "demiflow/workbench/analysis/case_query.py": [
+        "_column",
+        "_json_value"
+      ],
+      "demiflow/workbench/analysis/catalog_versions.py": [
+        "describe_table"
+      ],
+      "demiflow/workbench/analysis/media_source_export.py": [
+        "_open",
+        "sample_table"
+      ],
+      "demiflow/workbench/analysis/source_export.py": [
+        "_column",
+        "_open",
+        "describe_table"
+      ],
+      "demiflow/workbench/analysis/source_query.py": [
+        "_column",
+        "_open",
+        "_rows"
+      ],
+      "demiflow/workbench/projects/discovery.py": [
+        "describe_table",
+        "sample_table"
+      ],
+      "demiflow/workbench/worker.py": [
+        "catalog_reference",
+        "describe_table",
+        "image_preview",
+        "sample_table",
+        "snapshot_metadata"
+      ]
+    }
+  },
+  "members": {
+    "control.CheckedExecution": {
+      "constructor": "__init__(*, nodes, edges, actions, operators, source_root, limits, record, check_stop, observe=None, resource_root=None, work_root=None, report_digest=None, targets=None), unchanged. bind_context() returns context manager with existing exact action-completion check.",
+      "members": [
+        "bind_context"
+      ]
+    },
+    "control.RunContext": {
+      "members": [
+        "attach",
+        "__enter__",
+        "__exit__"
+      ],
+      "returned": "Existing context manager establishment only; worker does not bind returned RunContext or access its state. CheckedExecution.bind_context() independently uses original ContextVar mechanism; no new coupling."
+    },
+    "control.RunJournal": {
+      "conditional": "reserve_nodes/reserve_actions only initial prepare; resumed managed attempts must pass both to begin_attempt. Remove listed read members that final facts migration leaves unused; never expand to arbitrary class members.",
+      "constructor": "directory, attempt=None; existing approved public options only, no _maintenance_deadline from host",
+      "forbidden": [
+        "db",
+        "_connection",
+        "_transaction",
+        "_reserve_capacity",
+        "claim_execution",
+        "release_execution",
+        "bind_source",
+        "clean_orphans",
+        "object_roots",
+        "recovery_binding raw slots"
+      ],
+      "members": [
+        "directory",
+        "attempt",
+        "initialize",
+        "execution_status",
+        "transition",
+        "record_usage",
+        "begin_attempt",
+        "reserve_nodes",
+        "reserve_actions",
+        "execution_view",
+        "action_event",
+        "recovery_identity",
+        "finish",
+        "observe_nodes"
+      ]
+    },
+    "inspection.capture_pipeline.return": {
+      "currently_consumed": [
+        "compiled",
+        "kind",
+        "provider",
+        "bounds",
+        "entry_completed"
+      ],
+      "members": [
+        "compiled",
+        "kind",
+        "provider",
+        "policy",
+        "bounds",
+        "entry_completed"
+      ],
+      "nested": "compiled.graph and .declarations/.observation_labels are allowed as opaque arguments to build_logical_plan_view/compiled_node_materials; graph.dag_id/nodes/occurrence_id/kind used for existing material association. No direct declaration/kernel interpretation. policy not consumed by current host; do not infer its layout as approved.",
+      "type": "existing CapturedAction"
+    },
+    "inspection.compiled_node_materials.return": "B3materials.types below; only declared fields, not object __dict__/vars.",
+    "inspection.dataset_declaration_links.return": "Tuple(source, operations) supports identity comparisons/id/weakref only; no host interpretation of SourcePlan or LogicalOp layouts."
+  },
+  "objects": {
+    "CapturedAction": [
+      "compiled",
+      "kind",
+      "provider",
+      "bounds",
+      "entry_completed"
+    ],
+    "Catalog": [
+      "versions"
+    ],
+    "CheckedExecution": [
+      "bind_context"
+    ],
+    "CompiledDataflow": [
+      "graph",
+      "declarations",
+      "observation_labels"
+    ],
+    "CompiledNodeMaterials": [
+      "occurrence_id",
+      "kind",
+      "schema",
+      "configuration",
+      "implementation",
+      "prompts"
+    ],
+    "DataFusionSession": [
+      "borrow_resources",
+      "query",
+      "options"
+    ],
+    "DataflowGraph": [
+      "dag_id",
+      "nodes"
+    ],
+    "Dataset": [],
+    "DatasetRef": [
+      "dataset_id",
+      "store_id",
+      "relative_uri",
+      "lance_version",
+      "schema_hash",
+      "row_count",
+      "to_dict",
+      "from_dict"
+    ],
+    "GraphNode": [
+      "occurrence_id",
+      "kind"
+    ],
+    "LancePreview": [
+      "catalog_reference",
+      "describe_table",
+      "image_preview",
+      "sample_table",
+      "snapshot_metadata",
+      "_column",
+      "_open",
+      "_rows",
+      "_json_value"
+    ],
+    "NodeConfigurationMaterial": [
+      "availability",
+      "reason",
+      "engine_configuration",
+      "arguments",
+      "argument_kind"
+    ],
+    "NodeImplementationMaterial": [
+      "availability",
+      "reason",
+      "referenced",
+      "kind",
+      "function",
+      "name",
+      "source_hash"
+    ],
+    "NodeSchemaMaterial": [
+      "availability",
+      "reason",
+      "output",
+      "inputs",
+      "bindings",
+      "read_fields"
+    ],
+    "OutputWatch": [
+      "poll",
+      "close"
+    ],
+    "ProgramPromptMaterials": [
+      "state",
+      "reason",
+      "prompts"
+    ],
+    "PromptDefinition": [
+      "version",
+      "template",
+      "response_schema",
+      "response_format",
+      "input_mode",
+      "schema_retries",
+      "message_limits",
+      "model",
+      "arguments"
+    ],
+    "PromptMaterial": [
+      "name",
+      "definition",
+      "inputs",
+      "output",
+      "outputs",
+      "max_requests"
+    ],
+    "PromptRecordRef": [
+      "read"
+    ],
+    "RunContext": [
+      "attach",
+      "__enter__",
+      "__exit__"
+    ],
+    "RunJournal": [
+      "directory",
+      "attempt",
+      "initialize",
+      "execution_status",
+      "transition",
+      "record_usage",
+      "begin_attempt",
+      "reserve_nodes",
+      "reserve_actions",
+      "execution_view",
+      "action_event",
+      "recovery_identity",
+      "finish",
+      "observe_nodes"
+    ],
+    "RunReader": [
+      "state",
+      "attempt_state",
+      "execution_view",
+      "list_attempts",
+      "output_projection",
+      "preparation_evidence",
+      "native_maintenance_state",
+      "state_projection",
+      "runtime_summary",
+      "control_events",
+      "control_sequence",
+      "action_sequence",
+      "manifest_identity",
+      "observation_revision",
+      "observation_rows",
+      "observation_scope",
+      "observation_summaries",
+      "observations_supported"
+    ],
+    "StorageObservation": [
+      "exists",
+      "change_token",
+      "snapshot",
+      "native_footprint"
+    ]
+  },
+  "opaque_forwarding": {
+    "opaque:native_recording": {
+      "argument": 2,
+      "call": "RunJournal.action_event",
+      "rule": "Only direct forwarding or local reference alias; no nested reads, conversion, copying or escaping through another callable."
+    }
+  },
+  "parameter_origins": {
+    "demiflow/workbench/graph/plan_callsite.py:_observe": {
+      "receiver": "Dataset",
+      "returned": "Dataset"
+    },
+    "demiflow/workbench/graph/plan_details.py:_configuration_detail": {
+      "projected": "NodeConfigurationMaterial"
+    },
+    "demiflow/workbench/graph/plan_details.py:_implementation": {
+      "reference": "NodeImplementationMaterial"
+    },
+    "demiflow/workbench/graph/plan_details.py:_prompt_detail": {
+      "prompts": "ProgramPromptMaterials"
+    },
+    "demiflow/workbench/graph/plan_details.py:build_plan_details": {
+      "compiled": "CompiledDataflow"
+    },
+    "demiflow/workbench/graph/plan_schema.py:build_schema_details": {
+      "projected": "map:CompiledNodeMaterials"
+    },
+    "demiflow/workbench/runs/native_stages.py:admit_prepared": {
+      "journal": "RunJournal"
+    },
+    "demiflow/workbench/runs/storage.py:clean_stopped": {
+      "run": "RunJournal"
+    },
+    "demiflow/workbench/runs/worker.py:sample_output": {
+      "output_watch": "OutputWatch"
+    }
+  },
+  "record_fields": {
+    "record:NativeRecording": {
+      "action_id": "value",
+      "attempt": "value",
+      "kind": "value",
+      "value": "opaque:native_recording"
+    },
+    "record:VerifiedPublication": {
+      "action_id": "value",
+      "action_sequence": "value",
+      "attempt": "value",
+      "checkpoint_node": "value",
+      "current_attempt": "value",
+      "recording": "record:NativeRecording",
+      "reference": "value",
+      "result_kind": "value",
+      "retained_from_attempt": "value",
+      "revision": "value",
+      "row_count": "value",
+      "schema_hash": "value",
+      "schema_identity": "value",
+      "uri": "value",
+      "version": "value"
+    }
+  },
+  "reexport_origins": {
+    "demiflow.workbench.runs.manager.RunJournal": "demiflow.execution.host.control.RunJournal"
+  },
+  "reflection_sites": {
+    "demiflow/workbench/analysis/trusted_entry.py:main": "Fixed local worker dispatcher selects one of four existing workbench.analysis modules from validated operation/role; independent of Pipeline surface.",
+    "demiflow/workbench/graph/plan_callsite.py:__init__": "vars(owner) enumerates exact DataAPI/Dataset/MaterializedDataset methods and passive FunctionType code/signature; no declaration state.",
+    "demiflow/workbench/graph/preview.py:preview": "Existing authorized import of pinned project entry in isolated compiler worker; not an engine dependency loader.",
+    "demiflow/workbench/runs/worker.py:execute": "Existing authorized import of pinned project entry after worker guards; not an engine dependency loader."
+  },
+  "result_origins": {
+    "CapturedAction.compiled": "CompiledDataflow",
+    "CheckedExecution.bind_context": "CheckedExecution",
+    "CompiledDataflow.declarations": "opaque:declarations",
+    "CompiledDataflow.graph": "DataflowGraph",
+    "CompiledDataflow.observation_labels": "opaque:labels",
+    "CompiledNodeMaterials.configuration": "NodeConfigurationMaterial",
+    "CompiledNodeMaterials.implementation": "NodeImplementationMaterial",
+    "CompiledNodeMaterials.prompts": "ProgramPromptMaterials",
+    "CompiledNodeMaterials.schema": "NodeSchemaMaterial",
+    "DataflowGraph.nodes": "seq:GraphNode",
+    "NodeConfigurationMaterial.engine_configuration": "opaque:configuration",
+    "ProgramPromptMaterials.prompts": "seq:PromptMaterial",
+    "PromptMaterial.definition": "PromptDefinition",
+    "contextlib.ExitStack": "stdlib:ExitStack",
+    "demiflow.data.dataset.Dataset": "Dataset",
+    "demiflow.data.dataset.MaterializedDataset": "Dataset",
+    "demiflow.execution.datafusion.DataFusionSession": "DataFusionSession",
+    "demiflow.execution.host.control.CheckedExecution": "CheckedExecution",
+    "demiflow.execution.host.control.RunContext": "RunContext",
+    "demiflow.execution.host.control.RunContext.attach": "RunContext",
+    "demiflow.execution.host.control.RunJournal": "RunJournal",
+    "demiflow.execution.host.inspection.capture_pipeline": "CapturedAction",
+    "demiflow.execution.host.inspection.compiled_node_materials": "map:CompiledNodeMaterials",
+    "demiflow.execution.host.inspection.observe_storage": "StorageObservation",
+    "demiflow.execution.host.inspection.read_run": "RunReader",
+    "demiflow.execution.host.inspection.verify_published_output": "record:VerifiedPublication",
+    "demiflow.execution.host.inspection.verify_write_receipt": "record:VerifiedPublication",
+    "demiflow.execution.output_watch.OutputWatch": "OutputWatch",
+    "demiflow.lance.preview": "LancePreview",
+    "demiflow.lance.refs.DatasetRef": "DatasetRef",
+    "demiflow.lance.refs.DatasetRef.from_dict": "DatasetRef",
+    "demiflow.lance.registry.Catalog": "Catalog",
+    "demiflow.operator_llm.call_ref.PromptRecordRef": "PromptRecordRef",
+    "demiflow.workbench.runs.manager._verified_output": "record:VerifiedPublication",
+    "demiflow.workbench.runs.view._reading": "tuple:unknown,RunReader"
+  },
+  "return_contracts": {
+    "RunReader.execution_view": {
+      "result": {
+        "actions": "dict[action_id, dict[kind,JsonValue]], full compatibility diagnostics assembled natively",
+        "completion": "JsonValue|None, only full",
+        "current_attempt": "int|None",
+        "events": "list[{sequence:int, action_id:str, kind:str, value:JsonValue}], selected attempt diagnostics only",
+        "manifest": "JsonObject|None, original bounded manifest",
+        "observations": "list[JsonObject], original full only",
+        "output_projections": "dict[action_id, OutputProjection] for requested manifest output action IDs; absent for identity detail",
+        "revision": "int, current control revision",
+        "state": "JsonObject|None, selected attempt original state"
+      },
+      "signature": "execution_view(*, detail='full', action_ids=None, attempt=None) -> ExecutionView"
+    },
+    "RunReader.list_attempts": {
+      "result": "Original attempt state documents ordered by attempt, at most32; known legacy no-attempt behavior retained. Each document keeps original values; current RunJournal.list_attempts64 KiB encoded limit remains.",
+      "signature": "list_attempts() -> list[JsonObject]"
+    },
+    "RunReader.native_maintenance_state": {
+      "result": {
+        "gc_settled": "bool",
+        "owner_released": "bool"
+      },
+      "signature": "native_maintenance_state() -> NativeMaintenanceState"
+    },
+    "RunReader.output_projection": {
+      "related_types": {
+        "Evidence": {
+          "attempt": "int effective evidence attempt",
+          "checkpoint_node": "str|None, legacy checkpoint only",
+          "kind": "one existing event kind: receipt/recovered/stage_commit/stage_recovered",
+          "row_count": "int>=0|None, receipt only",
+          "schema_hash": "str|None, receipt only",
+          "schema_identity": "str|None, stage only",
+          "uri": "str",
+          "version": "int>=1"
+        }
+      },
+      "result": {
+        "action_id": "str",
+        "action_sequence": "int selected event revision",
+        "attempt": "int selected",
+        "commit": "optional JsonObject|None when diagnostics=True, old full location/value",
+        "committed": "bool, journal-recorded receipt/stage commit only",
+        "current_attempt": "int|None",
+        "error": "JsonValue|None, exact selected-attempt failed value",
+        "evidence": "Evidence|None",
+        "failed": "bool selected attempt has failed fact",
+        "has_intent": "bool selected attempt has an intent",
+        "receipt": "optional JsonObject|None when diagnostics=True, old full location/value",
+        "result": "{ref:DatasetRef-wire, location_id:str}|None",
+        "result_ref": "DatasetRef-wire|None, same result.ref convenience for compact",
+        "retained_from_attempt": "int|None",
+        "revision": "int current control revision"
+      },
+      "signature": "output_projection(selected_attempt, action_id, *, diagnostics=False) -> OutputProjection"
+    },
+    "RunReader.preparation_evidence": {
+      "result": {
+        "prepare_request_id": "str|None",
+        "root": "str|None",
+        "run_id": "str|None",
+        "status": "existing design values never_started or not_proven"
+      },
+      "signature": "preparation_evidence() -> PreparationEvidence"
+    },
+    "action_recovery_facts": {
+      "result": {
+        "absence_eligible": "bool",
+        "absence_recorded": "bool",
+        "action_id": "str",
+        "attempt": "int|None selected",
+        "current_attempt": "int|None",
+        "native_action_present": "bool",
+        "native_completed": "bool",
+        "recovery_restricted": "bool",
+        "revision": "int"
+      },
+      "signature": "action_recovery_facts(directory, action_id, *, attempt=None, deadline=None) -> ActionRecoveryFacts"
+    },
+    "observe_storage": {
+      "related_types": {
+        "NativeFootprint": {
+          "native_run_id": "str|None original identity",
+          "object_roots": "tuple[{root_id:str,logical_root:str,physical_root:str,run_id:str},...] original bounded registration records",
+          "relative_roots": "tuple[str,...], exactly current native state/materializations/scratch paths relative to owned run root"
+        },
+        "StorageSnapshot": {
+          "identity": "{run_id:JsonValue}|None",
+          "identity_digest": "str|None original complete identity hash",
+          "manifest": "{run_id:JsonValue,object_locations:JsonValue,report_digest:JsonValue}|None",
+          "manifest_digest": "str|None original complete manifest hash",
+          "object_roots": "list[{root_id:str,logical_root:str,physical_root:str,run_id:str}]|None",
+          "state": "{status:JsonValue,attempt:JsonValue}|None, existing projection"
+        }
+      },
+      "result": {
+        "change_token": "opaque equality-comparable str digest or tuple; only equality allowed",
+        "exists": "bool original journal presence; observation fixed at entry",
+        "native_footprint()": "NativeFootprint",
+        "snapshot()": "original six-key StorageSnapshot"
+      },
+      "signature": "observe_storage(directory=None, *, directory_fd=None, deadline=None) -> contextmanager[StorageObservation]"
+    },
+    "read_action_plan": {
+      "result": {
+        "action_id": "str original",
+        "artifact_manifest_ref": "JsonObject|None original accepted reference, diagnostics when not consumed",
+        "code_pin_ref": "JsonObject|None v3 view original if present",
+        "dag_id": "str original",
+        "engine_run_id": "str|None original recovery run identity",
+        "identity_bridge_ref": "JsonObject|None original validated carrier ref if present",
+        "plan_id": "str original",
+        "plan_view": "JsonObject normalized dag/node_map/physical/node_observations view",
+        "recovery_restriction": "JsonObject|None original bounded public history restriction",
+        "sealed_at": "original JSON scalar accepted by old reader; do not newly tighten F1",
+        "version": "existing v3 or explicit F1 version tag; F1 tag is new internal envelope only, old host response need not gain it"
+      },
+      "signature": "read_action_plan(directory, action_id, *, max_bytes, deadline=None) -> ActionPlan|None"
+    },
+    "read_verified_identity_bridge": {
+      "result": {
+        "bridge": "existing demiflow.identity_bridge.v1 JsonObject with verified bounded entries; original accepted extra fields preserved",
+        "ref": "original validated carrier reference {sha256:str,path:str,bytes:int}"
+      },
+      "signature": "read_verified_identity_bridge(directory, action_id, *, expected_dag_id, expected_report_digest, max_bytes, deadline=None) -> VerifiedBridge|None"
+    },
+    "verify_published_output": {
+      "result": {
+        "action_id": "str",
+        "action_sequence": "int selected attempt event revision",
+        "attempt": "int effective fact attempt",
+        "checkpoint_node": "str|None; legacy checkpoint requires exact expected node",
+        "current_attempt": "int|None",
+        "recording": "Recording|None",
+        "reference": "{uri:str,version:int>=1}",
+        "result_kind": "existing product event kind result or recovered_result; write receipts retain result, recovered stages use recovered_result",
+        "retained_from_attempt": "int|None",
+        "revision": "int current control revision",
+        "row_count": "int>=0",
+        "schema_hash": "str nonempty",
+        "schema_identity": "str|None; stage requires exact expected schema identity",
+        "uri": "str exact expected URI",
+        "version": "int>=1 fixed version"
+      },
+      "signature": "verify_published_output(directory, action_id, *, expected_uri, expected_schema_identity, publication=None, expected_checkpoint_node=None, report_digest=None, parents=None, attempt=None, recover=False, require_current_head=False, deadline=None) -> VerifiedPublication|None"
+    },
+    "verify_write_receipt": {
+      "related_types": {
+        "Recording": {
+          "action_id": "str same returned action_id",
+          "attempt": "int exact target selected attempt, may differ from effective retained evidence only when newly recovering into selected attempt",
+          "kind": "existing action event kind recovered or stage_recovered only",
+          "value": "opaque JsonObject <=256 KiB encoded, assembled and validated by native owner"
+        }
+      },
+      "result": {
+        "action_id": "str",
+        "action_sequence": "int selected attempt event revision",
+        "attempt": "int effective fact attempt",
+        "checkpoint_node": "str|None; legacy checkpoint requires exact expected node",
+        "current_attempt": "int|None",
+        "recording": "Recording|None",
+        "reference": "{uri:str,version:int>=1}",
+        "result_kind": "existing product event kind result or recovered_result; write receipts retain result, recovered stages use recovered_result",
+        "retained_from_attempt": "int|None",
+        "revision": "int current control revision",
+        "row_count": "int>=0",
+        "schema_hash": "str nonempty",
+        "schema_identity": "str|None; stage requires exact expected schema identity",
+        "uri": "str exact expected URI",
+        "version": "int>=1 fixed version"
+      },
+      "signature": "verify_write_receipt(directory, action_id, *, expected_uri, attempt=None, recover=False, require_current_head=False, deadline=None) -> VerifiedPublication|None"
+    }
+  }
+}
