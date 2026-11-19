@@ -544,7 +544,11 @@ def test_native_inflight_cut_allows_free_slots_past_slow_call(tmp_path, monkeypa
                 with journal._connection() as db:
                     complete = db.execute('SELECT count(*) FROM calls WHERE response_json IS NOT NULL').fetchone()[0]
                 image = execution._restore_image
-                if complete == 12 and image is not None and not image.cut.final:
+                if (complete == 12 and image is not None and not image.cut.final
+                        and execution._publication_future is None):
+                    # Fault after a settled ACK. An already-started publisher is
+                    # correctly drained during close; crashing while it runs can
+                    # advance the durable cut beyond this stale in-memory image.
                     assert 0 in pending_ids(image, execution._store, execution._bounds)
                     assert fixture.seven.is_set() and sorted(fixture.requests) == list(range(12))
                     interrupted.append(image.commit_id)
