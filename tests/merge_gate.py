@@ -32,6 +32,7 @@ GUARDS = (
     'tests/test_package_dependency_ratchet.py',
     'tests/test_workbench_engine_boundary.py',
     'tests/test_p1_*.py',
+    'tests/test_p4_managed_cleanup.py',
     'tests/test_compile_contract_inventory.py',
     'tests/test_dataflow_compile_inputs.py',
     'tests/test_pre_v3_retention.py',
