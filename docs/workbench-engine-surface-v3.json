@@ -232,17 +232,17 @@
       ]
     },
     "demiflow.lance.preview": {
-      "_json_value": [
-        "demiflow/workbench/conversations/inputs.py"
-      ],
-      "_rows": [
-        "demiflow/workbench/conversations/inputs.py"
-      ],
       "describe_table": [
         "demiflow/workbench/projects/workspace.py"
       ],
       "image_bytes_preview": [
         "demiflow/workbench/catalog.py"
+      ],
+      "preview_value": [
+        "demiflow/workbench/conversations/inputs.py"
+      ],
+      "sample_open_table": [
+        "demiflow/workbench/conversations/inputs.py"
       ]
     },
     "demiflow.lance.refs": {
