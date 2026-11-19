@@ -128,6 +128,8 @@ def run(*, source, target, other):
             page.locator('.wb-monitor-tabs').get_by_role('button', name='输出结果', exact=True).click()
             page.get_by_role('button', name='查看固定结果', exact=True).click()
             expect(page.locator('main')).to_contain_text('三角形')
+            expect(page.locator('.wb-result-preview')).to_have_attribute('data-attempt', '1')
+            page.get_by_role('button', name='在数据页打开', exact=True).click()
             assert page.evaluate('ForgeView.decodeView(location.hash).alias').endswith(':target:1')
             assert not errors, errors
         finally:

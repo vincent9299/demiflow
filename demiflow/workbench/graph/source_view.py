@@ -132,7 +132,8 @@ def get(root,*,graph_binding,node_id,kind,resource=None,logical_node_id=None,occ
         detail = details.get(kind, {})
         if kind == 'configuration':
             from .plan_details import safe_json
-            return {**result, 'kind': kind, 'fields': [],
+            return {**detail, **result, 'kind': kind, 'fields': [],
+                'schema_metadata': details.get('schema', {}).get('metadata'),
                 'wiring': safe_json(dict(api=node.get('api'), parameters=node.get('parameters', {}), output_fields={})),
                 'resources': []}
         metadata = detail.get('metadata', {})

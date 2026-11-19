@@ -40,21 +40,43 @@ def environment_names(value):
     return sorted(value)
 
 
-def trusted_environment(*, workspace):
+def executable_directories(value, *, workspace=None):
+    if type(value) is not list or len(value) > 8 or any(type(p) is not str for p in value):
+        raise ForgeError('Invalid deployment executable directories')
+    result = []
+    for item in value:
+        path = no_symlinks(Path(item))
+        if (not path.is_absolute() or str(path.resolve()) != item or not path.is_dir()
+                or ':' in item or (workspace is not None and path.is_relative_to(Path(workspace).resolve()))):
+            raise ForgeError('Executable directories must be canonical deployment directories outside the project')
+        if item not in result:
+            result.append(item)
+    return result
+
+
+def trusted_process_environment(*, workspace):
     """Deployment-owned per-project CLI credentials/settings, never request input."""
     path = os.environ.get('DEMIFLOW_WORKBENCH_RUN_ENVIRONMENT')
     if not path:
-        return []
+        return dict(environment_names=[], executable_dirs=[])
     path = no_symlinks(Path(path))
     root = Path(workspace).absolute()
     if not path.is_absolute() or path.is_relative_to(root):
         raise ForgeError('Execution environment declaration must be deployment-owned')
     value = json.loads(read_bounded(path, MAX_BYTES))
-    if (type(value) is not dict or set(value) != {'format', 'workspaces'}
+    if (type(value) is not dict or set(value) - {'executable_dirs'} != {'format', 'workspaces'}
             or value['format'] != 'demiflow_managed_environment_v1'
             or type(value['workspaces']) is not dict or len(value['workspaces']) > 128):
         raise ForgeError('Invalid deployment execution environment declaration')
-    return environment_names(value['workspaces'].get(str(root), []))
+    directories = value.get('executable_dirs', {})
+    if type(directories) is not dict or len(directories) > 128:
+        raise ForgeError('Invalid deployment executable directory declaration')
+    return dict(environment_names=environment_names(value['workspaces'].get(str(root), [])),
+                executable_dirs=executable_directories(directories.get(str(root), []), workspace=root))
+
+
+def trusted_environment(*, workspace):
+    return trusted_process_environment(workspace=workspace)['environment_names']
 
 
 def validate(value):

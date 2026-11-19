@@ -62,3 +62,29 @@ def test_deployment_environment_is_explicit_project_scoped_and_names_only(tmp_pa
     for names in (['HOME'], ['PYTHONPATH'], ['TMPDIR'], ['DEMIFLOW_RESOURCE_ROOT'], [{}]):
         with pytest.raises(ForgeError):
             native_resources.environment_names(names)
+
+
+def test_deployment_executable_path_is_sealed_and_not_client_controlled(tmp_path, monkeypatch):
+    import json
+    import subprocess
+    root = tmp_path / 'project'
+    root.mkdir()
+    tools = tmp_path / 'tools'
+    tools.mkdir()
+    binary = tools / 'fixture-tool'
+    binary.write_text('#!/bin/sh\nprintf deployment-tool')
+    binary.chmod(0o700)
+    declaration = tmp_path / 'host-env.json'
+    declaration.write_text(json.dumps(dict(format='demiflow_managed_environment_v1',
+        workspaces={str(root): []}, executable_dirs={str(root): [str(tools)]})))
+    monkeypatch.setenv('DEMIFLOW_WORKBENCH_RUN_ENVIRONMENT', str(declaration))
+    settings = native_resources.trusted_process_environment(workspace=root)
+    assert settings == dict(environment_names=[], executable_dirs=[str(tools)])
+    assert native_resources.trusted_process_environment(workspace=tmp_path / 'other')['executable_dirs'] == []
+    with pytest.raises(ForgeError):
+        OPERATIONS['prepare'].validate(dict(entry='x.py:run', params={}, executable_dirs=[str(tools)]))
+    with pytest.raises(ForgeError):
+        native_resources.executable_directories([str(root)], workspace=root)
+    environment = worker_environment(tmp_path / 'run', executable_dirs=settings['executable_dirs'])
+    result = subprocess.run(['fixture-tool'], env=environment, capture_output=True, text=True, check=True)
+    assert result.stdout == 'deployment-tool'

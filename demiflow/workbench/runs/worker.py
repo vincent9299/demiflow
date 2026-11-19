@@ -301,7 +301,8 @@ def _supervise(root, run_id, lease, attempt=None):
             output.get('allocation_root', output['uri']) for output in manifest['outputs'].values())))
         env = runs.worker_environment(target, limits, manifest.get('credential_names', []),
                                       native_execution=manifest.get('native_execution'),
-                                      capacity_domain=manifest.get('capacity_domain'))
+                                      capacity_domain=manifest.get('capacity_domain'),
+                                      executable_dirs=manifest.get('executable_dirs', []))
         env['DEMIFLOW_INSPECTION_PARENT'] = str(os.getpid())
         env['TMPDIR'] = str(work)
         unit_fds = inherited_unit()

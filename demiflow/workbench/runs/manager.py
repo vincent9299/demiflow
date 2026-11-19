@@ -233,9 +233,9 @@ def prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None,
     from demiflow.workbench.runs.domain import preparation_lock
     from functools import partial
     args = dict(params=params, outputs=outputs, new_outputs=new_outputs, limits=limits, inputs=inputs,telemetry=telemetry)
-    from demiflow.workbench.runs.native_resources import trusted_deployment, capacity_domain, trusted_environment
+    from demiflow.workbench.runs.native_resources import trusted_deployment, capacity_domain, trusted_process_environment
     args['capacity_domain'] = capacity_domain()
-    args['environment_names'] = trusted_environment(workspace=root)
+    args.update(trusted_process_environment(workspace=root))
     native_deployment = trusted_deployment(workspace=root)
     if native_deployment is not None:
         args['native_deployment'] = native_deployment
@@ -255,7 +255,7 @@ def _fact_actions(report, outputs):
 
 def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None, inputs=None,
              reserved_run_id=None, prepare_request_id=None, telemetry=True, authority=None, native_deployment=None,
-             capacity_domain=None, environment_names=None):
+             capacity_domain=None, environment_names=None, executable_dirs=None):
     operation_budget.check()
     if type(telemetry) is not bool:
         raise ForgeError('telemetry must be boolean',code='invalid_request')
@@ -439,6 +439,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     from demiflow.workbench.runs.domain import SEALED_BYTES
     from demiflow.workbench.runs.native_resources import environment_names as validate_environment_names
     credentials.update(validate_environment_names(environment_names or []))
+    executable_dirs = native_resources.executable_directories(executable_dirs or [], workspace=root)
     platform_root = Path(__file__).resolve().parents[2]
     seal_root = Path(report['binding'].get('source_root', root))
     seal_files = [(ws.relative_path(seal_root,name), Path('source')/name, digest,1024**2)
@@ -479,7 +480,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                 journal_version=2,
                 created_at=time.time(), report_digest=report['digest'], original_parameters=original,
                 parameter_path=str(parameter_path.relative_to(root)) if parameter_path else None,
-                outputs=output_specs, limits=limits, workspace=workspace, capacity_domain=capacity_domain,
+                outputs=output_specs, limits=limits, workspace=workspace, capacity_domain=capacity_domain, executable_dirs=executable_dirs,
                 observation_instances=observation_instances,
                 credential_names=sorted(credentials), evidence=ledgers, request_budgets=list(budgets.values()),
                 object_locations=object_locations(report=report),
@@ -753,7 +754,8 @@ def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authorit
                         command.append(str(attempt))
                     env = worker_environment(target, value['manifest']['limits'], value['manifest'].get('credential_names', []),
                                              native_execution=value['manifest'].get('native_execution'),
-                                             capacity_domain=value['manifest'].get('capacity_domain'))
+                                             capacity_domain=value['manifest'].get('capacity_domain'),
+                                             executable_dirs=value['manifest'].get('executable_dirs', []))
                     env['DEMIFLOW_EXECUTION_UNIT_FD'] = str(unit)
                     operation_budget.check()
                     spawn_attempted = True
@@ -971,7 +973,7 @@ def _resume(root, run_id, *, expected, expected_attempt, authority=None):
     return show(root, run_id)
 
 
-def worker_environment(target, limits=None, credential_names=(), *, native_execution=None, capacity_domain=None):
+def worker_environment(target, limits=None, credential_names=(), *, native_execution=None, capacity_domain=None, executable_dirs=()):
     limits = limits or DEFAULT_LIMITS
     result = dict(PATH=os.path.dirname(sys.executable) + ':/usr/bin:/bin', LANG='C.UTF-8',
         PYTHONDONTWRITEBYTECODE='1', PYTHONNOUSERSITE='1',
@@ -983,7 +985,9 @@ def worker_environment(target, limits=None, credential_names=(), *, native_execu
         MALLOC_ARENA_MAX='2',
         TOKIO_WORKER_THREADS='2', LANCE_CPU_THREADS='2', CUDA_VISIBLE_DEVICES='',
         LANCE_MEM_POOL_SIZE=str(limits['memory_bytes']), LANCE_MAX_TEMP_DIRECTORY_SIZE=str(limits['max_scratch_bytes']))
-    from demiflow.workbench.runs.native_resources import environment
+    from demiflow.workbench.runs.native_resources import environment, executable_directories
+    paths = executable_directories(list(executable_dirs))
+    result['PATH'] = os.pathsep.join([os.path.dirname(sys.executable), *paths, '/usr/bin', '/bin'])
     result.update(environment(target, native_execution))
     if capacity_domain is not None:
         from demiflow.workbench.runs.native_resources import capacity_domain as validate_domain
