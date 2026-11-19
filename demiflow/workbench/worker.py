@@ -20,6 +20,7 @@ def operation(name, root, *, _pass_fds=(), _authority=None, **arguments):
 
     from demiflow.workbench.reader import current
     from demiflow.workbench.reader import ALLOWED
+    from demiflow.workbench.reader import in_native_dispatch
     request={"operation":name,"root":str(Path(root).absolute()),"arguments":arguments}
     if _authority is not None:
         request["bootstrap"] = _authority
@@ -31,7 +32,13 @@ def operation(name, root, *, _pass_fds=(), _authority=None, **arguments):
         if launch is not None and (_pass_fds or _authority is not None):
             raise ForgeError('Confined plan inspection cannot inherit preparation authority', code='invalid_request')
     context=current()
-    if context is not None:
+    if name == 'metadata' and in_native_dispatch() and not _pass_fds and _authority is None:
+        # Publication verification can request fixed-version metadata while
+        # serving a table read. It already runs under the reader's time/RSS/IO
+        # ceilings; reuse the fixed dispatcher, never create a nested worker.
+        # All other operations retain their original isolation and admission.
+        value=dispatch(request)
+    elif context is not None:
         reader,consumer_closed=context
         import os
         reusable=not _pass_fds and not os.environ.get('DEMIFLOW_FORGE_PREPARATION_FD') and name in ALLOWED

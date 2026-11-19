@@ -4,7 +4,7 @@
   const text = (maximum, pattern) => ({type: 'string', minLength: 1, maxLength: maximum, ...(pattern ? {pattern} : {})});
   const fields = {
     workspace: text(2048, '^/'),
-    alias: text(256, '^(?:[A-Za-z][A-Za-z0-9_-]{0,63}|run:r[0-9a-f]{24}:[A-Za-z][A-Za-z0-9_-]{0,63})$'),
+    alias: text(256, '^(?:[A-Za-z][A-Za-z0-9_-]{0,63}|run:r[0-9a-f]{24}:[A-Za-z][A-Za-z0-9_-]{0,63}(?::(?:[1-9]|[12][0-9]|3[0-2]))?)$'),
     binding_digest: text(64, '^[0-9a-f]{64}$'),
     report_digest: text(64, '^[0-9a-f]{64}$'),
     run_id: text(25, '^r[0-9a-f]{24}$'),

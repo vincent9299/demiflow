@@ -38,6 +38,22 @@ def _describe(root, entry, *, params, limits=None):
     admitted, path = inputs(root, workspace, entry, params, limits)
     parameters = ws.read_control(path) if path else params
     arguments = ws.resolve_arguments(root, workspace, parameters)
+    pending = [parameters.get('arguments', {})]
+    outputs = 0
+    while pending:
+        value = pending.pop()
+        if type(value) is dict:
+            if value.get('kind') == 'output':
+                outputs += 1
+            else:
+                pending.extend(value.values())
+        elif type(value) is list:
+            pending.extend(value)
+    if not outputs:
+        return dict(format='demiflow_forge_runtime_admission_v1', status='unsupported',
+            reason='managed_output_binding_missing', entry=entry,
+            parameter_path=params if path else None, limits=admitted,
+            message='该流程尚未接入受管提交：缺少显式输出绑定。执行计划可阅读；原生 Dataset 的提交接入需单独完成。')
     # Never claim that discovery or this inexpensive prerequisite projection
     # replaces the checker on effective output bindings and sealed sources.
     return dict(
