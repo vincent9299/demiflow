@@ -24,7 +24,6 @@ from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOption
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.block_sink import BlockSink
 from demiflow.execution.exchange.carriage_local import LocalSegmentStore, channel_pair, inline_records
-from demiflow.execution.exchange.graph_router import GraphInputReader
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.graph import run_local_graph
 from demiflow.execution.recovery_contract import RecoveryContractError
@@ -148,7 +147,6 @@ def test_consumer_crash_recovers_whole_graph_exactly_once(tmp_path):
     _release_crash_orphans(tmp_path / "run-resources")
 
 
-
 # ---------------- exit gate 2: stage failure publishes nothing ----------------
 
 def test_stage_failure_seals_nothing(tmp_path):
@@ -210,73 +208,3 @@ def test_sealed_storage_exhaustion_fails_early_without_publication(tmp_path):
 
 # ---------------- CUT: multi-input fan-in alignment + EOI empty barrier ----------------
 
-def test_cut_multi_input_aligns_and_eoi_channel_empty_barrier(tmp_path):
-    from demiflow.execution.exchange.graph_channel import GraphChannelProducer
-    # One reader over two input channels (fan-in). Each producer sends pre-cut data
-    # then a barrier for the same checkpoint; the reader aligns only when BOTH hold
-    # it and pre-cut data is drained. An EOI producer contributes an empty barrier.
-    store = LocalSegmentStore(tmp_path, host_id="h")
-    cids = ["ch-a", "ch-b"]
-    plinks, clinks = {}, {}
-    for cid in cids:
-        plinks[cid], clinks[cid] = channel_pair()
-    producers = {cid: GraphChannelProducer(cid, reader_id="reader", exchange_mode="memory_incremental")
-                 for cid in cids}
-    specs = [{"channel_id": cid, "reader_id": "reader", "exchange_mode": "memory_incremental",
-              "credit_budget": {"rows": 32, "bytes": 1 << 20}, "route_epoch": 0} for cid in cids]
-    reader = GraphInputReader(specs, clinks, reader_id="reader", reader_domain=store.domain, store=store)
-    reader.start()
-    # The reader grants initial credit back to each producer endpoint; consume those
-    # frames so the bare producers (no credit thread here) can charge data.
-    for cid in cids:
-        credit_frame = plinks[cid].recv()
-        assert credit_frame["kind"] == "credit"
-        producers[cid].grant_credit(credit_frame["credit"])
-
-    def records(cid, ordinal):
-        return inline_records([{"v": ordinal}], source_id="src", occurrence_id="shared",
-                              start_ordinal=ordinal)
-
-    # Pre-cut data on both channels, then a barrier naming the same checkpoint.
-    for cid in cids:
-        for ordinal in range(3):
-            envelope = producers[cid].data_envelope(records(cid, ordinal),
-                                                    producer={"logical_node_id": "n", "occurrence_id": "n-p0"})
-            plinks[cid].send({"kind": "data", "sequence": envelope["sequence"], "envelope": envelope})
-    # Both producers finish (EOI) before the cut; each still participates with an
-    # empty barrier (frozen InputGate: finished channels stay participants until the
-    # same cut), and the aligned cut is final because every input has EOI'd.
-    for cid in cids:
-        plinks[cid].send({"kind": "eoi", **producers[cid].end_of_input()})
-    for cid in cids:
-        barrier = producers[cid].barrier("cut-1", epoch=1, topology_revision=0,
-                                         producer_sequence_bound=None)
-        plinks[cid].send({"kind": "barrier", **barrier})
-
-    # Drain pre-cut data; the reader aligns the multi-input cut and waits on the hook.
-    done = threading.Event()
-    release = threading.Event()
-    aligned = {}
-
-    def hook(checkpoint, consumed, final):
-        aligned["checkpoint"] = checkpoint
-        aligned["consumed"] = consumed
-        aligned["final"] = final
-        done.set()
-        return release  # held until the test asserts alignment, then released
-
-    reader.set_cut_hook(hook)
-    consumed = []
-    pump = threading.Thread(target=lambda: consumed.extend(reader.rows()), daemon=True)
-    pump.start()
-    assert done.wait(timeout=5), "multi-input cut did not align"
-    assert aligned["checkpoint"] == "cut-1"
-    assert aligned["consumed"] == 6  # 3 pre-cut rows from each of the two channels
-    assert aligned["final"] is True  # ch-b EOI + ch-a barrier => all inputs finished
-    assert sorted(row["v"] for row in consumed) == [0, 0, 1, 1, 2, 2]
-    # The barrier never overtook pre-cut data: every pre-cut row dequeued first.
-    release.set()
-    pump.join(timeout=5)
-    reader.close()
-    for link in plinks.values():
-        link.close()

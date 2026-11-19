@@ -122,7 +122,7 @@ def test_ray_core_finite_phases_use_same_native_cut_protocol(tmp_path, monkeypat
         monkeypatch.setattr(ray.data, name, forbidden)
     try:
         ray.init(address="local", num_cpus=4, include_dashboard=False, object_store_memory=100*1024**2,
-                 _temp_dir=tempfile.mkdtemp(prefix='demiflow-ray-phase-'))
+                 _temp_dir=tempfile.mkdtemp(prefix='demiflow-ray-phase-', dir='/tmp'))
         with RunContext.start(tmp_path/'run', limits=LIMITS) as run:
             ds = dataset()
             hosted = Dataset(ds._source, ds._plan, RayDatasetExecutor())

@@ -1,0 +1,1128 @@
+{
+ "schema": "demiflow_pre_v3_retention_v1",
+ "candidate": "74d2f9941377a0a2ca82e492d7be3a6b02e3d014",
+ "basis": [
+  "docs/unified-runtime-v3-20261114/MIGRATION.md「替换与退出」「历史结果与恢复」",
+  "_demiflow/shared-review/2026-11-18-p8-pre-v3-code-retirement-design.md",
+  "GPT 评审 2026-11-18（兼容入口保留；队列载体按符号清理；打包命令行本轮保留）"
+ ],
+ "modules": {
+  "demiflow.cli": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 4,
+     "historical_set_139_files": 0
+    },
+    "functions": 7,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 7
+   }
+  },
+  "demiflow.execution.chain": {
+   "status": "mixed",
+   "reason": "代码固定工具（在用）、两个兼容入口（保留）和旧链式执行实现（待退役）在同一个文件里。",
+   "symbols": {
+    "ChainResultSink": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": [
+      "demiflow.execution.graph"
+     ]
+    },
+    "DriverStreamTerminal": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": []
+    },
+    "_ChainBlocks": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": []
+    },
+    "_WriteSeal": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": []
+    },
+    "_build_sealed_manifest": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": [
+      "demiflow.execution.native_plan"
+     ]
+    },
+    "_business_dependency_manifest": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_business_dependency_modules": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_by_value_business_modules": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_by_value_reachable": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_class_module": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_class_mro": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_class_namespace": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_classify_dependency_module": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_code_global_names": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_declared_slots": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_instance_namespace": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_instance_slots": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_is_by_reference_class": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_is_by_reference_udf": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_is_walkable_value": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_module_registered_by_value": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_seal_chain_bindings": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": []
+    },
+    "_seal_chain_identity_bridge": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": []
+    },
+    "_seal_plan_code": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": []
+    },
+    "_stable_code_identity": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_static_reference_member": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "_worker_failure": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": []
+    },
+    "build_commit_cut": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": [
+      "demiflow.execution.worker.execution"
+     ]
+    },
+    "build_commit_receipt": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": []
+    },
+    "chain_checkpoint_manifest": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": []
+    },
+    "compile_chain_topology": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": []
+    },
+    "plan_code_pin": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "run_local_chain": {
+     "status": "compat_entry",
+     "reason": "MIGRATION「替换与退出」：chain 公开兼容入口保留，翻译成一次 v3 动作。",
+     "translates_through": "run_dataset_action"
+    },
+    "run_ray_chain": {
+     "status": "compat_entry",
+     "reason": "MIGRATION「替换与退出」：chain 公开兼容入口保留，翻译成一次 v3 动作。",
+     "translates_through": "run_dataset_action"
+    },
+    "seal_plan_facts": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": [
+      "demiflow.execution.graph",
+      "demiflow.execution.native_plan"
+     ]
+    },
+    "seal_write_plan_ref": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": [
+      "demiflow.execution.native_plan"
+     ]
+    },
+    "seal_write_topology": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": []
+    },
+    "snapshot_code_sources": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": []
+    },
+    "source_callable_roots": {
+     "status": "live",
+     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
+    },
+    "stage_plan_artifact": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": [
+      "demiflow.execution.graph"
+     ]
+    },
+    "unified_chain_eligible": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": []
+    },
+    "validate_commit_cut": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": []
+    },
+    "validate_commit_receipt": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": [
+      "demiflow.execution.worker.execution"
+     ]
+    },
+    "verify_loaded_plan": {
+     "status": "old",
+     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "batch": 4,
+     "users": [
+      "demiflow.execution.worker.execution"
+     ]
+    }
+   },
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 218,
+     "historical_set_139_files": 93
+    },
+    "functions": 62,
+    "reached_through_a_product_entry": 26,
+    "called_only_by_tests": 29,
+    "ran_only_at_import": 0,
+    "never_ran": 7
+   }
+  },
+  "demiflow.execution.contracts.pipeline": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 263,
+     "historical_set_139_files": 135
+    },
+    "functions": 11,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 11
+   }
+  },
+  "demiflow.execution.dataflow_control": {
+   "status": "undecided",
+   "reason": "v3 计划 H045–H048 的交付物，产品代码没有导入方。GPT 评审 2026-11-18：职责已由 dataflow_hosts.ControlMailbox 承担，列为重复实现候选；先把它的合同测试对应到真实生产路径。",
+   "importers": [],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 1,
+     "historical_set_139_files": 0
+    },
+    "functions": 10,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 10,
+    "ran_only_at_import": 0,
+    "never_ran": 0
+   }
+  },
+  "demiflow.execution.dataset_commit": {
+   "status": "undecided",
+   "reason": "docs/platform-upgrade.md 有记载，tests/test_platform_upgrade.py 使用；产品代码和业务仓都不导入。暂不处理。",
+   "importers": [],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 0,
+     "historical_set_139_files": 1
+    },
+    "functions": 6,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 6,
+    "ran_only_at_import": 0,
+    "never_ran": 0
+   }
+  },
+  "demiflow.execution.driver": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 1,
+     "historical_set_139_files": 0
+    },
+    "functions": 5,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 1,
+    "ran_only_at_import": 0,
+    "never_ran": 4
+   }
+  },
+  "demiflow.execution.environment": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 263,
+     "historical_set_139_files": 135
+    },
+    "functions": 4,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 2,
+    "ran_only_at_import": 0,
+    "never_ran": 2
+   }
+  },
+  "demiflow.execution.graph": {
+   "status": "mixed",
+   "reason": "图入口（在用，走 v3 动作）和旧图驱动实现在同一个文件里。",
+   "symbols": {
+    "GraphCommitTerminal": {
+     "status": "old",
+     "reason": "11-10 那一代图执行的驱动侧；没有产品调用方。和批次 4 一起评审。",
+     "users": []
+    },
+    "GraphLocalConnector": {
+     "status": "old",
+     "reason": "11-10 那一代图执行的驱动侧；没有产品调用方。和批次 4 一起评审。",
+     "users": []
+    },
+    "_WorkerLink": {
+     "status": "old",
+     "reason": "11-10 那一代图执行的驱动侧；没有产品调用方。和批次 4 一起评审。",
+     "users": []
+    },
+    "_activation_order": {
+     "status": "old",
+     "reason": "11-10 那一代图执行的驱动侧；没有产品调用方。和批次 4 一起评审。",
+     "users": []
+    },
+    "_build_manifest": {
+     "status": "old",
+     "reason": "11-10 那一代图执行的驱动侧；没有产品调用方。和批次 4 一起评审。",
+     "users": []
+    },
+    "_graph_action_request": {
+     "status": "live",
+     "reason": "图入口走 v3 动作的实现。"
+    },
+    "_run_graph": {
+     "status": "live",
+     "reason": "图入口走 v3 动作的实现。"
+    },
+    "_sealed_operators": {
+     "status": "old",
+     "reason": "11-10 那一代图执行的驱动侧；没有产品调用方。和批次 4 一起评审。",
+     "users": []
+    },
+    "_validate_graph_location": {
+     "status": "live",
+     "reason": "图入口走 v3 动作的实现。"
+    },
+    "_worker_assignment_channels": {
+     "status": "old",
+     "reason": "11-10 那一代图执行的驱动侧；没有产品调用方。和批次 4 一起评审。",
+     "users": []
+    },
+    "compile_graph_topology": {
+     "status": "old",
+     "reason": "11-10 那一代图执行的驱动侧；没有产品调用方。和批次 4 一起评审。",
+     "users": []
+    },
+    "run_local_graph": {
+     "status": "compat_entry",
+     "reason": "MIGRATION「替换与退出」：graph 公开兼容入口保留。executors/local.py、executors/ray.py 调用；函数内交给 _run_graph，由它走 v3 动作。",
+     "translates_through": "_run_graph"
+    },
+    "run_ray_graph": {
+     "status": "compat_entry",
+     "reason": "MIGRATION「替换与退出」：graph 公开兼容入口保留。executors/local.py、executors/ray.py 调用；函数内交给 _run_graph，由它走 v3 动作。",
+     "translates_through": "_run_graph"
+    }
+   },
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 7,
+     "historical_set_139_files": 10
+    },
+    "functions": 27,
+    "reached_through_a_product_entry": 4,
+    "called_only_by_tests": 3,
+    "ran_only_at_import": 0,
+    "never_ran": 20
+   }
+  },
+  "demiflow.execution.lance_merge": {
+   "status": "undecided",
+   "reason": "产品代码没有导入方，有一个测试文件。暂不处理。",
+   "importers": [],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 0,
+     "historical_set_139_files": 1
+    },
+    "functions": 1,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 1
+   }
+  },
+  "demiflow.execution.local": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 0,
+     "historical_set_139_files": 0
+    },
+    "functions": 7,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 7
+   }
+  },
+  "demiflow.execution.local_tasks": {
+   "status": "undecided",
+   "reason": "它自己的函数只被历史测试执行；arrow_batch_sink 继承它的 Block 并使用 TaskOutput、TaskScheduler，dataset_native 使用 _apply、_fold。",
+   "importers": [
+    "demiflow.execution.arrow_batch_sink",
+    "demiflow.execution.dataset_native"
+   ],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 4,
+     "historical_set_139_files": 8
+    },
+    "functions": 49,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 17,
+    "ran_only_at_import": 0,
+    "never_ran": 32
+   }
+  },
+  "demiflow.execution.native_commit_store": {
+   "status": "undecided",
+   "reason": "一个接口说明（Protocol），没有导入方，没有测试。批次 3，待确认不是有意留着的。",
+   "importers": [],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 0,
+     "historical_set_139_files": 0
+    },
+    "functions": 9,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 9
+   }
+  },
+  "demiflow.execution.native_plan": {
+   "status": "old",
+   "reason": "旧的原生写入封存路径；调用方只有 chain.py 里的 _WriteSeal 和 seal_write_topology（都待退役）。批次 4。",
+   "batch": 4,
+   "importers": [
+    "demiflow.execution.chain"
+   ],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 3,
+     "historical_set_139_files": 6
+    },
+    "functions": 10,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 9,
+    "ran_only_at_import": 0,
+    "never_ran": 1
+   }
+  },
+  "demiflow.execution.notebook": {
+   "status": "undecided",
+   "reason": "给 notebook 用的公开小工具，有测试；产品代码不导入。暂不处理。",
+   "importers": [],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 0,
+     "historical_set_139_files": 1
+    },
+    "functions": 9,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 3,
+    "ran_only_at_import": 0,
+    "never_ran": 6
+   }
+  },
+  "demiflow.execution.observation": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 0,
+     "historical_set_139_files": 0
+    },
+    "functions": 4,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 4
+   }
+  },
+  "demiflow.execution.operator_checkpoint": {
+   "status": "undecided",
+   "reason": "data/dataset.py 里有一处函数内导入；测量里从未被加载。暂不处理。",
+   "importers": [
+    "demiflow.data.dataset"
+   ],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 0,
+     "historical_set_139_files": 0
+    },
+    "functions": 17,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 17
+   }
+  },
+  "demiflow.execution.package_loader": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 263,
+     "historical_set_139_files": 135
+    },
+    "functions": 2,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 2
+   }
+  },
+  "demiflow.execution.plan_interpreter": {
+   "status": "history",
+   "reason": "sealed_plans 读封存计划时调它的校验函数和常量；PlanContractError 是读取方的错误类型。解释旧物理计划的部分随批次 4 细化到符号。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 36,
+     "historical_set_139_files": 44
+    },
+    "functions": 17,
+    "reached_through_a_product_entry": 3,
+    "called_only_by_tests": 14,
+    "ran_only_at_import": 0,
+    "never_ran": 0
+   }
+  },
+  "demiflow.execution.python_environment": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 263,
+     "historical_set_139_files": 135
+    },
+    "functions": 9,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 9
+   }
+  },
+  "demiflow.execution.queue_chain": {
+   "status": "mixed",
+   "reason": "只剩兼容入口；旧转换载体和它的准入判断已在批次 2 按符号清掉（GPT 评审 2026-11-18：按符号清理，不整删）。",
+   "symbols": {
+    "run_local_queue_chain": {
+     "status": "compat_entry",
+     "reason": "MIGRATION「替换与退出」：chain/graph/queue_chain 公开兼容入口保留，翻译请求交 execute_action。tests/test_runtime_v3_f.py::test_f017 验证。",
+     "translates_through": "execute_action"
+    }
+   },
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 1,
+     "historical_set_139_files": 3
+    },
+    "functions": 5,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 2,
+    "ran_only_at_import": 0,
+    "never_ran": 3
+   }
+  },
+  "demiflow.execution.queue_execution": {
+   "status": "frozen",
+   "reason": "七个冻结文件之一，不改。其中 write_queue_datasink 没有调用方（产品和测试都没有）。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 211,
+     "historical_set_139_files": 70
+    },
+    "functions": 8,
+    "reached_through_a_product_entry": 5,
+    "called_only_by_tests": 1,
+    "ran_only_at_import": 0,
+    "never_ran": 2
+   }
+  },
+  "demiflow.execution.ray": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 0,
+     "historical_set_139_files": 0
+    },
+    "functions": 11,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 11
+   }
+  },
+  "demiflow.execution.readiness": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 263,
+     "historical_set_139_files": 135
+    },
+    "functions": 1,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 1
+   }
+  },
+  "demiflow.execution.requirements": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 263,
+     "historical_set_139_files": 135
+    },
+    "functions": 24,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 24
+   }
+  },
+  "demiflow.execution.sealed_plans": {
+   "status": "history",
+   "reason": "读封存计划：v3 封存的计划和旧运行的计划都经它读（dataflow_history、sealed_plan_facts、publication_facts、图适配器）。保留。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 35,
+     "historical_set_139_files": 38
+    },
+    "functions": 11,
+    "reached_through_a_product_entry": 7,
+    "called_only_by_tests": 4,
+    "ran_only_at_import": 0,
+    "never_ran": 0
+   }
+  },
+  "demiflow.execution.stage_buffers": {
+   "status": "undecided",
+   "reason": "旧流式驱动的零件；stream_barrier._CheckpointBarrier 经 stream 被 request_limits.ObservedQueue 引用。随批次 5 评审。",
+   "importers": [
+    "demiflow.execution.stream",
+    "demiflow.execution.stream_materialize"
+   ],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 0,
+     "historical_set_139_files": 0
+    },
+    "functions": 20,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 20
+   }
+  },
+  "demiflow.execution.stream": {
+   "status": "mixed",
+   "reason": "统计类型（在用）和旧流式驱动（待退役）在同一个文件里。常量 SENTINEL 被 request_limits.ObservedQueue 使用。",
+   "symbols": {
+    "StreamStats": {
+     "status": "live",
+     "reason": "v3 的 dataflow_stream.py 用它做流式统计。"
+    },
+    "_Stage": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": []
+    },
+    "_arun": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": []
+    },
+    "_call": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": []
+    },
+    "_call_stage": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": []
+    },
+    "_call_sync": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": []
+    },
+    "_close_platform": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": []
+    },
+    "_close_stages": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": []
+    },
+    "_drain_threads": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": []
+    },
+    "_local_queue": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": []
+    },
+    "_make_worker": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": []
+    },
+    "_materialize": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": []
+    },
+    "_post_filter": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": []
+    },
+    "_predicate": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": []
+    },
+    "run_stream": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": [
+      "demiflow.data.dataset",
+      "demiflow.execution.worker.execution"
+     ]
+    }
+   },
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 149,
+     "historical_set_139_files": 69
+    },
+    "functions": 49,
+    "reached_through_a_product_entry": 3,
+    "called_only_by_tests": 32,
+    "ran_only_at_import": 0,
+    "never_ran": 14
+   }
+  },
+  "demiflow.execution.stream_barrier": {
+   "status": "undecided",
+   "reason": "旧流式驱动的零件；stream_barrier._CheckpointBarrier 经 stream 被 request_limits.ObservedQueue 引用。随批次 5 评审。",
+   "importers": [
+    "demiflow.execution.stream"
+   ],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 149,
+     "historical_set_139_files": 69
+    },
+    "functions": 16,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 15,
+    "ran_only_at_import": 0,
+    "never_ran": 1
+   }
+  },
+  "demiflow.execution.stream_map": {
+   "status": "undecided",
+   "reason": "旧流式驱动的零件；stream_barrier._CheckpointBarrier 经 stream 被 request_limits.ObservedQueue 引用。随批次 5 评审。",
+   "importers": [
+    "demiflow.execution.stream",
+    "demiflow.execution.stream_materialize"
+   ],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 149,
+     "historical_set_139_files": 69
+    },
+    "functions": 12,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 9,
+    "ran_only_at_import": 0,
+    "never_ran": 3
+   }
+  },
+  "demiflow.execution.stream_materialize": {
+   "status": "mixed",
+   "reason": "旧流式物化；其中 stream_view 被冻结文件 queue_execution.py 里没有调用方的 write_queue_datasink 引用。",
+   "symbols": {
+    "StreamMaterialization": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": []
+    },
+    "StreamStageProgress": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": [
+      "demiflow.execution.worker.progress"
+     ]
+    },
+    "bounded_stream_batches": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": []
+    },
+    "has_stream": {
+     "status": "live",
+     "reason": "execution/capabilities.py 调用。"
+    },
+    "prepare_stream_blocks": {
+     "status": "old",
+     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
+     "users": []
+    },
+    "stream_view": {
+     "status": "frozen",
+     "reason": "冻结文件 execution/queue_execution.py 的 write_queue_datasink 引用它（该函数本身没有调用方）。到流式退役批次统一裁决。"
+    }
+   },
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 148,
+     "historical_set_139_files": 68
+    },
+    "functions": 21,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 2,
+    "ran_only_at_import": 0,
+    "never_ran": 19
+   }
+  },
+  "demiflow.execution.target": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 263,
+     "historical_set_139_files": 135
+    },
+    "functions": 2,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 2
+   }
+  },
+  "demiflow.execution.timeout": {
+   "status": "undecided",
+   "reason": "2026-09 的文件，没有导入方，没有测试。批次 3，待确认。",
+   "importers": [],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 0,
+     "historical_set_139_files": 0
+    },
+    "functions": 3,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 3
+   }
+  },
+  "demiflow.execution.worker.execution": {
+   "status": "old",
+   "reason": "11-09 那一代的 worker 执行器。run_worker 的 execution 分支没有产品来源；worker/ray_host.py 在模块顶部导入它（Ray 路径）。批次 4。",
+   "batch": 4,
+   "importers": [
+    "demiflow.execution.worker.bootstrap",
+    "demiflow.execution.worker.ray_host"
+   ],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 148,
+     "historical_set_139_files": 64
+    },
+    "functions": 14,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 5,
+    "ran_only_at_import": 0,
+    "never_ran": 9
+   }
+  },
+  "demiflow.execution.worker.layout": {
+   "status": "old",
+   "reason": "只被旧执行器和 chain.py 的旧实现使用。批次 4。",
+   "batch": 4,
+   "importers": [
+    "demiflow.execution.chain",
+    "demiflow.execution.worker.execution"
+   ],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 0,
+     "historical_set_139_files": 3
+    },
+    "functions": 1,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 1,
+    "ran_only_at_import": 0,
+    "never_ran": 0
+   }
+  },
+  "demiflow.execution.worker.progress": {
+   "status": "old",
+   "reason": "只被 worker/execution.py 使用。批次 4。",
+   "batch": 4,
+   "importers": [
+    "demiflow.execution.worker.execution"
+   ],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 148,
+     "historical_set_139_files": 65
+    },
+    "functions": 2,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 2
+   }
+  },
+  "demiflow.execution.worker.ray_host": {
+   "status": "undecided",
+   "reason": "v3 的 DataflowRayConnector 继承这里的 RayControlConnector；_RayWorkerHost 属于 11-09 那一代。需要在 Ray 环境里测量后细化到符号。",
+   "importers": [
+    "demiflow.execution.dataflow_hosts"
+   ],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 1,
+     "historical_set_139_files": 0
+    },
+    "functions": 20,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 20
+   }
+  }
+ },
+ "methods": [
+  {
+   "module": "demiflow.data.dataset",
+   "name": "_run_stream",
+   "status": "old",
+   "reason": "旧流式驱动的入口（Dataset._run_stream）。调用方只剩冻结文件里没有调用方的 write_queue_datasink、没有调用方的 prepare_stream_blocks 和两个测试基准脚本。其中还留着对已删除的 _apply_plan 的调用。批次 5。"
+  },
+  {
+   "module": "demiflow.execution.worker.bootstrap",
+   "name": "run_worker",
+   "status": "live",
+   "reason": "v3 worker 的启动入口。函数里 execution 分支和它的导入属于旧执行器，批次 4 去掉；queue_transform 分支已在批次 2 去掉。"
+  }
+ ],
+ "removed": [
+  {
+   "module": "demiflow.execution.worker.graph_host",
+   "batch": 1,
+   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  },
+  {
+   "module": "demiflow.execution.worker.graph_ray_host",
+   "batch": 1,
+   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  },
+  {
+   "module": "demiflow.execution.worker.graph_execution",
+   "batch": 1,
+   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  },
+  {
+   "module": "demiflow.execution.worker.graph_progress",
+   "batch": 1,
+   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  },
+  {
+   "module": "demiflow.execution.exchange.graph_router",
+   "batch": 1,
+   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  },
+  {
+   "module": "demiflow.execution.exchange.graph_channel",
+   "batch": 1,
+   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  },
+  {
+   "module": "demiflow.execution.exchange.segment_gc",
+   "batch": 1,
+   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  },
+  {
+   "module": "demiflow.execution.exchange.carriage_ray",
+   "batch": 1,
+   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  },
+  {
+   "module": "demiflow.execution.worker.queue_transform",
+   "batch": 2,
+   "reason": "11-12 那一代的队列转换执行器。启动它的只有 run_worker 里 queue_transform 分支，产品代码不再产生这种启动参数。批次 2。"
+  },
+  {
+   "module": "demiflow.execution.queue_chain",
+   "symbol": "_TransformClient",
+   "batch": 2,
+   "reason": "旧转换载体的驱动侧；没有产品调用方。批次 2。"
+  },
+  {
+   "module": "demiflow.execution.queue_chain",
+   "symbol": "unified_queue_chain_eligible",
+   "batch": 2,
+   "reason": "旧载体的准入判断；没有产品调用方。批次 2。"
+  }
+ ]
+}

@@ -224,36 +224,7 @@ def test_sem_local_ray_graph_equivalence(tmp_path, ray_cluster):
     assert 'ray.data' not in sys.modules
 
 
-
 # ---------------- ray_object large payload: ref on the wire, consumer ray.get direct ----------------
-
-def test_ray_object_large_payload_direct_read_not_inline(tmp_path, ray_cluster):
-    from demiflow.execution.exchange.carriage_ray import RayObjectStore, ref_records, expand_records
-    store = RayObjectStore(tmp_path / "producer", host_id="h")
-    big_rows = [{"v": i, "blob": "x" * 4096} for i in range(8)]
-    descriptor, refs = store.write(big_rows, scope_ref="occ")
-    assert refs[0]["kind"] == "ray_object" and refs[0]["durability"] == "ephemeral"
-    records = ref_records(refs, occurrence_id="occ")
-    # The wire record carries only the ref (payload is the DataRef, not the rows):
-    # the large business payload never rides the channel frame / driver.
-    assert records[0]["payload"] == refs[0]
-    assert records[0]["size_bytes"] == refs[0]["bytes"]
-    assert "blob" not in json.dumps(records[0]["payload"])
-    # A fresh consumer store sharing the producer's read domain (same run directory,
-    # as ancestor/targets share in the graph) but with an EMPTY pin dict: it must
-    # reconstruct the ObjectRef from its hex location and ray.get the same-host plasma
-    # directly, never relying on the producer's in-memory pins or the driver.
-    consumer = RayObjectStore(tmp_path / "producer", host_id="h")
-    assert consumer.domain == store.domain
-    assert consumer._objects == {}
-    assert expand_records(records, consumer) == big_rows
-    # Tampered digest is rejected before unpickling.
-    from demiflow.execution.contracts.errors import ProtocolError
-    bad = dict(refs[0]); bad["sha256"] = "0" * 64
-    bad["ref_id"] = __import__("demiflow.execution.contracts.exchange", fromlist=["data_ref_id"]).data_ref_id(
-        bad["read_domain"], bad["location"], bad["sha256"])
-    with pytest.raises(ProtocolError):
-        consumer.read([bad])
 
 
 # ---------------- Ray fault matrix: actor death -> whole-graph restore exactly once ----------------
@@ -316,7 +287,6 @@ def test_ray_graph_producer_death_recovers_acked_prefix_exactly_once(tmp_path, r
     assert all(counts[i] == 1 for i in range(9, n))
 
 
-
 def test_ray_graph_consumer_death_recovers_whole_graph_exactly_once(tmp_path, ray_cluster):
     from runtime_v3_graph_history import capture_acks, assert_acks_retained
     from runtime_v3_owned_crash import assert_worker_loss
@@ -362,7 +332,6 @@ def test_ray_graph_consumer_death_recovers_whole_graph_exactly_once(tmp_path, ra
             assert [r["x"] for r in rows] == [i * 2 for i in range(n)], rid
         assert _owner(run2) == (run2.attempt, run2.fence)
     assert result["egress_rows"] == n
-
 
 
 # ---------------- Ray fault matrix: sealed storage insufficiency fails early ----------------

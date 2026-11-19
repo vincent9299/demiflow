@@ -22,7 +22,7 @@ def endpoint(monkeypatch):
     def remote(limit):
         calls.append(limit)
         return ref
-    actor = NS(pull_events=NS(remote=remote), handle=NS(remote=lambda command: Ref({'receipt':{}}, True)))
+    actor = NS(pull_events=NS(remote=remote), handle=NS(remote=lambda command, **options: Ref({'receipt':{}}, True)))
     def wait(refs, timeout):
         waits.append(timeout)
         return [r for r in refs if r.ready], [r for r in refs if not r.ready]
@@ -37,7 +37,9 @@ def endpoint(monkeypatch):
     ep = hosts.RayHostEndpoint.__new__(hosts.RayHostEndpoint)
     ep._pending_pull, ep._pull_limit, ep._pull_started = None, 0, 0.0
     ep._events, ep._allocation_id = deque(), 'owned'
-    ep._services = NS(bounds=NS(max_pending_events=4), policy=NS(control_timeout_ms=1000))
+    ep._services = NS(bounds=NS(max_pending_events=4), policy=NS(control_timeout_ms=1000),
+                      journal_service=NS(poll_worker_replies=lambda **options: ()))
+    ep._boot_id = 'boot'
     ep._connector = NS(_actor=lambda allocation: actor)
     ep._k3_envelope = lambda kind, payload: {'kind':kind, 'payload':payload}
     ep._accept_final_observations = lambda result: None

@@ -59,7 +59,11 @@ def test_api_matrix_guard_rejects_claimed_success_without_complete_actual_eviden
     else:report['cases']=[]
     monkeypatch.setattr(runtime_v3_api_scenarios,'api_matrix',lambda fx,fault:report)
     monkeypatch.setattr(runtime_v3_ray_matrix_process,'run_ray_api_matrix',lambda fx,fault:report)
-    with pytest.raises(AssertionError):support._s_api_matrix(SimpleNamespace(provider=provider),None)
+    saved=[]
+    fixture=SimpleNamespace(provider=provider,_save_evidence=lambda name,evidence:saved.append(name))
+    with pytest.raises(AssertionError):support._s_api_matrix(fixture,None)
+    # A failing matrix exports its case details before the assertion propagates.
+    assert saved==(['api_matrix'] if defect=='failure' else [])
 
 
 @pytest.mark.parametrize('provider', ['local', 'ray_core'])

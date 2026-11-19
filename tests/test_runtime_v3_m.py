@@ -1551,7 +1551,7 @@ def test_m026(prompt_server, tmp_path):
     client = create_async_operator_llm_client(model, None, native_journal=remote)
     assert isinstance(client, AsyncOperatorLLMClient) and client.journal is remote
     # Offline data now uses the same verified native port, never a worker-owned
-    # database or a paid HTTP request. Codex still owns a different capability.
+    # database or a paid HTTP request.
     from demiflow.execution.dataflow_offline import RemoteOfflinePromptClient
     before = list(port.commands)
     for options in ({'offline_store': {'path': str(tmp_path / 'offline.sqlite')}},
@@ -1563,7 +1563,8 @@ def test_m026(prompt_server, tmp_path):
         with pytest.raises(ValueError, match='verified native worker port'):
             create_async_operator_llm_client(model, options, native_journal=object())
     assert port.commands == before and prompt_server['requests'] == []
-    for options in ({'codex_exec': {}}, {'offline_dir': 'x', 'offline_store': {}},
+    # Codex exec binds the same verified port (test_runtime_v3_codex_prompt_journal.py).
+    for options in ({'offline_dir': 'x', 'offline_store': {}},
                     {'offline_store': {}, 'sqlite_journal': {'path': 'not-owned'}},
                     {'offline_dir': 'x', 'http_error_retry': {'max_retries': 1}}):
         with pytest.raises(ValueError):

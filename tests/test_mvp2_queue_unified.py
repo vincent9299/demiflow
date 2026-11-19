@@ -10,7 +10,6 @@ prove the worker constructs zero CommitCoordinator (guardrail 2, absolute) and
 that both commit scopes settle in the driver's single journal, and bind the
 default-OFF seam's eligibility fallbacks.
 """
-import ast
 import json
 import os
 import signal
@@ -160,28 +159,6 @@ def test_seam_default_on_uses_unified_carrier(tmp_path):
     assert pids and os.getpid() not in pids
 
 
-def test_worker_carrier_constructs_zero_commit_coordinator():
-    # Guardrail 2 (absolute), grep proof: the worker carrier module neither
-    # imports nor constructs CommitCoordinator. AST ignores the docstring, so
-    # this binds actual code references, not prose.
-    import demiflow.execution.worker.queue_transform as carrier
-    tree = ast.parse(Path(carrier.__file__).read_text())
-    referenced = set()
-    imported_modules = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name):
-            referenced.add(node.id)
-        elif isinstance(node, ast.Attribute):
-            referenced.add(node.attr)
-        elif isinstance(node, ast.ImportFrom):
-            imported_modules.add(node.module or '')
-            referenced.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.Import):
-            referenced.update(alias.name for alias in node.names)
-    assert 'CommitCoordinator' not in referenced
-    assert not any(module == 'commit' or module.endswith('.commit') for module in imported_modules)
-
-
 def test_both_commit_scopes_settle_in_driver_single_journal(tmp_path, monkeypatch):
     import demiflow.execution.commit as commits
     records = []
@@ -215,38 +192,6 @@ def test_both_commit_scopes_settle_in_driver_single_journal(tmp_path, monkeypatc
                           'WHERE generation=? AND task_id=?',
                           (channel.snapshot('p').generation, 'x')).fetchone()
     assert task[0] and task[1] and task[2] == 'done_ok'
-
-
-def test_eligibility_requires_serializable_maps_suffix(tmp_path):
-    from demiflow.execution.queue_chain import unified_queue_chain_eligible
-    cfg = _config(tmp_path, 'elig')
-    store = LocalObjectStore(tmp_path / 'objects')
-    policy = FetchPolicy(max_object_bytes=131072, http=HttpSource(allow_private=True))
-
-    def fetched():
-        return data.read_queue(cfg, pool='p').fetch(store=store, policy=policy, concurrency=1)
-
-    # No RawFetch node -> ineligible.
-    assert unified_queue_chain_eligible(data.read_queue(cfg, pool='p')._plan) is False
-    # Fetch-only (empty suffix) -> byte-unchanged legacy in-driver path.
-    assert unified_queue_chain_eligible(fetched()._plan) is False
-
-    def pure(row):
-        return row
-
-    # Fetch + pure serializable maps suffix -> unified carrier.
-    assert unified_queue_chain_eligible(fetched().map(pure)._plan) is True
-
-    # Fetch + a suffix capturing a live process-bound lock -> not serializable,
-    # so the narrow probe routes it to the legacy in-driver fallback.
-    import threading
-    lock = threading.Lock()
-
-    def captured(row):
-        with lock:
-            return row
-
-    assert unified_queue_chain_eligible(fetched().map(captured)._plan) is False
 
 
 # --- Segment 2: multi-task settlement equality + R4 kill/recover ------------
@@ -410,7 +355,6 @@ def test_unified_queue_carrier_kill_recover_per_record_equivalence(tmp_path):
     assert_released(root)
 
 
-
 # --- Segment 2: finite-resource release (worker quota + claim/lease) ---------
 
 _CAPACITY = {"cpu_millis": 4000, "memory_bytes": 4 * 1024 ** 3}
@@ -434,75 +378,6 @@ def _pid_dead(pid):
     except FileNotFoundError:
         return True
     return state == 'Z'
-
-
-def _release_orphans(resource_root):
-    # Canonical exit-evidence release (the provider's ensure_absent path): a dead
-    # allocation stays BOUND until unit-lock + birth-identity evidence confirms
-    # the host gone. Cross-run shared-tree reconcile is post-MVP (S8.3); here we
-    # only prove this-task quota is reclaimable, never permanently leaked.
-    from demiflow.resources.process_unit import ManagedProcessUnit
-    pool = _capacity(resource_root)
-    unit = ManagedProcessUnit(resource_root / "units")
-    for record in pool.snapshot()["active"]:
-        allocation_id = record["allocation_id"]
-        process_json = next((resource_root / "units").glob("*/" + allocation_id + "/process.json"))
-        evidence = unit.stop(process_json.parent.parent.name, allocation_id, terminate_deadline_ms=2000)
-        assert evidence["confirmed"] is True
-        pool.release(allocation_id, evidence)
-        try:
-            os.waitpid(evidence["identity"]["pid"], os.WNOHANG)
-        except (ChildProcessError, OSError):
-            pass
-    return pool.snapshot()["charged"]
-
-
-def test_unified_queue_carrier_releases_worker_quota_on_success_and_cancel(tmp_path, monkeypatch):
-    import demiflow.execution.queue_chain as qc
-    n = 3
-    # Success: this-task worker quota fully released, no live worker, every claim
-    # consumed (no leased remainder), queue drained, exactly one fetch per task.
-    cfg, root = _config(tmp_path, 'rok'), tmp_path / 'rokrun'
-    with origin_server() as (url, calls):
-        channel, p = _seed_tasks(cfg, tmp_path / 'rok-seed', url, n)
-        _settle_many(cfg, root, url, n, unified_queue_chain=True)
-    res = _resources(root)
-    assert _capacity(res).snapshot()["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
-    assert _capacity(res).snapshot()["active"] == []
-    pids = _managed_worker_pids(res)
-    assert pids and all(_pid_dead(pid) for pid in pids)
-    assert channel.state('p')['queue_drained'] and calls['/file'] == n
-    with channel.database.connection() as db:
-        statuses = sorted(r[0] for r in db.execute(
-            'SELECT status FROM queue_tasks WHERE generation=?', (p.generation,)))
-    assert statuses == ['done_ok'] * n
-
-    # Cancel/parent-exit: a driver-side carrier failure on t1 leaves the worker
-    # LIVE (it already transformed t0); the finally block must kill it. The queue
-    # is NOT drained (cancel never manufactures ACK) and the dead allocation is
-    # canonically releasable.
-    ccfg, croot = _config(tmp_path, 'rcancel'), tmp_path / 'rcancelrun'
-    original = qc._TransformClient.transform
-
-    def faulty(self, row):
-        if row['_queue_delivery']['task_id'] == 't1':
-            raise RuntimeError('driver carrier cancelled')
-        return original(self, row)
-
-    monkeypatch.setattr(qc._TransformClient, 'transform', faulty)
-    with origin_server() as (url, calls):
-        cchannel, cp = _seed_tasks(ccfg, tmp_path / 'rcancel-seed', url, n)
-        with pytest.raises(RuntimeError, match='driver carrier cancelled'):
-            _settle_many(ccfg, croot, url, n, unified_queue_chain=True)
-    cres = _resources(croot)
-    cpids = _managed_worker_pids(cres)
-    assert cpids and all(_pid_dead(pid) for pid in cpids)
-    assert not cchannel.state('p')['queue_drained']
-    with cchannel.database.connection() as db:
-        t0 = db.execute('SELECT status FROM queue_tasks WHERE generation=? AND task_id=?',
-                        (cp.generation, 't0')).fetchone()[0]
-    assert t0 == 'done_ok'  # the worker did real work, so it was live before the kill
-    assert _release_orphans(cres) == {"cpu_millis": 0, "memory_bytes": 0}
 
 
 def test_unified_queue_carrier_crash_resume_reclaims_quota_no_live_worker(tmp_path):
@@ -548,7 +423,6 @@ def test_unified_queue_carrier_crash_resume_reclaims_quota_no_live_worker(tmp_pa
         assert channel.state('p')['queue_drained'] and calls['/file'] == n
 
 
-
 # --- Segment 3: S8.5 artifact immutability narrow gate ----------------------
 
 
@@ -582,47 +456,6 @@ def _settle_label_variant(cfg, root, *, url, label_fn, **exec_kwargs):
                   .map(receipt_status, inputs={'result': 'result'}, output='status')
                   .map(label_fn, inputs={'status': 'status'}, output='label'))
             assert ds.write_datasink(QueueResultSink(cfg, pool='p')) is None
-
-
-def test_eligibility_discriminates_by_reference_udfs(tmp_path, monkeypatch):
-    import pickle
-    from demiflow.execution.queue_chain import unified_queue_chain_eligible
-    cfg = _config(tmp_path, 'disc')
-    store = LocalObjectStore(tmp_path / 'objects')
-    policy = FetchPolicy(max_object_bytes=131072, http=HttpSource(allow_private=True))
-
-    def fetched():
-        return data.read_queue(cfg, pool='p').fetch(store=store, policy=policy, concurrency=1)
-
-    def suffix(label_fn):
-        return fetched().map(label_fn, inputs={'status': 'status'}, output='label')._plan
-
-    # By-reference: a module-level UDF (standard pickle succeeds, __module__ is
-    # not '__main__') -> cloudpickle carries it by reference -> rejected.
-    assert _module_label.__module__ != '__main__'
-    assert unified_queue_chain_eligible(suffix(_module_label)) is False
-
-    # By-value: a local closure and a lambda fail standard pickle, so cloudpickle
-    # carries their code bytes by value -> admitted.
-    def closure_label(status):
-        return 'downloaded' if status == 'ok' else 'failed'
-
-    assert unified_queue_chain_eligible(suffix(closure_label)) is True
-    assert unified_queue_chain_eligible(suffix(lambda status: status)) is True
-
-    # __main__ nuance: standard pickle ALSO succeeds for a genuine __main__ UDF
-    # (script/notebook top level), but cloudpickle special-cases __main__ BY
-    # VALUE. Make it findable as __main__.main_label so pickle.dumps succeeds,
-    # then prove the __module__ guard admits it (a naive pickle-success-only rule
-    # would wrongly reject this primary workbench case).
-    def main_label(status):
-        return status
-
-    main_label.__module__ = '__main__'
-    main_label.__qualname__ = 'main_label'
-    monkeypatch.setattr(sys.modules['__main__'], 'main_label', main_label, raising=False)
-    assert pickle.dumps(main_label)
-    assert unified_queue_chain_eligible(suffix(main_label)) is True
 
 
 def test_by_reference_suffix_falls_back_to_legacy_without_hang(tmp_path):
@@ -806,28 +639,6 @@ def test_unified_queue_carrier_releases_quota_on_business_failure_no_helper(tmp_
     pids = _managed_worker_pids(res)
     assert pids and all(_pid_dead(pid) for pid in pids)
     assert not QueueChannel(cfg).state('p')['queue_drained']  # failure never manufactures ACK
-
-
-def test_unified_queue_carrier_releases_quota_on_cancel_no_helper(tmp_path, monkeypatch):
-    # N3: a driver-side carrier cancel (failure before the worker drains) also
-    # auto-releases this-task capacity through the same terminal — no helper.
-    import demiflow.execution.queue_chain as qc
-    cfg, root = _config(tmp_path, 'cancel'), tmp_path / 'cancelrun'
-
-    def faulty(self, row):
-        raise RuntimeError('driver carrier cancelled')
-
-    monkeypatch.setattr(qc._TransformClient, 'transform', faulty)
-    with origin_server() as (url, calls):
-        seed(QueueChannel(cfg), tmp_path / 'cancel-seed', url)
-        with pytest.raises(RuntimeError, match='driver carrier cancelled'):
-            _intermediate_settle(cfg, root, url=url, kind='tuple', unified_queue_chain=True)
-    res = _resources(root)
-    assert _capacity(res).snapshot()["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
-    assert _capacity(res).snapshot()["active"] == []
-    pids = _managed_worker_pids(res)
-    assert pids and all(_pid_dead(pid) for pid in pids)
-    assert not QueueChannel(cfg).state('p')['queue_drained']
 
 
 def test_unified_queue_carrier_scratch_bounded_across_many_rows(tmp_path):

@@ -241,6 +241,7 @@ def test_original_pump_waits_for_reply_readiness_only_on_local(tmp_path, monkeyp
             endpoint = SimpleNamespace(_sock=peer, poll=lambda **kwargs: (), deliver_reply=lambda reply: None)
             driver = object.__new__(DataflowExecution)
             driver._closed, driver._started = False, True
+            driver._cancelled, driver._publication_future, driver._checkpoint_deadline = False, None, None
             driver._check_stop = driver._renew_workers = driver._advance_cut = lambda: None
             driver._checkpoint_progress = lambda: 0
             driver._bounds = env.bounds

@@ -411,7 +411,6 @@ def test_g4_queue_closure_end_to_end_seals_helper(tmp_path, monkeypatch):
     from test_raw_fetch import origin_server
     from demiflow.collect import FetchPolicy, HttpSource
     from demiflow.execution.queue_sinks import QueueResultSink
-    from demiflow.execution.queue_chain import unified_queue_chain_eligible
     from demiflow.objects import LocalObjectStore
     from test_stage2_unified_plan import _code_pin_keys
 
@@ -426,7 +425,6 @@ def test_g4_queue_closure_end_to_end_seals_helper(tmp_path, monkeypatch):
     policy = FetchPolicy(max_object_bytes=131072, http=HttpSource(allow_private=True))
     fetched = data.read_queue(cfg, pool='p').fetch(
         store=LocalObjectStore(tmp_path / 'objects'), policy=policy, concurrency=1)
-    assert unified_queue_chain_eligible(fetched.map(label_fn)._plan) is True
 
     build = _make_builder(1, label_fn=label_fn)
     with origin_server() as (url, calls):

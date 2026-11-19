@@ -9,7 +9,7 @@ def test_ray_matrix_child_releases_process_owned_fds(tmp_path):
     pytest.importorskip('ray')
     from runtime_v3_support import RuntimeV3Fixture
     from runtime_v3_ray_matrix_process import run_ray_api_matrix
-    root = Path(tempfile.mkdtemp(prefix='demiflow-ray-matrix-process-'))
+    root = Path(tempfile.mkdtemp(prefix='demiflow-ray-matrix-process-', dir='/tmp'))
     fixture = RuntimeV3Fixture(root, provider='ray_core', bounds={'max_rows': 1000})
     try:
         report = run_ray_api_matrix(fixture, 'models')

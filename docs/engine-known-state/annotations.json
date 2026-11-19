@@ -1,0 +1,1470 @@
+{
+ "rules": [
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_evidence_integrity.py",
+    "function": "test_api_matrix_guard_rejects_claimed_success_without_complete_actual_evidence"
+   },
+   "cause": {
+    "flip_commit": "29cdf279",
+    "committed": "2026-11-16 22:42",
+    "subject": "Retain complete API matrix failure evidence before fixture cleanup",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "high",
+    "note": "这个提交只改了测试支撑代码和 2 个测试"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": null,
+    "note": "测试用的假夹具没有 _save_evidence，而支撑函数现在在断言失败前先导出证据。补上后原断言通过。",
+    "fixed_by": "0b0aabe"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_journal_wakeup.py",
+    "function": "test_original_pump_waits_for_reply_readiness_only_on_local"
+   },
+   "cause": {
+    "flip_commit": "2bd6c34b",
+    "committed": "2026-11-17 01:10",
+    "subject": "Overlap original checkpoint publication with bounded graph progress and preserve delivered prefix ACKs",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "high"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": null,
+    "note": "手工搭的 DataflowExecution 缺 _cancelled、_publication_future、_checkpoint_deadline。补上后原断言通过。",
+    "fixed_by": "0b0aabe"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_live_input_branches.py",
+    "outcome": "failed"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": null,
+    "note": "测试注入的提交钩子没有转发 native_queue_state 关键字参数。改成原样转发后通过。",
+    "fixed_by": "0b0aabe"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_ray_polling.py",
+    "outcome": "failed"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": null,
+    "note": "假的 actor 句柄不接受 resource_envelope；端点替身缺 journal_service 和 _boot_id。补上后通过。",
+    "fixed_by": "0b0aabe"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_worker_wakeup.py",
+    "outcome": "failed"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": null,
+    "note": "假的 peer 缺 _bytes，假的执行器缺 _kernels。补上后通过。",
+    "fixed_by": "0b0aabe"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_park_window.py",
+    "outcome": "failed"
+   },
+   "cause": {
+    "flip_commit": "d9a22f6",
+    "committed": "2026-11-17 04:55",
+    "subject": "Checkpoint finite input consumption through the original worker frontier",
+    "method": "按源码改动定位（git log -S）：_advance_input_completions 开始读 _finite_input 的提交；没有做二分",
+    "confidence": "medium"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": null,
+    "note": "手工搭的 WorkerGraphRunner 缺 _finite_input、_relational_regions、_region_members，kernel 替身缺 _spec。补上后 4 项通过。",
+    "fixed_by": "0b0aabe"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_m.py",
+    "function": "test_m026"
+   },
+   "cause": {
+    "flip_commit": "e1a95c0",
+    "committed": "2026-11-18 19:57",
+    "subject": "fix(prompt): bind Codex transport to verified native request journal",
+    "method": "直接验证：同一用例在前一个提交 3c7625d 通过，在 e1a95c0 失败",
+    "confidence": "high",
+    "note": "这是候选从 a28b1b4 前移到 74d2f99 的三个提交里新增的失配"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": null,
+    "note": "e1a95c0 有意取消了“codex_exec 不接受 native journal”的拒绝，并新增了 test_runtime_v3_codex_prompt_journal.py 验证新行为。从被拒绝的选项里去掉这一项。",
+    "fixed_by": "6345149"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_stream_budgets.py",
+    "function": "test_stream_terminal_uses_original_allocator_and_public_envelope"
+   },
+   "cause": {
+    "flip_commit": "df5d2530",
+    "committed": "2026-11-17 01:23",
+    "subject": "Preserve business catch identity and expose actual sealed stream progress",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "high"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": null,
+    "note": "统计对象的形状变了：stages 现在是真实的封存阶段进度，已提交行数在 stats.emitted 和 stats.metrics。改读新位置。",
+    "fixed_by": "6345149"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_public_execution.py",
+    "function": "test_public_automatic_cuts_lance_publishes_once"
+   },
+   "cause": {
+    "flip_commit": "2bd6c34b",
+    "committed": "2026-11-17 01:10",
+    "subject": "Overlap original checkpoint publication with bounded graph progress and preserve delivered prefix ACKs",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": null,
+    "note": "发布和图的推进现在可以重叠，在途的一次发布会吸收期间到达的行，所以 6 行不再必然切 3 次。改成和节奏无关的事实：至少一次自动切点加最后一次。“只有最后一次切点发布”的断言没动。",
+    "fixed_by": "6345149"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_route_recovery.py",
+    "function": "test_unknown_target_cannot_silently_select_a_different_reader_or_model"
+   },
+   "cause": {
+    "flip_commit": "7d4c84a8",
+    "committed": "2026-11-17 05:40",
+    "subject": "Fit default codec slack to simultaneous graph components",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": null,
+    "note": "场景用默认的 16 MiB 行/批窗口手工封存两个读者副本，7d4c84a8 之后这个手工计划放不进驻留预算，在走到“目标不是读者”的检查之前就被规划拒绝。同文件其他场景本来就用显式窗口，这个场景改用相同的值。断言没动。",
+    "fixed_by": "5ae3638"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_v.py",
+    "function": "test_v002"
+   },
+   "cause": {
+    "flip_commit": "e4e55356",
+    "committed": "2026-11-16 11:56",
+    "subject": "test(runtime): connect measured performance reports and keep evidence gates closed",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high",
+    "note": "这个提交只改了 tests/"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": null,
+    "note": "测试是对的：其他场景都是先记账再抛 NotRun，只有性能场景在 e4e55356 之后漏了记账。在场景包装里补上记账。",
+    "fixed_by": "fe83a1c"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_resource_preallocation.py",
+    "function": "test_resource_evidence_backup_closes_every_sqlite_handle"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": null,
+    "note": "导出目录必须直接在 /tmp 下，测试却用不带 dir 的 mkdtemp，只有 TMPDIR 恰好是 /tmp 时才成立。显式写 dir=/tmp 后，在私有 TMPDIR 下 9 项全过。",
+    "fixed_by": "cbce402"
+   }
+  },
+  {
+   "match": {
+    "lane": "ray",
+    "reason_contains": "AF_UNIX path length cannot exceed"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": null,
+    "note": "Ray 会话目录用不带 dir 的 mkdtemp 建在 TMPDIR 下，套接字路径超过 107 字节。显式写 dir=/tmp 后，在回执工具的私有 TMPDIR 下通过。回执工具的目录规则不动。",
+    "fixed_by": "cbce402"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_ray_matrix_process.py",
+    "lane": "ray",
+    "reason_contains": "fixture root must be /tmp/demiflow-*"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": null,
+    "note": "夹具根目录必须直接是 /tmp/demiflow-*，测试用不带 dir 的 mkdtemp。显式写 dir=/tmp 后在回执工具下通过。",
+    "fixed_by": "cbce402"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_function_residency.py",
+    "function": "test_readonly_task_dependencies_need_no_state_reservation"
+   },
+   "cause": {
+    "flip_commit": "172b2ae9",
+    "committed": "2026-11-17 04:11",
+    "subject": "fix: provision record codec workspace within original run budgets",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high",
+    "note": "当时的报错和现在不同：在 172b2ae9 上是整个运行失败，现在是断言的数值对不上"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "重写这条断言：用和阶段窗口拟合无关的方式表达“没有状态预留”",
+    "note": "等式写死了 172b2ae9 之前的公式（一个批加一行）。现在阶段申请是按运行预算拟合出来的窗口（实测 72,701,269），既不是旧公式，也不是 _payload_workspace(bounds)（100,667,392，我试过）。没有改：怎么表达要负责人定。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_arrow_payload.py",
+    "function": "test_wide_parent_buffers_use_original_rows_within_narrow_window"
+   },
+   "cause": {
+    "flip_commit": "204531fb",
+    "committed": "2026-11-17 06:43",
+    "subject": "Keep previous native output within the shared publication target",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "high"
+   },
+   "ruling": {
+    "verdict": "scenario_must_be_rebuilt",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "重新构造一个确实超过转换准入窗口的多行批；保留“超过就拒绝、单行批能过”的断言",
+    "note": "204531fb 有意把原生发布工作区加大了一个批窗口（同一提交新增了宽记录并存的测试）。原来 8 行 × 12 KB 的批不再超窗；我把载荷加到批上限（14,000、15,500、16,000）也不再被拒。准入检查本身还在，test_runtime_v3_lance_blob.py 仍在测它。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_function_residency.py",
+    "function": "test_nonrecoverable_alias_can_run_resident_but_never_silently_park"
+   },
+   "cause": {
+    "flip_commit": "cd4a233b",
+    "committed": "2026-11-17 01:57",
+    "subject": "fix: place bounded Dataset DAGs within original small-worker budgets",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high",
+    "note": "早先记的 27f37944 不对：那个提交到 0d25ba3 之间（三分钟）代码处于中间状态，测试因另一个原因失败（cleanup only carries actor progress），把二分带偏了。在 27f37944 的前一个提交、27f37944、cd4a233b 上各跑一遍确认：现在这个失败原因从 cd4a233b 开始"
+   },
+   "ruling": {
+    "verdict": "scenario_must_be_rebuilt",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "构造一个在现在的放置规则下仍然需要停车的场景，再验证“不能安全停车就拒绝”",
+    "note": "实测：workers=1、两个 map_async 阶段现在被放进同一个阶段（一个同时驻留组，不需要落盘），驻留执行，结果正确，没有任何停车发生，所以“cannot safely park”的拒绝不会触发。和 GPT 对停车 4 项的裁决是同一个机制。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_function_residency.py",
+    "function": "test_nested_global_cannot_be_downgraded_by_ordinary_task_declaration"
+   },
+   "cause": {
+    "flip_commit": "cd4a233b",
+    "committed": "2026-11-17 01:57",
+    "subject": "fix: place bounded Dataset DAGs within original small-worker budgets",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high",
+    "note": "早先记的 27f37944 不对：那个提交到 0d25ba3 之间（三分钟）代码处于中间状态，测试因另一个原因失败（cleanup only carries actor progress），把二分带偏了。在 27f37944 的前一个提交、27f37944、cd4a233b 上各跑一遍确认：现在这个失败原因从 cd4a233b 开始"
+   },
+   "ruling": {
+    "verdict": "scenario_must_be_rebuilt",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "同上",
+    "note": "同上：前提是会停车，现在不停车。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_graph_adapter.py",
+    "outcome": "failed"
+   },
+   "cause": {
+    "flip_commit": "c61e125a",
+    "committed": "2026-11-17 03:03",
+    "subject": "Colocate bounded literal graph prefixes without merging reader branches",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high"
+   },
+   "ruling": {
+    "verdict": "scenario_must_be_rebuilt",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "在现在的同置规则下重新构造会出现“停车的持久信用窗口”和“在途内存”的图",
+    "note": "c61e125a 把有界的图前缀放到一起。一项期望的“超过停车持久信用窗口”的拒绝不再发生；另一项是测试自己的前置检查没通过（must exercise real in-flight memory）。按提交意图和失败形态判断，没有逐行调试。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_stream_budgets.py",
+    "function": "test_stream_refuses_an_indivisible_stage_before_upstream_start"
+   },
+   "cause": {
+    "flip_commit": "cd4a233b",
+    "committed": "2026-11-17 01:57",
+    "subject": "fix: place bounded Dataset DAGs within original small-worker budgets",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high",
+    "note": "已校验：前一个提交通过，cd4a233b 失败，原因相同"
+   },
+   "ruling": {
+    "verdict": "scenario_must_be_rebuilt",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "换一个现在仍然放不下的不可分阶段，保留“启动上游之前就拒绝”的断言",
+    "note": "实测：曾被拒绝的计划（map_async 并发 4、1 个 worker、128 KiB）现在被放进一个阶段跑完，计费内存 114,687，没有超过 131,072 的预算，6 行正确。预算保证没有丢，只是这个配置现在放得下。报错里的“launch preparation changed allocation identity”是测试自己的 _prepare_launch 替身返回 None 造成的。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_public_budgets.py",
+    "function": "test_concurrent_profile_must_fit_before_any_upstream_launch"
+   },
+   "cause": {
+    "flip_commit": "cd4a233b",
+    "committed": "2026-11-17 01:57",
+    "subject": "fix: place bounded Dataset DAGs within original small-worker budgets",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high",
+    "note": "二分并校验"
+   },
+   "ruling": {
+    "verdict": "scenario_must_be_rebuilt",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "同上",
+    "note": "和上一项同一个场景、同一个原因。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_terminal_flush_budget.py",
+    "outcome": "failed"
+   },
+   "cause": {
+    "flip_commit": "172b2ae9",
+    "committed": "2026-11-17 04:11",
+    "subject": "fix: provision record codec workspace within original run budgets",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high",
+    "note": "当时的报错和现在不同：在 172b2ae9 上是规划拒绝，现在是观测文件没有生成"
+   },
+   "ruling": {
+    "verdict": "scenario_must_be_rebuilt",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "重新设计观测方式，让“切换块时不多占一份线上缓冲”在现在的执行布局下能被看到",
+    "note": "白盒观测：钩子是从用户函数里装进去的（替换 TerminalBlocks.append 等，还读调用方栈帧的局部变量）。它前面的业务断言（结果行相等、切点全部确认）都通过，只是观测文件再也没有被写出来。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_late_final.py",
+    "outcome": "failed"
+   },
+   "cause": {
+    "flip_commit": "d729ca3f",
+    "committed": "2026-11-17 06:17",
+    "subject": "Keep checkpoint control from restarting an idle timed batch",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high"
+   },
+   "ruling": {
+    "verdict": "product_regression",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "负责人确认 d729ca3f 之后这个场景是否真的会挂住；不要改测试来让它通过",
+    "note": "疑似活性退化，把握中等。测试把第一个切点的投递压到原生嵌入结果就绪之后；d729ca3f 之后整个运行停住，直到 25 秒时间预算耗尽（前一个提交 2.5 秒通过）。这个提交让 worker 在有切点控制待处理时不再轮询 kernel。测试没有用过时的替身。我没有调试到根因。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_stream_checkpoint_resume.py",
+    "function": "test_prepend_streams_without_waiting_for_upstream"
+   },
+   "cause": {
+    "flip_commit": "172b2ae9",
+    "committed": "2026-11-17 04:11",
+    "subject": "fix: provision record codec workspace within original run budgets",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high"
+   },
+   "ruling": {
+    "verdict": "product_regression",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "负责人决定怎么修；不是撤销 codec 核算，而是让默认预算下的流式计划仍然能有同时驻留的阶段",
+    "note": "只用公开接口的流式合同：prepend 的前缀要先流到下游，不等上游。实测现在默认预算下这条管线被排成 7 个阶段、7 个各含 1 个阶段的同时驻留组，阶段之间全部落盘；阶段只能一个一个跑，前缀到不了下游，上游等 3 秒后超时。前一个提交通过。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_stream_map.py",
+    "function": "test_nested_relations_support_stream_options_without_eager_source_access"
+   },
+   "cause": {
+    "flip_commit": "172b2ae9",
+    "committed": "2026-11-17 04:11",
+    "subject": "fix: provision record codec workspace within original run budgets",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high",
+    "note": "这个用例在更早的 dec2e23 上也失败过，中间修好了；已校验：172b2ae9 的前一个提交通过，172b2ae9 起以同样的原因失败"
+   },
+   "ruling": {
+    "verdict": "product_regression",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "同上",
+    "note": "公开接口、默认预算、1 行数据、活的迭代器数据源：join / reduce / union 现在在规划时被拒（memory group cannot fit and its source/state cannot safely park）。和上一项同一个机制。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_public_budgets.py",
+    "function": "test_public_worker_budget_uses_actual_phases_and_native_allocation"
+   },
+   "cause": {
+    "flip_commit": "172b2ae9",
+    "committed": "2026-11-17 04:11",
+    "subject": "fix: provision record codec workspace within original run budgets",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high",
+    "note": "第一次二分落在 27f37944，是被那个三分钟的中间状态带偏的；从 0d25ba3 起重新二分得到 172b2ae9"
+   },
+   "ruling": {
+    "verdict": "product_regression",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "负责人决定：规划时就按停车快照的大小留够状态上限（或直接拒绝），还是认定这个夹具的预算太小",
+    "note": "把握中等。测试关掉融合，内存 128 KiB。实测规划器留下的状态上限是 9,830 字节，而四个停车阶段的状态镜像合计 10,208 字节，运行到第三个切点才报 BUDGET_EXCEEDED。规划器放行的计划在运行中失败。默认开着融合时这个小计划会被合成一个阶段，碰不到这条路。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_routed_offline.py",
+    "lane": "ray",
+    "outcome": "failed"
+   },
+   "cause": {
+    "flip_commit": "20fef67e",
+    "committed": "2026-11-16 16:55",
+    "subject": "Project sealed routed prompt environment to each Ray allocation",
+    "method": "在 Ray 环境二分 [ray-offline_dir] 变体：用例创建时的提交 1d1d961 通过，前一个提交 cee341d 通过，20fef67e 起失败（10 步，结果前后一致）",
+    "confidence": "high",
+    "note": "[ray-offline_store] 变体没有单独二分，失败原因相同，按同一提交记"
+   },
+   "ruling": {
+    "verdict": "product_regression",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "负责人决定：离线路由不要求这些环境变量，还是两种提供方都要求（那就改测试）",
+    "note": "把握中等。两条路由都是离线的（max_requests 为 0），测试从不设置模型声明的环境变量，local 变体通过。20fef67e 之后 Ray 分配在启动时要求这些变量存在，于是 ray 变体失败。同一用例在两种提供方下行为不一致。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_node_loss.py",
+    "function": "test_actual_producer_owner_loss_recovers_original_ack",
+    "lane": "ray"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "undetermined",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "先让这个用例稳定下来（或确认不稳定的原因），再谈定性；收尾阶段的文件描述符泄漏请在负责人的 Ray 环境里确认",
+    "note": "无法定性：调用阶段不稳定。重复运行（Ray 环境，ray_core 提供方）：74d2f99 上 6 次里 4 次失败；我原先二分到的 cf5de618 上 4 次里 2 次失败，它的前一个提交上 4 次里也有 1 次失败。所以那次二分不成立，我撤回了“疑似产品退化”的裁决和定位。收尾阶段的文件描述符泄漏报错（baseline=12 now=24）每次都有，从这个用例最后一次修改起就有。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_d1a_sealed_plan_facts.py",
+    "outcome": "failed"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "retired_contract_needs_mapping",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "随批次 4（旧链式执行实现）一起退役；对应关系：每个动作封存 v3 计划（load_sealed_plan(..., version=\"v3\")），v1 事实由 test_runtime_v3_history_protection.py 保证可读",
+    "note": "这三项断言当前调用方还在写 schema 为 demiflow.sealed_plan_facts.v1 的 “*-sealed-plan” 绑定，或者断言 run_ray_chain 的源码里有 compile_chain_topology(。v3 封存的是 v3 计划，v1 事实只作为可读的历史保留。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_map_prompt_async.py",
+    "outcome": "failed"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "retired_contract_needs_mapping",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "把业务合同对应到 M 道（prompt 运行时）的 v3 测试后再处置；对应时核对三件事：业务 HTTP 错误跨 worker 边界后的类型；同步和异步节点的预算是否各自独立；驱动进程里设置的环境变量能否到达 worker",
+    "note": "v3 之前的 prompt 测试。16 项里 7 项传了已退役的选项（5 项 journal 选项、2 项显式 checkpoint），被有意的明确拒绝挡住；另 9 项假定在驱动进程里执行或依赖旧的错误类型（HTTP 503 变成 DataflowError INTERNAL_PROTOCOL 2 项、驱动里设置的环境变量 worker 读不到 1 项、驱动侧计数始终为 0 共 4 项、不再抛 NotImplementedError 1 项、不再抛 PromptBudgetExceededError 1 项、IndexError 1 项）。没有逐项核对 v3 里的对应测试。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_w.py",
+    "function": "test_w021"
+   },
+   "cause": {
+    "flip_commit": "8add1fff",
+    "committed": "2026-11-17 21:30",
+    "subject": "fix(workbench): show only execution plans and read long project docs",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "工作台一侧处理：给测试的假 DOM 补上 insertBefore",
+    "note": "不属于引擎。工作台前端的 node 测试：workbench-graph.js:302 调用 wrapper.insertBefore，而测试的假 DOM 没有这个方法。工作台正在改，我没有动。"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_w.py",
+    "function": "test_w019"
+   },
+   "cause": {
+    "flip_commit": "8add1fff",
+    "committed": "2026-11-17 21:30",
+    "subject": "fix(workbench): show only execution plans and read long project docs",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high"
+   },
+   "ruling": {
+    "verdict": "undetermined",
+    "by": "Claude，用户授权裁决（2026-11-19）",
+    "required": "移交工作台：确认“不会按旧版悄悄画完整计划”这条提示是有意去掉的，还是丢了",
+    "note": "不属于引擎。断言一条拒绝提示的文案；同一个工作台提交改了展示逻辑。是测试过时还是提示丢了，要工作台负责人判断。"
+   }
+  },
+  {
+   "match": {
+    "lane": "ray",
+    "reason_contains": "'name': 'wiki-"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "environment_not_run",
+    "by": "事实判定（环境），不是契约裁决",
+    "required": "在 env-ray 安装 mwparserfromhell 后重跑",
+    "note": "用例输出里的真实错误：DataflowError INTERNAL_PROTOCOL: No module named 'mwparserfromhell'（env-ray 没装这个可选依赖）。"
+   }
+  },
+  {
+   "match": {
+    "lane": "ray",
+    "reason_contains": "'name': 'native-search-http'"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "environment_not_run",
+    "by": "事实判定（环境），不是契约裁决",
+    "required": "在 env-ray 安装 babel 后重跑",
+    "note": "用例输出里的真实错误：ModuleNotFoundError: No module named 'babel'（env-ray 没装这个可选依赖）。"
+   }
+  },
+  {
+   "match": {
+    "reason_contains": "'missing_environment': 'real Ray Core'"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "environment_not_run",
+    "by": "conftest 约定：缺环境记为未运行，不算通过",
+    "required": "在 Ray 环境运行（/yzp/zhaozy/yangzepeng/0905/env-ray/bin/python）"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_park_window.py",
+    "reason_contains": "has no attribute '_finite_input'"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "undetermined",
+    "by": null,
+    "required": null,
+    "note": "测试访问的内部属性 WorkerGraphRunner._finite_input 已不存在；没有二分"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_worker_wakeup.py",
+    "reason_contains": "has no attribute '_bytes'"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "undetermined",
+    "by": null,
+    "required": null,
+    "note": "测试用的替身对象缺少生产代码现在访问的 _bytes 属性；没有二分"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_live_input_branches.py",
+    "reason_contains": "got an unexpected key"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "undetermined",
+    "by": null,
+    "required": null,
+    "note": "测试注入的钩子不接受生产代码现在传入的关键字参数；没有二分"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_ray_polling.py",
+    "reason_contains": "unexpected keyword argument 'resource_envelope'"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "undetermined",
+    "by": null,
+    "required": null,
+    "note": "测试注入的钩子不接受 resource_envelope 参数；没有二分"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_default_suffix_fusion.py",
+    "function": "test_insufficient_worker_budget_uses_one_independent_source_and_original_suffix"
+   },
+   "cause": {
+    "flip_commit": "172b2ae9",
+    "committed": "2026-11-17 04:11",
+    "subject": "fix: provision record codec workspace within original run budgets",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "high"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "GPT 评审 2026-11-18",
+    "required": "修正测试的默认参数准备路径（和公开入口一样经过 fit_default_stream_windows），保留\"两阶段、源独立、资源正确核算\"的原断言；不把期望改成 7，不撤销 codec 内存核算",
+    "fixed_by": "4cb20ec"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_default_suffix_fusion.py",
+    "function": "test_new_default_rule_does_not_absorb_shared_sources_or_gpu_stages"
+   },
+   "cause": {
+    "flip_commit": "172b2ae9",
+    "committed": "2026-11-17 04:11",
+    "subject": "fix: provision record codec workspace within original run budgets",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "medium",
+    "note": "同一个测试函数或失败信息完全相同的相邻用例，未单独二分"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "GPT 评审 2026-11-18",
+    "required": "修正测试的默认参数准备路径（和公开入口一样经过 fit_default_stream_windows），保留\"两阶段、源独立、资源正确核算\"的原断言；不把期望改成 7，不撤销 codec 内存核算",
+    "fixed_by": "4cb20ec"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_d.py",
+    "function": "test_d002"
+   },
+   "cause": {
+    "flip_commit": "2b981523",
+    "committed": "2026-11-17 04:19",
+    "subject": "Separate typed row limits from bounded record carrier workspaces",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "high"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "GPT 评审 2026-11-18",
+    "required": "调整夹具的阶段授权（夹具只给阶段 1,024 字节，编码工作区需要 2,777 字节）；保留原提交、故障恢复和预算边界断言；不统一抬高所有预算",
+    "fixed_by": "a78087f"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_d.py",
+    "function": "test_d003"
+   },
+   "cause": {
+    "flip_commit": "2b981523",
+    "committed": "2026-11-17 04:19",
+    "subject": "Separate typed row limits from bounded record carrier workspaces",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "medium",
+    "note": "同一个测试函数或失败信息完全相同的相邻用例，未单独二分"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "GPT 评审 2026-11-18",
+    "required": "调整夹具的阶段授权（夹具只给阶段 1,024 字节，编码工作区需要 2,777 字节）；保留原提交、故障恢复和预算边界断言；不统一抬高所有预算",
+    "fixed_by": "a78087f"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_d.py",
+    "function": "test_d004"
+   },
+   "cause": {
+    "flip_commit": "2b981523",
+    "committed": "2026-11-17 04:19",
+    "subject": "Separate typed row limits from bounded record carrier workspaces",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "medium",
+    "note": "同一个测试函数或失败信息完全相同的相邻用例，未单独二分"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "GPT 评审 2026-11-18",
+    "required": "调整夹具的阶段授权（夹具只给阶段 1,024 字节，编码工作区需要 2,777 字节）；保留原提交、故障恢复和预算边界断言；不统一抬高所有预算",
+    "fixed_by": "a78087f"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_d.py",
+    "function": "test_d005"
+   },
+   "cause": {
+    "flip_commit": "2b981523",
+    "committed": "2026-11-17 04:19",
+    "subject": "Separate typed row limits from bounded record carrier workspaces",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "medium",
+    "note": "同一个测试函数或失败信息完全相同的相邻用例，未单独二分"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "GPT 评审 2026-11-18",
+    "required": "调整夹具的阶段授权（夹具只给阶段 1,024 字节，编码工作区需要 2,777 字节）；保留原提交、故障恢复和预算边界断言；不统一抬高所有预算",
+    "fixed_by": "a78087f"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_d.py",
+    "function": "test_d006"
+   },
+   "cause": {
+    "flip_commit": "2b981523",
+    "committed": "2026-11-17 04:19",
+    "subject": "Separate typed row limits from bounded record carrier workspaces",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "medium",
+    "note": "同一个测试函数或失败信息完全相同的相邻用例，未单独二分"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "GPT 评审 2026-11-18",
+    "required": "调整夹具的阶段授权（夹具只给阶段 1,024 字节，编码工作区需要 2,777 字节）；保留原提交、故障恢复和预算边界断言；不统一抬高所有预算",
+    "fixed_by": "a78087f"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_d.py",
+    "function": "test_d009"
+   },
+   "cause": {
+    "flip_commit": "2b981523",
+    "committed": "2026-11-17 04:19",
+    "subject": "Separate typed row limits from bounded record carrier workspaces",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "medium",
+    "note": "同一个测试函数或失败信息完全相同的相邻用例，未单独二分"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "GPT 评审 2026-11-18",
+    "required": "调整夹具的阶段授权（夹具只给阶段 1,024 字节，编码工作区需要 2,777 字节）；保留原提交、故障恢复和预算边界断言；不统一抬高所有预算",
+    "fixed_by": "a78087f"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_d.py",
+    "function": "test_d010"
+   },
+   "cause": {
+    "flip_commit": "2b981523",
+    "committed": "2026-11-17 04:19",
+    "subject": "Separate typed row limits from bounded record carrier workspaces",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "medium",
+    "note": "同一个测试函数或失败信息完全相同的相邻用例，未单独二分"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "GPT 评审 2026-11-18",
+    "required": "调整夹具的阶段授权（夹具只给阶段 1,024 字节，编码工作区需要 2,777 字节）；保留原提交、故障恢复和预算边界断言；不统一抬高所有预算",
+    "fixed_by": "a78087f"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_d.py",
+    "function": "test_d011"
+   },
+   "cause": {
+    "flip_commit": "2b981523",
+    "committed": "2026-11-17 04:19",
+    "subject": "Separate typed row limits from bounded record carrier workspaces",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "medium",
+    "note": "同一个测试函数或失败信息完全相同的相邻用例，未单独二分"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "GPT 评审 2026-11-18",
+    "required": "调整夹具的阶段授权（夹具只给阶段 1,024 字节，编码工作区需要 2,777 字节）；保留原提交、故障恢复和预算边界断言；不统一抬高所有预算",
+    "fixed_by": "a78087f"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_task_scope.py",
+    "function": "test_actual_driver_resume_preserves_partial_task_and_committed_prefix"
+   },
+   "cause": {
+    "flip_commit": "f48bfa3f",
+    "committed": "2026-11-17 07:33",
+    "subject": "Restore native queue claims through original dataflow cuts and commit authority",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "high",
+    "note": "另做了直接验证：同一用例在父提交 90ee9b2 通过，在 f48bfa3f 失败"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "GPT 评审 2026-11-18",
+    "required": "测试里的包装函数漏转发参数。P2 的交付（提交 2b54d1c）已经包含这项准备修复，不重复修"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_function_residency.py",
+    "function": "test_actual_function_restore_uses_committed_counter_and_no_prefix_reexecution"
+   },
+   "cause": {
+    "flip_commit": "f48bfa3f",
+    "committed": "2026-11-17 07:33",
+    "subject": "Restore native queue claims through original dataflow cuts and commit authority",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "medium",
+    "note": "同一个测试函数或失败信息完全相同的相邻用例，未单独二分"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "GPT 评审 2026-11-18",
+    "required": "测试里的包装函数漏转发参数。P2 的交付（提交 2b54d1c）已经包含这项准备修复，不重复修"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_sync_map_semantics.py",
+    "function": "test_callback_cancel_preserves_exception_closes_actor_and_does_not_commit"
+   },
+   "cause": {
+    "flip_commit": "5a32abe5",
+    "committed": "2026-11-17 01:41",
+    "subject": "fix: distinguish drained callback deadlines and wire batch observations",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "high"
+   },
+   "ruling": {
+    "verdict": "test_mismatch",
+    "by": "GPT 评审 2026-11-18",
+    "required": "当前 API 拒绝 thread callable 返回 awaitable（TypeError），又被测试的 catch=(Exception,) 捕获。拆成\"非法 awaitable 拒绝\"和\"合法回调取消传播\"两个测试",
+    "fixed_by": "a5650c3"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_function_residency.py",
+    "function": "test_actual_function_keeps_stage_state_across_worker_parking"
+   },
+   "cause": {
+    "flip_commit": "cd4a233b",
+    "committed": "2026-11-17 01:57",
+    "subject": "fix: place bounded Dataset DAGs within original small-worker budgets",
+    "method": "标准环境二分：好的一端是该测试文件最后一次修改的提交；并校验过：前一个提交通过，这个提交失败",
+    "confidence": "high",
+    "note": "早先记的 27f37944 不对：那个提交到 0d25ba3 之间（三分钟）代码处于中间状态，测试因另一个原因失败（cleanup only carries actor progress），把二分带偏了。在 27f37944 的前一个提交、27f37944、cd4a233b 上各跑一遍确认：现在这个失败原因从 cd4a233b 开始"
+   },
+   "ruling": {
+    "verdict": "scenario_must_be_rebuilt",
+    "by": "GPT 评审 2026-11-18",
+    "required": "原测试要验证\"发生停车后状态仍正确\"，现在的优化让它不再停车。重新构造能触发停车的场景，继续验证状态、ACK 和恢复；不删除 durable_incremental 断言"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_graph_adapter.py",
+    "function": "test_mixed_residency_waits_for_memory_peer_but_rejects_durable_expansion"
+   },
+   "cause": {
+    "flip_commit": "c61e125a",
+    "committed": "2026-11-17 03:03",
+    "subject": "Colocate bounded literal graph prefixes without merging reader branches",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "high"
+   },
+   "ruling": {
+    "verdict": "undetermined",
+    "by": null,
+    "required": null
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_runtime_v3_graph_adapter.py",
+    "function": "test_source_credit_pause_drains_pending_memory_before_original_cut"
+   },
+   "cause": {
+    "flip_commit": "c61e125a",
+    "committed": "2026-11-17 03:03",
+    "subject": "Colocate bounded literal graph prefixes without merging reader branches",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "high"
+   },
+   "ruling": {
+    "verdict": "undetermined",
+    "by": null,
+    "required": null
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_d1a_sealed_plan_facts.py",
+    "function": "test_v3_local_caller_seals_and_persists"
+   },
+   "cause": {
+    "flip_commit": "8830efa0",
+    "committed": "2026-11-14 17:43",
+    "subject": "fix: connect sealed execution and close seven integration defects",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "high"
+   },
+   "ruling": {
+    "verdict": "undetermined",
+    "by": null,
+    "required": null
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_d1a_sealed_plan_facts.py",
+    "function": "test_v3_queue_caller_seals_and_persists"
+   },
+   "cause": {
+    "flip_commit": "8830efa0",
+    "committed": "2026-11-14 17:43",
+    "subject": "fix: connect sealed execution and close seven integration defects",
+    "method": "git bisect：好的一端是该测试文件最后一次修改的提交，坏的一端是 a28b1b4",
+    "confidence": "medium",
+    "note": "同一个测试函数或失败信息完全相同的相邻用例，未单独二分"
+   },
+   "ruling": {
+    "verdict": "undetermined",
+    "by": null,
+    "required": null
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_d1a_sealed_plan_facts.py",
+    "function": "test_v3_ray_caller_routes_through_same_seam"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "undetermined",
+    "by": null,
+    "required": null,
+    "note": "断言 run_ray_chain 的源码文本里含有 compile_chain_topology(。这个入口 11-15 已改成翻译成 v3 动作（MIGRATION 的兼容入口安排），断言的是旧实现的写法"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_map_prompt_async.py",
+    "reason_contains": "execution-owned; remove journal options"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "undetermined",
+    "by": null,
+    "required": null,
+    "note": "失败信息是已退役协议的明确拒绝（MIGRATION：已退役 checkpoint 保持明确拒绝，不重新实现）。GPT 评审：这个文件里还有 HTTP 异常、请求预算、并发和关闭语义，不能整文件定性为只需迁移"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_map_prompt_async.py",
+    "reason_contains": "Explicit checkpoint orchestration is retired"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "undetermined",
+    "by": null,
+    "required": null,
+    "note": "失败信息是已退役协议的明确拒绝（MIGRATION：已退役 checkpoint 保持明确拒绝，不重新实现）。GPT 评审：这个文件里还有 HTTP 异常、请求预算、并发和关闭语义，不能整文件定性为只需迁移"
+   }
+  },
+  {
+   "match": {
+    "file": "tests/test_map_prompt_async.py",
+    "reason_contains": "Explicit checkpoint mode is retired"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "undetermined",
+    "by": null,
+    "required": null,
+    "note": "失败信息是已退役协议的明确拒绝（MIGRATION：已退役 checkpoint 保持明确拒绝，不重新实现）。GPT 评审：这个文件里还有 HTTP 异常、请求预算、并发和关闭语义，不能整文件定性为只需迁移"
+   }
+  },
+  {
+   "match": {
+    "reason_contains": "No module named 'ray'"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "environment_not_run",
+    "by": "conftest 约定：缺环境记为未运行，不算通过",
+    "required": "在 Ray 环境运行（/yzp/zhaozy/yangzepeng/0905/env-ray/bin/python）"
+   }
+  },
+  {
+   "match": {
+    "reason_contains": "Ray Core is not installed"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "environment_not_run",
+    "by": "conftest 约定：缺环境记为未运行，不算通过",
+    "required": "在 Ray 环境运行（/yzp/zhaozy/yangzepeng/0905/env-ray/bin/python）"
+   }
+  },
+  {
+   "match": {
+    "reason_contains": "real Ray validation environment"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "environment_not_run",
+    "by": "conftest 约定：缺环境记为未运行，不算通过",
+    "required": "在 Ray 环境运行（/yzp/zhaozy/yangzepeng/0905/env-ray/bin/python）"
+   }
+  },
+  {
+   "match": {
+    "reason_contains": "real Ray Core environment"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "environment_not_run",
+    "by": "conftest 约定：缺环境记为未运行，不算通过",
+    "required": "在 Ray 环境运行（/yzp/zhaozy/yangzepeng/0905/env-ray/bin/python）"
+   }
+  },
+  {
+   "match": {
+    "reason_contains": "could not import 'ray'"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "environment_not_run",
+    "by": "conftest 约定：缺环境记为未运行，不算通过",
+    "required": "在 Ray 环境运行（/yzp/zhaozy/yangzepeng/0905/env-ray/bin/python）"
+   }
+  },
+  {
+   "match": {
+    "reason_contains": "PostgreSQL DSN not provided"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "environment_not_run",
+    "by": "conftest 约定：缺环境记为未运行，不算通过",
+    "required": "需要任务私有的 PostgreSQL DSN"
+   }
+  },
+  {
+   "match": {
+    "reason_contains": "real-GPU execution opt-in"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "environment_not_run",
+    "by": "conftest 约定：缺环境记为未运行，不算通过",
+    "required": "需要显式开启真实 GPU 执行"
+   }
+  },
+  {
+   "match": {
+    "reason_contains": "FORGE_CHROMIUM"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "environment_not_run",
+    "by": "conftest 约定：缺环境记为未运行，不算通过",
+    "required": "需要 Chromium"
+   }
+  },
+  {
+   "match": {
+    "reason_contains": "Real Ray environment is required"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "environment_not_run",
+    "by": "conftest 约定：缺环境记为未运行，不算通过",
+    "required": "在 Ray 环境运行（/yzp/zhaozy/yangzepeng/0905/env-ray/bin/python）"
+   }
+  },
+  {
+   "match": {
+    "reason_contains": "PostgreSQL-specific"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "environment_not_run",
+    "by": "conftest 约定：缺环境记为未运行，不算通过",
+    "required": "需要任务私有的 PostgreSQL DSN"
+   }
+  },
+  {
+   "match": {
+    "lane": "historical",
+    "file": "tests/test_prompt_http_stream.py",
+    "function": "test_read_idle_and_total_timeouts_are_distinct"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "undetermined",
+    "by": null,
+    "required": null,
+    "note": "不稳定：在 74d2f99 上单独运行 3 次，2 次失败 1 次通过（见 supplementary）。v3 之前各代留下的测试，没有逐项分析。"
+   }
+  },
+  {
+   "match": {
+    "lane": "historical",
+    "outcome": "failed"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "undetermined",
+    "by": null,
+    "required": null,
+    "note": "v3 之前各代留下的测试。这一轮只记录了现状，没有逐项分析，也没有二分。"
+   }
+  },
+  {
+   "match": {
+    "lane": "historical_ray",
+    "outcome": "failed"
+   },
+   "cause": null,
+   "ruling": {
+    "verdict": "undetermined",
+    "by": null,
+    "required": null,
+    "note": "v3 之前各代留下的 Ray 测试。这一轮只记录了现状，没有逐项分析，也没有二分。"
+   }
+  }
+ ],
+ "history": [
+  {
+   "source": "docs/unified-runtime-v3-20261114/evidence/historical-dispositions.json",
+   "old": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads",
+   "cases": 30,
+   "status": "renamed",
+   "new": "tests/test_stream_map.py::test_every_explicit_option_supports_lazy_actions_without_eager_reads",
+   "changed_by": "6389b15 (2026-11-16 01:28)",
+   "evidence": null
+  },
+  {
+   "source": "docs/unified-runtime-v3-20261114/evidence/historical-dispositions.json",
+   "old": "tests/test_stream_map.py::test_nested_relations_and_lazy_workers_reject_before_source_access",
+   "cases": 2,
+   "status": "renamed",
+   "new": "tests/test_stream_map.py::test_nested_relations_support_stream_options_without_eager_source_access",
+   "changed_by": "6389b15 (2026-11-16 01:28)",
+   "evidence": null
+  },
+  {
+   "source": "docs/unified-runtime-v3-20261114/evidence/historical-dispositions.json",
+   "old": "tests/test_stream_map.py::test_checkpoint_bridges_map_only_and_replays_without_calls",
+   "cases": 2,
+   "status": "renamed",
+   "new": "tests/test_stream_map.py::test_retired_checkpoint_is_rejected_and_native_run_replays_without_calls",
+   "changed_by": "6389b15 (2026-11-16 01:28)",
+   "evidence": null
+  },
+  {
+   "source": "docs/unified-runtime-v3-20261114/evidence/historical-dispositions.json",
+   "old": "tests/test_stream_map.py::test_stream_sink_checkpoint_accepts_thread_map_policy_change",
+   "cases": 1,
+   "status": "renamed",
+   "new": "tests/test_stream_map.py::test_stream_native_recovery_preserves_sealed_policy_and_new_run_can_append",
+   "changed_by": "6389b15 (2026-11-16 01:28)",
+   "evidence": null
+  },
+  {
+   "source": "docs/unified-runtime-v3-20261114/evidence/historical-dispositions.json",
+   "old": "tests/test_stream_map.py::test_lance_checkpoint_writer_failure_joins_stream_and_closes_workers",
+   "cases": 2,
+   "status": "renamed",
+   "new": "tests/test_stream_map.py::test_native_lance_writer_failure_joins_stream_and_closes_workers",
+   "changed_by": "dec2e23 (2026-11-16 02:02)",
+   "evidence": null
+  },
+  {
+   "source": "docs/unified-runtime-v3-20261114/evidence/historical-dispositions.json",
+   "old": "tests/test_bound_result_cache.py（test_unbound_async_none_and_list_keep_map_semantics、test_only_computation_result_is_shared 的 3 个参数、test_shared_wait_cancellation_and_actor_hooks）",
+   "cases": 5,
+   "status": "resolved",
+   "new": null,
+   "changed_by": null,
+   "evidence": "在 74d2f99 上直接运行这两个文件（标准环境，pytest，没有回执）：18 个用例全部通过，其中包括这 7 条记录",
+   "recorded_as": "preexisting_real_defect"
+  },
+  {
+   "source": "docs/unified-runtime-v3-20261114/evidence/historical-dispositions.json",
+   "old": "tests/test_async_materialize.py（test_async_materialize_spills_reuses_and_writes、test_wide_rows_spill_before_row_limit_and_restore_individually）",
+   "cases": 2,
+   "status": "resolved",
+   "new": null,
+   "changed_by": null,
+   "evidence": "在 74d2f99 上直接运行这两个文件（标准环境，pytest，没有回执）：18 个用例全部通过，其中包括这 7 条记录",
+   "recorded_as": "preexisting_real_defect"
+  }
+ ],
+ "not_run": {
+  "tests/test_runtime_v3_acceptance.py": "按文件名排除：需要 GPU、多主机、性能基准或会再启动整套回归；只收集，没有执行",
+  "tests/test_runtime_v3_cross_host_lease.py": "按文件名排除：需要 GPU、多主机、性能基准或会再启动整套回归；只收集，没有执行",
+  "tests/test_runtime_v3_devices.py": "按文件名排除：需要 GPU、多主机、性能基准或会再启动整套回归；只收集，没有执行",
+  "tests/test_runtime_v3_managed_embedding_service.py": "按文件名排除：需要 GPU、多主机、性能基准或会再启动整套回归；只收集，没有执行",
+  "tests/test_runtime_v3_managed_guardian_unknown.py": "按文件名排除：需要 GPU、多主机、性能基准或会再启动整套回归；只收集，没有执行",
+  "tests/test_runtime_v3_managed_service_gpu.py": "按文件名排除：需要 GPU、多主机、性能基准或会再启动整套回归；只收集，没有执行",
+  "tests/test_runtime_v3_performance_harness.py": "按文件名排除：需要 GPU、多主机、性能基准或会再启动整套回归；只收集，没有执行",
+  "tests/test_runtime_v3_performance_ray.py": "按文件名排除：需要 GPU、多主机、性能基准或会再启动整套回归；只收集，没有执行",
+  "tests/test_runtime_v3_physical_four_gpu.py": "按文件名排除：需要 GPU、多主机、性能基准或会再启动整套回归；只收集，没有执行",
+  "tests/test_runtime_v3_physical_gpu.py": "按文件名排除：需要 GPU、多主机、性能基准或会再启动整套回归；只收集，没有执行",
+  "tests/test_runtime_v3_physical_hosts.py": "按文件名排除：需要 GPU、多主机、性能基准或会再启动整套回归；只收集，没有执行",
+  "tests/test_runtime_v3_physical_ray_gpus.py": "按文件名排除：需要 GPU、多主机、性能基准或会再启动整套回归；只收集，没有执行",
+  "tests/test_runtime_v3_product_scenarios.py": "按文件名排除：需要 GPU、多主机、性能基准或会再启动整套回归；只收集，没有执行",
+  "tests/test_runtime_v3_regression_gate.py": "按文件名排除：需要 GPU、多主机、性能基准或会再启动整套回归；只收集，没有执行",
+  "tests/test_lance_merge_strategy.py": "历史测试这条线：限时 900 秒内没有跑完（18 个用例里第 15 个失败后不再前进），进程被终止，没有回执。之前带监听器的那次同样卡住"
+ },
+ "supplementary": [
+  {
+   "lane": "ray",
+   "nodeid": "tests/test_runtime_v3_blocks.py::test_ray_core_uses_same_logical_block_manifest",
+   "outcome": "passed",
+   "junit": "r2/090/result.xml",
+   "junit_sha256": "226dc42502ee9da867049c76c0465c2229aca687f427a4a2d5a0ca9c0e131bed",
+   "method": "直接运行：env-ray 的 python -m pytest，TMPDIR=/tmp，其余四个私有目录在 /tmp/demiflow-q<编号>/ 下；没有回执，只有 junit 文件"
+  },
+  {
+   "lane": "ray",
+   "nodeid": "tests/test_runtime_v3_native_execution_ray.py::test_actual_ray_native_adapter_preserves_budget_schema_and_completed_result",
+   "outcome": "passed",
+   "junit": "r2/179/result.xml",
+   "junit_sha256": "74c2563858b9ea86977f316a474097f71d62edfc7965dd11782c9e24978c6c0c",
+   "method": "直接运行：env-ray 的 python -m pytest，TMPDIR=/tmp，其余四个私有目录在 /tmp/demiflow-q<编号>/ 下；没有回执，只有 junit 文件"
+  },
+  {
+   "lane": "ray",
+   "nodeid": "tests/test_runtime_v3_ray_device_binding.py::test_identity_timeout_retains_same_real_actor_until_verified",
+   "outcome": "passed",
+   "junit": "r2/211/result.xml",
+   "junit_sha256": "7344a6d5d9a6a7171e2f318a56b6f819ca54d0cfb46ea0ef7be22c7961d2a7b7",
+   "method": "直接运行：env-ray 的 python -m pytest，TMPDIR=/tmp，其余四个私有目录在 /tmp/demiflow-q<编号>/ 下；没有回执，只有 junit 文件"
+  },
+  {
+   "lane": "ray",
+   "nodeid": "tests/test_runtime_v3_ray_device_binding.py::test_reconstructed_provider_finds_original_live_actor_and_proves_exit",
+   "outcome": "passed",
+   "junit": "r2/211/result.xml",
+   "junit_sha256": "7344a6d5d9a6a7171e2f318a56b6f819ca54d0cfb46ea0ef7be22c7961d2a7b7",
+   "method": "直接运行：env-ray 的 python -m pytest，TMPDIR=/tmp，其余四个私有目录在 /tmp/demiflow-q<编号>/ 下；没有回执，只有 junit 文件"
+  },
+  {
+   "lane": "ray",
+   "nodeid": "tests/test_runtime_v3_ray_device_binding.py::test_recovered_cleanup_ownership_never_bypasses_business_binding",
+   "outcome": "passed",
+   "junit": "r2/211/result.xml",
+   "junit_sha256": "7344a6d5d9a6a7171e2f318a56b6f819ca54d0cfb46ea0ef7be22c7961d2a7b7",
+   "method": "直接运行：env-ray 的 python -m pytest，TMPDIR=/tmp，其余四个私有目录在 /tmp/demiflow-q<编号>/ 下；没有回执，只有 junit 文件"
+  },
+  {
+   "lane": "ray",
+   "nodeid": "tests/test_runtime_v3_ray_device_binding.py::test_unknown_creation_is_not_never_created",
+   "outcome": "passed",
+   "junit": "r2/211/result.xml",
+   "junit_sha256": "7344a6d5d9a6a7171e2f318a56b6f819ca54d0cfb46ea0ef7be22c7961d2a7b7",
+   "method": "直接运行：env-ray 的 python -m pytest，TMPDIR=/tmp，其余四个私有目录在 /tmp/demiflow-q<编号>/ 下；没有回执，只有 junit 文件"
+  },
+  {
+   "lane": "ray",
+   "nodeid": "tests/test_runtime_v3_ray_matrix_process.py::test_ray_matrix_child_releases_process_owned_fds",
+   "outcome": "passed",
+   "junit": "r2/214/result.xml",
+   "junit_sha256": "0980cd61b279ea6bdf2b529d94e9d3f5e3551df21f25af4e0f6279b336222460",
+   "method": "直接运行：env-ray 的 python -m pytest，TMPDIR=/tmp，其余四个私有目录在 /tmp/demiflow-q<编号>/ 下；没有回执，只有 junit 文件"
+  },
+  {
+   "lane": "ray",
+   "nodeid": "tests/test_runtime_v3_ray_native.py::test_ray_native_producer_fetch_settlement_and_history",
+   "outcome": "passed",
+   "junit": "r2/215/result.xml",
+   "junit_sha256": "9bbdc5862c7834f87c9a76bed9ffc1c77cf92f020ee2e154de4b798f8b1fe712",
+   "method": "直接运行：env-ray 的 python -m pytest，TMPDIR=/tmp，其余四个私有目录在 /tmp/demiflow-q<编号>/ 下；没有回执，只有 junit 文件"
+  },
+  {
+   "lane": "ray",
+   "nodeid": "tests/test_runtime_v3_ray_native.py::test_ray_prompt_and_relational_chain",
+   "outcome": "passed",
+   "junit": "r2/215/result.xml",
+   "junit_sha256": "9bbdc5862c7834f87c9a76bed9ffc1c77cf92f020ee2e154de4b798f8b1fe712",
+   "method": "直接运行：env-ray 的 python -m pytest，TMPDIR=/tmp，其余四个私有目录在 /tmp/demiflow-q<编号>/ 下；没有回执，只有 junit 文件"
+  },
+  {
+   "lane": "ray",
+   "nodeid": "tests/test_runtime_v3_ray_native_limits.py::test_real_ray_join_seals_public_native_limits[1]",
+   "outcome": "passed",
+   "junit": "r2/216/result.xml",
+   "junit_sha256": "3ad0acd43957bc51d72621b171f42fb3a305af9c6cde7225b57f37e71f04ed77",
+   "method": "直接运行：env-ray 的 python -m pytest，TMPDIR=/tmp，其余四个私有目录在 /tmp/demiflow-q<编号>/ 下；没有回执，只有 junit 文件"
+  },
+  {
+   "lane": "ray",
+   "nodeid": "tests/test_runtime_v3_ray_native_limits.py::test_real_ray_join_seals_public_native_limits[2]",
+   "outcome": "passed",
+   "junit": "r2/216/result.xml",
+   "junit_sha256": "3ad0acd43957bc51d72621b171f42fb3a305af9c6cde7225b57f37e71f04ed77",
+   "method": "直接运行：env-ray 的 python -m pytest，TMPDIR=/tmp，其余四个私有目录在 /tmp/demiflow-q<编号>/ 下；没有回执，只有 junit 文件"
+  },
+  {
+   "lane": "ray",
+   "nodeid": "tests/test_runtime_v3_residency.py::test_ray_core_finite_phases_use_same_native_cut_protocol",
+   "outcome": "passed",
+   "junit": "r2/231/result.xml",
+   "junit_sha256": "b968fdaaeef702b9e0cc42143af739cb28bca605f00d12f8bbfd419e13a63735",
+   "method": "直接运行：env-ray 的 python -m pytest，TMPDIR=/tmp，其余四个私有目录在 /tmp/demiflow-q<编号>/ 下；没有回执，只有 junit 文件"
+  },
+  {
+   "lane": "standard",
+   "nodeid": "tests/test_runtime_v3_residency_resources.py::test_unknown_exit_still_charges_and_blocks_replacement",
+   "outcome": "unstable",
+   "known_state": "基线的两次运行（并行一次、单路复跑一次）都通过，所以清单里没有它的记录",
+   "runs": {
+    "74d2f99": "15 次里 3 次失败",
+    "工具分支 ad38df2": "12 次里 5 次失败",
+    "批次 1 edbbeb2": "12 次里 4 次失败",
+    "批次 2 1d54257": "15 次里 6 次失败"
+   },
+   "failure": "AssertionError: assert 'UNCONFIRMED' == 'CONFIRMED'（进程退出的确认没有在 1 秒的期限内完成）",
+   "method": "单独运行这一个用例（标准环境，pytest，五个私有目录，没有回执），在未改动的 74d2f99 检出和分支检出上交替进行"
+  },
+  {
+   "lane": "historical",
+   "nodeid": "tests/test_queue_v2_transactions.py::test_public_workers_consume_before_seal_without_duplicate_effects[sqlite]",
+   "outcome": "unstable",
+   "known_state": "基线运行时通过，所以清单里没有它的记录",
+   "runs": {
+    "74d2f99": "3 次里 1 次失败",
+    "批次 2 1d54257": "3 次里 0 次失败"
+   },
+   "failure": "ArtifactDomainUnavailable: Unfinished artifacts are outside this worker reading domain",
+   "method": "单独运行这一个用例（标准环境，pytest，五个私有目录，没有回执），在未改动的 74d2f99 检出和分支检出上交替进行"
+  },
+  {
+   "lane": "historical",
+   "nodeid": "tests/test_prompt_http_stream.py::test_read_idle_and_total_timeouts_are_distinct",
+   "outcome": "unstable",
+   "known_state": "基线运行时失败，清单里有它的记录",
+   "runs": {
+    "74d2f99": "3 次里 2 次失败",
+    "批次 2 1d54257": "3 次里 1 次失败"
+   },
+   "failure": "见清单里的记录",
+   "method": "单独运行这一个用例（标准环境，pytest，五个私有目录，没有回执），在未改动的 74d2f99 检出和分支检出上交替进行"
+  },
+  {
+   "lane": "standard",
+   "nodeid": "tests/test_runtime_v3_cache_frontier.py::test_real_driver_process_death_recovers_original_ack_and_suffix_cache[default]",
+   "outcome": "unstable",
+   "known_state": "基线的两次运行和第一次分支头重跑都通过，所以清单里没有它的记录；第二次分支头重跑时失败",
+   "runs": {
+    "74d2f99": "这个测试函数（6 个参数）跑 6 轮，3 轮各有 2 个参数失败",
+    "批次 2 分支头": "6 轮里 2 轮各有 2 个参数失败"
+   },
+   "failure": "第二个进程重开运行日志时 sqlite3.OperationalError: attempt to write a readonly database（驱动进程被杀之后）",
+   "method": "单独运行这一个用例，在不同提交的检出上重复（标准环境，pytest，五个私有目录，没有回执）"
+  },
+  {
+   "lane": "ray",
+   "nodeid": "tests/test_runtime_v3_node_loss.py::test_actual_producer_owner_loss_recovers_original_ack",
+   "outcome": "unstable",
+   "known_state": "基线运行时调用阶段失败、收尾阶段报错，清单里有它的记录；第二次分支头重跑时调用阶段通过",
+   "runs": {
+    "74d2f99": "调用阶段 6 次里 4 次失败",
+    "cf5de618": "4 次里 2 次失败",
+    "cf5de618 的前一个提交": "4 次里 1 次失败"
+   },
+   "failure": "调用阶段 ActorDiedError；收尾阶段的文件描述符泄漏每次都有",
+   "method": "单独运行这一个用例，在不同提交的检出上重复（Ray 环境，DEMIFLOW_V3_PROVIDER=ray_core，pytest，TMPDIR=/tmp，没有回执）"
+  }
+ ]
+}

@@ -198,7 +198,9 @@ def test_public_automatic_cuts_lance_publishes_once(tmp_path):
         assert receipt.committed_version == 1
         assert lance.dataset(str(target)).to_table().to_pylist() == [{'n': i + 10} for i in range(6)]
         cuts = run.journal.execution_commits('action-1')
-        assert len(cuts) >= 3 and all(c['status'] == 'acked' for c in cuts)
+        # Publication overlaps graph progress (2bd6c34b): a cut in flight absorbs the rows that
+        # arrive meanwhile, so six rows need at least one automatic cut and the final one.
+        assert len(cuts) >= 2 and all(c['status'] == 'acked' for c in cuts)
         assert all(c['prepared']['sinks']['write_lance']['native'] is None for c in cuts[:-1])
         assert cuts[-1]['prepared']['sinks']['write_lance']['native'] is not None
 
