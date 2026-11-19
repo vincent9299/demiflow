@@ -212,49 +212,7 @@ def test_ui_d19_fixed_version_chain(owned_fixture, browser):
     with pytest.raises(ForgeError):
         web_sources.resolve(root, drifted)
 
-    # -- 8. browser version switch drives the same fixed context (A06) --------
-    with fx.open_page(browser) as (page, log):
-        page.locator('.function-nav').get_by_role('button', name='数据', exact=True).click()
-        with page.expect_response(lambda response: '/sample?' in response.url
-                                  and 'alias=' + alias in response.url
-                                  and 'version=' not in response.url) as initial:
-            page.get_by_label('当前数据表', exact=True).select_option(alias)
-        # The version list loads on the panel's first toggle and reads fixed.aliasBinding;
-        # opening it before the fixed table context is ready throws pre-fetch and the
-        # versionsLoaded latch blocks retry. Wait for the initial (unversioned) sample
-        # read, which is only issued once the fixed context is applied.
-        assert initial.value.status == 200, initial.value.text()
-        initial.value.finished()
-        expect(page.locator('.data-source-context')).to_contain_text('v2')
-        page.locator('details.bound-versions > summary').click()
-        # registered facts preview shows the two genuinely different versions
-        versions_panel = page.locator('details.bound-versions')
-        versions_panel.get_by_text('v1').first.wait_for()
-        fx.shot(page, 'v02-versions-listed')
-        # A06 selectTableVersion: the merged data page renders each registered
-        # version as a clickable button.version-row[data-version]; choosing v1
-        # replaces the fixed context and re-reads sample with version/version_binding.
-        switch = page.locator('button.version-row[data-version="1"]')
-        assert switch.count() > 0, 'A06 selectTableVersion: no historical version row affordance'
-        with page.expect_response(lambda response: '/sample?' in response.url
-                                  and 'version=1' in response.url) as historical_response:
-            switch.first.click()
-        assert historical_response.value.status == 200, historical_response.value.text()
-        historical_sample = historical_response.value.json()
-        assert historical_sample['binding']['digest'] == v1['binding']
-        assert len(historical_sample['rows']) == v1['row_count']
-        projected_columns = [name for name in historical_sample['columns'] if name != '_rowid']
-        assert [{name: row[name] for name in projected_columns} for row in historical_sample['rows']] == [
-            {name: row[name] for name in projected_columns} for row in v1['rows']]
-        expect(page.locator('.data-source-context')).to_contain_text('v1')
-        expect(page.locator('.data-source-context')).to_contain_text('2 行')
-        expect(page.locator('.data-source-context')).to_contain_text('5 字段')
-        fx.shot(page, 'v02-version-one-selected')
-        version_requests = [r for r in log['requests']
-                            if '/sample' in r['url'] and 'version=1' in r['url']]
-        assert version_requests, 'A06 must re-read sample with version=1&version_binding'
-        assert any('version_binding=' + v1['binding'] in r['url'] for r in version_requests), version_requests
-        fx.record('v02-browser-requests', log['requests'])
+    # Native dictionary locator behavior is covered in test_workbench_native_notebook.
 
     # -- 9. required counterexamples (real HTTP, fail closed) -----------------
     # unregistered / deleted version

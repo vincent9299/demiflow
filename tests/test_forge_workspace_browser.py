@@ -12,7 +12,7 @@ from demiflow.workbench.api import WorkspaceServer
 from demiflow.workbench.api import export_report
 
 
-def test_workspace_browser_cases_graph_source_compare_and_export(demo, tmp_path):
+def test_workspace_browser_dictionary_graph_source_and_export(demo, tmp_path):
     playwright = pytest.importorskip("playwright.sync_api")
     browser_path = Path(
         os.environ.get(
@@ -47,38 +47,8 @@ def test_workspace_browser_cases_graph_source_compare_and_export(demo, tmp_path)
             page.locator("#workspace-name").filter(has_text="question-experiments").wait_for()
             page.screenshot(path=str(output / "01-workspace.png"), full_page=True)
             page.get_by_role("button", name="数据", exact=True).click()
-            page.get_by_role("heading", name="单条 case · 8589934592").wait_for()
-            page.get_by_role('tab', name='image_uri', exact=True).first.click()
-            page.get_by_role("button", name="查看本地图片").first.click()
-            page.locator(".case-image").wait_for()
-            if not page.locator('.case-comparison').get_attribute('open') == '':
-                page.locator('.case-comparison > summary').click()
-            page.get_by_label("对照表", exact=True).select_option("comparison_fixture")
-            page.get_by_label("业务键", exact=True).select_option("case_id")
-            page.get_by_role("button", name="查找对应 case").click()
-            page.get_by_text("匹配 1 条记录", exact=True).wait_for()
-            page.get_by_role(
-                "heading", name="单条 case · 8589934592"
-            ).scroll_into_view_if_needed()
-            page.screenshot(path=str(output / "02-real-case.png"), full_page=True)
-            # The real locator is version-bound; it is never used as a join key.
-            case_table = page.locator(".case-record-selector")
-            case_table.locator("button").nth(1).click()
-            page.get_by_role("heading", name="单条 case · 8589934593").wait_for()
-            if not page.locator('.case-comparison').get_attribute('open') == '':
-                page.locator('.case-comparison > summary').click()
-            page.get_by_label("对照表", exact=True).select_option("comparison_fixture")
-            page.get_by_label("业务键", exact=True).select_option("case_id")
-            page.get_by_role("button", name="查找对应 case").click()
-            page.get_by_text("匹配 2 条记录；业务键不唯一", exact=True).wait_for()
-            case_table.locator("button").nth(2).click()
-            page.get_by_role("heading", name="单条 case · 8589934594").wait_for()
-            if not page.locator('.case-comparison').get_attribute('open') == '':
-                page.locator('.case-comparison > summary').click()
-            page.get_by_label("对照表", exact=True).select_option("comparison_fixture")
-            page.get_by_label("业务键", exact=True).select_option("case_id")
-            page.get_by_role("button", name="查找对应 case").click()
-            page.get_by_text("未找到匹配记录", exact=True).wait_for()
+            page.get_by_role('complementary',name='数据字典').wait_for()
+            assert not page.get_by_role('button',name='Case 分析',exact=True).count()
             page.get_by_role("button",name="管道",exact=True).click()
             page.get_by_role("button",name="检查",exact=True).click()
             page.locator('.wb-basis').filter(has_text='检查报告图 · checked').wait_for()

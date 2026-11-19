@@ -202,7 +202,8 @@ def set_capabilities(path, workspace_id, *, expected, capabilities, analysis_ser
     added={key for key in CAPABILITIES-{'config_write'} if capabilities[key] and not configured.get(key,False)}
     if added:
         from demiflow.workbench.analysis.web_service import WebService
-        if not isinstance(analysis_service,WebService):
+        from demiflow.workbench.notebooks.service import Notebooks
+        if not isinstance(analysis_service,(WebService,Notebooks)):
             raise ForgeError('Analysis deployment is not connected',code='operation_rejected')
         ceiling=analysis_service.ceiling()
         if any(not ceiling[key] for key in added):
@@ -301,9 +302,10 @@ def register(forge):
     @click.pass_obj
     @click.option("--development-config", type=click.Path(exists=True, dir_okay=False, path_type=Path), help="Explicit project development deployment; disabled by default")
     @click.option("--analysis-config", type=click.Path(exists=True, dir_okay=False, path_type=Path), help="Explicit reviewed production analysis adapter; disabled by default")
-    def serve_projects(registry, port, enable_runs, enable_config_write, control_only, api_only, token_file, development_config, analysis_config):
+    @click.option('--notebook-python', type=click.Path(exists=True, dir_okay=False, path_type=Path), help='Python environment with native Jupyter Notebook 7 installed.')
+    def serve_projects(registry, port, enable_runs, enable_config_write, control_only, api_only, token_file, development_config, analysis_config, notebook_python):
         from demiflow.workbench.api import serve
-        serve(None, registry=registry, port=port, enable_runs=enable_runs, enable_config_write=enable_config_write, control_only=control_only, api_only=api_only, token_file=token_file, development_config=development_config, analysis_config=analysis_config)
+        serve(None, registry=registry, port=port, enable_runs=enable_runs, enable_config_write=enable_config_write, control_only=control_only, api_only=api_only, token_file=token_file, development_config=development_config, analysis_config=analysis_config, notebook_python=notebook_python)
 
     @console.command('migrate')
     @click.option('--expected', required=True)

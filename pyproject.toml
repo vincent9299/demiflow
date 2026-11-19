@@ -46,6 +46,7 @@ search-browser = ["playwright==1.63.0"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 analysis = ["jupyter_client==8.10.0", "ipykernel==7.3.0", "nbformat==5.11.1",
             "pandas==2.3.3", "matplotlib==3.11.1", "pillow==12.3.0"]
+notebook = ["notebook==7.5.7", "jupyterlab==4.5.11", "ipykernel==7.3.0", "pandas==2.3.3"]
 
 [tool.setuptools.packages.find]
 include = ["demiflow*"]

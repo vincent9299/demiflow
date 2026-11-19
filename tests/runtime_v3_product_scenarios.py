@@ -28,13 +28,11 @@ WORKBENCH_CASES = (
     "tests/test_workbench_native_gpu.py::test_real_managed_cuda_plan_bridge_and_browser",
 )
 PRODUCT_CASES = (
+    "tests/test_workbench_native_notebook.py::test_native_edit_execute_save_reopen_and_dictionary",
     "tests/test_runtime_v3_product_scenarios.py::test_managed_union_and_nested_materialize_bind_every_occurrence",
     "tests/test_runtime_v3_product_scenarios.py::test_private_jupyter_sql_uses_original_compiler_broker_native_query_and_ingress",
     "tests/test_forge_outputs_jupyter.py::test_real_private_jupyter_mime_output_projects_to_same_typed_renderer_contract",
-    "tests/test_forge_analysis_browser.py::test_source_import_keeps_old_draft_distinct_and_narrow_layout_fits",
     "tests/test_forge_analysis_records.py::test_notebook_response_loss_cas_and_history_survive_controller_crash",
-    "tests/test_forge_analysis_case_ui_browser.py::test_real_full_query_nested_types_view_reload_and_narrow_layout",
-    "tests/test_forge_analysis_case_browser.py::test_three_regions_view_definition_changes_and_annotation_history_are_separate",
     "tests/test_forge_development_chat_browser.py::test_browser_conversation_navigation_refresh_and_mobile",
     "tests/test_forge_development_chat_browser.py::test_acp_permission_diff_markdown_and_dialog_lifecycle",
     "tests/test_workbench_execution_binding_browser.py::test_real_run_data_graph_source_and_params_still_load",
