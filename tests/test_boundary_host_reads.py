@@ -54,3 +54,26 @@ def test_incomplete_preparation_reads_without_initializing_or_erasing_evidence(t
     with pytest.raises(ForgeError, match='execution facts'):
         requests._incomplete_seal(target, 'request', 'run', tmp_path)
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize('table', ['execution_state', 'manifest'])
+def test_a_preparation_whose_journal_holds_a_non_text_document_stays_pending(tmp_path, table):
+    """The gate before a run directory is deleted: a document the engine could not have written is not proof.
+
+    Everything else about this journal says "prepared, never started, owned by this request". Only the storage
+    class of one document is wrong. The answer must be a refusal, which leaves the request pending, never True.
+    """
+    target = tmp_path / 'run'; target.mkdir()
+    path = target / 'run.sqlite'
+    documents = {'execution_state': dict(status=None, revision=0, attempt=1),
+                 'manifest': dict(prepare_request_id='request', run_id='run', root=str(tmp_path))}
+    with closing(sqlite3.connect(path)) as db:
+        for name, value in documents.items():
+            text = json.dumps(value)
+            db.execute(f'CREATE TABLE {name}(document TEXT)')
+            db.execute(f'INSERT INTO {name} VALUES (?)', (sqlite3.Binary(text.encode()) if name == table else text,))
+        db.commit()
+    before = path.read_bytes()
+    with pytest.raises(ForgeError):
+        requests._incomplete_seal(target, 'request', 'run', tmp_path)
+    assert path.read_bytes() == before and target.exists()
