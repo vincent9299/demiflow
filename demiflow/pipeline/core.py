@@ -91,7 +91,7 @@ class Pipeline:
             executor=getattr(dataset_executor, "NAME", type(dataset_executor).__name__),
             entrypoint=self.entrypoint,
         )
-        from ..data.api import _use_executor
+        from ..data.execution_contract import _use_executor
 
         started = time.monotonic()
         from .context import ProgramContext

@@ -270,7 +270,10 @@ def fake_action(monkeypatch):
     return _Action()
 
 
-class _FakeExecutor:
+from demiflow.execution.executors.base import DatasetExecutor
+
+
+class _FakeExecutor(DatasetExecutor):
     NAME = "local"
 
     def __init__(self, name="local", **kwargs):

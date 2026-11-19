@@ -160,7 +160,7 @@ def local_execution(*, workers=4, worker_mode=None, partitions=None,
     suffix to the byte-unchanged legacy in-driver write_queue_datasink fallback.
     Pass unified_queue_chain=False for the explicit legacy in-driver path.
     """
-    from ..data.api import _current_executor, _use_executor
+    from ..data.execution_contract import _current_executor, _use_executor
     from .executors.local import LocalDatasetExecutor
     from ..planning.policy import parse_platform_planning_policy
     planning_policy = parse_platform_planning_policy(planning)

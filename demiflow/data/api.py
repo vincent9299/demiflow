@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from contextvars import ContextVar
-from contextlib import contextmanager
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 from .dataset import Dataset, MaterializedDataset
+from .execution_contract import InputSpec, _current_executor, _use_executor
 from .plan import LogicalPlan
 from .native_options import parse_native_options
 from .sources import (
@@ -23,18 +22,12 @@ from .sources import (
 )
 
 
-# Selected only by a Pipeline driver. Plain script readers create a local executor.
-# A ContextVar keeps concurrent runs and nested pipelines from changing each other.
-_current_executor = ContextVar('demiflow_dataset_executor', default=None)
-
-
-@contextmanager
-def _use_executor(executor):
-    token = _current_executor.set(executor)
-    try:
-        yield
-    finally:
-        _current_executor.reset(token)
+def _select_executor(executor=None, *, workers=4, block_size=256):
+    """Select the existing default host only at public assembly boundaries."""
+    if executor is None:
+        from ..execution.executors.local import LocalDatasetExecutor
+        executor = LocalDatasetExecutor(workers=workers, block_size=block_size)
+    return executor
 
 
 class DataAPI:
@@ -45,10 +38,7 @@ class DataAPI:
         workers/block_size configure local execution only. Prompt configuration,
         transport options and request limits belong to each map_prompt node.
         """
-        if executor is None:
-            from ..execution.executors.local import LocalDatasetExecutor
-            executor = LocalDatasetExecutor(workers=workers, block_size=block_size)
-        self._executor = executor
+        self._executor = _select_executor(executor, workers=workers, block_size=block_size)
 
     def prompt_usage(self) -> dict[str, int]:
         """Cumulative prompt usage for this context (sync and async combined)."""
@@ -69,13 +59,9 @@ class DataAPI:
         external data. Do not collect an external Dataset and pass its rows back
         to ``from_items`` solely to write the same detail rows.
         """
-        if not isinstance(items, list) or isinstance(items, Iterator):
-            raise TypeError("from_items requires a materialized list")
-        bounded_items = list(items)
-        from ..execution.dataflow_inputs import build_input_handle
-        handle = build_input_handle(bounded_items, format="items")
+        handle = self._executor.prepare_input(InputSpec('items', items))
         return MaterializedDataset(
-            MaterializedSource(handle, len(bounded_items)), LogicalPlan(), self._executor,
+            MaterializedSource(handle, handle.row_count), LogicalPlan(), self._executor,
         )
 
     def from_iter(
@@ -126,24 +112,21 @@ class DataAPI:
 
     def from_arrow(self, tables: Any) -> MaterializedDataset:
         """Create a current-run materialized Dataset from bounded Arrow table data."""
-        from ..execution.dataflow_inputs import build_input_handle
-        handle = build_input_handle(tables, format="arrow")
+        handle = self._executor.prepare_input(InputSpec('arrow', tables))
         return MaterializedDataset(
             MaterializedSource(handle), LogicalPlan(), self._executor,
         )
 
     def from_numpy(self, arrays: Any) -> MaterializedDataset:
         """Create a current-run materialized Dataset from bounded NumPy array data."""
-        from ..execution.dataflow_inputs import build_input_handle
-        handle = build_input_handle(arrays, format="numpy")
+        handle = self._executor.prepare_input(InputSpec('numpy', arrays))
         return MaterializedDataset(
             MaterializedSource(handle), LogicalPlan(), self._executor,
         )
 
     def from_pandas(self, frames: Any) -> MaterializedDataset:
         """Create a current-run materialized Dataset from bounded pandas frame data."""
-        from ..execution.dataflow_inputs import build_input_handle
-        handle = build_input_handle(frames, format="pandas")
+        handle = self._executor.prepare_input(InputSpec('pandas', frames))
         return MaterializedDataset(
             MaterializedSource(handle), LogicalPlan(), self._executor,
         )

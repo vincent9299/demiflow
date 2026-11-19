@@ -27,7 +27,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Optional
 
-from ...data.datasink import Datasink, WriteResult
 from ...data.observability import DatasourceReadObserver, block_row_count
 from ...errors import (
     UnsupportedExecutionOptionError,
@@ -205,26 +204,6 @@ class LocalDatasetExecutor(DatasetExecutor):
         if self._pool is None:
             self._pool = ThreadPoolExecutor(max_workers=self._workers)
         return self._pool
-
-    def from_items(self, items: list[Any], *, override_num_blocks: int | None = None) -> Any:
-        if not isinstance(items, list):
-            raise TypeError("from_items requires a materialized list")
-        from ..dataflow_inputs import build_input_handle
-        return build_input_handle(items, format='items', override_num_blocks=override_num_blocks)
-
-    def from_arrow(self, tables: Any) -> Any:
-        from ..dataflow_inputs import build_input_handle
-        return build_input_handle(tables, format='arrow')
-
-    def from_numpy(self, arrays: Any) -> Any:
-        from ..dataflow_inputs import build_input_handle
-        return build_input_handle(arrays, format='numpy')
-
-    def from_pandas(
-        self, frames: Any, *, override_num_blocks: int | None = None,
-    ) -> Any:
-        from ..dataflow_inputs import build_input_handle
-        return build_input_handle(frames, format='pandas', override_num_blocks=override_num_blocks)
 
     def _iter_block_rows(self, block: Any) -> Iterator[Any]:
         if block is None:
@@ -541,22 +520,6 @@ class LocalDatasetExecutor(DatasetExecutor):
         for output_rows in self._map_stage(batches(), apply, width):
             yield from output_rows
 
-    def iter_rows(self, source: SourcePlan, plan: LogicalPlan) -> Iterable[object]:
-        from ..dataflow_api import make_action_request, run_dataset_action
-        request = make_action_request(self, source, plan, kind='iter_rows', arguments={})
-        return run_dataset_action(request)
-
-    def iter_batches(
-        self, source: SourcePlan, plan: LogicalPlan, *, prefetch_batches: int = 1,
-        batch_size: int | None = 256, batch_format: str | None = "default", drop_last: bool = False,
-    ) -> Iterable[Any]:
-        from ..dataflow_api import make_action_request, run_dataset_action
-        request = make_action_request(self, source, plan, kind='iter_batches', arguments={
-            'prefetch_batches': prefetch_batches, 'batch_size': batch_size,
-            'batch_format': batch_format, 'drop_last': drop_last,
-        })
-        return run_dataset_action(request)
-
     def _rows_as_batches(
         self, rows, *, batch_size: int | None = 256,
         batch_format: str | None = "default", drop_last: bool = False, schema=None, byte_limits=None,
@@ -600,22 +563,6 @@ class LocalDatasetExecutor(DatasetExecutor):
                     if batch_format == "pyarrow":
                         raise
             yield rows
-
-    def materialize(self, source: SourcePlan, plan: LogicalPlan) -> Any:
-        from ..dataflow_api import make_action_request, run_dataset_action
-        request = make_action_request(self, source, plan, kind='materialize', arguments={})
-        result = run_dataset_action(request)
-        self._last_metadata = ExecutionMetadata(source_name=type(source).__name__)
-        return result
-
-    def materialize_stream(self, dataset, *, source=None, plan=None) -> Any:
-        from ..dataflow_api import make_action_request, run_dataset_action
-        selected_source = dataset._source if source is None else source
-        selected_plan = dataset._plan if plan is None else plan
-        request = make_action_request(self, selected_source, selected_plan, kind='materialize', arguments={})
-        result = run_dataset_action(request)
-        self._last_metadata = ExecutionMetadata(source_name=type(selected_source).__name__)
-        return result
 
     def materialize_graph(self, graph_spec):
         # graph_spec is translated to a standard v3 request by run_local_graph
@@ -704,60 +651,6 @@ class LocalDatasetExecutor(DatasetExecutor):
         )
         return _LocalMaterializedHandle(tuple(blocks), rows_count)
 
-    def count(self, source: SourcePlan, plan: LogicalPlan) -> int:
-        from ..dataflow_api import make_action_request, run_dataset_action
-        request = make_action_request(self, source, plan, kind='count', arguments={})
-        result = run_dataset_action(request)
-        self._last_metadata = ExecutionMetadata(source_name=type(source).__name__)
-        return result
-
-    def take(
-        self, source: SourcePlan, plan: LogicalPlan, limit: int,
-    ) -> list[dict[str, Any]]:
-        from ..dataflow_api import make_action_request, run_dataset_action
-        request = make_action_request(self, source, plan, kind='take', arguments={'limit': limit})
-        result = run_dataset_action(request)
-        self._last_metadata = ExecutionMetadata(source_name=type(source).__name__)
-        return result
-
-    def take_batch(
-        self, source: SourcePlan, plan: LogicalPlan, batch_size: int,
-        *, batch_format: str,
-    ) -> Any:
-        from ..dataflow_api import make_action_request, run_dataset_action
-        request = make_action_request(self, source, plan, kind='take_batch', arguments={
-            'batch_size': batch_size, 'batch_format': batch_format,
-        })
-        result = run_dataset_action(request)
-        self._last_metadata = ExecutionMetadata(source_name=type(source).__name__)
-        return result
-
-    def aggregate(
-        self, source: SourcePlan, plan: LogicalPlan,
-        aggregates: tuple[Any, ...],
-    ) -> Any:
-        from ..dataflow_api import make_action_request, run_dataset_action
-        from ..contracts.dataflow import ActionProgram
-        # The retained low-level method historically accepts no aggregations:
-        # empty input -> None, nonempty input -> {}. Count on the same native
-        # terminal proves emptiness without restoring a second source loop.
-        empty_aggregations = not aggregates
-        if empty_aggregations:
-            from ...data.aggregate import Count
-            aggregates = (Count(),)
-        programs = tuple(
-            ActionProgram(name='aggregate-' + str(index), kind='aggregate', value=aggregate)
-            for index, aggregate in enumerate(aggregates)
-        )
-        request = make_action_request(self, source, plan, kind='aggregate',
-            arguments={'names': [aggregate.name for aggregate in aggregates]},
-            programs=programs)
-        result = run_dataset_action(request)
-        self._last_metadata = ExecutionMetadata(source_name=type(source).__name__)
-        if empty_aggregations:
-            return {} if result['count()'] else None
-        return result
-
     def schema(self, source: SourcePlan, plan: LogicalPlan, *, fetch_if_missing: bool = True) -> Any:
         if not fetch_if_missing:
             return None
@@ -775,13 +668,6 @@ class LocalDatasetExecutor(DatasetExecutor):
         request = make_action_request(self, source, plan, kind='columns',
             arguments={'fetch_if_missing': fetch_if_missing})
         return run_dataset_action(request)
-
-    def size_bytes(self, source: SourcePlan, plan: LogicalPlan) -> int:
-        from ..dataflow_api import make_action_request, run_dataset_action
-        request = make_action_request(self, source, plan, kind='size_bytes', arguments={})
-        result = run_dataset_action(request)
-        self._last_metadata = ExecutionMetadata(source_name=type(source).__name__)
-        return result
 
     def num_blocks(self, source: SourcePlan, plan: LogicalPlan) -> int:
         if not isinstance(source, MaterializedSource) or not plan.is_empty:
@@ -819,36 +705,6 @@ class LocalDatasetExecutor(DatasetExecutor):
         if self._last_metadata is not None:
             return replace(self._last_metadata, run_ref=self._run_ref)
         return None
-
-    def write_datasink(
-        self, source: SourcePlan, plan: LogicalPlan, datasink: Datasink,
-        *, native_options=None,
-    ) -> WriteResult:
-        if native_options is not None:
-            raise UnsupportedExecutionOptionError("Ray native options require a Ray target")
-        from ..dataflow_api import make_action_request, run_dataset_action
-        request = make_action_request(self, source, plan, kind='write_datasink',
-            arguments={}, sink=datasink)
-        return run_dataset_action(request)
-
-    def write_lance(self, source, plan, spec, *, native_options=None):
-        if native_options is not None:
-            raise UnsupportedExecutionOptionError("Ray native options require a Ray target")
-        from ..dataflow_api import make_action_request, run_dataset_action
-        from ..contracts.dataflow import ActionProgram
-        request = make_action_request(self, source, plan, kind='write_lance', arguments={},
-            programs=(ActionProgram(name='write_lance', kind='sink', value=spec),))
-        return run_dataset_action(request)
-
-    def write_file(
-        self, source: SourcePlan, plan: LogicalPlan, format_name: str,
-        path: str, options: dict[str, Any],
-    ) -> WriteResult:
-        from ..dataflow_api import make_action_request, run_dataset_action
-        request = make_action_request(self, source, plan, kind='write_file', arguments={
-            'format': format_name, 'path': path, 'options': dict(options),
-        })
-        return run_dataset_action(request)
 
     def close(self) -> None:
         # Release only this executor's hosted resource scope (worker pool and

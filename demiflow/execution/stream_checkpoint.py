@@ -335,7 +335,8 @@ def read_checkpoint(checkpoint, stage, *, columns=None):
     advances. This never reads a table head or accepts a user-supplied receipt.
     """
     from .checked import action, current
-    from ..data.api import DataAPI, _current_executor
+    from ..data.api import DataAPI
+    from ..data.execution_contract import _current_executor
     import pyarrow as pa
     if type(checkpoint) is not StreamCheckpoint or checkpoint.declared_outputs is None:
         raise ValueError('Read requires a declared native checkpoint')

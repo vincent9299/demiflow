@@ -11,6 +11,7 @@ import time
 import demiflow
 from demiflow import data
 from demiflow.data.plan import LogicalPlan
+from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.recovery_identity import plan_identity
@@ -51,7 +52,9 @@ usage = resource.getrusage(resource.RUSAGE_SELF)
 with RunContext.start(ROOT, limits={'max_row_bytes': 4096, 'max_batch_bytes': 65536}) as run:
     graph = data.from_items([{'id': i} for i in range(1536)]).map_async(first, concurrency=8).map_async(second, concurrency=8)
     with run.action(plan_identity('materialize', graph._source, graph._plan)) as action:
-        terminal = StreamMaterialization(action, lambda: graph._executor.iter_rows(graph._source, LogicalPlan()))
+        terminal = StreamMaterialization(action, lambda: run_dataset_action(make_action_request(
+            graph._executor, graph._source, LogicalPlan(), kind='iter_rows', arguments={}
+        )))
         async def consume(row):
             latencies.append(time.perf_counter() - started)
             await terminal.append(row)

@@ -1,4 +1,4 @@
-"""The public Lance terminal's original checked action and receipt boundary."""
+"""Private registration binding consumed by the Dataset action runtime."""
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -21,35 +21,12 @@ def bind_lance_action(before_execute, *, max_rows_per_batch):
         _BINDING.reset(token)
 
 
-def execute_lance_write(dataset, spec, *, native_options=None):
-    from dataclasses import asdict
-    from .checked import action
-    from .run_context import current_action
-    from .dataflow_api import make_action_request, run_dataset_action
-    from .contracts.dataflow import ActionProgram
-    from ..observability import observe_action
-    arguments = {} if native_options is None else {'native_options': asdict(native_options)}
-    binding = _BINDING.get()
-    if binding is not None:
-        from .dataflow_native_limits import EXECUTION_LIMITS
-        arguments[EXECUTION_LIMITS] = {'inflight_rows': binding[1]}
-    with action('write_table', dataset._source, dataset._plan, spec) as checked, observe_action(
-        'write_lance', dataset._source, dataset._plan, dataset._executor,
-        sink_type='LanceWrite', sink_target=spec.uri,
-    ) as observer:
-        from .plan_capture import current_capture
-        if binding is not None and current_capture() is None:
-            _BINDING.set(None)  # Never bind a second action in nested callbacks.
-            binding[0](current_action(), spec)
-        request = make_action_request(dataset._executor, checked.source, checked.plan,
-            kind='write_lance', arguments=arguments,
-            programs=(ActionProgram(name='write_lance', kind='sink', value=spec),))
-        receipt = run_dataset_action(request)
-        checked.receipt(receipt)
-        if receipt.status == 'indeterminate':
-            from ..errors import LanceWriteError
-            raise LanceWriteError(receipt)
-        observer.rows = int(receipt.written_rows or 0)
-        observer.complete(result_target=spec.uri, write_receipt=receipt.to_dict(),
-                          reconciliation_required=False)
-    return receipt
+def _lance_action_binding():
+    """Read the existing registration without exposing it through SDK requests."""
+    return _BINDING.get()
+
+
+def _consume_lance_action_binding(binding, action, spec):
+    # Clear before the callback: a nested write must not bind a second action.
+    _BINDING.set(None)
+    binding[0](action, spec)

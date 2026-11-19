@@ -1,9 +1,9 @@
 """Actual executor compatibility preserves business aggregate names on both hosts."""
+from demiflow.data.dataset import Dataset
 import pytest
 
 from demiflow.data.aggregate import Count, Sum
 from demiflow.execution.run_context import RunContext
-from _runtime_v3_executor_scope import call
 from test_runtime_v3_chain_compatibility import _entry
 
 
@@ -16,7 +16,7 @@ def test_real_executor_aggregate_preserves_names_and_original_commit(tmp_path, i
         with _entry(tmp_path) as (api, executor, _):
             dataset = api.from_items(items)
             aggregates = (Sum('id'), Count(), Sum('id', alias_name='total id (sum)'))
-            result = call(executor, 'aggregate', dataset._source, dataset._plan, aggregates)
+            result = Dataset(dataset._source, dataset._plan, executor).aggregate(*aggregates)
             assert result == expected
             assert run.position == 1
             assert run.journal.execution_action('action-2') is None

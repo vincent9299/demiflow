@@ -48,7 +48,9 @@ PRE_V3_MODULES = {
         'demiflow.execution.worker.bootstrap', 'demiflow.execution.worker.execution',
         'demiflow.execution.worker.graph_execution', 'demiflow.execution.worker.queue_transform'},
     'demiflow.execution.stream': {
-        'demiflow.data.dataset', 'demiflow.execution.dataflow_stream',
+        'demiflow.data.dataset',
+        'demiflow.data.execution_contract',  # TYPE_CHECKING only: original StreamStats identity
+        'demiflow.execution.dataflow_stream',
         'demiflow.execution.request_limits', 'demiflow.execution.worker.execution',
         'demiflow.execution.worker.graph_execution', 'demiflow.execution.worker.queue_transform'},
     'demiflow.execution.plan_interpreter': {
