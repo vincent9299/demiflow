@@ -272,6 +272,17 @@ class ReviewAuthority:
             phase=phase, backend=backend, implementation=implementation, execution_id=execution_id), sort_keys=True)
         return ReviewReceipt(payload, hmac.new(self._key, payload.encode(), hashlib.sha256).hexdigest())
 
+    def issue_registration(self, task_id, revision_id):
+        safe_id(task_id)
+        payload = json.dumps(dict(domain="managed-registration-v1", task_id=task_id, revision_id=revision_id), sort_keys=True)
+        return ReviewReceipt(payload, hmac.new(self._key, payload.encode(), hashlib.sha256).hexdigest())
+
+    def issue_implementation(self, task_id, revision_id):
+        safe_id(task_id)
+        payload = json.dumps(dict(domain='managed-implementation-v1', task_id=task_id,
+                                  revision_id=revision_id), sort_keys=True)
+        return ReviewReceipt(payload, hmac.new(self._key, payload.encode(), hashlib.sha256).hexdigest())
+
     def validate(self, receipt):
         if (type(receipt) is not ReviewReceipt or not isinstance(receipt.payload, str) or
                 not isinstance(receipt.signature, str) or len(receipt.payload) > 4096):
@@ -292,7 +303,9 @@ class ManagedTasks:
         self.review_authority = review_authority
 
     def _project(self):
-        return Project(self.project_root, task_store=self.store)
+        project = Project(self.project_root, task_store=self.store)
+        project.managed_authority = self.review_authority
+        return project
 
     def _validate(self, state, task_id):
         metadata = state.get('managed', {})
@@ -388,6 +401,8 @@ class ManagedTasks:
         project = self._project()
         with tasks.locked(project, task_id) as (directory, state):
             metadata = self._validate(state, task_id)
+            if tasks.pending_questions(state):
+                raise ForgeError('needs_input: unresolved questions must receive a human response before Review')
             tree, readonly, _, fingerprint, observation = tasks.current(project, state, with_observation=True)
             current = self._projection(project, state, directory)
             if (fingerprint != expected_fingerprint or current['gates']['check'] != 'passed' or
@@ -462,7 +477,7 @@ class ManagedTasks:
                 if rule_bytes > 256 * 1024:
                     raise ForgeError('Complete Review authority byte budget exceeded')
                 rules[key] = text
-            for source in metadata['bound_contract'].get('context_baseline', []):
+            for source in (tasks.context_baseline(project, state) or []):
                 text = _text_source(project, source['canonical_path'], source['sha256'])
                 rule_bytes += len(text.encode())
                 if rule_bytes > 256 * 1024:
@@ -484,6 +499,8 @@ class ManagedTasks:
                 fingerprint=fingerprint, project_id=self.project_id, project_root=str(self.project_root),
                 original_goal=state['goal'], non_goals=state['non_goals'], writes=state['writes'],
                 decisions=[n for n in state['notes'] if n['kind'] == 'decision' or n.get('resolved')],
+                questions=tasks.managed_questions(state), current_request=tasks.managed_current_request(state),
+                registration_revisions=[r['plan'] for r in metadata.get('registration_revisions', []) if r['status'] == 'committed'],
                 applicable_sources=rules, review_rules=list(REVIEW_RULES), sources=sources,
                 differences=differences, check=state['check'], verification=verification,
                 evidence_paths=sorted(known), assurance='gate_only',
@@ -555,6 +572,8 @@ class ManagedTasks:
                     supplemental.append(source)
             observation.stable()
             bound = metadata['bound_contract']
+            from .registration import original_sources
+            supplemental = original_sources(project, state, supplemental)
             if 'context_baseline' in bound and bound['context_baseline'] != supplemental:
                 metadata['context_binding_problem'] = 'supplementary_source_set_changed'
                 # Preserve this refusal even though the normal mutation scope is
@@ -605,6 +624,77 @@ class ManagedTasks:
             state['notes'].append(note)
             return dict(note_index=len(state['notes']) - 1, duplicate=False)
 
+    def adopt_implementation(self, task_id, *, request_id, before_components, after_components,
+                             allowed_files, authorization):
+        from . import registration
+        project = self._project()
+        with tasks.locked(project, task_id) as (directory, state):
+            metadata = self._validate(state, task_id)
+            if (_project_identity(self.project_root) != metadata['bound_contract']['project_identity'] or
+                    _index_snapshot(self.project_root) != metadata['bound_contract']['staging']):
+                raise ForgeError('Implementation adoption cannot replace the original physical root or staging baseline')
+            registration.adopt_implementation(project, state, request_id=request_id,
+                before_components=before_components, after_components=after_components,
+                allowed_files=allowed_files, authorization=authorization)
+            return self._projection(project, state, directory)
+
+    def prepare_registration(self, task_id, **request):
+        from . import registration
+        project = self._project()
+        with tasks.locked(project, task_id) as (_, state):
+            self._validate(state, task_id)
+            return registration.prepare(project, state, **request)
+
+    def registration_plan(self, task_id, revision_id=None, *, request_id=None):
+        from . import registration
+        project = self._project()
+        with tasks.locked(project, task_id, write=False) as (_, state):
+            self._validate(state, task_id)
+            return registration.plan_for(project, state, revision_id, request_id=request_id)
+
+    def commit_registration(self, task_id, revision_id):
+        from . import registration
+        project = self._project()
+        with tasks.locked(project, task_id) as (directory, state):
+            self._validate(state, task_id)
+            registration.commit(project, state, revision_id)
+            return self._projection(project, state, directory)
+
+    def abort_registration(self, task_id, revision_id):
+        from . import registration
+        project = self._project()
+        with tasks.locked(project, task_id) as (_, state):
+            self._validate(state, task_id)
+            registration.abort(project, state, revision_id)
+            return registration.plan_for(project, state, revision_id)
+
+    def resolve_question(self, task_id, note_index, *, answer_event_ids):
+        """The trusted bridge supplies references to the current human message."""
+        if (type(note_index) is not int or note_index < 0 or type(answer_event_ids) is not list or
+                not 1 <= len(answer_event_ids) <= 256 or
+                any(not isinstance(event, str) or not event or len(event) > 256 for event in answer_event_ids) or
+                len(set(answer_event_ids)) != len(answer_event_ids)):
+            raise ForgeError('Question resolution requires a note index and distinct human decision event IDs')
+        project = self._project()
+        with tasks.locked(project, task_id) as (_, state):
+            self._validate(state, task_id)
+            tasks.current(project, state)
+            if note_index >= len(state['notes']) or state['notes'][note_index]['kind'] != 'question':
+                raise ForgeError('Question resolution requires an existing question note')
+            question = state['notes'][note_index]
+            resolution = dict(answer_event_ids=list(answer_event_ids))
+            if question.get('resolved'):
+                if question['resolved'] != resolution:
+                    raise ForgeError('A resolved question cannot be silently given a different answer')
+                return dict(note_index=note_index, answer_event_ids=list(answer_event_ids), duplicate=True)
+            matches = [(i, n) for i, n in enumerate(state['notes'])
+                       if n['kind'] == 'decision' and n.get('event_id') in answer_event_ids]
+            if ([n['event_id'] for _, n in matches] != answer_event_ids or
+                    any(i <= note_index for i, _ in matches)):
+                raise ForgeError('Question answer must reference recorded human decisions after the question')
+            question.update(resolved=resolution, resolved_at=tasks.now())
+            return dict(note_index=note_index, answer_event_ids=list(answer_event_ids), duplicate=False)
+
     def _expected(self, project, state, expected):
         return expected is None or tasks.current(project, state)[3] == expected
 
@@ -621,6 +711,8 @@ class ManagedTasks:
         project = self._project()
         with tasks.locked(project, task_id) as (directory, state):
             metadata = self._validate(state, task_id)
+            if tasks.pending_questions(state):
+                return self._projection(project, state, directory)
             contract = metadata['request']['contract']
             if not contract['allow_tests']:
                 raise ForgeError('Managed fixture verification has not been authorized')
@@ -720,6 +812,8 @@ class ManagedTasks:
         project = self._project()
         with tasks.locked(project, task_id) as (directory, state):
             self._validate(state, task_id)
+            if tasks.pending_questions(state):
+                return self._projection(project, state, directory)
             if not self._expected(project, state, expected_fingerprint):
                 return self._projection(project, state, directory, stale=True)
             tasks.check(project, state)
@@ -742,13 +836,25 @@ class ManagedTasks:
     def _projection(self, project, state, directory, *, stale=False):
         metadata = self._validate(state, state['id'])
         acceptance = metadata.get('acceptance') or {}
+        pending = tasks.pending_questions(state)
+        visible_questions, question_bytes = [], 0
+        for question in pending[:64]:
+            item = dict(note_index=question['note_index'], text=question['text'][:2048])
+            size = len(json.dumps(item, ensure_ascii=False).encode())
+            if question_bytes + size > 16384:
+                break
+            visible_questions.append(item)
+            question_bytes += size
         result = dict(schema=SCHEMA, task_id=state['id'], project_id=self.project_id,
                       source_fingerprint=None, baseline_fingerprint=metadata['bound_contract']['baseline_fingerprint'],
                       contract_digest=metadata['contract_digest'], assurance='gate_only',
                       run_policy='observe', development_state='incomplete', gates={}, violations=[],
                       accepted_fingerprint=acceptance.get('fingerprint'), ready=False,
                       verification_source='live_tree_rechecked', changed=[], changed_total=0,
-                      truncated=False, feedback=[], execution_evidence={}, repairable=False)
+                      truncated=False, feedback=[], execution_evidence={}, repairable=False,
+                      pending_questions=visible_questions, pending_question_count=len(pending),
+                      pending_questions_truncated=(len(visible_questions) != len(pending) or
+                          any(len(q['text']) > 2048 for q in pending)))
         try:
             if _project_identity(self.project_root) != metadata['bound_contract']['project_identity']:
                 raise ForgeError('Physical project root changed from the original task baseline')
@@ -760,7 +866,7 @@ class ManagedTasks:
             # This eligibility is deliberately narrower than ordinary stale
             # evidence: authority/scope drift requires controller intervention.
             # Reuse the same snapshots and scope semantics as the existing check.
-            repair_safe = (not changes(state['readonly_baseline'], readonly) and
+            repair_safe = (not changes(tasks.readonly_baseline(project, state), readonly) and
                 all(any(within(name.rstrip('/'), write) for write in state['writes']) for name in changed) and
                 (not metadata['request']['contract'].get('require_context_binding') or
                  'context_baseline' in metadata['bound_contract']) and
@@ -826,7 +932,7 @@ class ManagedTasks:
                 repair_safe = False
                 gates['check'] = 'failed'
                 violations.append('DF-01 Git staging changed from the original task baseline')
-            unresolved = [n for n in state['notes'] if n['kind'] == 'question' and not n.get('resolved')]
+            unresolved = pending
             if unresolved:
                 violations.append('Unresolved task questions remain')
             execution_ok = True
@@ -880,7 +986,9 @@ class ManagedTasks:
             result['ready'] = all(value == 'passed' for value in gates.values()) and not unresolved and execution_ok
             if result['ready'] and metadata['request']['contract'].get('require_enforcement'):
                 result['assurance'] = 'enforced'
-            if result['ready'] and acceptance.get('fingerprint') == fingerprint:
+            if unresolved:
+                result['development_state'] = 'needs_input'
+            elif result['ready'] and acceptance.get('fingerprint') == fingerprint:
                 result['development_state'] = 'accepted'
             elif ('stale' in gates.values() or 'stale' in result['execution_evidence'].values() or
                   acceptance.get('fingerprint') and acceptance['fingerprint'] != fingerprint):

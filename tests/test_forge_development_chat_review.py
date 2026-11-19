@@ -39,7 +39,7 @@ def setup_review(api, monkeypatch, tmp_path, *, mode='pass', mutate=None):
 const plugin=require(process.argv[2]);
 const mode=process.argv[3], text=process.argv[4];
 const ctx={effect(){},llm:{async *stream(options){
-  if(options.tools.length || options.sessionId || options.messages.length!==1 || options.provider!=='fixture' || options.model!=='fixture-model' || options.maxTokens!==16384 || options.reasoningEffort!=='low')
+  if(options.tools.length || options.sessionId || options.messages.length!==1 || options.provider!=='fixture' || options.model!=='fixture-model' || options.maxTokens!==32768 || options.reasoningEffort!=='low')
     throw new Error('Not an independent no-tools request');
   const input=options.messages[0].content[0].text;
   if(!input.includes('original_goal') || !input.includes('review_rules') || !input.includes('verification')) throw new Error('Missing evidence');

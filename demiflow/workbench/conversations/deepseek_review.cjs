@@ -29,9 +29,9 @@ exports.apply = function(ctx, config) {
       // The profile disables llm-retry. One native model request, tools empty,
       // no developer-session identity and no model-triggered execution surface.
       for await (const chunk of ctx.llm.stream({provider:config.provider,model:config.model,
-        reasoningEffort:config.reasoningEffort,tools:[],maxTokens:16384,
+        reasoningEffort:config.reasoningEffort,tools:[],maxTokens:32768,
         messages:[{role:'user',content:[{type:'text',text:params.prompt}]}],signal:operation.signal})) {
-        if(finish || ++observed>32768) throw new Error('Invalid or excessive model stream');
+        if(finish || ++observed>65536) throw new Error('Invalid or excessive model stream');
         if(chunk.type==='block-start') {
           if(!['text','reasoning'].includes(chunk.blockType) || blocks.has(chunk.index) || blocks.size>=64)
             throw new Error('Reviewer attempted a tool or unsupported block');

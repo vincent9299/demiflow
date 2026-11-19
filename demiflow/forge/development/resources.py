@@ -35,11 +35,11 @@ def implementation_files():
     # Stable logical names, independent of checkout/site-packages placement.
     names = (
         "__init__.py", "data/__init__.py", "cli.py", "forge/__init__.py", "forge/cli.py", "forge/definition.py",
-        "forge/io.py", "forge/schema.py", "pipeline/core.py",
+        "forge/io.py", "forge/schema.py", "forge/platform.py", "pipeline/core.py",
         *("forge/development/" + name for name in (
             "__init__.py", "__main__.py", "coverage.py", "checks.py", "cli.py", "click_entry.py",
             "history.py", "io.py", "launcher.py", "notebook.py", "project.py",
-            "resources.py", "runner.py", "tasks.py", "taskstore.py", "managed.py", "skill/SKILL.md", "skill/scripts/forge.py",
+            "resources.py", "registration.py", "runner.py", "tasks.py", "taskstore.py", "managed.py", "skill/SKILL.md", "skill/scripts/forge.py",
         )),
     )
     return {"demiflow/" + name: PACKAGE_ROOT / name for name in names}

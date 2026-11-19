@@ -623,9 +623,8 @@ def source_text(root, path, *, expected_sha256=None):
     return {'path': path, 'text': raw.decode('utf-8'), 'sha256': actual}
 
 
-def register_flow(root, entry, *, params):
+def _register_flow_value(root, value, entry, params, *, new_only=False):
     import ast
-    root, value, _ = load_workspace(root)
     if value['format'] not in MODERN_FORMATS:
         raise ForgeError('Explicit flow registration requires workspace v2')
     target, symbol = validate_entry(root, entry)
@@ -633,16 +632,40 @@ def register_flow(root, entry, *, params):
     if sum(isinstance(n, ast.FunctionDef) and n.name == symbol for n in tree.body) != 1:
         raise ForgeError('Registered entry function is missing or ambiguous')
     read_control(validate_parameter_path(root, params), 65536)
-    expected = content_digest(value)
+    if new_only and entry in value['entries']:
+        raise ForgeError('Managed registration can only add a new entry', code='conflict')
     paths = value['entries'].setdefault(entry, [])
     if params in paths:
         return dict(status='unchanged', entry=entry, params=params)
     if len(value['entries']) > 256 or len(paths) >= 64:
         raise ForgeError('Entry registration budget exceeded')
     paths.append(params)
+    return dict(status='registered', entry=entry, params=params)
+
+
+def plan_flow_registration(root, flows):
+    """Validate an additive batch without publishing either project control."""
+    root, value, _ = load_workspace(root)
+    before = read_bounded(root / 'workspace.json', 1024**2).decode('utf-8')
+    if content_digest(json.loads(before)) != content_digest(value):
+        raise ForgeError('Workspace changed during registration planning', code='conflict')
+    if not isinstance(flows, list) or not 1 <= len(flows) <= 8:
+        raise ForgeError('Managed registration requires 1..8 new flows')
+    for flow in flows:
+        _register_flow_value(root, value, flow['path'] + ':' + flow['symbol'], flow['params'], new_only=True)
+    after = bounded_json(value, 1024**2).decode('utf-8')
+    return dict(before_raw=before, before_sha256=hashlib.sha256(before.encode()).hexdigest(),
+                after_raw=after, after_sha256=hashlib.sha256(after.encode()).hexdigest())
+
+
+def register_flow(root, entry, *, params):
+    root, value, _ = load_workspace(root)
+    expected = content_digest(value)
+    result = _register_flow_value(root, value, entry, params)
+    if result['status'] == 'unchanged': return result
     with control_lock(root):
         write_control(root / 'workspace.json', value, expected=expected)
-    return dict(status='registered', entry=entry, params=params)
+    return result
 
 
 def unregister_flow(root, entry, *, expected):

@@ -368,8 +368,8 @@ class Service:
                 project = self.project(workspace, json.loads(session['root'])['path'])
                 current = project_tasks(self.deployment, session, project).status(sid)
                 if (turn['development']['state'] not in {'cancelled', 'unknown', 'failed'} and
-                        (turn['development']['state'] in {'accepted', 'review_unavailable'} or current.get('accepted_fingerprint')
-                         or current.get('development_state') == 'stale')):
+                        (turn['development']['state'] in {'accepted', 'review_unavailable', 'needs_input'} or current.get('accepted_fingerprint')
+                         or current.get('development_state') in {'stale', 'needs_input'})):
                     turn['development'] = dict(turn['development'], **projection(current))
             except Exception as exc:
                 if turn['development']['state'] not in {'cancelled', 'unknown', 'failed'}:

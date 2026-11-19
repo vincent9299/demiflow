@@ -36,7 +36,7 @@ from demiflow.workbench.conversations.context import BridgeServer
 from demiflow.workbench.conversations.changes import capture
 from demiflow.workbench.conversations.changes import differences
 from demiflow.workbench.conversations.execution import launch_provider
-from demiflow.workbench.conversations.development import managed, prepare, provider_message, request_deadline, runtime_paths, project_tasks
+from demiflow.workbench.conversations.development import managed, prepare, provider_message, request_deadline, runtime_paths, project_tasks, current_request
 
 
 def sandbox_spec(deployment, project, session, turn, manifest, config, private_home):
@@ -206,7 +206,7 @@ def run(config_path, tid, lease_fd, parent_fd):
             managed_tasks = prepare(deployment, store, turn, session, project) if managed(project) else None
             manifest, prompt = assemble(project, turn['text'], scratch, limits,
                 managed_tasks=managed_tasks, task_id=session['id'] if managed_tasks is not None else None,
-                execution_mode=deployment.mode)
+                execution_mode=deployment.mode, current_request=current_request(turn) if managed_tasks is not None else None)
             store.update(tid, context=wire(manifest).decode(), delivery='prepared')
             protocol_bridge = ProtocolBridge(store, tid, project, scratch)
             store.event(tid, 'context.bound', {'digest': manifest['digest'], 'kind': manifest['kind'],

@@ -35,6 +35,26 @@ def test_catalog_does_not_import_and_is_project_scoped(project):
     with pytest.raises(ForgeError): definitions.read(project,id='../dispatch.py')
 
 
+def test_repository_workspace_discovers_only_explicit_unique_flow_owner(project):
+    from demiflow.workbench.projects.discovery import discover
+    root = project.parent
+    ws.init_workspace(root, existing=True)
+    # No guessing from a nested directory or merely having one declaration.
+    assert definitions.catalog(root)['definitions'] == []
+    ws.register_flow(root, 'shipping/flows/select.py:run', params='shipping/settings/select.json')
+    catalog = definitions.catalog(root)
+    assert {(d['kind'], d['symbol']) for d in catalog['definitions']} == {('code','clean'), ('prompt','review')}
+    (project/'operators/quality.py').write_text('raise RuntimeError("NEVER IMPORT")\ndef quality(row):\n    return row\n')
+    assert {d['symbol'] for d in definitions.catalog(root)['definitions']} == {'clean', 'quality', 'review'}
+    # A second referenced owner is ambiguous: do not silently choose or merge.
+    path = root/'.demiforge/project.json'
+    value = json.loads(path.read_text())
+    value['projects']['other'] = dict(value['projects']['shipping'], path='another')
+    path.write_text(json.dumps(value))
+    assert definitions.catalog(root)['definitions'] == []
+    assert any(d['code'] == 'conflicting_owner' for d in discover(root)['diagnostics'])
+
+
 def test_real_versions_from_nested_repository_and_current_changes(project):
     repo=project.parent
     def git(*args): return subprocess.check_output(['git','-C',str(repo),*args],text=True).strip()

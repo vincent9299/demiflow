@@ -635,7 +635,7 @@ class Project:
         return result
 
 
-def binding(config_path, config, *, hash_file=None):
+def binding_components(config_path, config, *, hash_file=None):
     """Tool/config identity only; this does not certify current project sources."""
     hash_file = hash_file or file_hash
     standards = {config["standard"], *(p.get("standard", config["standard"])
@@ -644,5 +644,9 @@ def binding(config_path, config, *, hash_file=None):
     for version in sorted(standards):
         path = STANDARDS[version]
         files["demiflow/forge/development/standards/" + path.name] = path
-    return digest({"config": hash_file(config_path),
-                   "tool": {name: hash_file(path) for name, path in sorted(files.items())}})
+    return {"config": hash_file(config_path),
+            "tool": {name: hash_file(path) for name, path in sorted(files.items())}}
+
+
+def binding(config_path, config, *, hash_file=None):
+    return digest(binding_components(config_path, config, hash_file=hash_file))

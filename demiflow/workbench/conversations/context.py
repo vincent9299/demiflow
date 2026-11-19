@@ -1,4 +1,4 @@
-"""Assemble authoritative context and invoke only the public development CLI.
+"""Deliver authoritative context and expose the narrow development protocol.
 
 CLI read receipts and delivery to a provider are separate facts. Preparation may
 write a CLI receipt; no model turn is dispatched until its context is acknowledged.
@@ -68,7 +68,7 @@ def cli(root, arguments, *, scratch, timeout=30, maximum=1024 * 1024):
     return value
 
 
-def assemble(project, requirement, scratch, limits, *, managed_tasks=None, task_id=None, execution_mode='trusted_local'):
+def assemble(project, requirement, scratch, limits, *, managed_tasks=None, task_id=None, execution_mode='trusted_local', current_request=None):
     root = Path(project['root'])
     sources, pages, used = [], [], 0
 
@@ -128,11 +128,19 @@ def assemble(project, requirement, scratch, limits, *, managed_tasks=None, task_
         if not isinstance(binding, dict) or sorted(binding.get('writes', [])) != sorted(project['writes']):
             reject('Registered task writable scope differs from the deployment grant', 'conflict')
         if managed_tasks is not None:
-            intent = dict(task_id=task, original_goal=binding['goal'], non_goals=binding['non_goals'],
+            intent = dict(task_id=task, initial_goal=binding['goal'], current_request=current_request or dict(text=requirement),
+                non_goals=binding['non_goals'], questions=binding.get('questions', []),
                 user_decisions=[dict(event_id=n['event_id'], text=n['text']) for n in binding['notes']
                                 if n['kind'] == 'decision' and n.get('event_id')])
             append('controller-task-intent', 'urn:demiflow:forge:task:' + task,
-                '# 受信任务上下文：原始意图与后续真人要求\n' + wire(intent, limits.context_bytes).decode(),
+                '# 受信任务上下文：项目对话的当前要求与历史依据\n'
+                'current_request 是本轮真人要求；initial_goal 是保留的首次要求和基线历史，不把项目永久限定为第一次修改。'
+                '同项目可在既有授权内新增或修改 flow、operator；历史约束和验收记录仍须保留。'
+                '在已声明算子目录新增普通函数或类会由项目视图发现；新增 flow 的源码和参数文件写好后，'
+                '调用 register_flow(flow_id,path,symbol,params)，路径均为授权目录内相对路径。控制器将在本段排空后登记，'
+                '再自动续行重新提供上下文；不要直接改 workspace.json 或 .demiforge/project.json。'
+                '待答问题须向用户说明；只有后续真人回答或明确纠偏可通过 resolve_question(note_index) 关联，不能自行编造回答。\n'
+                + wire(intent, limits.context_bytes).decode(),
                 binding=binding['fingerprint'], origin='controller_bound_user_requirements')
         append('canonical-skill', DEVELOPMENT / 'skill/SKILL.md', read_file(DEVELOPMENT / 'skill/SKILL.md').decode())
         for key, info in binding['sources'].items():
@@ -167,14 +175,16 @@ def assemble(project, requirement, scratch, limits, *, managed_tasks=None, task_
         '不要改写控制目录或旧任务基线。保留 dirty 内容与 Notebook 输出。'
         '设计阶段仅可写明确列出的设计文档。遇到范围冲突或规范缺失须说明，不能擅自放宽。'
         '你的文字与命令输出不代表检查、独立 Review、Freeze 或验收通过。'
-        + ('开发规范、检查和验收由控制器调用 Forge 管理 API；开发桥只提供当前任务上下文、记录和检查请求。'
+        + ('开发规范、检查和验收由控制器调用 Forge 管理 API；开发桥提供项目上下文、问题与真人答复关联、记录和检查请求。'
            if managed_tasks is not None else '使用项目现有验证入口；开发桥只调用公开 CLI。')
         + '内部模型调用次数和费用未封顶。\n'
         '当前真人要求（原文）：\n' + requirement + '\n权威来源正文：\n'
     )
     manifest = dict(kind=project['kind'], task_id=task_id or project.get('task_id'), grant=grant,
                     requirement=requirement, sources=sources, bytes=used, evidence='missing', binding=binding)
-    if managed_tasks is not None: manifest['managed'] = True
+    if managed_tasks is not None:
+        manifest['managed'] = True
+        manifest['current_request'] = current_request or dict(text=requirement)
     prompt = header + '\n\n'.join(pages)
     if len(prompt.encode()) > limits.context_bytes:
         reject('Context with trusted header exceeds initial budget', 'resource_limit')
@@ -203,7 +213,7 @@ def bridge_spec(project):
     if not managed(project): return BRIDGE
     return dict(name=BRIDGE['name'], description='Read the bound Forge task context or request checks after this turn drains. No verification or acceptance authority.',
         inputSchema=dict(type='object', additionalProperties=False, required=['operation', 'arguments'], properties={
-            'operation': dict(type='string', enum=['context', 'context_read', 'ack_context', 'note', 'request_check', 'submit_candidate']),
+            'operation': dict(type='string', enum=['context', 'context_read', 'ack_context', 'note', 'resolve_question', 'register_flow', 'request_check', 'submit_candidate']),
             'arguments': dict(type='object')}))
 
 
@@ -265,7 +275,7 @@ class ProtocolBridge:
         if type(request) is not dict or set(request) != {'operation', 'arguments'} or type(request['arguments']) is not dict:
             reject('Invalid development bridge request')
         operation, args = request['operation'], request['arguments']
-        if self.managed_tasks is not None and operation not in {'context', 'context_read', 'ack_context', 'note', 'request_check', 'submit_candidate'}:
+        if self.managed_tasks is not None and operation not in {'context', 'context_read', 'ack_context', 'note', 'resolve_question', 'register_flow', 'request_check', 'submit_candidate'}:
             reject('Managed development tools cannot execute verification, refresh authority, or grant acceptance')
         self.require_active()
         self.sent_page = None
@@ -290,6 +300,17 @@ class ProtocolBridge:
                 return dict(status='scheduled_after_provider_drain', task_id=self.task_id)
             elif operation == 'note' and set(args) == {'kind', 'text'} and args['kind'] in {'progress', 'question', 'unverified', 'next'}:
                 return self.managed_tasks.note(self.task_id, args['kind'], text(args['text'], 8192))
+            elif operation == 'resolve_question' and set(args) == {'note_index'}:
+                from demiflow.workbench.conversations.common import integer
+                from demiflow.workbench.conversations.development import question_answer_events
+                index = integer(args['note_index'], 0, 4095)
+                turn = self.store.turn(self.tid)
+                if turn.get('operation', 'message') != 'message': reject('Only a real user message can answer a question')
+                return self.managed_tasks.resolve_question(self.task_id, index,
+                    answer_event_ids=question_answer_events(self.store,turn))
+            elif operation == 'register_flow':
+                from demiflow.workbench.conversations.registration import enqueue_registration
+                return enqueue_registration(self, args)
             else:
                 reject('Managed development tools cannot execute verification, refresh authority, or grant acceptance')
         else:

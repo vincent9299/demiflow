@@ -121,7 +121,9 @@ def current(project, state, *, with_observation=False):
     if state.get('managed', {}).get('context_binding_problem'):
         raise ForgeError('Supplementary authority source set changed; an explicit contract update is required')
     binding = project.binding()
-    if binding != state["binding"]:
+    from .registration import binding_for
+    expected_binding = binding_for(project, state) if 'managed' in state else state["binding"]
+    if binding != expected_binding:
         raise ForgeError("Tool, standard or project configuration changed; use read-only history. "
                          "Continuation requires a separately reviewed plan preserving the original baseline; "
                          "do not restart this task from the current tree")
@@ -138,12 +140,72 @@ def current(project, state, *, with_observation=False):
         basis['coverage'] = observation.coverage
     if 'managed' in state:
         basis['managed_contract'] = state['managed']['contract_digest']
-        supplemental = state['managed']['bound_contract'].get('context_baseline')
+        basis['managed_questions'] = managed_questions(state)
+        supplemental = context_baseline(project, state)
         if supplemental is not None:
             basis['managed_context'] = supplemental_context(supplemental)
     fingerprint = digest(basis)
     values = (tree, readonly, sources, fingerprint)
     return (*values, observation) if with_observation else values
+
+
+
+
+
+def readonly_baseline(project, state):
+    if 'managed' not in state: return state['readonly_baseline']
+    from .registration import readonly_baseline as effective
+    return effective(project, state)
+
+
+def context_baseline(project, state):
+    from .registration import supplemental_sources
+    return supplemental_sources(project, state)
+
+
+def managed_current_request(state):
+    decisions = [n for n in state['notes'] if n['kind'] == 'decision' and n.get('event_id')]
+    if not decisions:
+        return None
+    last = decisions[-1]['event_id']
+    prefix, separator, suffix = last.rpartition(':')
+    turn = prefix if separator and suffix.isdecimal() else last
+    selected = [n for n in decisions if (n['event_id'].rpartition(':')[0] == turn and
+                n['event_id'].rpartition(':')[2].isdecimal())] if turn != last else [decisions[-1]]
+    return dict(turn_id=turn, text=''.join(n['text'] for n in selected),
+                event_ids=[n['event_id'] for n in selected])
+
+
+def managed_questions(state):
+    """Question/answer facts from controller-recorded human decision events."""
+    result, used = [], 0
+    for index, note in enumerate(state['notes']):
+        if note['kind'] != 'question':
+            continue
+        item = dict(note_index=index, text=note['text'], resolved=bool(note.get('resolved')),
+                    answer_event_ids=[], answers=[])
+        if note.get('resolved'):
+            resolution = note['resolved']
+            if (type(resolution) is not dict or set(resolution) != {'answer_event_ids'} or
+                    type(resolution['answer_event_ids']) is not list or not resolution['answer_event_ids']):
+                raise ForgeError('Managed question resolution requires recorded human decision references')
+            ids = resolution['answer_event_ids']
+            matches = [(i, n) for i, n in enumerate(state['notes'])
+                       if n['kind'] == 'decision' and n.get('event_id') in ids]
+            if ([n['event_id'] for _, n in matches] != ids or any(i <= index for i, _ in matches)):
+                raise ForgeError('Managed question answer must follow the question in recorded human decisions')
+            item.update(answer_event_ids=ids,
+                        answers=[dict(event_id=n['event_id'], text=n['text']) for _, n in matches])
+        used += len(json.dumps(item, ensure_ascii=False).encode())
+        if used > 4 * 1024 * 1024:
+            raise ForgeError('Managed question/answer context exceeds its bounded note budget')
+        result.append(item)
+    return result
+
+
+def pending_questions(state):
+    return [dict(note_index=i, text=n['text']) for i, n in enumerate(state['notes'])
+            if n['kind'] == 'question' and not n.get('resolved')]
 
 
 def supplemental_context(sources):
@@ -184,6 +246,8 @@ def context(project, state, source_id=None, page=1):
                 "excluded_directories": sorted(SKIP - {'runs', 'datasets'} if observation.coverage is not None else SKIP),
                 **({'source_coverage': observation.coverage} if observation.coverage is not None else {}),
                 "sources": sources, "read_pages": state["reads"], "notes": state["notes"],
+                **({"questions": managed_questions(state), "current_request": managed_current_request(state)}
+                   if 'managed' in state else {}),
                 "fingerprint": fingerprint,
                 "evidence": {k: evidence_status(state[k], fingerprint) for k in ("check", "verification", "review")},
                 "next": "Read each required source page with context --read ID --page N; excerpts are explicit"}
@@ -221,7 +285,7 @@ def check(project, state):
     changed = changes(state["baseline"], tree)
     violations = [f"DF-01 out-of-scope change: {name}" for name in changed
                   if not any(within(name.rstrip("/"), w) for w in state["writes"])]
-    violations += [f"DF-01 readonly changed: {name}" for name in changes(state["readonly_baseline"], readonly)]
+    violations += [f"DF-01 readonly changed: {name}" for name in changes(readonly_baseline(project, state), readonly)]
     managed = state.get('managed')
     if (managed and managed['request']['contract'].get('require_context_binding', False)
             and 'context_baseline' not in managed['bound_contract']):

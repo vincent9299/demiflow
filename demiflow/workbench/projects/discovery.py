@@ -173,8 +173,8 @@ def discover(root, control=None):
         except (ValueError, OSError) as exc:
             issue('invalid_native_entry', entry, exc)
 
-    # The public JSON declaration may live at a repository root. Only the exact
-    # registered owner is selected; sibling configurations/commands are never run.
+    # Select the exact owner, or a unique v3 owner explicitly referenced by a
+    # repository-root workspace. Directory names alone never select an owner.
     declaration = None
     for depth, base in enumerate((root, *root.parents)):
         if depth >= 32:
@@ -197,7 +197,7 @@ def discover(root, control=None):
             if type(records) is not dict or len(records) > MAX_ITEMS:
                 raise ForgeError('Invalid or oversized pipeline declarations')
             base = declaration.parent.parent
-            matches = []
+            matches, referenced = [], []
             for name, record in records.items():
                 if type(record) is not dict or type(record.get('path')) is not str:
                     raise ForgeError('Invalid pipeline owner declaration')
@@ -211,6 +211,17 @@ def discover(root, control=None):
                 owner = base.joinpath(*relative.parts)
                 if owner == root:
                     matches.append((name, record))
+                elif multi and base == root and type(record.get('flows')) is dict:
+                    flows = record['flows']
+                    if len(flows) > 64:
+                        raise ForgeError('Invalid multi-flow declaration')
+                    if any(type(flow) is dict and type(flow.get('path')) is str
+                           and type(flow.get('symbol')) is str
+                           and flow['path'] + ':' + flow['symbol'] in control.get('entries', {})
+                           for flow in flows.values()):
+                        referenced.append((name, record))
+            if not matches:
+                matches = referenced
             if len(matches) > 1:
                 issue('conflicting_owner', declaration, '多个登记声明拥有同一目录；未自动选择入口。')
             elif not matches:
