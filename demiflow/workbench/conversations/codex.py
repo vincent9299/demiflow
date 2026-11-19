@@ -1,4 +1,4 @@
-"""Pinned Codex 0.164.0 app-server adapter; Codex owns its model/tool loop."""
+"""Codex app-server adapter pinned to qualified versions; Codex owns its model/tool loop."""
 from __future__ import annotations
 
 import json
@@ -12,6 +12,7 @@ from demiflow.workbench.conversations.common import wire
 from demiflow.workbench.conversations.context import BRIDGE
 from demiflow.workbench.conversations.context import bridge_spec
 from demiflow.workbench.conversations.policy import proxy_environment
+from demiflow.workbench.conversations.versions import matches_user_agent
 
 
 class Codex:
@@ -85,7 +86,7 @@ class Codex:
             'capabilities': {'experimentalApi': True}})
 
     def initialized(self, result):
-        if '0.164.0' not in result.get('userAgent', ''):
+        if not matches_user_agent('codex', result.get('userAgent', '')):
             reject('Codex runtime version differs from the qualified version')
         self.transport.send(dict(method='initialized', params={}))
         return self.transport.request('config/read', dict(cwd=self.project['root'], includeLayers=True))
