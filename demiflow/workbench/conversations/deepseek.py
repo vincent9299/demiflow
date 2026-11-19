@@ -90,6 +90,11 @@ class DeepSeek:
             overlay += [dict(id='acp',disabled=True),dict(id='llm-retry',disabled=True),dict(insert=[dict(id='demiflow-model-broker',
                 name=str(Path(__file__).with_name('deepseek_model_broker.cjs')),
                 config=dict(provider=route,model=config['model'],reasoningEffort=config.get('effort','high')))])]
+        if not any(config.get(key) for key in ('_compaction', '_review', '_model_broker')):
+            next(row for row in overlay if row.get('id')=='acp')['inject']=[
+                'acpAppStartup','demiflowAssistantStreamReady']
+            overlay.append(dict(insert=[dict(id='demiflow-assistant-stream',
+                name=str(Path(__file__).with_name('deepseek_stream.cjs')), config=dict(cwd=root))]))
         if boundary:
             if package is None: reject('Restricted model transport requires the pinned installed Harness')
             overlay += [dict(id='llm-deepseek',disabled=True),dict(insert=[dict(id='demiflow-model-proxy',
@@ -117,6 +122,7 @@ class DeepSeek:
         self.thread,self.turn=saved_session,None
         self.prompt='';self.prompt_key=None;self.items={};self.acknowledged=False
         self.message_scope=None;self.message_block=0;self.message_kind=None
+        self.stream_attempt=None;self.stream_blocks={};self.stream_count=0;self.stream_messages=set()
         self.mcp_servers=[]
 
     def initialize(self):
@@ -156,6 +162,7 @@ class DeepSeek:
         # identities: one conversation can contain many "client-3" intervals.
         self.message_scope=scope
         self.message_block=0;self.message_kind=None
+        self.stream_attempt=None;self.stream_blocks={};self.stream_count=0;self.stream_messages.clear()
         return self.prompt_key
 
     def interrupt(self):
@@ -176,9 +183,11 @@ class DeepSeek:
             allowed=bool(item and item.get('rawInput'))
             return [('request',dict(rpc_id=event['id'],method=method,params=dict(params,known_tool=item),allow_once=allowed))]
         if 'id' in event:reject('Unsupported ACP server request')
+        if method=='demiflow/assistant-stream':return self._stream(params)
         if method!='session/update':return []
         update=params.get('update',{});kind=update.get('sessionUpdate')
         if kind in {'agent_message_chunk', 'agent_thought_chunk'}:
+            if type(update.get('messageId')) is str and update['messageId'] in self.stream_messages:return []
             content=update.get('content',{})
             if content.get('type')!='text':reject('Only text development messages are supported')
             if type(content.get('text')) is not str:reject('Invalid ACP message text')
@@ -205,6 +214,48 @@ class DeepSeek:
             return [('activity',{}),('item.updated',dict(id=key,type='tool',**{k:v for k,v in item.items() if k in {'title','status','rawInput','locations','content'}}))]
         if kind=='usage_update':return [('usage.observed',{k:v for k,v in update.items() if k!='sessionUpdate'})]
         return []
+
+    def _stream(self, params):
+        """Normalize only the fixed plugin's public text projection, not raw DSH frames."""
+        phase=params.get('phase')
+        if phase=='error':reject('Native public stream exceeded its protocol or resource boundary', 'resource_limit')
+        if not self.message_scope:reject('Native stream arrived outside a submitted prompt')
+        attempt=text(params.get('attemptId'),256)
+        if phase=='start':
+            if set(params)!={'sessionId','phase','attemptId'} or self.stream_attempt is not None:
+                reject('Invalid native assistant attempt boundary')
+            self.stream_count+=1
+            if self.stream_count>128:reject('Native assistant attempts exceed budget', 'resource_limit')
+            self.stream_attempt=attempt;self.stream_blocks={}
+            return [('activity',{})]
+        if attempt!=self.stream_attempt:reject('Native assistant attempt identity mismatch')
+        if phase=='settled':
+            if set(params)-{'sessionId','phase','attemptId','messageId','status'} or params.get('status') not in {'complete','incomplete'}:
+                reject('Invalid native assistant settlement')
+            if 'messageId' in params:
+                self.stream_messages.add(text(params['messageId'],256))
+                if len(self.stream_messages)>128:reject('Native message identity budget exceeded', 'resource_limit')
+            self.stream_attempt=None;self.stream_blocks={}
+            return []
+        expected={'sessionId','phase','attemptId','blockIndex','channel','text'}
+        if phase=='completed':expected|={'status','interrupted'}
+        if phase not in {'delta','completed'} or set(params)!=expected:
+            reject('Unknown native public stream projection')
+        index=params['blockIndex'];channel=params['channel'];content=params['text']
+        if (type(index) is not int or not 0<=index<65536 or channel not in {'answer','process'} or
+                type(content) is not str or len(content.encode())>128*1024):
+            reject('Invalid native public text block')
+        if index in self.stream_blocks and self.stream_blocks[index]!=channel:
+            reject('Native assistant block channel changed')
+        self.stream_blocks[index]=channel
+        if len(self.stream_blocks)>64:reject('Native assistant block budget exceeded', 'resource_limit')
+        data=dict(item_id='dsh:'+self.message_scope+':'+attempt+':'+str(index),text=content,channel=channel)
+        if phase=='completed':
+            if (params['status'] not in {'streaming','complete','incomplete'} or
+                    type(params['interrupted']) is not bool or params['interrupted']!=(params['status']=='incomplete')):
+                reject('Invalid native assistant completion state')
+            data.update(status=params['status'],interrupted=params['interrupted'])
+        return [('activity',{}),('message.delta' if phase=='delta' else 'message.completed',data)]
 
     @staticmethod
     def answer(request,answer):

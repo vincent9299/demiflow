@@ -42,6 +42,7 @@ class Transport:
         self.response_bytes, self.response_sizes = 0, {}
         self.output_bytes = self.frame_count = 0
         self.out = bytearray(); self.closed = False
+        self.stdout_registered = True
         for name, stream in (('stdout', process.stdout), ('stderr', process.stderr)):
             os.set_blocking(stream.fileno(), False)
             self.selector.register(stream, selectors.EVENT_READ, name)
@@ -77,13 +78,56 @@ class Transport:
         if 'error' in response: reject('Provider RPC failed: ' + str(response['error'])[:2048])
         return response['result']
 
+    def _decode_buffer(self):
+        """Admit complete frames only while the bounded consumer queue has room."""
+        while True:
+            if len(self.events) >= 128 or self.queued_bytes >= 2 * self.limits.frame_bytes:
+                return False
+            end = self.buffer.find(b'\n')
+            if end < 0:
+                if len(self.buffer) > self.limits.frame_bytes:
+                    reject('Provider frame exceeded byte budget', 'resource_limit')
+                return True
+            if end > self.limits.frame_bytes:
+                reject('Provider frame exceeded byte budget', 'resource_limit')
+            if self.queued_bytes + end > 2 * self.limits.frame_bytes:
+                return False
+            raw = bytes(self.buffer[:end]); del self.buffer[:end + 1]
+            if not raw: continue
+            self.frame_count += 1
+            if self.frame_count > self.limits.events_per_turn:
+                reject('Provider total frame budget exceeded', 'resource_limit')
+            event = decode(raw)
+            if 'id' in event and 'method' not in event:
+                identity = event['id']
+                if type(identity) is not str or identity not in self.pending or identity in self.responses:
+                    reject('Unknown or duplicate provider response identity')
+                if self.response_bytes + len(raw) > 2 * self.limits.frame_bytes:
+                    reject('Provider response map byte budget exceeded', 'resource_limit')
+                self.response_bytes += len(raw); self.response_sizes[identity] = len(raw)
+                self.responses[identity] = event
+            else:
+                self.events.append((event, len(raw))); self.queued_bytes += len(raw)
+
+    def _read_stdout(self, enabled):
+        # A full queue must stop reading the OS pipe, rather than repeatedly
+        # waking on readable stdout while wait() retains pre-ack notifications.
+        if self.closed or enabled == self.stdout_registered: return
+        if enabled:
+            self.selector.register(self.process.stdout, selectors.EVENT_READ, 'stdout')
+        else:
+            self.selector.unregister(self.process.stdout)
+        self.stdout_registered = enabled
+
     def poll(self, timeout=0.1):
+        self._read_stdout(self._decode_buffer())
         for key, _ in self.selector.select(timeout):
             maximum = self.limits.frame_bytes + 1 - len(self.buffer) if key.data == 'stdout' else 65536
             chunk = os.read(key.fd, min(65536, maximum))
             if not chunk:
                 self.selector.unregister(key.fileobj)
-                if key.data == 'stdout': self.closed = True
+                if key.data == 'stdout':
+                    self.closed = True; self.stdout_registered = False
                 continue
             if key.data == 'stderr':
                 self.stderr_total += len(chunk)
@@ -95,28 +139,7 @@ class Transport:
             if self.output_bytes > self.limits.output_bytes:
                 reject('Provider total stdout byte budget exceeded', 'resource_limit')
             self.buffer.extend(chunk)
-            while b'\n' in self.buffer:
-                end = self.buffer.index(10)
-                raw = bytes(self.buffer[:end]); del self.buffer[:end + 1]
-                if not raw: continue
-                self.frame_count += 1
-                if self.frame_count > self.limits.events_per_turn:
-                    reject('Provider total frame budget exceeded', 'resource_limit')
-                event = decode(raw)
-                if 'id' in event and 'method' not in event:
-                    identity = event['id']
-                    if type(identity) is not str or identity not in self.pending or identity in self.responses:
-                        reject('Unknown or duplicate provider response identity')
-                    if self.response_bytes + len(raw) > 2 * self.limits.frame_bytes:
-                        reject('Provider response map byte budget exceeded', 'resource_limit')
-                    self.response_bytes += len(raw); self.response_sizes[identity] = len(raw)
-                    self.responses[identity] = event
-                else:
-                    if len(self.events) >= 128 or self.queued_bytes + len(raw) > 2 * self.limits.frame_bytes:
-                        reject('Provider event queue exceeded budget', 'resource_limit')
-                    self.events.append((event, len(raw))); self.queued_bytes += len(raw)
-            if len(self.buffer) > self.limits.frame_bytes:
-                reject('Provider frame exceeded byte budget', 'resource_limit')
+            self._read_stdout(self._decode_buffer())
 
     def pop(self):
         event, size = self.events.popleft(); self.queued_bytes -= size

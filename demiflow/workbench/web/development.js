@@ -1,7 +1,10 @@
 /* Project development projection. No provider credentials, commands or raw HTML. */
 (() => {
   'use strict';
-  /* DeepSeek Harness 0.2.1-rc.2, ui-chat/use-scroll-follow.js.
+  /* Adapted from DeepSeek Harness 0.2.1-rc.2:
+     ui-chat/use-scroll-follow.js and chat/ReasoningRow.js;
+     ui-conversation/InputBar.js (send/stop SVGs, focus and IME handling);
+     ui-model-selection/ModelSelect.js (disclosure and keyboard behavior).
 MIT License
 
 Copyright (c) 2026 DeepSeek
@@ -24,6 +27,22 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
+  function latestCompletedParagraphFirstLine(text) {
+    let summary = '';
+    let paragraphStart = 0;
+    const separator = /\r?\n(?:[\t ]*\r?\n)+/g;
+    while (true) {
+      const nextParagraph = separator.exec(text);
+      const paragraphEnd = nextParagraph === null ? text.length : nextParagraph.index + nextParagraph[0].indexOf('\n');
+      const newline = text.indexOf('\n', paragraphStart);
+      if (newline !== -1 && newline <= paragraphEnd) {
+        const candidate = text.slice(paragraphStart, newline).trim();
+        if (candidate !== '') summary = candidate;
+      }
+      if (nextParagraph === null) return summary;
+      paragraphStart = nextParagraph.index + nextParagraph[0].length;
+    }
+  }
   function scrollMetrics(element) {
   	const height = element.clientHeight;
   	return {
@@ -208,12 +227,12 @@ SOFTWARE.
     return developmentLabels[value.state]||'开发检查结果待核对';
   }
   const uid=()=>crypto.randomUUID();
-  const iconButton=(label,path)=>{const b=el('button',undefined,'development-icon');b.type='button';b.title=label;b.setAttribute('aria-label',label);const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');const p=document.createElementNS(svg.namespaceURI,'path');p.setAttribute('d',path);svg.append(p);b.append(svg);return b;};
+  const iconButton=(label,path,viewBox='0 0 24 24',filled=false)=>{const b=el('button',undefined,'development-icon');b.type='button';b.title=label;b.setAttribute('aria-label',label);const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',viewBox);svg.setAttribute('aria-hidden','true');if(filled)svg.classList.add('development-filled-icon');const p=document.createElementNS(svg.namespaceURI,typeof path==='string'?'path':'rect');for(const [key,value]of Object.entries(typeof path==='string'?{d:path}:path))p.setAttribute(key,value);svg.append(p);b.append(svg);return b;};
   async function mount({main,api,workspaceId,view,mountText,disposeReaders,openSession,error,register}) {
     const state={disposed:false,timer:null,session:null,sequence:0,items:new Map(),textItems:new Map(),lastText:null,pagedText:null,textBytes:0,pending:new Set(),submission:null,dialogs:new Set()};
     const layout=el('section',undefined,'development-layout'),body=el('div',undefined,'development-conversation');
     layout.append(body);main.append(layout);main.classList.add('development-main');active.add(state);
-    const handle={get sessionId(){return state.session?.id;},dispose(){state.disposed=true;clearTimeout(state.timer);state.observer?.disconnect();active.delete(state);main.classList.remove('development-main');disposeReaders(layout);for(const dialog of state.dialogs)dialog.remove();state.dialogs.clear();}};register(handle);
+    const handle={get sessionId(){return state.session?.id;},dispose(){state.disposed=true;clearTimeout(state.timer);state.observer?.disconnect();state.closeModel?.();active.delete(state);main.classList.remove('development-main');disposeReaders(layout);for(const dialog of state.dialogs)dialog.remove();state.dialogs.clear();}};register(handle);
     const head=el('header',undefined,'development-head'),title=el('span','项目对话','development-title');
     const archive=el('button','归档历史','development-archive');archive.type='button';archive.disabled=true;
     archive.title='压缩较早的上下文，保留原始消息';head.append(title,archive);body.append(head);
@@ -221,7 +240,9 @@ SOFTWARE.
     let capabilities=await api('dev-capabilities');state.capabilitiesAt=Date.now();if(!layout.isConnected)return {dispose(){}};
     const info=el('details',undefined,'development-info'),infoToggle=el('summary','对话信息'),infoBody=el('div',undefined,'development-info-body');
     const reason=el('p',capabilities.reason);infoBody.append(reason);info.append(infoToggle,infoBody);head.append(info);
-    const providers=el('select');providers.setAttribute('aria-label','开发代理');
+    // The native select keeps the existing provider binding; ModelSelect's
+    // compact trigger/menu is the visible control, without a React dependency.
+    const providers=el('select');
     for(const p of capabilities.providers||[]){const option=el('option',p.id+' · '+p.model+(p.available?'':' · 暂不可用'));option.value=p.id;option.disabled=!p.available;providers.append(option);}
     const messages=el('nav',undefined,'development-message-rail'),versions=el('nav',undefined,'development-version-rail');
     messages.setAttribute('aria-label','历史消息定位');versions.setAttribute('aria-label','版本时间线');layout.prepend(messages);layout.append(versions);
@@ -274,14 +295,45 @@ SOFTWARE.
     const newContent=el('button','有新内容，滚动到底部');newContent.hidden=true;stage.append(newContent);newContent.onclick=()=>{follow.toBottom(timeline,scrollMetrics(timeline),'instant');newContent.hidden=true;};
     state.observer=new ResizeObserver(()=>{if(!state.disposed&&follow.active)follow.toBottom(timeline,scrollMetrics(timeline),'instant');});state.observer.observe(flow);state.observer.observe(timeline);
     const pendingHost=el('div',undefined,'development-pending');stage.append(pendingHost);
-    const form=el('form',undefined,'development-composer'),input=el('textarea');input.rows=2;input.placeholder='发消息，讨论或修改这个项目…';input.setAttribute('aria-label','开发要求');
-    const controls=el('div',undefined,'development-controls'),send=iconButton('发送','M12 19V5M5 12l7-7 7 7'),stop=iconButton('停止','M7 7h10v10H7z');send.type='submit';send.disabled=true;stop.disabled=true;
+    const form=el('form',undefined,'development-composer'),input=el('textarea');input.rows=1;input.placeholder='发消息，讨论或修改这个项目…';input.setAttribute('aria-label','开发要求');
+    const controls=el('div',undefined,'development-controls'),send=iconButton('发送','M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z','0 0 16 16',true),stop=iconButton('停止',{x:3,y:3,width:10,height:10,rx:3},'0 0 16 16',true);send.type='submit';send.disabled=true;stop.disabled=true;
     send.classList.add('development-send');stop.classList.add('development-send');
+    send.title='发送 · Enter';stop.title='停止 · Esc';
+    const modelPicker=el('div',undefined,'development-model'),modelTrigger=iconButton('开发代理','M6 9l6 6 6-6'),modelName=el('span',undefined,'development-model-name'),modelMenu=el('div',undefined,'development-model-menu');
+    modelTrigger.className='development-model-trigger';modelTrigger.prepend(modelName);modelTrigger.setAttribute('aria-haspopup','menu');modelTrigger.setAttribute('aria-expanded','false');
+    modelMenu.id='development-model-'+uid();modelMenu.setAttribute('role','menu');modelMenu.setAttribute('aria-label','选择模型');modelMenu.hidden=true;modelTrigger.setAttribute('aria-controls',modelMenu.id);modelPicker.append(modelTrigger,modelMenu);
+    const closeModel=(restore=false)=>{modelMenu.hidden=true;modelTrigger.setAttribute('aria-expanded','false');document.removeEventListener('pointerdown',outsideModel);if(restore)modelTrigger.focus();};
+    const outsideModel=e=>{if(!modelPicker.contains(e.target))closeModel();};state.closeModel=closeModel;
+    function openModel(last=false){
+      if(modelTrigger.disabled)return;modelMenu.replaceChildren();
+      for(const p of capabilities.providers||[]){
+        const option=el('button',undefined,'development-model-option'),copy=el('span',undefined,'development-model-copy');option.type='button';option.setAttribute('role','menuitemradio');option.setAttribute('aria-checked',String(providers.value===p.id));option.disabled=!p.available;
+        copy.append(el('span',p.model),el('small',p.id+(p.available?'':' · 暂不可用')));option.append(copy,el('span',providers.value===p.id?'✓':'','development-model-check'));
+        option.onclick=()=>{providers.value=p.id;closeModel();availability();input.focus();};modelMenu.append(option);
+      }
+      modelMenu.hidden=false;modelTrigger.setAttribute('aria-expanded','true');document.addEventListener('pointerdown',outsideModel);
+      const options=[...modelMenu.querySelectorAll('button:not(:disabled)')];(last?options.at(-1):options.find(o=>o.getAttribute('aria-checked')==='true')||options[0])?.focus();
+    }
+    modelTrigger.onclick=()=>modelMenu.hidden?openModel():closeModel(true);
+    modelPicker.onkeydown=e=>{
+      if(e.key==='Escape'&&!modelMenu.hidden){e.preventDefault();e.stopPropagation();closeModel(true);}
+      else if(['ArrowDown','ArrowUp','Home','End'].includes(e.key)){
+        e.preventDefault();if(modelMenu.hidden){openModel(e.key==='ArrowUp'||e.key==='End');return;}
+        const options=[...modelMenu.querySelectorAll('button:not(:disabled)')],at=options.indexOf(document.activeElement);
+        const next=e.key==='Home'?0:e.key==='End'?options.length-1:(at+(e.key==='ArrowUp'?-1:1)+options.length)%options.length;options[next]?.focus();
+      }
+    };
+    modelPicker.onfocusout=e=>{if(!modelPicker.contains(e.relatedTarget))closeModel();};
     const disconnected=el('span',capabilities.service_configured?'本项目未授予开发能力':'未连接 CLI','development-provider-label');providers.hidden=!(capabilities.providers||[]).length;disconnected.hidden=!providers.hidden;
-    controls.append(providers,disconnected,send,stop);form.append(input,controls);stage.append(form,status);
+    const hint=el('span','Enter 发送 · Shift+Enter 换行','development-composer-hint'),trailing=el('div',undefined,'development-controls-trailing');trailing.append(modelPicker,disconnected,send,stop);controls.append(hint,trailing);form.append(input,controls);stage.append(form,status);
+    form.onmousedown=e=>{if(input.disabled||e.button!==0||e.defaultPrevented||e.target.closest('button,a,input,select,textarea,[tabindex]'))return;e.preventDefault();input.focus();};
+    send.onmousedown=stop.onmousedown=e=>{if(e.button===0)e.preventDefault();};
     let draftKey=workspaceId+':project';input.value=drafts.get(draftKey)||'';
-    input.oninput=()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,220)+'px';if(bytes(input.value)>32768){input.setCustomValidity('要求不能超过 32 KiB');return;}input.setCustomValidity('');if(!drafts.has(draftKey)&&drafts.size>=64){input.setCustomValidity('已保存 64 份草稿，请先清空不再需要的草稿。');return;}if(input.value)drafts.set(draftKey,input.value);else drafts.delete(draftKey);saveDrafts();availability();};
-    input.onkeydown=e=>{if(e.isComposing||e.keyCode===229)return;if(e.key==='Enter'&&(!e.shiftKey||e.ctrlKey||e.metaKey)){e.preventDefault();form.requestSubmit();}if(e.key==='Escape'&&!stop.disabled)stop.click();};
+    const resizeInput=()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,220)+'px';};
+    input.oninput=()=>{resizeInput();if(bytes(input.value)>32768){input.setCustomValidity('要求不能超过 32 KiB');return;}input.setCustomValidity('');if(!drafts.has(draftKey)&&drafts.size>=64){input.setCustomValidity('已保存 64 份草稿，请先清空不再需要的草稿。');return;}if(input.value)drafts.set(draftKey,input.value);else drafts.delete(draftKey);saveDrafts();availability();};
+    let composing=false,composingUntil=0;
+    input.addEventListener('compositionstart',()=>{composing=true;});input.addEventListener('compositionend',()=>{composing=false;composingUntil=Date.now()+10;});
+    input.onkeydown=e=>{if(composing||Date.now()<composingUntil||e.isComposing||e.keyCode===229)return;if(e.key==='Enter'&&!e.shiftKey&&!e.altKey){e.preventDefault();if(!e.repeat)form.requestSubmit();}if(e.key==='Escape'&&!stop.disabled)stop.click();};
     function availability(){
       const t=state.session?.turn,busy=t&&(t.cleanup!=='complete'||t.development?.busy===true);
       const provider=(capabilities.providers||[]).find(p=>p.id===(state.session?.provider||providers.value));
@@ -292,13 +344,14 @@ SOFTWARE.
       input.disabled=readonly||!!state.historyOnly||!capabilities.enabled||!!state.sending;
       providers.disabled=readonly||!capabilities.enabled||!!state.session||!!state.creation||!!state.sending;
       providers.hidden=!(capabilities.providers||[]).length;disconnected.hidden=!providers.hidden;
+      modelPicker.hidden=providers.hidden;modelTrigger.disabled=providers.disabled;modelName.textContent=provider?.model||'选择模型';modelTrigger.title=provider?provider.model+' · '+provider.id:'选择开发代理';if(modelTrigger.disabled)closeModel();
       archive.disabled=readonly||!capabilities.start||!provider?.available||!!busy||!!state.sending||!!state.historyOnly||!state.session?.revision;
       basis.disabled=!t;recover.disabled=readonly||!capabilities.enabled||!state.session;
       title.textContent=readonly||state.historyOnly?'历史消息 · 只读':'项目对话';
       hero.hidden=!!state.items.size;layout.classList.toggle('development-empty',!state.items.size);
       disconnected.textContent=unapproved?'本项目未授予开发能力':capabilities.service_configured?'已有开发服务连接不可用':'未连接 CLI';
       status.textContent=t?(t.operation==='compact'?(t.cleanup!=='complete'?'正在归档历史…':t.state==='completed'?'归档处理完成':'归档未完成'):(t.development?developmentLabel(t.development):(labels[t.state]||t.state)))+(t.dispatch==='unknown'?' · 发送结果未知，请先核对':''):
-        readonly?'已有开发历史 · 只读':unapproved?'本项目未授予开发能力':provider?.available?'Enter 发送 · Shift+Enter 换行':capabilities.service_configured?'已有开发服务当前不可用':'尚未连接开发代理';
+        readonly?'已有开发历史 · 只读':unapproved?'本项目未授予开发能力':provider?.available?'':capabilities.service_configured?'已有开发服务当前不可用':'尚未连接开发代理';
       reason.textContent=capabilities.reason+(t?.development?' 开发验收由 Forge 独立检查；'+(t.development.assurance==='enforced'?'开发进程受外部执行边界约束。':capabilities.mode==='restricted'?'本次受限开发的验收证据尚未齐备。':'当前为可信本地模式，未防篡改。')+(t.development.reason?' '+t.development.reason:''):'')+(provider?.reason?' '+provider.reason:'')+(provider?.input_requests==='unsupported'?' 此代理不支持轮内补充输入；停止后可继续。':'')+(provider?.history_replay==='unsupported'?' 恢复时仅展示本应用已保存的历史。':'');
     }
     providers.onchange=availability;
@@ -325,8 +378,10 @@ SOFTWARE.
       let item=state.items.get(id);
       if(!item){
         while(state.items.size>=100){const first=state.items.keys().next().value;const old=state.items.get(first);disposeReaders(old.node);old.node.remove();state.textBytes-=bytes(old.text);state.items.delete(first);if(old.textKey&&state.textItems.get(old.textKey)===first)state.textItems.delete(old.textKey);earlier.hidden=false;}
-        const chat=label==='你'||label==='助手',process=label==='模型过程'||label==='思考摘要',node=el(chat?'article':'details',undefined,'development-message'),heading=el(chat?'span':'summary',label),content=el('div'),source=el('button','原文');source.setAttribute('aria-label','分页查看原文');source.className='development-raw';source.onclick=()=>output(item);source.hidden=!event;node.classList.add(chat?(label==='你'?'development-user':'development-assistant'):process?'development-process':'development-tool');if(chat)heading.className='sr-only';if(process)node.open=true;node.append(heading,content,source);flow.append(node);hero.hidden=true;layout.classList.remove('development-empty');
-        item={node,content,text:'',source,role:label};state.items.set(id,item);
+        const chat=label==='你'||label==='助手',process=label==='模型过程'||label==='思考摘要',node=el(chat?'article':'details',undefined,'development-message'),heading=el(chat?'span':'summary',label),content=el('div'),source=iconButton('分页查看原文','M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 13h8M8 17h5');source.title='查看原文';source.classList.add('development-raw');source.onclick=()=>output(item);source.hidden=!event;node.classList.add(chat?(label==='你'?'development-user':'development-assistant'):process?'development-process':'development-tool');if(chat)heading.className='sr-only';node.append(heading,content,source);flow.append(node);hero.hidden=true;layout.classList.remove('development-empty');
+        const preview=process?el('span',undefined,'development-process-preview'):null;
+        if(process)heading.replaceChildren(el('span',label,'development-process-title'),preview);
+        item={node,heading,content,text:'',source,role:label,preview};state.items.set(id,item);
       }
       if(event){
         if(!item.sourceRef)item.sourceRef={item_id:rawId,turn_id:event.turn_id,...(event.provider_epoch?{provider_epoch:event.provider_epoch}:{}),from_sequence:event.sequence,through_sequence:event.sequence};
@@ -347,19 +402,28 @@ SOFTWARE.
       const item=card(id,d.channel==='process'?'模型过程':d.channel==='summary'?'思考摘要':'助手',event,d.item_id);
       item.textKey=key;state.textItems.set(key,id);
       if(complete){
+        if(d.interrupted||d.status==='incomplete'){
+          if(!item.incomplete){item.incomplete=el('span','未完成','development-message-state');if(item.preview)item.heading.append(item.incomplete);else item.source.before(item.incomplete);}
+        }else{item.incomplete?.remove();item.incomplete=null;}
         item.node.classList.remove('development-streaming');
         if(d.paged){
           // Older workers store large completion bodies as adjacent output
           // chunks. Replace preceding deltas without changing the prose role.
           putText(item,'');item.sourceRef.from_sequence=event.sequence;
           state.lastText={key,id};state.pagedText=key;
-        }else{putText(item,d.text,false,true);if(state.lastText?.id===id)state.lastText=null;}
+        }else{item.sourceRef.from_sequence=event.sequence;putText(item,d.text,false,true);if(state.lastText?.id===id)state.lastText=null;}
       }
       else{state.lastText={key,id};item.node.classList.add('development-streaming');putText(item,d.text,true);}
     }
     function putText(item,text,append=false,markdown=false){
       const previous=bytes(item.text),value=append?item.text+text:text,n=bytes(value);
-      if(n>65536||state.textBytes-previous+n>1024*1024){item.source.textContent='内容超过预览预算 · 分页查看该段原文';return;}
+      const overBudget=n>65536||state.textBytes-previous+n>1024*1024;
+      if(item.preview){
+        const running=item.node.classList.contains('development-streaming');
+        const summary=running?latestCompletedParagraphFirstLine(overBudget?item.text:value).replaceAll('**',''):'';
+        item.preview.textContent=running?(summary.slice(0,256)+(summary.length>256?'…':'')||'正在输出…'):'';
+      }
+      if(overBudget){if(!item.previewTruncated){item.source.classList.add('development-raw-overflow');item.source.append(el('span','超出预览预算 · 查看原文'));item.source.title='内容超过预览预算，分页查看该段原文';item.previewTruncated=true;}return;}
       state.textBytes+=n-previous;item.text=value;
       if(append&&item.content.firstElementChild?.classList.contains('development-stream')){const pre=item.content.firstElementChild;if(pre.firstChild)pre.firstChild.appendData(text);else pre.append(document.createTextNode(text));return;}
       disposeReaders(item.content);item.content.replaceChildren();
@@ -401,7 +465,7 @@ SOFTWARE.
       if(r.method.endsWith('requestUserInput')){
         for(const q of r.params.questions){const label=el('label',q.question),answer=el('textarea');answer.rows=2;answer.setAttribute('aria-label',q.question);label.append(answer);card.append(label);fields.set(q.id,answer);if(q.options?.length)card.append(el('p',q.options.map(o=>o.label+': '+o.description).join('；'),'muted'));}
       }else {const tool=r.params.known_tool;card.append(el('pre',tool?JSON.stringify({tool:tool.title||tool.kind,arguments:tool.rawInput},null,2):r.params.command||r.params.reason||'请求增加操作权限；本部署不允许扩权。'));}
-      const submit=el('button',r.method.endsWith('requestUserInput')?'提交回答':'允许一次'),deny=el('button','拒绝');submit.disabled=!r.allow_once;
+      const submit=el('button',r.method.endsWith('requestUserInput')?'提交回答':'允许一次','development-input-confirm'),deny=el('button','拒绝','development-input-deny');submit.disabled=!r.allow_once;
       async function respond(answer){submit.disabled=deny.disabled=true;try{await api('dev-input',{}, {session_id:state.session.id,turn_id:state.session.turn.id,pending_request_id:request.id,expected_digest:request.digest,answer});card.replaceChildren(el('p','回答已保存，等待代理接收。'));}catch(e){error(card,e);submit.disabled=!r.allow_once;deny.disabled=false;}}
       submit.onclick=()=>respond(r.method.endsWith('requestUserInput')?Object.fromEntries([...fields].map(([k,v])=>[k,v.value])):'allow_once');deny.onclick=()=>respond('deny');card.append(submit);if(!r.method.endsWith('requestUserInput'))card.append(deny);pendingHost.append(card);
     }
@@ -436,7 +500,7 @@ SOFTWARE.
     form.onsubmit=async e=>{e.preventDefault();if(send.disabled||!input.reportValidity()||!input.value.trim())return;send.disabled=true;
       const message=input.value,submission=state.submission||{text:message,id:uid()};if(submission.text!==message){error(body,new Error('上次发送结果未确认，请先核对记录后再编辑要求。'));return;}state.submission=submission;
       state.sending=true;availability();
-      try{if(!state.session){state.creation||={request_id:uid(),provider_id:providers.value};state.session=await api('dev-session-create',{},state.creation);state.createdHere=true;}if(state.disposed)return;await api('dev-turn-start',{}, {session_id:state.session.id,submission_id:submission.id,expected_revision:state.session.revision,text:message});state.submission=null;input.value='';drafts.delete(draftKey);saveDrafts();if(state.createdHere){await openSession(state.session.id);return;}clearTimeout(state.timer);await refresh();await sessions(true);}
+      try{if(!state.session){state.creation||={request_id:uid(),provider_id:providers.value};state.session=await api('dev-session-create',{},state.creation);state.createdHere=true;}if(state.disposed)return;await api('dev-turn-start',{}, {session_id:state.session.id,submission_id:submission.id,expected_revision:state.session.revision,text:message});state.submission=null;input.value='';resizeInput();drafts.delete(draftKey);saveDrafts();if(state.createdHere){await openSession(state.session.id);return;}clearTimeout(state.timer);await refresh();await sessions(true);}
       catch(err){if(!state.disposed){error(body,err);await refresh().catch(()=>{});await sessions(true).catch(()=>{});}}
       finally{state.sending=false;if(!state.disposed)availability();}
     };
@@ -468,7 +532,7 @@ SOFTWARE.
       if(state.disposed)return handle;
       if(state.session){providers.value=state.session.provider;input.value=drafts.get(draftKey)||drafts.get(workspaceId+':'+state.session.id)||'';state.sequence=Math.max(0,state.session.sequence-50,(state.session.archive_sequence||0)-1);state.windowStart=state.sequence;earlier.hidden=state.sequence===0;await refresh();}
     }
-    availability();
+    availability();resizeInput();
     return handle;
   }
   globalThis.ForgeDevelopment=Object.freeze({mount,activeCount:()=>active.size});

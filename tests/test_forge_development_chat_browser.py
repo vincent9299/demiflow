@@ -118,6 +118,7 @@ def test_first_message_ime_idempotent_creation_and_stop(tmp_path):
     """A lost create response must not duplicate the session or send a turn twice."""
     import json
     from playwright.sync_api import sync_playwright, expect
+    shots=Path(os.environ.get('FORGE_ACCEPTANCE_DIR',str(tmp_path/'screenshots')));shots.mkdir(parents=True,exist_ok=True)
     with app(tmp_path) as (server, workspace, root), sync_playwright() as runtime:
         browser=runtime.chromium.launch(executable_path='/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome',headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
         page=browser.new_page(viewport={'width':1440,'height':1000});page.set_default_timeout(20000)
@@ -130,8 +131,27 @@ def test_first_message_ime_idempotent_creation_and_stop(tmp_path):
         page.route('**/dev-session-create',lose_first_reply)
         page.goto(server.origin+'/#token='+server.token)
         page.get_by_role('button',name='开发',exact=True).click()
+        model=page.get_by_role('button',name='开发代理',exact=True)
+        model.click();menu=page.get_by_role('menu',name='选择模型')
+        expect(menu.get_by_role('menuitemradio')).to_have_attribute('aria-checked','true')
+        menu.get_by_role('menuitemradio').press('Escape');expect(menu).to_be_hidden();expect(model).to_be_focused()
+        model.press('ArrowDown');menu.get_by_role('menuitemradio').press('Enter')
+        expect(page.get_by_label('开发要求')).to_be_focused()
+        page.locator('.development-composer').click(position={'x':120,'y':4})
+        expect(page.get_by_label('开发要求')).to_be_focused()
         field=page.get_by_label('开发要求');field.fill('First message')
+        for width in (1440,390,320):
+            page.set_viewport_size({'width':width,'height':1000})
+            page.screenshot(path=str(shots/f'development-composer-{width}.png'),full_page=True)
+            model.click();expect(menu).to_be_visible()
+            box=menu.bounding_box();assert box['x']>=0 and box['x']+box['width']<=width
+            page.screenshot(path=str(shots/f'development-model-{width}.png'),full_page=True)
+            menu.get_by_role('menuitemradio').press('Escape')
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+        page.set_viewport_size({'width':1440,'height':1000})
+        model.click();page.get_by_role('heading',name='今天想做些什么？',exact=True).click();expect(menu).to_be_hidden()
         field.dispatch_event('keydown',{'key':'Enter','code':'Enter','isComposing':True,'bubbles':True})
+        field.evaluate("node=>{node.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));node.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));node.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));node.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));}")
         assert not server.development.store.list(workspace)['sessions']
         field.press('Shift+Enter');field.press('s');expect(field).to_have_value('First message\ns')
         field.press('Enter')
@@ -148,6 +168,7 @@ def test_first_message_ime_idempotent_creation_and_stop(tmp_path):
         field.fill('hang');field.press('Enter')
         page.get_by_text('正在开发',exact=True).wait_for()
         expect(page.get_by_role('button',name='停止',exact=True)).to_be_enabled()
+        page.screenshot(path=str(shots/'development-composer-running.png'),full_page=True)
         assert page.get_by_role('button',name='发送',exact=True).count()==0
         field.press('Escape');page.get_by_text('已停止',exact=True).wait_for()
         assert server.development.store.show(workspace,sessions[0]['id'])['turn']['cleanup']=='complete'
@@ -296,11 +317,16 @@ def test_public_acp_process_visible_while_running_and_after_reload(tmp_path):
         page.get_by_role('button',name='发送',exact=True).click()
         process=page.locator('.development-process')
         expect(process).to_contain_text('公开过程：先检查现有数据。')
+        assert not process.evaluate('(node)=>node.open')
+        expect(process.locator(':scope>div')).to_be_hidden()
+        process.locator(':scope>summary').click()
         assert process.evaluate('(node)=>node.open')
         expect(page.locator('.development-assistant')).to_contain_text('正在查找数据来源。')
         sid=server.development.store.list(workspace)['sessions'][0]['id']
         assert server.development.store.show(workspace,sid)['turn']['cleanup']!='complete'
         page.reload();expect(process).to_contain_text('公开过程：先检查现有数据。')
+        assert not process.evaluate('(node)=>node.open')
+        process.locator(':scope>summary').click()
         assert process.inner_text().count('公开过程：先检查现有数据。')==1
         (root/'release-process').write_text('release')
         page.get_by_text('本轮已完成',exact=True).wait_for()
@@ -314,6 +340,8 @@ def test_public_acp_process_visible_while_running_and_after_reload(tmp_path):
         assert all(text in node for text,node in zip(expected,nodes)),nodes
         expect(page.locator('.development-streaming')).to_have_count(0)
         page.reload();expect(page.locator('.development-assistant')).to_have_count(2)
+        assert not process.evaluate('(node)=>node.open')
+        process.locator(':scope>summary').click()
         assert process.inner_text().count('公开过程：先检查现有数据。')==1
         assert not errors,errors
         browser.close()
@@ -334,6 +362,10 @@ def test_large_public_summary_and_final_keep_message_role_without_duplication(tm
         def check():
             process=page.locator('.development-process');answer=page.locator('.development-assistant')
             expect(process).to_have_count(1);expect(answer).to_have_count(1)
+            assert not process.evaluate('(node)=>node.open')
+            expect(process.locator(':scope>div')).to_be_hidden()
+            assert process.bounding_box()['height']<56
+            process.locator(':scope>summary').click()
             expect(process).to_contain_text('Summary end.');expect(answer).to_contain_text('Final answer end.')
             assert process.inner_text().count('Public summary start.')==1
             assert answer.inner_text().count('Long final answer start.')==1
@@ -346,5 +378,79 @@ def test_large_public_summary_and_final_keep_message_role_without_duplication(tm
         assert dialog.inner_text().count('Long final answer start.')==1
         sid=server.development.store.list(workspace)['sessions'][0]['id']
         assert 'PRIVATE REASONING' not in str(server.development.store.events(workspace,sid))
+        assert not errors,errors
+        browser.close()
+
+
+def test_process_disclosure_streams_compactly_and_keeps_reader_choice(tmp_path):
+    """The real HTTP event feed updates disclosure text without toggling its state."""
+    from playwright.sync_api import sync_playwright, expect
+    from demiflow.workbench.conversations.common import root_identity
+    with app(tmp_path,acp=True) as (server,workspace,root), sync_playwright() as runtime:
+        service=server.development;store=service.store
+        sid=service.create_project(workspace,root,'compact-stream','deepseek')['id']
+        turn,_=store.submit(workspace,sid,'stream',0,'开发一个过滤流程',root_identity(root),service.policy_hash)
+        store.update(turn['id'],state='running',dispatch='acknowledged',delivery='acknowledged')
+        process_text='**先查看数据结构**\n\n'+'检查现有字段和样例内容。\n'*40
+        store.event(turn['id'],'message.delta',dict(item_id='process',channel='process',text=process_text))
+        browser=runtime.chromium.launch(executable_path='/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome',headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
+        page=browser.new_page(viewport={'width':1440,'height':1000});page.set_default_timeout(15000)
+        errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+        page.goto(server.origin+'/#token='+server.token)
+        page.get_by_role('button',name='开发',exact=True).click()
+        process=page.locator('.development-process');preview=process.locator('.development-process-preview')
+        expect(preview).to_have_text('检查现有字段和样例内容。')
+        assert not process.evaluate('(node)=>node.open')
+        expect(process.locator(':scope>div')).to_be_hidden()
+        assert process.bounding_box()['height']<56
+        process.locator(':scope>summary').click()
+        expect(process.locator(':scope>div')).to_be_visible()
+        next_process='\n\n**已找到输入结构**\n下一步创建算子。';process_text+=next_process
+        store.event(turn['id'],'message.delta',dict(item_id='process',channel='process',text=next_process))
+        expect(process.locator(':scope>div')).to_contain_text('下一步创建算子。')
+        assert process.evaluate('(node)=>node.open')
+        process.locator(':scope>summary').click()
+        expect(preview).to_have_text('已找到输入结构')
+        long_line='正在核对一个很长的字段说明，'*40
+        next_process='\n\n**'+long_line+'**\n仍在检查。';process_text+=next_process
+        store.event(turn['id'],'message.delta',dict(item_id='process',channel='process',text=next_process))
+        expect(preview).to_contain_text('正在核对一个很长的字段说明')
+        assert not process.evaluate('(node)=>node.open')
+        assert len(preview.inner_text())<=257
+        page.set_viewport_size({'width':320,'height':850})
+        assert preview.evaluate('(node)=>node.scrollWidth>node.clientWidth')
+        assert process.bounding_box()['height']<56
+        assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+        shots=Path(os.environ.get('FORGE_ACCEPTANCE_DIR',str(tmp_path/'screenshots')));shots.mkdir(parents=True,exist_ok=True)
+        page.screenshot(path=str(shots/'development-process-compact.png'),full_page=True)
+        process.locator(':scope>summary').click()
+        store.event(turn['id'],'message.completed',dict(item_id='process',channel='process',text=process_text,interrupted=True,status='incomplete'))
+        expect(process.locator(':scope>summary')).to_contain_text('未完成')
+        store.event(turn['id'],'message.delta',dict(item_id='answer',text='开始开发过滤流程。'))
+        answer=page.locator('.development-assistant');expect(answer).to_contain_text('开始开发过滤流程。')
+        store.event(turn['id'],'message.delta',dict(item_id='answer',text='正在补齐算子。'))
+        expect(answer).to_contain_text('正在补齐算子。')
+        assert process.evaluate('(node)=>node.open')
+        assert store.turn(turn['id'])['cleanup']!='complete'
+        # Native block-end and canonical commit may both complete the same item.
+        for _ in range(2):store.event(turn['id'],'message.completed',dict(item_id='answer',text='开始开发过滤流程。正在补齐算子。'))
+        store.finish_provider(turn['id'],state='completed',cleanup='complete',result={})
+        page.get_by_text('本轮已完成',exact=True).wait_for()
+        assert process.evaluate('(node)=>node.open')
+        process.get_by_role('button',name='分页查看原文').click()
+        dialog=page.get_by_role('dialog');expect(dialog).to_contain_text('已找到输入结构')
+        expect(dialog).to_contain_text('仍在检查。')
+        assert dialog.inner_text().count('先查看数据结构')==1
+        page.get_by_role('button',name='关闭',exact=True).click()
+        answer.get_by_role('button',name='分页查看原文').click()
+        expect(dialog).to_contain_text('开始开发过滤流程。正在补齐算子。')
+        assert dialog.inner_text().count('开始开发过滤流程。')==1
+        page.get_by_role('button',name='关闭',exact=True).click()
+        page.reload();expect(answer).to_contain_text('正在补齐算子。')
+        expect(process.locator(':scope>div')).to_be_hidden()
+        assert not process.evaluate('(node)=>node.open')
+        expect(preview).to_have_text('')
+        expect(process.locator(':scope>summary')).to_contain_text('未完成')
+        expect(page.locator('.development-streaming')).to_have_count(0)
         assert not errors,errors
         browser.close()
