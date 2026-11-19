@@ -40,9 +40,13 @@ def _now_ms() -> int:
 def resource_scope_binding(resources, policy):
     """Runtime cleanup coordinates, deliberately outside sealed plan identity."""
     binding = {'provider': policy.provider}
-    if policy.provider == 'local':
+    # A sealed local plan continued under another provider has no local pool to name. Record the
+    # provider alone, as before these coordinates existed, so that the provider check that follows
+    # refuses the continuation with INCOMPATIBLE_HISTORY instead of this lookup failing first.
+    pool = getattr(resources.provider, 'pool', None)
+    if policy.provider == 'local' and pool is not None:
         binding.update(worker_mode='thread' if policy.worker_mode == 'thread' else 'process',
-                       capacity_root=str(resources.provider.pool.root))
+                       capacity_root=str(pool.root))
     return binding
 
 

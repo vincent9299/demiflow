@@ -32,6 +32,15 @@ def _read(path):
     return raw
 
 
+def read_evidence_file(path):
+    """The bounded, symlink-refusing read of one evidence file: its bytes, or None when absent.
+
+    For a caller outside this package that resolves the original provider path itself, such as
+    the engine cleaning up after a stopped run.
+    """
+    return _read(path)
+
+
 def _reference(root, scope, allocation, record):
     identifier(scope); identifier(allocation)
     if record not in _RECORDS:

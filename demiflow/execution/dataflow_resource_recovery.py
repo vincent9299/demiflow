@@ -28,8 +28,8 @@ def _original_path(path):
 
 def _record(path):
     # Reuse the original provider evidence's bounded, no-symlink reader.
-    from ..resources.evidence import _read
-    raw = _read(path)
+    from ..resources.evidence import read_evidence_file
+    raw = read_evidence_file(path)
     if raw is None:
         return None
     value = json.loads(raw)
