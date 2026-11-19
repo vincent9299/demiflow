@@ -128,4 +128,5 @@ def post(server, workspace, root, name, request, *, consumer_closed=None):
         return service.forward(workspace, root, name, request, mutation=True, consumer_closed=consumer_closed)
     actions = {'dev-session-create': service.create_project, 'dev-turn-start': service.start_project, 'dev-compact': service.compact, 'dev-input': service.input,
                'dev-cancel': service.cancel, 'dev-recover': service.recover}
-    return actions[name](workspace, root, **request)
+    with service.lock:
+        return actions[name](workspace, root, **request)

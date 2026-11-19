@@ -233,11 +233,11 @@
     if (offline) throw new Error('离线报告不能读取工作区或重新检查');
     const write=!!body&&!['plan-preview','plan-node-detail','plan-pipeline-source','analysis-source-register','analysis-case-group-bindings','analysis-case-page','analysis-annotation-heads','analysis-annotation-definitions','analysis-field-preview','analysis-source-from-handle','analysis-case-media','analysis-artifact-media-current','analysis-media'].includes(path);
     const cleanup=false;
-    const epoch = viewEpoch;
-    const url = (['projects','capabilities','project-create','project-register','project-remove','project-permissions','project-capabilities'].includes(path) ? '/api/' + path : '/api/workspaces/' + projectId + '/' + path) + (Object.keys(query).length ? '?' + new URLSearchParams(query) : '');
+    const epoch = viewEpoch, globalSettings=path==='development-settings';
+    const url = (['projects','capabilities','project-create','project-register','project-remove','project-permissions','project-capabilities','development-settings'].includes(path) ? '/api/' + path : '/api/workspaces/' + projectId + '/' + path) + (Object.keys(query).length ? '?' + new URLSearchParams(query) : '');
     if (url.length > 8192) throw new Error('查询链接超出长度限制，请缩小字段投影');
     const payload=body?V.boundedJSON(body,65536):null;
-    const signal=cleanup?AbortSignal.timeout(5000):write?AbortSignal.timeout(65000):AbortSignal.any([readController.signal,...(options.signal?[options.signal]:[]),AbortSignal.timeout(65000)]);
+    const signal=cleanup?AbortSignal.timeout(5000):write?AbortSignal.timeout(65000):AbortSignal.any([...(globalSettings?[]:[readController.signal]),...(options.signal?[options.signal]:[]),AbortSignal.timeout(65000)]);
     const run=async()=>{
     if (!write) await acquireRead(signal);
     else activeWrites++;
@@ -250,14 +250,14 @@
         ...(cleanup?{keepalive:true}:{}),
         signal
       }).catch(err => {
-        if(!write&&!cleanup&&(epoch!==viewEpoch||options.signal?.aborted))throw staleRequest();
+        if(!write&&!cleanup&&(!globalSettings&&epoch!==viewEpoch||options.signal?.aborted))throw staleRequest();
         if (err.name === 'AbortError') throw err;
         throw new Error(write ? '未收到服务响应，请先检查连接并核对操作结果。' : '无法连接工作区服务，请确认服务和连接可用后重试。');
       });
-      if(!write&&!cleanup&&(epoch!==viewEpoch||options.signal?.aborted))throw staleRequest();
+      if(!write&&!cleanup&&(!globalSettings&&epoch!==viewEpoch||options.signal?.aborted))throw staleRequest();
       if (!response.ok) {
         let value = {}; try { value = await response.json(); } catch { /* proxies may return an empty or HTML error */ }
-        if(!write&&!cleanup&&(epoch!==viewEpoch||options.signal?.aborted))throw staleRequest();
+        if(!write&&!cleanup&&(!globalSettings&&epoch!==viewEpoch||options.signal?.aborted))throw staleRequest();
         if (!value || typeof value !== 'object' || Array.isArray(value)) value = {};
         const err = new Error(value.error || ('HTTP ' + response.status + '：服务暂未提供可读取的响应。'));
         err.code = value.code || 'transport_error';
@@ -283,8 +283,8 @@
       }
       let value;
       try { value = await response.json(); }
-      catch { if(!write&&(epoch!==viewEpoch||options.signal?.aborted))throw staleRequest();throw new Error(write ? '未能读取操作响应，请先核对操作结果，不要直接重复提交。' : '服务响应无法读取，请刷新后重试。'); }
-      if (!write && !cleanup && epoch !== viewEpoch) throw staleRequest();
+      catch { if(!write&&(!globalSettings&&epoch!==viewEpoch||options.signal?.aborted))throw staleRequest();throw new Error(write ? '未能读取操作响应，请先核对操作结果，不要直接重复提交。' : '服务响应无法读取，请刷新后重试。'); }
+      if (!write && !cleanup && !globalSettings && epoch !== viewEpoch) throw staleRequest();
       return value;
       }
     } finally { if (!write) releaseRead(); else activeWrites--; }
@@ -796,7 +796,7 @@
     mode.hidden=!context;
     const path=document.getElementById('workspace-path');
     if(path){const current=pendingView||view;path.textContent=({development:'开发',overview:'Readme',tables:'数据',flows:'管道',operators:'算子',monitor:'运行'})[pageKind()]+(current?.alias?' / '+current.alias:'')+(current?.row_id?' / Case '+current.row_id:'');}
-    const settings=document.getElementById('project-settings');if(settings)settings.disabled=!workspaceId;
+    const settings=document.getElementById('project-settings');if(settings)settings.disabled=offline;
     const status=document.getElementById('workspace-status');if(status){status.hidden=!workspaceId;if(!workspaceId)status.open=false;}
   }
   function markProject() {
@@ -809,32 +809,61 @@
     }
   }
   function settingsDialog() {
-    const project=projectList.find(p=>p.workspace_id===workspaceId);if(!project)return;
-    const dialog=$('dialog');dialog.append($('h2','项目设置'),$('p',project.name),$('p',project.root,'muted small'));
-    dialog.setAttribute('aria-label','项目设置');
-    const connection=$('section',undefined,'development-connection-settings'),facts=$('div'),controller=new AbortController(),id=workspaceId;
-    connection.append($('h3','开发代理'),$('p','连接和模型由当前工作台服务统一配置，项目共用；每个项目单独启用开发并限定修改范围。','muted small'),facts);
-    const instructions=$('details'),summary=$('summary','在哪里配置连接？');
-    instructions.append(summary,$('p','当前版本在服务端配置，网页可查看状态，尚不支持修改连接。无需为每个项目重复配置模型地址或密钥。'));
-    instructions.append($('p','启动工作台时通过 --development-config 指定配置文件：providers 配置共享代理和模型，projects 配置项目及修改范围；已有服务连接使用其项目绑定。更改后由服务管理者重新加载，新会话使用新配置，已有历史保持。','muted small'));
-    connection.append(instructions);dialog.append(connection);
-    async function refreshConnection(){
-      facts.replaceChildren($('p','正在检查开发代理…','muted small'));
-      try{
-        const caps=await api('dev-capabilities',{},undefined,id,{signal:controller.signal});
-        if(!dialog.isConnected||id!==workspaceId)return;
-        const state=ForgeDevelopmentComposer.connectionStatus(caps);
-        facts.replaceChildren($('p',state.label),$('p','服务配置：'+(state.configured?'已配置，共用连接':'尚未配置')+' · 当前项目：'+(state.authorized?(caps.read_only?'仅查看历史':'已启用开发'):'未启用开发'),'muted small'));
-        for(const provider of (caps.providers||[]).slice(0,8))facts.append($('p',provider.id+' · '+provider.model+(provider.available?' · 当前项目可用':''),'small'));
-        if(caps.reason)facts.append($('p',caps.reason,'muted small'));
-      }catch(err){if(dialog.isConnected&&!controller.signal.aborted)facts.replaceChildren($('p','连接状态读取失败：'+err.message,'error-box'));}
+    const project=projectList.find(p=>p.workspace_id===workspaceId);
+    const dialog=$('dialog',undefined,'global-ai-settings');dialog.setAttribute('aria-label','设置');
+    dialog.append($('h2','AI 连接设置'),$('p','配置一次，所有项目自动共用。新增项目也会直接使用，无需单独启用。','muted small'));
+    const form=$('form'),fields=$('fieldset'),status=$('p','正在读取配置…','muted small'),actions=$('div',undefined,'toolbar');
+    status.setAttribute('role','status');form.append(fields,status,actions);dialog.append(form);
+    let current=null,saving=false;const controller=new AbortController();
+    function field(label,node){const host=$('label',label);node.setAttribute('aria-label',label);host.append(node);fields.append(host);return {host,node};}
+    const provider=field('开发代理',$('select')),model=field('模型',$('input')),effort=field('推理强度',$('select')),auth=field('认证方式',$('select'));
+    model.node.required=true;model.node.maxLength=128;
+    const address=field('服务地址',$('input')),secret=field('API Key',$('input'));address.node.type='url';address.node.maxLength=2048;
+    secret.node.type='password';secret.node.autocomplete='new-password';secret.node.maxLength=4096;
+    const note=$('p','API Key 只保存在服务端，页面不会回显。','muted small');fields.append(note);
+    function option(node,value,label){const item=$('option',label);item.value=value;node.append(item);}
+    function authFields(){const key=auth.node.value==='api_key';address.host.hidden=secret.host.hidden=note.hidden=!key;address.node.disabled=secret.node.disabled=!key;address.node.required=key;secret.node.required=key&&!(current?.authentication==='api_key'&&current?.has_credentials&&provider.node.value===current.provider);}
+    function providerFields(initial=false){
+      const selected=(current.providers||[]).find(p=>p.id===provider.node.value);auth.node.replaceChildren();
+      if(selected?.native_login)option(auth.node,'login','使用服务端已有登录');option(auth.node,'api_key','API Key');
+      auth.node.value=initial?current.authentication:selected?.native_login?'login':'api_key';
+      effort.node.replaceChildren();const levels=provider.node.value==='deepseek'?['off','low','high','max']:['low','medium','high','xhigh'];
+      for(const level of levels)option(effort.node,level,({off:'关闭',low:'低',medium:'中',high:'高',xhigh:'更高',max:'最高'})[level]);
+      effort.node.value=initial?current.effort:'high';model.node.value=initial?current.model:selected?.model||'';
+      address.node.value=initial?current.base_url:provider.node.value==='deepseek'?'https://api.deepseek.com':'https://api.openai.com/v1';
+      secret.node.value='';secret.node.placeholder=current.has_credentials&&provider.node.value===current.provider?'留空保留已保存的凭据':'输入 API Key';authFields();
     }
-    button('重新检查连接',refreshConnection,connection);
-    if(projectRemovalEnabled)button('移除项目 '+project.name,()=>{dialog.close();removeProjectDialog(project);},dialog);
-    else dialog.append($('p','此服务未授予项目管理权限。','notice'));
-    button('关闭',()=>dialog.close(),dialog);document.body.append(dialog);dialog.addEventListener('close',()=>{controller.abort();dialog.remove();},{once:true});dialog.showModal();refreshConnection();
+    auth.node.onchange=authFields;provider.node.onchange=()=>providerFields();
+    const save=button('保存并应用',()=>{},actions);save.type='submit';save.className='primary';save.disabled=true;
+    const reread=button('重新读取',()=>read(),actions);
+    async function read(){
+      fields.disabled=save.disabled=reread.disabled=true;status.textContent='正在读取配置…';status.className='muted small';
+      try{
+        const value=await api('development-settings',{},undefined,undefined,{signal:controller.signal});if(!dialog.isConnected)return;
+        current=value;fields.hidden=!value.writable;save.hidden=!value.writable;
+        if(!value.writable){status.textContent=value.reason;return;}
+        provider.node.replaceChildren();for(const p of value.providers)option(provider.node,p.id,p.label);provider.node.value=value.provider;providerFields(true);
+        status.textContent=value.inherited?'已保存 · 所有项目共用此连接。':'保存后，所有项目将自动共用当前连接。';save.disabled=false;fields.disabled=false;
+      }catch(err){if(!controller.signal.aborted){status.textContent='读取失败：'+err.message;status.className='error-box';}}
+      finally{reread.disabled=false;}
+    }
+    form.onsubmit=async event=>{
+      event.preventDefault();if(saving||!current||!form.reportValidity())return;saving=true;fields.disabled=save.disabled=reread.disabled=true;
+      status.textContent='正在保存…';status.className='muted small';
+      try{
+        const value=await api('development-settings',{}, {expected:current.revision,provider:provider.node.value,model:model.node.value,effort:effort.node.value,authentication:auth.node.value,base_url:auth.node.value==='api_key'?address.node.value:'',api_key:auth.node.value==='api_key'?secret.node.value:''});
+        current=value;secret.node.value='';secret.node.placeholder='留空保留已保存的凭据';
+        status.textContent='已保存，所有项目的新会话已使用此配置。历史会话保持原配置。';authFields();
+        window.dispatchEvent(new Event('forge-development-settings-changed'));
+      }catch(err){status.textContent='保存失败：'+err.message;status.className='error-box';}
+      finally{saving=false;fields.disabled=save.disabled=reread.disabled=false;}
+    };
+    dialog.append($('p','设置影响新会话；有开发会话运行时请完成后再保存。Forge 的开发权限和代码范围保持不变。','muted small'));
+    if(project){const section=$('details');section.append($('summary','当前项目 · '+project.name),$('p',project.root,'muted small'));
+      if(projectRemovalEnabled)button('移除项目 '+project.name,()=>{dialog.close();removeProjectDialog(project);},section);dialog.append(section);}
+    button('关闭',()=>dialog.close(),dialog);dialog.addEventListener('cancel',event=>{if(saving)event.preventDefault();});
+    document.body.append(dialog);dialog.addEventListener('close',()=>{controller.abort();secret.node.value='';dialog.remove();},{once:true});dialog.showModal();read();
   }
-  globalThis.ForgeDevelopmentSettings=Object.freeze({open:settingsDialog});
   function clearProject(message='在项目中阅读说明、用 Notebook 分析数据、核对流程和检查结果。') {
     if(!canLeaveViews())return;
     readController.abort();readController=new AbortController();
@@ -944,7 +973,7 @@
     nav=$('nav',undefined,'function-nav');nav.setAttribute('aria-label','项目功能');nav.hidden=true;
     for(const [page,label]of [['development','开发'],['operators','算子'],['flows','管道'],['monitor','运行'],['tables','数据'],['overview','Readme']]){const b=button(label,()=>navigate(page),nav);b.dataset.page=page;b.disabled=true;}
     const actions=$('div',undefined,'header-actions');
-    const settings=iconButton('项目设置',settingsDialog,actions,['M4 7h10m4 0h2M4 17h2m4 0h10M14 4v6M10 14v6']);settings.id='project-settings';
+    const settings=iconButton('设置',settingsDialog,actions,['M4 7h10m4 0h2M4 17h2m4 0h10M14 4v6M10 14v6']);settings.id='project-settings';
     iconButton('刷新当前视图',refreshView,actions,['M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 11-2l3 3M4 16l3 3a7 7 0 0 0 11-2']);
     iconButton('帮助',()=>documentDialog('使用 DemiFlow','DemiFlow 从原项目出发：阅读文档，用原生 Jupyter 分析数据，核对入口、配置和规范检查，再按权限准备运行。\n\n刷新和自动同步只读取当前状态；检查会保存报告。未识别不表示没有内容，静态检查通过不表示行为验证或语义审查已完成。'),actions,['M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0','M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01']);header.append(actions);
     const crumb=$('span','项目总览','sr-only');crumb.id='workspace-path';title.append(crumb);

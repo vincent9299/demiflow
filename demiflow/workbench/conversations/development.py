@@ -40,10 +40,19 @@ def initial(task_id):
                 assurance='gate_only', run_policy='observe', reason=None, busy=True)
 
 
+def declaration_root(project):
+    return Path(project.get('development_root', project['root']))
+
+
+def declaration_writes(project):
+    prefix = Path(project['root']).relative_to(declaration_root(project))
+    return [(prefix / name).as_posix() for name in project['writes']]
+
+
 def project_tasks(deployment, session, project):
     from demiflow.forge.development.managed import ManagedTasks
     from demiflow.workbench.conversations.review import review_authority
-    return ManagedTasks(deployment.state, session['workspace'], project['root'], review_authority=review_authority(deployment.state))
+    return ManagedTasks(deployment.state, session['workspace'], declaration_root(project), review_authority=review_authority(deployment.state))
 
 
 def request_deadline(turn, limits):
@@ -74,7 +83,7 @@ def verification_launcher(deployment, session, project):
     from demiflow.workbench.conversations.sandbox import SandboxSpec, launch_sandbox
     from demiflow.forge.development.project import Project
     def launch(argv, *, cwd, env, scratch, timeout):
-        root = Path(project['root'])
+        root = declaration_root(project)
         declared = Project(root)
         read = [root, declared.tool_root, *[(root / path).resolve(strict=True) for path in declared.config['readonly']]]
         executable = (str((root / argv[0]).resolve(strict=True)) if '/' in argv[0] else
@@ -132,7 +141,7 @@ def prepare(deployment, store, turn, session, project):
     contract = dict(allow_tests=project.get('allow_tests') is True, max_verification_seconds=min(120, deployment.limits.turn_seconds),
                     developer_session_id=session['id'], require_context_binding=True)
     if deployment.mode == 'restricted': contract['require_enforcement'] = True
-    tasks.prepare_task(session['id'], project['pipeline'], original['text'], project['writes'], project['non_goals'], contract=contract)
+    tasks.prepare_task(session['id'], project['pipeline'], original['text'], declaration_writes(project), project['non_goals'], contract=contract)
     if json.loads(turn.get('development_control') or '{}').get('repair_round'):
         return tasks
     for part in human_decisions(turn):

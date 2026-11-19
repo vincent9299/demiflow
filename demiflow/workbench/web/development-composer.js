@@ -146,12 +146,12 @@
       stop.disabled=readonly||state.historyOnly||unavailable||!busy;stop.hidden=!busy||state.historyOnly;send.hidden=busy&&!state.historyOnly;
       providers.disabled=readonly||state.historyOnly||unavailable||!!session||state.creation||state.sending;
       modelTrigger.disabled=providers.disabled||!(caps.providers||[]).length;
-      modelName.textContent=modelLabel(provider);effort.textContent=effortLabel(provider);effort.hidden=!effort.textContent;
-      modelTrigger.title=provider?modelLabel(provider)+(effort.textContent?' '+effort.textContent:'')+' · '+provider.id:'未提供可用开发代理';
+      const displayed=session?.model?{...provider,model:session.model,effort:session.effort}:provider;
+      modelName.textContent=modelLabel(displayed);effort.textContent=effortLabel(displayed);effort.hidden=!effort.textContent;
+      modelTrigger.title=provider?modelLabel(displayed)+(effort.textContent?' '+effort.textContent:'')+' · '+provider.id:'未提供可用开发代理';
       modelTrigger.hidden=!(caps.providers||[]).length;
-      const connection=connectionStatus(caps);
-      accessLabel.textContent=readonly||state.historyOnly?'Read only':unavailable?connection.label:caps.mode==='restricted'?'Managed access':caps.mode==='trusted_local'?'Trusted local':'Project access';
-      access.title=readonly||state.historyOnly?'当前仅可查看历史记录。':unavailable?connection.label+'。在右上角项目设置查看开发代理配置。':caps.mode==='restricted'?'项目开发受 Forge 管理；输入可在对话中发现和引用，写入仍限项目授权范围。':caps.mode==='trusted_local'?'可信本地执行；当前未声明 OS 防篡改边界。':'按当前项目的已授权开发范围执行。';
+      accessLabel.textContent=readonly||state.historyOnly?'Read only':caps.mode==='restricted'?'Managed access':caps.mode==='trusted_local'?'Trusted local':'Project access';
+      access.title=readonly||state.historyOnly?'当前仅可查看历史记录。':caps.mode==='restricted'?'项目开发受 Forge 管理；输入可在对话中发现和引用，写入仍限项目授权范围。':caps.mode==='trusted_local'?'可信本地执行；当前未声明 OS 防篡改边界。':'按当前项目的已授权开发范围执行。';
       access.setAttribute('aria-label','查看当前开发权限：'+accessLabel.textContent);
       add.disabled=input.disabled||state.attaching;file.disabled=add.disabled;reference.disabled=!options.onReference||add.disabled;attachment.disabled=add.disabled;
       for(const item of modelMenu.querySelectorAll('[data-provider]'))item.setAttribute('aria-checked',String(item.dataset.provider===(session?.provider||providers.value)));
