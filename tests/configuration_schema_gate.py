@@ -12,6 +12,7 @@ A test that produces reports on purpose opts out by decorating itself with
 ``reports_on_purpose`` from this module (no marker to register).
 """
 import logging
+import os
 
 import pytest
 
@@ -23,13 +24,23 @@ class _Reports(logging.Handler):
         super().__init__(level=logging.DEBUG)
         self.findings = []
         self.graphs = 0
+        self.pid = os.getpid()
+        self.stages = {}
 
     def emit(self, record):
-        message = record.getMessage()
-        if 'nodes checked' in message:
-            self.graphs += 1
-        else:
-            self.findings.append(message)
+        if os.getpid() != self.pid:
+            return                  # inherited handlers do not observe a child
+        summary = getattr(record, 'configuration_schema', None)
+        if summary is not None:
+            stage = summary['stage']
+            self.stages[stage] = self.stages.get(stage, 0) + 1
+            self.graphs += stage == 'final'
+            if summary['findings'] or not summary['check_completed']:
+                if len(self.findings) < 20:
+                    self.findings.append('stage %s: %d findings, completed=%s' % (
+                        stage, summary['findings'], summary['check_completed']))
+        elif record.levelno >= logging.WARNING and len(self.findings) < 20:
+            self.findings.append(record.getMessage())
 
 
 def reports_on_purpose(function):

@@ -178,10 +178,13 @@ def test_the_opt_in_gate_collects_reports_and_counts_checked_graphs():
     logger.addHandler(handler)
     logger.setLevel(logging.DEBUG)
     try:
-        logger.debug('configuration schema: action %s: %d nodes checked, %d findings', 'a', 3, 0)
+        logger.debug('not parsed', extra={'configuration_schema': {
+            'stage': 'final', 'findings': 0, 'check_completed': True}})
         assert handler.graphs == 1 and handler.findings == []
-        logger.debug('configuration schema: action %s: %s', 'a', 'MapOp 0123: key x is not admitted on this node')
+        logger.debug('not parsed', extra={'configuration_schema': {
+            'stage': 'budget', 'findings': 1, 'check_completed': False}})
         assert len(handler.findings) == 1
+        assert handler.stages == {'final': 1, 'budget': 1} and handler.graphs == 1
     finally:
         logger.removeHandler(handler)
         logger.setLevel(level)

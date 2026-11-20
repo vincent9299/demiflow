@@ -48,7 +48,8 @@ from typing import Any, Callable, Mapping
 from ..execution.contracts.dataflow_kinds import kinds_with
 
 _LOG = logging.getLogger('demiflow.planning.configuration')
-_MAX_REPORTED = 20          # findings logged per graph; the rest are counted
+_MAX_REPORTED = 20          # findings logged per stage; the rest are counted
+STAGES = ('capture', 'graph', 'budget', 'final')
 
 # Operation fields the generic lowering does not copy into the configuration.
 NOT_COPIED = frozenset({'runtime_contract', 'label', 'node_id', 'source_dataset',
@@ -296,6 +297,10 @@ def _identity(value):
     # not logged, including an exception's message or an unknown key/kind.
     if type(value) is str and len(value) <= 64 and all(c in '0123456789abcdef' for c in value):
         return value
+    return _opaque(value)
+
+
+def _opaque(value):
     raw = value if type(value) is str else type(value).__name__
     return hashlib.sha256(raw.encode('utf-8', errors='replace')).hexdigest()[:16]
 
@@ -303,7 +308,7 @@ def _identity(value):
 def _key_label(name, admitted):
     known = name in COMPILER_KEYS or name in admitted or name in TERMINAL_KEYS
     known = known or any(name in keys for keys in (*SOURCE_KEYS.values(), *MODEL_KEYS.values()))
-    return name if known else 'unknown#' + _identity(name)
+    return name if known else 'unknown#' + _opaque(name)
 
 
 def _finding(node, code, message, *, stage, key=None, category='invariant'):
@@ -316,7 +321,7 @@ def _finding(node, code, message, *, stage, key=None, category='invariant'):
         known = kind in terminal_registry()
     return _Finding(code, category, stage, node.kind if node.kind in (
         'source', 'relational', 'transform', 'terminal') else 'unknown',
-        kind if known else 'unknown#' + _identity(kind), _identity(node.occurrence_id), key, message)
+        kind if known else 'unknown#' + _opaque(kind), _identity(node.occurrence_id), key, message)
 
 
 def _check_error(stage):
@@ -474,3 +479,14 @@ def report_configuration(graph) -> tuple[str, ...]:
     return _report(_graph_findings(graph), action_id=getattr(graph, 'action_id', None), stage='final',
                    node_count=len(getattr(graph, 'nodes', ())), edge_count=len(getattr(graph, 'edges', ())),
                    collect_all=True)
+
+
+def report_configuration_stage(nodes, connections, *, action_id, stage, edge_count):
+    """Observe one mature compiler boundary with bounded diagnostic storage.
+
+    Connections are occurrence pairs, including at stages with private integer
+    edge indices. No intermediate public graph, digest or configuration copy is
+    needed. This function neither changes the plan nor rejects compilation.
+    """
+    _report(_scan(nodes, connections, stage=stage), action_id=action_id, stage=stage,
+            node_count=len(nodes), edge_count=edge_count, collect_all=False)
