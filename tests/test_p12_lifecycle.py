@@ -12,6 +12,7 @@ from demiflow.workbench.runs import manager as runs
 from demiflow.workbench.table_bindings import make_resolver
 from test_forge_runs import base, root, prepared, execute
 from test_forge_resume import stopped
+from test_workbench_native_submission import native_flow
 from _p12_bounded_test import bounded_test
 
 
@@ -68,7 +69,7 @@ def test_prepare_begin_refusal_does_not_create_run_or_remove_prior_report(root):
 
 
 def test_resume_pending_refusal_preserves_real_prior_recovery_without_new_attempt(root, monkeypatch):
-    value = execute(root, prepared(root))
+    value = execute(root, native_flow(root))
     assert value['status'] == 'succeeded', value
     stopped(root, value['run_id'])
     identity = value['run_id']; target = runs.directory(root, identity)

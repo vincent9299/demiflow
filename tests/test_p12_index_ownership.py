@@ -200,3 +200,38 @@ def test_rebuild_after_replace_cleanup_failure_reports_new_epoch_and_pending(tmp
     assert after['epoch'] != before['epoch'] and after['reports'] == 2
     assert after['pending'] == 1 and not after['complete']
     assert not list((tmp_path / '.forge').glob('.index-*'))
+
+
+@pytest.mark.parametrize('owner', ['run', 'report'])
+def test_corrupt_owned_source_never_clears_pending_as_missing(prepared, owner):
+    root, manifest, _, journal = prepared
+    if owner == 'run':
+        marker = marker_for(root, manifest)
+        journal.path.write_bytes(b'not a journal database')
+        publish = runs.publish_run_index
+    else:
+        (root / '.forge/inspections').mkdir()
+        value, marker = report(root, 7, publish=False)
+        (root / '.forge/inspections' / (value['digest'] + '.json')).write_text('{broken')
+        publish = ws.publish_report_index
+    path = root / '.forge/index-pending' / (marker['kind'] + '-' + marker['identity'] + '.json')
+    original = path.read_bytes()
+    with ws.control_lock(root):
+        assert publish(root, marker)
+    assert path.read_bytes() == original and index.status(root)['pending'] == 1
+    assert index.page(root, marker['kind'])['total'] == 0
+
+
+@pytest.mark.parametrize('alteration', [
+    {'kind': 'report'}, {'identity': 'r' + '2' * 24}, {'created_at': float('nan')},
+    {'created_at': -1}, {'digest': 'invalid'}, {'active': 1}, {'unexpected': True},
+])
+def test_index_rejects_untrusted_owner_entry_shape_without_consuming_marker(prepared, alteration):
+    root, manifest, _, _ = prepared
+    marker = marker_for(root, manifest)
+    original = (root / '.forge/index.sqlite').read_bytes()
+    entry = {**runs.run_index_entry(root, manifest['run_id']), **alteration}
+    with ws.control_lock(root):
+        assert index.publish(root, marker, entry)
+    assert (root / '.forge/index.sqlite').read_bytes() == original
+    assert index.status(root)['pending'] == 1 and index.page(root, 'run')['total'] == 0
