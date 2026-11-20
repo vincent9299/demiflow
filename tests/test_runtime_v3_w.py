@@ -358,7 +358,7 @@ def test_w002():
     report = hist.validate_resume_compatibility(absent, current_runtime="engine-x", store=store)
     assert not report.supported and any("journal-proven" in r for r in report.reasons)
     drift = hist.validate_resume_compatibility(binding, current_runtime="other-engine", store=store)
-    assert not drift.supported and any("platform code differs" in r for r in drift.reasons)
+    assert drift.supported and drift.reasons == ()  # Origin is not runtime admission.
     for recovery in ("attempt_only", "delivery_only"):
         report = hist.validate_resume_compatibility(bind({"recovery": recovery, "splits": []}),
                                                     current_runtime="engine-x", store=store)
@@ -384,10 +384,9 @@ def test_w002():
                                 restore_image=None)
     report = hist.validate_resume_compatibility(unknown, current_runtime="engine-x", store=store)
     assert report.supported is False and any("unsupported historical schema" in r for r in report.reasons)
-    # Guard: current_runtime must be a bounded nonempty string.
-    with pytest.raises(DataflowError) as exc:
-        hist.validate_resume_compatibility(binding, current_runtime="", store=store)
-    assert exc.value.code == "INVALID_CONTRACT"
+    # Old keyword is accepted as provenance only, including callers omitting it.
+    assert hist.validate_resume_compatibility(binding, current_runtime="", store=store).supported
+    assert hist.validate_resume_compatibility(binding, store=store).supported
 
 
 # --- W003 translate_native_checkpoint --------------------------------------
@@ -798,10 +797,10 @@ def test_w013(tmp_path, monkeypatch):
     RunJournal(bare).initialize(dict(run_id="r" + "2" * 24, object_locations=[]), attempts=True)
     with pytest.raises(RecoveryContractError, match="no unified recovery contract"):
         RunContext.resume(RunRef(str(bare), "r" + "2" * 24))
-    # Platform implementation changed.
+    # Different platform provenance preserves the original RunRef.
     other_target, _, _, other_run = make_journal(tmp_path / "other", platform_revision="other-engine")
-    with pytest.raises(RecoveryContractError, match="Platform implementation changed"):
-        RunContext.resume(RunRef(str(other_target), other_run))
+    other_context = RunContext.resume(RunRef(str(other_target), other_run))
+    assert other_context.expected_run_id == other_run
     # RunRef identity does not match its directory.
     with pytest.raises(RecoveryContractError, match="RunRef identity does not match"):
         RunContext.resume(RunRef(str(target), "r" + "3" * 24))
@@ -830,10 +829,9 @@ def test_w014(tmp_path, monkeypatch):
     configuration = dict(run_id=run_id, platform_revision="other-engine",
                          limits=dict(max_control_bytes=8 * 1024 ** 2, max_commits=1024, admission_timeout_s=30))
     journal.claim_execution(configuration, "f" + "1" * 32)
-    with pytest.raises(ForgeError) as exc:
-        manager.resume(tmp_path, run_id, expected="d", expected_attempt=1, authority=authority)
-    assert exc.value.code == "conflict"
-    # Matching identity passes the gate (downstream lifecycle doubled).
+    # Platform provenance does not gate either old or current origins; this unit
+    # checks forwarding only, real recovery lives in the native integration cases.
+    # Downstream lifecycle is doubled here.
     import demiflow.workbench.worker as worker
     import demiflow.workbench.runs.domain as domain
     from contextlib import contextmanager
@@ -843,6 +841,7 @@ def test_w014(tmp_path, monkeypatch):
     monkeypatch.setattr(domain, "preparation_lock", fake_lock)
     monkeypatch.setattr(worker, "operation", lambda *a, **k: {"attempt": 1})
     monkeypatch.setattr(manager, "start", lambda *a, **k: "started")
+    assert manager.resume(tmp_path, run_id, expected="d", expected_attempt=1, authority=authority) == "started"
     journal2 = RunJournal(target)
     configuration["platform_revision"] = platform_identity()
     # Re-claim with matching revision is immutable-conflict; build a fresh run instead.
