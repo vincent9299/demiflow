@@ -59,5 +59,15 @@
     "No E2 production rejection",
     "No S2/H1 or cross-version resume",
     "No complete all-green product or release acceptance"
-  ]
+  ],
+  "execution_basis": {
+    "user_bound_sha256": "5bbcf2ab1a387f3d3c949ec252f6513acde360c16594074d831fe8506ae1532d",
+    "observed_file_sha256": "f1a825a449efe760bc63d6f102989c04cede719721bb6857c3f654038f66f987",
+    "bound_content": "EXECUTION-BASIS-user-bound.txt",
+    "observed_content": "EXECUTION-BASIS-observed.txt",
+    "note": "The user-specified exact bytes are preserved as the suffix. An additional prefix is separate later context and is not silently merged into this fixed-T implementation scope. Current human message explicitly narrows first-batch acceptance to architecture v3 section 5.1 and P12 v2.1; release gates remain unchanged.",
+    "historical_root": "retained in historical handoff only; no repeated root/15-leaf checklist or new acceptance expansion",
+    "design_only": "C/F/G reviewed design delivery, D retention ruling; no implied missing product implementation; F2 Search not a prerequisite; E2 continues separately."
+  },
+  "architecture_delivery_not_blocked_by_design_only_work": true
 }
