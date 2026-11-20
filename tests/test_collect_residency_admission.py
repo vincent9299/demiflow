@@ -22,7 +22,7 @@ def image_operation(concurrency=1):
 
 
 def bounds(memory=1024*MIB):
-    return resolve_runtime_policy({'memory_bytes': memory}, {}, provider='local')[1]
+    return resolve_runtime_policy({}, {'memory_bytes': memory}, provider='local')[1]
 
 
 @pytest.mark.parametrize('declared,actual', [(1, 1), (1, 2), (2, 1)])
