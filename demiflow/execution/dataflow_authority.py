@@ -194,6 +194,9 @@ class DriverArtifactPort:
         from .dataflow_staging import recover_staging
         self.recovery = recover_staging(action, bounds=bounds)
 
+    def bind_bounds(self, bounds: "Bounds") -> None:
+        self._bounds = bounds
+
     def bind_store_lease(self, inode, *, fresh):
         return self._action.context.journal.bind_dataflow_gc_protocol(
             self._action.context.fence, inode, fresh=fresh)
@@ -246,6 +249,7 @@ class DriverJournalService:
         self._closed = False
         self._native = None
         self._recovery_policy = None
+        self._stream_lance = None
         self._leases = {}
         self._worker_occurrences = {}
         self._native_action_id = None
@@ -308,6 +312,22 @@ class DriverJournalService:
         finally:
             if writer is not None:
                 writer.close()
+
+    def bind_bounds(self, bounds: "Bounds") -> None:
+        """Bind the effective control window before admitting workers."""
+        self._bounds = bounds
+
+    def bind_stream_writer(self, writer) -> None:
+        if writer.action is not self._action:
+            raise DataflowError('FENCED', 'Stream writer belongs to another action')
+        if self._stream_lance is not None and self._stream_lance is not writer:
+            raise DataflowError('FENCED', 'Action already has a stream writer')
+        self._stream_lance = writer
+
+    def check_model_recovery(self) -> None:
+        if self._action.replaying and self._journal.source_binding(
+                self._action.action_id + '-native-model-journal') is not None:
+            self._native_journal().check_recovery()
 
     def bind_recovery_policy(self, policy):
         """Bind the authenticated physical policy before any worker can call."""
@@ -699,7 +719,7 @@ class DriverJournalService:
             from .dataflow_batch_membership import request as batch_membership
             return batch_membership(self, command, request)
         if command.operation == 'stream_lance':
-            service = getattr(self, '_stream_lance', None)
+            service = self._stream_lance
             if service is None:
                 raise DataflowError('FENCED', 'Action declares no streaming Lance writer')
             return service.request(command, request)

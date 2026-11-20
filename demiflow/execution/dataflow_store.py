@@ -177,6 +177,19 @@ class RunArtifactStore:
             self.close()
             raise
 
+    def bind_driver_bounds(self, bounds: "Bounds") -> None:
+        """Use the admitted action limits for both local files and journal reservations."""
+        self._journal.bind_bounds(bounds)
+        with self._file_state.lock:
+            if self._writer_slot and self._writer_limit != bounds.max_open_files:
+                limits = self._file_state.limits
+                limits[self._writer_limit] -= 1
+                if not limits[self._writer_limit]:
+                    del limits[self._writer_limit]
+                self._writer_limit = bounds.max_open_files
+                limits[self._writer_limit] = limits.get(self._writer_limit, 0) + 1
+            self._bounds = bounds
+
     # Conservative simultaneous artifact FDs, including physical lease and
     # native-journal metadata access while staging is open. Not process RLIMIT:
     # resource-provider sockets/SQLite connections retain their original owner.
