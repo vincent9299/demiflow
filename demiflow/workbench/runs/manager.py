@@ -132,6 +132,63 @@ def _claim_lease(lease, run_id):
     os.fsync(lease)
 
 
+def run_index_entry(root, run_id, *, deadline=None):
+    """Read run-owned facts for the derived directory; missing is not unreadable."""
+    from demiflow.execution.host.inspection import observe_storage
+    current = operation_budget.current_deadline()
+    deadline = current if deadline is None else deadline if current is None else min(deadline, current)
+    operation_budget.check(deadline)
+    target = directory(root, run_id)
+    if not target.exists():
+        return None
+    try:
+        with observe_storage(target, deadline=deadline) as observation:
+            if not observation.exists:
+                return None
+    except RunReadError as exc:
+        raise ForgeError(str(exc), code=exc.code or 'operation_rejected') from exc
+    operation_budget.check(deadline)
+    _, value = _load(root, run_id, detail='identity', deadline=deadline)
+    manifest = value['manifest']
+    return dict(kind='run', identity=run_id, created_at=manifest['created_at'],
+                digest=manifest['digest'], active=value['state']['status'] in ACTIVE)
+
+
+def publish_run_index(root, marker, *, deadline=None):
+    """Optional cache work never undoes source publication or the original error."""
+    from demiflow.workbench.projects import index
+    try:
+        operation_budget.check(deadline)
+        entry = run_index_entry(root, marker['identity'], deadline=deadline)
+        operation_budget.check(deadline)
+        error = index.publish(root, marker, entry)
+    except Exception as exc:
+        error = str(exc)[:1024]
+    if error:
+        try:
+            import logging
+            logging.getLogger(__name__).warning('Directory run %s: %s; demiflow workbench index ROOT --synchronize',
+                                                marker['identity'], error[:1024])
+        except Exception:
+            pass
+    return error
+
+
+def run_index_entries(root, *, check, deadline):
+    """Explicit rebuild only: stream this owner's sources within shared budgets."""
+    parent = ws.relative_path(root, '.forge/runs')
+    if parent.exists():
+        with os.scandir(parent) as entries:
+            for entry in entries:
+                check()
+                if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                    raise ForgeError('Invalid run directory entry')
+                value = run_index_entry(root, entry.name, deadline=deadline)
+                if value is None:
+                    raise ForgeError('Directory source is incomplete: ' + entry.name)
+                yield value
+
+
 def refresh_index(root, run_id, *, deadline=None):
     """Best-effort activity hint; source journal and execution lease own state."""
     from demiflow.workbench.projects import index
@@ -144,7 +201,7 @@ def refresh_index(root, run_id, *, deadline=None):
             marker = index.begin(root, 'run', run_id)
             if deadline is not None and time.monotonic() >= deadline:
                 return 'Index publication deferred after maintenance deadline'
-            return index.publish(root, marker)
+            return publish_run_index(root, marker, deadline=deadline)
     except Exception as error:
         return str(error)[:1024]
 
@@ -460,8 +517,10 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
         store.mkdir(exist_ok=True)
         marker = index.begin(root, 'run', run_id)
         target = directory(root, run_id)
-        target.mkdir()
+        created = False
         try:
+            target.mkdir()
+            created = True
             from demiflow.workbench.runs.domain import history_admission
             from demiflow.workbench.host_partition import policy
             from demiflow.workbench.host_partition import location
@@ -508,17 +567,22 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                 run.transition({None}, 'prepared', prepared_at=time.time())
                 run.record_usage(elapsed_ms=0, output_bytes=0, complete=True)
                 durable_tree(target)
-                index.publish(root, marker)
-        except BaseException:
-            shutil.rmtree(target)
+        except BaseException as exc:
+            if created:
+                shutil.rmtree(target)
+            if isinstance(exc, Exception):
+                publish_run_index(root, marker)
             raise
+        publish_run_index(root, marker)
     return show(root, run_id, include_report=True)
 
 
-def _load(root, run_id, *, detail='full', action_ids=None, attempt=None):
+def _load(root, run_id, *, detail='full', action_ids=None, attempt=None, deadline=None):
     target = directory(root, run_id)
+    current = operation_budget.current_deadline()
+    deadline = current if deadline is None else deadline if current is None else min(deadline, current)
     try:
-        with read_run(target, deadline=operation_budget.current_deadline()) as reader:
+        with read_run(target, deadline=deadline) as reader:
             value = reader.execution_view(detail=detail, action_ids=action_ids, attempt=attempt)
     except RunReadError as exc:
         raise ForgeError(str(exc), code=exc.code or 'operation_rejected') from exc
@@ -715,72 +779,80 @@ def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authorit
                 raise ForgeError('Run changed before admission', code='conflict')
             run_domain.history_admission(root, reserve=0, admitting=run_id, ceiling=capacity['history_bytes'])
             operation_budget.check()
-            # Establish the durable execution fence before any visible admission.
+            # The durable fence precedes reservation and run admission.
+            # The earlier directory marker is only derived-cache intent.
             # A prepared retry may reuse an unlocked fence left before reservation.
             development_guard = (development_admission.guard(root, entry=value['manifest']['entry'], expected=value['manifest'].get('development_acceptance'))
                                  if attempt == 1 else nullcontext())
-            with authority.guard(root, 'run_submit'), development_guard, _launch_unit(target, attempt) as (unit, unit_identity):
-                process = reservation = marker = None
-                spawn_attempted = False
+            with authority.guard(root, 'run_submit'), development_guard:
+                marker = index.begin(root, 'run', run_id)
+                interrupted = False
                 try:
-                    operation_budget.check()
-                    reservation = run_domain.reserve(domain, capacity, root, value['manifest'], attempt)
-                    operation_budget.check()
-                    marker = index.begin(root, 'run', run_id)
-                    _claim_lease(lease, run_id)
-                    run.transition({'prepared'}, 'starting', started_at=time.time(), deployment=reservation,
-                                   execution_stopped=False, unit_identity=unit_identity, launch_phase='admitted')
-                    index.publish(root, marker)
-                    marker = None
-                    # Persist uncertainty before Popen; an interrupted launch may
-                    # have forked even when no process identity was recorded yet.
-                    usage = value['state'].get('usage', {})
-                    run.record_usage(elapsed_ms=usage.get('elapsed_ms', 0),
-                                     output_bytes=usage.get('output_bytes', 0), complete=False)
-                    for _ in range(2):
-                        state = run.execution_status()
-                        if state['status'] not in {'starting', 'stopping'}:
-                            raise ForgeError('Launch state changed', code='conflict')
-                        if run.transition({state['status']}, state['status'], launch_phase='spawning'):
-                            break
-                    else:
-                        raise ForgeError('Launch state changed', code='conflict')
-                    worker_path = next((item['path'] for item in value['manifest']['platform']['files']
-                                        if item['path'] in {'workbench/runs/worker.py', 'forge/run_worker.py'}), None)
-                    if worker_path is None:
-                        raise ForgeError('Sealed run has no supported supervisor entry', code='operation_rejected')
-                    command = [sys.executable, '-I', '-B', str(target / 'runtime/demiflow' / worker_path), 'supervise', str(root), run_id, str(lease)]
-                    if attempt is not None:
-                        command.append(str(attempt))
-                    env = worker_environment(target, value['manifest']['limits'], value['manifest'].get('credential_names', []),
-                                             native_execution=value['manifest'].get('native_execution'),
-                                             capacity_domain=value['manifest'].get('capacity_domain'),
-                                             executable_dirs=value['manifest'].get('executable_dirs', []))
-                    env['DEMIFLOW_EXECUTION_UNIT_FD'] = str(unit)
-                    operation_budget.check()
-                    spawn_attempted = True
-                    process = subprocess.Popen(command, cwd=target, env=env, stdin=subprocess.DEVNULL,
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        start_new_session=True, pass_fds=(lease, unit))
-                    run.transition({'starting'}, 'starting', supervisor=process_identity(process.pid))
+                    with _launch_unit(target, attempt) as (unit, unit_identity):
+                        process = reservation = None
+                        spawn_attempted = False
+                        try:
+                            operation_budget.check()
+                            reservation = run_domain.reserve(domain, capacity, root, value['manifest'], attempt)
+                            operation_budget.check()
+                            _claim_lease(lease, run_id)
+                            run.transition({'prepared'}, 'starting', started_at=time.time(), deployment=reservation,
+                                           execution_stopped=False, unit_identity=unit_identity, launch_phase='admitted')
+                            publish_run_index(root, marker)
+                            marker = None
+                            # Persist uncertainty before Popen; an interrupted launch may
+                            # have forked even when no process identity was recorded yet.
+                            usage = value['state'].get('usage', {})
+                            run.record_usage(elapsed_ms=usage.get('elapsed_ms', 0),
+                                             output_bytes=usage.get('output_bytes', 0), complete=False)
+                            for _ in range(2):
+                                state = run.execution_status()
+                                if state['status'] not in {'starting', 'stopping'}:
+                                    raise ForgeError('Launch state changed', code='conflict')
+                                if run.transition({state['status']}, state['status'], launch_phase='spawning'):
+                                    break
+                            else:
+                                raise ForgeError('Launch state changed', code='conflict')
+                            worker_path = next((item['path'] for item in value['manifest']['platform']['files']
+                                                if item['path'] in {'workbench/runs/worker.py', 'forge/run_worker.py'}), None)
+                            if worker_path is None:
+                                raise ForgeError('Sealed run has no supported supervisor entry', code='operation_rejected')
+                            command = [sys.executable, '-I', '-B', str(target / 'runtime/demiflow' / worker_path), 'supervise', str(root), run_id, str(lease)]
+                            if attempt is not None:
+                                command.append(str(attempt))
+                            env = worker_environment(target, value['manifest']['limits'], value['manifest'].get('credential_names', []),
+                                                     native_execution=value['manifest'].get('native_execution'),
+                                                     capacity_domain=value['manifest'].get('capacity_domain'),
+                                                     executable_dirs=value['manifest'].get('executable_dirs', []))
+                            env['DEMIFLOW_EXECUTION_UNIT_FD'] = str(unit)
+                            operation_budget.check()
+                            spawn_attempted = True
+                            process = subprocess.Popen(command, cwd=target, env=env, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                start_new_session=True, pass_fds=(lease, unit))
+                            run.transition({'starting'}, 'starting', supervisor=process_identity(process.pid))
+                        except BaseException as exc:
+                            if not spawn_attempted and reservation is not None:
+                                usage = value['state'].get('usage', {})
+                                run.record_usage(elapsed_ms=usage.get('elapsed_ms', 0),
+                                                 output_bytes=usage.get('output_bytes', 0), complete=True)
+                                state = run.execution_status()
+                                cleanup = 'pending' if attempt_directory(target, 'work', attempt).exists() else 'complete'
+                                closed = run.transition({'prepared', 'starting', 'stopping'},
+                                    'cancelled' if state['status'] == 'stopping' else 'failed',
+                                    error=str(exc)[:2048], recoverable=True, reason='launch_failed',
+                                    execution_stopped=True, cleanup=cleanup, stop_phase='confirmed')
+                                if closed and cleanup == 'complete':
+                                    run_domain.abandon(domain, reservation['slot'], run_id=run_id, attempt=attempt)
+                            # Once spawned, retain uncertain state and ownership. The
+                            # durable unit permits explicit recovery after launcher loss.
+                            raise
                 except BaseException as exc:
-                    if not spawn_attempted and reservation is not None:
-                        usage = value['state'].get('usage', {})
-                        run.record_usage(elapsed_ms=usage.get('elapsed_ms', 0),
-                                         output_bytes=usage.get('output_bytes', 0), complete=True)
-                        state = run.execution_status()
-                        cleanup = 'pending' if attempt_directory(target, 'work', attempt).exists() else 'complete'
-                        closed = run.transition({'prepared', 'starting', 'stopping'},
-                            'cancelled' if state['status'] == 'stopping' else 'failed',
-                            error=str(exc)[:2048], recoverable=True, reason='launch_failed',
-                            execution_stopped=True, cleanup=cleanup, stop_phase='confirmed')
-                        if closed and cleanup == 'complete':
-                            run_domain.abandon(domain, reservation['slot'], run_id=run_id, attempt=attempt)
-                        if marker is not None:
-                            index.publish(root, marker)
-                    # Once spawned, retain uncertain state and ownership. The
-                    # durable unit permits explicit recovery after launcher loss.
+                    interrupted = not isinstance(exc, Exception)
                     raise
+                finally:
+                    if marker is not None and not interrupted:
+                        publish_run_index(root, marker)
     return show(root, run_id)
 
 
@@ -961,15 +1033,22 @@ def _resume(root, run_id, *, expected, expected_attempt, authority=None):
             _check_basis(root, target, manifest, phase='resume')
             operation_budget.check(deadline)
             marker = index.begin(root, 'run', run_id)
-            report = _report(target, manifest)
-            operation_budget.check(deadline)
-            with authority.guard(root, 'run_submit'):
-                control.begin_attempt(expected_attempt=expected_attempt,
-                    expected_revision=value['state']['revision'],
-                    nodes=[(item['action_id'], item['node_id'], item['occurrence'])
-                           for item in manifest['observation_instances']],
-                    actions=_fact_actions(report, manifest['outputs']))
-                index.publish(root, marker)
+            interrupted = False
+            try:
+                report = _report(target, manifest)
+                operation_budget.check(deadline)
+                with authority.guard(root, 'run_submit'):
+                    control.begin_attempt(expected_attempt=expected_attempt,
+                        expected_revision=value['state']['revision'],
+                        nodes=[(item['action_id'], item['node_id'], item['occurrence'])
+                               for item in manifest['observation_instances']],
+                        actions=_fact_actions(report, manifest['outputs']))
+            except BaseException as exc:
+                interrupted = not isinstance(exc, Exception)
+                raise
+            finally:
+                if not interrupted:
+                    publish_run_index(root, marker, deadline=deadline)
     return show(root, run_id)
 
 

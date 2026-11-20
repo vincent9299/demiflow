@@ -95,7 +95,7 @@ def init_workspace(root, *, name="workspace", modules=("demiflow.data",), existi
             os.fsync(stream.fileno())
         created_files.append(lease)
         from demiflow.workbench.projects import index
-        index._ensure(root)
+        index.initialize_empty(root)
         created_files.append(root / '.forge/index.sqlite')
         write_control(root / 'workspace.json', value, create=True)
     except BaseException:
@@ -1146,12 +1146,19 @@ def _inspect_flow(root, entry, *, params, save=True, limits=None):
             no_symlinks(directory)
             target = directory / (report["digest"] + ".json")
             marker = index.begin(root, 'report', report['digest'])
-            if not target.exists():
-                raw = bounded_json(report, 8 * 1024**2)
-                if shutil.disk_usage(root).free < 2 * len(raw) + 8 * 1024**2:
-                    raise ForgeError('Insufficient disk headroom for the report')
-                write_control(target, report, create=True)
-            index.publish(root, marker)
+            interrupted = False
+            try:
+                if not target.exists():
+                    raw = bounded_json(report, 8 * 1024**2)
+                    if shutil.disk_usage(root).free < 2 * len(raw) + 8 * 1024**2:
+                        raise ForgeError('Insufficient disk headroom for the report')
+                    write_control(target, report, create=True)
+            except BaseException as exc:
+                interrupted = not isinstance(exc, Exception)
+                raise
+            finally:
+                if not interrupted:
+                    publish_report_index(root, marker)
     return report
 
 
@@ -1251,6 +1258,53 @@ def resolve_flow_resources(root, tree, references, bindings):
             bindings[path] = binding
         result[name] = {**binding, "text": raw.decode("utf-8")} if kind == 'config' else dict(binding)
     return result
+
+
+def report_index_entry(root, digest, *, deadline=None):
+    from demiflow.forge import operation_budget
+    operation_budget.check(deadline)
+    from demiflow.forge.audit import digest as valid_digest
+    valid_digest(digest)
+    path = relative_path(root, '.forge/inspections/' + digest + '.json')
+    if not path.exists():
+        return None
+    report = load_report(root, digest)
+    return dict(kind='report', identity=digest, created_at=path.stat().st_mtime_ns / 1e9,
+                digest=report['digest'], active=False)
+
+
+def publish_report_index(root, marker, *, deadline=None):
+    from demiflow.workbench.projects import index
+    from demiflow.forge import operation_budget
+    try:
+        operation_budget.check(deadline)
+        entry = report_index_entry(root, marker['identity'], deadline=deadline)
+        operation_budget.check(deadline)
+        error = index.publish(root, marker, entry)
+    except Exception as exc:
+        error = str(exc)[:1024]
+    if error:
+        try:
+            import logging
+            logging.getLogger(__name__).warning('Directory report %s: %s; demiflow workbench index ROOT --synchronize',
+                                                marker['identity'], error[:1024])
+        except Exception:
+            pass
+    return error
+
+
+def report_index_entries(root, *, check, deadline):
+    parent = relative_path(root, '.forge/inspections')
+    if parent.exists():
+        with os.scandir(parent) as entries:
+            for entry in entries:
+                check()
+                if entry.is_symlink() or not entry.is_file(follow_symlinks=False) or not re.fullmatch(r'[0-9a-f]{64}\.json', entry.name):
+                    raise ForgeError('Invalid report directory entry')
+                value = report_index_entry(root, entry.name[:-5], deadline=deadline)
+                if value is None:
+                    raise ForgeError('Directory source is incomplete: ' + entry.name)
+                yield value
 
 
 def load_report(root, digest):

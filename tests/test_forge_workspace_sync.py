@@ -27,7 +27,7 @@ def test_change_hints_cover_controls_configs_and_wal_without_content_reads(isola
     run.transition({None}, 'starting')
     with ws.control_lock(root):
         marker = index.begin(root, 'run', run_id)
-        assert index.publish(root, marker) is None
+        assert runs.publish_run_index(root, marker) is None
     baseline = ws.workspace_changes(root)
     def forbidden(*args, **kwargs):
         raise AssertionError('Change hints must not read report/journal contents')

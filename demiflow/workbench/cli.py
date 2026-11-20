@@ -211,7 +211,8 @@ def register(main):
         def perform():
             if rebuild and synchronize:
                 raise ValueError('Select either rebuild or synchronize')
-            return index.rebuild(root) if rebuild else index.synchronize(root) if synchronize else index.status(root)
+            from demiflow.workbench import directory_operations
+            return directory_operations.rebuild(root) if rebuild else directory_operations.synchronize(root) if synchronize else index.status(root)
         output(perform, pretty)
 
     @workspace.command("bind-platform")
