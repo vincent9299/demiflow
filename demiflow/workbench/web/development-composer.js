@@ -139,7 +139,7 @@
     function renderAvailability(){
       const caps=state.capabilities,session=state.session,turn=session?.turn;
       const readonly=state.readonly||caps.read_only===true,unavailable=!caps.enabled;
-      const busy=!!(turn&&(turn.cleanup!=='complete'||turn.development?.busy===true));
+      const busy=!!(turn&&turn.cleanup!=='complete');
       const provider=(caps.providers||[]).find(value=>value.id===(session?.provider||providers.value));
       input.disabled=readonly||state.historyOnly||unavailable||state.sending;
       send.disabled=input.disabled||!caps.start||!provider?.available||busy||!input.value.trim()||bytes(input.value)>32768;

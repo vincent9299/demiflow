@@ -10,7 +10,7 @@ from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.graph import model
 from demiflow.workbench.graph import source_view
-from test_forge_project_discovery import original, business_bytes
+from test_forge_project_discovery import original, business_bytes, register_fixture_flow
 from test_forge_public_api import service
 from test_forge_markdown_reading import browser
 from test_forge_workbench_browser import page_for, pipeline
@@ -33,7 +33,7 @@ def author(root, *, calls=True):
 
 
 def test_unadmitted_import_still_has_sha_bound_syntax_calls_without_compute_admission(original,tmp_path):
-    author(original);before=business_bytes(original)
+    author(original);register_fixture_flow(original);before=business_bytes(original)
     console.add(tmp_path/'registry.json',original)
     value=model.get(original,basis_kind='source',entry='dispatch.py:run_pipeline')
     assert value['status']=='not_checked' and value['completeness']['semantic']=='unchecked'
@@ -46,8 +46,8 @@ def test_unadmitted_import_still_has_sha_bound_syntax_calls_without_compute_admi
     assert source['kind']=='callsite' and source['reason']=='source_callsite_only'
     # The current checker keeps its original strict admission result.
     checked=project_ops.check_project(original)
-    assert checked['status']!='checked' and any(d.get('code')=='OP-06' for d in checked['diagnostics'])
-    assert not ws.workspace_context(original)['flows'] and business_bytes(original)==before
+    assert checked['status']!='checked' and any(d.get('rule')=='OP-06' for d in checked['diagnostics'])
+    assert business_bytes(original)==before
     (original/'dispatch.py').write_text((original/'dispatch.py').read_text()+'\n# source changed\n')
     with pytest.raises(ValueError):
         source_view.get(original,graph_binding=value['binding'],node_id=value['nodes'][0]['id'],kind='implementation')
@@ -55,7 +55,7 @@ def test_unadmitted_import_still_has_sha_bound_syntax_calls_without_compute_admi
 
 @pytest.mark.parametrize('calls',[True,False,'cached'])
 def test_browser_unadmitted_source_keeps_diagnostics_without_fake_execution_graph(original,tmp_path,browser,calls):
-    author(original,calls=calls);before=business_bytes(original)
+    author(original,calls=calls);register_fixture_flow(original);before=business_bytes(original)
     registry=tmp_path/'registry.json';console.add(registry,original)
     with service(None,registry=registry,enable_runs=True) as app,page_for(browser,app) as (page,errors):
         posts=[];page.on('request',lambda r:posts.append(r.url) if r.method=='POST' else None)
@@ -65,7 +65,13 @@ def test_browser_unadmitted_source_keeps_diagnostics_without_fake_execution_grap
         expect(page.locator('.wb-graph-empty')).to_contain_text('尚无运行执行图', timeout=15000)
         expect(page.locator('.wb-graph')).not_to_have_attribute('aria-busy','true')
         expect(page.locator('.wb-node')).to_have_count(0)
-        expect(page.get_by_role('button',name='解析执行计划',exact=True)).to_be_disabled()
+        compile_plan = page.get_by_role('button', name='解析执行计划', exact=True)
+        expect(compile_plan).to_be_enabled()
+        with page.expect_response(lambda response: response.url.endswith('/plan-preview')) as pending:
+            compile_plan.click()
+        response = pending.value
+        assert response.status != 200 or not response.json().get('available')
+        expect(page.locator('.wb-node')).to_have_count(0)
         expect(page.locator('.wb-actions').get_by_role('button',name='运行',exact=True)).to_be_disabled()
         page.locator('.wb-more > summary').click()
         page.get_by_role('button',name='检查问题',exact=True).click()

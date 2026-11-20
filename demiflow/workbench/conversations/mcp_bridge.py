@@ -60,8 +60,6 @@ def main(endpoint, token, turn_id, epoch):
         except Exception as exc:
             response['error'] = dict(code=-32602, message=str(exc)[:2048])
         sys.stdout.buffer.write(wire(response, 65536) + b'\n'); sys.stdout.buffer.flush()
-        if method == 'tools/call' and 'result' in response:
-            call(endpoint, token, turn_id, epoch, 'delivery/sent', {})
 
 
 if __name__ == '__main__':

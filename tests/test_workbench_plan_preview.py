@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from test_forge_project_discovery import original, snapshot, cached_snapshot, business_bytes
+from test_forge_project_discovery import original, snapshot, cached_snapshot, business_bytes, register_fixture_flow
 from demiflow.workbench.graph.preview import preview
 from demiflow.workbench.projects import workspace as ws
 from demiflow.forge.schema import ForgeError
@@ -35,7 +35,7 @@ def test_native_fixed_inputs_resolve_before_guard_but_project_import_stays_reado
 def test_original_helpers_and_parameter_branches_compile_without_execution(original):
     (original / 'operators/clean.py').write_text('def clean(row):\n    raise AssertionError("row executed")\n')
     (original / 'dispatch.py').write_text('''from demiflow import data
-from shipping.operators.clean import clean
+from operators.clean import clean
 def config(): return {}
 def source(): return data.from_items([{'id': 1}])
 def run_pipeline(*, combine=False):
@@ -43,10 +43,8 @@ def run_pipeline(*, combine=False):
     if combine: ds = ds.union(source().filter(clean))
     return ds.take_all()
 ''')
-    # The public project declaration fixes the repository import root. Its
-    # package namespace is independent of the pipeline's registration name.
     path = original / 'settings/compile.json'
-    ws.init_workspace(original, existing=True)
+    register_fixture_flow(original, 'settings/compile.json')
     results = []
     for combine in (False, True):
         path.write_text(json.dumps({'run_directory': '/unused', 'arguments': {'combine': combine}}))
@@ -55,7 +53,7 @@ def run_pipeline(*, combine=False):
         assert business_bytes(original) == before
         assert result['scope'] == 'first_action' and result['entry_completed'] is False
         assert result['kind'] == 'take_all' and 'physical' not in result and 'run_id' not in result
-        assert 'shipping/operators/clean.py' in result['basis']['sources']
+        assert 'operators/clean.py' in result['basis']['sources']
         assert result['basis']['params_sha256']
         results.append(result)
     assert len(results[1]['dag']['nodes']) > len(results[0]['dag']['nodes'])
@@ -71,7 +69,7 @@ def run_pipeline():
     Path('should-not-exist').write_text('bad')
     return data.from_items([1]).take_all()
 ''')
-    ws.init_workspace(original, existing=True)
+    register_fixture_flow(original)
     before = business_bytes(original)
     with pytest.raises(ForgeError, match='解析阶段'):
         preview(original, entry='dispatch.py:run_pipeline')
@@ -82,10 +80,10 @@ def test_http_node_details_keep_exact_compiled_source_and_require_matching_ident
     operator = original / 'operators/clean.py'
     operator.write_text('def clean(row):\n    """Original frozen material."""\n    return row\n')
     (original / 'dispatch.py').write_text('from demiflow import data\n'
-        'from shipping.operators.clean import clean\n'
+        'from operators.clean import clean\n'
         'def config(): return {}\n'
         'def run_pipeline(): return data.from_items([{\"id\":1}]).map(clean).take_all()\n')
-    ws.init_workspace(original, existing=True)
+    register_fixture_flow(original)
     with service(original) as app:
         code, result = request(app, '/api/plan-preview', dict(entry='dispatch.py:run_pipeline', params=None))
         assert code == 200, result
@@ -118,7 +116,7 @@ def test_http_accepts_null_params_and_explains_required_arguments(original, requ
     (original / 'dispatch.py').write_text('from demiflow import data\n'
         'def config(): return {}\n'
         f'def run_pipeline({signature}):\n    return data.from_items([1]).take_all()\n')
-    ws.init_workspace(original, existing=True)
+    register_fixture_flow(original)
     before = business_bytes(original)
     with service(original) as app:
         code, result = request(app, '/api/plan-preview', dict(entry='dispatch.py:run_pipeline', params=None))

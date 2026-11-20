@@ -142,42 +142,6 @@ def test_json_depth_duplicate_and_capacity(tmp_path):
     with pytest.raises(ForgeError,match='count'):store.create('w',root_identity(root),'codex','c2','policy')
 
 
-def test_context_categories_public_cli_and_delivery_not_receipt(tmp_path):
-    from demiflow.workbench.conversations.context import assemble
-    from demiflow.workbench.conversations.context import bridge
-    from demiflow.workbench.conversations.context import cli
-    from test_forge_development import DevelopmentTests
-    root,path,value=configuration(tmp_path)
-    grant=value['projects']['wfixture'];scratch=tmp_path/'scratch';scratch.mkdir()
-    for kind in ('platform','unregistered'):
-        manifest,prompt=assemble(dict(grant,kind=kind),'Keep exact human requirements',scratch,Limits())
-        assert manifest['kind']==kind and 'Keep exact human requirements' in prompt
-        assert all(s['delivery']=='prepared' for s in manifest['sources'])
-        assert manifest['evidence']=='missing'
-    (root/'workspace.json').write_text('{"format":"demiflow_forge_workspace_v3","entries":{}}')
-    manifest,prompt=assemble(dict(grant,kind='native_forge'),'Native author task',scratch,Limits())
-    assert any(s['canonical_path'].endswith('workspace.json') for s in manifest['sources'])
-    fixture=DevelopmentTests();fixture.setUp()
-    try:
-        project=dict(root=str(fixture.root),kind='demiforge_registered',phase='implementation',writes=['orders'],watch=['orders'],sources=[],
-            task_id='test',pipeline='orders',non_goals=['production'],authorization='fixture grant')
-        baseline=(fixture.root/'.demiforge/tasks/test/task.json').read_bytes()
-        before=json.loads(baseline)['baseline']
-        manifest,prompt=assemble(project,'Continue existing task',scratch,Limits())
-        assert manifest['binding']['id']=='test'
-        assert 'candidate.6' in prompt
-        assert all(s['delivery']=='prepared' for s in manifest['sources'])
-        after=json.loads((fixture.root/'.demiforge/tasks/test/task.json').read_bytes())
-        assert before==after['baseline'] and after['reads']
-        with pytest.raises(ForgeError,match='not acknowledged'):
-            bridge(project,{'operation':'check','arguments':{}},scratch,delivery='unknown')
-        check=bridge(project,{'operation':'check','arguments':{}},scratch,delivery='acknowledged')
-        assert check['passed']
-        with pytest.raises(ForgeError):
-            bridge(project,{'operation':'handoff','arguments':{'accept':True}},scratch,delivery='acknowledged')
-    finally:fixture.doCleanups()
-
-
 def test_source_bytes_notebook_symlink_and_context_overflow(tmp_path):
     from demiflow.workbench.conversations.common import snapshot
     from demiflow.workbench.conversations.context import assemble
@@ -188,9 +152,8 @@ def test_source_bytes_notebook_symlink_and_context_overflow(tmp_path):
     with pytest.raises(ForgeError,match='byte budget'):snapshot(root,['large.ipynb'],max_bytes=1024)
     (root/'link').symlink_to(notebook)
     with pytest.raises(ForgeError,match='links'):snapshot(root,['link'])
-    scratch=tmp_path/'scratch';scratch.mkdir()
     with pytest.raises(ForgeError,match='context'):
-        assemble(value['projects']['wfixture'],'requirement',scratch,Limits(context_bytes=10))
+        assemble(value['projects']['wfixture'],'requirement',Limits(context_bytes=10))
 
 
 def test_restart_unknown_and_root_replacement_preserve_lease(tmp_path):

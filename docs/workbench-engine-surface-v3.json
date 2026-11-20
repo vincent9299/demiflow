@@ -320,8 +320,6 @@
     "demiflow.resources.process_observation": {
       "UNIT_ENV": [
         "demiflow/workbench/conversations/execution.py",
-        "demiflow/workbench/conversations/inspection.py",
-        "demiflow/workbench/conversations/review.py",
         "demiflow/workbench/runs/worker.py"
       ],
       "_pidfd": [
@@ -337,14 +335,12 @@
       "descendants": [
         "demiflow/workbench/analysis/trusted_local.py",
         "demiflow/workbench/analysis/trusted_runner.py",
-        "demiflow/workbench/conversations/development.py",
         "demiflow/workbench/conversations/worker.py",
         "demiflow/workbench/reader.py",
         "demiflow/workbench/runs/worker.py"
       ],
       "drain_owned": [
         "demiflow/workbench/analysis/trusted_runner.py",
-        "demiflow/workbench/conversations/development.py",
         "demiflow/workbench/conversations/worker.py",
         "demiflow/workbench/runs/worker.py"
       ],
@@ -354,13 +350,11 @@
       "require_pidfds": [
         "demiflow/workbench/analysis/runtime.py",
         "demiflow/workbench/analysis/trusted_local.py",
-        "demiflow/workbench/conversations/development.py",
         "demiflow/workbench/conversations/worker.py",
         "demiflow/workbench/runs/manager.py"
       ],
       "signal_owned": [
         "demiflow/workbench/analysis/trusted_runner.py",
-        "demiflow/workbench/conversations/development.py",
         "demiflow/workbench/conversations/worker.py",
         "demiflow/workbench/reader.py",
         "demiflow/workbench/runs/worker.py"

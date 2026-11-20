@@ -552,9 +552,8 @@
     const project=context.project;if(!project)return;
     const p=panel('原项目识别',parent);
     p.append($('p','读取已有声明和文档引用；识别结果不代表规范通过，也不会授权执行。','muted'));
-    for(const d of project.declarations||[])p.append($('p',d.pipeline+' · '+d.standard+' · '+d.path,'muted small'));
     const viewer=$('div');
-    table(p,['入口','协议 / 规范','依据'],project.entries.map(e=>({value:e,cells:[e.entry,(e.protocol==='native_flow'?'原生 Flow':'config → run_pipeline')+' · '+(e.standard||'平台工作区声明'),e.evidence]})),async e=>{
+    table(p,['原生流程入口','依据'],project.entries.map(e=>({value:e,cells:[e.entry,e.evidence]})),async e=>{
       const source=await api('source',{path:e.path,...(e.sha256?{expected_sha256:e.sha256}:{})});
       if(viewer.isConnected)viewer.replaceChildren($('h3',e.entry),$('pre',source.text));
     });
@@ -673,21 +672,15 @@
   async function projectChecks(parent=main,{project=workspaceId,isCurrent=()=>true,onBegin=()=>{},onEnd=()=>{}}={}) {
     const controls=$('div',undefined,'toolbar');parent.append(controls);
     const area=panel('当前项目规范检查',parent);
-    const names={passed:'通过',checked:'静态检查通过',missing:'缺少证据',invalid:'不符合规范',incomplete:'尚未完成',stale:'依据已变化'};
+    const names={checked:'通过',missing:'尚未检查',invalid:'不符合规范',incomplete:'尚未完成',stale:'依据已变化'};
     function render(value) {
       if(!area.isConnected||!isCurrent())return;
       area.replaceChildren($('h2','检查结果'));
-      area.append($('p','整体：'+(names[value.status]||value.status)+'；静态检查：'+(names[value.static_status]||value.static_status)));
-      if(value.standard)area.append($('p','统一规范版本：'+value.standard.version,'muted'));
-      if(value.coverage)area.append($('p','已检查 '+value.coverage.inspected+' / '+value.coverage.declared+' 组已声明入口与配置；未声明代码不计为通过。'));
-      if(value.coverage?.recognized_entries!==undefined)area.append($('p','已识别 '+value.coverage.recognized_entries+' 个原入口；其中 '+value.coverage.source_inspected+' 个完成或尝试了源码前置检查，'+value.coverage.unbound_entries+' 个缺少原生协议或参数绑定，不能完成 Flow 语义检查。','notice'));
-      if(value.source_checks?.length)table(area,['原入口','源码前置检查','实际读取的源码'],value.source_checks.map(s=>({cells:[s.entry,names[s.status]||s.status,s.sources.join('\n')||'未读取']})));
-      area.append($('p','行为验证和语义审查的缺失证据会单独列出。修改项目需要你的明确确认。','notice'));
+      area.append($('p','静态检查：'+(names[value.status]||value.status)));
+      if(value.coverage)area.append($('p','已检查 '+value.coverage.inspected+' / '+value.coverage.declared+' 组已登记入口与配置。'));
       if(value.changes?.length)area.append($('p',value.changes.join('\n'),'notice'));
       for(const item of value.diagnostics||[])area.append($('p',[item.rule,(item.path||'')+(item.path&&item.line?':'+item.line:''),item.detail].filter(Boolean).join(' · '),'error-box'));
       if(value.entries?.length)table(area,['入口','配置','结果'],value.entries.map(item=>({value:item,cells:[item.entry,item.params,names[item.status]||item.status]})),item=>item.digest?openView(target('inspection',{report_digest:item.digest})):undefined);
-      if(value.rules?.length){const rules=$('details');rules.append($('summary','查看全部规则与证据'));area.append(rules);
-        table(rules,['规则','要求','证据'],value.rules.map(rule=>({cells:[rule.id,rule.requirement,Object.entries(rule.methods).map(([m,s])=>({static:'静态',behavior:'行为',review:'审查'}[m])+': '+(names[s]||s)).join('；')]})));}
     }
     let checking=false;
     button('检查当前项目',async()=>{

@@ -46,8 +46,9 @@
       for(const issue of index?.diagnostics||[])list.append(el('p',issue.path+'：'+issue.detail,'op-error'));
       list.querySelector('[aria-pressed=true]')?.scrollIntoView({block:'nearest'});
     }
-    async function open(id,version='current'){
-      selected=id;revision=version;activeKind=index.definitions.find(item=>item.id===id)?.kind||activeKind;
+    async function open(id,version='current',{selectKind=true}={}){
+      selected=id;revision=version;
+      if(selectKind)activeKind=index.definitions.find(item=>item.id===id)?.kind||activeKind;
       const ticket=++sequence;paintTree();
       try{sessionStorage.setItem(key,id);}catch{}
       disposeReaders(viewer);viewer.replaceChildren(el('p','读取定义…','op-muted'));
@@ -88,11 +89,12 @@
         if(index&&!force)return;
         const ticket=++sequence;const next=await request('project-operators');if(disposed||ticket!==sequence)return;
         index=next;paintTree();const item=index.definitions.find(d=>d.id===selected)||index.definitions[0];
-        if(item)await open(item.id);else viewer.replaceChildren(el('p','在开发中声明项目的 operators / prompts，即可在这里阅读定义。','op-empty'));
+        if(item)await open(item.id,item.id===selected?revision:'current',{selectKind:!force});
+        else viewer.replaceChildren(el('p','在开发中声明项目的 operators / prompts，即可在这里阅读定义。','op-empty'));
       },
       async selectSource(path,line,sha256){
         await this.load();const normalized=path?.replaceAll('\\','/');
-        const matches=index.definitions.filter(d=>(normalized===d.path||normalized===[index.source_prefix,d.path].filter(Boolean).join('/'))
+        const matches=index.definitions.filter(d=>normalized===d.path
           &&d.file_sha256===sha256&&(!line||d.line<=line&&d.end_line>=line));
         if(matches.length===1){await open(matches[0].id);return true;}return false;
       },

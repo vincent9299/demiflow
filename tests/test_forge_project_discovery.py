@@ -25,11 +25,6 @@ def original(tmp_path):
     root = repo / 'shipping'
     root.mkdir(parents=True)
     (repo / '.git').mkdir()
-    (repo / '.demiforge').mkdir()
-    declaration = dict(schema='demiforge-project-v2', standard='1.0.0-candidate.5',
-        pipelines={'shipments': dict(path='shipping', entry='dispatch.py',
-                                    verify=[{'argv': ['must-never-execute']}])})
-    (repo / '.demiforge/project.json').write_text(json.dumps(declaration))
     (root / 'operators').mkdir()
     (root / 'operators/clean.py').write_text('def clean(row):\n    return row\n')
     (root / 'dispatch.py').write_text('from operators.clean import clean\n'
@@ -43,9 +38,14 @@ def original(tmp_path):
     return root
 
 
-def declarations(root):
-    path = root.parent / '.demiforge/project.json'
-    return path, json.loads(path.read_text())
+def register_fixture_flow(root, params='settings/preview.json'):
+    """Register the fixture entry explicitly under the selected project."""
+    if not (root / 'workspace.json').exists():
+        ws.init_workspace(root, existing=True)
+    path = root / params
+    if not path.exists():
+        path.write_text('{"format": "demiflow_forge_flow_parameters_v2", "arguments": {}}')
+    ws.register_flow(root, 'dispatch.py:run_pipeline', params=params)
 
 
 def business_bytes(root):
@@ -60,40 +60,16 @@ def test_register_recognizes_original_without_execution_or_copies(original, tmp_
     console.add(tmp_path / 'console.json', original)
     value = ws.workspace_context(original)
     result = value['project']
-    assert result['entries'][0]['entry'] == 'dispatch.py:run_pipeline'
-    assert result['entries'][0]['configuration_entry'] == 'dispatch.py:config'
-    assert result['entries'][0]['protocol'] == 'config_run_pipeline'
+    assert result['entries'] == []
     assert result['configurations'][0]['path'] == 'settings/small.json'
     assert result['operators'][0]['path'] == 'operators'
     assert len(result['tables']) == 2  # documented head plus fixed configuration
     assert result['runs'][0]['status'] == 'unverified'
     assert result['coverage']['candidate_code_executed'] is False
-    assert value['flows'] == []  # recognized legacy entry is not an executable native Flow
-    assert any(d['code'] == 'unsupported_flow_protocol' for d in result['diagnostics'])
-    checked = project_ops.check_project(original)
-    assert checked['static_status'] == 'invalid'
-    assert checked['coverage']['source_inspected'] == 1
-    assert any(d.get('scope') == 'source_prerequisites' and 'initialization' in d['detail'] for d in checked['diagnostics'])
+    assert value['flows'] == []
+    assert any(d['code'] == 'entry_not_declared' for d in result['diagnostics'])
     assert business_bytes(original) == before
     assert not (original / 'tables').exists() and not (original / 'flows').exists()
-
-
-def test_partial_source_check_is_bound_to_originals_and_declarations(original):
-    ws.init_workspace(original, existing=True)
-    result = project_ops.check_project(original)
-    assert result['status'] == result['static_status'] == 'incomplete'
-    assert result['coverage']['recognized_entries'] == result['coverage']['source_inspected'] == 1
-    assert result['coverage']['declared'] == 0
-    assert set(result['sources']) == {'dispatch.py', 'operators/clean.py'}
-    assert project_ops.project_check_status(original)['status'] == 'incomplete'
-    operator = original / 'operators/clean.py'
-    operator.write_text(operator.read_text() + '\n# modified\n')
-    assert 'source_changed:operators/clean.py' in project_ops.project_check_status(original)['changes']
-    project_ops.check_project(original)
-    path, value = declarations(original)
-    value['pipelines']['shipments']['standard'] = 'unsupported-version'
-    path.write_text(json.dumps(value))
-    assert 'original_project_evidence_changed' in project_ops.project_check_status(original)['changes']
 
 
 def test_project_check_tracks_the_checker_revision(original, monkeypatch):
@@ -108,61 +84,7 @@ def test_project_check_tracks_the_checker_revision(original, monkeypatch):
     status = project_check.status(original, table_resolver=resolver)
     assert 'platform_changed' not in status['changes']
     assert status['platform_provenance']['current_digest'] == '0'*64
-    assert status['static_status'] == result['static_status']
-
-
-@pytest.mark.parametrize('change,code', [
-    ('unsupported', 'unsupported_standard'), ('duplicate_owner', 'conflicting_owner'),
-    ('outside_entry', 'declaration_unreadable'), ('missing_entry', 'entry_unreadable'),
-    ('wrong_symbol', 'entry_missing'), ('duplicate_json', 'declaration_unreadable'),
-])
-def test_explicit_gaps_are_not_empty_success(original, change, code):
-    path, value = declarations(original)
-    row = value['pipelines']['shipments']
-    if change == 'unsupported':
-        row['standard'] = 'v-next'
-    elif change == 'duplicate_owner':
-        value['pipelines']['other'] = dict(row)
-    elif change == 'missing_entry':
-        (original / 'dispatch.py').unlink()
-    elif change == 'wrong_symbol':
-        (original / 'dispatch.py').write_text('def different():\n    pass\n')
-    elif change == 'outside_entry':
-        row.update(standard='1.0.0-candidate.9', entry={'path': 'elsewhere/recipe.py', 'symbol': 'build'}, operators=[])
-    path.write_text('{"schema":1,"schema":2}' if change == 'duplicate_json' else json.dumps(value))
-    result = discover(original, {'entries': {}})
-    assert result['status'] == 'partial'
-    assert code in {d['code'] for d in result['diagnostics']}
-
-
-def test_native_project_roles_need_no_directory_spelling(original):
-    path, value = declarations(original)
-    value['pipelines']['shipments'].update(standard='1.0.0-candidate.9',
-        entry={'path': 'shipping/dispatch.py', 'symbol': 'run_pipeline'}, operators=['shipping/processing.py'])
-    path.write_text(json.dumps(value))
-    (original / 'processing.py').write_text('def process(row):\n    return row\n')
-    result = discover(original, {'entries': {'dispatch.py:run_pipeline': ['settings/small.json']}})
-    assert len(result['entries']) == 1
-    assert result['entries'][0]['parameters'] == ['settings/small.json']
-    assert result['operators'][0]['path'] == 'processing.py'
-    assert not any(d['code'] == 'parameters_unbound' for d in result['diagnostics'])
-
-
-def test_conflicting_protocol_is_reported(original):
-    value = discover(original, {'entries': {'dispatch.py:run_pipeline': ['settings/small.json']}})
-    assert 'conflicting_entry' in {d['code'] for d in value['diagnostics']}
-
-
-def test_format_version_mismatch_and_sibling_paths(original, tmp_path):
-    path, value = declarations(original)
-    (original.parent / 'sibling').symlink_to(tmp_path)
-    value['pipelines']['sibling'] = dict(path='sibling', entry='other.py')
-    path.write_text(json.dumps(value))
-    assert len(discover(original, {'entries': {}})['entries']) == 1
-    value['pipelines']['shipments']['standard'] = '1.0.0-candidate.9'
-    path.write_text(json.dumps(value))
-    result = discover(original, {'entries': {}})
-    assert 'unsupported_entry' in {d['code'] for d in result['diagnostics']}
+    assert status['status'] == result['status']
 
 
 def test_config_reference_budget_is_visible_without_hiding_the_project(original):
@@ -193,22 +115,13 @@ def test_reference_shape_does_not_turn_arbitrary_uris_into_tables(original):
     assert any(d['code'] == 'configuration_format_unknown' for d in result['diagnostics'])
 
 
-def test_owner_path_must_be_normalized(original):
-    path, value = declarations(original)
-    value['pipelines']['shipments']['path'] = './shipping'
-    path.write_text(json.dumps(value))
-    result = discover(original, {'entries': {}})
-    assert result['entries'] == []
-    assert any(d['code'] == 'invalid_owner' for d in result['diagnostics'])
-
-
 def test_unknown_project_and_nearest_repository_boundary(tmp_path):
     parent = tmp_path / '.demiforge'; parent.mkdir()
     (parent / 'project.json').write_text('invalid')
-    root = tmp_path / 'unrelated'; root.mkdir(); (root / '.git').mkdir()
+    root = tmp_path / 'unrelated'; root.mkdir()
     (root / 'main.py').write_text('raise RuntimeError("never import")')
     value = discover(root, {'entries': {}})
-    assert value['entries'] == [] and value['declarations'] == []
+    assert value['entries'] == []
     assert [d['code'] for d in value['diagnostics']] == ['entry_not_declared']
 
 

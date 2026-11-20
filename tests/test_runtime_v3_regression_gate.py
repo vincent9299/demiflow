@@ -1,3 +1,4 @@
+import unittest
 """The V035 evidence gate refuses false green; one real child proves execution."""
 from copy import deepcopy
 import json
@@ -137,9 +138,15 @@ def test_subtests_preserve_parent_and_every_failure_boundary(fixture, defect):
     assert bool(result['failed']) is (defect is not None)
 
 
+class RegressionGateSubtestFixture(unittest.TestCase):
+    def test_reports_each_subtest(self):
+        for value in range(6):
+            with self.subTest(value=value):
+                self.assertIsInstance(value, int)
+
+
 def test_real_unittest_subtests_have_distinct_reports_and_one_parent(tmp_path):
-    node = ('tests/test_forge_development_workspace.py::WorkspaceDevelopmentTests'
-            '::test_projection_validates_skipped_json')
+    node = 'tests/test_runtime_v3_regression_gate.py::RegressionGateSubtestFixture::test_reports_each_subtest'
     result = gate.execute_batch({'nodeids': [node], 'environment': 'local', 'python': sys.executable},
         entries={node: {'state': 'reviewed', 'environment': 'local'}}, destination=tmp_path / 'subtest-child')
     receipt = gate.read_json(result['receipt'])

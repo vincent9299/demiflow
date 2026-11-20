@@ -58,7 +58,7 @@
   const timestamp=value=>Number.isFinite(value)&&value>0?value:null;
   function localTime(seconds){if(!seconds)return '';const date=new Date(seconds*1000);return (date.getMonth()+1)+'/'+date.getDate()+' '+String(date.getHours()).padStart(2,'0')+':'+String(date.getMinutes()).padStart(2,'0');}
   function duration(seconds){const value=Math.max(0,Math.floor(seconds));return value<60?value+'s':value<3600?Math.floor(value/60)+'m '+value%60+'s':Math.floor(value/3600)+'h '+Math.floor(value%3600/60)+'m';}
-  function create({flow,onRaw=()=>{},onChange=()=>{},onTrim=()=>{},formatDevelopment=value=>value.state||'Checks'}={}){
+  function create({flow,onRaw=()=>{},onChange=()=>{},onTrim=()=>{}}={}){
     if(!(flow instanceof Element))throw new TypeError('A chat flow element is required');
     const items=new Map(),turns=new Map(),textItems=new Map(),toolItems=new Map(),seen=new Map();
     let mode='standard',textBytes=0,trimmed=0,disposed=false,lastText=null,pagedText=null,latestTurn=null,renderTimer=null;
@@ -202,11 +202,20 @@
         const turn=newTurn(event);if(data.state)turn.state=data.state;
         if(data.cleanup==='complete'){finishText();turn.done=true;turn.ended=timestamp(event.observed_at);for(const key of turn.ids){const item=items.get(key);if(item){item.running=false;item.node.classList.remove('dfc-streaming');if(item.preview)item.preview.textContent=excerpt(item.summary||item.text);}}}
         paintTurn(turn);
-        if(data.result){try{const result=typeof data.result==='string'?JSON.parse(data.result):data.result;if(result.reason)system(event,'Run details',result.reason);}catch{}}
+        if(data.result){try{
+          const result=typeof data.result==='string'?JSON.parse(data.result):data.result;
+          if(result.reason)system(event,'Run details',result.reason);
+          for(const [key,label] of [['native_flow','原生数据流检查'],['project_layout','项目目录检查']]){
+            const check=result.pipeline_checks?.[key];if(!check)continue;
+            const status={passed:'通过',failed:'发现问题',incomplete:'待核对',not_applicable:'不适用'}[check.status]||'待核对';
+            const details=(check.diagnostics||[]).map(d=>[d.rule,d.path+(d.line?':'+d.line:''),d.detail].filter(Boolean).join(' · '));
+            const omitted=check.diagnostic_count-details.length;if(omitted>0)details.push('另有 '+omitted+' 项诊断');
+            system(event,label,[status,...details].join('\n'),null,'pipeline:'+key);
+          }
+        }catch{}}
       }else if(event.type==='change.observed')system(event,'Changed files',(data.files||[]).map(file=>file.path+'\n'+(file.diff||file.diff_unavailable||'')).join('\n'),'change:'+event.sequence);
       else if(event.type==='check.reference')system(event,'Checks',JSON.stringify(data.result||data,null,2),'check:'+event.sequence);
-      else if(event.type==='development.state')system(event,'Development checks',formatDevelopment(data)+(data.reason?'\n'+data.reason:''),null,'development');
-      else if(event.type==='development.repair.started')system(event,'Auto repair · Round '+data.round,(data.feedback||[]).map(value=>value.reason||'').join('\n')||'Repairing the checked candidate.');
+
       else if(event.type==='questions.observed')system(event,'Questions',JSON.stringify(data,null,2));
       else if(event.type==='provider.error')system(event,'Provider error',JSON.stringify(data,null,2));
       else if(event.type==='history.gap')system(event,'History','The provider did not replay history. These are the application’s saved events.');

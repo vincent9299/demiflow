@@ -32,21 +32,13 @@ def _scope_nodes(items):
         stack.extend(reversed(list(ast.iter_child_nodes(node))))
 
 
-def _declared(root, control, entry, params):
+def _require_declared(root, control, entry, params):
     ws.validate_entry(root, entry)
-    if entry in control.get('entries', {}):
-        if params is not None and params not in control['entries'][entry]:
-            raise ForgeError('Parameters are not registered for this entry', code='conflict')
-        return []
-    from demiflow.workbench.projects.discovery import discover
-    project = discover(root, control)
-    entries = project['entries']
-    if not any(e['entry'] == entry for e in entries):
+    entries = control.get('entries', {})
+    if entry not in entries:
         raise ForgeError('Entry is not declared by this project', code='not_found')
-    if params is not None:
-        raise ForgeError('Original entry has no native parameter registration', code='operation_rejected')
-    path=next(e['path'] for e in entries if e['entry']==entry)
-    return [d for d in project['diagnostics'] if d.get('path')==path or not d.get('path')]
+    if params is not None and params not in entries[entry]:
+        raise ForgeError('Parameters are not registered for this entry', code='conflict')
 
 
 def _source(root, control, entry, params):
@@ -103,11 +95,11 @@ def _source_tree(root, *, entry, params, expected_workspace):
     root,control,_ = ws.load_workspace(root)
     if content_digest(control)!=expected_workspace:
         raise ForgeError('Workspace changed while reading the graph',code='conflict')
-    declared_diagnostics = _declared(root, control, entry, params)
+    _require_declared(root, control, entry, params)
     tree = SourceTree(root, {'files':16, 'total_bytes':4*1024**2, 'nodes':256, 'edges':512})
     path, symbol = entry.split(':')
     module = path[:-3].replace('/', '.')
-    nodes, edges, diagnostics = [], [], list(declared_diagnostics)
+    nodes, edges, diagnostics = [], [], []
     node_count=edge_count=0
     try:
         namespace, definition = _entry_definition(tree, module, path, symbol, diagnostics)

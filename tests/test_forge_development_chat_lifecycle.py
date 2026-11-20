@@ -123,22 +123,6 @@ def test_recovery_rejects_replaced_unit_and_worker_rejects_stale_identity(tmp_pa
     finally: service.close()
 
 
-def test_legacy_missing_launch_phase_is_not_upgraded_to_unstarted_proof(tmp_path):
-    root, path, _ = configuration(tmp_path)
-    service = Service(path)
-    sid = service.create('wfixture', root, 'legacy', 'codex')['id']
-    saved, _ = service.store.submit('wfixture', sid, 'first', 0, 'retained requirement', root_identity(root), service.policy_hash)
-    service.close()
-    with service.store.connect(write=True) as db:
-        db.execute('ALTER TABLE turns DROP COLUMN launch_phase')
-    service = Service(path)
-    try:
-        assert service.store.turn(saved['id'])['launch_phase'] == 'unknown'
-        assert service.store.turn(saved['id'])['text'] == 'retained requirement'
-        assert not service.recover('wfixture', root, sid, 1)['recovery']['can_continue']
-    finally: service.close()
-
-
 def test_restart_inventory_cannot_overwrite_a_newer_cleanup_receipt(tmp_path, monkeypatch):
     root, path, _ = configuration(tmp_path)
     service = Service(path)

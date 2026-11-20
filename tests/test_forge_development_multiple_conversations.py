@@ -43,6 +43,9 @@ def finish(case, turn):
 def service_for(case):
     """Use production service routing with no worker, admission snapshot or model."""
     service = Service.__new__(Service)
+    service.settings = None
+    service.root = case.store.root
+    service.config_path = service.root / "fixture-policy.json"
     service.store, service.policy_hash = case.store, case.policy
     service.lock = threading.Lock()
     service._reap = lambda: None
@@ -79,31 +82,6 @@ def test_first_explicit_conversation_pins_primary_and_persists_on_restart(case):
     assert reopened.primary(case.workspace, case.identity, case.policy)['id'] == first
     assert reopened.writable(case.workspace, second, case.identity, case.policy, {'codex'})
     assert reopened.create_conversation(case.workspace, case.identity, 'codex', 'second', case.policy)['id'] == second
-
-
-def test_legacy_migration_keeps_only_main_writable_and_history_unchanged(case):
-    old = case.store.create(case.workspace, case.identity, 'codex', 'old', case.policy)['id']
-    old_turn = submit(case, old)
-    finish(case, old_turn)
-    main = case.store.create(case.workspace, case.identity, 'codex', 'main', case.policy)['id']
-    finish(case, submit(case, main))
-    empty = case.store.create(case.workspace, case.identity, 'codex', 'unused', case.policy)['id']
-    history = {sid: case.store.events(case.workspace, sid) for sid in (old, main, empty)}
-    with case.store.connect(write=True) as db:
-        before = [tuple(row) for row in db.execute('SELECT * FROM sessions ORDER BY id')]
-        db.execute('DROP TABLE project_conversation_members')
-    case.store = Store(case.store.root, case.store.limits, initialize=True)
-    with case.store.connect() as db:
-        assert [tuple(row) for row in db.execute('SELECT * FROM sessions ORDER BY id')] == before
-        assert db.execute('SELECT count(*) FROM project_conversation_members').fetchone()[0] == 0
-    new = create(case, 'new-after-migration', new=True)
-    writable = {row['id'] for row in listing(case)['sessions'] if row['writable']}
-    assert writable == {main, new}
-    assert create(case, 'default-after-migration') == main
-    assert {sid: case.store.events(case.workspace, sid) for sid in history} == history
-    with pytest.raises(ForgeError, match='membership'):
-        create(case, 'old', new=True)
-    assert not case.store.writable(case.workspace, old, case.identity, case.policy, {'codex'})
 
 
 def test_fallback_never_promotes_an_explicit_member(case):
@@ -157,7 +135,7 @@ def test_paged_minimal_list_and_writer_identity_are_workspace_scoped(case):
     assert len(tail['sessions']) == 2 and tail['next_offset'] is None
     row = next(row for row in tail['sessions'] if row['id'] == main)
     assert row['title'] == 'First conversation message'
-    assert row['turn'] == dict(id=turn['id'], state='preparing', cleanup='pending', development=dict(busy=False))
+    assert row['turn'] == dict(id=turn['id'], state='preparing', cleanup='pending')
     assert set(row) == {'id', 'title', 'provider', 'created', 'revision', 'writable', 'turn'}
     alias_page = case.store.list('alias-workspace', identity=case.identity, policy_hash=case.policy, providers={'codex'})
     assert alias_page['writer_busy'] and alias_page['active_session_id'] is None
@@ -170,20 +148,6 @@ def test_paged_minimal_list_and_writer_identity_are_workspace_scoped(case):
     finish(case, submit(case, members[0]))
     with pytest.raises(ForgeError):
         listing(case, limit=21)
-
-
-@pytest.mark.parametrize('changes', [dict(gate_cleanup='pending'), dict(gate_phase='repair_pending')])
-def test_completed_provider_keeps_writer_busy_until_gate_cleanup(case, changes):
-    sid = create(case, 'main')
-    member = create(case, 'member', new=True)
-    turn = submit(case, sid)
-    finish(case, turn)
-    case.store.update(turn['id'], **changes, development=json.dumps(dict(busy=True)))
-    page = listing(case)
-    assert page['writer_busy'] and page['active_session_id'] == sid
-    assert next(row for row in page['sessions'] if row['id'] == sid)['turn']['development']['busy']
-    with pytest.raises(ForgeError, match='physical project'):
-        submit(case, member)
 
 
 def test_session_scoped_project_turns_preserve_aggregate_and_ownership(case):

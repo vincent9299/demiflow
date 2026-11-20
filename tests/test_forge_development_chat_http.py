@@ -15,8 +15,15 @@ from test_forge_development_chat import configuration
 
 
 @contextmanager
-def app(tmp_path, *, acp=False):
+def app(tmp_path, *, acp=False, guided=False):
     root,path,value=configuration(tmp_path)
+    if guided:
+        from demiflow.workbench.projects.workspace import init_workspace
+        init_workspace(root, name='Guided project', existing=True)
+        (root / 'flows').mkdir()
+        (root / 'prompts').mkdir()
+        value['projects']['wfixture'].update(kind='pipeline', writes=['flows', 'prompts'],
+                                             watch=['flows', 'prompts'])
     registry=tmp_path/'registry.json';created=console.add(registry,root)
     workspace=created['workspace_id']
     value['projects'][workspace]=value['projects'].pop('wfixture');path.write_text(json.dumps(value))

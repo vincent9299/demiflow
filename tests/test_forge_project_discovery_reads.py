@@ -1,6 +1,5 @@
 """Multi-entry discovery shares source work without weakening freshness/budgets."""
 import hashlib
-import json
 
 from demiflow.workbench.projects import discovery as discovery
 
@@ -18,11 +17,12 @@ def test_many_entries_in_one_module_fit_the_source_budget(tmp_path, monkeypatch)
         return raw
 
     monkeypatch.setattr(discovery, 'read_bounded', count)
+    (tmp_path / 'params.json').write_text('{"format":"demiflow_forge_flow_parameters_v2","arguments":{}}')
     result = discovery.discover(tmp_path, {'entries': {
-        f'recipe.py:flow_{n}': [] for n in range(8)}})
+        f'recipe.py:flow_{n}': ['params.json'] for n in range(8)}})
     assert len(result['entries']) == 8
     assert all(e['status'] == 'recognized' for e in result['entries'])
-    assert {d['code'] for d in result['diagnostics']} == {'parameters_unbound'}
+    assert result['diagnostics'] == []
     assert sum(size for path, size in reads if path == source) == source.stat().st_size
 
 
@@ -40,13 +40,6 @@ def test_shared_module_preserves_each_symbol_and_duplicate_diagnostics(tmp_path)
 
 
 def test_changed_source_cannot_reuse_earlier_entry_facts(tmp_path, monkeypatch):
-    (tmp_path / '.git').mkdir()
-    declaration = tmp_path / '.demiforge/project.json'
-    declaration.parent.mkdir()
-    declaration.write_text(json.dumps({
-        'schema': 'demiforge-project-v2', 'standard': '1.0.0-candidate.9',
-        'pipelines': {'orders': {'path': '.', 'entry': {
-            'path': 'recipe.py', 'symbol': 'build'}, 'operators': []}}}))
     source = tmp_path / 'recipe.py'
     source.write_text('def build():\n    pass\n')
     old = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -54,7 +47,7 @@ def test_changed_source_cannot_reuse_earlier_entry_facts(tmp_path, monkeypatch):
 
     def change_between_declarations(path, maximum):
         raw = read(path, maximum)
-        if path == declaration:
+        if path == source:
             source.write_text('def changed():\n    pass\n')
         return raw
 

@@ -62,7 +62,7 @@ def run(*, source, target):
     assert project_ops.report_status(root, report['digest'])['status'] == 'checked'
     checked = project_ops.check_project(root)
     assert next(item for item in checked['entries'] if item['entry'] == entry)['status'] == 'checked'
-    assert project_ops.project_check_status(root)['static_status'] == checked['static_status']
+    assert project_ops.project_check_status(root)['status'] == checked['status']
     project_ops.bind_audit_report(root, report['digest'], expected=content_digest(ws.load_workspace(root)[1]))
     observation = project_ops.audit_check(root, kind='report', report_digest=report['digest'],
         expected_policy=ws.audit_status(root)['policy_digest'])

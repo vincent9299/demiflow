@@ -249,53 +249,6 @@ def test_large_source_graph_has_bounded_index_and_local_navigation(isolated,brow
 
 
 
-def test_original_declared_project_without_native_flows_is_usable_and_honest(original,tmp_path,browser):
-    registry=tmp_path/'registry.json'
-    key=console.add(registry,original)['workspace_id']
-    before=business_bytes(original)
-    declaration=original.parent/'.demiforge/project.json';declaration_before=declaration.read_bytes()
-    grants=registry.read_bytes();calls=[]
-    with service(None,registry=registry,enable_runs=True) as app,page_for(browser,app) as (page,errors):
-        page.on('request',lambda r:calls.append((r.method,r.url)) if '/api/' in r.url else None)
-        page.locator('#project-switcher').click()
-        page.locator('#project-list [data-workspace="'+key+'"]').click()
-        pipeline(page)
-        expect(page.get_by_label('流程',exact=True)).to_have_value('dispatch.py:run_pipeline')
-        expect(page.get_by_label('配置',exact=True)).to_be_disabled()
-        expect(page.locator('.wb-access')).to_contain_text('尚未绑定可执行的原生流程与参数')
-        expect(page.locator('.wb-basis')).to_contain_text('源码观察图 · 尚未检查')
-        assert page.locator('.wb-node').count()==1
-        page.locator('.wb-node').first.click()
-        expect(page.locator('.wb-source-body')).to_contain_text('def clean(row)')
-        expect(page.locator('.wb-inspector')).to_contain_text('输入输出类型、参数语义与执行可用性尚未核验')
-        screenshot(page,'original-unconnected-initial-graph')
-        page.get_by_role('button',name='检查问题',exact=True).click()
-        expect(page.locator('.wb-check-issues')).to_contain_text('unsupported_flow_protocol')
-        expect(page.locator('.wb-check-issues')).to_contain_text('能力未支持')
-        expect(page.locator('.wb-check-issues')).to_contain_text('原 config → run_pipeline')
-        expect(page.locator('.wb-body')).to_be_visible()
-        expect(page.get_by_role('button',name='运行',exact=True)).to_be_disabled()
-        page.get_by_role('button',name='接入与权限',exact=True).click()
-        expect(page.locator('.wb-settings')).to_contain_text('已登记 0 个原生流程')
-        expect(page.get_by_role('button',name='登记原生流程',exact=True)).to_be_disabled()
-        page.get_by_role('button',name='运行记录',exact=True).click()
-        expect(page.locator('.wb-history')).to_contain_text('当前页没有运行记录')
-        assert not [url for method,url in calls if method=='POST']
-        screenshot(page,'original-unconnected-source-and-entry')
-        project_info(page)
-        page.get_by_role('button',name='检查当前项目',exact=True).click()
-        expect(page.locator('.workbench')).to_contain_text('整体：尚未完成；静态检查：尚未完成')
-        expect(page.locator('.workbench')).to_contain_text('缺少原生协议或参数绑定')
-        assert len([url for method,url in calls if method=='POST'])==1
-        assert all(url.endswith('/project-check') for method,url in calls if method=='POST')
-        assert not ws.workspace_context(original)['flows']
-        assert runs.list_runs(original)['total']==0
-        assert registry.read_bytes()==grants and business_bytes(original)==before
-        assert declaration.read_bytes()==declaration_before
-        assert not errors,errors
-        screenshot(page,'original-unconnected-project-check')
-
-
 def test_hidden_report_node_deep_link_and_large_offline_export_are_bounded(isolated,tmp_path,browser):
     from demiflow.workbench.api import export_report
     (isolated/'flows/many.py').write_text("from demiflow import data\ndef run(*,source,target):\n    d=data.read_lance(source['uri'],version=source['version'])\n"+'    d=d.limit(1)\n'*130+"    return d.write_lance(target['uri'],mode='create',return_receipt=True)\n")

@@ -49,8 +49,6 @@ assert set(data.__all__) <= set(dir(data))
 assert 'Dataset' not in vars(data)
 assert 'demiflow.data.dataset' not in sys.modules
 assert 'demiflow.execution' not in sys.modules
-from demiflow.forge.development.cli import parser
-assert parser()
 print('LEAN_COLD_OK')
 '''
 

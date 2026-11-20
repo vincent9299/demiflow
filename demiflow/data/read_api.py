@@ -122,6 +122,7 @@ def read_records(
     )
 
 
+@_flow_api('range')
 def range(n: int, *, backend_options=None) -> Dataset:
     """Create a lazy Dataset of ``{"id": value}`` rows in ``[0, n)``."""
     return DataAPI(_current_executor.get()).range(n, backend_options=backend_options)

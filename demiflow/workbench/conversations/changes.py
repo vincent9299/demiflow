@@ -9,8 +9,8 @@ from demiflow.workbench.conversations.common import snapshot
 TEXT_SUFFIXES = {'.py', '.md', '.json', '.yaml', '.yml', '.toml', '.js', '.css', '.html', '.txt'}
 
 
-def capture(root, paths):
-    facts = snapshot(root, paths)
+def capture(root, paths, *, exclude=()):
+    facts = snapshot(root, paths, exclude=exclude)
     remaining = 128 * 1024
     for name, fact in facts.items():
         if fact is None: continue

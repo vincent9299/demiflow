@@ -116,14 +116,7 @@ def catalog(root):
     for path, digest in sources.items():
         if hashlib.sha256(read_bounded(ws.relative_path(root, path), MAX_SOURCE)).hexdigest() != digest:
             raise ForgeError('Definitions changed during reading', code='conflict')
-    source_prefix = ''
-    for declaration in facts['declarations']:
-        path = Path(declaration['path'])
-        if path.name == 'project.json' and path.parent.name == '.demiforge' and root.is_relative_to(path.parent.parent):
-            source_prefix = root.relative_to(path.parent.parent).as_posix()
-            if source_prefix == '.': source_prefix = ''
-            break
-    result = dict(format='demiflow.project_definitions.v1', source_prefix=source_prefix, definitions=items, diagnostics=diagnostics,
+    result = dict(format='demiflow.project_definitions.v1', definitions=items, diagnostics=diagnostics,
                   discovery=facts['digest'], sources=sources, usage_coverage='declared_sources_only')
     result['revision'] = content_digest(result)
     bounded_json(result, 1024**2)

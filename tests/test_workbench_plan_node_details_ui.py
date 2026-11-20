@@ -5,7 +5,7 @@ from playwright.sync_api import expect
 
 from demiflow.workbench.projects import registry
 from test_forge_markdown_reading import browser
-from test_forge_project_discovery import original, snapshot, cached_snapshot, business_bytes
+from test_forge_project_discovery import original, snapshot, cached_snapshot, business_bytes, register_fixture_flow
 from test_forge_public_api import service
 from test_forge_web_redesign import opened
 from test_map_prompt_async import PACK
@@ -15,15 +15,17 @@ def setup_materials(original):
     (original / 'operators/clean.py').write_text('def clean(row):\n'
         '    """准确的业务函数正文。"""\n'
         '    raise AssertionError("must not execute rows")\n')
-    (original / 'settings/prompt.yaml').write_text(PACK)
+    (original / 'prompts').mkdir()
+    (original / 'prompts/prompt.yaml').write_text(PACK)
     (original / 'dispatch.py').write_text('from demiflow import data\n'
-        'from shipping.operators.clean import clean\n'
+        'from operators.clean import clean\n'
         'def config(): return {}\n'
         'def run_pipeline():\n'
         '    rows = data.from_items([{\"item\": \"x\"}]).map(clean, label="整理输入")\n'
-        '    return rows.map_prompt_async("enrich", config="settings/prompt.yaml",\n'
+        '    return rows.map_prompt_async("enrich", config="prompts/prompt.yaml",\n'
         '        inputs={"payload":"item"}, output="answer", max_requests=1, label="联合出题").take_all()\n')
 
+    register_fixture_flow(original)
 
 def test_real_nodes_open_matching_function_and_prompt_with_unreferenced_tabs_hidden(original, tmp_path, browser):
     setup_materials(original)
@@ -134,7 +136,7 @@ def test_referenced_but_over_budget_prompt_keeps_an_honest_tab(original, tmp_pat
     for _ in range(8):
         schema = {'type': 'object', 'properties': {'child': schema}, 'required': ['child'], 'additionalProperties': False}
     pack['prompts']['enrich']['response_schema'] = schema
-    (original / 'settings/prompt.yaml').write_text(json.dumps(pack))
+    (original / 'prompts/prompt.yaml').write_text(json.dumps(pack))
     path = tmp_path / 'registry.json'
     registry.add(path, original)
     with service(None, registry=path) as app, opened(browser, app) as (page, requests):

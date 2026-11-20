@@ -33,11 +33,6 @@ def run_pipeline(*, stage: str):
 ''')
     (original / 'settings/small.json').write_text(json.dumps({
         'format': 'demiflow_forge_flow_parameters_v1', 'arguments': {'stage': 'plain'}}))
-    declaration = dict(schema='demiforge-project-v3', standard='1.0.0-candidate.10',
-                       projects={'shipping': dict(path='shipping', flows={
-                           'shipments': dict(path='shipping/dispatch.py', symbol='run_pipeline')},
-                           operators=['shipping/operators'])})
-    (original.parent / '.demiforge/project.json').write_text(json.dumps(declaration))
     ws.init_workspace(original, existing=True)
     ws.register_flow(original, 'dispatch.py:run_pipeline', params='settings/small.json')
     registry.add(registry_path, original)
@@ -84,7 +79,7 @@ def test_original_configuration_selector_compiles_through_real_http(original, tm
         assert combined['basis']['params_sha256'] != plain['basis']['params_sha256']
         expect(page.locator('.wb-node')).to_have_count(5)
         assert len([url for method, url in requests if method == 'POST' and url.endswith('/plan-preview')]) == initial_requests + 2
-        expect(page.get_by_role('button', name='运行', exact=True)).to_be_disabled()
+        expect(page.locator('.wb-actions').get_by_role('button', name='运行', exact=True)).to_be_disabled()
     after = business_bytes(original)
     assert after.pop('settings/small.json') != before.pop('settings/small.json')
     assert after == before

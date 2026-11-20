@@ -57,25 +57,3 @@ class PublicIntegrationTests(unittest.TestCase):
             self.assertIs(namespace[name], value)
         with self.assertRaises(AttributeError):
             getattr(demiflow, "_unknown_public_object")
-
-    def test_forge_dev_delegates_help_list_and_exit_codes(self):
-        from click.testing import CliRunner
-        from demiflow.cli import main
-        from test_forge_development_migration import fixture
-        runner = CliRunner()
-        help_result = runner.invoke(main, ["forge", "dev", "--help"])
-        self.assertEqual(help_result.exit_code, 0, help_result.output)
-        self.assertIn("history", help_result.output)
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            fixture(root)
-            result = runner.invoke(main, ["forge", "dev", "--project", str(root), "list"])
-            self.assertEqual(result.exit_code, 0, result.output)
-            self.assertTrue(json.loads(result.output)["read_only"])
-            result = runner.invoke(main, ["forge", "dev", "--project", str(root), "start", "--id", "incomplete"])
-            self.assertEqual(result.exit_code, 2)
-            self.assertIn("--pipeline", result.output)
-
-
-if __name__ == "__main__":
-    unittest.main()

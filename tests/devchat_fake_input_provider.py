@@ -19,7 +19,7 @@ def event(method, params):
 
 def call(identifier, arguments):
     send(dict(id=identifier, method='item/tool/call', params=dict(threadId=thread,
-        turnId=turn, tool='development_protocol', arguments=dict(operation='input', arguments=arguments))))
+        turnId=turn, tool='read_input', arguments=arguments)))
 
 
 for line in sys.stdin:
@@ -32,7 +32,7 @@ for line in sys.stdin:
             shell_environment_policy=dict(inherit='none'), web_search='disabled'))
     elif method in {'thread/start', 'thread/resume'}:
         root = Path(params['cwd'])
-        assert 'input' in params['dynamicTools'][0]['inputSchema']['properties']['operation']['enum']
+        assert params['dynamicTools'][0]['name'] == 'read_input'
         result = dict(cwd=str(root), model=params['model'], approvalPolicy=params['approvalPolicy'],
             sandbox=dict(type='dangerFullAccess'), thread=dict(id=thread))
     elif method == 'turn/start':

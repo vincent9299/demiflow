@@ -1,3 +1,5 @@
+> 历史文档。当前实现见 [Forge 开发辅助方案](forge-guided-coding-redesign.md)。
+
 # Forge v1 契约与项目边界
 
 本文对应旧 `forge new/check/verify/review/freeze/run` 的 v1 项目协议。当前原项目管理、任意合法目录布局及只读识别见 [工作区指南](forge-workspace.md) 和 [原项目识别](forge-project-discovery.md)；下述固定骨架与三节点约束适用于 v1，不作为原项目登记要求。

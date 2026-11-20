@@ -271,6 +271,31 @@ def simple_flow(
     ).inspect("flows/simple.py:run", arguments or {})
 
 
+def test_native_range_filter_count_declares_integer_ids_and_scalar_result(tmp_path, catalog):
+    source = """from demiflow import data
+from operators.rules import is_even
+
+def run():
+    return data.range(10).filter(is_even).count()
+"""
+    predicate = """from typing import TypedDict
+class Row(TypedDict):
+    id: int
+def is_even(row: Row) -> bool:
+    return row['id'] % 2 == 0
+"""
+    report = simple_flow(tmp_path, catalog, source, predicate)
+    assert report['status'] == 'checked', report['diagnostics']
+    assert [node['kind'] for node in report['nodes']] == ['range', 'filter', 'count']
+    assert report['nodes'][0]['fields']['id'] == field(scalar('int'))
+    assert report['nodes'][-1]['result'] == 'value'
+    assert report['coverage']['execution'] == 'not_run'
+
+    negative = simple_flow(tmp_path, catalog, source.replace('range(10)', 'range(-1)'), predicate)
+    assert negative['status'] == 'invalid'
+    assert 'non-negative integer' in negative['diagnostics'][0]['detail']
+
+
 @pytest.mark.parametrize(
     "expression,operator,status,rule",
     [

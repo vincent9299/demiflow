@@ -9,8 +9,6 @@ from demiflow.workbench.conversations.common import reject
 from demiflow.workbench.conversations.common import safe_path
 from demiflow.workbench.conversations.common import text
 from demiflow.workbench.conversations.common import wire
-from demiflow.workbench.conversations.context import BRIDGE
-from demiflow.workbench.conversations.context import bridge_spec
 from demiflow.workbench.conversations.policy import proxy_environment
 from demiflow.workbench.conversations.versions import matches_user_agent
 
@@ -106,7 +104,7 @@ class Codex:
         if config.get('web_search') != 'disabled': reject('Native web search is not disabled')
         return dict(integrations='disabled', shell_environment='allowlist', filesystem='host_permissions')
 
-    def open(self, prompt):
+    def open(self, prompt, *, tools=()):
         params = dict(cwd=self.project['root'], model=self.config['model'],
             approvalPolicy='on-request', approvalsReviewer='user', sandbox='danger-full-access', developerInstructions=prompt)
         if self.config.get('base_url') or self.config.get('_boundary'): params['modelProvider'] = 'devchat'
@@ -114,7 +112,7 @@ class Codex:
             params.update(threadId=self.thread, excludeTurns=True)
             return self.transport.request('thread/resume', params)
         params.update(ephemeral=False, experimentalRawEvents=False, allowProviderModelFallback=False,
-                      dynamicTools=[dict(type='function', **bridge_spec(self.project))] if self.project['kind'] == 'demiforge_registered' else [])
+                      dynamicTools=[dict(type='function', **tool) for tool in tools])
         return self.transport.request('thread/start', params)
 
     def opened(self, result):
@@ -151,8 +149,7 @@ class Codex:
             if params.get('threadId') != self.thread or not params.get('turnId'):
                 reject('Server request lacks current thread/turn identity')
             if method == 'item/tool/call':
-                if params.get('tool') != BRIDGE['name']: reject('Unknown dynamic tool')
-                return [('bridge', dict(rpc_id=event['id'], arguments=params['arguments']))]
+                return [('bridge', dict(rpc_id=event['id'], tool=params.get('tool'), arguments=params['arguments']))]
             accepted = {'item/tool/requestUserInput', 'item/commandExecution/requestApproval',
                         'item/fileChange/requestApproval', 'item/permissions/requestApproval'}
             if method not in accepted:
@@ -254,7 +251,7 @@ class Codex:
 
 class CodexCompact(Codex):
     """Native maintenance turn; never a slash command sent as a user message."""
-    def open(self, prompt):
+    def open(self, prompt, *, tools=()):
         if not self.thread: reject('Compaction requires an existing provider thread')
         return self.transport.request('thread/resume', dict(threadId=self.thread,
             cwd=self.project['root'], model=self.config['model'], excludeTurns=True,

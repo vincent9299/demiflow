@@ -83,8 +83,6 @@ GET_FIELDS = {
     'operator-definition': ({'id'}, {'revision'}),
     'operator-history': ({'id'}, set()),
     'flow-arguments': ({'entry'}, set()),
-    'forge-context': (set(), {'task'}),
-    'forge-tools': (set(), set()),
     'run-context': ({'run_id'}, {'attempt'}),
     'run-tools': (set(), set()),
     'graph': ({'basis_kind'}, {'entry','params','report_digest','run_id','attempt','node_id','node_offset'}),
@@ -706,12 +704,6 @@ class Handler(BaseHTTPRequestHandler):
                     value['native_notebook'] = self.server.notebooks is not None
                     value['analysis_execution_profile']=self.server.analysis_execution_profile()
                     value['analysis_features']={'annotation_definitions':True,'case_cursor':True,'catalog_profile':True,'case_media':getattr(self.server.analysis,'features',{}).get('case_media') is True,'annotation_media_basis':getattr(self.server.analysis,'features',{}).get('annotation_media_basis') is True,'case_output_groups':getattr(self.server.analysis,'features',{}).get('case_output_groups') is True,'case_review_filter':getattr(self.server.analysis,'features',{}).get('case_review_filter') is True,'notebook_history':getattr(self.server.analysis,'features',{}).get('notebook_history') is True}
-                elif url.path == '/api/forge-context':
-                    from demiflow.forge.tools import invoke
-                    value = invoke('forge.context', root, query)
-                elif url.path == '/api/forge-tools':
-                    from demiflow.forge.tools import describe
-                    value = describe()
                 elif url.path == '/api/run-context':
                     from demiflow.workbench.runs.context import query as run_context
                     value = run_context(root, query['run_id'],

@@ -17,8 +17,6 @@ def project(original):
         (original / f'settings/{name}.json').write_text(json.dumps({'format':'demiflow_forge_flow_parameters_v1','arguments':{'limit':default}}))
     (original / 'prompts').mkdir()
     (original / 'prompts/review.yaml').write_text('schema_version: demiflow_prompt_pack_v2\nprompts:\n  review:\n    version: v1\n    template: "Review {{ value }}"\n    response_schema: {type: object}\n')
-    declaration=dict(schema='demiforge-project-v3',standard='1.0.0-candidate.10',projects={'shipping':dict(path='shipping',flows={n:dict(path=f'shipping/flows/{n}.py',symbol='run') for n in ('select','evaluate')},operators=['shipping/operators'],prompts=['shipping/prompts'])})
-    (original.parent / '.demiforge/project.json').write_text(json.dumps(declaration))
     ws.init_workspace(original, existing=True)
     for name in ('select','evaluate'): ws.register_flow(original, f'flows/{name}.py:run', params=f'settings/{name}.json')
     return original
@@ -33,26 +31,6 @@ def test_catalog_does_not_import_and_is_project_scoped(project):
     assert actual['output_schema']=={'type':'object'}
     assert definitions.history(project,id=prompt['id'])['available'] is False
     with pytest.raises(ForgeError): definitions.read(project,id='../dispatch.py')
-
-
-def test_repository_workspace_discovers_only_explicit_unique_flow_owner(project):
-    from demiflow.workbench.projects.discovery import discover
-    root = project.parent
-    ws.init_workspace(root, existing=True)
-    # No guessing from a nested directory or merely having one declaration.
-    assert definitions.catalog(root)['definitions'] == []
-    ws.register_flow(root, 'shipping/flows/select.py:run', params='shipping/settings/select.json')
-    catalog = definitions.catalog(root)
-    assert {(d['kind'], d['symbol']) for d in catalog['definitions']} == {('code','clean'), ('prompt','review')}
-    (project/'operators/quality.py').write_text('raise RuntimeError("NEVER IMPORT")\ndef quality(row):\n    return row\n')
-    assert {d['symbol'] for d in definitions.catalog(root)['definitions']} == {'clean', 'quality', 'review'}
-    # A second referenced owner is ambiguous: do not silently choose or merge.
-    path = root/'.demiforge/project.json'
-    value = json.loads(path.read_text())
-    value['projects']['other'] = dict(value['projects']['shipping'], path='another')
-    path.write_text(json.dumps(value))
-    assert definitions.catalog(root)['definitions'] == []
-    assert any(d['code'] == 'conflicting_owner' for d in discover(root)['diagnostics'])
 
 
 def test_real_versions_from_nested_repository_and_current_changes(project):

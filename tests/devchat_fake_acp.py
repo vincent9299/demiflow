@@ -39,13 +39,8 @@ for line in sys.stdin:
                 sessionUpdate='agent_message_chunk',messageId='message-2',content=dict(type='text',text='已找到输入，下一步可以开发过滤流程。')))))
             send(dict(id=value['id'],result=dict(stopReason='end_turn')))
             continue
-        if '受信任务上下文' in params['prompt'][0]['text']:
+        if '## 当前版本 DemiFlow 原生 API' in params['prompt'][0]['text']:
             (Path.home() / 'received-context.txt').write_text(params['prompt'][0]['text'])
-        if params['prompt'][0]['text'].rsplit('当前请求：\n', 1)[-1].startswith('managed-edit'):
-            with (root / 'orders/operators/map.py').open('a') as stream:
-                stream.write('# managed ACP fixture change\n')
-            send(dict(method='session/update', params=dict(sessionId='acp-fixture', update=dict(
-                sessionUpdate='agent_message_chunk', content=dict(type='text', text='Managed fixture edit completed')))))
         if 'stream fixture' in params['prompt'][0]['text']:
             send(dict(method='session/update',params=dict(sessionId='acp-fixture',update=dict(
                 sessionUpdate='agent_message_chunk',content=dict(type='text',text='First streamed paragraph.\n\n'+'Streaming fixture line.\n\n'*60)))))

@@ -30,21 +30,32 @@ def project(isolated):
 
 def test_original_module_paths_check_execute_and_stale_gate(project):
     checked = project_ops.check_project(project)
-    assert checked['static_status'] == 'checked', checked
-    assert checked['status'] == 'incomplete'  # Not a semantic/behavior certification.
+    assert checked['status'] == 'checked', checked
+    assert 'rules' not in checked and 'static_status' not in checked
     assert checked['coverage']['declared'] == checked['coverage']['inspected'] == 1
     assert set(checked['sources']) == {'recipe.py', 'processing.py'}
-    assert any(r['methods'].get('review') == 'missing' for r in checked['rules'])
-    assert project_ops.project_check_status(project)['static_status'] == 'checked'
+    (project / 'README.md').write_text('# Documentation only\n\n[Missing reference](notes.json)\n')
+    assert project_ops.project_check_status(project)['status'] == 'checked'
     prepared = runs.prepare(project, 'recipe.py:select', params='settings/small.json')
     done = execute(project, prepared)
     assert done['status'] == 'succeeded', done
     assert {r['case_id'] for r in rows(project, done)} == {'c01', 'c02'}
     pending = runs.prepare(project, 'recipe.py:select', params='settings/small.json')
     source = project / 'processing.py'; source.write_text(source.read_text() + '\n# changed\n')
-    assert project_ops.project_check_status(project)['static_status'] == 'stale'
+    assert project_ops.project_check_status(project)['status'] == 'stale'
     with pytest.raises(ForgeError, match='stale'):
         runs.start(project, pending['run_id'], expected=pending['digest'])
+
+
+
+def test_previous_project_review_does_not_count_as_current_static_check(project):
+    record = project / '.forge/project-check.json'
+    saved = b'{"format":"demiflow_forge_project_check_v1","status":"incomplete","static_status":"checked"}'
+    record.write_bytes(saved)
+    assert project_ops.project_check_status(project)['status'] == 'missing'
+    assert record.read_bytes() == saved
+    assert project_ops.check_project(project)['status'] == 'checked'
+    assert project_ops.project_check_status(project)['status'] == 'checked'
 
 
 def test_forbidden_effects_are_reported_and_never_fixed(project):
@@ -52,17 +63,14 @@ def test_forbidden_effects_are_reported_and_never_fixed(project):
     source.write_text('import subprocess\n' + source.read_text())
     before = source.read_bytes()
     result = project_ops.check_project(project)
-    assert result['static_status'] == 'invalid', result
+    assert result['status'] == 'invalid', result
     assert any(d['rule'] == 'OP-05' for d in result['diagnostics'])
-    methods = {r['id']: r['methods'] for r in result['rules']}
-    assert methods['OP-05']['static'] == 'invalid'
-    assert methods['FL-03']['static'] == 'incomplete'
     assert source.read_bytes() == before
     with pytest.raises(ForgeError):
         runs.prepare(project, 'recipe.py:select', params='settings/small.json')
     cli = CliRunner().invoke(main, ['workbench','check',str(project)])
     assert cli.exit_code == 1
-    assert json.loads(cli.output)['static_status'] == 'invalid'
+    assert json.loads(cli.output)['status'] == 'invalid'
 
 
 def test_generic_source_read_and_observation(project):

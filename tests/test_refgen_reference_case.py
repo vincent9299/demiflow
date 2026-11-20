@@ -25,7 +25,7 @@ LIMITS = {'memory_bytes': 384 * 1024**2, 'max_row_bytes': 256 * 1024,
 def case_modules(monkeypatch):
     monkeypatch.syspath_prepend(str(EXAMPLE))
     result = []
-    for name, path in [('refgen_case_flow', EXAMPLE / 'flow.py'), ('refgen_case_fixture', EXAMPLE / 'fixture.py')]:
+    for name, path in [('refgen_case_flow', EXAMPLE / 'flows/reference.py'), ('refgen_case_fixture', EXAMPLE / 'fixture.py')]:
         spec = importlib.util.spec_from_file_location(name, path)
         module = importlib.util.module_from_spec(spec)
         monkeypatch.setitem(sys.modules, name, module); spec.loader.exec_module(module)
@@ -55,7 +55,7 @@ def test_full_case_capture_is_one_real_action_with_shared_model_prefixes(case_mo
     def forbidden(*args, **kwargs): raise AssertionError('Preview attempted execution')
     monkeypatch.setattr(dataflow.DataflowExecution, 'start', forbidden)
     monkeypatch.setattr(dataflow, 'snapshot_source', forbidden)
-    captured = capture_pipeline(flow.run, config)
+    captured = capture_pipeline(flow._execute, config)
     graph = captured.compiled.graph
     view = build_logical_plan_view(graph, declarations=captured.compiled.declarations,
                                   observation_labels=captured.compiled.observation_labels)
@@ -90,7 +90,7 @@ def test_full_case_real_http_objects_fixed_delivery_and_history_replay(case_modu
         with pytest.raises(InterruptedAfterFinalAck):
             with RunContext.start(root / 'run', limits=LIMITS) as run:
                 with data.local_execution(workers=4, partitions=1, worker_mode='thread', memory_bytes=384 * 1024**2):
-                    receipt = flow.run(**config)
+                    receipt = flow._execute(**config)
                 raise InterruptedAfterFinalAck('controlled interruption after the final action ACK')
         assert receipt.status == 'committed'
         assert not server['errors'], server['errors']
@@ -131,7 +131,7 @@ def test_full_case_real_http_objects_fixed_delivery_and_history_replay(case_modu
         before_versions = {name: lance.dataset(str(root / name)).version for name in ('questions.lance', 'results.lance')}
         with RunContext.resume(run.ref):
             with data.local_execution(workers=4, partitions=1, worker_mode='thread', memory_bytes=384 * 1024**2):
-                replay = flow.run(**config)
+                replay = flow._execute(**config)
         assert replay.status == 'committed'
         assert server['counts'] == before_counts
         assert {name: lance.dataset(str(root / name)).version for name in before_versions} == before_versions
@@ -145,7 +145,7 @@ def test_failed_generation_keeps_both_score_positions_and_fixed_denominators(cas
         config = fixture.create_inputs(root, base=server['base'])
         with RunContext.start(root / 'run', limits=LIMITS):
             with data.local_execution(workers=4, partitions=1, worker_mode='thread', memory_bytes=384 * 1024**2):
-                flow.run(**config)
+                flow._execute(**config)
         assert not server['errors'], server['errors']
         assert server['counts'] == Counter(quality=2, focus=1, author=1, synthesis=1,
                                           finalize=1, boogu=12, concept=11, alignment=11)
@@ -186,7 +186,7 @@ def test_unreadable_inputs_preserve_failed_scores_without_model_calls(case_modul
             image.unlink()
         with RunContext.start(root / 'run', limits=LIMITS):
             with data.local_execution(workers=4, partitions=1, worker_mode='thread', memory_bytes=384 * 1024**2):
-                receipt = flow.run(**config)
+                receipt = flow._execute(**config)
         assert receipt.status == 'committed'
         assert not server['requests'] and not server['errors']
         rows = _records(root)
