@@ -18,8 +18,7 @@ import time
 import uuid
 
 from demiflow.workbench.projects import workspace as ws
-from demiflow.workbench.projects.python_sources import sealed_root
-from demiflow.workbench.projects.shared_sources import MAX_MODULE_BYTES, bound_files, read_sealed
+from demiflow.workbench.python_sources import MAX_MODULE_BYTES, bound_files, read_sealed, sealed_root
 from demiflow.workbench.process import process_identity
 from demiflow.workbench.runs.authority import LocalAuthority
 from demiflow.workbench.runs.admission import inputs as admit_inputs

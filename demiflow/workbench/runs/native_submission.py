@@ -19,8 +19,7 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits, sourc
     from contextlib import redirect_stdout
     from demiflow.execution.host.inspection import capture_managed_pipeline, native_submission_view
     from demiflow.workbench.graph.preview import _Discard
-    from demiflow.workbench.projects.python_sources import PythonSources
-    from demiflow.workbench.projects.shared_sources import SharedSources
+    from demiflow.workbench.python_sources import PythonSources, SharedSources
     from demiflow.workbench.graph.preview_guard import enter_readonly
     from demiflow.workbench.projects.discovery import discover
     root, control, platform = ws.load_workspace(root)
@@ -143,7 +142,7 @@ def prepare(root, entry, *, parameters, limits, metadata, source_modules=None):
 
 def verify_basis(root, manifest, report):
     from demiflow.forge import audit
-    from demiflow.workbench.projects.shared_sources import MAX_MODULE_BYTES, bound_files
+    from demiflow.workbench.python_sources import MAX_MODULE_BYTES, bound_files
     root, workspace, platform = ws.load_workspace(root)
     audit.require_scope(ws._check_change_scope(root), expected_scope=manifest.get('change_scope'))
     binding = report['binding']

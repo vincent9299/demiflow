@@ -82,8 +82,7 @@ def _execute(root, run_id, run, attempt=None):
         allocation_guard(manifest['limits'], native_execution=manifest.get('native_execution'))
         check_stop()
         run.transition({'starting'}, 'running', worker=process_identity(os.getpid()), running_at=time.time())
-        from demiflow.workbench.projects.python_sources import package_parts, sealed_root
-        from demiflow.workbench.projects.shared_sources import SharedSourceImports, bound_files, read_sealed
+        from demiflow.workbench.python_sources import SharedSourceImports, bound_files, package_parts, read_sealed, sealed_root
         binding = report['binding']
         package = package_parts(binding.get('source_package'))
         source = sealed_root(target, binding)

@@ -18,11 +18,6 @@ from demiflow.forge.platform_environment import read_bounded
 from demiflow.workbench.projects import workspace as ws
 
 
-def preview(root, *, entry, params=None):
-    from demiflow.workbench.worker import operation
-    return operation('plan_preview', root, entry=entry, params=params)
-
-
 def _parameters(root, control, entry, path, *, table_resolver):
     if path is None:
         return {}, None
@@ -60,13 +55,15 @@ class _Discard(io.TextIOBase):
         return len(value)
 
 
-def _preview(root, *, table_resolver, entry, params=None, source_modules=None):
-    """Called only by the fixed one-shot workspace worker, never the server."""
+def preview(root, *, entry, params=None, table_resolver=None, source_modules=None):
+    """Delegate to the one-shot reader unless called by its trusted dispatcher."""
+    if table_resolver is None:
+        from demiflow.workbench.worker import operation
+        return operation('plan_preview', root, entry=entry, params=params)
     from contextlib import redirect_stdout
     from demiflow.execution.host.inspection import capture_pipeline, build_logical_plan_view
     from demiflow.workbench.projects.discovery import discover
-    from demiflow.workbench.projects.python_sources import PythonSources
-    from demiflow.workbench.projects.shared_sources import SharedSources
+    from demiflow.workbench.python_sources import PythonSources, SharedSources
     from demiflow.workbench.graph.preview_guard import enter_readonly
 
     root, control, _ = ws.load_workspace(root)

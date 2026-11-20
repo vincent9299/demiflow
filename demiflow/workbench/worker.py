@@ -25,7 +25,7 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
     if _authority is not None:
         request["bootstrap"] = _authority
     if name in {'plan_preview', 'run_prepare'}:
-        from demiflow.workbench.projects.shared_sources import deployment_modules
+        from demiflow.workbench.python_sources import deployment_modules
         _source_modules = deployment_modules(Path(request['root']))
     if _source_modules is not None:
         request['source_modules'] = _source_modules
@@ -159,8 +159,8 @@ def dispatch(request):
 
             value = _inspect_flow(root, table_resolver=table_resolver, **args)
         elif op == 'plan_preview':
-            from demiflow.workbench.graph.preview import _preview
-            value = _preview(root, table_resolver=table_resolver, source_modules=request.get('source_modules'), **args)
+            from demiflow.workbench.graph.preview import preview as compile_preview
+            value = compile_preview(root, table_resolver=table_resolver, source_modules=request.get('source_modules'), **args)
         elif op == 'native_submission_inspect':
             from demiflow.workbench.runs.native_submission import inspect_submission
             value = inspect_submission(root, table_resolver=table_resolver, source_modules=request.get('source_modules'), **args)

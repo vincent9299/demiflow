@@ -67,7 +67,7 @@ def test_nested_package_preview_and_managed_run_use_same_sources(root):
 
 def test_shared_source_preview_and_run_pin_explicit_modules(root, monkeypatch):
     from demiflow.workbench.graph.preview import preview
-    from demiflow.workbench.projects.shared_sources import ENVIRONMENT, FORMAT
+    from demiflow.workbench.python_sources import ENVIRONMENT, FORMAT
 
     namespace = root.parent.name
     project_package = namespace + '.' + root.name
@@ -115,7 +115,7 @@ def test_shared_source_preview_and_run_pin_explicit_modules(root, monkeypatch):
 def test_shared_source_missing_grant_does_not_search_other_files(root, monkeypatch):
     from demiflow.forge.schema import ForgeError
     from demiflow.workbench.graph.preview import preview
-    from demiflow.workbench.projects.shared_sources import ENVIRONMENT, FORMAT
+    from demiflow.workbench.python_sources import ENVIRONMENT, FORMAT
 
     external = root.parent / 'shared'
     external.mkdir()
