@@ -180,9 +180,8 @@ def validate_literal_schema_replay(request, graph, *, bounds):
         for node in graph.nodes if node.kind == 'source' and KEY in node.kernel.configuration}
     if not expected:
         return
-    from ..planning.dataflow_compile import lower_action
-    from ..planning.dataflow_configuration import _HISTORY_REVALIDATION
-    current = lower_action(request, bounds=bounds, _configuration_purpose=_HISTORY_REVALIDATION).graph
+    from ..planning.dataflow_compile import revalidate_action
+    current = revalidate_action(request, bounds=bounds).graph
     actual = {node.occurrence_id: node.kernel.configuration.get(KEY)
         for node in current.nodes if node.kind == 'source'}
     for occurrence, value in expected.items():

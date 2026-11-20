@@ -926,3 +926,13 @@ def lower_action(request: ActionRequest, *, bounds: Bounds, inputs=None, on_comp
         raise _error("INVALID_CONTRACT", "write terminal requires a registered sink declaration")
     return capture_graph(request, bounds=bounds, inputs=inputs, on_compiled=on_compiled,
                          _configuration_purpose=_configuration_purpose)
+
+
+def revalidate_action(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow:
+    """Rebuild declarations for the two existing historical replay checks.
+
+    This internal engine entry retains diagnostic configuration semantics;
+    execution cannot choose the purpose from a request or persisted field.
+    """
+    from .dataflow_configuration import _HISTORY_REVALIDATION
+    return lower_action(request, bounds=bounds, _configuration_purpose=_HISTORY_REVALIDATION)

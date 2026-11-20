@@ -560,9 +560,8 @@ class DataflowExecution:
                 raise DataflowError('INCOMPATIBLE_HISTORY',
                                     'attempt-only live program has no final ACKed result')
             from .dataflow_seal import verify_completed_live_program
-            from ..planning.dataflow_configuration import _HISTORY_REVALIDATION
-            current_declarations = lower_action(self._request, bounds=self._bounds,
-                _configuration_purpose=_HISTORY_REVALIDATION).declarations
+            from ..planning.dataflow_compile import revalidate_action
+            current_declarations = revalidate_action(self._request, bounds=self._bounds).declarations
             declarations = {d.occurrence_id: d for d in current_declarations}
             for node in completed_live_nodes:
                 verify_completed_live_program(node.program_ref,
