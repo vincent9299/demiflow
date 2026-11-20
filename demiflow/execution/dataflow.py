@@ -412,7 +412,6 @@ class DataflowExecution:
         # start() still requires original cut proof for an actual replay.
         if existing is not None:
             from .dataflow_seal import load_dataflow, load_sealed_dataflow, verify_dataflow_program
-            from .recovery_identity import platform_identity
             graph, physical, sealed = load_dataflow(self._action.context.directory,
                 self._action.action_id, store=self._store, bounds=self._bounds)
             from .dataflow_shared import validate_shared_actor_binding
@@ -423,8 +422,6 @@ class DataflowExecution:
             validate_execution_binding(self._request, graph)
             _, _, pin = load_sealed_dataflow(sealed, action_id=self._action.action_id,
                                              store=self._store, bounds=self._bounds)
-            if pin.get("platform_revision") != platform_identity():
-                raise DataflowError("CODE_MISMATCH", "recovery requires the sealed runtime revision")
             for node in graph.nodes:
                 if node.program_ref is not None:
                     live_binding = None

@@ -319,19 +319,15 @@ class RunContext:
         if not isinstance(reference, RunRef):
             raise TypeError("Resume requires the original platform RunRef")
         # Unified history admission before any business start: the run must carry a
-        # unified recovery contract produced by this same engine revision. The
+        # unified recovery contract with an understood durable protocol. The
         # original RunRef is preserved; per-action code/source/state/sink/cursor
         # compatibility is enforced by the recovery path (load_execution_version /
         # validate_resume_compatibility), never by rewriting source or fabricating a
         # replacement successful run.
-        from .recovery_identity import platform_identity
         journal = RunJournal(reference.directory)
         binding = journal.recovery_identity()
         if binding is None:
             raise RecoveryContractError("Run has no unified recovery contract; cannot resume history")
-        if binding.get("platform_revision") != platform_identity():
-            raise RecoveryContractError(
-                "Platform implementation changed; resume requires the original engine revision")
         if binding.get("run_id") != reference.run_id:
             raise RecoveryContractError("RunRef identity does not match its directory")
         context = cls(reference.directory, entry_identity=entry_identity, limits=limits, resume=True)
@@ -365,16 +361,12 @@ class RunContext:
         self.directory.mkdir(parents=True, exist_ok=True)
         self._lease = _open_runtime_lease(self.directory)
         try:
-            from .recovery_identity import platform_identity
-            revision = platform_identity()
             old = self.journal.recovery_identity()
             if self.resuming and old is None:
                 raise RecoveryContractError("Run has no unified recovery contract")
             if not self.resuming and not self.external_control and self.journal.path.exists():
                 raise RecoveryContractError("Run already exists; resume its RunRef explicitly")
             if old is not None:
-                if old["platform_revision"] != revision:
-                    raise RecoveryContractError("Platform implementation changed; resume requires its fixed revision")
                 if self.entry_identity is not None and old["entry_identity"] != self.entry_identity:
                     raise RecoveryContractError("Run entry identity changed")
                 if self.requested_limits is not None and execution_limits(self.requested_limits) != old["limits"]:
@@ -383,6 +375,8 @@ class RunContext:
                     raise RecoveryContractError('Run limits semantics changed on resume')
                 configuration = old
             else:
+                from .recovery_identity import platform_identity
+                revision = platform_identity()  # Birth provenance only; never a resume gate.
                 configuration = dict(format=1, stream_protocol="aligned-barrier-v2", run_id=uuid.uuid4().hex,
                     entry_identity=self.entry_identity, limits=execution_limits(self.requested_limits),
                     platform_revision=revision, started_at=time.time(),
@@ -556,7 +550,7 @@ class RunContext:
         checkpointed_stream = (declaration.get('kind') == 'run_stream'
             and type(sealed_stream) is dict and sealed_stream.get('schema') == 'demiflow.dataflow_seal.v3'
             and bool(self.journal.execution_commits(action_id)))
-        # This admits the action to the SAME engine's recovery verifier. It is
+        # This admits the action to the original-contract recovery verifier. It is
         # not proof of success/recoverability: code, sources, actor state, effects
         # and the original journal cut must still pass before a worker starts.
         # An old delivery-only action or a directory containing no cut gains no

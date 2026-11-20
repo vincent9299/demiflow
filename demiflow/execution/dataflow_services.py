@@ -189,9 +189,6 @@ def _load_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bou
         raise DataflowError("CODE_MISMATCH", "loaded plan_id differs from the assignment")
     if physical.plan_revision != assignment.plan_revision:
         raise DataflowError("FENCED", "loaded plan_revision differs from the assignment")
-    from .recovery_identity import platform_identity
-    if pin.get("platform_revision") != platform_identity():
-        raise DataflowError("CODE_MISMATCH", "Worker platform code differs from the sealed revision")
     if physical.policy.worker_mode == "thread":
         cache = None  # Never mutate sys.path/module namespaces in the hosting process.
     programs = _VerifiedPrograms()

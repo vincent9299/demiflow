@@ -175,7 +175,7 @@ class NativeAcquisitionService(NativeSearchOperations):
             if isinstance(sink, QueueResultSink):
                 if native.settlement != 'sink':
                     raise DataflowError('INVALID_CONTRACT', 'automatic settlement requires sink mode')
-                (index, fetch), contract = validate_topology(native, plan, sink)
+                (index, fetch), contract = validate_topology(native, plan, sink, action=self._action)
                 native.configure(self._action, fetch, sink, contract, 'node-' + str(index))
                 mode = 'sink'
                 final_index: object = len(plan.operations)

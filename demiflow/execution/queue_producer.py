@@ -13,7 +13,7 @@ from .queue_contract import ProducerRef, ProducerWindowLimit, queue_config
 from .queue_commit import producer_action
 from .queue_sinks import QueuePublishSink
 from .recovery_contract import RecoveryContractError, SourcePosition, document, identity, identifier
-from .recovery_identity import describe, platform_identity, source_identity
+from .recovery_identity import describe, source_identity
 from .row_scope import RowScope, ScopedRow, current_row_scope
 
 
@@ -124,9 +124,11 @@ class QueueProducer:
         self.parent, self.source = parent, source
         binding = source_identity(source)
         self._verify_source(source, binding)
-        self.contract = identity(dict(protocol='demiflow.queue.producer-transform.v2', platform=platform_identity(),
-            source=binding, specification=describe(self.producer.source), operations=operations, messages=self.messages))
+        from .queue_contract import resolve_producer_contract
+        declaration = dict(protocol='demiflow.queue.producer-transform.v3',
+            source=binding, specification=describe(self.producer.source), operations=operations, messages=self.messages)
         self.channel = QueueChannel(self.config)
+        self.contract = resolve_producer_contract(self.channel, self.producer, declaration, parent)
 
     def _verify_source(self, source, binding):
         spec = self.producer.source

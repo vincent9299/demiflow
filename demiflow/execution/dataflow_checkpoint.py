@@ -552,11 +552,10 @@ class DataflowCheckpointCoordinator:
             load_execution_version, translate_native_checkpoint,
             validate_resume_compatibility,
         )
-        from .recovery_identity import platform_identity
         directory = self._action.context.directory
         binding = load_execution_version(directory, self._action.action_id,
                                          max_bytes=self._physical.bounds.max_state_bytes)
-        report = validate_resume_compatibility(binding, current_runtime=platform_identity(),
+        report = validate_resume_compatibility(binding,
                                                store=self._store)
         if not report.supported:
             raise DataflowError("INCOMPATIBLE_HISTORY",
