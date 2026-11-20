@@ -843,9 +843,18 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None, on_com
     capture = _Capture(request, bounds, inputs)
     producer = capture.capture_chain(request.source, request.plan, ())
     captured_terminal = capture.capture_terminal(producer)
+    from .dataflow_configuration import report_configuration_stage
+    def report_stage(stage):
+        report_configuration_stage(capture.nodes,
+            ((capture.nodes[p].occurrence_id, capture.nodes[c].occurrence_id)
+             for p, _, c, _ in capture.edges), action_id=request.action.action_id,
+            stage=stage, edge_count=len(capture.edges))
+    report_stage('capture')
     from .dataflow_graph_adapter import decorate_graph_capture
     terminal = decorate_graph_capture(capture, request, terminal=captured_terminal)
+    report_stage('graph')
     fit_codec_windows(capture.nodes, capture.edges, capture.codec_windows, capture.publication_windows, bounds)
+    report_stage('budget')
     # DTO constructors validate identities. Keep integer graph indices private;
     # never construct invalid public DTOs merely to replace their IDs later.
     bound_nodes = tuple(capture.nodes)
@@ -874,8 +883,8 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None, on_com
     )
     validate_graph(graph, bounds=bounds)
     # Report-only: a plan outside the configuration schema is logged as a warning, never refused.
-    from .dataflow_configuration import report_configuration
-    report_configuration(graph)
+    report_configuration_stage(graph.nodes, ((edge.producer, edge.consumer) for edge in graph.edges),
+                               action_id=graph.action_id, stage='final', edge_count=len(graph.edges))
     # Report bindings name nodes of the graph that is returned. Graph adaptation can
     # fold the terminal into another node and re-derive semantic identities, so the
     # identities are read here, from the finished nodes, not when a node was captured.
