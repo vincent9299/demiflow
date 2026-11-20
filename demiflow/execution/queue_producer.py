@@ -103,6 +103,7 @@ class QueueProducer:
             raise RecoveryContractError('enqueue must be the final producer transform')
         validate_source(source, self.producer.source)
         operations = []
+        search_nodes = {}
         for index,operation in enumerate(plan.operations[:-1]):
             target = getattr(getattr(operation, 'callable', None), 'target', None)
             if type(operation) in {ops.MapOp, ops.BoundMapOp, ops.FlatMapOp, ops.FilterOp} and inspect.isfunction(target):
@@ -117,8 +118,7 @@ class QueueProducer:
                 if type(actor) is not SearchWeb or operation.catch or operation.hard_timeout is not None or operation.concurrency != 1:
                     raise RecoveryContractError('Producer search requires its ordered native actor')
                 operations.append(actor.recovery_identity())
-                actor.queue_producer = self
-                actor.queue_node_id = str(index)
+                search_nodes[actor] = str(index)
             else:
                 raise RecoveryContractError('Producer supports pure maps/filter/flat_map and native search before enqueue')
         self.parent, self.source = parent, source
@@ -129,6 +129,7 @@ class QueueProducer:
             source=binding, specification=describe(self.producer.source), operations=operations, messages=self.messages)
         self.channel = QueueChannel(self.config)
         self.contract = resolve_producer_contract(self.channel, self.producer, declaration, parent)
+        self.search_nodes = search_nodes
 
     def _verify_source(self, source, binding):
         spec = self.producer.source
