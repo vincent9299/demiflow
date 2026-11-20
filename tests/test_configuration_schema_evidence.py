@@ -86,7 +86,7 @@ def test_shared_binding_is_observed_in_final_with_all_optional_keys(context, mon
 
 
 @reports_on_purpose
-def test_bad_stage_warns_but_compilation_remains_enabled(context, monkeypatch):
+def test_unknown_stage_warns_but_compilation_remains_enabled(context, monkeypatch):
     from demiflow.planning.dataflow_compile import _Capture
     original = _Capture.capture_terminal
     def defect(capture, producer):
@@ -94,7 +94,7 @@ def test_bad_stage_warns_but_compilation_remains_enabled(context, monkeypatch):
         for i, node in enumerate(capture.nodes):
             if node.kernel.kind == 'MapOp':
                 capture.nodes[i] = replace(node, kernel=replace(node.kernel, configuration={
-                    **node.kernel.configuration, 'task_batch_rows': {}, 'unregistered-private-key': 'secret-value'}))
+                    **node.kernel.configuration, 'unregistered-private-key': 'secret-value'}))
         return result
     monkeypatch.setattr(_Capture, 'capture_terminal', defect)
     observer = ProcessEvidence(source_binding(TREE), {'map': 'compiled'})
@@ -103,7 +103,7 @@ def test_bad_stage_warns_but_compilation_remains_enabled(context, monkeypatch):
         case['outcome'] = 'compiled'
     receipt = observer.receipt()
     assert not receipt['ok']
-    assert receipt['cases']['map']['codes'] == {'compiler_key_shape': 4, 'unknown_key': 4}
+    assert receipt['cases']['map']['codes'] == {'unknown_key': 4}
     assert 'secret-value' not in json.dumps(receipt)
 
 
@@ -221,8 +221,8 @@ def _child(mode, path, root):
             if mode == 'checker_error':
                 raise RuntimeError('private-exception')
             if mode == 'finding':
-                yield schema._finding(node, 'occurrence_binding', 'occurrence_id does not name this node',
-                                      stage=stage, key='occurrence_id')
+                yield schema._finding(node, 'unknown_key', 'key unknown#fixture is not admitted on this node',
+                                      stage=stage, key='unknown#fixture', category='observation')
     schema._node_findings = changed
     with ProcessEvidence(source_binding(TREE), {'map': 'compiled'}) as observer:
         with observer.case('map') as case:

@@ -21,15 +21,11 @@ A key reaches a node from exactly one of these writers, in the order they run:
 ``graph``        marks of the routed-graph adapter.
 ``shared``       same-instance actor ownership.
 
-``configuration_findings(graph)`` checks a newly compiled graph against this
-schema and returns what does not fit. Nothing here rejects a plan:
-``report_configuration`` logs each finding as a warning on the
-``demiflow.planning.configuration`` logger and returns. A sealed plan is never
-checked; it keeps the keys it was sealed with.
-
-Enforcement is staged. Tests can already fail on a finding (the opt-in
-``configuration_schema_gate`` pytest plugin). Production warns. Refusing a plan
-is a later step, for the invariants only, once real pipelines have run clean.
+``configuration_findings`` and ``report_configuration`` remain report-only
+diagnostic APIs. New compilation also rejects the explicitly qualified rules
+below, through the same scan. Other findings still warn. Budget probes and the
+two historical declaration rechecks only report; sealed graphs are not checked
+retroactively. Purpose is an internal call-site token, never a DTO/config field.
 
 The key names owned by other modules (``publication_workspace``,
 ``reducer_memory_v1``, ``shuffle_order_version``, ``declared_arrow_schema``,
@@ -50,6 +46,22 @@ from ..execution.contracts.dataflow_kinds import kinds_with
 _LOG = logging.getLogger('demiflow.planning.configuration')
 _MAX_REPORTED = 20          # findings logged per stage; the rest are counted
 STAGES = ('capture', 'graph', 'budget', 'final')
+
+# Qualified by fixed compiler corpus and seven read-only real pipeline entry
+# captures. These are specific rules, not a default rejection of every present
+# or future 'invariant' category. The shape predicates remain in COMPILER_KEYS.
+_REJECT_BINDINGS = frozenset({'occurrence_binding', 'program_binding', 'terminal_kind'})
+_REJECT_SHAPES = frozenset({'actor_binding_version', 'occurrence_id', 'program',
+    'publication_workspace', 'task_batch_rows', 'task_group', 'task_origin', 'terminal_memory'})
+_NEW = object()
+_PROBE = object()
+_HISTORY_REVALIDATION = object()
+
+
+def _check_purpose(purpose):
+    if not any(purpose is allowed for allowed in (_NEW, _PROBE, _HISTORY_REVALIDATION)):
+        from ..execution.contracts.dataflow_errors import DataflowError
+        raise DataflowError('INVALID_CONTRACT', 'Unknown internal configuration inspection purpose')
 
 # Operation fields the generic lowering does not copy into the configuration.
 NOT_COPIED = frozenset({'runtime_contract', 'label', 'node_id', 'source_dataset',
@@ -444,8 +456,9 @@ def configuration_findings(graph) -> tuple[str, ...]:
     return tuple(finding.text() for finding in _graph_findings(graph))
 
 
-def _report(findings, *, action_id, stage, node_count, edge_count, collect_all):
+def _report(findings, *, action_id, stage, node_count, edge_count, collect_all, _reject=False):
     samples, all_text = [], [] if collect_all else None
+    rejected, rejected_count = [], 0
     counts = {}
     categories = {}
     total = 0
@@ -457,6 +470,11 @@ def _report(findings, *, action_id, stage, node_count, edge_count, collect_all):
             samples.append(finding)
         if all_text is not None:
             all_text.append(finding.text())
+        if _reject and (finding.code in _REJECT_BINDINGS or (
+                finding.code == 'compiler_key_shape' and finding.key in _REJECT_SHAPES)):
+            rejected_count += 1
+            if len(rejected) < 4:
+                rejected.append(finding)
     action = _identity(action_id)
     for finding in samples:
         _LOG.warning('configuration schema: action %s: %s', action, finding.text())
@@ -467,6 +485,14 @@ def _report(findings, *, action_id, stage, node_count, edge_count, collect_all):
                'codes': counts, 'categories': categories, 'check_completed': 'check_error' not in counts}
     _LOG.debug('configuration schema: action %s: %d nodes checked, %d findings',
                action, node_count, total, extra={'configuration_schema': summary})
+    if rejected_count:
+        from ..execution.contracts.dataflow_errors import DataflowError
+        locations = [f.code + ('/' + f.key if f.key else '') + ' at ' +
+                     f.node_kind + ' ' + f.occurrence_id[:12] for f in rejected]
+        message = 'Compiled configuration invariant at ' + stage + ': ' + '; '.join(locations)
+        raise DataflowError('INVALID_CONTRACT', message[:1024], retryable=False,
+            context={'stage': stage, 'finding_count': rejected_count,
+                     'inspection_completed': summary['check_completed'], 'locations': locations})
     return tuple(all_text) if all_text is not None else None
 
 
@@ -481,12 +507,14 @@ def report_configuration(graph) -> tuple[str, ...]:
                    collect_all=True)
 
 
-def report_configuration_stage(nodes, connections, *, action_id, stage, edge_count):
-    """Observe one mature compiler boundary with bounded diagnostic storage.
+def report_configuration_stage(nodes, connections, *, action_id, stage, edge_count,
+                               _purpose=_NEW):
+    """Check one mature boundary; reject only qualified new-compile violations.
 
     Connections are occurrence pairs, including at stages with private integer
     edge indices. No intermediate public graph, digest or configuration copy is
-    needed. This function neither changes the plan nor rejects compilation.
+    needed. Probes and historical declaration rechecks retain warning semantics.
     """
+    _check_purpose(_purpose)
     _report(_scan(nodes, connections, stage=stage), action_id=action_id, stage=stage,
-            node_count=len(nodes), edge_count=edge_count, collect_all=False)
+            node_count=len(nodes), edge_count=edge_count, collect_all=False, _reject=_purpose is _NEW)
