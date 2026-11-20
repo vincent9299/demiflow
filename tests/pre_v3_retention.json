@@ -497,7 +497,7 @@
   },
   "demiflow.execution.native_commit_store": {
    "status": "undecided",
-   "reason": "一个接口说明（Protocol），没有导入方，没有测试。批次 3，待确认不是有意留着的。",
+   "reason": "2026-11-20 P8批次3 D1已处置为保留：19行Protocol的当前跨进程测量、历史类型依赖、删后历史和真实Ray门槛未齐；不为可选清理新建测量体系。旧74d2f99测量不改绑，详见docs/architecture-upgrade-20261120/D/D1-NATIVE-COMMIT-STORE.md。",
    "importers": [],
    "measured": {
     "at": "74d2f99",
