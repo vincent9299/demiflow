@@ -2,6 +2,22 @@
 (() => {
   'use strict';
   const $ = (tag, text, className) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (className) n.className = className; return n; };
+  // Chromium also emits a click when a text drag starts and ends in a control.
+  // Keep the selected text and the current view in that case.
+  let selectionStart;
+  document.addEventListener('pointerdown', event => {
+    selectionStart = event.isPrimary && event.button === 0 ? [event.clientX, event.clientY] : null;
+  }, true);
+  document.addEventListener('click', event => {
+    const start = selectionStart;
+    selectionStart = null;
+    if (!start || !event.detail || Math.hypot(event.clientX - start[0], event.clientY - start[1]) < 4) return;
+    const selection = window.getSelection();
+    if (!selection?.isCollapsed && selection?.rangeCount && selection.getRangeAt(0).intersectsNode(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, true);
   // Shared navigation chrome; each view keeps ownership of its data and filters.
   function navigationHeader({title,searchLabel,onSearch,placeholder}) {
     const element=$('div',undefined,'side-navigation-tools'),heading=$('div',undefined,'side-navigation-heading');

@@ -12,12 +12,13 @@ from test_forge_resume import stopped
 from test_forge_runs import wait
 
 
-def native_flow(root):
+def native_flow(root, imports='', value='1'):
     (root / 'flows/native.py').write_text('''from demiflow import data
 import pyarrow as pa
+''' + imports + f'''
 def run(*, target, stage):
     schema = pa.schema([('x', pa.int64())])
-    return data.from_items([{'x': 1}, {'x': 2}]).save_lance(stage, schema=schema,
+    return data.from_items([{{'x': {value}}}, {{'x': 2}}]).save_lance(stage, schema=schema,
         key='x', stage='rows', mode='append', max_rows=2, max_index_bytes=8388608
     ).write_lance(target, schema=schema, mode='create', return_receipt=True)
 ''')
@@ -41,6 +42,27 @@ def test_native_submit_seal_monitor_and_fixed_results(root):
     from demiflow.workbench.graph.model import get
     graph = get(root, basis_kind='run', run_id=result['run_id'], attempt=1)
     assert graph['logical']['actions'][0]['status'] == 'sealed'
+
+
+def test_nested_package_preview_and_managed_run_use_same_sources(root):
+    package = root.parent.name + '.' + root.name
+    (root.parent / '__init__.py').write_text('raise AssertionError("must not import the parent")\n')
+    (root / 'operators/local_input.py').write_text('value = 41\n')
+    prepared = native_flow(root, f'from {package}.operators.local_input import value\n', 'value')
+    run_id = prepared['run_id']
+    from demiflow.workbench.graph.preview import preview
+    result = preview(root, entry='flows/native.py:run', params='flows/native.json')
+    assert 'operators/local_input.py' in result['basis']['sources']
+    target, record = runs._load(root, run_id)
+    report = runs.verify_seal(target, record['manifest'])
+    assert report['binding']['source_package'] == package
+    assert report['binding']['sources']['operators/local_input.py'] == result['basis']['sources']['operators/local_input.py']
+    assert (target / 'source').joinpath(*package.split('.'), 'operators/local_input.py').is_file()
+    result = execute(root, prepared)
+    assert result['status'] == 'succeeded', (result, runs.logs(root, run_id))
+    import lance
+    for output in result['outputs']:
+        assert sorted(lance.dataset(output['uri']).to_table()['x'].to_pylist()) == [2, 41]
 
 
 def test_native_source_drift_rejected_before_worker(root):

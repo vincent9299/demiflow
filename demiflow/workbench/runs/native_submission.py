@@ -18,7 +18,8 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits):
     """Fixed disposable worker: original code construction is read-only."""
     from contextlib import redirect_stdout
     from demiflow.execution.host.inspection import capture_managed_pipeline, native_submission_view
-    from demiflow.workbench.graph.preview import _Sources, _Discard
+    from demiflow.workbench.graph.preview import _Discard
+    from demiflow.workbench.projects.python_sources import PythonSources
     from demiflow.workbench.graph.preview_guard import enter_readonly
     from demiflow.workbench.projects.discovery import discover
     root, control, platform = ws.load_workspace(root)
@@ -26,8 +27,8 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits):
     if not any(item['entry'] == entry and item['status'] == 'recognized' for item in project['entries']):
         raise ForgeError('Native entry must be declared by this project')
     target, symbol = ws.validate_entry(root, entry)
-    sources = _Sources(root)
-    sources.read(target)
+    sources = PythonSources(root)
+    module = sources.entry_module(target)
     arguments, tables, targets, _ = ws.resolve_arguments(root, control, parameters, table_resolver=table_resolver)
     if targets:
         raise ForgeError('Native admission cannot mix implicit and explicit output grants')
@@ -51,7 +52,6 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits):
     tracking[0] = True
     try:
         with redirect_stdout(_Discard()):
-            module = target.relative_to(root).as_posix()[:-3].replace('/', '.')
             function = getattr(importlib.import_module(module), symbol)
             if not inspect.isfunction(function) or Path(inspect.getfile(function)) != target:
                 raise ForgeError('Native entry resolved outside its declared source')
@@ -63,6 +63,8 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits):
             details = build_plan_details(captured.compiled, sources=sources.digests, root=root,
                                          callsites=callsites, bounds=captured.bounds)
             pipeline = pipeline_material(root, target, sources.digests)
+    except ModuleNotFoundError as exc:
+        raise sources.missing_import(exc) from exc
     finally:
         tracking[0] = False
     sources.verify()
@@ -88,6 +90,8 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits):
             sources=sources.digests, resources=resources, arguments=arguments,
             parameters=parameters, tables=tables, targets={},
             workspace_digest=content_digest(control), platform_digest=content_digest(platform)))
+    if sources.package:
+        result['binding'].update(source_package='.'.join(sources.package), entry_module=module)
     result['digest'] = content_digest(result)
     bounded_json(result, 8 * 1024**2)
     return result

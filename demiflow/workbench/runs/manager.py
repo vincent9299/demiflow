@@ -18,6 +18,7 @@ import time
 import uuid
 
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench.projects.python_sources import sealed_root
 from demiflow.workbench.process import process_identity
 from demiflow.workbench.runs.authority import LocalAuthority
 from demiflow.workbench.runs.admission import inputs as admit_inputs
@@ -499,9 +500,10 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     executable_dirs = native_resources.executable_directories(executable_dirs or [], workspace=root)
     platform_root = Path(__file__).resolve().parents[2]
     seal_root = Path(report['binding'].get('source_root', root))
-    seal_files = [(ws.relative_path(seal_root,name), Path('source')/name, digest,1024**2)
+    sealed = sealed_root(Path('.'), report['binding'])
+    seal_files = [(ws.relative_path(seal_root,name), sealed/name, digest,1024**2)
                   for name,digest in report['binding']['sources'].items()]
-    seal_files.extend((ws.relative_path(seal_root,r['path']),Path('source')/r['path'],r['sha256'],r.get('max_bytes',1024**2))
+    seal_files.extend((ws.relative_path(seal_root,r['path']),sealed/r['path'],r['sha256'],r.get('max_bytes',1024**2))
                       for r in report['binding'].get('resources',{}).values() if r['kind'] in {'config','file'})
     seal_files.extend((platform_root/item['path'],Path('runtime/demiflow')/item['path'],item['sha256'],platform['limits']['file_bytes'])
                       for item in platform['platform']['files'])
@@ -697,11 +699,12 @@ def verify_seal(target, manifest, *, environment=True):
         if scope is not None:
             audit.verify_baseline(ws.read_control(target / 'change-baseline.json', audit.BASELINE_BYTES),
                                   scope=scope, root=manifest['root'], project_id=manifest['workspace']['id'])
+    source = sealed_root(target, report['binding'])
     for name, digest in report['binding']['sources'].items():
-        if hashlib.sha256(read_bounded(target / 'source' / name, 1024**2)).hexdigest() != digest:
+        if hashlib.sha256(read_bounded(source / name, 1024**2)).hexdigest() != digest:
             raise ForgeError('Sealed candidate source differs')
     for resource in report['binding'].get('resources', {}).values():
-        if resource['kind'] in {'config', 'file'} and hashlib.sha256(read_bounded(target / 'source' / resource['path'], resource.get('max_bytes', 1024**2))).hexdigest() != resource['sha256']:
+        if resource['kind'] in {'config', 'file'} and hashlib.sha256(read_bounded(source / resource['path'], resource.get('max_bytes', 1024**2))).hexdigest() != resource['sha256']:
             raise ForgeError('Sealed resource differs')
     for item in manifest['platform']['files']:
         if hashlib.sha256(read_bounded(target / 'runtime/demiflow' / item['path'], manifest['platform']['limits']['file_bytes'])).hexdigest() != item['sha256']:
@@ -1296,7 +1299,7 @@ def source(root, run_id, path):
             expected = resource['sha256']
     if expected is None:
         raise ForgeError('Source is outside this run closure')
-    raw = read_bounded(ws.relative_path(target / 'source', path), 1024**2)
+    raw = read_bounded(ws.relative_path(sealed_root(target, report['binding']), path), 1024**2)
     if hashlib.sha256(raw).hexdigest() != expected:
         raise ForgeError('Sealed source differs')
     return dict(path=path, text=raw.decode('utf-8'))

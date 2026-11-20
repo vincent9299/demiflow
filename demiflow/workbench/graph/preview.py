@@ -6,8 +6,6 @@ model, Dataset worker or sink is started. This does not grant run permission.
 from pathlib import Path
 import hashlib
 import importlib
-import importlib.abc
-import importlib.machinery
 import inspect
 import io
 import json
@@ -57,46 +55,6 @@ def _parameters(root, control, entry, path, *, table_resolver):
     return arguments, hashlib.sha256(raw).hexdigest()
 
 
-class _Sources(importlib.abc.MetaPathFinder):
-    """Read original Python bytes, bypassing stale bytecode and pinning imports."""
-    def __init__(self, root):
-        self.root, self.digests, self.total = root, {}, 0
-
-    def read(self, path):
-        path = Path(path)
-        ws.no_symlinks(path)
-        raw = read_bounded(path, 4 * 1024**2)
-        name = path.relative_to(self.root).as_posix()
-        digest = hashlib.sha256(raw).hexdigest()
-        if name in self.digests and self.digests[name] != digest:
-            raise ForgeError('Source changed during plan construction', code='conflict')
-        if name not in self.digests:
-            self.total += len(raw)
-            if len(self.digests) >= 256 or self.total > 32 * 1024**2:
-                raise ForgeError('Plan source closure exceeds budget', code='resource_limit')
-            self.digests[name] = digest
-        return raw
-
-    def find_spec(self, fullname, path=None, target=None):
-        spec = importlib.machinery.PathFinder.find_spec(fullname, path)
-        if spec and spec.origin and Path(spec.origin).is_relative_to(self.root):
-            if not spec.origin.endswith('.py'):
-                raise ForgeError('Project imports must use original Python source', code='operation_rejected')
-            sources = self
-
-            class Loader(importlib.machinery.SourceFileLoader):
-                def get_code(self, name):
-                    return compile(sources.read(self.path), self.path, 'exec', dont_inherit=True)
-
-            spec.loader = Loader(fullname, spec.origin)
-            return spec
-        return None
-
-    def verify(self):
-        for name in tuple(self.digests):
-            self.read(self.root / name)
-
-
 class _Discard(io.TextIOBase):
     def write(self, value):
         return len(value)
@@ -107,6 +65,7 @@ def _preview(root, *, table_resolver, entry, params=None):
     from contextlib import redirect_stdout
     from demiflow.execution.host.inspection import capture_pipeline, build_logical_plan_view
     from demiflow.workbench.projects.discovery import discover
+    from demiflow.workbench.projects.python_sources import PythonSources
     from demiflow.workbench.graph.preview_guard import enter_readonly
 
     root, control, _ = ws.load_workspace(root)
@@ -114,7 +73,7 @@ def _preview(root, *, table_resolver, entry, params=None):
     if not any(item['entry'] == entry and item['status'] == 'recognized' for item in project['entries']):
         raise ForgeError('Entry is not declared by this project', code='not_found')
     target, symbol = ws.validate_entry(root, entry)
-    sources = _Sources(root)
+    sources = PythonSources(root)
     entry_sha = hashlib.sha256(sources.read(target)).hexdigest()
     # Resolve declared, fixed table metadata through the trusted platform
     # before importing project code. Lance initializes its native runtime here
@@ -122,6 +81,7 @@ def _preview(root, *, table_resolver, entry, params=None):
     # No row scan or output creation occurs in this resolver. Project imports
     # and all pipeline construction still run under the unchanged guard.
     arguments, params_sha = _parameters(root, control, entry, params, table_resolver=table_resolver)
+    module = sources.entry_module(target)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str(root))
     sys.meta_path.insert(0, sources)
@@ -129,7 +89,6 @@ def _preview(root, *, table_resolver, entry, params=None):
     enter_readonly()  # fail closed, before ANY project import/construction
     try:
         with redirect_stdout(_Discard()):
-            module = target.relative_to(root).as_posix()[:-3].replace('/', '.')
             function = getattr(importlib.import_module(module), symbol)
             if not inspect.isfunction(function) or Path(inspect.getfile(function)) != target:
                 raise ForgeError('Entry resolved outside its declared source', code='conflict')
@@ -157,6 +116,8 @@ def _preview(root, *, table_resolver, entry, params=None):
                               if params is not None else None)
         if current_params_sha != params_sha:
             raise ForgeError('Parameters changed during plan construction', code='conflict')
+    except ModuleNotFoundError as exc:
+        raise sources.missing_import(exc) from exc
     except PermissionError as exc:
         raise ForgeError('解析阶段需要写文件、联网或启动进程，已停止。请把这些操作放到 Dataset 执行阶段。',
                          code='operation_rejected') from exc
