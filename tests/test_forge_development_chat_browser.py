@@ -1,8 +1,70 @@
 import os
 from pathlib import Path
+import time
+from contextlib import contextmanager
 
 import pytest
 from test_forge_development_chat_http import app, legacy_history
+
+
+def test_browser_send_with_slow_retained_provider_homes(tmp_path, monkeypatch):
+    playwright = pytest.importorskip('playwright.sync_api')
+    browser_path = Path('/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome')
+    if not browser_path.is_file():
+        pytest.skip('Installed Chromium unavailable')
+
+    with app(tmp_path) as (server, workspace, root), playwright.sync_playwright() as runtime:
+        state = server.development.root
+        retained = {}
+        for index in range(8):
+            profile = state / ('retained-' + str(index))
+            profile.mkdir(mode=0o700)
+            for number in range(100):
+                path = profile / str(number)
+                path.write_bytes(b'old provider state')
+                retained[path] = path.stat().st_mtime_ns
+
+        original_scan = os.scandir
+
+        class SlowEntry:
+            def __init__(self, entry):
+                self.entry = entry
+
+            def __getattr__(self, name):
+                return getattr(self.entry, name)
+
+            def stat(self, **options):
+                time.sleep(.005)
+                return self.entry.stat(**options)
+
+        @contextmanager
+        def slow_scan(path):
+            with original_scan(path) as entries:
+                yield (SlowEntry(entry) for entry in entries)
+
+        def scan(path):
+            if isinstance(path, (str, Path)) and Path(path).parent == state and Path(path).name.startswith('retained-'):
+                return slow_scan(path)
+            return original_scan(path)
+
+        monkeypatch.setattr(os, 'scandir', scan)
+        browser = runtime.chromium.launch(executable_path=str(browser_path), headless=True,
+                                          args=['--no-sandbox', '--disable-dev-shm-usage'])
+        page = browser.new_page()
+        page.set_default_timeout(15000)
+        page.goto(server.origin + '/#token=' + server.token)
+        page.get_by_role('button', name='开发', exact=True).click()
+        text = 'Describe the project pipelines'
+        page.get_by_label('开发要求').fill(text)
+        with page.expect_response(lambda response: response.url.endswith('/dev-turn-start')) as submitted:
+            page.get_by_role('button', name='发送', exact=True).click()
+        response = submitted.value
+        assert response.status == 202, response.json()
+        page.locator('.dfc-message').filter(has_text='fixture answer').wait_for()
+        session, = server.development.store.list(workspace)['sessions']
+        assert server.development.store.show(workspace, session['id'])['revision'] == 1
+        assert all(path.stat().st_mtime_ns == modified for path, modified in retained.items())
+        browser.close()
 
 
 def open_more(page):

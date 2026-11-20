@@ -1,6 +1,7 @@
 """Bounded data and stable files for development chat."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -143,13 +144,20 @@ def directory_bytes(root, *, entries=16384, deadline=None):
     # Include directory blocks and small-file allocation overhead. Logical size
     # alone undercounts retained provider state; sparse files still reserve their
     # logical size here because later writes can allocate their holes.
+    now = time.monotonic()
+    deadline = min(deadline, now + 2) if deadline is not None else now + 2
+    if now > deadline:
+        reject('Private state scan exceeded entry/time budget', 'resource_limit')
     try:
-        info = Path(root).stat()
+        info = Path(root).lstat()
     except FileNotFoundError:
         return 0  # A finished owned profile may be removed during sampling.
+    if not stat.S_ISDIR(info.st_mode):
+        reject('Unexpected non-directory in private provider state')
     total, count, pending = max(info.st_size, info.st_blocks * 512), 0, [Path(root)]
-    deadline = min(deadline, time.monotonic() + 2) if deadline is not None else time.monotonic() + 2
     while pending:
+        if time.monotonic() > deadline:
+            reject('Private state scan exceeded entry/time budget', 'resource_limit')
         try:
             rows = os.scandir(pending.pop())
         except FileNotFoundError:
@@ -159,15 +167,17 @@ def directory_bytes(root, *, entries=16384, deadline=None):
                 count += 1
                 if count > entries or time.monotonic() > deadline:
                     reject('Private state scan exceeded entry/time budget', 'resource_limit')
-                if row.is_symlink():
-                    reject('Unexpected link in private provider state')
                 try:
                     info = row.stat(follow_symlinks=False)
                 except FileNotFoundError:
                     continue
+                if stat.S_ISLNK(info.st_mode):
+                    reject('Unexpected link in private provider state')
                 total += max(info.st_size, info.st_blocks * 512)
-                if row.is_dir(follow_symlinks=False):
+                if stat.S_ISDIR(info.st_mode):
                     pending.append(Path(row.path))
+    if time.monotonic() > deadline:
+        reject('Private state scan exceeded entry/time budget', 'resource_limit')
     return total
 
 
@@ -175,15 +185,25 @@ def private_directory_bytes(root, *, entries):
     """One shared inventory for retained provider homes and Forge evidence.
 
     Top-level database/control files use their own reservations. Count every
-    physical child directory, including its allocated blocks; retain the
-    existing per-directory entry limit within one total scan deadline.
+    physical child directory, including its allocated blocks. Scan independent
+    homes concurrently so storage metadata latency does not add up across
+    histories. Every worker shares the same overall deadline.
     """
-    sizes = {}
+    directories = []
     deadline = time.monotonic() + 3
     with os.scandir(root) as children:
         for count, child in enumerate(children):
             if count > entries or time.monotonic() > deadline:
                 reject('State inventory exceeds entry/time budget', 'resource_limit')
             if child.is_dir(follow_symlinks=False):
-                sizes[child.name] = directory_bytes(child.path, deadline=deadline)
-    return sizes
+                directories.append(Path(child.path))
+    if time.monotonic() > deadline:
+        reject('State inventory exceeds entry/time budget', 'resource_limit')
+
+    def scan(path):
+        return path.name, directory_bytes(path, deadline=deadline)
+
+    if len(directories) < 2:
+        return dict(map(scan, directories))
+    with ThreadPoolExecutor(max_workers=4) as workers:
+        return dict(workers.map(scan, directories))
