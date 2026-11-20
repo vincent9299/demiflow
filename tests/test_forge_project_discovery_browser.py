@@ -45,14 +45,22 @@ def test_original_project_review_and_sync(original, tmp_path):
         page.get_by_role('cell', name='dispatch.py:run_pipeline', exact=True).wait_for()
         assert page.locator('.wb-actions').get_by_role('button', name='运行', exact=True).is_disabled()
         page.get_by_role('button', name='数据', exact=True).click()
-        page.get_by_text('records/orders.lance',exact=True).click()
-        page.locator('.dictionary-table[open] .dictionary-version').filter(has_text='v1').wait_for()
-        page.locator('.dictionary-meta').filter(has_text='2 行').wait_for()
+        tables = page.locator('.dictionary-table').filter(has=page.get_by_text('records/orders.lance', exact=True))
+        assert tables.count() == 2  # Documentation describes both the head and a versioned reference.
+        if tables.first.get_attribute('open') is None:
+            tables.first.locator('summary').click()
+        tables.first.locator('.dictionary-version').filter(has_text='v1').wait_for()
+        tables.first.locator('.dictionary-meta').filter(has_text='2 行').wait_for()
         page.screenshot(path=str(artifact / 'original-dictionary.png'), full_page=True)
         page.get_by_role('button', name='管道', exact=True).click()
         project_info(page)
-        page.get_by_role('button', name='检查当前项目', exact=True).click()
-        page.get_by_text('整体：尚未完成；静态检查：尚未完成', exact=True).wait_for()
+        with page.expect_response(lambda response: response.url.endswith('/project-check')) as pending:
+            page.get_by_role('button', name='检查当前项目', exact=True).click()
+        report = pending.value.json()
+        assert pending.value.status == 200, report
+        assert report['status'] in {'incomplete', 'invalid'}
+        assert len(report['entries']) == 1 and report['entries'][0]['entry'] == 'dispatch.py:run_pipeline'
+        page.get_by_text('静态检查：', exact=False).first.wait_for()
         page.get_by_text('dispatch.py', exact=False).first.wait_for()
         page.screenshot(path=str(artifact / 'original-check-coverage.png'), full_page=True)
         project_info(page)
