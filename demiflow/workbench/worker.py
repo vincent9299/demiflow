@@ -10,7 +10,7 @@ import sys
 FORMAT = "demiflow_forge_workspace_response_v1"
 
 
-def operation(name, root, *, _pass_fds=(), _authority=None, **arguments):
+def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None, **arguments):
     from demiflow.forge.platform_worker import capture
     from demiflow.forge.platform import limits_with
     from demiflow.forge.schema import ForgeError
@@ -24,6 +24,11 @@ def operation(name, root, *, _pass_fds=(), _authority=None, **arguments):
     request={"operation":name,"root":str(Path(root).absolute()),"arguments":arguments}
     if _authority is not None:
         request["bootstrap"] = _authority
+    if name in {'plan_preview', 'run_prepare'}:
+        from demiflow.workbench.projects.shared_sources import deployment_modules
+        _source_modules = deployment_modules(Path(request['root']))
+    if _source_modules is not None:
+        request['source_modules'] = _source_modules
     settings=limits_with({"catalog_bytes":9*1024**2,**({"timeout_seconds":20} if name in {"analysis_export","analysis_media_export","analysis_media_sources","analysis_source_read","table_profile"} else {})})
     context=current()
     if name == 'metadata' and in_native_dispatch() and not _pass_fds and _authority is None:
@@ -155,10 +160,10 @@ def dispatch(request):
             value = _inspect_flow(root, table_resolver=table_resolver, **args)
         elif op == 'plan_preview':
             from demiflow.workbench.graph.preview import _preview
-            value = _preview(root, table_resolver=table_resolver, **args)
+            value = _preview(root, table_resolver=table_resolver, source_modules=request.get('source_modules'), **args)
         elif op == 'native_submission_inspect':
             from demiflow.workbench.runs.native_submission import inspect_submission
-            value = inspect_submission(root, table_resolver=table_resolver, **args)
+            value = inspect_submission(root, table_resolver=table_resolver, source_modules=request.get('source_modules'), **args)
         elif op == 'workbench_source':
             from demiflow.workbench.graph.model import _source_tree
             value=_source_tree(root,**args)
@@ -178,7 +183,8 @@ def dispatch(request):
             authority = from_bootstrap(request.get('bootstrap'), root)
             handler = {'run_prepare': run_manager._prepare, 'run_preflight': run_manager._preflight,
                        'run_resume': run_manager._resume}[op]
-            value = handler(root, **worker_arguments(op, args), authority=authority)
+            trusted = {'source_modules': request.get('source_modules')} if op == 'run_prepare' else {}
+            value = handler(root, **worker_arguments(op, args), authority=authority, **trusted)
         elif op == 'run_reconcile':
             from demiflow.workbench.runs import manager as runs
             value = runs._reconcile(root, **args)
@@ -341,7 +347,13 @@ def main():
     raw=sys.stdin.buffer.read(1024**2+1)
     if len(raw)>1024**2:raise ValueError("Workspace request exceeds budget")
     request=json.loads(raw)
-    if type(request) is not dict or set(request) not in ({"operation","root","arguments"}, {"operation","root","arguments","bootstrap"}):raise ValueError("Invalid workspace request")
+    required = {"operation", "root", "arguments"}
+    if (type(request) is not dict or not required <= request.keys()
+            or request.keys() - required - {"bootstrap", "source_modules"}
+            or "source_modules" in request and (
+                request["operation"] not in {"plan_preview", "run_prepare", "native_submission_inspect"}
+                or type(request["source_modules"]) is not dict)):
+        raise ValueError("Invalid workspace request")
     prepare_native(analysis_read=request["operation"] in {"analysis_export","analysis_media_export","analysis_media_sources","analysis_source_read","table_profile"})
     result=dispatch(request)
     sys.stdout.buffer.write(bounded_json(result,9*1024**2))

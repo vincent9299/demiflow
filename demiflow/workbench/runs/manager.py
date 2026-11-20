@@ -19,6 +19,7 @@ import uuid
 
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench.projects.python_sources import sealed_root
+from demiflow.workbench.projects.shared_sources import MAX_MODULE_BYTES, bound_files, read_sealed
 from demiflow.workbench.process import process_identity
 from demiflow.workbench.runs.authority import LocalAuthority
 from demiflow.workbench.runs.admission import inputs as admit_inputs
@@ -314,7 +315,7 @@ def _fact_actions(report, outputs):
 
 def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None, inputs=None,
              reserved_run_id=None, prepare_request_id=None, telemetry=True, authority=None, native_deployment=None,
-             capacity_domain=None, environment_names=None, executable_dirs=None):
+             capacity_domain=None, environment_names=None, executable_dirs=None, source_modules=None):
     operation_budget.check()
     if type(telemetry) is not bool:
         raise ForgeError('telemetry must be boolean',code='invalid_request')
@@ -386,7 +387,8 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     from demiflow.workbench.runs import native_submission
     native_flow = not output_specs
     if native_flow:
-        report, output_specs = native_submission.prepare(root, entry, parameters=effective, limits=limits, metadata=metadata)
+        report, output_specs = native_submission.prepare(root, entry, parameters=effective, limits=limits,
+                                                         metadata=metadata, source_modules=source_modules)
         from demiflow.workbench.runs import native_resources
         capacity_domain = native_resources.capacity_domain(capacity_domain)
         native_execution = None
@@ -505,6 +507,8 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                   for name,digest in report['binding']['sources'].items()]
     seal_files.extend((ws.relative_path(seal_root,r['path']),sealed/r['path'],r['sha256'],r.get('max_bytes',1024**2))
                       for r in report['binding'].get('resources',{}).values() if r['kind'] in {'config','file'})
+    seal_files.extend((ws.no_symlinks(origin), relative, digest, MAX_MODULE_BYTES)
+                      for _, origin, relative, digest in bound_files(report['binding']))
     seal_files.extend((platform_root/item['path'],Path('runtime/demiflow')/item['path'],item['sha256'],platform['limits']['file_bytes'])
                       for item in platform['platform']['files'])
     if len(seal_files)>16384 or sum(source.stat().st_size for source,_,_,_ in seal_files)>SEALED_BYTES:
@@ -703,6 +707,8 @@ def verify_seal(target, manifest, *, environment=True):
     for name, digest in report['binding']['sources'].items():
         if hashlib.sha256(read_bounded(source / name, 1024**2)).hexdigest() != digest:
             raise ForgeError('Sealed candidate source differs')
+    for name, _, relative, digest in bound_files(report['binding']):
+        read_sealed(name, target / relative, digest)
     for resource in report['binding'].get('resources', {}).values():
         if resource['kind'] in {'config', 'file'} and hashlib.sha256(read_bounded(source / resource['path'], resource.get('max_bytes', 1024**2))).hexdigest() != resource['sha256']:
             raise ForgeError('Sealed resource differs')

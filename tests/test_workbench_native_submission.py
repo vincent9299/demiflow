@@ -12,13 +12,13 @@ from test_forge_resume import stopped
 from test_forge_runs import wait
 
 
-def native_flow(root, imports='', value='1'):
+def native_flow(root, imports='', value='1', transform=''):
     (root / 'flows/native.py').write_text('''from demiflow import data
 import pyarrow as pa
 ''' + imports + f'''
 def run(*, target, stage):
     schema = pa.schema([('x', pa.int64())])
-    return data.from_items([{{'x': {value}}}, {{'x': 2}}]).save_lance(stage, schema=schema,
+    return data.from_items([{{'x': {value}}}, {{'x': 2}}]){transform}.save_lance(stage, schema=schema,
         key='x', stage='rows', mode='append', max_rows=2, max_index_bytes=8388608
     ).write_lance(target, schema=schema, mode='create', return_receipt=True)
 ''')
@@ -63,6 +63,73 @@ def test_nested_package_preview_and_managed_run_use_same_sources(root):
     import lance
     for output in result['outputs']:
         assert sorted(lance.dataset(output['uri']).to_table()['x'].to_pylist()) == [2, 41]
+
+
+def test_shared_source_preview_and_run_pin_explicit_modules(root, monkeypatch):
+    from demiflow.workbench.graph.preview import preview
+    from demiflow.workbench.projects.shared_sources import ENVIRONMENT, FORMAT
+
+    namespace = root.parent.name
+    project_package = namespace + '.' + root.name
+    external = root.parent / namespace
+    external.mkdir()
+    (root.parent / '__init__.py').write_text('raise AssertionError("undeclared initializer")\n')
+    (external / '__init__.py').write_text('label = "approved"\n')
+    (root / 'operators/local_input.py').write_text('value = 1\n')
+    (external / 'step.py').write_text('def adjust(row):\n'
+        f'    from {namespace}.metrics.settings import increment\n'
+        '    return {"x": row["x"] + increment}\n')
+    setting = external / 'settings.py'
+    setting.write_text('increment = 20\n')
+    policy = root.parent / 'python-sources.json'
+    policy.write_text(json.dumps(dict(format=FORMAT, workspaces={str(root): {
+        namespace: str(external / '__init__.py'),
+        namespace + '.metrics.step': str(external / 'step.py'),
+        namespace + '.metrics.settings': str(setting),
+    }})))
+    monkeypatch.setenv(ENVIRONMENT, str(policy))
+    prepared = native_flow(root, f'from {namespace}.metrics.step import adjust\n'
+        f'from {project_package}.operators.local_input import value\n', 'value', transform='.map(adjust)')
+    run_id = prepared['run_id']
+    plan = preview(root, entry='flows/native.py:run', params='flows/native.json')
+    binding = prepared['report']['binding']['shared_sources']
+    assert plan['basis']['shared_sources'] == {name: row['sha256'] for name, row in binding.items()}
+    assert any(row['implementation']['path'] == f'source/{namespace}/metrics/step.py'
+               for row in plan['_node_details'].values())
+    snapshot = runs.directory(root, run_id) / 'source' / namespace
+    assert (snapshot / '__init__.py').read_bytes() == (external / '__init__.py').read_bytes()
+    assert sorted(path.name for path in (snapshot / 'metrics').iterdir()) == ['settings.py', 'step.py']
+    assert (snapshot / root.name / 'operators/local_input.py').is_file()
+    setting.write_text('increment = 40\n')
+    with pytest.raises(Exception, match='prepared shared source changed: ' + namespace + r'\.metrics\.settings'):
+        runs.start(root, run_id, expected=prepared['digest'])
+    setting.write_text('increment = 20\n')
+    monkeypatch.delenv(ENVIRONMENT)
+    result = execute(root, prepared)
+    assert result['status'] == 'succeeded', (result, runs.logs(root, run_id))
+    import lance
+    for output in result['outputs']:
+        assert sorted(lance.dataset(output['uri']).to_table()['x'].to_pylist()) == [21, 22]
+
+
+def test_shared_source_missing_grant_does_not_search_other_files(root, monkeypatch):
+    from demiflow.forge.schema import ForgeError
+    from demiflow.workbench.graph.preview import preview
+    from demiflow.workbench.projects.shared_sources import ENVIRONMENT, FORMAT
+
+    external = root.parent / 'shared'
+    external.mkdir()
+    (external / 'allowed.py').write_text('from shared.private import value\n')
+    (external / 'private.py').write_text('value = 20\n')
+    policy = root.parent / 'python-sources.json'
+    policy.write_text(json.dumps(dict(format=FORMAT, workspaces={str(root): {
+        'shared.allowed': str(external / 'allowed.py'),
+    }})))
+    monkeypatch.setenv(ENVIRONMENT, str(policy))
+    with pytest.raises(ForgeError, match=r'管道依赖无法导入：shared\.private'):
+        native_flow(root, 'from shared.allowed import value\n')
+    with pytest.raises(ForgeError, match=r'管道依赖无法导入：shared\.private'):
+        preview(root, entry='flows/native.py:run', params='flows/native.json')
 
 
 def test_native_source_drift_rejected_before_worker(root):

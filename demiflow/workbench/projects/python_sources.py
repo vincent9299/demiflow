@@ -31,8 +31,9 @@ def sealed_root(directory, binding):
 class PythonSources(importlib.abc.MetaPathFinder):
     """Read and pin local source, with scoped support for qualified package names."""
 
-    def __init__(self, root):
+    def __init__(self, root, *, shared_imports=None):
         self.root = root
+        self.shared_imports = shared_imports
         self.package = ()
         self.digests = {}
         self.total = 0
@@ -72,11 +73,18 @@ class PythonSources(importlib.abc.MetaPathFinder):
                     local = self.root.joinpath(*relative)
                     if not (no_symlinks(local).is_dir() or no_symlinks(local.with_suffix('.py')).is_file()):
                         continue
-                    if self.package or prefix[0] in sys.modules:
+                    if self.package:
                         raise ForgeError('项目的 Python 包名称与另一个已使用的包冲突：' + '.'.join(prefix),
                                          code='operation_rejected')
-                    package_parts('.'.join(prefix))
-                    self.package = prefix
+                    self._select_package(prefix)
+
+    def _select_package(self, package):
+        if package[0] in sys.modules and (self.shared_imports is None or package[0] not in self.shared_imports.roots):
+            raise ForgeError('项目的 Python 包名称与已加载依赖冲突：' + package[0], code='operation_rejected')
+        package_parts('.'.join(package))
+        if self.shared_imports is not None:
+            self.shared_imports.set_project_package(package)
+        self.package = package
 
     def entry_module(self, path):
         tree = ast.parse(self.read(path), filename=str(path))
@@ -86,9 +94,7 @@ class PythonSources(importlib.abc.MetaPathFinder):
                                   for node in ast.walk(tree))
         if not self.package and self.root.name.isidentifier() and (
                 relative_to_project or no_symlinks(self.root / '__init__.py').is_file()):
-            if self.root.name in sys.modules:
-                raise ForgeError('项目的 Python 包名称与已加载依赖冲突：' + self.root.name, code='operation_rejected')
-            self.package = (self.root.name,)
+            self._select_package((self.root.name,))
         return '.'.join((*self.package, *relative))
 
     def missing_import(self, error):

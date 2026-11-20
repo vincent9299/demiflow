@@ -83,10 +83,21 @@ def _execute(root, run_id, run, attempt=None):
         check_stop()
         run.transition({'starting'}, 'running', worker=process_identity(os.getpid()), running_at=time.time())
         from demiflow.workbench.projects.python_sources import package_parts, sealed_root
+        from demiflow.workbench.projects.shared_sources import SharedSourceImports, bound_files, read_sealed
         binding = report['binding']
         package = package_parts(binding.get('source_package'))
         source = sealed_root(target, binding)
         _source_imports(source, binding['sources'], package=package)
+        shared = {name: (target / relative, digest) for name, _, relative, digest in bound_files(binding)}
+        shared_paths = {path for path, _ in shared.values()}
+        if shared:
+            project_roots = {Path(name).parts[0].removesuffix('.py') for name in binding['sources']}
+            def read_shared(name):
+                return read_sealed(name, *shared[name])
+            imports = SharedSourceImports({name: path for name, (path, _) in shared.items()},
+                                         read=read_shared, project_roots=project_roots)
+            imports.set_project_package(package)
+            sys.meta_path.insert(0, imports)
         module, function = binding.get('source_entry', manifest['entry']).split(':')
         module_name = binding.get('entry_module', module[:-3].replace('/', '.'))
         entry = getattr(importlib.import_module(module_name), function)
@@ -98,7 +109,7 @@ def _execute(root, run_id, run, attempt=None):
         # than re-resolving candidate namespace packages against site-packages.
         for loaded in tuple(sys.modules.values()):
             filename = getattr(loaded, '__file__', None)
-            if filename and Path(filename).is_relative_to(source):
+            if filename and (Path(filename).is_relative_to(source) or Path(filename) in shared_paths):
                 cloudpickle.register_pickle_by_value(loaded)
         limits = runs.remaining_limits(manifest['limits'], value['state'])
         work.mkdir(parents=True, exist_ok=True)

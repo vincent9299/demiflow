@@ -60,12 +60,13 @@ class _Discard(io.TextIOBase):
         return len(value)
 
 
-def _preview(root, *, table_resolver, entry, params=None):
+def _preview(root, *, table_resolver, entry, params=None, source_modules=None):
     """Called only by the fixed one-shot workspace worker, never the server."""
     from contextlib import redirect_stdout
     from demiflow.execution.host.inspection import capture_pipeline, build_logical_plan_view
     from demiflow.workbench.projects.discovery import discover
     from demiflow.workbench.projects.python_sources import PythonSources
+    from demiflow.workbench.projects.shared_sources import SharedSources
     from demiflow.workbench.graph.preview_guard import enter_readonly
 
     root, control, _ = ws.load_workspace(root)
@@ -73,7 +74,8 @@ def _preview(root, *, table_resolver, entry, params=None):
     if not any(item['entry'] == entry and item['status'] == 'recognized' for item in project['entries']):
         raise ForgeError('Entry is not declared by this project', code='not_found')
     target, symbol = ws.validate_entry(root, entry)
-    sources = PythonSources(root)
+    shared = SharedSources(root, {} if source_modules is None else source_modules)
+    sources = PythonSources(root, shared_imports=shared.importer)
     entry_sha = hashlib.sha256(sources.read(target)).hexdigest()
     # Resolve declared, fixed table metadata through the trusted platform
     # before importing project code. Lance initializes its native runtime here
@@ -85,6 +87,7 @@ def _preview(root, *, table_resolver, entry, params=None):
     sys.dont_write_bytecode = True
     sys.path.insert(0, str(root))
     sys.meta_path.insert(0, sources)
+    sys.meta_path.insert(0, shared.importer)
     os.chdir(root)
     enter_readonly()  # fail closed, before ANY project import/construction
     try:
@@ -109,7 +112,9 @@ def _preview(root, *, table_resolver, entry, params=None):
             with PlanCallsites(root, sources.digests) as callsites:
                 result = capture_pipeline(construct, {}, on_compiled=callsites.bind_compilation)
             from demiflow.workbench.graph.plan_details import build_plan_details
-            details = build_plan_details(result.compiled, sources=sources.digests, root=root, callsites=callsites, bounds=result.bounds)
+            shared_binding = shared.binding()
+            details = build_plan_details(result.compiled, sources=sources.digests, root=root, callsites=callsites,
+                                         bounds=result.bounds, shared_sources=shared_binding)
             pipeline = pipeline_material(root, target, sources.digests)
         sources.verify()
         current_params_sha = (hashlib.sha256(read_bounded(ws.validate_parameter_path(root, params), 65536)).hexdigest()
@@ -124,6 +129,8 @@ def _preview(root, *, table_resolver, entry, params=None):
     basis = dict(entry=entry, params=params, entry_sha256=entry_sha,
                  params_sha256=params_sha, sources=sources.digests, dag_id=result.compiled.graph.dag_id,
                  details_sha256=content_digest(details), pipeline_sha256=content_digest(pipeline))
+    if shared_binding:
+        basis['shared_sources'] = {name: row['sha256'] for name, row in shared_binding.items()}
     basis['digest'] = content_digest(basis)
     value = dict(format='demiflow.plan_preview.v1', available=True, basis=basis,
                  kind=result.kind, provider=result.provider, entry_completed=False,
