@@ -41,7 +41,7 @@ def test_real_stages_complete_before_callback_and_do_not_copy_configuration(cont
     dataset = context.rows().map(corpus.identity)
     action = type('Action', (), {'action_id': 'private-action-not-logged'})()
     request = ActionRequest(kind='take', source=dataset._source, plan=dataset._plan,
-                            arguments={'n': None}, action=action, provider='local')
+                            arguments={'limit': 2}, sink=None, programs=(), action=action, provider='local')
     source = source_binding(TREE)
     observer = ProcessEvidence(source, {'map': 'compiled'})
     with observer, observer.case('map') as case:
@@ -75,7 +75,8 @@ def test_shared_binding_is_observed_in_final_with_all_optional_keys(context, mon
     observer = ProcessEvidence(source_binding(TREE), {'shared_recovery': 'compiled'})
     with observer, observer.case('shared_recovery') as case:
         compiled = lower_action(ActionRequest(kind='take', source=dataset._source, plan=dataset._plan,
-            arguments={'n': None}, action=type('Action', (), {'action_id': 'shared-recovery'})(), provider='local'),
+            arguments={'limit': 2}, sink=None, programs=(),
+            action=type('Action', (), {'action_id': 'shared-recovery'})(), provider='local'),
             bounds=corpus.bounds())
         case['outcome'] = 'compiled'
     assert schema.SHARED_KEYS <= seen['final']
