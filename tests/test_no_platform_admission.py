@@ -140,6 +140,9 @@ def test_resume_rejects_unknown_durable_protocol_before_attempt(tmp_path,changes
     before=journal.execution_status()
     with pytest.raises(RecoveryContractError,match='Unsupported or missing runtime'):
         RunContext.resume(RunRef(str(target),configuration['run_id']))
+    with pytest.raises(RecoveryContractError,match='Unsupported or missing runtime'):
+        with RunContext(target,resume=True):
+            pytest.fail('unsupported protocol entered runtime')
     assert journal.execution_status()==before
     assert journal.recovery_identity()==configuration
 
