@@ -1,0 +1,233 @@
+{
+  "format": "demiflow_a2_implementation_validation_v1",
+  "status": "implemented_verified_awaiting_parent_final_review",
+  "owner": "original a_guards author",
+  "base_main_sha": "122edf4bd0c827338846abd0114f0b36cf8c1b6d",
+  "base_main_tag": "main-20261119-3",
+  "approved_design_commit": "c6cdd9d076cbc9181279ecd81e88fdc201907315",
+  "A1_preserved_ancestor": "0c1ff443cab9ecbc7a2e4cd45a70c5187e50643d",
+  "tested_commit": "73bb194d95456f6860cfe578939f8adcf205ae5d",
+  "final_docs_candidate": "Recorded externally in HANDOFF.json; tests and actual reports retain tested_commit, no rewritten evidence",
+  "branch": "gpt/test/public-imports-20261120",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/test/public-imports-20261120",
+  "review_authority": "Latest user GPT review; A design and A1 parent approved. Fable has no independent verdict. A2 final code review pending parent.",
+  "scope": [
+    "tools/architecture_diagnostics.py",
+    "tests/test_architecture_diagnostics.py",
+    "tests/merge_gate.py",
+    "tests/test_merge_gate.py",
+    "docs/architecture-upgrade-20261120/A/DIAGNOSTICS-USAGE.txt"
+  ],
+  "implementation_stat": "5 files, 1189 insertions, 0 deletions relative to fixed A1",
+  "validation_mapping": [
+    {
+      "design": "A2-V1/V6",
+      "actual": "Real private Git commits test SCC merge/split, existing/new entrants, existing exits/deleted modules, full member/path lists and missing/acyclic/dissolved anchors. All passed.",
+      "receipt": "related-1.xml; fixture-output-index.json; two preserved key Git bundles"
+    },
+    {
+      "design": "A2-V2/V3",
+      "actual": "Private fixed objects with line shifts produce relocated only; uncommitted invalid source and GIT_WORK_TREE override ignored. Repeated small-fixture and actual 122edf4/candidate reports byte-identical.",
+      "receipt": "related-1.xml; verification.json; primary reports"
+    },
+    {
+      "design": "A2-V4",
+      "actual": "Static absolute/relative/per-name top, guarded, lazy and two direct TYPE_CHECKING forms, literal and nonliteral dynamic imports and symbol strings tested; supplementary observations excluded from static SCC. Source containing unconditional AssertionError never executed.",
+      "receipt": "test_static_relative_kinds_and_dynamic_observations_stay_separate"
+    },
+    {
+      "design": "A2-V5/V12",
+      "actual": "Declaration seed/closure/missing/added cases passed; real original graph forward/backward anchor sets and every candidate name/location set match. 297/87, seeds27/closure42; statement groups3+9+6 (name sites4+11+6) are observed, not assertions used by tool.",
+      "receipt": "legacy-reconciliation.json"
+    },
+    {
+      "design": "A2-V7/V8",
+      "actual": "Invalid/missing/short/symbolic SHA, base tree/candidate blob, missing source tree, syntax and symlink fail honestly; tiny module/blob/source/path/metadata-entry/metadata-byte/row/report budgets reject. Declared Git object size is refused before any body read. No partial main reports survive failed generation/publication.",
+      "receipt": "48 related tests and preserved raw failure receipts"
+    },
+    {
+      "design": "A2-V9/V10",
+      "actual": "Fake timeout/nonzero/corrupt/write/missing/digest/input faults are visible failed. Four combinations of real guard pass/fail and mocked diagnostic complete/failed retain original ok and CLI exit. Not-requested/partial explicit. Owned-process-group timeout cleanup and real partial report publication cleanup tested.",
+      "receipt": "related-1.xml and full pytest child logs"
+    },
+    {
+      "design": "A2-V11",
+      "actual": "Private real no-commit merge write-tree input has commit_sha=null; later actual merge commit has same tree and identical snapshots. Parent repository refs/index untouched.",
+      "receipt": "preserved actual-merge Git bundle and fixture reports"
+    },
+    {
+      "design": "A2-V13",
+      "actual": "Two related complete files 48 passed first time; one complete real merge gate with optional actual reports 217 primary+12 subtests passed,17files,zero fail/error/skip.",
+      "receipt": "related-1-command.json; merge-gate-1-command.json; raw CLI/JUnit and source-bound observations"
+    }
+  ],
+  "actual_tests": {
+    "related": {
+      "passed": 48,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "outer_seconds": 8.53392892330885,
+      "pytest_seconds": 7.37
+    },
+    "merge_gate": {
+      "passed": 217,
+      "subtests_passed": 12,
+      "guard_files": 17,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "tree_bound": true,
+      "frozen_differences": [],
+      "missing_guards": [],
+      "diagnostics_status": "complete",
+      "outer_seconds": 68.99674508720636,
+      "pytest_seconds": 59.68
+    },
+    "outer_test_runs": 2,
+    "failed_outer_test_runs": 0,
+    "test_reruns_after_failure": 0,
+    "standalone_actual_generation": {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/evidence/standalone-1-command.json",
+      "bytes": 1988,
+      "sha256": "f07531ec623e5ca80f0b4e618683c5d4ff8d26ca0112c3165421f72ddb117c17"
+    },
+    "main_reports": [
+      {
+        "standalone": {
+          "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/standalone-1-reports/scc-membership.json",
+          "bytes": 1000945,
+          "sha256": "ae09664f78cf9333613089666629e1b009d79a49a02e9756fe349561844ffa80"
+        },
+        "gate": {
+          "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/merge-gate-1-reports/scc-membership.json",
+          "bytes": 1000945,
+          "sha256": "ae09664f78cf9333613089666629e1b009d79a49a02e9756fe349561844ffa80"
+        },
+        "byte_equal": true
+      },
+      {
+        "standalone": {
+          "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/standalone-1-reports/declaration-upward-imports.json",
+          "bytes": 87436,
+          "sha256": "872151c091c557ea49b8f5239b00f8537572cb58edd4f14fe82fecd8d4f548b6"
+        },
+        "gate": {
+          "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/merge-gate-1-reports/declaration-upward-imports.json",
+          "bytes": 87436,
+          "sha256": "872151c091c557ea49b8f5239b00f8537572cb58edd4f14fe82fecd8d4f548b6"
+        },
+        "byte_equal": true
+      }
+    ],
+    "interpreter": "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+    "version": "3.11.16",
+    "dependency_versions": {
+      "pytest": "9.1.1",
+      "pyarrow": "25.0.1",
+      "PyYAML": "6.0.3",
+      "pylance": "12.0.0+demiflow.arrowfix1",
+      "datafusion": "54.0.0"
+    },
+    "OS_backups": {
+      "address_space_bytes": 536870912,
+      "cpu_seconds": 60,
+      "resource_limits": "applied",
+      "wall_seconds": 90,
+      "wall_timer": "applied"
+    },
+    "not_run": [
+      "four release lanes",
+      "Ray/business/paid model/browser/online service",
+      "actual CPU/OOM/90s hard-kill stress (bounded unit/fake cases and actual applied limits instead)",
+      "complete Forge or business project snapshots",
+      "Fable independent final review",
+      "integration/main/tag/push/preview switch"
+    ]
+  },
+  "actual_reports_bind": {
+    "base": "122edf4bd0c827338846abd0114f0b36cf8c1b6d",
+    "candidate": "73bb194d95456f6860cfe578939f8adcf205ae5d",
+    "both_are_commits": true,
+    "candidate_tree_sha": "77208d2ffd0200297687a9e7fab30b8cae156615",
+    "report_input_not_rewritten_to_docs_candidate": true,
+    "no_structural_change": true,
+    "current_findings": {
+      "base": 297,
+      "workbench": 87,
+      "seed_top_candidates": {
+        "imported_name_sites": 4,
+        "statements": 3
+      },
+      "lazy_into_base_scc": {
+        "imported_name_sites": 11,
+        "statements": 9
+      },
+      "lazy_outside_base_scc": {
+        "imported_name_sites": 6,
+        "statements": 6
+      }
+    },
+    "seed_count": 27,
+    "closure_count": 42,
+    "nontrivial_components": 9
+  },
+  "identity": {
+    "package_files": 1445,
+    "package_bytes": 36545366,
+    "all_actual_product_package_bytes_equal_to_base": true,
+    "platform_identity_input_python_files": 1125,
+    "platform_identity_input_python_bytes": 10854934,
+    "platform_identity_digest": "bedffb7dc807fc7a1127f588fa6a7d71b082f145a18596bf054d35c198c24b10",
+    "packaging_declaration_unchanged": true,
+    "object_sealed_history_and_resume_policy_unchanged": true,
+    "Forge_platform_source_inputs": "package/standard/catalog source and declaration unchanged in same environment; no full snapshot runtime claim",
+    "Forge_project_watch": "tests/tools/docs may be watched; old project evidence cannot be silently reused"
+  },
+  "preservation": {
+    "A1": "0c1ff443cab9ecbc7a2e4cd45a70c5187e50643d",
+    "all_A1_meta_functions_AST_equal": true,
+    "GUARDS_FROZEN_equal": true,
+    "cold_fixture_source_equal": true,
+    "files": [
+      {
+        "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/test/public-imports-20261120/tools/architecture_diagnostics.py",
+        "bytes": 32651,
+        "sha256": "7219991a0c9e93f41bd7aee9eafdf6acb50a9f68bf65ce4e86accc671c7fb43f"
+      },
+      {
+        "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/test/public-imports-20261120/tests/test_architecture_diagnostics.py",
+        "bytes": 14813,
+        "sha256": "664ca06e1c5e64fe7bc23dfea076cb3efae503a255bce153dfaca344c30abae9"
+      },
+      {
+        "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/test/public-imports-20261120/tests/merge_gate.py",
+        "bytes": 13784,
+        "sha256": "e9bc6aa180c0b18cacf8d13f6b891344e9ba36e22f8fe67375a25a59422b6b0e"
+      },
+      {
+        "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/test/public-imports-20261120/tests/test_merge_gate.py",
+        "bytes": 9039,
+        "sha256": "7d791faa60eb807f6e49b7ff082887a1832d3a086c460d38c5cd1f7fe701da3d"
+      }
+    ]
+  },
+  "limits_and_process_choice": "CLI itself is the one independent analysis process, with 60s software checks, 90s signal timer and 512MiB/60sCPU backups, at most one serial Git reader. Gate supervises owned group for 90s plus up to2s cleanup. Function API does not mutate caller OS limits. No analysis platform, product imports or new owners.",
+  "deviations": "No substantive design deviation; current GPT authority replaces interrupted Fable workflow. Independent CLI process uses POSIX timer for outer backup and is additionally supervised by optional gate; resource limits apply only to CLI. Rows cap includes supplemental observations as a stricter bounded table.",
+  "evidence_collection_correction": "One evidence-copy helper initially parsed a deliberately corrupted negative fixture as valid JSON. Original error retained; same original bytes re-indexed as opaque. No implementation change, test retry or report regeneration.",
+  "cleanup": {
+    "at": "2026-11-20T01:08:59.278412+00:00",
+    "tested_commit": "73bb194d95456f6860cfe578939f8adcf205ae5d",
+    "private_scratch": "/tmp/demiflow-a2-20261120-o63cmxhd",
+    "private_files_before_cleanup": 909,
+    "preserved_fixture_json_files": 61,
+    "preserved_key_git_bundles": 2,
+    "gate_scratch": "/tmp/demiflow-gate-rnhiqdxr",
+    "gate_finally_cleanup_verified": true,
+    "all_launched_subprocesses_returned": true,
+    "scope": "only own recorded private scratch; raw receipts, reports and key private Git objects persisted in this A2 stage",
+    "private_scratch_removed": true
+  },
+  "evidence_root": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/evidence",
+  "human_decisions_needed": []
+}

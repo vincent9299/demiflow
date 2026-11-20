@@ -1,0 +1,74 @@
+任务 A2 实施与验收 v1
+
+原作者 a_guards；状态：实现和固定源码验证完成，待父协调固定代码终审。最新真人授权由 GPT 审阅，Fable 无独立通过结论。
+原始 root/15 叶及取舍原则原样复用本目录 ORIGINAL-INTENT.txt；AR v1.3、整体架构、架构 v3 和正式发版规范保持。
+本工作服务 R.5.1/5.2/5.3：给边界审阅提供可信结构变化和限度证据，不为降 SCC 数字搬产品，不新造运行体系或身份承诺。
+
+固定对象与范围
+
+基线 main-20261119-3：122edf4bd0c827338846abd0114f0b36cf8c1b6d。
+批准设计 c6cdd9d076cbc9181279ecd81e88fdc201907315，DESIGN 第4节 / CONTRACTS / VALIDATION；GPT 非原作者和父裁定已通过。
+已审 A1 独立祖先 0c1ff443cab9ecbc7a2e4cd45a70c5187e50643d 保留不重写；此次受测 A2 实现 T：73bb194d95456f6860cfe578939f8adcf205ae5d。
+分支 gpt/test/public-imports-20261120，专属树 /yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/test/public-imports-20261120。
+实现相对 A1 为5文件+1189/-0：tools/architecture_diagnostics.py、tests/test_architecture_diagnostics.py、tests/merge_gate.py、
+tests/test_merge_gate.py、DIAGNOSTICS-USAGE.txt。本两件实际说明在测试后单独留档；最终候选与源码逐项绑定写共享 HANDOFF，不自引用。
+不将 T 的测试或主报告 input 改写成文档提交，后续合流对真实组合 staged tree 仍由唯一管理者按规范过闸。
+
+改前→改后与职责
+
+改前只有仓库外可复用分析脚本，读取工作目录，旧 SCC 递归且假定锚点在环内，语法错误会略过，没有固定双对象报告/失效回执。
+改后新增一个有限 stdlib/Git 只读工具：读取完整 commit/tree SHA 的模块清单及 blob，逐份 AST，迭代 SCC，生成两份主报告和外围 receipt。
+复用旧 graph 导入解析/类别与 facts 的种子/闭包/SCC 定义，原件路径和精确 SHA 写进工具及 method，不在运行时依赖共享脚本，也不复制旧展示/模拟 cut。
+公开门面、执行器、业务对象、历史账本或资源 owner 不变；工具没有插件/注册中心/五层规则，也不执行被分析模块。
+
+SCC 报告完整列两个版本组件成员/路径、missing/acyclic/cyclic 锚点，区别新建/原有成员入环、保留退环/删除及组件交集的 merge/split。
+声明报告列实际/缺失/新增种子、top/guarded 闭包、种子跨旧口径包的 top 候选和闭包外 lazy 到底座 SCC 内外两组；每名和位置保留。
+依赖 key=(src,dst,names,kind) 聚合，行号变化只记 relocated。typing、literal dynamic、符号字符串和 computed unknowns 单列，不混入静态 SCC。
+无静态边不证明运行无依赖；函数 lazy 包含 defaults/decorators/annotations，直接 TYPE_CHECKING 才识别，别名、反射、可达性、动态调用来源不保证。
+“向上”仅是明示旧候选定义，不是已批准分层规范或违规判决；SCC/导入数增加也完成报告，不触发阈值失败。
+
+输入/输出/错误与可选 gate
+
+base 必须 full commit SHA，candidate 可 full commit/tree，tree commit_sha=null；Git replace/继承 GIT_* 路由禁用，只用 cat-file/ls-tree。
+不 checkout/write-tree/写Git引用/INDEX，不把未提交工作区混入；实际测试树与 staged tree 的对应仍由管理者证明。
+输出必须仓外全新目录，已有证据拒绝覆盖。两份有界临时主报告先写完再发布；异常清本次 partial，能写时留下 failed receipt，不能写时如实缺失/非零，不伪造空成功。
+主报告同输入/工具逐字节确定；时刻/耗时/绝对输出路径只在外围 receipt。路径、对象类型、模块/blob/总源、metadata、观察行、输出、deadline 都有主动上限。
+CLI 是一个独立分析进程（512MiB AS、60s CPU 后备、90s wall timer），软件阶段60s，最多一个串行 Git child；函数 API 不改当前 pytest 的 OS 限制。
+Git header 大小先准入再读body；.py symlink/special mode/语法错误明确失败，不静默跳过。资源限值、实际 OS 后备可用性和耗时如实记录，不称宿主 RSS 保证。
+
+可选 gate 三参数只在原 gate 结果之后运行工具。默认 diagnostics.status=not_requested 明示未生成；少参数/工具/输入/预算/写入/超时/损坏结果为 failed。
+complete 需实际两文件、输入匹配、字节/摘要和 receipt 一致；工具报告异常不读写 result.ok，最终 CLI 退出仍由真实 guard 决定。
+真实 guard fail+complete 仍失败，guard pass+failed 仍保留成功和报告失败两个事实。JSON 总回执写不出仍是缺证据，不能声称交付。
+A1 的 GUARDS/FROZEN、完整冷导入、fixture、原元测试 AST 和 skip 拒绝不变；没有 allow-skip、全仓政策改变或报告失败阻断 A1/P12。
+具体命令、字段、限制和恢复见 DIAGNOSTICS-USAGE.txt；不改现行发版规范，不替管理者执行合流/发布。
+
+实际验证（均固定 T）
+
+工具+完整 gate 元测试：48 passed，0失败/异常/skip，pytest7.37s、wrapper8.53s，首次通过。
+覆盖实际私有Git合并/拆分/新增删除、位置移动、固定对象忽略脏工作树、真实no-commit merge tree→later commit、静态/typing/动态限度、
+非法SHA/type/语法/链接/缺树、八种小预算、先验body拒绝、1200节点非递归遍历、partial publication 清理及可选gate所有四种真假组合。
+独立真实 CLI 122edf4→T 报告 complete，约7.08s；完整真实 gate 后再次生成同输入报告，两个主报告逐字节相同。
+一次完整 gate：217 primary+12 subtests passed，17文件，0失败/异常/skip；tree_bound=True，missing/frozen空，diagnostics=complete。
+完整gate pytest59.68s、整体wrapper69.00s；时间仅本次观察，原cold子进程30s及本任务外层边界不放宽。
+实际导入断言、解释器3.11.16、依赖、全部命令/env/stdout/stderr/JUnit、文件展开/nodeids/receipt 均保存，固定SHA开始/结束clean，observer无错误。
+wrapper只在已完成subprocess返回前复制输出/JUnit，不改变原参数/结果/代码；CLI模式运行原 merge_gate.py __main__ 和 argv。
+
+以原 design-v1 的 graph 做独立 forward∩reverse 全成员及声明全位置/名字集合对账：底座297/工作台87、9组件、种子27/闭包42；
+三组语句3+9+6（name sites4+11+6）逐项一致。本任务产品包不变，所以两版快照和结构差异实际为零；工具不把这些数字锁成断言。
+主报告源 SHA 仍为 T，最终docs候选只由字节等价证明相关源码不变，不谎称已用新input SHA再生成或做发布四线。
+
+无实际测试失败或修订后复跑；预期负例的内部失败/skip不计外层失败。归档 helper 曾误解析故意损坏的负例JSON，原错和原字节保留，
+改为不解析损坏输入后重做同一份证据索引，没有改实现/测试、重跑pytest或重生成主报告。61件私有fixture JSON原件及两个关键Git bundle保留。
+未跑四线、Ray、业务/付费模型、浏览器/服务、真实OOM/CPU/90s硬杀压力、完整Forge快照、Fable终审或发布；原始A1/设计失败历史不覆盖。
+
+身份、保留、风险与恢复
+
+所有1,445件产品包/36,545,366字节及真实磁盘路径与122edf4相同；包Git子树 d71f29fce5d314aa2ec0afb1a9f41daf4ccdff48 不变。
+原平台身份的1,125件.py/10,854,934字节不变，原算法复算 bedffb7dc807fc7a1127f588fa6a7d71b082f145a18596bf054d35c198c24b10。
+pyproject/MANIFEST/包内Forge标准和来源源码不变；不搬对象或改封存/历史/恢复策略。GitSHA前进与平台内容身份分开；
+Forge项目若watch到tests/tools/docs，开发快照可变，旧证据不能静默复用；不声称完整Forge snapshot实际验过，不等待/启用C新身份。
+合流其他产品任务时，管理者重新分析组合候选；本任务零变化报告不担保组合版，也不替代四线或产品验收。
+A1独立祖先保留，诊断失败不拖A1/P12。旧脚本、设计/报告/审阅/失败历史和冻结件全部保留，无删除产品实现。
+回退在任务分支作A2独立反向提交，由管理者按现行流程合流；不reset main、不改旧封存或覆盖报告。自己的私有scratch和原gate finally目录已清理。
+共享交接：/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/。
+后续只待父协调固定候选终审；原作者未合流/push/发标签/发布/切预览，无新增真人决定项。
