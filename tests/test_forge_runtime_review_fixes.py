@@ -312,10 +312,21 @@ def test_r3_pending_cleanup_retains_device_reservation_until_reconcile(
                 domain, config, other, {**manifest, "run_id": "r" + "2" * 24}, 1
             )
         assert (scratch / "owned-residue").exists()
+    # This control-only fixture needs a valid native protocol to reach the
+    # cleanup gate. Claim/release is fixture setup, not native execution evidence.
+    from demiflow.execution.runtime_limits import execution_limits
+    configuration = dict(format=1, stream_protocol="aligned-barrier-v2", run_id="4"*32,
+                         entry_identity=None, started_at=time.time(), limits_explicit=[],
+                         platform_revision="original-platform", limits=execution_limits(None))
+    journal.claim_execution(configuration, "f"+"1"*32)
+    journal.release_execution("f"+"1"*32)
+    before = journal.execution_status()
     with pytest.raises(ForgeError, match="reconcile pending cleanup"):
         runs._resume(
             root, manifest["run_id"], expected=manifest["digest"], expected_attempt=1
         )
+    assert journal.execution_status() == before
+    assert journal.recovery_identity() == configuration
     assert journal.execution_status()["attempt"] == 1
     assert len(RunJournal(target).list_attempts()) == 1
     runs._reconcile(root, manifest["run_id"], expected_attempt=1)
