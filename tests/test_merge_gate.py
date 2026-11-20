@@ -106,6 +106,9 @@ def test_the_real_guard_roster_includes_the_entire_cold_import_file():
     files, missing = merge_gate.guard_files(ROOT)
     assert missing == []
     assert 'tests/test_package_cold_imports.py' in files
+    assert 'tests/test_workbench_project_boundary.py' in files
+    assert 'tests/test_dataflow_configuration.py' in files
+    assert 'tests/test_configuration_schema_evidence.py' not in files
 
 
 def diagnostic_reply(command):
