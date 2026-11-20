@@ -428,9 +428,10 @@ def _chain_recovery(fixture, *, fault):
 
     rows, commits, refused = None, None, False
     if fault == 'edit_helper':
-        with pytest.raises(RecoveryContractError, match='code') as excinfo:
+        with pytest.raises(DataflowError, match='Loaded program code differs from the sealed pin') as excinfo:
             with RunContext.resume(reference):
                 execute()
+        assert excinfo.value.code == 'INVALID_CONTRACT'
         assert not isinstance(excinfo.value, TimeoutError)
         refused = True
         assert RunJournal(run_dir).execution_commits('action-1') == prefix
