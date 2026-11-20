@@ -195,10 +195,10 @@ def _release_orphans(run_dir, *, capacity):
 
 
 def _chain_child_id(run):
-    with run.journal._connection() as db:
-        row = db.execute("SELECT action_id FROM runtime_actions WHERE action_id LIKE '%-chain'").fetchone()
-    assert row is not None, 'chain output child action was not bound'
-    return row[0]
+    # The unified v3 action owns the checkpoint and final result commits;
+    # the former folded %-chain action no longer exists.
+    assert run.journal.source_binding('action-1-dataflow-sealed') is not None
+    return 'action-1'
 
 
 def _crash_hook(root):
@@ -208,7 +208,7 @@ def _crash_hook(root):
     def hook(row):
         counter[0] += 1
         if counter[0] == 5 and not marker.exists():
-            marker.touch()
+            marker.write_text(json.dumps({'pid': os.getpid(), 'row': counter[0]}))
             os.kill(os.getpid(), signal.SIGKILL)
         return row
 
@@ -394,7 +394,7 @@ def _chain_recovery(fixture, *, fault):
                 .map_async(hook, concurrency=1))
 
     def execute():
-        with data.local_execution(workers=1, worker_mode='thread', partitions=1,
+        with data.local_execution(workers=1, worker_mode='process', partitions=1,
                                   unified_chain=True):
             return pipeline().materialize().take_all()
 
@@ -405,6 +405,10 @@ def _chain_recovery(fixture, *, fault):
             reference = run.ref
             execute()
     assert marker.exists(), 'first run must crash after acked cuts, not fail at load'
+    killed = json.loads(marker.read_text())
+    assert killed['pid'] != os.getpid() and killed['row'] == 5
+    prefix = RunJournal(run_dir).execution_commits('action-1')
+    assert prefix and all(f['status'] == 'acked' for f in prefix), 'crash must retain a genuine ACK prefix'
     before = _resource_evidence(run_dir, capacity=_CHAIN_CAPACITY, started=started)
 
     if fault == 'edit_helper':
@@ -418,6 +422,7 @@ def _chain_recovery(fixture, *, fault):
                 execute()
         assert not isinstance(excinfo.value, TimeoutError)
         refused = True
+        assert RunJournal(run_dir).execution_commits('action-1') == prefix
     else:
         with RunContext.resume(reference) as run2:
             rows = execute()
