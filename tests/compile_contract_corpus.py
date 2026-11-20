@@ -233,6 +233,8 @@ def _policy(limits):
 
 BOUNDS = {
     'default': lambda: _policy({}),
+    # The default image declaration reserves 1632 MiB before payload/state.
+    'image_4g': lambda: _policy({'memory_bytes': 4 * 1024**3}),
     'm192_r8_b32': lambda: _policy({'memory_bytes': 192 * 1024, 'max_row_bytes': 8 * 1024, 'max_batch_bytes': 32 * 1024}),
     'm256_r16_b32': lambda: _policy({'memory_bytes': 256 * 1024, 'max_row_bytes': 16 * 1024, 'max_batch_bytes': 32 * 1024}),
     'm64_r8_b20': lambda: _policy({'memory_bytes': 64 * 1024, 'max_row_bytes': 8 * 1024, 'max_batch_bytes': 20 * 1024}),
@@ -429,7 +431,8 @@ CASES = {
         request='request', output='o', context=c.reading())),
     'read_object': lambda c: case(c.rows().read_object(reference='ref', output='o', root=c.path('objroot'))),
     'decode_document': lambda c: case(c.rows().decode_document(column='x', output='o')),
-    'encode_image': lambda c: case(c.rows().encode_image(column='x', output='o', profile='thumbnail_lanczos_v1')),
+    'encode_image': lambda c: case(c.rows().encode_image(column='x', output='o', profile='thumbnail_lanczos_v1'),
+                                 bounds='image_4g'),
     'parse_wikitext': lambda c: case(c.rows().parse_wikitext(column='x', output='o')),
     # -- worker resources ---------------------------------------------------
     'resources_memory_cpu': lambda c: case(c.rows().map(identity, backend_options=_resources(memory_bytes=512 * 1024**2, cpu=0.5))),
