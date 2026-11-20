@@ -1,6 +1,5 @@
 """Multi-entry discovery shares source work without weakening freshness/budgets."""
 import hashlib
-import json
 
 from demiflow.workbench.projects import discovery as discovery
 
@@ -40,13 +39,6 @@ def test_shared_module_preserves_each_symbol_and_duplicate_diagnostics(tmp_path)
 
 
 def test_changed_source_cannot_reuse_earlier_entry_facts(tmp_path, monkeypatch):
-    (tmp_path / '.git').mkdir()
-    declaration = tmp_path / '.demiforge/project.json'
-    declaration.parent.mkdir()
-    declaration.write_text(json.dumps({
-        'schema': 'demiforge-project-v2', 'standard': '1.0.0-candidate.9',
-        'pipelines': {'orders': {'path': '.', 'entry': {
-            'path': 'recipe.py', 'symbol': 'build'}, 'operators': []}}}))
     source = tmp_path / 'recipe.py'
     source.write_text('def build():\n    pass\n')
     old = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -54,7 +46,7 @@ def test_changed_source_cannot_reuse_earlier_entry_facts(tmp_path, monkeypatch):
 
     def change_between_declarations(path, maximum):
         raw = read(path, maximum)
-        if path == declaration:
+        if path == source:
             source.write_text('def changed():\n    pass\n')
         return raw
 

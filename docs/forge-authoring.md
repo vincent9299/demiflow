@@ -1,3 +1,5 @@
+> 历史文档。当前实现见 [Forge 开发辅助方案](forge-guided-coding-redesign.md)。
+
 # Forge 开发接口
 
 ## Request 与项目生成

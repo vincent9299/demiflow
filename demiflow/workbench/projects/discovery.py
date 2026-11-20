@@ -9,8 +9,8 @@ import ast
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
-from pathlib import PurePosixPath
 import re
 from urllib.parse import unquote
 from urllib.parse import urlsplit
@@ -21,8 +21,6 @@ from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.schema import ForgeError
 
 FORMAT = 'demiflow_forge_project_discovery_v1'
-STANDARDS = {f'1.0.0-candidate.{i}' for i in range(1, 11)}
-LEGACY_STANDARDS = {f'1.0.0-candidate.{i}' for i in range(1, 7)}
 PARAMETERS = {'demiflow_forge_flow_parameters_v1', 'demiflow_forge_flow_parameters_v2'}
 MAX_FILES, MAX_BYTES, MAX_ITEMS = 128, 4 * 1024**2, 256
 
@@ -45,6 +43,43 @@ def _json(raw):
     return json.loads(raw, object_pairs_hook=unique, parse_constant=invalid, parse_float=number)
 
 
+def coding_view(root, *, exclude=()):
+    """Select only local flow entries and role paths for a development turn."""
+    from demiflow.forge.io import no_symlinks
+    from demiflow.forge.project_rules import ROLE_DIRS
+    from .workspace import load_workspace_control
+
+    root = no_symlinks(Path(root).absolute())
+    control_path = root / 'workspace.json'
+    no_symlinks(control_path)
+    control = load_workspace_control(root)[1] if control_path.exists() else None
+    roles = {role: [] for role in ROLE_DIRS}
+    excluded = set(exclude)
+    seen = 0
+    for role in ROLE_DIRS:
+        suffixes = {'.yaml', '.yml', '.json'} if role == 'prompts' else {'.py'}
+        pending = [no_symlinks(root / role)]
+        while pending:
+            directory = pending.pop()
+            if directory.relative_to(root).as_posix() in excluded or not directory.exists():
+                continue
+            with os.scandir(no_symlinks(directory)) as children:
+                for entry in children:
+                    seen += 1
+                    if seen > 2048:
+                        raise ForgeError('Project coding discovery exceeds entry budget', code='resource_limit')
+                    path = Path(entry.path)
+                    relative = path.relative_to(root).as_posix()
+                    if entry.name.startswith('.') or entry.name == '__pycache__' or relative in excluded:
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(path)
+                    elif Path(entry.name).suffix in suffixes and entry.is_file(follow_symlinks=False):
+                        roles[role].append(relative)
+        roles[role].sort()
+    return dict(control=control, roles=roles, entries=dict((control or {}).get('entries', {})))
+
+
 def discover(root, control=None):
     from demiflow.workbench.projects import workspace as ws
     root = ws.no_symlinks(Path(root).absolute()).resolve(strict=True)
@@ -53,7 +88,6 @@ def discover(root, control=None):
     evidence, diagnostics, entries, configurations, tables, runs = {}, [], [], [], {}, []
     operator_paths, prompt_paths, total = {}, {}, 0
     entry_sources = {}
-    declarations = []
 
     def issue(code, path, detail, *, cause='unknown', scope='project_discovery'):
         row = dict(code=code, path=str(path), detail=str(detail)[:1024],cause=cause,scope=scope,related_nodes=[])
@@ -102,7 +136,7 @@ def discover(root, control=None):
         tree = ast.parse(raw, filename=relative)
         if sum(1 for _ in ast.walk(tree)) > 50000:
             raise ForgeError('Entry AST exceeds discovery budget', code='resource_limit')
-        functions, requirements, config_count = {}, {}, 0
+        functions, requirements = {}, {}
         for node in tree.body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 count, line = functions.get(node.name, (0, node.lineno))
@@ -111,26 +145,20 @@ def discover(root, control=None):
                 requirements[node.name] = [p.arg for p in positional[:len(positional)-len(node.args.defaults)]]
                 requirements[node.name].extend(p.arg for p, default in zip(node.args.kwonlyargs, node.args.kw_defaults)
                                                if default is None)
-            if isinstance(node, ast.FunctionDef) and node.name == 'config':
-                config_count += 1
         facts = dict(sha256=hashlib.sha256(raw).hexdigest(),
-                     functions=functions, requirements=requirements, configurations=config_count)
+                     functions=functions, requirements=requirements)
         if stamp() != before:
             raise ForgeError('Entry source changed during discovery', code='conflict')
         entry_sources[target] = (before, facts)
         return facts
 
-    def add_entry(path, symbol, protocol, origin, standard=None, params=()):
+    def add_entry(path, symbol, params):
         target = local(path)
         if target.suffix != '.py' or type(symbol) is not str or not symbol.isidentifier() or symbol.startswith('_'):
             raise ForgeError('Invalid Python entry declaration')
         relative = target.relative_to(root).as_posix()
         item = dict(entry=relative + ':' + symbol, path=relative, symbol=symbol,
-                    protocol=protocol, standard=standard, evidence=origin,
-                    parameters=list(params), status='recognized')
-        if any(e['entry'] == item['entry'] and e['protocol'] != protocol for e in entries):
-            item['status'] = 'conflict'
-            issue('conflicting_entry', relative, '同一入口被声明为不同协议；未自动选择。')
+                    protocol='native_flow', evidence='workspace.json', parameters=list(params), status='recognized')
         try:
             source = entry_source(target, relative)
             item['sha256'] = source['sha256']
@@ -141,134 +169,28 @@ def discover(root, control=None):
             else:
                 item['line'] = line
                 item['required_arguments'] = source['requirements'][symbol]
-            if protocol == 'config_run_pipeline':
-                item['configuration_entry'] = relative + ':config'
-                if source['configurations'] != 1:
-                    item['status'] = 'invalid'
-                    issue('configuration_entry_missing', relative, '旧协议要求的顶层 config 函数不存在或不唯一。')
         except (ValueError, OSError, SyntaxError, RecursionError) as exc:
             item['status'] = 'invalid'
             issue('entry_unreadable', relative, exc)
-        existing = next((e for e in entries if e['entry'] == item['entry'] and e['protocol'] == protocol), None)
-        if existing is None:
-            entries.append(item)
-        else:
-            existing.setdefault('also_declared_by', []).append(origin)
-            if standard:
-                existing['standard'] = standard
-
-    def add_operator(path, origin, kind='code'):
-        target = local(path)
-        relative = target.relative_to(root).as_posix()
-        extensions = {'.py'} if kind == 'code' else {'.yaml', '.yml', '.json'}
-        state = 'available' if target.is_dir() or target.is_file() and target.suffix in extensions else 'missing'
-        (operator_paths if kind == 'code' else prompt_paths)[relative] = dict(path=relative, evidence=origin, status=state)
-        if state == 'missing':
-            issue('operator_missing', relative, '声明的算子文件或目录不存在。')
+        entries.append(item)
 
     for entry, params in control.get('entries', {}).items():
         try:
             path, symbol = entry.split(':')
-            add_entry(path, symbol, 'native_flow', 'workspace.json', params=params)
+            add_entry(path, symbol, params)
         except (ValueError, OSError) as exc:
             issue('invalid_native_entry', entry, exc)
 
-    # Select the exact owner, or a unique v3 owner explicitly referenced by a
-    # repository-root workspace. Directory names alone never select an owner.
-    declaration = None
-    for depth, base in enumerate((root, *root.parents)):
-        if depth >= 32:
-            issue('discovery_limit', '', '父目录查找达到 32 层上限。')
-            break
-        candidate = base / '.demiforge/project.json'
-        if candidate.exists() or candidate.is_symlink():
-            declaration = candidate
-            break
-        if (base / '.git').exists():
-            break
-    if declaration is not None:
-        try:
-            raw = read(declaration)
-            value = _json(raw)
-            if type(value) is not dict or value.get('schema') not in {'demiforge-project-v1', 'demiforge-project-v2', 'demiforge-project-v3'}:
-                raise ForgeError('Unsupported project declaration schema')
-            multi = value['schema'] == 'demiforge-project-v3'
-            records = value.get('projects' if multi else 'pipelines')
-            if type(records) is not dict or len(records) > MAX_ITEMS:
-                raise ForgeError('Invalid or oversized pipeline declarations')
-            base = declaration.parent.parent
-            matches, referenced = [], []
-            for name, record in records.items():
-                if type(record) is not dict or type(record.get('path')) is not str:
-                    raise ForgeError('Invalid pipeline owner declaration')
-                relative = PurePosixPath(record['path'])
-                if (not record['path'] or str(relative) != record['path'] or relative.is_absolute()
-                        or '..' in relative.parts or '\\' in record['path']):
-                    issue('invalid_owner', declaration, '项目归属路径无效：' + name)
-                    continue
-                # Select lexically before inspecting any filesystem path. A
-                # sibling's unavailable or symlinked files do not hide this owner.
-                owner = base.joinpath(*relative.parts)
-                if owner == root:
-                    matches.append((name, record))
-                elif multi and base == root and type(record.get('flows')) is dict:
-                    flows = record['flows']
-                    if len(flows) > 64:
-                        raise ForgeError('Invalid multi-flow declaration')
-                    if any(type(flow) is dict and type(flow.get('path')) is str
-                           and type(flow.get('symbol')) is str
-                           and flow['path'] + ':' + flow['symbol'] in control.get('entries', {})
-                           for flow in flows.values()):
-                        referenced.append((name, record))
-            if not matches:
-                matches = referenced
-            if len(matches) > 1:
-                issue('conflicting_owner', declaration, '多个登记声明拥有同一目录；未自动选择入口。')
-            elif not matches:
-                issue('owner_not_declared', declaration, '未找到与当前目录准确匹配的项目归属声明。')
-            else:
-                name, record = matches[0]
-                standard = record.get('standard', value.get('standard'))
-                declarations.append(dict(path=str(declaration), pipeline=name, standard=standard,
-                                         schema=value['schema']))
-                if standard not in STANDARDS:
-                    issue('unsupported_standard', declaration, f'不支持的原项目规范版本：{standard}')
-                else:
-                    entry = record.get('entry')
-                    origin = str(declaration) + ('#projects.' if multi else '#pipelines.') + name
-                    if standard == '1.0.0-candidate.10':
-                        if not multi or type(record.get('flows')) is not dict or not 1 <= len(record['flows']) <= 64:
-                            raise ForgeError('Invalid multi-flow declaration')
-                        for flow_id, flow in record['flows'].items():
-                            if (type(flow_id) is not str or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,95}', flow_id)
-                                    or type(flow) is not dict or set(flow) != {'path', 'symbol'}):
-                                raise ForgeError('Invalid flow declaration')
-                            target = ws.relative_path(base, flow['path'])
-                            add_entry(target, flow['symbol'], 'native_flow', origin, standard)
-                            found = next(e for e in entries if e['entry'] == target.relative_to(root).as_posix() + ':' + flow['symbol'])
-                            found['flow_id'] = flow_id
-                        for role, kind in (('operators', 'code'), ('prompts', 'prompt')):
-                            paths = record.get(role)
-                            if type(paths) is not list or len(paths) > 64:
-                                raise ForgeError('Invalid definition paths')
-                            for path in paths:
-                                add_operator(ws.relative_path(base, path), origin, kind)
-                    elif standard in LEGACY_STANDARDS and type(entry) is str and '/' not in entry and entry.endswith('.py'):
-                        add_entry(entry, 'run_pipeline', 'config_run_pipeline', origin, standard)
-                        # This role is part of the supported legacy standard,
-                        # not a rule imposed on arbitrary registered projects.
-                        add_operator('operators', origin)
-                    elif standard not in LEGACY_STANDARDS and type(entry) is dict and set(entry) == {'path', 'symbol'}:
-                        add_entry(ws.relative_path(base, entry['path']), entry['symbol'], 'native_flow', origin, standard)
-                        operators = record.get('operators', [])
-                        if type(operators) is not list or len(operators) > 64:
-                            raise ForgeError('Invalid operator declarations')
-                        for operator in operators:
-                            add_operator(ws.relative_path(base, operator), origin)
-                    else:
-                        issue('unsupported_entry', declaration, '入口声明与指定规范版本的协议不一致。')
-        except (ValueError, OSError, TypeError, RecursionError) as exc:
-            issue('declaration_unreadable', declaration, exc)
+    from demiflow.forge.project_rules import ROLE_DIRS
+    for role, paths in (('operators', operator_paths), ('prompts', prompt_paths)):
+        if role in ROLE_DIRS:
+            try:
+                target = local(role)
+                if target.is_dir():
+                    paths[role] = dict(path=role, evidence='project_directory', status='available')
+            except (ValueError, OSError) as exc:
+                issue('definition_directory_unreadable', role, exc)
+
     if not entries:
         issue('entry_not_declared', '', '未识别到受支持的入口声明；不会根据函数名猜测并执行代码。')
 
@@ -379,19 +301,17 @@ def discover(root, control=None):
         configurations.append(row)
 
     for entry in entries:
-        if entry['protocol'] == 'config_run_pipeline':
-            issue('unsupported_flow_protocol', entry['path'], '已识别原 config → run_pipeline 入口；当前原生 Flow 契约检查与执行尚不支持此协议。保留原代码，改造需用户确认。',cause='unsupported',scope='entry')
-        elif not entry['parameters']:
+        if not entry['parameters']:
             issue('parameters_unbound', entry['path'], '已识别入口，但缺少入口与原生参数配置的明确绑定；文档引用不自动成为执行配置。',cause='source',scope='entry')
     result = dict(format=FORMAT, status='partial' if diagnostics else 'recognized',
-        declarations=declarations, entries=entries, operators=[operator_paths[p] for p in sorted(operator_paths)],
+        entries=entries, operators=[operator_paths[p] for p in sorted(operator_paths)],
         prompts=[prompt_paths[p] for p in sorted(prompt_paths)], configurations=configurations,
         tables=list(tables.values()), runs=runs, diagnostics=diagnostics,
         evidence=[dict(path=p, sha256=h) for p, h in sorted(evidence.items())],
         coverage=dict(candidate_code_executed=False, complete=False,
                       historical_runs='only_explicit_references', data='declared_references_only',
                       entry_checks='python_syntax_and_declared_symbol_only',
-                      operator_checks='declared_path_existence_only'))
+                      operator_checks='role_directory_existence_only'))
     result['digest'] = content_digest(result)
     bounded_json(result, 1024**2)
     return result

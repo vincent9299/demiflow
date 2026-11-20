@@ -22,7 +22,7 @@
 
 `demiflow workbench` 组织项目的入口、配置、固定版本数据与运行记录。通过 `workspace check` 查看项目检查覆盖，通过 `flow inspect` 检查已明确绑定的原生接线；受管运行复用现有 Dataset 执行及 prepare/start/resume 准入，Web、HTTP 和 CLI 读取同一项目事实。识别旧入口不自动获得执行能力；静态检查通过也不等于整体认证或生产放行。使用方式与边界见 [工作区指南](docs/forge-workspace.md) 和 [HTTP 契约](docs/forge-http-api.md)。
 
-旧 `demiflow forge new/check/verify/review/freeze/run` 保留 v1 的 `read_lance → map → write_lance` 契约和历史证据，与当前项目管理入口分别使用。详见 [v1 契约](docs/forge-contract.md)、[开发接口](docs/forge-authoring.md) 和 [v1 生命周期与 CLI](docs/forge-lifecycle.md)；参考项目位于 `examples/forge_text_map/`。
+Forge 为工作台开发对话提供当前 SDK 的原生 API、项目目录规范及写后静态检查，见 [Forge 改造方案](docs/forge-guided-coding-redesign.md)。项目资料取自所选项目。使用新开发状态目录启动当前流程。原生 Dataset 及 `demiflow run` 是可用的计算入口。
 
 ## 定位
 

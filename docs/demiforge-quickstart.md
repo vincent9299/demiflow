@@ -1,3 +1,5 @@
+> 历史文档。当前实现见 [Forge 开发辅助方案](forge-guided-coding-redesign.md)。
+
 # DemiForge 最小闭环
 
 当前版本：`1.0.0-candidate.10`。Python 3.10+、POSIX、源码检出或正常解压安装的 wheel 均可使用。

@@ -2,7 +2,6 @@
 import json
 import os
 from pathlib import Path
-import tempfile
 import urllib.error
 import urllib.request
 
@@ -103,31 +102,17 @@ def test_compare_and_swap_invalid_and_busy_save_are_atomic(tmp_path):
     finally:service.close()
 
 
-def test_automatic_managed_project_keeps_parent_forge_gates(tmp_path,monkeypatch):
-    from test_forge_development import DevelopmentTests
-    from demiflow.workbench.conversations.development import prepare
-    from demiflow.workbench.conversations.context import assemble
-    monkeypatch.setattr(tempfile,'tempdir',str(tmp_path))
-    fixture=DevelopmentTests();fixture.setUp()
-    host=tmp_path/'host';host.mkdir();root,path,service,settings,inventory=setup(host)
-    try:
-        selected=fixture.root/'orders';grant=automatic_project(selected)
-        assert grant['managed'] and grant['development_root']==str(fixture.root)
-        assert grant['pipeline']=='orders'
-        inventory['projects']['worders']={'root':str(selected)}
-        settings.save(payload(settings))
-        sid=service.create_project('worders',selected,'managed','codex')['id']
-        session=service.store.session(sid);project=service.project('worders',selected)
-        from demiflow.workbench.conversations.common import root_identity
-        turn,_=service.store.submit('worders',sid,'turn',0,'Preserve orders',root_identity(selected),session['policy_hash'])
-        policy=service.session_policy(session);tasks=prepare(policy,service.store,turn,session,project)
-        scratch=tmp_path/'scratch';scratch.mkdir()
-        manifest,prompt=assemble(project,'Preserve orders',scratch,policy.limits,managed_tasks=tasks,task_id=sid,
-                                current_request={'turn_id':turn['id'],'text':turn['text'],'event_ids':[turn['id']+':0']})
-        assert manifest['kind']=='demiforge_registered'
-        assert all(p.startswith('orders/') for p in manifest['binding']['writes'])
-        assert 'Preserve orders' in prompt
-    finally:service.close();fixture.doCleanups()
+def test_automatic_project_does_not_inherit_parent_forge_tasks(tmp_path):
+    parent = tmp_path / '.demiforge'
+    parent.mkdir()
+    (parent / 'project.json').write_text('intentionally invalid legacy declaration')
+    selected = tmp_path / 'orders'
+    selected.mkdir()
+    grant = automatic_project(selected)
+    assert grant['kind'] == 'pipeline'
+    assert not {'managed', 'development_root', 'pipeline'} & grant.keys()
+    assert {'flows', 'operators', 'prompts'} <= set(grant['writes'])
+    assert all(not Path(p).is_absolute() and '..' not in Path(p).parts for p in grant['writes'])
 
 
 def test_automatic_scope_preserves_nested_data_and_notebooks(tmp_path):
@@ -169,22 +154,6 @@ def test_existing_connection_automatically_applies_to_new_registered_project(tmp
         assert service.capabilities('wadded',other)['enabled']
         assert service.project('wadded',other)['writes']
         assert service.current_hash('wfixture',root)==service.policy_hash
-    finally:service.close()
-
-
-def test_save_waits_for_forge_verification_after_provider_finishes(tmp_path):
-    root,path,service,settings,_=setup(tmp_path)
-    try:
-        settings.save(payload(settings));before=settings.path.read_bytes()
-        with service.lock:
-            sid=service.create_project('wfixture',root,'gate','codex')['id']
-            from demiflow.workbench.conversations.common import root_identity
-            turn,_=service.store.submit('wfixture',sid,'turn',0,'gate pending',root_identity(root),service.current_hash('wfixture',root))
-            service.store.update(turn['id'],cleanup='complete',gate_cleanup='pending',gate_phase='claimed')
-            try:
-                with pytest.raises(ForgeError,match='正在运行'):settings.save(payload(settings))
-                assert settings.path.read_bytes()==before
-            finally:service.store.update(turn['id'],gate_cleanup='complete',gate_phase='finished')
     finally:service.close()
 
 

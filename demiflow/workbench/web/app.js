@@ -552,7 +552,6 @@
     const project=context.project;if(!project)return;
     const p=panel('原项目识别',parent);
     p.append($('p','读取已有声明和文档引用；识别结果不代表规范通过，也不会授权执行。','muted'));
-    for(const d of project.declarations||[])p.append($('p',d.pipeline+' · '+d.standard+' · '+d.path,'muted small'));
     const viewer=$('div');
     table(p,['入口','协议 / 规范','依据'],project.entries.map(e=>({value:e,cells:[e.entry,(e.protocol==='native_flow'?'原生 Flow':'config → run_pipeline')+' · '+(e.standard||'平台工作区声明'),e.evidence]})),async e=>{
       const source=await api('source',{path:e.path,...(e.sha256?{expected_sha256:e.sha256}:{})});

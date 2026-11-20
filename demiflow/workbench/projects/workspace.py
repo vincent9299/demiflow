@@ -100,7 +100,8 @@ def init_workspace(root, *, name="workspace", modules=("demiflow.data",), existi
     return {"status": "created", "workspace": str(root), "id": value['id'], "platform": value["platform"]}
 
 
-def load_workspace(root):
+def load_workspace_control(root):
+    """Validate local project declarations without opening platform provenance."""
     root = Path(root).absolute()
     no_symlinks(root)
     value = read_control(root / "workspace.json")
@@ -143,6 +144,11 @@ def load_workspace(root):
         if not modern and location["writable"] and (key != "local" or location["root"] != "data"):
             raise ForgeError("Only workspace data/ may be writable")
         location_root(root, location)
+    return root, value
+
+
+def load_workspace(root):
+    root, value = load_workspace_control(root)
     if set(value["platform"]) != {"path", "digest"}:
         raise ForgeError("Invalid platform binding")
     path = relative_path(root, value["platform"]["path"])
@@ -533,7 +539,7 @@ def source_text(root, path, *, expected_sha256=None):
     return {'path': path, 'text': raw.decode('utf-8'), 'sha256': actual}
 
 
-def _register_flow_value(root, value, entry, params, *, new_only=False):
+def _register_flow_value(root, value, entry, params):
     import ast
     if value['format'] not in MODERN_FORMATS:
         raise ForgeError('Explicit flow registration requires workspace v2')
@@ -542,8 +548,6 @@ def _register_flow_value(root, value, entry, params, *, new_only=False):
     if sum(isinstance(n, ast.FunctionDef) and n.name == symbol for n in tree.body) != 1:
         raise ForgeError('Registered entry function is missing or ambiguous')
     read_control(validate_parameter_path(root, params), 65536)
-    if new_only and entry in value['entries']:
-        raise ForgeError('Managed registration can only add a new entry', code='conflict')
     paths = value['entries'].setdefault(entry, [])
     if params in paths:
         return dict(status='unchanged', entry=entry, params=params)
@@ -551,21 +555,6 @@ def _register_flow_value(root, value, entry, params, *, new_only=False):
         raise ForgeError('Entry registration budget exceeded')
     paths.append(params)
     return dict(status='registered', entry=entry, params=params)
-
-
-def plan_flow_registration(root, flows):
-    """Validate an additive batch without publishing either project control."""
-    root, value, _ = load_workspace(root)
-    before = read_bounded(root / 'workspace.json', 1024**2).decode('utf-8')
-    if content_digest(json.loads(before)) != content_digest(value):
-        raise ForgeError('Workspace changed during registration planning', code='conflict')
-    if not isinstance(flows, list) or not 1 <= len(flows) <= 8:
-        raise ForgeError('Managed registration requires 1..8 new flows')
-    for flow in flows:
-        _register_flow_value(root, value, flow['path'] + ':' + flow['symbol'], flow['params'], new_only=True)
-    after = bounded_json(value, 1024**2).decode('utf-8')
-    return dict(before_raw=before, before_sha256=hashlib.sha256(before.encode()).hexdigest(),
-                after_raw=after, after_sha256=hashlib.sha256(after.encode()).hexdigest())
 
 
 def register_flow(root, entry, *, params):
@@ -873,6 +862,92 @@ def current_platform_snapshot(snapshot):
                           limits=snapshot['limits'])
 
 
+def inspect_coding_changes(root, changes, reference, *, exclude=()):
+    """Resolve development check inputs using local, existing project controls."""
+    import ast
+    from functools import partial
+    from demiflow.forge.pipeline_check import check_changes
+    from demiflow.forge.project_rules import ROLE_DIRS, diagnostic
+    from .discovery import coding_view
+
+    root = Path(root)
+    view = coding_view(root, exclude=exclude)
+    control = view['control']
+    entries = view['entries']
+    declared = {entry.partition(':')[0] for entry in entries}
+    registered_parameters = {path for paths in entries.values() for path in paths}
+    relevant, coverage, layout = set(), [], []
+    for change in changes:
+        path = change['path']
+        file = Path(path)
+        top = file.parts[0]
+        if (path in declared or path in registered_parameters or top in ROLE_DIRS or
+                file.suffix == '.py' and top not in {'tests', 'docs'}):
+            relevant.add(path)
+        if path in declared:
+            if change['after'] is None:
+                layout.append(diagnostic('DF-02', path, '项目登记的 flow 文件被删除。'))
+            elif top != 'flows':
+                layout.append(diagnostic('DF-02', path, '项目登记的 flow 应位于 flows/。'))
+        if path in declared or path not in view['roles']['flows']:
+            continue
+        if Path(path).name == '__init__.py':
+            continue
+        try:
+            tree = ast.parse(read_bounded(relative_path(root, path), 128 * 1024))
+        except SyntaxError as exc:
+            layout.append(diagnostic('DF-02', path, '无法解析 flow 源码。', line=exc.lineno))
+            coverage.append(diagnostic('FL-01', path, '源码语法错误。'))
+            continue
+        public = [node.name for node in tree.body if isinstance(node, ast.FunctionDef)
+                  and not node.name.startswith('_')]
+        if len(public) != 1:
+            layout.append(diagnostic('DF-02', path, '新 flow 需要一个明确的公开入口。'))
+            coverage.append(diagnostic('FL-01', path, '缺少唯一的 flow 入口。', status='incomplete'))
+            continue
+        entry = path + ':' + public[0]
+        validate_entry(root, entry)
+        entries[entry] = [None]
+
+    # Shared definitions can affect any registered flow. Never guess a
+    # dependency from a model message or silently skip an unregistered caller.
+    flow_paths = {entry.partition(':')[0] for entry in entries}
+    shared = bool(relevant - flow_paths - registered_parameters)
+    if not shared and relevant:
+        shared = any(c['path'] in relevant and c['after'] is None for c in changes)
+    if shared and any(path not in flow_paths and Path(path).name != '__init__.py' for path in view['roles']['flows']):
+        coverage.append(diagnostic('FL-10', '', '项目有尚未绑定的 flow，无法确认所有共享依赖。', status='incomplete'))
+    if relevant and not entries:
+        coverage.append(diagnostic('FL-10', '', '没有可核对的 flow 入口。', status='incomplete'))
+
+    def load(params):
+        path = validate_parameter_path(root, params) if params is not None else None
+        value = read_control(path) if path else None
+        args, tables, targets, controls = resolve_arguments(
+            root, control or {'locations': {}}, value, table_resolver=table_binding
+        ) if path else ({}, {}, {}, {})
+
+        def recheck():
+            workspace_path = root / 'workspace.json'
+            current = read_control(workspace_path) if workspace_path.exists() else None
+            if current != control or path is not None and read_control(path) != value:
+                raise ForgeError('Project or flow parameters changed during inspection', code='conflict')
+            for filename, expected in controls.items():
+                if content_digest(table_identity(read_control(relative_path(root, filename)))) != expected:
+                    raise ForgeError('Table binding changed during inspection', code='conflict')
+
+        def resources(tree, references, bindings):
+            return resolve_flow_resources(root, tree, references, bindings, control=control or {'locations': {}})
+        return args, tables, targets, resources, recheck
+
+    variants = ((entry, partial(load, params)) for entry, parameters in entries.items()
+                for params in parameters if relevant and
+                (shared or entry.partition(':')[0] in relevant or params in relevant))
+    return check_changes(root, changed=relevant, variants=variants,
+                         layout_diagnostics=layout, coverage=coverage,
+                         catalog=reference['catalog'], catalog_id=reference['catalog_id'])
+
+
 def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None):
     from demiflow.forge.flow_check import FlowChecker
 
@@ -961,7 +1036,7 @@ def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None
     return report
 
 
-def resolve_flow_resources(root, tree, references, bindings):
+def resolve_flow_resources(root, tree, references, bindings, *, control=None):
     """Read declared files under the workspace's existing source budget.
 
     Analyzers receive configuration text or immutable file metadata, never a
@@ -981,7 +1056,7 @@ def resolve_flow_resources(root, tree, references, bindings):
             value=str(reference['root'])
             logical=_local_path(value) if value.startswith('file:') else Path(value)
             reference['root']=str(logical if logical.is_absolute() else Path(root)/logical)
-            _, workspace, _ = load_workspace(root)
+            workspace = control if control is not None else load_workspace(root)[1]
             matches = [key for key, location in workspace['locations'].items()
                        if str(location_root(root, location)) == reference['root']]
             if len(matches) != 1:

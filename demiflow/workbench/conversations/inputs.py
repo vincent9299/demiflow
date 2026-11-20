@@ -97,11 +97,9 @@ class InputAccess:
         self.runtime = tuple(str(p) for p in runtime_paths)
         turn = store.turn(tid)
         self.epoch = turn['epoch']
-        control = json.loads(turn.get('development_control') or '{}')
-        self.deadline = deadline if deadline is not None else control.get(
-            'deadline', turn['created'] + store.limits.turn_seconds)
+        self.deadline = deadline if deadline is not None else turn['created'] + store.limits.turn_seconds
 
-    def _active(self):
+    def require_active(self):
         turn = self.store.turn(self.tid)
         if (turn['epoch'] != self.epoch or turn.get('stop_at') or
                 turn['cleanup'] == 'complete' or time.time() >= self.deadline):
@@ -127,7 +125,7 @@ class InputAccess:
         return path
 
     def invoke(self, arguments):
-        self._active()
+        self.require_active()
         if type(arguments) is not dict:
             reject('Input arguments must be an object', 'invalid_request')
         action = arguments.get('action', 'list')
@@ -151,7 +149,7 @@ class InputAccess:
                     result = self._inspect(path, info, arguments)
                 if _facts(os.fstat(fd)) != _facts(info):
                     reject('Input changed during inspection; retry the current path', 'conflict')
-                self._active()
+                self.require_active()
                 result.update(action=action, source=source, readonly=True)
                 wire(result, _RESULT_BYTES)
                 return result
@@ -175,7 +173,7 @@ class InputAccess:
         results, pending, scanned, skipped, truncated = [], [(root, 0)], 0, 0, False
         while pending:
             current, level = pending.pop()
-            self._active()
+            self.require_active()
             try:
                 with _open_physical(current) as (fd, info):
                     if current == root and _facts(info) != _facts(os.fstat(root_fd)):
@@ -289,7 +287,7 @@ class InputAccess:
                 process.stdin.close()
                 pipes = {process.stdout: output, process.stderr: errors}
                 while pipes:
-                    self._active()
+                    self.require_active()
                     if time.time() >= deadline:
                         reject('Input table inspection exceeded its time budget', 'resource_limit')
                     ready, _, _ = select.select(list(pipes), [], [], .1)
@@ -418,9 +416,18 @@ def _inspect_table(request):
         note='Finite readonly sample of this physical input; no pipeline execution or output changes.')
 
 
+def _limit_native_allocations():
+    """Bound native decoding in this disposable preview without reading proc."""
+    import resource
+    ceiling = 4 * 1024**3
+    for inherited in resource.getrlimit(resource.RLIMIT_AS):
+        if inherited != resource.RLIM_INFINITY:
+            ceiling = min(ceiling, inherited)
+    resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
+
+
 def main():
-    from demiflow.workbench.conversations.inspection import limit_native_allocations
-    limit_native_allocations()
+    _limit_native_allocations()
     request = json.loads(sys.stdin.buffer.read(8193))
     if (type(request) is not dict or set(request) != {'path', 'format', 'columns', 'limit'} or
             request['format'] not in {'lance', 'parquet'}):

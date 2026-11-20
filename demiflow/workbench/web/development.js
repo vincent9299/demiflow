@@ -220,12 +220,6 @@ SOFTWARE.
   try { const saved=sessionStorage.getItem('forge-development-drafts'); if(saved&&bytes(saved)<=2*1024*1024){const entries=JSON.parse(saved);if(Array.isArray(entries)&&entries.length<=64)for(const pair of entries)if(Array.isArray(pair)&&pair.length===2&&typeof pair[0]==='string'&&typeof pair[1]==='string'&&bytes(pair[1])<=32768)drafts.set(pair[0],pair[1]);}}catch{}
   const saveDrafts=()=>{try{sessionStorage.setItem('forge-development-drafts',JSON.stringify([...drafts]));}catch{}};
   const labels={preparing:'准备开发依据',starting:'正在连接',running:'正在开发',waiting_input:'等待回答',waiting_approval:'等待许可',stopping:'已请求停止，正在清理',completed:'本轮已完成',failed:'本轮失败',interrupted:'连接中断',cancelled:'已停止'};
-  const developmentLabels={needs_input:'等待补充需求，检查已暂停',preparing:'准备开发依据',developing:'正在开发',queued:'等待检查',checking:'正在检查',verifying:'正在验证',reviewing:'正在独立审阅',repair_pending:'发现问题，准备自动修复',repairing:'正在自动修复',stopping:'已请求停止，正在清理',failed:'开发检查未通过',stale:'内容已改变，需要重新检查',review_unavailable:'检查尚未完成 · 待独立审阅',not_applicable:'本轮没有开发变更',cancelled:'开发检查已停止',unknown:'开发检查结果待核对'};
-  function developmentLabel(value){
-    if(value.state==='accepted')return value.source_fingerprint&&value.accepted_fingerprint===value.source_fingerprint&&['check','verify','review'].every(k=>value.gates?.[k]==='passed')?(value.assurance==='enforced'?'本次开发完成 · 受限执行':'本次开发完成 · 可信本地'):'开发检查结果待核对';
-    if(value.state==='review_unavailable'&&value.gates?.check==='passed'&&value.gates?.verify==='passed')return '检查与验证通过 · 待独立审阅';
-    return developmentLabels[value.state]||'开发检查结果待核对';
-  }
   const uid=()=>crypto.randomUUID();
   const iconButton=(label,path,viewBox='0 0 24 24',filled=false)=>{const b=el('button',undefined,'development-icon');b.type='button';b.title=label;b.setAttribute('aria-label',label);const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',viewBox);svg.setAttribute('aria-hidden','true');if(filled)svg.classList.add('development-filled-icon');const p=document.createElementNS(svg.namespaceURI,typeof path==='string'?'path':'rect');for(const [key,value]of Object.entries(typeof path==='string'?{d:path}:path))p.setAttribute(key,value);svg.append(p);b.append(svg);return b;};
   async function mount({main,api,workspaceId,view,mountText,disposeReaders,openSession,openNew,error,register}) {
@@ -264,7 +258,7 @@ SOFTWARE.
     let capabilities=await api('dev-capabilities');state.capabilitiesAt=Date.now();if(state.disposed||!layout.isConnected)return handle;
     const messages=el('nav',undefined,'development-message-rail'),versions=el('nav',undefined,'development-version-rail');
     messages.setAttribute('aria-label','历史消息定位');versions.setAttribute('aria-label','版本时间线');history.append(messages);
-    const running=value=>!!(value?.turn&&(value.turn.cleanup!=='complete'||value.turn.development?.busy===true));
+    const running=value=>!!(value?.turn&&value.turn.cleanup!=='complete');
     const sessionReadonly=value=>!!value&&(value.writable===false||value.writable!==true&&(capabilities.multiple_conversations===true||!state.createdHere&&value.id!==state.primaryId));
     function renderConversations(){
       sessionList.replaceChildren();sessionPages.replaceChildren();
@@ -374,7 +368,7 @@ SOFTWARE.
     const escapeMenus=e=>{if(e.key!=='Escape')return;for(const menu of menus)if(menu.open){menu.open=false;menu.querySelector('summary').focus();e.stopPropagation();}};
     document.addEventListener('pointerdown',closeMenus);head.addEventListener('keydown',escapeMenus);
     state.releaseMenus=()=>{document.removeEventListener('pointerdown',closeMenus);head.removeEventListener('keydown',escapeMenus);};
-    const chat=globalThis.ForgeDevelopmentChat.create({flow,onRaw:output,formatDevelopment:developmentLabel,
+    const chat=globalThis.ForgeDevelopmentChat.create({flow,onRaw:output,
       onChange:()=>{if(state.disposed||!state.chat)return;hero.hidden=!!state.chat.items.size||!trajectory.hidden;layout.classList.toggle('development-empty',!state.chat.items.size&&trajectory.hidden);},
       onTrim:()=>{earlier.hidden=false;}});
     state.chat=chat;state.items=chat.items;
@@ -385,7 +379,7 @@ SOFTWARE.
     input.addEventListener('compositionstart',()=>{composing=true;});input.addEventListener('compositionend',()=>{composing=false;composingUntil=Date.now()+10;});
     input.onkeydown=e=>{if(composing||Date.now()<composingUntil||e.isComposing||e.keyCode===229)return;if(e.key==='Enter'&&!e.shiftKey&&!e.altKey){e.preventDefault();if(!e.repeat)form.requestSubmit();}if(e.key==='Escape'&&!stop.disabled)stop.click();};
     function availability(){
-      const t=state.session?.turn,busy=t&&(t.cleanup!=='complete'||t.development?.busy===true);
+      const t=state.session?.turn,busy=t&&t.cleanup!=='complete';
       const provider=(capabilities.providers||[]).find(p=>p.id===(state.session?.provider||providers.value));
       const unsupportedNew=state.newDraft&&capabilities.multiple_conversations!==true;
       const readonly=capabilities.read_only===true||sessionReadonly(state.session)||unsupportedNew;
@@ -396,9 +390,9 @@ SOFTWARE.
 
       hero.hidden=!!state.items.size||!trajectory.hidden;layout.classList.toggle('development-empty',!state.items.size&&trajectory.hidden);
       busyNotice.hidden=!otherBusy||readonly||!!state.historyOnly;busyText.textContent='另一个会话正在使用此项目，可以继续编辑草稿，完成后再发送。';busyJump.hidden=!state.activeSession;
-      status.textContent=unsupportedNew?'当前开发服务不支持新建独立会话，请从左侧打开已有会话。':readonly||state.historyOnly?'历史会话 · 只读，不能继续发送':t?(t.operation==='compact'?(t.cleanup!=='complete'?'正在归档历史…':t.state==='completed'?'归档处理完成':'归档未完成'):(t.development?developmentLabel(t.development):(labels[t.state]||t.state)))+(t.dispatch==='unknown'?' · 发送结果未知，请先核对':''):
+      status.textContent=unsupportedNew?'当前开发服务不支持新建独立会话，请从左侧打开已有会话。':readonly||state.historyOnly?'历史会话 · 只读，不能继续发送':t?(t.operation==='compact'?(t.cleanup!=='complete'?'正在归档历史…':t.state==='completed'?'归档处理完成':'归档未完成'):(labels[t.state]||t.state))+(t.dispatch==='unknown'?' · 发送结果未知，请先核对':''):
         readonly?'已有开发历史 · 只读':provider?.available?'':ForgeDevelopmentComposer.connectionStatus(capabilities).label;
-      reason.textContent=capabilities.reason+(t?.development?' 开发验收由 Forge 独立检查；'+(t.development.assurance==='enforced'?'开发进程受外部执行边界约束。':capabilities.mode==='restricted'?'本次受限开发的验收证据尚未齐备。':'当前为可信本地模式，未防篡改。')+(t.development.reason?' '+t.development.reason:''):'')+(provider?.reason?' '+provider.reason:'')+(provider?.input_requests==='unsupported'?' 此代理不支持轮内补充输入；停止后可继续。':'')+(provider?.history_replay==='unsupported'?' 恢复时仅展示本应用已保存的历史。':'');
+      reason.textContent=capabilities.reason+(provider?.reason?' '+provider.reason:'')+(provider?.input_requests==='unsupported'?' 此代理不支持轮内补充输入；停止后可继续。':'')+(provider?.history_replay==='unsupported'?' 恢复时仅展示本应用已保存的历史。':'');
     }
     providers.onchange=availability;
     function trackDialog(dialog){state.dialogs.add(dialog);dialog.addEventListener('close',()=>{state.dialogs.delete(dialog);dialog.remove();},{once:true});}
@@ -462,7 +456,7 @@ SOFTWARE.
           if(capabilities.enabled&&!capabilities.read_only&&!sessionReadonly(current)&&!state.historyOnly)for(const request of current.pending||[])pending(request);
           for(const node of pendingHost.children)if(state.historyOnly||capabilities.read_only||sessionReadonly(current)||!(current.pending||[]).some(p=>p.id===node.dataset.request))node.remove();
           if(!state.historyOnly){
-            const busy=current.turn&&(current.turn.cleanup!=='complete'||current.turn.development?.busy===true);
+            const busy=current.turn&&current.turn.cleanup!=='complete';
             const epoch=state.feedEpoch;const page=await api('dev-events',{session_id:current.id,after_sequence:state.sequence,limit:50,wait_ms:busy?1500:0});if(state.disposed||epoch!==state.feedEpoch)return;
             for(const event of page.events)project(event);state.sequence=page.next_sequence;chat.updateSession(current);
             delay=state.sequence<page.last_sequence||busy?25:1500;

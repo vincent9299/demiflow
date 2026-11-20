@@ -95,14 +95,15 @@ def read_file(path, maximum=1024 * 1024):
         return raw
 
 
-def snapshot(root, paths, *, max_files=4096, max_bytes=64 * 1024**2):
+def snapshot(root, paths, *, max_files=4096, max_bytes=64 * 1024**2, exclude=()):
     """Hash exact watched bytes, including notebook output; never alter the source."""
     result, total, visited = {}, 0, 0
     deadline = time.monotonic() + 10
     pending = [plain_path(p) for p in paths]
+    excluded = set(exclude)
     while pending:
         rel = pending.pop()
-        if rel in result:
+        if rel in result or rel in excluded:
             continue
         visited += 1
         if visited > max_files or time.monotonic() > deadline:
@@ -113,9 +114,12 @@ def snapshot(root, paths, *, max_files=4096, max_bytes=64 * 1024**2):
         elif path.is_dir():
             with os.scandir(path) as entries:
                 for entry in entries:
+                    child = rel + '/' + entry.name
+                    if child in excluded:
+                        continue
                     if len(pending) + visited >= max_files:
                         reject('Source snapshot entry budget exceeded', 'resource_limit')
-                    pending.append(rel + '/' + entry.name)
+                    pending.append(child)
         else:
             size = path.stat().st_size
             if total + size > max_bytes:

@@ -25,18 +25,6 @@ def preview(root, *, entry, params=None):
     return operation('plan_preview', root, entry=entry, params=params)
 
 
-def _import_root(root, project):
-    # Discovery already verified the public declaration and exact owner. Use
-    # that repository's namespace; never copy a pipeline into a generated tree.
-    for declaration in project['declarations']:
-        path = Path(declaration['path'])
-        if path.name == 'project.json' and path.parent.name == '.demiforge':
-            base = path.parent.parent
-            if root.is_relative_to(base):
-                return base
-    return root
-
-
 def _parameters(root, control, entry, path, *, table_resolver):
     if path is None:
         return {}, None
@@ -126,8 +114,7 @@ def _preview(root, *, table_resolver, entry, params=None):
     if not any(item['entry'] == entry and item['status'] == 'recognized' for item in project['entries']):
         raise ForgeError('Entry is not declared by this project', code='not_found')
     target, symbol = ws.validate_entry(root, entry)
-    source_root = _import_root(root, project)
-    sources = _Sources(source_root)
+    sources = _Sources(root)
     entry_sha = hashlib.sha256(sources.read(target)).hexdigest()
     # Resolve declared, fixed table metadata through the trusted platform
     # before importing project code. Lance initializes its native runtime here
@@ -136,17 +123,13 @@ def _preview(root, *, table_resolver, entry, params=None):
     # and all pipeline construction still run under the unchanged guard.
     arguments, params_sha = _parameters(root, control, entry, params, table_resolver=table_resolver)
     sys.dont_write_bytecode = True
-    sys.path.insert(0, str(source_root))
-    # A registered owner may use project-local imports as well as repository
-    # namespaces. Both remain inside the same bounded source snapshot.
-    if root != source_root:
-        sys.path.insert(0, str(root))
+    sys.path.insert(0, str(root))
     sys.meta_path.insert(0, sources)
     os.chdir(root)
     enter_readonly()  # fail closed, before ANY project import/construction
     try:
         with redirect_stdout(_Discard()):
-            module = target.relative_to(source_root).as_posix()[:-3].replace('/', '.')
+            module = target.relative_to(root).as_posix()[:-3].replace('/', '.')
             function = getattr(importlib.import_module(module), symbol)
             if not inspect.isfunction(function) or Path(inspect.getfile(function)) != target:
                 raise ForgeError('Entry resolved outside its declared source', code='conflict')
@@ -164,11 +147,11 @@ def _preview(root, *, table_resolver, entry, params=None):
                     raise ForgeError(detail, code='invalid_request') from exc
                 return function(**arguments)
             from demiflow.workbench.graph.plan_callsite import PlanCallsites, pipeline_material
-            with PlanCallsites(source_root, sources.digests) as callsites:
+            with PlanCallsites(root, sources.digests) as callsites:
                 result = capture_pipeline(construct, {}, on_compiled=callsites.bind_compilation)
             from demiflow.workbench.graph.plan_details import build_plan_details
-            details = build_plan_details(result.compiled, sources=sources.digests, root=source_root, callsites=callsites, bounds=result.bounds)
-            pipeline = pipeline_material(source_root, target, sources.digests)
+            details = build_plan_details(result.compiled, sources=sources.digests, root=root, callsites=callsites, bounds=result.bounds)
+            pipeline = pipeline_material(root, target, sources.digests)
         sources.verify()
         current_params_sha = (hashlib.sha256(read_bounded(ws.validate_parameter_path(root, params), 65536)).hexdigest()
                               if params is not None else None)

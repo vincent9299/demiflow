@@ -4,7 +4,7 @@ from playwright.sync_api import expect
 
 from d19_fixtures import owned_fixture
 from test_forge_markdown_reading import browser
-from test_forge_project_discovery import original, snapshot, cached_snapshot, business_bytes
+from test_forge_project_discovery import original, snapshot, cached_snapshot, business_bytes, register_fixture_flow
 from test_forge_public_api import service
 from test_forge_web_redesign import opened
 from test_ui_d19_projection_fixes import project
@@ -15,6 +15,7 @@ from demiflow.workbench.graph import model
 def test_original_calls_are_not_execution_nodes_and_canvas_expands(original, tmp_path, browser):
     path = original / 'dispatch.py'
     path.write_text(path.read_text().replace('return clean(cfg)', 'return clean(type(cfg))'))
+    register_fixture_flow(original)
     before = business_bytes(original)
     registry_path = tmp_path / 'registry.json'
     registry.add(registry_path, original)

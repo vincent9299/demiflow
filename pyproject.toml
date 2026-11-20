@@ -54,9 +54,8 @@ exclude = ["demiflow._vendor.searxng*"]
 
 [tool.setuptools.package-data]
 "demiflow.collect.native_search" = ["inventory.json"]
-"demiflow.forge" = ["contracts/*.json", "standards/*.json"]
+"demiflow.forge" = ["standards/*.json"]
 "demiflow.workbench" = ["analysis/*.json", "web/*.html", "web/*.js", "web/*.css", "web/*.txt", "web/*.json"]
-"demiflow.forge.development" = ["standards/*.md", "skill/SKILL.md", "skill/scripts/*.py"]
 "demiflow.workbench.conversations" = ["*.cjs"]
 "demiflow._vendor" = ["searxng/**/*", "searxng/*"]
 

@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -55,16 +56,10 @@ class Service:
         self.store = Store(self.root, self.deployment.limits, initialize=True)
         self.lock, self.workers, self.closed = threading.RLock(), {}, False
         self.worker_targets = {}
-        self.gate_workers = {}
-        self.gate_targets = {}
-        self.gate_wakeup = threading.Event()
+        self.coding_catalog = None
         self.policy_hash, self.config_path = self.seal_policy(self.deployment)
         for t in self.store.unresolved():
             self.store.interrupt_unresolved(t['id'])
-        # A gate which may have started is never automatically replayed.
-        # Its surviving supervisor retains the drain receipt responsibility.
-        self.gate_thread = threading.Thread(target=self._gate_loop, name='development-gates', daemon=True)
-        self.gate_thread.start()
 
     def seal_policy(self, deployment):
         """Persist the exact bounded non-secret policy before creating a session."""
@@ -88,8 +83,6 @@ class Service:
             with os.fdopen(fd, 'wb') as stream:
                 stream.write(raw); stream.flush(); os.fsync(stream.fileno())
             fsync_directory(self.root)
-        from .admission import install
-        install(deployment, path)
         return revision, path
 
     def binding(self, workspace, root, *, seal=False):
@@ -184,17 +177,13 @@ class Service:
             reserved = sum(max(0, allowance - homes.get(t['session'], 0)) for t in self.store.unresolved())
             if used + reserved + max(0, allowance - homes.get(session_id, 0)) > self.deployment.limits.private_total_bytes:
                 reject('Retained provider homes exhaust private disk reservation', 'resource_limit')
-            from demiflow.workbench.conversations.development import initial, managed
-            development = initial(session_id) if operation == 'message' and managed(self.project(workspace, root)) else None
             value, fresh = self.store.submit(workspace, session_id, submission_id, expected_revision, text, root_identity(root), self.current_hash(workspace,root),
-                                             operation=operation, development=development)
+                                             operation=operation)
             if not fresh: return self.store.public_turn(value)
             return self._launch_provider(value, session)
 
-    def _unit_path(self, turn, *, gate=False):
-        control = json.loads(turn.get('development_control') or '{}')
-        segment = '.r' + str(control['repair_round']) if control.get('repair_round') else ''
-        return self.root / turn['session'] / (turn['id'] + segment + ('.gate-unit' if gate else '.unit'))
+    def _unit_path(self, turn):
+        return self.root / turn['session'] / (turn['id'] + '.unit')
 
     def _launch_provider(self, value, session):
         workspace, session_id = session['workspace'], session['id']
@@ -204,6 +193,21 @@ class Service:
         fd = read_fd = write_fd = None
         try:
             try:
+                coding_fd = None
+                project = policy.project(workspace, json.loads(session['root'])['path'])
+                if value.get('operation') != 'compact' and project['kind'] == 'pipeline':
+                    if self.coding_catalog is None:
+                        from demiflow.forge.api_reference import REFERENCE_BYTES, build_reference
+                        raw = wire(build_reference(), REFERENCE_BYTES)
+                        catalog = tempfile.TemporaryFile(dir=self.root)
+                        try:
+                            catalog.write(raw)
+                            catalog.flush()
+                        except BaseException:
+                            catalog.close()
+                            raise
+                        self.coding_catalog = catalog
+                    coding_fd = self.coding_catalog.fileno()
                 # Admission durably says no spawn has been attempted. All
                 # allocation failures before spawning are safely recoverable.
                 lease.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -230,9 +234,14 @@ class Service:
                 # Popen object does not prove absence of a real child.
                 self.store.update(tid, launch_phase='spawning')
                 self.worker_targets[tid] = (workspace, session_id, value['epoch'], session['root'])
-                process = subprocess.Popen([sys.executable, '-I', '-B', str(worker), str(self.root / (session['policy_hash'] + '.json')), tid, str(fd), str(read_fd)],
+                command = [sys.executable, '-I', '-B', str(worker), str(self.root / (session['policy_hash'] + '.json')), tid, str(fd), str(read_fd)]
+                inherited = (fd, read_fd)
+                if coding_fd is not None:
+                    command.append(str(coding_fd))
+                    inherited += (coding_fd,)
+                process = subprocess.Popen(command,
                     cwd=self.root, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    pass_fds=(fd, read_fd), start_new_session=True)
+                    pass_fds=inherited, start_new_session=True)
                 self.workers[tid] = (process, write_fd)
             finally:
                 try:
@@ -280,118 +289,6 @@ class Service:
                 if self.store.turn(tid)['cleanup'] != 'complete':
                     if not self._finish_unstarted(self.store.turn(tid)):
                         self.store.update(tid, state='interrupted', cleanup='unknown')
-        for tid, (process, life) in list(self.gate_workers.items()):
-            if process.poll() is not None:
-                if life >= 0: os.close(life)
-                del self.gate_workers[tid]
-                self.gate_targets.pop(tid, None)
-                turn = self.store.turn(tid)
-                if turn['gate_cleanup'] != 'complete':
-                    self._finish_unstarted_gate(turn)
-
-    def _finish_unstarted_gate(self, turn):
-        """Only a never-claimed owned unit can release an uncertain gate lease."""
-        if turn['gate_cleanup'] == 'complete': return True
-        safe = turn['gate_phase'] == 'queued'
-        if turn['gate_phase'] == 'spawning':
-            ownership = json.loads(turn['gate_process'] or '{}')
-            lease = self._unit_path(turn, gate=True)
-            if (ownership.get('nonce') == turn['epoch'] and ownership.get('unit_path') == str(lease)
-                    and ownership.get('unit_identity') and not ownership.get('supervisor')):
-                try: safe = unit_stopped(lease, ownership['unit_identity'])
-                except OSError: safe = False
-        if safe:
-            value = json.loads(turn['development'])
-            self.store.gate_state(turn['id'], dict(value, state='cancelled' if turn['stop_at'] else 'unknown', busy=False,
-                reason='Gate did not start; no verification was replayed'), phase='finished', cleanup='complete')
-        return safe
-
-    def _launch_gate(self, turn):
-        tid = turn['id']
-        session = self.store.session(turn['session'])
-        try:
-            identity = json.loads(session['root'])
-            project = self.project(session['workspace'], identity['path'])
-            unchanged = session['policy_hash'] == self.current_hash(session['workspace'], identity['path']) and root_identity(project['root']) == identity
-        except Exception:
-            unchanged = False
-        if not unchanged:
-            value = json.loads(turn['development'])
-            self.store.gate_state(tid, dict(value, state='stale', busy=False,
-                gates=dict(check='stale', verify='stale', review='unavailable'),
-                reason='Deployment policy or physical project identity changed before gate admission'), phase='finished', cleanup='complete')
-            return
-        if turn['stop_at'] or time.time() >= turn['created'] + self.deployment.limits.turn_seconds:
-            value = json.loads(turn['development'])
-            self.store.gate_state(tid, dict(value, state='cancelled' if turn['stop_at'] else 'failed', busy=False,
-                reason='stop_requested' if turn['stop_at'] else 'Development request deadline exhausted'), phase='finished', cleanup='complete')
-            return
-        lease = self._unit_path(turn, gate=True)
-        fd = read_fd = write_fd = None
-        try:
-            fd = os.open(lease, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-            fcntl.flock(fd, fcntl.LOCK_SH)
-            info = os.fstat(fd); os.fsync(fd)
-            from demiflow.forge.io import fsync_directory
-            fsync_directory(lease.parent)
-            ownership = dict(unit_path=str(lease), unit_identity=dict(device=info.st_dev, inode=info.st_ino), nonce=turn['epoch'])
-            read_fd, write_fd = os.pipe()
-            self.store.update(tid, gate_process=wire(ownership).decode(), gate_phase='spawning')
-            self.gate_targets[tid] = (session['workspace'], session['id'], turn['epoch'], session['root'])
-            from demiflow.workbench.conversations import development
-            # Finish under the immutable policy that admitted this conversation,
-            # even if the service was restarted with a different deployment.
-            policy_path = self.root / (session['policy_hash'] + '.json')
-            env = dict(PATH='/usr/bin:/bin', LANG='C.UTF-8', PYTHONDONTWRITEBYTECODE='1')
-            for config in self.session_policy(session).providers.values():
-                name = config.get('credential_env')
-                if name and name in os.environ: env[name] = os.environ[name]
-                env.update(proxy_environment(config))
-            process = subprocess.Popen([sys.executable, '-I', '-B', development.__file__, str(policy_path), tid, str(fd), str(read_fd)],
-                cwd=self.root, env=env,
-                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                pass_fds=(fd, read_fd), start_new_session=True)
-            self.gate_workers[tid] = (process, write_fd)
-            write_fd = None
-        except BaseException:
-            if tid not in self.gate_workers: self.gate_targets.pop(tid, None)
-            try: self._finish_unstarted_gate(self.store.turn(tid))
-            except Exception: pass
-        finally:
-            for fd_to_close in (fd, read_fd, write_fd):
-                if fd_to_close is not None: os.close(fd_to_close)
-
-    def _gate_loop(self):
-        while not self.gate_wakeup.wait(.1):
-            try:
-                with self.lock:
-                    if self.closed: return
-                    self._reap()
-                    for turn in self.store.gate_pending():
-                        if turn['id'] in self.gate_workers or turn['id'] in self.workers: continue
-                        if turn['gate_phase'] == 'queued' and turn['cleanup'] == 'complete':
-                            self._launch_gate(turn)
-                        elif turn['gate_phase'] == 'repair_pending' and turn['gate_cleanup'] == 'complete':
-                            session = self.store.session(turn['session'])
-                            try:
-                                project = self.project(session['workspace'], json.loads(session['root'])['path'])
-                                if session['policy_hash'] != self.current_hash(session['workspace'], json.loads(session['root'])['path']):
-                                    reject('Deployment policy changed before automatic repair', 'conflict')
-                                self.deployment.validate_runtime(admit=True)
-                                if sum(private_directory_bytes(self.root, entries=self.deployment.limits.sessions+64).values()) > self.deployment.limits.private_total_bytes:
-                                    reject('Retained state exhausts the shared disk budget', 'resource_limit')
-                                value = self.store.begin_repair(turn['id'])
-                                if value is not None: self._launch_provider(value, session)
-                            except Exception as exc:
-                                latest = self.store.turn(turn['id'])
-                                if latest['cleanup'] == 'complete':
-                                    self.store.gate_state(turn['id'], dict(json.loads(latest['development']),
-                                        state='failed', busy=False, reason=str(exc)[:2048]), phase='finished', cleanup='complete')
-                        elif turn['gate_phase'] == 'spawning':
-                            self._finish_unstarted_gate(turn)
-            except Exception:
-                # Persistence failure cannot authorize execution or release a lease.
-                continue
 
     def show(self, workspace, sid):
         with self.lock:
@@ -408,23 +305,7 @@ class Service:
                     self.current_hash(workspace,project['root']), self.binding(workspace,project['root'])[0].providers)
             except (ValueError, OSError):
                 pass  # Old history stays readable after its root or grant changed.
-        turn = value.get('turn')
         session = self.store.session(sid)
-        if turn and turn.get('development') and not turn['development']['busy']:
-            from demiflow.workbench.conversations.development import project_tasks, projection
-            try:
-                if session['policy_hash'] != self.current_hash(session['workspace'], json.loads(session['root'])['path']):
-                    reject('Development policy changed; a new conversation is required')
-                project = self.project(workspace, json.loads(session['root'])['path'])
-                current = project_tasks(self.session_policy(session), session, project).status(sid)
-                if (turn['development']['state'] not in {'cancelled', 'unknown', 'failed'} and
-                        (turn['development']['state'] in {'accepted', 'review_unavailable', 'needs_input'} or current.get('accepted_fingerprint')
-                         or current.get('development_state') in {'stale', 'needs_input'})):
-                    turn['development'] = dict(turn['development'], **projection(current))
-            except Exception as exc:
-                if turn['development']['state'] not in {'cancelled', 'unknown', 'failed'}:
-                    turn['development'] = dict(turn['development'], state='stale', busy=False,
-                        gates=dict(check='stale', verify='stale', review='unavailable'), reason=str(exc)[:2048])
         if session:
             # Public policy metadata belongs to this session's immutable grant,
             # including busy turns and history read after a policy replacement.
@@ -434,9 +315,6 @@ class Service:
                 if digest(policy) == session['policy_hash']:
                     provider=policy['providers'].get(session['provider'],{})
                     value.update(model=provider.get('model'),effort=provider.get('effort'))
-                    bound = policy['projects'].get(workspace)
-                    if turn and turn.get('development') and bound and bound['root'] == json.loads(session['root'])['path']:
-                        turn['development']['run_policy'] = bound.get('run_policy', 'observe')
             except Exception:
                 pass  # Historical events remain readable if the grant is missing.
         return value
@@ -453,7 +331,7 @@ class Service:
         self.project(workspace, root); identifier(request_id)
         identifier(session_id); identifier(turn_id)
         with self.lock:
-            target = self.worker_targets.get(turn_id) or self.gate_targets.get(turn_id)
+            target = self.worker_targets.get(turn_id)
             if target and (target[:2] != (workspace, session_id) or json.loads(target[3]) != root_identity(root)):
                 reject('Turn does not belong to session/project', 'not_found')
             try:
@@ -465,10 +343,6 @@ class Service:
                 if target and owned and owned[1] >= 0:
                     os.close(owned[1])
                     self.workers[turn_id] = (owned[0], -1)
-                gate = self.gate_workers.get(turn_id)
-                if gate and target:
-                    if gate[1] >= 0: os.close(gate[1])
-                    self.gate_workers[turn_id] = (gate[0], -1)
                 raise
 
     def recover(self, workspace, root, session_id, expected_revision):
@@ -478,14 +352,6 @@ class Service:
             value = self.store.show(workspace, session_id)
             if value['revision'] != expected_revision: reject('Session revision changed', 'conflict')
             turn = value['turn']
-            if turn and (turn.get('gate_cleanup') != 'complete' or (turn.get('development') or {}).get('state') == 'repair_pending'):
-                saved = self.store.turn(turn['id'])
-                if turn['id'] not in self.gate_workers and saved['gate_phase'] == 'spawning':
-                    self._finish_unstarted_gate(saved)
-                value = self.store.show(workspace, session_id)
-                value['recovery'] = dict(status='gate_pending', can_continue=False,
-                    reason='Uncertain verification is never replayed; a cleanup receipt is required before continuing')
-                return value
             if turn and turn['cleanup'] != 'complete':
                 saved = self.store.turn(turn['id']); process = json.loads(saved['process'] or '{}')
                 if self._finish_unstarted(saved):
@@ -504,12 +370,6 @@ class Service:
             if self.closed:
                 return
             self.closed = True
-            self.gate_wakeup.set()
-            for pending in self.store.gate_pending():
-                if pending['gate_phase'] == 'repair_pending' and pending['gate_cleanup'] == 'complete':
-                    session = self.store.session(pending['session'])
-                    self.store.cancel(session['workspace'], session['id'], pending['id'])
-                    self.store.begin_repair(pending['id'])  # cancelled; no provider segment is admitted
             for tid, (_, life) in self.workers.items():
                 try:
                     t = self.store.turn(tid); s = self.store.session(t['session'])
@@ -520,15 +380,6 @@ class Service:
                     if life >= 0:
                         os.close(life)
                         self.workers[tid] = (self.workers[tid][0], -1)
-            for tid, (process, life) in self.gate_workers.items():
-                try:
-                    turn = self.store.turn(tid); session = self.store.session(turn['session'])
-                    self.store.cancel(session['workspace'], session['id'], tid)
-                except Exception:
-                    if life >= 0:
-                        os.close(life)
-                        self.gate_workers[tid] = (process, -1)
-        self.gate_thread.join(timeout=2)
         deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
             with self.lock:
@@ -536,16 +387,14 @@ class Service:
                     self._reap()
                 except Exception as exc:
                     failure = exc
-                if not self.workers and not self.gate_workers: break
+                if not self.workers: break
             time.sleep(0.05)
         for _, life in self.workers.values():
             if life >= 0: os.close(life)
         self.workers.clear()
         self.worker_targets.clear()
-        for _, life in self.gate_workers.values():
-            if life >= 0: os.close(life)
-        self.gate_workers.clear()
-        self.gate_targets.clear()
+        if self.coding_catalog is not None:
+            self.coding_catalog.close()
         os.close(self.owner)
         if failure is not None:
             reject('Development shutdown could not read final cleanup state', 'busy')

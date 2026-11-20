@@ -25,12 +25,6 @@ def operation(name, root, *, _pass_fds=(), _authority=None, **arguments):
     if _authority is not None:
         request["bootstrap"] = _authority
     settings=limits_with({"catalog_bytes":9*1024**2,**({"timeout_seconds":20} if name in {"analysis_export","analysis_media_export","analysis_media_sources","analysis_source_read","table_profile"} else {})})
-    launch = None
-    if name == 'plan_preview':
-        from demiflow.workbench.conversations.inspection import preview_launcher
-        launch = preview_launcher(root)
-        if launch is not None and (_pass_fds or _authority is not None):
-            raise ForgeError('Confined plan inspection cannot inherit preparation authority', code='invalid_request')
     context=current()
     if name == 'metadata' and in_native_dispatch() and not _pass_fds and _authority is None:
         # Publication verification can request fixed-version metadata while
@@ -51,7 +45,6 @@ def operation(name, root, *, _pass_fds=(), _authority=None, **arguments):
     if value is None:
         value=capture([sys.executable,"-I","-B",str(Path(__file__).resolve())],request,settings,
             response_formats={FORMAT},input_limit=1024**2,pass_fds=_pass_fds,
-            launch=launch,
             tree_rss_limit=PREPARATION_RSS if _pass_fds or name in {"analysis_media_sources","analysis_source_read","table_profile"} else (READONLY_RSS if (location() / 'host-budget.json').exists() else None))
     if not value["ok"]:
         code = value.get('code', 'operation_failed')

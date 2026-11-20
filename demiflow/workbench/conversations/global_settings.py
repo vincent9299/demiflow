@@ -39,40 +39,16 @@ def _endpoint(value):
 
 
 def automatic_project(root):
-    """Use original Forge declarations; never import business code or invent tests."""
+    """Grant source work within the selected project, independent of its ancestors."""
     root = Path(root).absolute(); root_identity(root)
-    grant = dict(root=str(root), kind='unregistered', phase='implementation', writes=[], watch=[], sources=[],
+    grant = dict(root=str(root), kind='pipeline', phase='implementation', writes=[], watch=[], sources=[],
         non_goals=['修改项目外文件、运行结果、原始数据、Notebook输出和平台控制文件'],
         authorization='工作台全局 AI 开发：仅按当前会话真人要求修改本项目源代码。')
     scopes = {'README.md', 'tests', 'docs'}
-    for parent in (root, *root.parents):
-        declaration = parent / '.demiforge/project.json'
-        if not declaration.is_file(): continue
-        # Validate the full original contract, including verifier commands; no fallback
-        # to an unregistered grant if an existing contract is invalid.
-        read_file(declaration, 256 * 1024)
-        from demiflow.forge.development.project import Project
-        declared = Project(parent)
-        owners = [(key, item) for key, item in declared.registrations.items()
-                  if (parent / item['path']).resolve() == root]
-        if not owners and parent == root and len(declared.registrations) == 1:
-            owners = list(declared.registrations.items())
-        if len(owners) == 1:
-            key, item = owners[0]
-            grant.update(kind='demiforge_registered', managed=True, pipeline=key, allow_tests=True, run_policy='observe')
-            if parent != root: grant['development_root'] = str(parent)
-            paths = [row['path'] for row in declared.entries(key).values()]
-            paths += item.get('operators', []) + item.get('prompts', [])
-            for relative in paths:
-                target = parent / relative
-                if not target.is_relative_to(root): reject('Forge 声明中的源代码不属于当前项目。', 'conflict')
-                local = target.relative_to(root)
-                scopes.add(local.parts[0] if len(local.parts) > 1 else str(local))
-            break
-        if owners: reject('无法唯一确定项目的 Forge 声明。', 'conflict')
-    if grant['kind'] == 'unregistered':
-        if (root/'workspace.json').is_file(): grant['kind']='native_forge'
-        scopes.update(('src', 'lib', 'operators', 'flows', 'prompts'))
+    from demiflow.forge.project_rules import ROLE_DIRS
+    scopes.update(ROLE_DIRS)
+    if not (root / 'workspace.json').is_file():
+        scopes.update(('src', 'lib'))
         with os.scandir(root) as entries:
             for count, entry in enumerate(entries):
                 if count >= 4096: reject('项目目录条目过多。', 'resource_limit')
@@ -170,7 +146,7 @@ class GlobalSettings:
             previous = self._read(); self._load_secret(previous)
             if request['expected'] != digest(previous): reject('全局设置已被其他页面修改，请重新读取。', 'conflict')
             self.service._reap()
-            if self.service.store.unresolved() or self.service.store.gate_pending(): reject('有开发会话正在运行，配置草稿已保留；完成后再保存。', 'busy')
+            if self.service.store.unresolved(): reject('有开发会话正在运行，配置草稿已保留；完成后再保存。', 'busy')
             config = copy.deepcopy(self.templates[name]); secret = None
             config.update(model=model, effort=effort)
             if request['authentication'] == 'login':
@@ -215,19 +191,19 @@ class GlobalSettings:
             inventory=self.inventory()['projects']; row=inventory.get(workspace)
             if row is None or Path(row['root']).absolute()!=Path(root).absolute(): reject('项目不在当前工作台中。','not_found')
             identity=root_identity(root)
-            legacy=self.service.deployment.projects.get(workspace)
-            if not legacy or legacy['identity']!=identity:
+            explicit=self.service.deployment.projects.get(workspace)
+            if not explicit or explicit['identity']!=identity:
                 matches=[p for p in self.service.deployment.projects.values() if p['identity']==identity]
                 if len(matches)>1: reject('项目存在多个开发范围，请保留原登记身份。','conflict')
-                legacy=matches[0] if matches else None
-            if self.value is None and workspace in self.service.deployment.projects and legacy is self.service.deployment.projects[workspace] and legacy['identity']==identity:
+                explicit=matches[0] if matches else None
+            if self.value is None and workspace in self.service.deployment.projects and explicit is self.service.deployment.projects[workspace] and explicit['identity']==identity:
                 return self.service.deployment,self.service.policy_hash,self.service.config_path
             effective=self.value or dict(provider=next(iter(self.templates)),config=next(iter(self.templates.values())))
             cache_key=(workspace,digest(identity),digest(self.value))
             if cache_key not in self.bindings:
                 if len(self.bindings)>=128: reject('自动项目绑定超过预算。','resource_limit')
-                if legacy and legacy['identity']==identity:
-                    project=copy.deepcopy(legacy);project.pop('identity',None)
+                if explicit and explicit['identity']==identity:
+                    project=copy.deepcopy(explicit);project.pop('identity',None)
                 else: project=automatic_project(root)
                 value=copy.deepcopy(self.service.deployment.value)
                 value['projects']={workspace:project};value['providers']={effective['provider']:effective['config']}

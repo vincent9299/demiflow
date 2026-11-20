@@ -92,7 +92,7 @@
       },
       async selectSource(path,line,sha256){
         await this.load();const normalized=path?.replaceAll('\\','/');
-        const matches=index.definitions.filter(d=>(normalized===d.path||normalized===[index.source_prefix,d.path].filter(Boolean).join('/'))
+        const matches=index.definitions.filter(d=>normalized===d.path
           &&d.file_sha256===sha256&&(!line||d.line<=line&&d.end_line>=line));
         if(matches.length===1){await open(matches[0].id);return true;}return false;
       },

@@ -1,12 +1,6 @@
 # DemiFlow 开发对话与运行态组合部署
 
-2026-11-19 试用已上线：`http://localhost:55972/` →“Forge 开发试用”→“开发”，实际运行 `fix/prompt-replay-delivery-20261118` / `_demiflow/worktrees/gpt_prompt_replay_20261118` 的 `20581ae`。真实连续两轮开发及重启后接受、原项目视图和历史保护均已核验；[试用交付记录](forge-development-harness-delivery-20261119.md)包含测试、限制和回退。采用原 token、registry 与分析数据库，当前开发授权配置位于 `_demiflow/shared-review/forge-harness-final-delivery-20261118/trial-development-final.json`。下方 11 月 5 日地址与结果为历史事实，不能替代本轮记录。
-
-2026-11-05：当前原服务已接通本地 DeepSeek CLI，`shared/concepts/identity` 的开发对话可直接使用。刷新原页面，进入「开发」并发送要求即可；界面按 DeepSeek Harness 精简，历史与连接详情按需展开。下面的 `/srv` 路径是移植示例，不是当前安装值。
-
-当前实际部署：配置 `/yzp/zhaozy/yangzepeng/0905/.forge/development.json`，会话状态 `.forge/development-state`，共享运行域 `/var/tmp/demiflow-forge-0`，服务仍为59865/桌面转发55971。仅已配置项目可开发；原业务运行许可保持。单个活动开发单元、2GiB provider RSS采样保护、15分钟应用轮次和10分钟输入等待；当前项目显式配置512KiB上下文，总额度仍512KiB，完整包含祖先AGENTS与PIPELINE_SPEC。默认部署仍为128KiB，超限明确拒绝，不截断规范。
-
-本次新增三轮真实浏览器验收分别完成了临时项目代码修改/4项独立测试、刷新后同对话继续、现有项目完整上下文只读确认；均正常排空。临时验收项目已移出登记与开发授权，最终配置的新会话发送可用。历史验收会话绑定原配置而保留；配置变更后请新建对话，不重写旧授权记录。证据在工作区 `_demiflow/forge_coordination_20261104/direct_use_20261105/final-verification.json`。Codex真实推理仍未验收。
+本文记录当前配置和资源口径。[Forge 开发辅助方案](forge-guided-coding-redesign.md)描述当前开发功能。旧试用的配置与证据另见[历史记录](forge-development-harness-delivery-20261119.md)。
 
 ## 开关与归属
 
@@ -111,21 +105,11 @@
 
 平台只检查 native_credentials 的物理路径/权限/大小，由已安装 CLI 原生组件读取；不把认证正文复制进部署文件、数据库或报告。使用同一安装的 raw CLI 是为了避开会固定共享 DSH_HOME 的外层启动器；每个开发会话继续使用私有 HOME/profile。`inherit_proxy` 只显式传递 HTTP(S)_PROXY/NO_PROXY 引用；无需要时设 false，值不写进部署文件或历史。
 
-### 受管开发门禁接入
+### 管道开发
 
-已登记 DemiForge pipeline 的新开发授权使用 `kind: "demiforge_registered"`、`phase: "implementation"` 和明确的 `pipeline`，省略 `task_id`（等同 `managed: true`）。普通用户继续在开发页输入需求，控制器为项目会话自动创建唯一受管任务；后续消息追加到同一任务，原始 dirty 基线保持。仍须明确授权 writes/watch/sources/non_goals，实际运行登记验证需要 `allow_tests: true`。不得借该设置扩大命令或生产执行权限。
+开发 grant 使用 `kind: "pipeline"`。平台源码的明确授权使用 `kind: "platform"`。当前开发存储格式需要独立的新 `state_root`。管道会话在写前提供当前 SDK 与所选项目资料，写后在回合结果中报告两项静态检查。运行授权继续由工作台运行服务校验。
 
-受管任务存于 `state_root/forge-development/<workspace-id>/<session-id>/`，不在项目内复制权威记录。已有明确 `task_id` 的授权继续使用旧本地任务；不能同时指定 `managed: true` 和 `task_id`，也不自动迁移旧历史。修改授权会改变会话绑定的 policy，不能静默升级已有会话。
-
-控制器在 provider 及工具排空后自动检查、运行已授权的固定验证，并使用已配置的同 provider/model 发起独立无工具审阅。确定的检查或语义审阅失败可在同一用户请求内自动续修最多 3 次；独立审阅最多 2 次。原始 goal、dirty/staging 基线和总时限不重建，内部反馈不冒充新的人类授权。未知发送、超时、资源中止、取消及未证明排空均不自动重放。仅语法或测试通过不能显示开发完成。
-
-DeepSeek 审阅阶段固定使用 `low` 推理等级，编码阶段仍使用部署的等级（本次为 `high`）；两者使用同一个已配置 provider/model。审阅单次上限为 16,384 输出 token、180 秒和 64 KiB 结论。预算耗尽且未返回完整结论时明确显示不可用，保留检查/验证事实但不签发接受。真实模型诊断与整条页面验收分别记录，不能把单独的审阅诊断当成原任务已接受。
-
-`restricted` 使用真实 user/PID/network namespace、清零能力、Landlock 与 seccomp，从进程外约束整个 CLI 和它的工具后代。开发只写明确的源文件范围及私有 HOME；固定 verifier 只写 scratch。凭证留在受信模型传输服务，CLI 只有当前任务固定出口，不得到上游凭证、代理或任意 URL。权限和平台源码、控制域重叠、缺失模型通道或边界不可用时拒绝启动，不回退到 trusted_local。它保持调用者的宿主 UID 映射，不能称为独立非 root 宿主账号。RSS、总磁盘增长与进程计数仍是有界采样保护；不是 cgroup 或文件系统硬配额。
-
-验证保持 `live_tree_rechecked`：候选源码原位只读执行，开始和结束重新校验指纹，不声称创建了不可变源码快照。接受还要求真实 developer/verifier 完成回执、同候选独立审阅、当前标准/契约/源码/日志有效，以及控制器证明完整排空。`trusted_local` 保留旧行为和历史，接受标注可信本地、未防篡改。显式 `task_id` 的 legacy 本地任务不能在 restricted 下调用宿主 launcher；新受管任务需单独建立，旧记录不改写。
-
-运行策略 `run_policy` 默认 `observe`。需要严格准入的受管受限项目可在受信部署授权中显式设置 `require`，并配置固定 `runtime_domain`。同一域的受保护 `development-admission.json` 只引用已有配置快照，不是新的运行或接受账本；CLI 无权改它。新准备和首次启动复用当前领域验收及控制器终态，并把接受身份封入原 run manifest。历史 attempt 恢复继续使用原封存对象，停止和历史读取不被新开发证书阻断。不能用省略配置字段悄悄撤销已启用的 require。
+`restricted` 使用真实的 user/PID/network namespace、能力限制、Landlock 与 seccomp。开发只写声明的授权范围及私有 HOME。凭证留在受信模型传输服务。边界不可用时拒绝启动。`trusted_local` 使用宿主权限。RSS 与磁盘和进程计数按有界采样保护。
 
 ## 启用与回退顺序
 
@@ -144,4 +128,4 @@ python -m demiflow.cli workbench console --registry /srv/demiflow/registry.json 
 5. 无模型核验项目权限、开发 capability、运行快照、停止路径及静态资产；正常开发请求依用户当次要求执行；验收批次单独记录次数与时限，历史验收次数不是永久禁用开关。
 6. 回退先停止开发及确认清理，然后移除开发开关并按原运行服务方案回退。保留 state root、SQLite、unit 和收据；cleanup unknown 不因回退变为 complete。已 claim 但无后代排空证明的开发轮次仍需保留预留；本版没有强制释放入口。
 
-`trusted_local` 使用宿主权限，不是 OS 文件/网络沙箱；范围检查不能阻止同 UID 工具越界。restricted 需通过宿主真实探针和任务启动校验后启用。DeepSeek 的补充输入和 provider transcript replay 未支持，恢复时显示历史缺口；模型文字不授予检查通过、认证或独立 Review。当前固定模型传输只接受文本和本地工具结果；Codex 必须显式配置同模型 Responses 通道，不能借用桌面 App 的认证，也不默默切换 provider。
+`trusted_local` 使用宿主权限，不是 OS 文件/网络沙箱；范围检查不能阻止同 UID 工具越界。restricted 需通过宿主真实探针和任务启动校验后启用。DeepSeek 的补充输入和 provider transcript replay 未支持，恢复时显示历史缺口；模型文字不授予检查通过、认证或独立 Review。固定模型传输只接受文本和本地工具结果；Codex 必须显式配置同模型 Responses 通道，不能借用桌面 App 的认证，也不默默切换 provider。

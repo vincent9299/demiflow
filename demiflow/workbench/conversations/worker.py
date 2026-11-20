@@ -31,12 +31,10 @@ from demiflow.workbench.conversations.store import Store
 from demiflow.workbench.conversations.transport import Transport
 from demiflow.workbench.conversations.provider import adapter_for
 from demiflow.workbench.conversations.context import assemble
-from demiflow.workbench.conversations.context import ProtocolBridge
-from demiflow.workbench.conversations.context import BridgeServer
+from demiflow.workbench.conversations.context import BridgeServer, INPUT_TOOL
 from demiflow.workbench.conversations.changes import capture
 from demiflow.workbench.conversations.changes import differences
-from demiflow.workbench.conversations.execution import launch_provider
-from demiflow.workbench.conversations.development import managed, prepare, provider_message, request_deadline, runtime_paths, project_tasks, current_request
+from demiflow.workbench.conversations.execution import launch_provider, runtime_paths
 
 
 def sandbox_spec(deployment, project, session, turn, manifest, config, private_home):
@@ -44,21 +42,15 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
     from demiflow.workbench.conversations.sandbox import SandboxSpec
     root = Path(project['root'])
     sources = [Path(source['canonical_path']) for source in manifest.get('sources', [])
-               if source.get('origin') in {'authoritative_file', 'managed_development_api'}]
+               if source.get('origin') == 'authoritative_file']
     read = [root, *[path for path in sources if path.is_file()]]
     openssl = Path('/etc/ssl/openssl.cnf')
     if openssl.is_file(): read.append(openssl)
     writes = [] if turn.get('operation') == 'compact' else [root / name for name in project['writes']]
-    protected = [root / '.git', root / '.forge', root / '.demiforge', root / 'AGENTS.md']
+    protected = [root / name for name in ('.git', '.forge', 'AGENTS.md', 'workspace.json', 'PIPELINE_SPEC.md')]
     protected.extend(path for path in sources if path.name in {'AGENTS.md', 'PIPELINE_SPEC.md'})
     protected.extend(root / name for name in project.get('protected', []))
-    # The immutable registered declaration owns verifier argv and readonly roots.
-    if managed(project):
-        from demiflow.forge.development.project import Project
-        declared = Project(project.get('development_root', root))
-        protected.extend((declared.root / path).resolve() for path in declared.config['readonly'])
-        read.extend(path for path in protected if path.exists())
-    denied = [deployment.state / 'chat.sqlite3', deployment.state / 'forge-development',
+    denied = [deployment.state / 'chat.sqlite3',
               deployment.state / 'service.lock', deployment.state / 'control.reserve']
     if deployment.value.get('runtime_domain'): denied.append(Path(deployment.value['runtime_domain']))
     with os.scandir(deployment.state) as entries:
@@ -77,36 +69,28 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
     return SandboxSpec(read_paths=unique(read), write_paths=unique(writes), runtime_paths=runtime_paths(config),
         protected_paths=unique(protected), denied_paths=unique(denied), private_home=str(private_home),
         role='readonly' if turn.get('operation') == 'compact' else 'developer',
-        seconds=max(.1, request_deadline(turn, deployment.limits)-time.time()), rss_bytes=deployment.limits.rss_bytes,
+        seconds=max(.1, turn['created'] + deployment.limits.turn_seconds-time.time()), rss_bytes=deployment.limits.rss_bytes,
         processes=deployment.limits.processes, file_bytes=min(64*1024**2, deployment.limits.provider_bytes),
         private_bytes=min(deployment.limits.provider_bytes, deployment.limits.private_total_bytes))
 
 
 def automatic_approval(project, request, *, assurance):
     """Reuse an existing grant; business input and permission expansion still wait."""
-    if not managed(project) or not request.get('allow_once'): return False
+    if not request.get('allow_once'):
+        return False
+    if project['kind'] != 'pipeline' or assurance != 'enforced':
+        return False
     method = request['method']
     if method.endswith('requestUserInput') or method == 'item/permissions/requestApproval': return False
     if method == 'item/fileChange/requestApproval':
         # The adapter has already matched every effective changed path to writes.
         return True
-    if assurance == 'enforced' and method in {'item/commandExecution/requestApproval', 'session/request_permission'}:
+    if method in {'item/commandExecution/requestApproval', 'session/request_permission'}:
         return True
-    if method == 'session/request_permission':
-        item = request.get('params', {}).get('known_tool') or {}
-        raw = item.get('rawInput') or {}
-        path = raw.get('path') if type(raw) is dict else None
-        if item.get('kind') == 'edit' and isinstance(path, str):
-            from demiflow.workbench.conversations.common import safe_path
-            try:
-                relative = str(Path(path).relative_to(project['root'])) if Path(path).is_absolute() else path
-                safe_path(project['root'], relative, missing=True)
-                return any(relative == allowed or relative.startswith(allowed + '/') for allowed in project['writes'])
-            except (ValueError, OSError): pass
     return False
 
 
-def run(config_path, tid, lease_fd, parent_fd):
+def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
     deployment = Deployment.load(config_path)
     store = Store(deployment.state, deployment.limits)
     turn = store.turn(tid); session = store.session(turn['session'])
@@ -114,16 +98,20 @@ def run(config_path, tid, lease_fd, parent_fd):
     with store.connect() as db:
         history_boundary = db.execute('SELECT min(sequence)-1 FROM events WHERE turn=?',(tid,)).fetchone()[0] or 0
     project = deployment.project(session['workspace'], json.loads(session['root'])['path'])
+    guided = not compact and project['kind'] == 'pipeline'
+    watched = project['watch']
+    excluded = project.get('protected', ()) if guided else ()
+    coding = None
     home = deployment.state / session['id']; scratch = home / turn['id']; scratch.mkdir(mode=0o700, exist_ok=True)
     limits = deployment.limits
     process = transport = provider = None
     final, reason, completed, draining = 'failed', None, False, False
     requested = False
-    deadline = request_deadline(turn, limits)
+    deadline = turn['created'] + limits.turn_seconds
     stop_started = None
     last_sample, peaks = 0, {'rss_bytes': 0, 'private_bytes': 0, 'processes': 0}
     outstanding = {}
-    protocol_bridge = None
+    input_access = None
     control_bridge = None
     model_broker = None
     os.set_blocking(parent_fd, False)
@@ -195,18 +183,28 @@ def run(config_path, tid, lease_fd, parent_fd):
     try:
         tick()
         if requested: raise InterruptedError(reason)
-        if deployment.mode == 'restricted' and project['kind'] == 'demiforge_registered' and not managed(project):
-            reject('Restricted registered development requires controller-managed tasks')
-        baseline = capture(project['root'], project['watch'])
+        if guided:
+            from demiflow.forge.api_reference import REFERENCE_BYTES, sdk_identity
+            if coding_fd is None:
+                reject('Current SDK reference was not prepared')
+            try:
+                raw = os.pread(coding_fd, REFERENCE_BYTES + 1, 0)
+            finally:
+                os.close(coding_fd)
+                coding_fd = None
+            if len(raw) > REFERENCE_BYTES:
+                reject('SDK reference exceeds byte budget', 'resource_limit')
+            coding = json.loads(raw)
+            if sdk_identity(coding['catalog']) != coding['sdk_revision']:
+                reject('Native SDK changed before context delivery', 'conflict')
+        baseline = capture(project['root'], watched, exclude=excluded)
         store.update(tid, baseline=wire(baseline).decode())
         if compact:
             prompt = ''
             manifest = dict(operation='compact', provider=session['provider'], delivery='not_applicable')
             store.update(tid, context=wire(manifest).decode(), delivery='not_applicable')
         else:
-            managed_tasks = prepare(deployment, store, turn, session, project) if managed(project) else None
-            input_access = None
-            if project['kind'] == 'demiforge_registered':
+            if guided:
                 from demiflow.workbench.conversations.inputs import InputAccess
                 denied_inputs = [deployment.state, Path(config_path).resolve()]
                 denied_inputs.extend(Path(p) for p in json.loads(os.environ.pop('DEMIFLOW_INPUT_DENIED_PATHS', '[]')))
@@ -216,21 +214,18 @@ def run(config_path, tid, lease_fd, parent_fd):
                                      if value.get('native_credentials'))
                 input_access = InputAccess(store, tid, project, scratch, denied_paths=denied_inputs,
                     runtime_paths=runtime_paths(deployment.providers[session['provider']]), deadline=deadline)
-            manifest, prompt = assemble(project, turn['text'], scratch, limits,
-                managed_tasks=managed_tasks, task_id=session['id'] if managed_tasks is not None else None,
-                execution_mode=deployment.mode, current_request=current_request(turn) if managed_tasks is not None else None,
-                input_access=input_access is not None)
+            manifest, prompt = assemble(project, turn['text'], limits,
+                execution_mode=deployment.mode, input_access=input_access is not None, coding=coding)
             store.update(tid, context=wire(manifest).decode(), delivery='prepared')
-            protocol_bridge = ProtocolBridge(store, tid, project, scratch, input_access=input_access)
             store.event(tid, 'context.bound', {'digest': manifest['digest'], 'kind': manifest['kind'],
-                'task_id': manifest['task_id'], 'sources': len(manifest['sources']), 'bytes': manifest['bytes'], 'delivery': 'prepared'})
+                'sources': len(manifest['sources']), 'bytes': manifest['bytes'], 'delivery': 'prepared'})
         tick()
         if requested: raise InterruptedError(reason)
         config = deployment.providers[session['provider']]
         adapter = adapter_for(session['provider'],turn.get('operation','message'))
         acp = getattr(adapter, 'acp', False)
-        if not compact and acp and project['kind'] == 'demiforge_registered':
-            control_bridge = BridgeServer(protocol_bridge, epoch=turn['epoch'], deadline=deadline)
+        if acp and guided:
+            control_bridge = BridgeServer(input_access)
         provider_home = home / 'provider' if deployment.mode == 'restricted' else home
         provider_home.mkdir(mode=0o700, exist_ok=True)
         if deployment.mode == 'restricted':
@@ -248,34 +243,33 @@ def run(config_path, tid, lease_fd, parent_fd):
             control_socket=control_bridge.path if control_bridge is not None else None,
             model_socket=model_broker.socket_path if model_broker is not None else None)
         transport = Transport(process, limits, acp=acp)
-        continuing_repair = bool(json.loads(turn.get('development_control') or '{}').get('repair_round'))
-        saved_session = session['provider_session'] if acp or continuing_repair or store.has_dispatched(session['id']) else None
+        saved_session = session['provider_session'] if acp or store.has_dispatched(session['id']) else None
         provider = adapter(transport, config, project, saved_session)
-        if not compact and acp and project['kind'] == 'demiforge_registered':
+        if acp and guided:
             provider.mcp_servers = [dict(name='development-protocol', command=sys.executable,
                 args=['-I', '-B', str(Path(__file__).with_name('mcp_bridge.py')), '--connect', str(control_bridge.path),
                       control_bridge.token, tid, turn['epoch']], env=[])]
         handshake = wait(provider.initialize(), timeout=40)
         configuration_key = provider.initialized(handshake)
         effective = provider.verify_config(wait(configuration_key) if configuration_key else {})
-        effective['execution_assurance'] = getattr(process, 'execution_assurance', 'gate_only')
+        effective['execution_assurance'] = getattr(process, 'execution_assurance', 'host_permissions')
         store.event(tid, 'provider.bound', effective)
         store.update(tid, delivery='not_applicable' if compact else 'sent')
-        thread = provider.opened(wait(provider.open(prompt)))
+        open_key = provider.open(prompt) if acp else provider.open(prompt, tools=(INPUT_TOOL,) if guided else ())
+        thread = provider.opened(wait(open_key))
         store.bind_provider(session['id'], thread)
         store.update(tid, delivery='not_applicable' if compact else 'prepared' if acp else 'acknowledged')
         if not compact and acp and session['provider_session']:
             store.event(tid, 'history.gap', dict(reason='ACP resume does not replay provider transcript; saved application events remain authoritative'))
         # Compare again after context preparation and handshake; no baseline reset.
-        if capture(project['root'], project['watch']) != baseline:
+        if watched and capture(project['root'], watched, exclude=excluded) != baseline:
             reject('Watched sources changed during preparation; no model turn sent', 'conflict')
         tick()
         if requested: raise InterruptedError(reason)
         # Persist unknown BEFORE writing to the provider pipe: a crash cannot
         # turn an uncertain paid request into a supposedly safe automatic retry.
         store.update(tid, dispatch='unknown')
-        message, submission = provider_message(turn)
-        start_key = provider.start(message, submission)
+        start_key = provider.start(turn['text'], turn['submission'])
         if acp:
             native_turn = provider.turn
             store.update(tid, dispatch='sent', delivery='not_applicable' if compact else 'sent', provider_turn=native_turn, state='running')
@@ -283,10 +277,6 @@ def run(config_path, tid, lease_fd, parent_fd):
             started = wait(start_key)
             native_turn = provider.started(started)
             store.update(tid, dispatch='acknowledged', provider_turn=native_turn, state='running')
-        if turn.get('development'):
-            development = json.loads(store.turn(tid)['development'])
-            repair = json.loads(turn.get('development_control') or '{}').get('repair_round', 0)
-            store.update(tid, development=wire(dict(development, state='repairing' if repair else 'developing')).decode())
         while not completed:
             current = tick()
             transport.poll()
@@ -306,7 +296,7 @@ def run(config_path, tid, lease_fd, parent_fd):
                     elif kind == 'request':
                         tick()
                         if requested: continue
-                        if automatic_approval(project, data, assurance=getattr(process, 'execution_assurance', 'gate_only')):
+                        if automatic_approval(project, data, assurance=getattr(process, 'execution_assurance', 'host_permissions')):
                             reply = dict(id=data['rpc_id'], result=provider.answer(data, 'allow_once'))
                             if store.dispatch_provider_reply(tid, turn['epoch'], lambda: transport.send(reply)):
                                 store.event(tid, 'approval.automatic', dict(method=data['method'], authorization='existing_deployment_scope'))
@@ -317,12 +307,13 @@ def run(config_path, tid, lease_fd, parent_fd):
                         tick()
                         if requested: continue
                         try:
-                            answer = protocol_bridge.invoke(data['arguments'])
+                            if input_access is None or data['tool'] != INPUT_TOOL['name']:
+                                reject('Input tool is unavailable for this turn')
+                            answer = input_access.invoke(data['arguments'])
                             result = dict(success=True, contentItems=[dict(type='inputText', text=wire(answer, 65536).decode())])
                         except Exception as exc:
                             result = dict(success=False, contentItems=[dict(type='inputText', text=str(exc)[:2048])])
                         transport.send(dict(id=data['rpc_id'], result=result))
-                        if result['success']: protocol_bridge.sent()
                     else: emit(kind, data)
             for pending in store.pending(tid):
                 tick()
@@ -334,8 +325,6 @@ def run(config_path, tid, lease_fd, parent_fd):
                     answer = provider.answer(request, json.loads(pending['answer']))
                     if not store.dispatch_provider_reply(tid, turn['epoch'], lambda: transport.send(dict(id=request['rpc_id'], result=answer))):
                         break
-                    if not compact and managed_tasks is not None and request['method'].endswith('requestUserInput'):
-                        managed_tasks.note(session['id'], 'decision', pending['answer'], event_id=pending['id'])
                     store.resolved(pending['id']); del outstanding[pending['id']]
                     store.update(tid, state='running' if not outstanding else 'waiting_input')
             if acp and start_key in transport.responses:
@@ -386,8 +375,8 @@ def run(config_path, tid, lease_fd, parent_fd):
         try:
             changes = []; revision = None
             saved = store.turn(tid)
-            if saved['baseline']:
-                before = json.loads(saved['baseline']); after = capture(project['root'], project['watch'])
+            if saved['baseline'] and watched:
+                before = json.loads(saved['baseline']); after = capture(project['root'], watched, exclude=excluded)
                 changes = list(differences(before, after, project['writes']))
                 if changes:
                     source_hash = lambda values: digest({name:(fact or {}).get('sha256') for name,fact in values.items()})
@@ -403,18 +392,22 @@ def run(config_path, tid, lease_fd, parent_fd):
         try:
             result = dict(reason=reason, peaks=peaks, changed_files=len(changes), evidence='stale' if changes else 'missing',
                           cleanup='complete' if drained else 'unknown', provider_completed=completed)
-            result['execution_assurance'] = getattr(process, 'execution_assurance', 'gate_only')
-            if (not compact and managed(project) and drained and completed and final == 'completed'
-                    and result['execution_assurance'] == 'enforced'):
-                evidence = getattr(process, 'execution_evidence', None)
-                if evidence is None: reject('Enforced provider omitted its actual boundary evidence')
-                tasks = project_tasks(deployment, session, project)
-                candidate = tasks.status(session['id'])
-                if candidate['source_fingerprint'] is not None:
-                    receipt = tasks.review_authority.issue_execution(session['id'], candidate['source_fingerprint'],
-                        phase='developer', backend=evidence['backend'], implementation=evidence['implementation'], execution_id=evidence['execution_id'])
-                    tasks.record_execution(session['id'], candidate['source_fingerprint'], receipt=receipt)
-                result['execution'] = evidence
+            result['execution_assurance'] = (getattr(process, 'execution_assurance', 'host_permissions')
+                                             if process is not None else 'not_started')
+            if (coding is not None and changes and drained and completed and final == 'completed'
+                    and not saved['stop_at'] and saved['dispatch'] == saved['delivery'] == 'acknowledged'):
+                from demiflow.forge.pipeline_check import result as check_result
+                from demiflow.forge.project_rules import diagnostic
+                from demiflow.workbench.projects.workspace import inspect_coding_changes
+                try:
+                    report = inspect_coding_changes(project['root'], changes, coding, exclude=excluded)
+                    if (sdk_identity(coding['catalog']) != coding['sdk_revision']
+                            or capture(project['root'], watched, exclude=excluded) != after):
+                        reject('SDK or project source changed before checks could be reported', 'conflict')
+                    result['pipeline_checks'] = report
+                except (ValueError, OSError, KeyError, RecursionError) as exc:
+                    incomplete = check_result([diagnostic('DF-01', '', str(exc), status='incomplete')], ())
+                    result['pipeline_checks'] = dict(native_flow=incomplete, project_layout=incomplete)
             if revision: result['revision'] = revision
             if compact and completed and final == 'completed':
                 metadata = getattr(provider,'compaction_result',None)
@@ -429,8 +422,10 @@ def run(config_path, tid, lease_fd, parent_fd):
             # ownership failure. The persistent reservation remains held.
             try: store.update(tid, state='stopping', cleanup='unknown')
             except BaseException: pass
+        if coding_fd is not None:
+            os.close(coding_fd)
         os.close(lease_fd); os.close(parent_fd)
 
 
 if __name__ == '__main__':
-    run(sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]))
+    run(sys.argv[1], sys.argv[2], *(int(fd) for fd in sys.argv[3:]))

@@ -1,12 +1,11 @@
 """Browser acceptance on an unrelated original project and two observing clients."""
-import json
 import os
 from pathlib import Path
 
 import pytest
 
 from demiflow.workbench.projects import registry as console
-from test_forge_project_discovery import original, business_bytes, snapshot, cached_snapshot
+from test_forge_project_discovery import original, business_bytes, snapshot, cached_snapshot, register_fixture_flow
 from test_forge_public_api import service
 from test_forge_web_redesign import project_info
 
@@ -17,6 +16,7 @@ def test_original_project_review_and_sync(original, tmp_path):
     if not executable.is_file():
         pytest.skip('FORGE_CHROMIUM must point to an installed browser')
     registry = tmp_path / 'console.json'
+    register_fixture_flow(original)
     console.add(registry, original)
     before = business_bytes(original)
     artifact = Path(os.environ.get('FORGE_ACCEPTANCE_DIR', str(tmp_path / 'screenshots')))
@@ -43,7 +43,7 @@ def test_original_project_review_and_sync(original, tmp_path):
         page.get_by_role('button', name='管道', exact=True).click()
         project_info(page)
         page.get_by_role('cell', name='dispatch.py:run_pipeline', exact=True).wait_for()
-        assert page.get_by_role('button', name='运行', exact=True).is_disabled()
+        assert page.locator('.wb-actions').get_by_role('button', name='运行', exact=True).is_disabled()
         page.get_by_role('button', name='数据', exact=True).click()
         page.get_by_text('records/orders.lance',exact=True).click()
         page.locator('.dictionary-table[open] .dictionary-version').filter(has_text='v1').wait_for()
@@ -53,7 +53,7 @@ def test_original_project_review_and_sync(original, tmp_path):
         project_info(page)
         page.get_by_role('button', name='检查当前项目', exact=True).click()
         page.get_by_text('整体：尚未完成；静态检查：尚未完成', exact=True).wait_for()
-        page.get_by_text('dispatch.py\noperators/clean.py', exact=True).wait_for()
+        page.get_by_text('dispatch.py', exact=False).first.wait_for()
         page.screenshot(path=str(artifact / 'original-check-coverage.png'), full_page=True)
         project_info(page)
         page.get_by_role('cell', name='history/RUN/calls.sqlite', exact=True).wait_for()

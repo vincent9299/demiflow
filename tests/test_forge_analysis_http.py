@@ -177,10 +177,8 @@ def test_product_context_routes_read_existing_project_records(isolated):
     manifest, target, _ = control_fixture(isolated)
     before = (target / 'run.sqlite').read_bytes()
     with service(isolated) as app:
-        code, facts = request(app, '/api/forge-context')
-        assert code == 200 and facts['read_only'] and facts['project'] == str(isolated)
-        assert request(app, '/api/forge-context?task=../escape')[0] == 400
-        assert request(app, '/api/forge-tools')[0] == 200
+        assert request(app, '/api/forge-context')[0] == 404
+        assert request(app, '/api/forge-tools')[0] == 404
         code, facts = request(app, '/api/run-context?run_id=' + manifest['run_id'])
         assert code == 200 and facts['facts'][0]['value']['state']['status'] == 'prepared'
         assert request(app, '/api/run-tools')[0] == 200

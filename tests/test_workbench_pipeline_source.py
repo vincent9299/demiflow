@@ -8,7 +8,7 @@ import pytest
 from playwright.sync_api import expect
 
 from demiflow.workbench.projects import workspace as ws, registry
-from test_forge_project_discovery import original, snapshot, cached_snapshot, business_bytes
+from test_forge_project_discovery import original, snapshot, cached_snapshot, business_bytes, register_fixture_flow
 from test_forge_markdown_reading import browser
 from test_forge_public_api import service, request
 from test_forge_web_redesign import opened
@@ -36,7 +36,7 @@ def address(preview):
 def test_read_callsite_and_entire_pipeline_share_immutable_preview(original):
     entry = original / 'dispatch.py'
     entry.write_text(CODE)
-    ws.init_workspace(original, existing=True)
+    register_fixture_flow(original)
     before = business_bytes(original)
     with service(original) as app:
         status, preview = request(app, '/api/plan-preview', dict(entry='dispatch.py:run_pipeline', params=None))
@@ -50,7 +50,7 @@ def test_read_callsite_and_entire_pipeline_share_immutable_preview(original):
             status, detail = request(app, '/api/plan-node-detail', dict(basis=address(preview),
                 logical_node_id=node['logical_node_id'], occurrence_id=node['occurrence_id'], kind='callsite'))
             assert status == 200, detail
-            assert detail['path'] == 'shipping/dispatch.py'
+            assert detail['path'] == 'dispatch.py'
             assert detail['start_line'] == detail['end_line'] == 9
             api = detail['metadata']['definition']
             assert api['symbol'] == 'DataAPI.read_lance'
@@ -90,6 +90,7 @@ def test_read_callsite_and_entire_pipeline_share_immutable_preview(original):
 
 def test_pipeline_ui_read_call_code_config_and_whole_source(original, tmp_path, browser):
     (original / 'dispatch.py').write_text(CODE)
+    register_fixture_flow(original)
     before = business_bytes(original)
     path = tmp_path / 'registry.json'; registry.add(path, original)
     with service(None, registry=path) as app, opened(browser, app) as (page, requests):

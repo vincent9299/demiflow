@@ -14,6 +14,15 @@ from demiflow.resources.process_observation import UNIT_ENV
 from demiflow.workbench.conversations.common import reject
 
 
+def runtime_paths(config):
+    paths = [Path('/usr'), Path('/lib'), Path('/lib64'), Path(sys.base_prefix), Path(sys.prefix),
+             Path(__file__).resolve().parents[3]]
+    executable = Path(config['executable']).resolve()
+    paths.append(executable.parent.parent if executable.name == 'bin.js' or executable.suffix == '.js' else executable)
+    if config.get('node'): paths.append(Path(config['node']).resolve())
+    return tuple(sorted({str(path.absolute()) for path in paths}))
+
+
 def execution_facts(mode):
     """Return implementation facts, never provider claims or check results."""
     if type(mode) is not str or mode not in {'trusted_local', 'restricted'}:

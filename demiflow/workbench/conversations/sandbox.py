@@ -135,7 +135,7 @@ def specification(spec, command, env, cwd):
                         count += 1
                         if count > 4096:
                             raise ValueError('Writable tree scope inventory exceeds budget')
-                        if value != home and entry.name in {'.git', '.forge', '.demiforge', '.codex', '.dsh', 'AGENTS.md'}:
+                        if value != home and entry.name in {'.git', '.forge', '.codex', '.dsh', 'AGENTS.md'}:
                             raise ValueError('Writable tree contains protected development metadata')
                         info = entry.stat(follow_symlinks=False)
                         if stat.S_ISLNK(info.st_mode) or stat.S_ISREG(info.st_mode) and info.st_nlink != 1:

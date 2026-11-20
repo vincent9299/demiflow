@@ -18,7 +18,7 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits):
     """Fixed disposable worker: original code construction is read-only."""
     from contextlib import redirect_stdout
     from demiflow.execution.host.inspection import capture_managed_pipeline, native_submission_view
-    from demiflow.workbench.graph.preview import _Sources, _Discard, _import_root
+    from demiflow.workbench.graph.preview import _Sources, _Discard
     from demiflow.workbench.graph.preview_guard import enter_readonly
     from demiflow.workbench.projects.discovery import discover
     root, control, platform = ws.load_workspace(root)
@@ -26,14 +26,13 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits):
     if not any(item['entry'] == entry and item['status'] == 'recognized' for item in project['entries']):
         raise ForgeError('Native entry must be declared by this project')
     target, symbol = ws.validate_entry(root, entry)
-    source_root = _import_root(root, project)
-    sources = _Sources(source_root)
+    sources = _Sources(root)
     sources.read(target)
     arguments, tables, targets, _ = ws.resolve_arguments(root, control, parameters, table_resolver=table_resolver)
     if targets:
         raise ForgeError('Native admission cannot mix implicit and explicit output grants')
     sys.dont_write_bytecode = True
-    sys.path[:0] = [str(source_root), str(root)]
+    sys.path[:0] = [str(root)]
     sys.meta_path.insert(0, sources)
     os.chdir(root)
     reads = set()
@@ -43,7 +42,7 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits):
             path = Path(os.fsdecode(args[0])).absolute()
             # Native libraries own their files; only project Python/config
             # closure is copied. Fixed external inputs remain in place.
-            if path.is_relative_to(source_root):
+            if path.is_relative_to(root):
                 if len(reads) >= 512 and path not in reads:
                     raise ForgeError('Native source resource closure exceeds budget')
                 reads.add(path)
@@ -52,24 +51,24 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits):
     tracking[0] = True
     try:
         with redirect_stdout(_Discard()):
-            module = target.relative_to(source_root).as_posix()[:-3].replace('/', '.')
+            module = target.relative_to(root).as_posix()[:-3].replace('/', '.')
             function = getattr(importlib.import_module(module), symbol)
             if not inspect.isfunction(function) or Path(inspect.getfile(function)) != target:
                 raise ForgeError('Native entry resolved outside its declared source')
             inspect.signature(function).bind(**arguments)
             from demiflow.workbench.graph.plan_callsite import PlanCallsites, pipeline_material
             from demiflow.workbench.graph.plan_details import build_plan_details
-            with PlanCallsites(source_root, sources.digests) as callsites:
+            with PlanCallsites(root, sources.digests) as callsites:
                 captured = capture_managed_pipeline(function, arguments, limits=limits, on_compiled=callsites.bind_compilation)
-            details = build_plan_details(captured.compiled, sources=sources.digests, root=source_root,
+            details = build_plan_details(captured.compiled, sources=sources.digests, root=root,
                                          callsites=callsites, bounds=captured.bounds)
-            pipeline = pipeline_material(source_root, target, sources.digests)
+            pipeline = pipeline_material(root, target, sources.digests)
     finally:
         tracking[0] = False
     sources.verify()
     resources = {}
     for path in sorted(reads):
-        name = path.relative_to(source_root).as_posix()
+        name = path.relative_to(root).as_posix()
         if name in sources.digests or not path.is_file():
             continue
         ws.no_symlinks(path)
@@ -84,8 +83,8 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits):
         pipeline_detail=pipeline,
         observation_instances=view['observations'], diagnostics=[],
         coverage=dict(execution='not_run', scope='first_action'),
-        binding=dict(entry=entry, source_root=str(source_root),
-            source_entry=target.relative_to(source_root).as_posix() + ':' + symbol,
+        binding=dict(entry=entry, source_root=str(root),
+            source_entry=target.relative_to(root).as_posix() + ':' + symbol,
             sources=sources.digests, resources=resources, arguments=arguments,
             parameters=parameters, tables=tables, targets={},
             workspace_digest=content_digest(control), platform_digest=content_digest(platform)))

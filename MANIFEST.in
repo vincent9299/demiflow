@@ -5,12 +5,9 @@ recursive-include tests *.py *.json
 recursive-include tools *.py
 recursive-include examples *.py *.json *.md
 recursive-include integrations *.md
-recursive-include demiflow/forge/contracts *.json
 recursive-include demiflow/forge/standards *.json
 recursive-include demiflow/workbench/web *.html *.js *.css *.txt *.json
 recursive-include demiflow/workbench/analysis *.json
-recursive-include demiflow/forge/development/standards *.md
-recursive-include demiflow/forge/development/skill *.md *.py
 recursive-include demiflow/workbench/conversations *.cjs
 recursive-include demiflow/_vendor/searxng *
 global-exclude *.pyc

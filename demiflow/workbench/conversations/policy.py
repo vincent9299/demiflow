@@ -91,7 +91,7 @@ class Deployment:
             reject('Configure 1..128 explicitly permitted projects')
         for key, project in self.projects.items():
             required = {'root', 'kind', 'phase', 'writes', 'watch', 'sources', 'non_goals', 'authorization'}
-            optional = {'task_id', 'pipeline', 'allow_tests', 'design_review', 'managed', 'run_policy', 'development_root', 'protected'}
+            optional = {'protected'}
             if type(project) is not dict or not required <= project.keys() or project.keys() - required - optional:
                 reject('Invalid project development grant')
             project['identity'] = root_identity(project['root'])
@@ -103,7 +103,7 @@ class Deployment:
                 if (domain == root or domain in root.parents or root in domain.parents or
                         domain == self.state or domain in self.state.parents or self.state in domain.parents):
                     reject('Restricted runtime domain, private state and project roots must be disjoint')
-            if project['kind'] not in {'platform', 'native_forge', 'demiforge_registered', 'unregistered'}:
+            if project['kind'] not in {'platform', 'pipeline'}:
                 reject('Explicit development kind required')
             if project['phase'] not in {'design', 'implementation'}:
                 reject('Explicit development phase required')
@@ -118,48 +118,14 @@ class Deployment:
                 safe_path(root, path, missing=True)
             for path in project['writes']:
                 parts = plain_path(path).split('/')
-                if any(p in {'.git', '.forge', '.demiforge', '.codex', '.dsh'} for p in parts) or parts[-1] in {'AGENTS.md', 'workspace.json'}:
+                if any(p.startswith('.') for p in parts) or parts[-1] in {'AGENTS.md', 'workspace.json', 'PIPELINE_SPEC.md'}:
                     reject('Control files require a separate development grant')
                 if not any(path == w or path.startswith(w + '/') for w in project['watch']):
                     reject('Writable scope must be watched')
-            for flag in ('managed', 'allow_tests'):
-                if flag in project and type(project[flag]) is not bool:
-                    reject('Development ' + flag + ' must be a boolean')
-            managed = project.get('managed', project['kind'] == 'demiforge_registered' and not project.get('task_id'))
-            if managed:
-                if project['kind'] != 'demiforge_registered' or project['phase'] != 'implementation' or 'task_id' in project:
-                    reject('Managed development requires registered implementation without a local task_id')
-                from demiflow.forge.development.project import safe_id
-                safe_id(key)
-                # Only new managed grants acquire this field. Do not change the
-                # policy hash of legacy deployments or silently migrate history.
-                project['managed'] = True
-            if project['kind'] == 'demiforge_registered':
-                if not project.get('pipeline') or (not managed and not project.get('task_id')):
-                    reject('Registered development requires a pipeline and managed or explicit local task')
-                text(project['pipeline'], 80)
-            if project.get('run_policy', 'observe') not in {'observe','require'}:
-                reject('Development run policy must be observe or require')
-            if project.get('run_policy') == 'require' and (not managed or self.mode != 'restricted' or not value.get('runtime_domain')):
-                reject('Required development acceptance needs managed restricted execution in a fixed runtime domain')
-            if managed and self.mode == 'restricted' and not value.get('runtime_domain'):
-                reject('Managed restricted development needs a fixed runtime domain for all source execution entrypoints')
-            if 'development_root' in project:
-                declared = Path(project['development_root'])
-                root_identity(declared)
-                if not managed or not root.is_relative_to(declared):
-                    reject('Managed declaration root must contain the selected project')
             protected = project.get('protected', [])
             if type(protected) is not list or len(protected) > 128:
                 reject('Protected source list exceeds budget')
             for name in protected: safe_path(root, name, missing=True)
-            if project.get('design_review'):
-                review = project['design_review']
-                if type(review) is not dict or set(review) != {'path', 'sha256', 'authority'}:
-                    reject('Design Review must name exact source and authority')
-                from hashlib import sha256
-                if sha256(read_file(safe_path(root, review['path']))).hexdigest() != review['sha256']:
-                    reject('Design Review source changed', 'conflict')
         if type(self.providers) is not dict or not 1 <= len(self.providers) <= 2:
             reject('Configure at most two providers')
         for name, provider in self.providers.items():
@@ -264,38 +230,23 @@ class Deployment:
             permitted = False
         execution = execution_facts(self.mode)
         from .model_broker import capabilities as model_capabilities
-        from .review import review_capabilities
-        managed = bool(project.get('managed'))
         providers = []
         for name, config in self.providers.items():
             model = model_capabilities(name, config)
-            review = review_capabilities(name, config)
-            ready = execution['available'] and (self.mode != 'restricted' or model['available'] and (not managed or review['available']))
-            legacy = self.mode == 'restricted' and project.get('kind') == 'demiforge_registered' and not managed
-            if legacy: ready = False
-            reason = ''
-            if legacy: reason = '原有本地任务仅保留可信本地执行；受限开发需建立新的受管任务。'
-            elif self.mode == 'restricted':
-                if not model['available']: reason = model['reason']
-                elif managed and not review['available']: reason = review['reason']
+            ready = execution['available'] and (self.mode != 'restricted' or model['available'])
+            reason = model['reason'] if self.mode == 'restricted' and not model['available'] else ''
             providers.append(dict(id=name, version=config['version'], model=config['model'], available=permitted and ready,
                 **({'effort': config['effort']} if 'effort' in config else {}),
                 compaction='native', input_requests='supported' if name == 'codex' else 'unsupported',
-                history_replay='supported' if name == 'codex' else 'unsupported', independent_review=review['mode'],
+                history_replay='supported' if name == 'codex' else 'unsupported',
                 reason=reason))
         available = any(p['available'] for p in providers)
-        independent = managed and any(p['independent_review'] == 'model_only' for p in providers)
         return dict(format='demiflow_development_chat_v1', enabled=permitted, start=available,
             conversation_stats=True, multiple_conversations=True,
             mode=self.mode, filesystem_enforcement=execution['filesystem_enforcement'], reason=execution['reason'],
-            # Capability is not an acceptance receipt. The task projection alone
-            # can claim enforced after both execution phases and review verify.
-            development_gate=dict(enabled=managed, assurance='pending' if managed and self.mode == 'restricted' else 'gate_only' if managed else 'none',
-                                  run_policy=project.get('run_policy','observe'), independent_review='model_only' if independent else 'unavailable',
-                                  automatic_repair=managed, repair_attempts=3 if managed else 0, review_attempts=2 if managed else 0),
             providers=providers,
             limits=asdict(self.limits), host_partition=dict(self.value['host_budget'],
                 development_memory_bytes=self.memory_reservation, development_disk_bytes=self.disk_reservation),
             guarantees=dict(resource_protection='bytes_and_counts_atomic; process_tree_RSS_and_disk_sampled',
                             provider_internal_requests='root_turn_transport_max_64' if self.mode == 'restricted' else 'unknown',
-                            cost_cap='unsupported', independent_review=independent))
+                            cost_cap='unsupported'))

@@ -9,45 +9,37 @@ import pytest
 from click.testing import CliRunner
 
 from demiflow.forge.schema import ForgeError
-from demiflow.forge.tools import invoke
 from demiflow.workbench.runs import context, tools
 from test_forge_runtime_review_fixes import control_fixture
-from forge_support import create_project
 
 
 def test_forge_imports_without_product_or_interactive_runtime():
     root = Path(__file__).resolve().parents[1]
     result = subprocess.run([sys.executable, '-I', '-B', '-c',
-        'import sys;sys.path.insert(0,sys.argv[1]);import demiflow.forge.cli;import demiflow.forge.context;'
+        'import sys;sys.path.insert(0,sys.argv[1]);import demiflow.forge.cli;import demiflow.forge.api_reference;import demiflow.forge.pipeline_check;'
         'assert not any(n.startswith(("demiflow.workbench", "jupyter", "ipykernel")) for n in sys.modules)', str(root)],
         capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
 
 
-def test_forge_facts_do_not_create_task_or_receipt_and_closed_fields_fail(tmp_path):
-    (tmp_path / 'contract.lock.json').write_text('{"schema_version":"saved","rules":["original"]}')
-    before = {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
-    facts = invoke('forge.context', tmp_path)
-    assert facts['read_only'] and facts['current_evidence'] == 'unverified'
-    assert facts['facts'][0]['source'] == str(tmp_path / 'contract.lock.json')
-    assert facts['facts'][0]['version'] and facts['facts'][0]['observed_at']
-    assert {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()} == before
-    with pytest.raises(ForgeError): invoke('forge.context', tmp_path, {'run': True})
-    with pytest.raises(ValueError): invoke('forge.context', tmp_path, {'task': '../escape'})
+def test_forge_guidance_and_check_use_the_same_public_catalogue(tmp_path):
+    from demiflow.forge.api_reference import build_reference, render_reference
+    from demiflow.workbench.projects.workspace import inspect_coding_changes
 
-
-def test_forge_cli_and_tool_use_same_current_checker(tmp_path):
-    from demiflow.cli import main
-    project = create_project(tmp_path)
-    direct = invoke('forge.check', project)
-    result = CliRunner().invoke(main, ['forge', 'check', str(project), '--json'])
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.output) == direct
-    # Actual invalid source gets the same failure, not a separate tool policy.
-    (project / 'pipeline.py').write_text('raise RuntimeError("must not execute")\n')
-    direct = invoke('forge.check', project)
-    result = CliRunner().invoke(main, ['forge', 'check', str(project), '--json'])
-    assert result.exit_code == 1 and json.loads(result.output) == direct
+    flows = tmp_path / 'flows'
+    flows.mkdir()
+    source = flows / 'example.py'
+    source.write_text("from demiflow.data import from_items\ndef example():\n    return from_items([{'id': 1}]).materialize()\n")
+    before = source.read_bytes()
+    reference = build_reference()
+    text, symbols = render_reference(reference)
+    assert 'demiflow.data:Dataset.materialize' in symbols
+    assert 'Dataset.materialize' in text
+    inspected = inspect_coding_changes(tmp_path, [dict(path='flows/example.py', after={})], reference)
+    assert inspected['catalog_id'] == reference['catalog_id']
+    assert inspected['native_flow']['status'] == 'passed', inspected
+    assert inspected['project_layout']['status'] == 'passed'
+    assert list(tmp_path.iterdir()) == [flows] and source.read_bytes() == before
 
 
 def test_run_context_is_project_read_only_and_does_not_reconcile(tmp_path, monkeypatch):

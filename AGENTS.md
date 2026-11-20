@@ -19,13 +19,9 @@
 
 平台架构、Forge边界和实现Review以[架构总意图v1](docs/architecture-master-intent-v1.md)为当前已定版基线，原产品root意图保持。Forge负责context/tools与开发、运维工作流；Pipeline运行管理及交互应用保留各自状态。现有包名/命令兼容路径不等于领域归属。SQL当前可随Notebook，当前版交付不等待新引擎；后续适配遵守双方C1–C6/R1–R4约定。定版不表示已重构，历史准入、权限与数据保护继续有效。
 
-## Forge 契约开发边界
+## Forge 开发辅助边界
 
-`demiflow.forge` 是独立的契约开发与生命周期层，不读取或依赖 DemiForge、Demiurge 或业务仓配置。内置契约、当前平台上下文、静态检查、行为测试、Review 和 Freeze 必须绑定同一实现 revision；不得为了通过任务放宽契约或复用陈旧证据。真实 Forge 运行只复用现有 Dataset 执行，不新增第二套调度或执行引擎。可执行范围由当前原生能力、入口检查和同 revision 的验收证据共同限定；早期“仅项目内固定 Lance”描述属于历史阶段，不能代替当前能力表，也不能据此放开未验收的外部写入。统一运行基础的阶段范围见 [P0–P2 契约](docs/execution-foundation-contract.json)，其中 P3–P6 适配和切换项不得标为已完成。详见 [Forge 契约](docs/forge-contract.md) 与 [生命周期](docs/forge-lifecycle.md)。
-
-2026-11-04 用户补充原项目识别闭环：登记后可只读解析已支持、版本化的公开项目声明及其明确引用，展示原入口、配置、算子、数据与运行信息和缺口。此项覆盖上段“不读取业务配置”的旧限制；不导入或调用 Demiurge 实现、不执行声明中的命令、不导入业务代码，不从识别结果授予检查通过或执行权限。检查继续复用平台现有统一检查器，原项目只报告问题，修正需用户确认。支持格式、读取预算与权限边界见 [原项目识别](docs/forge-project-discovery.md)。
-
-同日用户授权将原 DemiForge 开发工具、版本化标准和 Skill 合入本仓的 `demiflow.forge.development`，统一在 demiflow 演进；公开入口为 `demiflow forge dev`，业务项目保留 `.demiforge/forge` 薄入口及原任务记录。上文独立层边界适用于原生 Forge 契约、工作区和执行链；开发工具按项目声明与 Skill 管理授权开发和验证。Web/原项目识别只解析支持的公开声明，受管执行继续复用原生 Dataset，两者均不导入开发工具去执行声明命令。历史规则内容、任务基线和收据保留原值；历史结果按原始快照读取，当前绑定与证据有效性独立校验。整合范围和验证见 [迁移方案](docs/demiforge-consolidation-plan-20261104.md)。
+适用 [Forge 开发辅助方案](docs/forge-guided-coding-redesign.md)。Forge 提供当前 SDK 参考、通用目录规则和原生静态检查。项目入口和参数来自所选工作区。工作台负责开发授权、真实对话和展示，原生运行服务负责执行准入与封存。旧 DemiForge 的父级声明、受管任务和验收协议已退役。
 
 ## 模型与环境的交互仍然算子化
 

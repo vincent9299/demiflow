@@ -23,7 +23,8 @@ for line in sys.stdin:
         'shell_environment_policy':{'inherit':'none'},'web_search':'disabled'}}
     elif method in {'thread/start','thread/resume'}:
         project_root = Path(params['cwd'])
-        if '受信任务上下文' in params.get('developerInstructions', ''):
+        instructions = params.get('developerInstructions', '')
+        if '## 当前版本 DemiFlow 原生 API' in instructions:
             (Path.home() / 'received-context.txt').write_text(params['developerInstructions'])
         result={'cwd':params['cwd'],'model':params['model'],'approvalPolicy':'on-request','sandbox':{'type':'dangerFullAccess'},'thread':{'id':thread}}
     elif method=='thread/compact/start':
@@ -36,15 +37,26 @@ for line in sys.stdin:
         send({'id':value['id'],'result':{'turn':{'id':turn}}})
         event('turn/started',{'threadId':thread,'turn':{'id':turn}})
         message=params['input'][0]['text']
-        if message.startswith('managed-edit'):
-            with (project_root / 'orders/operators/map.py').open('a') as stream:
-                stream.write('# managed fixture change\n')
-        if message.startswith('managed-entry'):
-            with (project_root / 'orders/orders_pipeline.py').open('a') as stream:
-                stream.write('# managed entry fixture change\n')
-        if message.startswith('managed-norm-alter'):
-            with (project_root.parent / 'AGENTS.md').open('a') as stream:
-                stream.write('Changed ancestor fixture requirement.\n')
+        if message.startswith('guided fixture edit'):
+            assert 'Dataset.map_prompt_async' in instructions and 'DF-02' in instructions
+            flow = project_root / 'flows' / 'guided.py'
+            if message.endswith('native'):
+                flow.write_text("from demiflow.data import from_items\ndef run():\n    return from_items([{'id': 1}]).materialize()\n")
+            elif message.endswith('manual'):
+                flow.write_text("def run():\n    return [2, 4]\n")
+            elif message.endswith('unproved'):
+                flow.write_text("def run():\n    return [value * 2 for value in [1, 2]]\n")
+            elif message.endswith('prompt'):
+                flow.write_text("from demiflow.data import from_items\ndef run():\n"
+                    "    return from_items([{'payload': 'text'}]).map_prompt_async('enrich', "
+                    "config='prompts/guided.yaml', inputs={'payload': 'payload'}, output='answer', "
+                    "call_output='call', error_output='error', max_requests=1, "
+                    "options={'trust_env':False, 'timeout_s':2, 'collect_journal_totals':False, 'max_request_bytes':1048576, 'max_response_bytes':1048576, "
+                    "'model_revision':'fixture-v1'}).materialize()\n")
+            elif message.endswith('crossflow'):
+                flow.write_text("from flows.other import source\ndef run():\n    return source().materialize()\n")
+            elif message.endswith('layout'):
+                flow.write_text("from demiflow.data import from_items\nfrom lib.normalize import normalize\ndef run():\n    return from_items([{'name': 'A'}]).map(normalize).materialize()\n")
         if message.startswith('disconnect'): sys.exit(3)
         if message.startswith('hang'):
             subprocess.Popen([sys.executable,'-c','import os,time;os.setsid();time.sleep(90)'])

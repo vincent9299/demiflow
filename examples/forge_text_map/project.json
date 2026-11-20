@@ -1,7 +1,0 @@
-{
-  "context_digest": "6c04e7d0ed27e48eebbb3d024b60c14a4ecd0522f19f3a561105513e1de97c05",
-  "contract_id": "demiflow.pipeline.map",
-  "contract_version": "1.0.0",
-  "name": "forge-text-map",
-  "schema_version": "demiflow_forge_project_v1"
-}

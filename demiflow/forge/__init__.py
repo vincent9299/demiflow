@@ -1,4 +1,1 @@
-"""Contract-driven Pipeline authoring."""
-from .definition import OperatorDefinition, PipelineDefinition, operator
-
-__all__ = ["OperatorDefinition", "PipelineDefinition", "operator"]
+"""Native pipeline authoring guidance and static engineering checks."""

@@ -1,3 +1,5 @@
+> 历史文档。当前实现见 [Forge 开发辅助方案](forge-guided-coding-redesign.md)。
+
 # Forge v1 生命周期与 CLI
 
 本文说明旧 v1 项目的 Check → Verify → Review → Freeze 流程。当前原项目的新建、登记、统一检查与受管实验使用 [工作区指南](forge-workspace.md) 中的 console/workspace/flow 入口；登记或识别结果不继承本页的生命周期状态。

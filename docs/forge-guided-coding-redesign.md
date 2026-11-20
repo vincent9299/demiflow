@@ -1,0 +1,61 @@
+# Forge 开发辅助改造
+
+任务分支 `gpt/workbench/interaction-20261120`。工程基线 `a9641d2`，含 `main@5f3c077` 和本分支发送修复 `5ae98dc`。本方案按用户最后确认的全新 Forge 设计。
+
+## 中粒度
+
+AI 在首次写代码前收到本次实际使用的 DemiFlow 公共 API、项目目录约定和当前项目的源码位置。业务 flow 用原生 Dataset API 串联数据源、转换、模型与输出。普通行处理可以用函数或 Actor。flow、代码算子和 Prompt/Agent 配置分别落在 `flows/`、`operators/`、`prompts/`。
+
+| 模块 | 权威与输出 | 依赖方向 |
+|---|---|---|
+| DemiFlow SDK | 原生 API、签名、语义和运行行为 | 保持 SDK 原有公开入口。Forge 读取它 |
+| Forge | 生成写前参考，检查实际源码的原生 flow 和目录角色 | 复用公开目录及原生静态检查。输入采用当前项目根、变更和显式提供的参数/资源解析 |
+| 工作台项目 | 选中项目、读取权限、源码目录、`workspace.json` 和参数来源 | 负责文件解析和参数/资源绑定，将有界事实传给 Forge |
+| 工作台开发对话 | 授权、用户要求、真实模型传输、进程排空、改动和结果展示 | 每轮构造资料并把实际检查结果写入现有回合。模型适配器处理通信和能力约定 |
+| 工作台运行与引擎 | 运行准入、资源授权、代码绑定、执行提交和封存事实 | 走现有原生链路。静态检查结果只用于开发反馈 |
+
+当前项目的登记事实来自其 `workspace.json`。约定目录用于识别引用和提供源码位置。读取 README、规则或发现源码均不会登记该 flow 或授予权限。开发配置分为管道开发 `pipeline` 和明确授权的平台开发 `platform`。
+
+全新 Forge 退役固定 v1 模板、父级 DemiForge 声明、任务 CLI、登记写回、模型独立审阅、自动修复与开发验收凭证。开发状态从独立新目录启动。工作台运行域也使用隔离环境验收。本次工作只提交源码，磁盘上的旧数据、预览和在线运行由其原环境持有。
+
+## 源码级
+
+### 写前资料
+
+1. `forge/api_reference.py` 的 `build_reference()` 通过现有 `platform.discover_catalog` 读取 `demiflow.data`、`demiflow.operator_llm`、`demiflow.objects`、`demiflow.agent`。`sdk_identity(catalog)` 绑定 SDK 源码及语义文件。 `render_reference(reference)` 投影常用 API 的真实签名、文档节选、出处和最小示例，公开但尚未覆盖的 API 明确标注。目录上限 2 MiB，参考正文上限 20 KiB。
+2. `workbench/projects/discovery.py:coding_view(root, *, exclude)` 读取当前根的控制文件和角色索引。它不打开平台快照、父项目声明、运行报告和数据文件。当前项目的 Pipeline 规范、README 和有范围的源码由 `conversations/context.py:assemble` 送进可信参考段。项目文本不能改变 grant。
+3. `Service._launch_provider` 在首次需要时生成 API 目录，利用私有的匿名文件描述符复用。worker 读取并关闭描述符后启动 provider，并核验源码摘要。Codex 首次和续聊的开发指令包含所附资料。DeepSeek ACP 在本轮真实 Prompt 中送出资料和用户要求。只读输入工具的能力由 Workbench 明确提供，适配器负责传递。
+4. `Deployment` 校验当前 grant 和 provider 配置。全局配置一次，项目复用连接。当前项目根、写入范围、受保护文件、已授予的输入、机密和操作系统进程边界继续由现有服务和沙箱掌握。
+
+### 写后检查
+
+1. `conversations/worker.py:run` 用 `changes.capture`、`differences` 记录授权范围内的实际变更，范围可能包含显式 watch。已知保护内容不纳入改动采集。只有成功、已确认送达且排空的模型回合出现源码变更，才进入源码检查。普通问答不产生检查结论。
+2. `workbench/projects/workspace.py:inspect_coding_changes` 确定受影响的已登记入口和每份参数。新的单入口 flow 可先做静态检查。资源继续用现有有界解析器。显式参数、控制文件、表绑定和检入的源码在结果发布前复核。同一项目共享定义改动检查已知调用者，预算或未知依赖造成的缺口单独记录。
+3. `forge/pipeline_check.py:check_changes` 用 `FlowChecker` 检查最多 24 个入口/配置变体。检查从真实 flow 节点的算子、回调及 Prompt 资源定位文件角色。目录规则由 `project_rules.py` 持有。结果的 `native_flow`、`project_layout` 各自提供 `passed`、`failed`、`incomplete` 或 `not_applicable`、检查数和有限诊断。静态覆盖的上限跟随原生检查器，模糊调用和缺失事实不会产生原生流程通过结论。
+4. `Store.finish_provider` 原子保存排空及检查结果。停止与发布并发时以已提交的停止为准。`development-chat.js` 只投影两项结果及诊断；无第二个 gate、任务表、验收状态或模型回合。
+
+### 去除旧入口和接线
+
+- `forge/` 删除 v1 固定模板执行、工具和合同。移除旧 `forge/development/`、`forge dev` 及专属打包数据。保留 API 目录、原生静态分析、已经有调用方的平台事实工具和 `demiflow run`。
+- `workbench/projects/discovery.py:discover` 从本地项目登记发现 flow，公共角色目录概览与写前参考共享角色定义。`projects/definitions.py`、`graph/preview.py`、`runs/native_submission.py` 使用当前项目的相对路径和导入核验。移除子项目向上寻找父级声明及路径补前缀。
+- `conversations` 删除旧任务登记、审阅、自动修复、gate worker、附加字段和专属启动分支。`runs/manager.py` 删除开发验收凭证依赖，继续以原有授权提交 guard 和原生运行预检为准。
+- `Store` 使用当前有限 schema。有不同 schema 的状态目录被拒绝，无历史任务恢复或迁移分支。预览、引擎、算子、业务项目和发布目录没有随源码改造切换。
+
+## 设计复核
+
+| 接线 | 复核 |
+|---|---|
+| 模型实际收到了什么 | 使用首次和续聊的协议请求作证。内部 context 清单只作来源记录 |
+| API、参数、资源有几个权威 | 签名来自 SDK，入口与参数来自工作台登记，运行事实来自运行服务和引擎 |
+| 静态检查能否代替执行 | 检查没有运行准入接口。通过状态是静态结论，运行仍依赖每个操作自己的真实授权和封存 |
+| 会不会检查错版本或报假绿 | SDK、项目配置与相关源码按实际检查身份核对。拒绝预算超限、未知事实和并发取消造成的假绿 |
+| 删除后会不会触及在线状态 | 仅在隔离分支和私有测试目录工作。旧状态不会作为此分支验收的输入 |
+
+## 落地复核
+
+- 写前参考实测进入 Codex 和 DeepSeek 的首次及续聊协议。正常问答无源码变更，不生成两项检查。RefGen 只读实测从选中根识别到 7 个登记入口和本地定义目录。
+- 浏览器逐轮写入并验证五种结果。原生 Prompt 流两项通过，手写替代流判失败，语义无法证明的写法判未完成，算子错置与跨 flow 引用分别由目录检查拒绝。页面刷新后仍读取同一回合的持久结果。
+- 角色归属取实际依赖闭包中的路径，包级算子与谓词同样检查。参数变更定位到对应现行入口和变体。工作台将只读工具传给适配器，工具访问由单一的 `InputAccess` 绑定回合、截止时间和受保护路径。
+- 旧状态使用测试数据库实测拒绝接入且保留内容字节。并发取消后晚到的静态结果被丢弃，已有排空事实仍保存。
+- 工作台的 Host Surface 元数据仅删去已移除会话组件的引用。七个冻结文件、SDK、调度与计算实现没有改动。
+- 本任务提交走隔离分支交付。预览换版与正式发版使用各自的既定流程。
