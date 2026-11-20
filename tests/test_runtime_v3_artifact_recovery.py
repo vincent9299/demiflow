@@ -300,3 +300,22 @@ def test_definite_initial_quota_rejection_does_not_leak_empty_owner_files(tmp_pa
                 store.put(iter([b'new']), max_bytes=1024, media_type='application/octet-stream')
         assert consumed(run) == 1500 and store.inspect(ref)
         assert not list((store.root / store.store_id / 'staging').iterdir())
+
+
+def test_sealed_store_limits_apply_to_other_views_and_the_original_reservation(tmp_path):
+    with store_fixture(tmp_path, ceiling=4096) as (run, store, port):
+        _, bounds = resolve_runtime_policy({}, run.limits, provider='local')
+        view = RunArtifactStore(root=store.root, store_id=store.store_id, journal=None,
+                                bounds=bounds, readonly=True)
+        try:
+            effective = replace(bounds, max_open_files=6, max_spill_bytes=32)
+            used = store.open_file_slots
+            store.bind_driver_bounds(effective)
+            assert view.available_file_slots() == 6 - used
+            with pytest.raises(RecoveryContractError):
+                port.reserve('over-sealed-budget', {'artifact_staging_bytes': 33})
+            ref = store.put(iter([b'original']), max_bytes=8, media_type='application/octet-stream')
+            assert b''.join(view.read(ref, max_bytes=8)) == b'original'
+        finally:
+            view.close()
+            store.close()

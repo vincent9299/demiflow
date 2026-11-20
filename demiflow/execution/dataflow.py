@@ -491,9 +491,8 @@ class DataflowExecution:
         self._native_guard = NativeBudgetGuard(self._native_limits)
         live_policy = replace(physical.policy, native_limits=self._native_limits)
         self._services = replace(self._services, bounds=self._bounds, policy=live_policy)
-        self._store._bounds = self._bounds
-        self._store._journal._bounds = self._bounds
-        self._services.journal_service._bounds = self._bounds
+        self._store.bind_driver_bounds(self._bounds)
+        self._services.journal_service.bind_bounds(self._bounds)
         self._check_stop()
         from .checked import current
         self._checked = current()
@@ -593,7 +592,7 @@ class DataflowExecution:
         if any(node.kernel.kind == 'SaveLanceOp' for node in graph.nodes):
             from .dataflow_stream_lance import NativeStreamLanceService
             self._stream_lance = NativeStreamLanceService(self)
-            self._services.journal_service._stream_lance = self._stream_lance
+            self._services.journal_service.bind_stream_writer(self._stream_lance)
         self._prepared = True
         return sealed
 
@@ -625,9 +624,7 @@ class DataflowExecution:
             self._scheduler.scope_id, self._run_id(), resource_scope_binding(self._services.resources, self._policy),
             self._fence(), budget))
         self._scope_open = True
-        if self._action.replaying and self._action.context.journal.source_binding(
-                self._action.action_id + '-native-model-journal') is not None:
-            self._services.journal_service._native_journal().check_recovery()
+        self._services.journal_service.check_model_recovery()
         queue_owned_recovery = (self._acquisition is not None and
             self._acquisition.can_recover_without_dataflow_cut())
         if self._stream_lance is not None:
