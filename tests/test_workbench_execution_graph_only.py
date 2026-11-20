@@ -26,7 +26,7 @@ def test_original_calls_are_not_execution_nodes_and_canvas_expands(original, tmp
         page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
         expect(page.locator('.wb-graph-empty')).to_have_text('尚无运行执行图')
         expect(page.locator('.wb-node')).to_have_count(0)
-        expect(page.locator('.wb-graph-notices')).to_contain_text('计划解析')
+        expect(page.locator('.wb-graph-notices')).to_contain_text('解析执行计划')
         assert page.get_by_role('button', name='当时检查图', exact=True).count() == 0
         assert page.get_by_role('button', name='查看源码引用（诊断）', exact=True).count() == 0
         canvas = page.locator('.wb-graph')
@@ -39,7 +39,9 @@ def test_original_calls_are_not_execution_nodes_and_canvas_expands(original, tmp
         for width in (320, 390, 768, 1440):
             page.set_viewport_size({'width': width, 'height': 1000})
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
-        assert not any(method == 'POST' for method, _ in requests)
+        # Opening a registered entry may request its read-only plan preview.
+        # It still must not submit a run or any workspace mutation.
+        assert all(url.endswith('/plan-preview') for method, url in requests if method == 'POST')
     assert business_bytes(original) == before
 
 
@@ -65,10 +67,10 @@ console.log(JSON.stringify(P.buildGraphModel(payload.graph, {choice: P.chooseGra
     with fx.open_page(browser) as (page, log):
         page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
         expect(page.locator('.wb-graph-empty')).to_have_text('尚无运行执行图')
-        page.get_by_role('button', name='运行记录', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='运行', exact=True).click()
         page.locator('.wb-run-record[data-run="' + run['run_id'] + '"]').click()
         expect(page.locator('.wb-node')).to_have_count(len(projected['nodes']))
-        expect(page.locator('.wb-graph-tools')).to_contain_text('运行执行图')
+        expect(page.get_by_role('group', name='运行封存计划', exact=True)).to_be_visible()
         assert page.locator('.wb-edge').count() == len(projected['edges'])
         assert page.get_by_role('button', name='当时检查图', exact=True).count() == 0
         assert not log['errors']

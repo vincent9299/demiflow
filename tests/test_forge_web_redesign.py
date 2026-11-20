@@ -480,8 +480,8 @@ def test_project_rows_have_independent_tabs_and_restore_history(isolated,origina
         page.locator('#project-switcher').click()
         row(original_id).click()
         page.locator('#workspace-name').filter(has_text=original_name).wait_for()
-        page.wait_for_function("id => {const v=ForgeView.decodeView(location.hash);return v?.workspace===id&&v.kind==='flows';}",arg=original_id)
-        assert page.evaluate('ForgeView.decodeView(location.hash).kind')=='flows'
+        page.wait_for_function("id => {const v=ForgeView.decodeView(location.hash);return v?.workspace===id&&v.kind==='overview';}",arg=original_id)
+        assert tabs.get_by_role('button',name='Readme',exact=True).get_attribute('aria-current')=='page'
         navigate(page,'数据')
         page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='tables'")
         page.locator('#project-switcher').click()
@@ -523,11 +523,11 @@ def test_project_rows_have_independent_tabs_and_restore_history(isolated,origina
         page.goto(app.origin+'/#view='+urllib.parse.quote(json.dumps(reference)))
         page.locator('.wb-history').wait_for()
         assert row(original_id).get_attribute('aria-current')=='true'
-        assert tabs.get_by_role('button',name='运行监控',exact=True).get_attribute('aria-current')=='page'
+        assert tabs.get_by_role('button',name='运行',exact=True).get_attribute('aria-current')=='page'
         for width in [390,320]:
             page.set_viewport_size({'width':width,'height':844})
             assert tabs.is_visible() and not page.locator('#project-picker').is_visible()
-            expect(tabs.get_by_role('button',name='运行监控',exact=True)).to_be_in_viewport()
+            expect(tabs.get_by_role('button',name='运行',exact=True)).to_be_in_viewport()
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
             artifact(page,f'projects-and-tabs-{width}')
         assert all(url.endswith(('/plan-preview','/plan-node-detail')) for method,url in requests if method=='POST')
