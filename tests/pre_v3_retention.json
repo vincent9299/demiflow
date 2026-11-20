@@ -240,7 +240,7 @@
     },
     "unified_chain_eligible": {
      "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
+     "reason": "2026-11-20 P8批次3 D1单符号评估后保留：当前跨进程产品测量、删后封存/代码固定历史与真实Ray门槛未齐；chain仍含活工具和兼容入口，不为该可选清理新建测量体系。原批次4归组保留作历史，详见docs/architecture-upgrade-20261120/D/D1-UNIFIED-CHAIN-ELIGIBLE.md。",
      "batch": 4,
      "users": []
     },
