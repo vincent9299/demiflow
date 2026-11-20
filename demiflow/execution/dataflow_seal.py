@@ -703,6 +703,11 @@ def load_sealed_dataflow(sealed: SealedExecution, *, action_id: str, store, boun
     physical = decode_wire(_read_bytes(store, sealed.physical_ref,
                            max_bytes=bounds.max_control_bytes, media_type=PHYSICAL_MEDIA),
                            type_name="PhysicalDataflow", bounds=bounds)
+    pin = _verify_sealed_membership(sealed, action_id, graph, physical, store, bounds)
+    return graph, physical, pin
+
+
+def _verify_sealed_membership(sealed, action_id, graph, physical, store, bounds):
     if graph.action_id != action_id:
         raise DataflowError("CODE_MISMATCH", "Sealed action differs from assignment")
     if graph.dag_id != compute_graph_digest(graph):
@@ -723,4 +728,24 @@ def load_sealed_dataflow(sealed: SealedExecution, *, action_id: str, store, boun
     for ref in (*programs, sealed.identity_bridge_ref, *sealed.source_refs, sealed.constants_ref):
         if not store.inspect(ref):
             raise DataflowError("CORRUPT_ARTIFACT", "Sealed artifact is absent")
-    return graph, physical, pin
+    return pin
+
+
+def verify_action_programs(action, graph, physical, sealed, *, store, bounds):
+    """Verify programs from the journal-authenticated plan. Defer attempt-only code to final ACK proof."""
+    pin = _verify_sealed_membership(sealed, action.action_id, graph, physical, store, bounds)
+    pending = []
+    for node in graph.nodes:
+        if node.program_ref is None:
+            continue
+        expected = pin["programs"][node.occurrence_id]
+        live_binding = None
+        if node.kernel.configuration.get("thread_attempt"):
+            if action.replaying:
+                pending.append((node, expected))
+                continue
+            from .dataflow_thread_programs import owner
+            live_binding = owner(action)
+        verify_dataflow_program(node.program_ref, expected_pin=expected, store=store,
+                                bounds=bounds, live_binding=live_binding)
+    return pending
