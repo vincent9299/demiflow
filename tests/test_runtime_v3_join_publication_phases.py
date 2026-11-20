@@ -35,7 +35,7 @@ def _write(target, rows, right, *, schema=None):
 def _assert_physical_publication(execution, observations):
     scheduler = execution._scheduler
     active = {scheduler._lease_stage[a] for a in scheduler._resident_by_allocation}
-    reservation = execution._publication_reservation
+    reservation = execution._scheduler._publication_reservation
     assert reservation.scoped and active <= reservation.stages
     assert execution._completed_stages and not execution._completed_stages.intersection(active)
     assert scheduler._resident_used + reservation.reserved(active, publishing=True) <= execution._bounds.max_resident_bytes
@@ -227,7 +227,7 @@ def test_real_ray_stored_join_payload_and_original_final_ack(tmp_path, monkeypat
     def prepared(execution):
         result=prepare(execution)
         assert execution._physical.policy.provider=='ray_core'
-        assert execution._publication_reservation.scoped
+        assert execution._scheduler._publication_reservation.scoped
         observed.append(execution)
         return result
     monkeypatch.setattr(DataflowExecution,'prepare',prepared)

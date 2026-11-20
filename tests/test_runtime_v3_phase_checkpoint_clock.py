@@ -24,7 +24,6 @@ def driver(monkeypatch,*,damage=None):
     stage=NS(stage_id='stage',partitions=('p0',))
     ex._stage_order=lambda:[stage]
     ex._initial_work=lambda stage,partition:NS(operation_id='operation')
-    ex._place_hosts=lambda pending:{'operation':'host'}
     ex._physical=NS(exchanges=());ex._finite_seals={}
     ex._prepare_launch=lambda *args:None
     ex.activations=[]
@@ -37,7 +36,7 @@ def driver(monkeypatch,*,damage=None):
         if damage=='dirty_during_prepare':ex._node_metrics[('source','p0')]['rows_output']+=1
         if damage=='activated_during_prepare':ex._active_worker_allocations.add('unexpected')
         return NS(allocation_id='new')
-    ex._scheduler=NS(place=place)
+    ex._scheduler=NS(place=place,place_hosts=lambda pending:{'operation':'host'})
     def activate(lease,stage):
         ex.activations.append((clock[0],ex._checkpoint_at))
         ex._active_worker_allocations.add(lease.allocation_id)
@@ -90,7 +89,7 @@ def test_actor_activation_time_is_never_excluded_by_later_ready_workers(monkeypa
     stage=ex._stage_order()[0];stage.partitions=('p0','p1')
     ex._durable_residency.partition_groups=[('p0','p1')]
     ex._initial_work=lambda stage,partition:NS(operation_id=partition)
-    ex._place_hosts=lambda pending:{work.operation_id:'host' for _,work in pending}
+    ex._scheduler.place_hosts=lambda pending:{work.operation_id:'host' for _,work in pending}
     place=ex._scheduler.place
     def preparing(work,**kwargs):
         place(work,**kwargs)

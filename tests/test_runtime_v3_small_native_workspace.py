@@ -26,13 +26,13 @@ def test_real_small_native_publication_keeps_live_terminal_grant_and_original_re
         node = next(n for n in execution._graph.nodes if n.kind == 'terminal')
         assert node.kernel.configuration['terminal_memory'] == {
             'schema':TERMINAL_WORKSPACE, 'resident_bytes':14336}
-        assert execution._publication_reservation.bytes == 21504
+        assert execution._scheduler._publication_reservation.bytes == 21504
         return result
     def lost(sink, staged, context):
         execution = executions[-1]
         scheduler = execution._scheduler
         active = {scheduler._lease_stage[a] for a in scheduler._resident_by_allocation}
-        reservation = execution._publication_reservation
+        reservation = execution._scheduler._publication_reservation
         assert active and active <= reservation.stages
         assert scheduler._resident_used == 14336
         assert scheduler._resident_used + reservation.reserved(active, publishing=True) == 40960
