@@ -130,11 +130,12 @@ def test_v002():
     # A module present only as a fabricated double is not_run (test_double),
     # never a double-evidence pass — integration gates require real on-disk code.
     import types
+    from demiflow.execution.action_driver import dataflow
 
     fx2 = _fixture()
-    fake_name = "demiflow.execution.dataflow"
+    fake_name = dataflow.__name__
     fake = types.ModuleType(fake_name)
-    fake.__file__ = str(s.WORKTREE / "demiflow/execution/dataflow.py")  # not on disk
+    fake.__file__ = dataflow.__file__
     original_module = sys.modules.get(fake_name)
     sys.modules[fake_name] = fake
     try:
