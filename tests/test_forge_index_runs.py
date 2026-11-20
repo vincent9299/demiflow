@@ -66,9 +66,12 @@ def test_lease_owner_adopts_legacy_once_and_does_not_trust_cached_activity(tmp_p
 
 def test_new_run_admission_requires_entry_and_registered_parameter_path(tmp_path, monkeypatch):
     workspace = {'format': ws.FORMAT_V2, 'entries': {}, 'budgets': {}}
-    monkeypatch.setattr(ws, 'load_workspace', lambda root: (tmp_path, workspace, {}))
+    platform = ws.build_snapshot(('demiflow.data',))
+    monkeypatch.setattr(ws, 'load_workspace', lambda root: (tmp_path, workspace, platform))
     with pytest.raises(ValueError, match='registered Flow'):
         runs._prepare(tmp_path, 'flows/missing.py:run', params={})
+    assert not (tmp_path / '.forge/runs').exists()
     workspace['entries']['flows/missing.py:run'] = ['flows/known.json']
     with pytest.raises(ValueError, match='Parameter file.*registered'):
         runs._prepare(tmp_path, 'flows/missing.py:run', params='flows/other.json')
+    assert not (tmp_path / '.forge/runs').exists()

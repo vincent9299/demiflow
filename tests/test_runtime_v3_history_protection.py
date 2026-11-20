@@ -1,4 +1,4 @@
-"""Old bytes remain readable; missing adapters never claim resumability."""
+"""Old bytes stay readable; reference admission never claims missing adapters."""
 import hashlib
 import json
 
@@ -52,4 +52,9 @@ def test_original_native_history_read_refusal_and_original_runtime_resume(tmp_pa
     evidence = scenarios.original_native_history(tmp_path / "history")
     assert evidence["origin"]["commit"] == "b4dd41722130be3898a8a98057541d843777906e"
     assert evidence["cases"]["interrupted"]["original_environment_resumed"]["written_rows"] == 2
+    for case in evidence["cases"].values():
+        assert case["current_reference_admission"]["platform_provenance_differs"]
+        assert case["current_reference_admission"]["context_entered"] is False
+        assert not case["compatibility"]["supported"]
+        assert case["read_only_before"] == case["read_only_after"]
     assert evidence["unsupported"]  # This does not turn the wider V029 gate green.
