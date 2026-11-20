@@ -1,0 +1,12 @@
+{
+  "kind": "pure_json_model_not_product_verification",
+  "passed": 6,
+  "checks": [
+    "old_vs_current_platform_changes_legacy_hash",
+    "legacy_reconstruction_preserves_original_hash",
+    "business_code_still_rejected",
+    "new_contract_has_no_platform",
+    "legacy_workspace_original_field_reconstruction",
+    "workspace_permission_change_not_waived"
+  ]
+}

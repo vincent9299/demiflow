@@ -1,0 +1,42 @@
+--- a/demiflow/execution/queue_execution.py
++++ b/demiflow/execution/queue_execution.py
+@@ -61,7 +61,7 @@
+     return {'callable':describe(spec),'stateless_methods':methods}
+ 
+ 
+-def validate_topology(source,plan,sink,*,mode='sink'):
++def validate_topology(source,plan,sink,*,mode='sink',action=None):
+     from .raw_fetch import RawFetch
+     from .recovery_identity import describe
+     if type(sink) is not QueueResultSink or source.settlement!=mode:
+@@ -123,9 +123,10 @@
+             raise RecoveryContractError('Task settlement supports pure one-to-one maps and exactly one raw fetch')
+     if len(fetch)!=1 or fetch[0][1].output!=sink.result:
+         raise RecoveryContractError('Task result sink requires exactly one matching fetch receipt')
+-    from .recovery_identity import platform_identity
+-    return fetch[0],dict(protocol='demiflow.queue.consumer.v2',platform=platform_identity(),
+-                        operations=operations,result=sink.result,settlement=source.settlement)
++    from .queue_contract import resolve_consumer_contract
++    declaration=dict(protocol='demiflow.queue.consumer.v3',
++                     operations=operations,result=sink.result,settlement=source.settlement)
++    return fetch[0],resolve_consumer_contract(source,declaration,action=action)
+ 
+ 
+ def finalize_task(source,delivery,row):
+@@ -155,7 +156,7 @@
+ 
+ def write_queue_datasink(executor,source_plan,plan,sink,action):
+     source=queue_source(source_plan)
+-    (index,fetch),contract=validate_topology(source,plan,sink)
++    (index,fetch),contract=validate_topology(source,plan,sink,action=action)
+     source.configure(action,fetch,sink,contract,'node-'+str(index))
+     from .stream_materialize import stream_view
+     async def consume(row):
+@@ -185,6 +186,6 @@
+     if type(operation) is not AsyncMapOp or type(actor) is not QueueAcknowledge or operation.catch or operation.hard_timeout is not None:
+         raise RecoveryContractError('Explicit queue source requires exactly one final ack_queue node')
+     sink=QueueResultSink(actor.config,pool=source.pool,result=actor.result)
+-    (index,fetch),contract=validate_topology(source,LogicalPlan(plan.operations[:-1]),sink,mode='explicit')
++    (index,fetch),contract=validate_topology(source,LogicalPlan(plan.operations[:-1]),sink,mode='explicit',action=action)
+     source.configure(action,fetch,sink,contract,'node-'+str(index))
+     actor.source=source
