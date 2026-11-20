@@ -104,7 +104,7 @@ def test_unqualified_shapes_unknown_and_task_semantics_still_report(monkeypatch)
         original = compiler._Capture.capture_terminal
         def omit(capture, producer):
             result = original(capture, producer)
-            capture.nodes[:] = [replace(n, kernel=replace(n.kernel, configuration={k:v for k,v in n.kernel.configuration.items() if k!='task_group'})) if n.kernel.kind=='MapOp' else n for n in capture.nodes]
+            capture.nodes[:] = [replace(n, kernel=replace(n.kernel, configuration={k:v for k,v in compiler._plain(n.kernel.configuration).items() if k!='task_group'})) if n.kernel.kind=='MapOp' else n for n in capture.nodes]
             return result
         patch.setattr(compiler._Capture, 'capture_terminal', omit)
         result = compiler.lower_action(request(), bounds=corpus.bounds())
