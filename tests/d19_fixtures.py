@@ -349,7 +349,6 @@ import json, pathlib, sys, time, subprocess
 import demiflow
 from demiflow.workbench.runs import manager as runs
 from demiflow.workbench.projects import workspace as ws
-from demiflow.workbench import project_operations as project_ops
 tree, root = map(pathlib.Path, sys.argv[1:])
 assert pathlib.Path(demiflow.__file__).resolve().is_relative_to(tree)
 # The historical producer must inspect against its own platform snapshot.
