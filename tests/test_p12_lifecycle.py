@@ -68,9 +68,8 @@ def test_prepare_begin_refusal_does_not_create_run_or_remove_prior_report(root):
 
 
 def test_resume_pending_refusal_preserves_real_prior_recovery_without_new_attempt(root, monkeypatch):
-    if bounded_test(test_resume_pending_refusal_preserves_real_prior_recovery_without_new_attempt, root=root): return
     value = execute(root, prepared(root))
-    assert value['status'] == 'succeeded'
+    assert value['status'] == 'succeeded', value
     stopped(root, value['run_id'])
     identity = value['run_id']; target = runs.directory(root, identity)
     journal = runs.journal(root, identity)
@@ -84,6 +83,12 @@ def test_resume_pending_refusal_preserves_real_prior_recovery_without_new_attemp
     before = journal.execution_status()
     with ws.control_lock(root):
         marker = index.begin(root, 'run', identity)
+    bounded_test(_resume_after_real_commit, root=root, identity=identity, value=value,
+                 output=output, before=before, marker=marker)
+
+
+def _resume_after_real_commit(root, identity, value, output, before, marker, monkeypatch):
+    journal = runs.journal(root, identity)
     # Real register_results restores the fixed ref before the pending refusal.
     # Keep a checkpoint immediately before begin to distinguish those earlier
     # facts from a forbidden new attempt or a fabricated launch failure.
