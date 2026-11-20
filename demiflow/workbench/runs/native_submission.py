@@ -136,9 +136,12 @@ def verify_basis(root, manifest, report):
     root, workspace, platform = ws.load_workspace(root)
     audit.require_scope(ws._check_change_scope(root), expected_scope=manifest.get('change_scope'))
     binding = report['binding']
-    if (content_digest(workspace) != binding['workspace_digest']
-            or content_digest(platform) != binding['platform_digest']):
-        raise ForgeError('Native prepared project/platform basis changed', code='conflict')
+    original = manifest['workspace']
+    if content_digest(original) != binding['workspace_digest']:
+        raise ForgeError('Native original project basis digest differs', code='conflict')
+    if {k: v for k, v in workspace.items() if k != 'platform'} != {
+            k: v for k, v in original.items() if k != 'platform'}:
+        raise ForgeError('Native prepared project basis changed', code='conflict')
     base = Path(binding['source_root'])
     for name, digest in binding['sources'].items():
         if hashlib.sha256(read_bounded(ws.relative_path(base, name), 4 * 1024**2)).hexdigest() != digest:

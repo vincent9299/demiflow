@@ -28,9 +28,6 @@ def check(root, *, table_resolver):
     discovery = discover(root, control)
     variants = [(e, p) for e, paths in control.get('entries', {}).items() for p in paths]
     results, diagnostics, sources = [], [], {}
-    if snapshot['standard']['digest'] != standard['digest']:
-        diagnostics.append(dict(rule='FL-10', status='stale', path='workspace.json',
-            detail='Historical standard binding: explicitly adopt the current platform before inspection.'))
     for entry, params in variants[:MAX_VARIANTS]:
         if time.monotonic() - started > 35:
             break
@@ -152,9 +149,6 @@ def status(root, *, table_resolver):
     if result['standard']['digest'] != engineering_standard()['digest']:
         reasons.append('standard_changed')
     platform = ws.check_snapshot(root / control['platform']['path'])
-    if (result.get('checker_platform_digest') != platform.get('current_digest') if result.get('checker_platform_digest')
-            else platform['status'] != 'current'):
-        reasons.append('platform_changed')
     for item in result['entries']:
         try:
             if item['digest'] and ws._report_status(root, item['digest'], platform_check=False, table_resolver=table_resolver)['status'] != item['status']:
@@ -171,4 +165,5 @@ def status(root, *, table_resolver):
         except (ValueError, OSError):
             reasons.append('source_unverifiable:' + path)
     return {**result, 'status': 'stale' if reasons else result['status'],
-            'static_status': 'stale' if reasons else result['static_status'], 'changes': reasons}
+            'static_status': 'stale' if reasons else result['static_status'], 'changes': reasons,
+            'platform_provenance': platform}

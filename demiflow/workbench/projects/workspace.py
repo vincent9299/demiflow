@@ -867,17 +867,17 @@ def resolve_arguments(root, value, parameters, *, table_resolver):
     return args, tables, targets, controls
 
 
+def current_platform_snapshot(snapshot):
+    """Inspect the loaded checker; a workspace's historical snapshot is provenance."""
+    return build_snapshot(snapshot['scope']['modules'], extras=snapshot['scope']['extras'],
+                          limits=snapshot['limits'])
+
+
 def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None):
     from demiflow.forge.flow_check import FlowChecker
 
     root, value, snapshot = load_workspace(root)
-    comparison = check_snapshot(root / value["platform"]["path"])
-    if comparison["status"] != "current":
-        return {
-            "status": comparison["status"],
-            "diagnostics": comparison["diagnostics"],
-            "changes": comparison["changes"],
-        }
+    snapshot = current_platform_snapshot(snapshot)
     path = validate_parameter_path(root, params) if isinstance(params, str) else None
     parameters_value = read_control(path) if path else params
     args, tables, targets, controls = resolve_arguments(root, value, parameters_value, table_resolver=table_resolver)
@@ -888,7 +888,7 @@ def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None
     report["binding"].update(
         {
             "root": str(root),
-            "platform": value["platform"]["digest"],
+            "platform": snapshot["digests"]["snapshot"],
             "controls": controls,
             "parameters": parameters_value,
             "parameter_path": str(path.relative_to(root)) if path else None,
@@ -908,8 +908,8 @@ def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None
         raise ForgeError("Workspace inputs changed during inspection")
     # Native implementation and environment identity are rechecked after the
     # candidate closure; no successful report spans a concurrent platform edit.
-    final = check_snapshot(root / value["platform"]["path"])
-    if final["status"] != "current":
+    final = current_platform_snapshot(snapshot)
+    if final["digests"]["snapshot"] != snapshot["digests"]["snapshot"]:
         return {
             "status": "stale",
             "diagnostics": [
@@ -1161,7 +1161,7 @@ def _report_status(root, digest, *, table_resolver, platform_check=True):
     report = load_report(root, digest)
     binding = report["binding"]
     reasons, checks = [], []
-    complete = bool(platform_check)
+    complete = True  # Completeness concerns the business basis, not provenance.
     total = 0
 
     def check(kind, subject, read, expected, reason, unavailable_reason=None):
@@ -1188,6 +1188,11 @@ def _report_status(root, digest, *, table_resolver, platform_check=True):
                   resource['sha256'], 'resource_changed:' + resource['path'])
     check('workspace', 'root', lambda: str(root), binding.get('root'), 'workspace_root_changed')
     current_policy = workspace_policy(value, binding) if report['format'] == 'demiflow_forge_flow_inspection_v3' else value
+    original_policy = binding.get('workspace_policy')
+    if type(original_policy) is dict:
+        if content_digest(original_policy) != binding['workspace']:
+            raise ForgeError('Original workspace policy digest differs', code='conflict')
+        current_policy = {**current_policy, 'platform': original_policy.get('platform')}
     check('workspace', 'policy', lambda: content_digest(current_policy), binding['workspace'], 'workspace_changed')
     for path, sha in binding['sources'].items():
         check('source', path, lambda p=path: hashlib.sha256(read_bounded(relative_path(root, p), 1024**2)).hexdigest(),
@@ -1207,11 +1212,9 @@ def _report_status(root, digest, *, table_resolver, platform_check=True):
     path = binding['parameter_path']
     if path:
         check('parameters', path, lambda: read_control(relative_path(root, path)), binding['parameters'], 'parameters_changed')
-    if platform_check:
-        check('platform', value['platform']['digest'], lambda: check_snapshot(root / value['platform']['path'])['status'],
-              'current', 'platform_changed')
+    provenance = check_snapshot(root / value['platform']['path']) if platform_check else None
     return dict(status='stale' if reasons else report['status'], report=report, changes=reasons,
-                platform_checked=platform_check,
+                platform_checked=platform_check, platform_provenance=provenance,
                 verification=dict(complete=complete, checks=checks, check_count=total, truncated=total > len(checks)))
 
 

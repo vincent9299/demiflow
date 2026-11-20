@@ -323,6 +323,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     from demiflow.workbench.conversations import admission as development_admission
     development_acceptance = development_admission.check(root, entry=entry)
     root, workspace, platform = ws.load_workspace(root)
+    platform = ws.current_platform_snapshot(platform)
     change_scope = workspace.get('audit', {}).get('change_scope')
     audit.require_scope(ws._check_change_scope(root), expected_scope=change_scope)
     requested_limits = limits
@@ -545,7 +546,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                 observation_instances=observation_instances,
                 credential_names=sorted(credentials), evidence=ledgers, request_budgets=list(budgets.values()),
                 object_locations=object_locations(report=report),
-                platform=dict(digest=workspace['platform']['digest'], origin=str(platform_root),
+                platform=dict(digest=platform['digests']['snapshot'], origin=str(platform_root),
                     declaration=declaration, environment=platform['environment'], files=platform['platform']['files'], limits=platform['limits']))
             if native_execution is not None:
                 native_resources.seal(target, native_execution)
@@ -712,7 +713,9 @@ def verify_seal(target, manifest, *, environment=True):
             raise ForgeError('Sealed platform source differs')
     if environment:
         p = manifest['platform']
-        if environment_inventory(p['declaration'], p['limits'], extras=p['environment']['extras']) != p['environment']:
+        actual = environment_inventory(p['declaration'], p['limits'], extras=p['environment']['extras'])
+        if {k: v for k, v in actual.items() if k != 'platform_distribution'} != {
+                k: v for k, v in p['environment'].items() if k != 'platform_distribution'}:
             raise ForgeError('Run dependency metadata changed')
     return report
 
@@ -1398,7 +1401,7 @@ def verify_run_basis(root, manifest):
     if manifest['format'] == 'demiflow_forge_run_manifest_v3' and project['format'] == ws.FORMAT_V3:
         raise ForgeError('Workspace audit contract changed; prepare a new run', code='conflict')
     audit.require_scope(ws._check_change_scope(root), expected_scope=manifest.get('change_scope'))
-    report = ws._report_status(root, manifest['report_digest'], table_resolver=_table_resolver())
+    report = ws._report_status(root, manifest['report_digest'], table_resolver=_table_resolver(), platform_check=False)
     if report['status'] != 'checked' or not report['verification']['complete']:
         raise ForgeError('Prepared basis is stale: ' + ', '.join(report.get('changes', [])), code='conflict')
     if manifest['parameter_path'] and ws.read_control(ws.relative_path(root, manifest['parameter_path'])) != manifest['original_parameters']:
