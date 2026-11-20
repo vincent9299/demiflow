@@ -174,6 +174,20 @@ def test_logging_is_explicit_restored_and_receipt_needs_completion():
     assert logger.level == level and logger.handlers == handlers
 
 
+def test_an_inherited_observer_cannot_supply_child_completion(context, monkeypatch):
+    observer = ProcessEvidence(source_binding(TREE), {'map': 'compiled'})
+    with observer, observer.case('map') as case:
+        # Model the PID change at fork without launching an unobserved worker.
+        with monkeypatch.context() as patch:
+            patch.setattr(os, 'getpid', lambda: observer.pid + 1)
+            _compile(context)
+            with pytest.raises(ValueError, match='inherited observer'):
+                observer.receipt()
+        case['outcome'] = 'compiled'
+    assert observer.receipt()['problems'] == ['missing_stage']
+    assert not any(observer.receipt()['cases']['map']['stages'].values())
+
+
 @pytest.mark.parametrize('mode', ['clean', 'finding', 'checker_error', 'missing_completion'])
 def test_child_process_requires_its_own_installed_probe(tmp_path, mode):
     source = source_binding(TREE)
@@ -200,8 +214,6 @@ def test_child_process_requires_its_own_installed_probe(tmp_path, mode):
 def _child(mode, path, root):
     print(os.getpid(), flush=True)
     context = corpus.Context(root)
-    if mode == 'missing_completion':
-        os._exit(17)
     original = schema._node_findings
     def changed(node, by_occurrence, *, stage):
         yield from original(node, by_occurrence, stage=stage)
@@ -216,6 +228,8 @@ def _child(mode, path, root):
         with observer.case('map') as case:
             _compile(context)
             case['outcome'] = 'compiled'
+    if mode == 'missing_completion':
+        os._exit(17)  # a real completed compile still supplies no process receipt
     observer.write(path)
 
 
