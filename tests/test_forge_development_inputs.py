@@ -25,7 +25,7 @@ def access(tmp_path):
                 development_control=None)
     store = SimpleNamespace(limits=SimpleNamespace(turn_seconds=120,
         rss_bytes=1024**3, processes=32), turn=lambda tid: dict(turn))
-    from demiflow.workbench.conversations.development import runtime_paths
+    from demiflow.workbench.conversations.execution import runtime_paths
     api = InputAccess(store, 'turn', dict(root=str(project)), scratch,
         denied_paths=[private], runtime_paths=runtime_paths(dict(executable=sys.executable)))
     return api, tmp_path, project, private, turn
