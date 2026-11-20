@@ -9,6 +9,7 @@ import pytest
 
 from demiflow.forge import audit
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
 
@@ -118,14 +119,14 @@ def test_scope_lifecycle_uses_original_baseline_and_cas(tmp_path):
     (root / 'operators/a.py').write_text('# pre-existing dirty')
     def expected():
         return content_digest(ws.load_workspace(root)[1])
-    first = ws.begin_change_scope(root, expected=expected(), writes=[dict(path='operators/a.py', kind='file')])
+    first = project_ops.begin_change_scope(root, expected=expected(), writes=[dict(path='operators/a.py', kind='file')])
     original = first['audit']['change_scope']['baseline']
     (root / 'operators/b.py').write_text('# unexpected')
     assert ws._check_change_scope(root)['status'] == 'violated'
     with pytest.raises(ForgeError, match='outside'):
         audit.require_scope(ws._check_change_scope(root), expected_scope=first['audit']['change_scope'])
     with pytest.raises(ForgeError, match='active'):
-        ws.begin_change_scope(root, expected=expected(), writes=[])
+        project_ops.begin_change_scope(root, expected=expected(), writes=[])
     amended = ws.amend_change_scope(root, expected=expected(), writes=[dict(path='operators', kind='tree')], reason='explicit extension')
     assert amended['audit']['change_scope']['baseline'] == original
     assert ws._check_change_scope(root)['status'] == 'within_scope'

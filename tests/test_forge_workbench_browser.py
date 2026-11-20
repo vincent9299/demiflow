@@ -11,6 +11,7 @@ from playwright.sync_api import expect
 
 from demiflow.workbench.runs import manager as runs
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.projects import registry as console
 from test_forge_project_discovery import original,business_bytes
 from test_forge_web_redesign import project_info
@@ -301,7 +302,7 @@ def test_hidden_report_node_deep_link_and_large_offline_export_are_bounded(isola
     (isolated/'flows/many.json').write_text(json.dumps(dict(format='demiflow_forge_flow_parameters_v1',arguments={
         'source':{'kind':'table','alias':'candidates'},'target':{'kind':'output','location_id':'local','relative_uri':'many.lance'}})))
     ws.register_flow(isolated,'flows/many.py:run',params='flows/many.json')
-    report=ws.inspect_flow(isolated,'flows/many.py:run',params='flows/many.json')
+    report=project_ops.inspect_flow(isolated,'flows/many.py:run',params='flows/many.json')
     assert report['status']=='checked',report['diagnostics']
     assert len(report['nodes'])>128
     hidden=report['nodes'][-1]['id'];key=ws.workspace_id(isolated,ws.load_workspace(isolated)[1])

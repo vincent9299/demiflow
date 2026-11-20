@@ -11,6 +11,7 @@ import pytest
 
 from demiflow.workbench.projects import registry as console
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.api import WorkspaceServer
@@ -54,7 +55,7 @@ def test_registration_is_explicit_and_helper_is_not_a_flow(isolated):
     with pytest.raises(ForgeError, match='missing'):
         ws.register_flow(isolated, 'flows/questions.py:nonexistent', params='flows/select_a.json')
     ws.register_flow(isolated, 'operators/question_rules.py:keep_selected', params='flows/select_a.json')
-    assert ws.inspect_flow(isolated, 'operators/question_rules.py:keep_selected', params='flows/select_a.json')['status'] != 'checked'
+    assert project_ops.inspect_flow(isolated, 'operators/question_rules.py:keep_selected', params='flows/select_a.json')['status'] != 'checked'
     assert ws.register_flow(isolated, 'flows/questions.py:select', params='flows/select_a.json')['status'] == 'unchanged'
     path = isolated / 'flows/questions.py'
     path.write_text(path.read_text().replace('def select(', 'def renamed('))
@@ -62,17 +63,17 @@ def test_registration_is_explicit_and_helper_is_not_a_flow(isolated):
 
 
 def test_report_binds_only_used_workspace_policy(isolated):
-    result = ws.inspect_flow(isolated, 'flows/questions.py:select', params='flows/select_a.json')
+    result = project_ops.inspect_flow(isolated, 'flows/questions.py:select', params='flows/select_a.json')
     assert result['status'] == 'checked', result
     (isolated / 'flows/other.py').write_text('def independent():\n    pass\n')
     ws.register_flow(isolated, 'flows/other.py:independent', params='flows/select_b.json')
     control = ws.read_control(isolated / 'workspace.json')
     control['name'] = 'renamed'
     (isolated / 'workspace.json').write_text(json.dumps(control))
-    assert ws.report_status(isolated, result['digest'])['status'] == 'checked'
+    assert project_ops.report_status(isolated, result['digest'])['status'] == 'checked'
     control['locations']['local']['writable'] = False
     (isolated / 'workspace.json').write_text(json.dumps(control))
-    changed = ws.report_status(isolated, result['digest'])
+    changed = project_ops.report_status(isolated, result['digest'])
     assert changed['status'] == 'stale' and 'workspace_changed' in changed['changes']
 
 

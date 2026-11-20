@@ -5,6 +5,7 @@ import ast
 import hashlib
 
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.forge.platform import bounded_json
 from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
@@ -274,7 +275,7 @@ def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
         if basis_kind == 'report':
             if not report_digest or run_id is not None or attempt is not None:
                 raise ForgeError('Report graph requires its digest', code='invalid_request')
-            result = ws.report_status(root, report_digest)
+            result = project_ops.report_status(root, report_digest)
             report, changes = result['report'], result['changes']
             fresh = result['verification']['complete'] and not changes
             status = result['status']

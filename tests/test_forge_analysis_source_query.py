@@ -8,6 +8,7 @@ import pyarrow as pa
 import pytest
 
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.analysis import source_query
 from demiflow.workbench.analysis import web_sources
 from demiflow.forge.schema import ForgeError
@@ -60,7 +61,7 @@ def test_oversized_native_batch_is_rejected_before_python_expansion():
 
 
 def test_real_fixed_source_sample_and_complete_small_table_profile(isolated):
-    description=ws.describe_table(isolated,"candidates")
+    description=project_ops.describe_table(isolated,"candidates")
     locator=dict(kind="workspace_table",alias="candidates",binding=description["binding"]["digest"],columns=["case_id","question"])
     fixed=web_sources.resolve(isolated,locator)["source"]
     sample=operation("analysis_source_read",isolated,source_locator=locator,source_snapshot=fixed["digest"],

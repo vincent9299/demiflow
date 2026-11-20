@@ -51,7 +51,7 @@ class VersionResolution:
         }
 
 
-def resolve_version(root, *, alias, expected_binding, version, expected_version_binding=None):
+def resolve_version(root, *, table_resolver, alias, expected_binding, version, expected_version_binding=None):
     from demiflow.lance import preview
     from demiflow.lance.registry import Catalog
     from demiflow.workbench.projects import workspace as ws
@@ -61,7 +61,7 @@ def resolve_version(root, *, alias, expected_binding, version, expected_version_
     if expected_version_binding is not None:
         c.sha(expected_version_binding, "expected version binding")
     root, workspace, _ = ws.load_workspace(root)
-    control, ref, uri = ws.table_binding(root, workspace, alias)
+    control, ref, uri = table_resolver(root, workspace, alias)
     alias_binding = ws.preview_binding(root, control, uri)
     if expected_binding != alias_binding["digest"]:
         c.reject("Registered alias binding changed; reopen the table explicitly", code="conflict")
@@ -87,7 +87,7 @@ def resolve_version(root, *, alias, expected_binding, version, expected_version_
         c.reject("Historical version binding changed", code="conflict")
     # The alias must still name the same source after the historical read.
     _, workspace_after, _ = ws.load_workspace(root)
-    control_after, ref_after, uri_after = ws.table_binding(root, workspace_after, alias)
+    control_after, ref_after, uri_after = table_resolver(root, workspace_after, alias)
     if control_after != control or ref_after.to_dict() != ref.to_dict() or uri_after != uri:
         c.reject("Table alias changed while its historical version was resolved", code="conflict")
     return VersionResolution(

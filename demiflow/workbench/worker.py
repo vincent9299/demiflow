@@ -106,6 +106,10 @@ def dispatch(request):
     from demiflow.forge.io import no_symlinks
 
     no_symlinks(root)
+    from demiflow.workbench.projects import workspace as ws
+    from demiflow.workbench.runs import manager as runs
+    from demiflow.workbench.table_bindings import make_resolver
+    table_resolver = make_resolver(ws.table_binding, runs.result_table)
     try:
         from demiflow.errors import DemiflowError
         from demiflow.lance import preview
@@ -116,27 +120,27 @@ def dispatch(request):
             from demiflow.workbench.analysis.source_export import export
             if set(args) != {"source_locator", "source_snapshot", "output_fd"}:
                 raise ForgeError("Invalid fixed source export arguments",code="invalid_request")
-            value = export(root, **args)
+            value = export(root, table_resolver=table_resolver, **args)
         elif op=="analysis_media_export":
             from demiflow.workbench.analysis.media_source_export import export
             if set(args)!={"source_locator","source_snapshot","case_key","field","output_fd"}:
                 raise ForgeError("Invalid fixed declared media export arguments",code="invalid_request")
-            value=export(root,**args)
+            value=export(root,table_resolver=table_resolver, **args)
         elif op=="analysis_media_sources":
             from demiflow.workbench.analysis.media_source_export import resolve_fields
             if set(args)!={"source_locator","source_snapshot","case_key","fields"}:
                 raise ForgeError("Invalid fixed declared media proof arguments",code="invalid_request")
-            value=resolve_fields(root,**args)
+            value=resolve_fields(root,table_resolver=table_resolver, **args)
         elif op == "analysis_source_read":
             from demiflow.workbench.analysis.source_query import read
             if set(args)!={"source_locator","source_snapshot","query"}:
                 raise ForgeError("Invalid fixed source sample/profile arguments",code="invalid_request")
-            value=read(root,**args)
+            value=read(root,table_resolver=table_resolver, **args)
         elif op=="table_profile":
             from demiflow.workbench.analysis.catalog_profile import profile
             from demiflow.workbench.analysis import contracts
             contracts.fields(args,{"kind","columns"},{"alias","expected_binding","identity","expected","version","binding","version_binding"},label="catalog profile")
-            value=profile(root,**args)
+            value=profile(root,table_resolver=table_resolver, **args)
         elif op == 'metadata':
             value = preview.snapshot_metadata(root, args['version'])
         elif op == "catalog":
@@ -146,7 +150,7 @@ def dispatch(request):
             from demiflow.workbench.projects import checks as project_check
             if args:
                 raise ForgeError('Project checks accept no rule overrides', code='invalid_request')
-            value = (project_check.check if op == 'project_check' else project_check.status)(root)
+            value = (project_check.check if op == 'project_check' else project_check.status)(root, table_resolver=table_resolver)
         elif op == 'project_table':
             from demiflow.workbench.projects.discovery import table
             from demiflow.workbench.projects.workspace import load_workspace
@@ -155,13 +159,13 @@ def dispatch(request):
         elif op == "inspect":
             from demiflow.workbench.projects.workspace import _inspect_flow
 
-            value = _inspect_flow(root, **args)
+            value = _inspect_flow(root, table_resolver=table_resolver, **args)
         elif op == 'plan_preview':
             from demiflow.workbench.graph.preview import _preview
-            value = _preview(root, **args)
+            value = _preview(root, table_resolver=table_resolver, **args)
         elif op == 'native_submission_inspect':
             from demiflow.workbench.runs.native_submission import inspect_submission
-            value = inspect_submission(root, **args)
+            value = inspect_submission(root, table_resolver=table_resolver, **args)
         elif op == 'workbench_source':
             from demiflow.workbench.graph.model import _source_tree
             value=_source_tree(root,**args)
@@ -173,7 +177,7 @@ def dispatch(request):
             value=_reconcile(root,**args)
         elif op == 'run_admission':
             from demiflow.workbench.runs.admission import _describe
-            value=_describe(root,**args)
+            value=_describe(root,table_resolver=table_resolver, **args)
         elif op in {"run_prepare", "run_preflight", "run_resume"}:
             from demiflow.workbench.runs import manager as run_manager
             from demiflow.workbench.runs.authority import from_bootstrap
@@ -188,7 +192,7 @@ def dispatch(request):
         elif op == "status":
             from demiflow.workbench.projects.workspace import _report_status
 
-            value = _report_status(root, **args)
+            value = _report_status(root, table_resolver=table_resolver, **args)
         elif op == 'audit_capture':
             from demiflow.workbench.projects.workspace import _capture_change_baseline
             value = _capture_change_baseline(root, **args)
@@ -199,14 +203,13 @@ def dispatch(request):
             value = _check_change_scope(root)
         elif op == 'audit_check':
             from demiflow.workbench.projects.workspace import _audit_check
-            value = _audit_check(root, **args)
+            value = _audit_check(root, table_resolver=table_resolver, **args)
         elif op == 'audit_hint':
             from demiflow.workbench.projects.workspace import _audit_hint
             value = _audit_hint(root, **args)
         elif op in {"table", "sample", "media", 'table_evidence', "table_versions"}:
             import re
             from demiflow.workbench.projects.workspace import load_workspace
-            from demiflow.workbench.projects.workspace import table_binding
             from demiflow.workbench.projects.workspace import preview_binding
             from demiflow.workbench.projects.workspace import location_root
             from demiflow.workbench.projects.workspace import relative_path
@@ -217,7 +220,7 @@ def dispatch(request):
                 raise ForgeError("Invalid preview binding digest", code='invalid_request')
             root, workspace, _ = load_workspace(root)
             alias = args.pop("alias")
-            control, ref, uri = table_binding(root, workspace, alias)
+            control, ref, uri = table_resolver(root, workspace, alias)
             binding = preview_binding(root, control, uri)
             if expected is not None and expected != binding["digest"]:
                 raise ForgeError("Preview binding changed; reopen the table explicitly", code='conflict')
@@ -235,7 +238,7 @@ def dispatch(request):
                         raise ForgeError("Historical reads require the current alias binding", code='invalid_request')
                     from demiflow.workbench.analysis.catalog_versions import resolve_version
                     resolution = resolve_version(root, alias=alias, expected_binding=expected,
-                                                 version=version, expected_version_binding=version_binding)
+                                                 version=version, expected_version_binding=version_binding, table_resolver=table_resolver)
                     wire = resolution.to_wire()
                     control, ref, binding = wire["reference"], resolution.ref, wire["binding"]
             if op == "table_versions":
@@ -266,7 +269,7 @@ def dispatch(request):
                         from demiflow.workbench.analysis.catalog_versions import resolve_version
                         resolution = resolve_version(root, alias=alias,
                                                      expected_binding=expected if expected is not None else binding["digest"],
-                                                     version=version)
+                                                     version=version, table_resolver=table_resolver)
                         value["selected"] = resolution.to_wire()
             elif op == "table":
                 if args:

@@ -1,0 +1,2651 @@
+{
+  "source_sha": "918a46dfc40e80022d041ab54c64a9a10a68673c",
+  "runtime_source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b",
+  "scope": "Ordered raw runs, including retries and baseline comparisons; counts are not additive unique coverage and are not the release four-line gate.",
+  "runs": [
+    {
+      "group": "B1-policy",
+      "source_sha": "89914372b163f2d96a79ff8cfcb4de96f0f717cd",
+      "counts": {
+        "collected": 44,
+        "executed": 44,
+        "passed": 44,
+        "failed": 0,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 8.838729858398438,
+      "returncode": 0,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/B1-policy/receipt.json",
+      "receipt_sha256": "4afb2af0f1209b94d7391e581879f09c5d09c30d817aa4144367ca252745a26c",
+      "files": [
+        "tests/test_workbench_engine_boundary.py",
+        "tests/test_forge_prompt_contract.py::test_workspace_capacity_is_explicit_and_runs_can_only_tighten_it",
+        "tests/test_execution_payload_limits.py::test_explicit_row_allowance_can_exceed_default_estimate_without_raising_other_budgets"
+      ],
+      "nonpass": []
+    },
+    {
+      "group": "B2-index",
+      "source_sha": "2aee0aaf246cfb83ce49ba7aec9305a07e144b4d",
+      "counts": {
+        "collected": 114,
+        "executed": 114,
+        "passed": 110,
+        "failed": 4,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 82.94482159614563,
+      "returncode": 1,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/B2-index/receipt.json",
+      "receipt_sha256": "3070a0ba6c3d482af69b7d20e3cf6c1b9b4278255a0c9af9a67df0bb002c342e",
+      "files": [
+        "tests/test_forge_index.py",
+        "tests/test_forge_index_runs.py",
+        "tests/test_p12_index_ownership.py",
+        "tests/test_forge_runtime_review_fixes.py",
+        "tests/test_workbench_engine_boundary.py",
+        "tests/test_p4_material_surface.py"
+      ],
+      "nonpass": [
+        {
+          "nodeid": "tests.test_p12_index_ownership::test_begin_refusal_precedes_fence_reserve_lease_spawn_and_source_mutation[pending]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_p12_index_ownership::test_begin_refusal_precedes_fence_reserve_lease_spawn_and_source_mutation[full]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_p12_index_ownership::test_begin_refusal_precedes_fence_reserve_lease_spawn_and_source_mutation[corrupt]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_p12_index_ownership::test_reserve_post_replace_fsync_failure_preserves_owner_and_fence",
+          "result": "failed"
+        }
+      ]
+    },
+    {
+      "group": "B2-index-recheck",
+      "source_sha": "f8c9b5f27b6e7073c311184b886c7d42e1410c7f",
+      "counts": {
+        "collected": 114,
+        "executed": 114,
+        "passed": 114,
+        "failed": 0,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 82.29377222061157,
+      "returncode": 0,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/B2-index-recheck/receipt.json",
+      "receipt_sha256": "c11ca123cdc60721b40536f9ba5676398ae1566114d9bfd629404606a8c300af",
+      "files": [
+        "tests/test_forge_index.py",
+        "tests/test_forge_index_runs.py",
+        "tests/test_p12_index_ownership.py",
+        "tests/test_forge_runtime_review_fixes.py",
+        "tests/test_workbench_engine_boundary.py",
+        "tests/test_p4_material_surface.py"
+      ],
+      "nonpass": []
+    },
+    {
+      "group": "B3-resolver",
+      "source_sha": "7cae46814ed29b069eda907ef75bd0fe8cb4bb58",
+      "counts": {
+        "collected": 117,
+        "executed": 117,
+        "passed": 115,
+        "failed": 2,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 1097.0050086975098,
+      "returncode": 1,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/B3-resolver/receipt.json",
+      "receipt_sha256": "f969bac540aee0cd0aa751294186a8976ab0cf9b3538c220b358442b26888493",
+      "files": [
+        "tests/test_p12_table_bindings.py",
+        "tests/test_forge_workspace.py",
+        "tests/test_forge_project_checks.py",
+        "tests/test_forge_audit_runs.py",
+        "tests/test_workbench_parameter_projection.py",
+        "tests/test_workbench_plan_preview.py",
+        "tests/test_forge_public_api.py",
+        "tests/test_forge_analysis_web_sources.py",
+        "tests/test_forge_runs.py::test_real_ab_receipts_case_comparison_and_fixed_continuation",
+        "tests/test_workbench_native_submission.py",
+        "tests/test_workbench_engine_boundary.py",
+        "tests/test_p4_material_surface.py"
+      ],
+      "nonpass": [
+        {
+          "nodeid": "tests.test_p12_table_bindings::test_core_requires_explicit_resolver_and_has_no_domain_fallback[resolve_arguments]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_workbench_parameter_projection::test_registered_plain_configuration_cold_open_switch_and_reload",
+          "result": "failed"
+        }
+      ]
+    },
+    {
+      "group": "B3-browser-baseline",
+      "source_sha": "122edf4bd0c827338846abd0114f0b36cf8c1b6d",
+      "counts": {
+        "collected": 1,
+        "executed": 1,
+        "passed": 0,
+        "failed": 1,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 77.22544002532959,
+      "returncode": 1,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/B3-browser-baseline/receipt.json",
+      "receipt_sha256": "511f4c27f04224534ebefc05901e4348e57123a5bf62b40dd277aae2b71e12f4",
+      "files": [
+        "tests/test_workbench_parameter_projection.py::test_registered_plain_configuration_cold_open_switch_and_reload"
+      ],
+      "nonpass": [
+        {
+          "nodeid": "tests.test_workbench_parameter_projection::test_registered_plain_configuration_cold_open_switch_and_reload",
+          "result": "failed"
+        }
+      ]
+    },
+    {
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b",
+      "counts": {
+        "collected": 95,
+        "executed": 95,
+        "passed": 95,
+        "failed": 0,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 14.338733434677124,
+      "returncode": 0,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/G1-boundaries/receipt.json",
+      "receipt_sha256": "0472b3e06c47a5e910a4140a829e24daa6de3da2c89ed4336c42c45b5160f2ca",
+      "files": [
+        "tests/test_workbench_project_boundary.py",
+        "tests/test_workbench_engine_boundary.py",
+        "tests/test_package_dependency_ratchet.py",
+        "tests/test_p12_table_bindings.py",
+        "tests/test_p4_material_surface.py",
+        "tests/test_p4_host_integration.py",
+        "tests/test_p12_change_hints.py"
+      ],
+      "nonpass": []
+    },
+    {
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b",
+      "counts": {
+        "collected": 78,
+        "executed": 78,
+        "passed": 73,
+        "failed": 5,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 228.24833607673645,
+      "returncode": 1,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/G2-index-lifecycle/receipt.json",
+      "receipt_sha256": "5565ab89ad7d24c61adf3703a8e57c78c3de7aa1227db02863d5045824103731",
+      "files": [
+        "tests/test_forge_index.py",
+        "tests/test_forge_index_runs.py",
+        "tests/test_p12_index_ownership.py",
+        "tests/test_p12_index_failures.py",
+        "tests/test_p12_lifecycle.py",
+        "tests/test_forge_runtime_review_fixes.py",
+        "tests/test_forge_development_admission.py::test_prepare_rejects_before_inspecting_business_source",
+        "tests/test_forge_development_admission.py::test_first_start_rejects_wrong_entry_sealed_by_previous_admission_version",
+        "tests/test_forge_development_admission.py::test_public_prepare_seals_current_acceptance_and_start_rechecks_latest_turn"
+      ],
+      "nonpass": [
+        {
+          "nodeid": "tests.test_p12_lifecycle::test_prepared_source_is_durable_when_cache_publication_fails[summary]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_p12_lifecycle::test_prepared_source_is_durable_when_cache_publication_fails[publish]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_p12_lifecycle::test_report_bytes_and_digest_survive_summary_and_diagnostic_failure",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_p12_lifecycle::test_prepare_begin_refusal_does_not_create_run_or_remove_prior_report",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_p12_lifecycle::test_resume_pending_refusal_preserves_real_prior_recovery_without_new_attempt",
+          "result": "failed"
+        }
+      ]
+    },
+    {
+      "group": "G2-owner-bounded-recheck",
+      "source_sha": "541f4f46b89ef48211f176a9fb4ba1f5ad850270",
+      "counts": {
+        "collected": 21,
+        "executed": 0,
+        "passed": 0,
+        "failed": 0,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 21,
+        "deselected": 0
+      },
+      "elapsed_seconds": 67.76609516143799,
+      "returncode": -15,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/G2-owner-bounded-recheck/receipt.json",
+      "receipt_sha256": "14682fc3a5f6912f66e4533a8203641fa58a5466b19c54f7a1dbe9858ca6a78f",
+      "files": [
+        "tests/test_p12_lifecycle.py",
+        "tests/test_p12_table_rechecks.py",
+        "tests/test_workbench_project_boundary.py"
+      ],
+      "nonpass": [],
+      "author_interruption": {
+        "reason": "Bounded test helper omitted native thread caps; first probe consumed virtual address headroom and waited in native initialization. Stop only owned pytest process group before repeating this fixture mistake. Product guard remains unchanged.",
+        "owned_pytest_pid": 50848,
+        "owned_child_pid": 51005,
+        "signal": "SIGTERM",
+        "time": 1795135915.7681172
+      }
+    },
+    {
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43",
+      "counts": {
+        "collected": 21,
+        "executed": 21,
+        "passed": 20,
+        "failed": 1,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 162.80448651313782,
+      "returncode": 1,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/G2-owner-native-recheck/receipt.json",
+      "receipt_sha256": "1bef89f2d5084566bcfdd0ea14a3ac8827caf4836500363008288e3e1e7712b5",
+      "files": [
+        "tests/test_p12_lifecycle.py",
+        "tests/test_p12_table_rechecks.py",
+        "tests/test_workbench_project_boundary.py"
+      ],
+      "nonpass": [
+        {
+          "nodeid": "tests.test_p12_lifecycle::test_resume_pending_refusal_preserves_real_prior_recovery_without_new_attempt",
+          "result": "failed"
+        }
+      ]
+    },
+    {
+      "group": "G2-resume-maintenance-recheck",
+      "source_sha": "a697311924a179baf38fee2c730a2fc17337c3f9",
+      "counts": {
+        "collected": 1,
+        "executed": 1,
+        "passed": 0,
+        "failed": 1,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 70.618656873703,
+      "returncode": 1,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/G2-resume-maintenance-recheck/receipt.json",
+      "receipt_sha256": "6988dfcb1d714138f92090e587a1e324f5d9cc41f8a0516f41af62457431cf42",
+      "files": [
+        "tests/test_p12_lifecycle.py::test_resume_pending_refusal_preserves_real_prior_recovery_without_new_attempt"
+      ],
+      "nonpass": [
+        {
+          "nodeid": "tests.test_p12_lifecycle::test_resume_pending_refusal_preserves_real_prior_recovery_without_new_attempt",
+          "result": "failed"
+        }
+      ]
+    },
+    {
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf",
+      "counts": {
+        "collected": 24,
+        "executed": 24,
+        "passed": 24,
+        "failed": 0,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 61.553839445114136,
+      "returncode": 0,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/G2-native-recovery-and-owner-validation/receipt.json",
+      "receipt_sha256": "c8f1cd91220b08ca86eec526f0debdfe48823d9cd2c601e8f20fbaeab77a226e",
+      "files": [
+        "tests/test_p12_lifecycle.py::test_resume_pending_refusal_preserves_real_prior_recovery_without_new_attempt",
+        "tests/test_p12_index_ownership.py"
+      ],
+      "nonpass": []
+    },
+    {
+      "group": "G3-fixed-results",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf",
+      "counts": {
+        "collected": 15,
+        "executed": 15,
+        "passed": 12,
+        "failed": 3,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 670.7147526741028,
+      "returncode": 1,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/G3-fixed-results/receipt.json",
+      "receipt_sha256": "a77f55fe026f9e1892cb31293ea9fdb900ca29fe2627c4214659f4770c65f5fa",
+      "files": [
+        "tests/test_forge_runs.py::test_real_ab_receipts_case_comparison_and_fixed_continuation",
+        "tests/test_forge_runs.py::test_prepare_does_not_execute_and_rejects_changed_basis",
+        "tests/test_forge_runs.py::test_cancel_and_timeout_own_run_only",
+        "tests/test_forge_runs.py::test_wrong_marker_never_promoted_and_registration_recovery",
+        "tests/test_forge_public_api.py::test_attach_preserves_exact_result_and_rejects_catalog_identity_changes",
+        "tests/test_workbench_native_submission.py",
+        "tests/test_forge_resume.py",
+        "tests/test_runtime_v3_save_product.py::test_native_save_prepare_execute_and_fixed_result",
+        "tests/test_runtime_v3_save_product.py::test_stage_stays_visible_after_later_failure_and_reconcile_without_events"
+      ],
+      "nonpass": [
+        {
+          "nodeid": "tests.test_forge_resume::test_resume_never_grants_unknown_reset_or_changed_binding[unknown-accounting]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_resume::test_resume_never_grants_unknown_reset_or_changed_binding[exhausted-exhausted]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_resume::test_resume_never_grants_unknown_reset_or_changed_binding[changed-stale]",
+          "result": "failed"
+        }
+      ]
+    },
+    {
+      "group": "G4-input-routes",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf",
+      "counts": {
+        "collected": 10,
+        "executed": 10,
+        "passed": 9,
+        "failed": 1,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 399.76690888404846,
+      "returncode": 1,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/G4-input-routes/receipt.json",
+      "receipt_sha256": "672c8ab9a83e620dc37928623ec5a035bdb43e848ec97807a101f9eaa669bdbd",
+      "files": [
+        "tests/test_p12_input_routes.py",
+        "tests/test_workbench_managed_plan_preview.py"
+      ],
+      "nonpass": [
+        {
+          "nodeid": "tests.test_p12_input_routes::test_fixed_run_input_reaches_every_inspection_and_parameter_owner",
+          "result": "failed"
+        }
+      ]
+    },
+    {
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf",
+      "counts": {
+        "collected": 34,
+        "executed": 34,
+        "passed": 34,
+        "failed": 0,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 418.495322227478,
+      "returncode": 0,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/G5-analysis-notebook-media/receipt.json",
+      "receipt_sha256": "d10831a86582df1188163a2835998e8a715593f0a9b6dd0f277c096b6d088fbd",
+      "files": [
+        "tests/test_forge_table_view.py",
+        "tests/test_forge_analysis_catalog.py",
+        "tests/test_forge_analysis_source_export.py",
+        "tests/test_forge_analysis_source_query.py",
+        "tests/test_forge_analysis_fixed_reads.py",
+        "tests/test_forge_analysis_source_admission.py",
+        "tests/test_forge_analysis_media_source_export.py::test_exact_declared_fixed_row_streams_only_to_exclusive_inherited_file",
+        "tests/test_forge_analysis_media_source_export.py::test_missing_declaration_or_symlink_never_uses_a_project_root_fallback",
+        "tests/test_forge_analysis_media_source_export.py::test_audio_video_declarations_have_real_resource_root_hash_mime_and_finite_budget",
+        "tests/test_forge_analysis_media_source_export.py::test_control_root_itself_ancestor_and_child_refuse_before_copy",
+        "tests/test_forge_analysis_media_source_export.py::test_filesystem_identity_is_bounded_exact_and_keeps_legacy_small_metadata_readable",
+        "tests/test_workbench_native_notebook.py::test_dictionary_read_uses_fixed_binding"
+      ],
+      "nonpass": []
+    },
+    {
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf",
+      "counts": {
+        "collected": 62,
+        "executed": 62,
+        "passed": 55,
+        "failed": 7,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 226.30973076820374,
+      "returncode": 1,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/G6-refresh-budgets-history/receipt.json",
+      "receipt_sha256": "a9b9ccae11b3b0a5782424430391dda329e059bb9d2c058254876d7fa4b13634",
+      "files": [
+        "tests/test_forge_workspace_sync.py",
+        "tests/test_forge_project_management.py",
+        "tests/test_workbench_read_admission.py",
+        "tests/test_forge_operation_budget.py",
+        "tests/test_forge_history_admission.py::test_actual_paths_capacity_and_exclusions",
+        "tests/test_forge_history_admission.py::test_snapshot_is_readonly_bounded_and_ends_each_transaction",
+        "tests/test_forge_history_admission.py::test_unknown_files_and_symlinks_refuse_without_fd_leak",
+        "tests/test_forge_history_admission.py::test_limits_and_deadline_are_enforced",
+        "tests/test_forge_history_admission.py::test_deadline_is_checked_inside_a_single_flat_directory",
+        "tests/test_forge_history_admission.py::test_disappearing_file_is_not_silently_charged_zero",
+        "tests/test_forge_prompt_contract.py::test_workspace_capacity_is_explicit_and_runs_can_only_tighten_it",
+        "tests/test_execution_payload_limits.py::test_explicit_row_allowance_can_exceed_default_estimate_without_raising_other_budgets",
+        "tests/test_execution_payload_limits.py::test_real_forge_wide_join_uses_same_payload_contract",
+        "tests/test_execution_payload_limits.py::test_real_forge_resume_delivers_new_output_under_original_cumulative_ceiling"
+      ],
+      "nonpass": [
+        {
+          "nodeid": "tests.test_forge_workspace_sync::test_run_page_at_capacity_reads_only_selected_outputs",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_workspace_sync::test_read_projections_preserve_committed_output_facts",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_operation_budget::test_one_shot_parent_binding_transports_remaining_without_global_env",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_operation_budget::test_launch_deadline_preserves_real_journal_and_ownership[before_fork]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_operation_budget::test_launch_deadline_preserves_real_journal_and_ownership[possible_fork]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_operation_budget::test_launch_deadline_preserves_real_journal_and_ownership[returned_fork]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_operation_budget::test_resume_attempt_commit_survives_expiry_before_nested_start",
+          "result": "failed"
+        }
+      ]
+    },
+    {
+      "group": "baseline-existing-negatives",
+      "source_sha": "122edf4bd0c827338846abd0114f0b36cf8c1b6d",
+      "counts": {
+        "collected": 10,
+        "executed": 10,
+        "passed": 0,
+        "failed": 10,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 117.99350190162659,
+      "returncode": 1,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/baseline-existing-negatives/receipt.json",
+      "receipt_sha256": "4790a98b38400d1c670a7ac5edf96c3fa1eb8ec6bc9e880e7686186379c7ea85",
+      "files": [
+        "tests/test_forge_resume.py::test_resume_never_grants_unknown_reset_or_changed_binding[unknown-accounting]",
+        "tests/test_forge_resume.py::test_resume_never_grants_unknown_reset_or_changed_binding[exhausted-exhausted]",
+        "tests/test_forge_resume.py::test_resume_never_grants_unknown_reset_or_changed_binding[changed-stale]",
+        "tests/test_forge_workspace_sync.py::test_run_page_at_capacity_reads_only_selected_outputs",
+        "tests/test_forge_workspace_sync.py::test_read_projections_preserve_committed_output_facts",
+        "tests/test_forge_operation_budget.py::test_one_shot_parent_binding_transports_remaining_without_global_env",
+        "tests/test_forge_operation_budget.py::test_launch_deadline_preserves_real_journal_and_ownership[before_fork]",
+        "tests/test_forge_operation_budget.py::test_launch_deadline_preserves_real_journal_and_ownership[possible_fork]",
+        "tests/test_forge_operation_budget.py::test_launch_deadline_preserves_real_journal_and_ownership[returned_fork]",
+        "tests/test_forge_operation_budget.py::test_resume_attempt_commit_survives_expiry_before_nested_start"
+      ],
+      "nonpass": [
+        {
+          "nodeid": "tests.test_forge_resume::test_resume_never_grants_unknown_reset_or_changed_binding[unknown-accounting]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_resume::test_resume_never_grants_unknown_reset_or_changed_binding[exhausted-exhausted]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_resume::test_resume_never_grants_unknown_reset_or_changed_binding[changed-stale]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_workspace_sync::test_run_page_at_capacity_reads_only_selected_outputs",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_workspace_sync::test_read_projections_preserve_committed_output_facts",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_operation_budget::test_one_shot_parent_binding_transports_remaining_without_global_env",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_operation_budget::test_launch_deadline_preserves_real_journal_and_ownership[before_fork]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_operation_budget::test_launch_deadline_preserves_real_journal_and_ownership[possible_fork]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_operation_budget::test_launch_deadline_preserves_real_journal_and_ownership[returned_fork]",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_operation_budget::test_resume_attempt_commit_survives_expiry_before_nested_start",
+          "result": "failed"
+        }
+      ]
+    },
+    {
+      "group": "G3-G4-G6-real-fixture-recheck",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455",
+      "counts": {
+        "collected": 14,
+        "executed": 14,
+        "passed": 12,
+        "failed": 2,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 627.747946023941,
+      "returncode": 1,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/G3-G4-G6-real-fixture-recheck/receipt.json",
+      "receipt_sha256": "05124e836eb6db5b0ae9a0f390d35ea95a51e5d803c1a287e208b37215648cd9",
+      "files": [
+        "tests/test_forge_resume.py::test_resume_never_grants_unknown_reset_or_changed_binding",
+        "tests/test_forge_workspace_sync.py::test_run_page_at_capacity_reads_only_selected_outputs",
+        "tests/test_forge_workspace_sync.py::test_read_projections_preserve_committed_output_facts",
+        "tests/test_forge_operation_budget.py::test_one_shot_parent_binding_transports_remaining_without_global_env",
+        "tests/test_forge_operation_budget.py::test_launch_deadline_preserves_real_journal_and_ownership",
+        "tests/test_forge_operation_budget.py::test_cancel_remains_independent_of_expired_control_and_admission_locks",
+        "tests/test_forge_operation_budget.py::test_resume_attempt_commit_survives_expiry_before_nested_start",
+        "tests/test_p12_input_routes.py::test_fixed_run_input_reaches_every_inspection_and_parameter_owner",
+        "tests/test_workbench_native_submission.py::test_native_stop_resume_keeps_original_run_and_stage_receipts"
+      ],
+      "nonpass": [
+        {
+          "nodeid": "tests.test_forge_operation_budget::test_one_shot_parent_binding_transports_remaining_without_global_env",
+          "result": "failed"
+        },
+        {
+          "nodeid": "tests.test_forge_operation_budget::test_resume_attempt_commit_survives_expiry_before_nested_start",
+          "result": "failed"
+        }
+      ]
+    },
+    {
+      "group": "G7-private-browser-notebook",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455",
+      "counts": {
+        "collected": 6,
+        "executed": 6,
+        "passed": 5,
+        "failed": 1,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 416.9289677143097,
+      "returncode": 1,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/G7-private-browser-notebook/receipt.json",
+      "receipt_sha256": "d7d5ecfb4f4d2373e491e6ed6c9364e103e8a5764b30e3c85891ae3a69a35c35",
+      "files": [
+        "tests/test_workbench_project_boundary_browser.py",
+        "tests/test_workbench_native_notebook.py::test_native_edit_execute_save_reopen_and_dictionary",
+        "tests/test_workbench_native_notebook.py::test_dictionary_old_locator_does_not_silently_adopt_new_binding",
+        "tests/test_workbench_native_notebook.py::test_dictionary_resolved_request_stays_fixed_across_rebind_and_navigation",
+        "tests/test_workbench_native_notebook.py::test_native_gateway_permissions_files_and_owned_cleanup"
+      ],
+      "nonpass": [
+        {
+          "nodeid": "tests.test_workbench_project_boundary_browser::test_pending_start_explicit_cli_sync_retry_and_current_dictionary",
+          "result": "failed"
+        }
+      ]
+    },
+    {
+      "group": "G6-G7-budget-and-browser-recheck",
+      "source_sha": "918a46dfc40e80022d041ab54c64a9a10a68673c",
+      "counts": {
+        "collected": 3,
+        "executed": 3,
+        "passed": 2,
+        "failed": 0,
+        "error": 1,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 94.30615329742432,
+      "returncode": 1,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/G6-G7-budget-and-browser-recheck/receipt.json",
+      "receipt_sha256": "9b62a18f9c06a6eff952ea4dc7fa067740a36c2bbdf6cedd0bfefb5e2e7c13aa",
+      "files": [
+        "tests/test_forge_operation_budget.py::test_one_shot_parent_binding_transports_remaining_without_global_env",
+        "tests/test_forge_operation_budget.py::test_resume_attempt_commit_survives_expiry_before_nested_start",
+        "tests/test_workbench_project_boundary_browser.py"
+      ],
+      "nonpass": [
+        {
+          "nodeid": "tests.test_workbench_project_boundary_browser::test_pending_start_explicit_cli_sync_retry_and_current_dictionary",
+          "result": "error"
+        }
+      ],
+      "body_not_run_due_to_setup_error": 1
+    },
+    {
+      "group": "G7-final",
+      "source_sha": "918a46dfc40e80022d041ab54c64a9a10a68673c",
+      "counts": {
+        "collected": 1,
+        "executed": 1,
+        "passed": 1,
+        "failed": 0,
+        "error": 0,
+        "skipped": 0,
+        "timeout": 0,
+        "not_run": 0,
+        "deselected": 0
+      },
+      "elapsed_seconds": 77.73354172706604,
+      "returncode": 0,
+      "receipt": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/implementation-v1/G7-final/receipt.json",
+      "receipt_sha256": "ea84bfaab7b2a4ce1094d8be7bcb7651d94dda28227a49694ab6e52c5b6b6c7c",
+      "files": [
+        "tests/test_workbench_project_boundary_browser.py"
+      ],
+      "nonpass": []
+    }
+  ],
+  "latest_runtime_equal_case_evidence": [
+    {
+      "nodeid": "tests.test_workbench_project_boundary::test_project_directory_has_seven_core_three_application_and_inert_initializer",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_workbench_project_boundary::test_core_has_no_transitive_run_worker_or_application_dependency[checks]",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_workbench_project_boundary::test_core_has_no_transitive_run_worker_or_application_dependency[definitions]",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_workbench_project_boundary::test_core_has_no_transitive_run_worker_or_application_dependency[discovery]",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_workbench_project_boundary::test_core_has_no_transitive_run_worker_or_application_dependency[documents]",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_workbench_project_boundary::test_core_has_no_transitive_run_worker_or_application_dependency[index]",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_workbench_project_boundary::test_core_has_no_transitive_run_worker_or_application_dependency[io]",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_workbench_project_boundary::test_core_has_no_transitive_run_worker_or_application_dependency[workspace]",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_workbench_project_boundary::test_index_cannot_reach_domain_source_or_platform_readers",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_workbench_project_boundary::test_neutral_modules_do_not_depend_on_domain_owners[table_bindings]",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_workbench_project_boundary::test_neutral_modules_do_not_depend_on_domain_owners[pipeline_policy]",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_workbench_project_boundary::test_guard_detects_function_local_relative_and_indirect_imports",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_workbench_project_boundary::test_cold_import_of_all_project_core_modules_does_not_load_domains",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_workbench_imports_are_classified_by_exact_surface_and_consumer",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_approved_objects_do_not_leak_members_or_opaque_configuration",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_native_core_never_imports_host_or_product",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_surface_document_is_generated_from_runtime_literal",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_import_negative_alias_fixtures[from demiflow.execution.run_journal import RunJournal as J]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_import_negative_alias_fixtures[import demiflow.execution.run_journal as j]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_import_negative_alias_fixtures[from demiflow.execution.host.control import *]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_member_negative_alias_and_return_fixtures[from demiflow.execution.host.control import RunJournal as J\\nr = J(\"x\")\\nother = r\\nother.db]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_member_negative_alias_and_return_fixtures[from demiflow.execution.host.inspection import read_run as read\\nwith read(\"x\") as r:\\n    alias=r\\n    alias.tables]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_member_negative_alias_and_return_fixtures[from demiflow.execution.host.control import RunJournal\\nj=RunJournal(\"x\")\\ngetattr(j, \"db\")]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_member_negative_alias_and_return_fixtures[from demiflow.execution.host.inspection import compiled_node_materials\\nm=compiled_node_materials(c,bounds=b)\\nitem=m[\"x\"]\\ncfg=item.configuration.engine_configuration\\ncfg.get(\"query\")]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_member_negative_alias_and_return_fixtures[import importlib\\nimportlib.import_module(\"demiflow.execution.run_journal\")]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_member_negative_alias_and_return_fixtures[from demiflow.execution.host.inspection import capture_pipeline\\nr=capture_pipeline(f,{})\\nn=r.compiled.graph.nodes[0]\\nn.kernel.configuration]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_member_negative_alias_and_return_fixtures[from demiflow.execution.host.control import RunJournal as J\\nj=J(\"x\")\\npeek=getattr\\npeek(j, \"db\")]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_host_private_state_and_independent_borrow_are_not_native_leaks",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_indices_are_lazy_and_reexport_original_objects",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_native_storage_layout_is_not_reinterpreted_in_workbench",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_every_index_export_has_an_actual_workbench_consumer",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_real_journal_consumers_cannot_hide_private_calls[demiflow/workbench/runs/requests.py-_ready-journal.claim_execution({}, \"unexpected\")]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_real_journal_consumers_cannot_hide_private_calls[demiflow/workbench/runs/native_stages.py-admit_prepared-journal.claim_execution({}, \"unexpected\")]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_private_constructor_options_cannot_bypass_reexport_contract[target, _maintenance_deadline=1-from demiflow.execution.host.control import RunJournal\\n]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_private_constructor_options_cannot_bypass_reexport_contract[target, _maintenance_deadline=1-from demiflow.workbench.runs.manager import RunJournal\\n]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_private_constructor_options_cannot_bypass_reexport_contract[target, **options-from demiflow.execution.host.control import RunJournal\\n]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_private_constructor_options_cannot_bypass_reexport_contract[target, **options-from demiflow.workbench.runs.manager import RunJournal\\n]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_real_registration_rejects_decoding_native_recording",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_publication_recording_is_not_another_host_protocol[raw[\"intent\"]-verify_write_receipt]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_publication_recording_is_not_another_host_protocol[raw[\"intent\"]-verify_published_output]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_publication_recording_is_not_another_host_protocol[raw[\"intent\"]-_verified_output]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_publication_recording_is_not_another_host_protocol[raw.get(\"intent\")-verify_write_receipt]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_publication_recording_is_not_another_host_protocol[raw.get(\"intent\")-verify_published_output]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_publication_recording_is_not_another_host_protocol[raw.get(\"intent\")-_verified_output]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_publication_recording_is_not_another_host_protocol[dict(raw)-verify_write_receipt]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_publication_recording_is_not_another_host_protocol[dict(raw)-verify_published_output]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_publication_recording_is_not_another_host_protocol[dict(raw)-_verified_output]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_publication_recording_is_not_another_host_protocol[str(raw)-verify_write_receipt]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_publication_recording_is_not_another_host_protocol[str(raw)-verify_published_output]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_publication_recording_is_not_another_host_protocol[str(raw)-_verified_output]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_publication_recording_is_not_another_host_protocol[another_writer(raw)-verify_write_receipt]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_publication_recording_is_not_another_host_protocol[another_writer(raw)-verify_published_output]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_publication_recording_is_not_another_host_protocol[another_writer(raw)-_verified_output]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_native_recording_can_only_be_aliased_and_forwarded_unchanged",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_workbench_engine_boundary::test_approved_reexport_matches_its_real_import",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_package_dependency_ratchet::test_scan_covers_the_repository",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_package_dependency_ratchet::test_base_never_imports_hosts_and_forge_never_imports_workbench",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_package_dependency_ratchet::test_leaf_packages_import_no_other_package",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_package_dependency_ratchet::test_cross_package_private_imports_do_not_grow",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_package_dependency_ratchet::test_pre_v3_modules_gain_no_importers",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_package_dependency_ratchet::test_plan_compiler_learns_no_new_runtime_modules",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_package_dependency_ratchet::test_budgets_are_not_stale_by_more_than_they_help",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_table_bindings::test_resolver_passes_current_control_and_actual_owner_objects",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_table_bindings::test_invalid_attempt_cannot_reach_run_owner[run:r:out:0]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_table_bindings::test_invalid_attempt_cannot_reach_run_owner[run:r:out:33]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_table_bindings::test_invalid_attempt_cannot_reach_run_owner[run:r:out:01]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_table_bindings::test_invalid_attempt_cannot_reach_run_owner[run:r:out:True]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_table_bindings::test_invalid_attempt_cannot_reach_run_owner[run:r]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_table_bindings::test_invalid_attempt_cannot_reach_run_owner[run:r:out:1:extra]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_table_bindings::test_core_requires_explicit_resolver_and_has_no_domain_fallback[resolve_arguments]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_table_bindings::test_core_requires_explicit_resolver_and_has_no_domain_fallback[_inspect_flow]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_table_bindings::test_core_requires_explicit_resolver_and_has_no_domain_fallback[_report_status]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_table_bindings::test_core_requires_explicit_resolver_and_has_no_domain_fallback[_audit_check]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_table_bindings::test_core_requires_explicit_resolver_and_has_no_domain_fallback[check]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_table_bindings::test_core_requires_explicit_resolver_and_has_no_domain_fallback[status]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_material_surface::test_sdk_links_preserve_identity_and_refuse_subclasses_or_overbudget",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_material_surface::test_all_schema_nodes_share_one_native_pass_and_preserve_wire",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_material_surface::test_schema_budget_is_unavailable_not_unknown_and_corruption_stays_error",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_material_surface::test_passive_function_source_and_opaque_configuration_remain_renderable",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_material_surface::test_inventory_public_validation_is_pure_and_same_native_implementation",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_material_surface::test_borrowed_native_slot_is_drained_before_session_close",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_material_surface::test_configuration_projection_limits_and_redaction_do_not_become_schema",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_material_surface::test_schema_redaction_failure_only_disables_that_material",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_material_surface::test_index_missing_run_directory_and_missing_native_storage_remain_absent",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_host_integration::test_completed_reconcile_preserves_state_revision_and_control_history",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_host_integration::test_missing_or_unfinished_cleanup_reclaims_private_work_before_completion[None]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_host_integration::test_missing_or_unfinished_cleanup_reclaims_private_work_before_completion[pending]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_host_integration::test_missing_or_unfinished_cleanup_reclaims_private_work_before_completion[unknown]",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_host_integration::test_completed_cleanup_with_private_work_refuses_without_reviving_capacity",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_host_integration::test_expired_cleanup_keeps_pending_work_and_does_not_advance_attempt",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_host_integration::test_stale_reconcile_cannot_clean_current_attempt",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p4_host_integration::test_refresh_expiry_after_begin_keeps_recovery_marker",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_change_hints::test_application_reads_status_once_and_passes_same_owned_object",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_change_hints::test_unavailable_index_never_invokes_legacy_scan_and_missing_uses_same_hint",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_change_hints::test_uninitialized_fallback_is_bounded_and_observation_token_stays_opaque",
+      "result": "passed",
+      "group": "G1-boundaries",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_index::test_more_than_128_reports_keyset_paging_and_concurrent_new_entry",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_index::test_source_commit_survives_index_failure_and_pending_sync",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_index::test_publication_recovery_is_idempotent_after_commit_before_marker_clear",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_index::test_corrupt_index_explicit_rebuild_preserves_sources_and_invalidates_cursor",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_index::test_rebuild_limits_and_legacy_reads_do_not_silently_change_sources",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_index::test_pending_capacity_and_source_less_intent_recovery",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_index_runs::test_run_pages_only_load_page_members_and_have_no_128_limit",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_index_runs::test_lease_owner_adopts_legacy_once_and_does_not_trust_cached_activity",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_index_runs::test_new_run_admission_requires_entry_and_registered_parameter_path",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_begin_refusal_precedes_fence_reserve_lease_spawn_and_source_mutation[pending]",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_begin_refusal_precedes_fence_reserve_lease_spawn_and_source_mutation[full]",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_begin_refusal_precedes_fence_reserve_lease_spawn_and_source_mutation[corrupt]",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_marker_without_reservation_finishes_without_launch_failure[fence]",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_marker_without_reservation_finishes_without_launch_failure[reserve]",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_authority_guard_rejects_before_index_begin",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_begin_then_expired_deadline_keeps_pending_without_summary_read",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_reserve_post_replace_fsync_failure_preserves_owner_and_fence",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_publish_exception_does_not_turn_start_into_launch_failed",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_summary_failure_is_inside_owner_boundary_and_not_missing[run]",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_summary_failure_is_inside_owner_boundary_and_not_missing[report]",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_old_empty_root_requires_rebuild_while_fresh_root_can_attest_empty",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_generation_replacement_and_missing_do_not_delete_members",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_rebuild_after_replace_cleanup_failure_reports_new_epoch_and_pending",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_failures::test_expired_request_prevents_refresh_marker_before_optional_work",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_index_failures::test_request_expiry_after_refresh_begin_keeps_pending_without_summary",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_index_failures::test_rebuild_before_replace_preserves_old_database_markers_and_closes_sources[source]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_index_failures::test_rebuild_before_replace_preserves_old_database_markers_and_closes_sources[invalid_name]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_index_failures::test_rebuild_before_replace_preserves_old_database_markers_and_closes_sources[symlink]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_index_failures::test_rebuild_before_replace_preserves_old_database_markers_and_closes_sources[replace]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_index_failures::test_rebuild_before_replace_preserves_old_database_markers_and_closes_sources[deadline_after_last]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_lifecycle::test_prepared_source_is_durable_when_cache_publication_fails[summary]",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_p12_lifecycle::test_prepared_source_is_durable_when_cache_publication_fails[publish]",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_p12_lifecycle::test_report_bytes_and_digest_survive_summary_and_diagnostic_failure",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_p12_lifecycle::test_prepare_begin_refusal_does_not_create_run_or_remove_prior_report",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_p12_lifecycle::test_resume_pending_refusal_preserves_real_prior_recovery_without_new_attempt",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_optional_samples_are_unavailable[None]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_optional_samples_are_unavailable[corruption1]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_optional_samples_are_unavailable[corruption2]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_optional_samples_are_unavailable[corruption3]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_optional_samples_are_unavailable[corruption4]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_optional_samples_are_unavailable[corruption5]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_optional_samples_are_unavailable[corruption6]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_optional_samples_are_unavailable[corruption7]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_optional_samples_are_unavailable[corruption8]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_optional_samples_are_unavailable[corruption9]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_optional_samples_are_unavailable[corruption10]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_optional_samples_are_unavailable[corruption11]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_optional_samples_are_unavailable[corruption12]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_optional_samples_are_unavailable[corruption13]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_optional_samples_are_unavailable[corruption14]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_optional_samples_are_unavailable[corruption15]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_minute_aggregates_are_unavailable[None]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_minute_aggregates_are_unavailable[corruption1]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_minute_aggregates_are_unavailable[corruption2]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_minute_aggregates_are_unavailable[corruption3]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_minute_aggregates_are_unavailable[corruption4]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_minute_aggregates_are_unavailable[corruption5]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_minute_aggregates_are_unavailable[corruption6]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_malformed_minute_aggregates_are_unavailable[corruption7]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_snapshot_and_compact_cancel_survive_bad_optional_json",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r1_supervisor_and_http_stop_ignore_malformed_optional_samples",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r2_actual_launch_failure_before_spawn_is_terminal_and_releases_capacity",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r2_launcher_hard_exit_has_durable_reconciliation_fence[reserved]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r2_launcher_hard_exit_has_durable_reconciliation_fence[admitted]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r2_launcher_hard_exit_has_durable_reconciliation_fence[spawning]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r3_pending_cleanup_retains_device_reservation_until_reconcile",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r2_lost_popen_return_retains_live_unit_and_open_accounting",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r4_incomplete_prepare_is_failed_once_and_pending_capacity_recovers[absent]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r4_incomplete_prepare_is_failed_once_and_pending_capacity_recovers[partial_files]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r4_incomplete_prepare_is_failed_once_and_pending_capacity_recovers[empty_journal]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r4_incomplete_prepare_is_failed_once_and_pending_capacity_recovers[initialized_journal]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r4_execution_fence_prevents_discarding_unknown_preparation",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r4_expired_pending_closes_with_same_identity[False]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r4_expired_pending_closes_with_same_identity[True]",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_runtime_review_fixes::test_r4_public_reconcile_uses_bounded_preparation_worker",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_development_admission::test_prepare_rejects_before_inspecting_business_source",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_development_admission::test_first_start_rejects_wrong_entry_sealed_by_previous_admission_version",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_forge_development_admission::test_public_prepare_seals_current_acceptance_and_start_rechecks_latest_turn",
+      "result": "passed",
+      "group": "G2-index-lifecycle",
+      "source_sha": "53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b"
+    },
+    {
+      "nodeid": "tests.test_p12_table_rechecks::test_historical_version_rereads_alias_after_metadata",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_p12_table_rechecks::test_source_sample_cannot_return_rows_after_alias_rebind",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_p12_table_rechecks::test_media_recheck_observes_revoked_display_grant_even_when_table_binding_is_same",
+      "result": "passed",
+      "group": "G2-owner-native-recheck",
+      "source_sha": "c0766dfc56dd8444f10b4be9608d9501705a8e43"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_corrupt_owned_source_never_clears_pending_as_missing[run]",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_corrupt_owned_source_never_clears_pending_as_missing[report]",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_index_rejects_untrusted_owner_entry_shape_without_consuming_marker[alteration0]",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_index_rejects_untrusted_owner_entry_shape_without_consuming_marker[alteration1]",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_index_rejects_untrusted_owner_entry_shape_without_consuming_marker[alteration2]",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_index_rejects_untrusted_owner_entry_shape_without_consuming_marker[alteration3]",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_index_rejects_untrusted_owner_entry_shape_without_consuming_marker[alteration4]",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_index_rejects_untrusted_owner_entry_shape_without_consuming_marker[alteration5]",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_index_ownership::test_index_rejects_untrusted_owner_entry_shape_without_consuming_marker[alteration6]",
+      "result": "passed",
+      "group": "G2-native-recovery-and-owner-validation",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_runs::test_real_ab_receipts_case_comparison_and_fixed_continuation",
+      "result": "passed",
+      "group": "G3-fixed-results",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_runs::test_prepare_does_not_execute_and_rejects_changed_basis",
+      "result": "passed",
+      "group": "G3-fixed-results",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_runs::test_cancel_and_timeout_own_run_only",
+      "result": "passed",
+      "group": "G3-fixed-results",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_runs::test_wrong_marker_never_promoted_and_registration_recovery",
+      "result": "passed",
+      "group": "G3-fixed-results",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_public_api::test_attach_preserves_exact_result_and_rejects_catalog_identity_changes",
+      "result": "passed",
+      "group": "G3-fixed-results",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_workbench_native_submission::test_native_submit_seal_monitor_and_fixed_results",
+      "result": "passed",
+      "group": "G3-fixed-results",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_workbench_native_submission::test_native_source_drift_rejected_before_worker",
+      "result": "passed",
+      "group": "G3-fixed-results",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_workbench_native_submission::test_native_stop_resume_keeps_original_run_and_stage_receipts",
+      "result": "passed",
+      "group": "G3-G4-G6-real-fixture-recheck",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    },
+    {
+      "nodeid": "tests.test_forge_resume::test_cancel_resume_reuses_owned_commit_and_retains_attempt_history",
+      "result": "passed",
+      "group": "G3-fixed-results",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_resume::test_resume_never_grants_unknown_reset_or_changed_binding[unknown-accounting]",
+      "result": "passed",
+      "group": "G3-G4-G6-real-fixture-recheck",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    },
+    {
+      "nodeid": "tests.test_forge_resume::test_resume_never_grants_unknown_reset_or_changed_binding[exhausted-exhausted]",
+      "result": "passed",
+      "group": "G3-G4-G6-real-fixture-recheck",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    },
+    {
+      "nodeid": "tests.test_forge_resume::test_resume_never_grants_unknown_reset_or_changed_binding[changed-stale]",
+      "result": "passed",
+      "group": "G3-G4-G6-real-fixture-recheck",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    },
+    {
+      "nodeid": "tests.test_forge_resume::test_failed_business_guard_is_not_a_technical_retry",
+      "result": "passed",
+      "group": "G3-fixed-results",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_runtime_v3_save_product::test_native_save_prepare_execute_and_fixed_result",
+      "result": "passed",
+      "group": "G3-fixed-results",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_runtime_v3_save_product::test_stage_stays_visible_after_later_failure_and_reconcile_without_events",
+      "result": "passed",
+      "group": "G3-fixed-results",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_p12_input_routes::test_fixed_run_input_reaches_every_inspection_and_parameter_owner",
+      "result": "passed",
+      "group": "G3-G4-G6-real-fixture-recheck",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    },
+    {
+      "nodeid": "tests.test_p12_input_routes::test_native_fixed_stage_uses_sealed_root_without_granting_media",
+      "result": "passed",
+      "group": "G4-input-routes",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_workbench_managed_plan_preview::test_managed_readonly_preview_still_constructs_first_action",
+      "result": "passed",
+      "group": "G4-input-routes",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_workbench_managed_plan_preview::test_managed_native_lance_bindings_compile_without_reading_rows_or_writing_output",
+      "result": "passed",
+      "group": "G4-input-routes",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_workbench_managed_plan_preview::test_managed_preview_preserves_lower_inherited_allocation_limits",
+      "result": "passed",
+      "group": "G4-input-routes",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_workbench_managed_plan_preview::test_managed_candidate_import_cannot_reach_host_or_modify_authority[host_read]",
+      "result": "passed",
+      "group": "G4-input-routes",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_workbench_managed_plan_preview::test_managed_candidate_import_cannot_reach_host_or_modify_authority[proc_read]",
+      "result": "passed",
+      "group": "G4-input-routes",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_workbench_managed_plan_preview::test_managed_candidate_import_cannot_reach_host_or_modify_authority[rule_write]",
+      "result": "passed",
+      "group": "G4-input-routes",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_workbench_managed_plan_preview::test_managed_candidate_import_cannot_reach_host_or_modify_authority[network]",
+      "result": "passed",
+      "group": "G4-input-routes",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_workbench_managed_plan_preview::test_managed_preview_cannot_inherit_preparation_descriptors",
+      "result": "passed",
+      "group": "G4-input-routes",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_table_view::test_presentation_changes_keep_fixed_binding_and_inspection",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_table_view::test_nested_images_use_declared_location_and_fixed_hash",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_table_view::test_historical_evidence_reads_only_stored_json_and_scrubs_credentials",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_table_view::test_resource_declarations_reject_ambiguous_or_unknown_access",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_table_view::test_nested_projection_and_matching_are_literal_schema_paths",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_table_view::test_table_versions_list_registered_facts_and_preview_without_moving_binding",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_table_view::test_table_versions_run_product_is_a_sealed_single_version",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_catalog::test_catalog_profile_is_read_only_fixed_and_available_without_analysis_environment",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_catalog::test_original_declared_profile_keeps_fixed_version_and_does_not_edit_business_files",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_catalog::test_idle_housekeeping_and_real_foreground_http_share_the_original_reader_permit",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_catalog::test_native_cleanup_error_still_closes_the_other_owned_service_resources",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_catalog::test_deferred_owner_start_cancel_or_shutdown_never_launches_a_late_child[False]",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_catalog::test_deferred_owner_start_cancel_or_shutdown_never_launches_a_late_child[True]",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_source_export::test_real_fixed_projected_export_roundtrip_retains_content_and_null_types",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_source_export::test_alias_rebinding_or_invalid_fd_never_exports_a_newer_table",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_source_query::test_projection_and_budget_policy_cannot_be_replaced_with_sql_or_paths",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_source_query::test_profile_explicit_byte_coverage_and_nonfinite_null_complex_counts",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_source_query::test_oversized_native_batch_is_rejected_before_python_expansion",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_source_query::test_real_fixed_source_sample_and_complete_small_table_profile",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_fixed_reads::test_exited_worker_does_not_lose_queued_end_before_cleanup_or_readopt_generation",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_fixed_reads::test_owner_clear_failure_after_retirement_holds_return_without_accessing_retired_lease",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_fixed_reads::test_incomplete_read_does_not_acknowledge_end_or_release_owner",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_fixed_reads::test_consumer_cancel_fences_owned_job_and_cleans_before_releasing_slot",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_fixed_reads::test_original_output_range_accepts_integer_http_status_and_retires_before_bytes",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_source_admission::test_input_scope_cannot_run_sql_and_binding_waits_for_native_object_then_commits_all_aliases",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_source_admission::test_wrong_source_transfer_or_stopped_admission_never_binds_input",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_media_source_export::test_exact_declared_fixed_row_streams_only_to_exclusive_inherited_file",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_media_source_export::test_missing_declaration_or_symlink_never_uses_a_project_root_fallback",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_media_source_export::test_audio_video_declarations_have_real_resource_root_hash_mime_and_finite_budget",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_media_source_export::test_control_root_itself_ancestor_and_child_refuse_before_copy[.forge]",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_media_source_export::test_control_root_itself_ancestor_and_child_refuse_before_copy[.forge/assets]",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_media_source_export::test_control_root_itself_ancestor_and_child_refuse_before_copy[public]",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_analysis_media_source_export::test_filesystem_identity_is_bounded_exact_and_keeps_legacy_small_metadata_readable",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_workbench_native_notebook::test_dictionary_read_uses_fixed_binding",
+      "result": "passed",
+      "group": "G5-analysis-notebook-media",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_workspace_sync::test_change_hints_cover_controls_configs_and_wal_without_content_reads",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_workspace_sync::test_change_inventory_reports_omissions_without_disabling_other_scopes",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_workspace_sync::test_run_page_at_capacity_reads_only_selected_outputs",
+      "result": "passed",
+      "group": "G3-G4-G6-real-fixture-recheck",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    },
+    {
+      "nodeid": "tests.test_forge_workspace_sync::test_read_projections_preserve_committed_output_facts",
+      "result": "passed",
+      "group": "G3-G4-G6-real-fixture-recheck",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    },
+    {
+      "nodeid": "tests.test_forge_workspace_sync::test_journal_projection_does_not_require_a_forge_manifest",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_project_management::test_create_only_control_files_and_no_false_pass",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_project_management::test_register_keeps_business_bytes_and_is_idempotent",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_project_management::test_registration_controls_conflict_does_not_overwrite",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_project_management::test_large_original_project_keeps_browsing_and_sync_without_data_configuration",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_project_management::test_failed_publication_is_recoverable_without_reinitializing",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_project_management::test_cli_create_and_add_share_registration",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_workbench_read_admission::test_read_burst_waits_fifo_cancels_and_releases_every_slot",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_nested_remaining_independent_calls_and_finally_reset",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_invalid_scope_refuses_without_context_leak[nan]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_invalid_scope_refuses_without_context_leak[inf]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_invalid_scope_refuses_without_context_leak[True]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_invalid_scope_refuses_without_context_leak[160]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_resident_absence_does_not_install_startup_deadline",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_untrusted_or_expanded_worker_transport_refuses[other-150000000000]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_untrusted_or_expanded_worker_transport_refuses[oneshot-v1-nan]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_untrusted_or_expanded_worker_transport_refuses[oneshot-v1-\\u0661\\u0665\\u0660]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_untrusted_or_expanded_worker_transport_refuses[oneshot-v1-0]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_untrusted_or_expanded_worker_transport_refuses[oneshot-v1-161000000000]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_untrusted_or_expanded_worker_transport_refuses[oneshot-v1-111111111111111111111]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_untrusted_or_expanded_worker_transport_refuses[None-150000000000]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_untrusted_or_expanded_worker_transport_refuses[oneshot-v1-None]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_validated_worker_bound_is_retained_and_transport_removed",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_one_shot_parent_binding_transports_remaining_without_global_env",
+      "result": "passed",
+      "group": "G6-G7-budget-and-browser-recheck",
+      "source_sha": "918a46dfc40e80022d041ab54c64a9a10a68673c"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_exited_ready_response_is_drained_after_deadline",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_exited_worker_with_open_reply_pipe_does_not_wait_past_deadline",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_expired_copy_does_not_begin_a_new_file",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_cpu_retains_all_four_exited_thread_totals",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_unrelated_web_thread_cpu_is_excluded",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_missing_final_cpu_coverage_refuses",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_history_slow_marker_and_wait_limit_are_separate",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_history_inherits_shorter_operation_deadline",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_history_cpu_refusal_drains_and_next_request_is_independent",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_native_worker_environment_never_inherits_control_bound",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_request_receipt_keeps_late_ready_or_unknown_seal[ready]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_request_receipt_keeps_late_ready_or_unknown_seal[unknown]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_launch_deadline_preserves_real_journal_and_ownership[reservation_overrun]",
+      "result": "passed",
+      "group": "G3-G4-G6-real-fixture-recheck",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_launch_deadline_preserves_real_journal_and_ownership[before_fork]",
+      "result": "passed",
+      "group": "G3-G4-G6-real-fixture-recheck",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_launch_deadline_preserves_real_journal_and_ownership[possible_fork]",
+      "result": "passed",
+      "group": "G3-G4-G6-real-fixture-recheck",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_launch_deadline_preserves_real_journal_and_ownership[returned_fork]",
+      "result": "passed",
+      "group": "G3-G4-G6-real-fixture-recheck",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_cancel_remains_independent_of_expired_control_and_admission_locks",
+      "result": "passed",
+      "group": "G3-G4-G6-real-fixture-recheck",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    },
+    {
+      "nodeid": "tests.test_forge_operation_budget::test_resume_attempt_commit_survives_expiry_before_nested_start",
+      "result": "passed",
+      "group": "G6-G7-budget-and-browser-recheck",
+      "source_sha": "918a46dfc40e80022d041ab54c64a9a10a68673c"
+    },
+    {
+      "nodeid": "tests.test_forge_history_admission::test_actual_paths_capacity_and_exclusions",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_history_admission::test_snapshot_is_readonly_bounded_and_ends_each_transaction",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_history_admission::test_unknown_files_and_symlinks_refuse_without_fd_leak[symlink]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_history_admission::test_unknown_files_and_symlinks_refuse_without_fd_leak[skipped_symlink]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_history_admission::test_unknown_files_and_symlinks_refuse_without_fd_leak[fifo]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_history_admission::test_unknown_files_and_symlinks_refuse_without_fd_leak[socket]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_history_admission::test_unknown_files_and_symlinks_refuse_without_fd_leak[root_symlink]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_history_admission::test_unknown_files_and_symlinks_refuse_without_fd_leak[journal_symlink]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_history_admission::test_limits_and_deadline_are_enforced",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_history_admission::test_deadline_is_checked_inside_a_single_flat_directory",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_history_admission::test_disappearing_file_is_not_silently_charged_zero",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_forge_prompt_contract::test_workspace_capacity_is_explicit_and_runs_can_only_tighten_it",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_execution_payload_limits::test_explicit_row_allowance_can_exceed_default_estimate_without_raising_other_budgets",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_execution_payload_limits::test_real_forge_wide_join_uses_same_payload_contract[True]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_execution_payload_limits::test_real_forge_wide_join_uses_same_payload_contract[False]",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_execution_payload_limits::test_real_forge_resume_delivers_new_output_under_original_cumulative_ceiling",
+      "result": "passed",
+      "group": "G6-refresh-budgets-history",
+      "source_sha": "0f56e4fd6e0a6cfc7b03e4458382dbe2923371cf"
+    },
+    {
+      "nodeid": "tests.test_workbench_project_boundary_browser::test_pending_start_explicit_cli_sync_retry_and_current_dictionary",
+      "result": "passed",
+      "group": "G7-final",
+      "source_sha": "918a46dfc40e80022d041ab54c64a9a10a68673c"
+    },
+    {
+      "nodeid": "tests.test_workbench_native_notebook::test_native_edit_execute_save_reopen_and_dictionary",
+      "result": "passed",
+      "group": "G7-private-browser-notebook",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    },
+    {
+      "nodeid": "tests.test_workbench_native_notebook::test_dictionary_old_locator_does_not_silently_adopt_new_binding[table]",
+      "result": "passed",
+      "group": "G7-private-browser-notebook",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    },
+    {
+      "nodeid": "tests.test_workbench_native_notebook::test_dictionary_old_locator_does_not_silently_adopt_new_binding[table_request]",
+      "result": "passed",
+      "group": "G7-private-browser-notebook",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    },
+    {
+      "nodeid": "tests.test_workbench_native_notebook::test_dictionary_resolved_request_stays_fixed_across_rebind_and_navigation",
+      "result": "passed",
+      "group": "G7-private-browser-notebook",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    },
+    {
+      "nodeid": "tests.test_workbench_native_notebook::test_native_gateway_permissions_files_and_owned_cleanup",
+      "result": "passed",
+      "group": "G7-private-browser-notebook",
+      "source_sha": "007363251e13c3b623b68a85ebf833e1750eb455"
+    }
+  ],
+  "latest_runtime_equal_counts": {
+    "passed": 312,
+    "failed": 0,
+    "error": 0,
+    "skipped": 0
+  },
+  "scope_notes": {
+    "not_performed": [
+      "release standard/ray/historical/historical_ray full lanes (integration manager window)",
+      "business pipeline tests and live business data",
+      "paid/model/coding loop calls",
+      "obsolete Case browser UI revival",
+      "legacy four-tabs browser case from original plan (replaced by current Notebook routes; separate cold graph baseline failure retained)",
+      "Fable final code review",
+      "integration/main/formal worktree writes",
+      "push/release/preview service changes"
+    ],
+    "known_state_review_required": [
+      {
+        "case": "tests/test_workbench_parameter_projection.py::test_registered_plain_configuration_cold_open_switch_and_reload",
+        "candidate_group": "B3-resolver",
+        "base_group": "B3-browser-baseline",
+        "observed": "HTTP graph 200 but old .wb-node count assertion gets 0 vs expected 3 in both fixed trees",
+        "author_classification": "same baseline failure, not passed and not called flaky",
+        "owner": "parent coordinator for final difference adjudication"
+      }
+    ],
+    "plan_clarifications": [
+      "Table binding identity remains exact workspace/URI/alias/location/ref; same inherited ref need not change with attempt",
+      "index.status once only in application composition; original bounded source_inventory author_roots reads retained",
+      "execution.lock empty content legacy adoption remains before index.begin; nonempty invalid owner rejects",
+      "real prior resume maintenance is retained; no attempt/status/usage admission after refused begin measured against post-maintenance facts",
+      "current Notebook dictionary paths replace inactive Case UI; original intent wording retained"
+    ]
+  }
+}

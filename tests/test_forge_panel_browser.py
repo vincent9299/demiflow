@@ -9,6 +9,7 @@ import pytest
 
 from test_forge_workspace import demo, isolated
 from demiflow.workbench.projects import workspace as api
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.api import WorkspaceServer
 
 
@@ -50,8 +51,8 @@ def open_panel(app, page, target=None):
 
 def test_case_deep_link_reload_history_and_invalid_node(panel):
     root, app, page, errors = panel
-    description = api.describe_table(root, "candidates")
-    row = api.sample_table(root, "candidates", offset=1, limit=1)["rows"][0]
+    description = project_ops.describe_table(root, "candidates")
+    row = project_ops.sample_table(root, "candidates", offset=1, limit=1)["rows"][0]
     reference = dict(v=1, workspace=str(root), kind="case", alias="candidates",
                      binding_digest=description["binding"]["digest"], row_id=row["_rowid"])
     open_panel(app, page, reference)

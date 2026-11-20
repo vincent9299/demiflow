@@ -14,7 +14,7 @@ from demiflow.workbench.projects import workspace as ws
 FORMAT = 'demiflow_forge_native_inspection_v1'
 
 
-def inspect_submission(root, *, entry, parameters, limits):
+def inspect_submission(root, *, table_resolver, entry, parameters, limits):
     """Fixed disposable worker: original code construction is read-only."""
     from contextlib import redirect_stdout
     from demiflow.execution.host.inspection import capture_managed_pipeline, native_submission_view
@@ -29,7 +29,7 @@ def inspect_submission(root, *, entry, parameters, limits):
     source_root = _import_root(root, project)
     sources = _Sources(source_root)
     sources.read(target)
-    arguments, tables, targets, _ = ws.resolve_arguments(root, control, parameters)
+    arguments, tables, targets, _ = ws.resolve_arguments(root, control, parameters, table_resolver=table_resolver)
     if targets:
         raise ForgeError('Native admission cannot mix implicit and explicit output grants')
     sys.dont_write_bytecode = True

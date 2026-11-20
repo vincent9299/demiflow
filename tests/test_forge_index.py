@@ -7,6 +7,7 @@ import sqlite3
 import pytest
 
 from demiflow.workbench.projects import index
+from demiflow.workbench import directory_operations
 from demiflow.workbench.projects import workspace as ws
 from demiflow.forge.platform import content_digest
 
@@ -14,6 +15,7 @@ from demiflow.forge.platform import content_digest
 @pytest.fixture
 def root(tmp_path):
     (tmp_path / '.forge/inspections').mkdir(parents=True)
+    index.initialize_empty(tmp_path)
     return tmp_path
 
 
@@ -27,7 +29,7 @@ def report(root, number, *, publish=True):
         ws.write_control(path, value, create=True)
         os.utime(path, (1000 + number, 1000 + number))
         if publish:
-            assert index.publish(root, marker) is None
+            assert ws.publish_report_index(root, marker) is None
     return value, marker
 
 
@@ -65,12 +67,12 @@ def test_source_commit_survives_index_failure_and_pending_sync(root, monkeypatch
     insert = index._insert
     monkeypatch.setattr(index, '_insert', failed)
     with ws.control_lock(root):
-        assert 'injected' in index.publish(root, marker)
+        assert 'injected' in ws.publish_report_index(root, marker)
     assert path.read_bytes() == original
     assert index.status(root)['complete'] is False
     assert index.page(root, 'report')['total'] == 0
     monkeypatch.setattr(index, '_insert', insert)
-    result = index.synchronize(root)
+    result = directory_operations.synchronize(root)
     assert result['complete'] and result['pending'] == 0 and result['reports'] == 1
     assert path.read_bytes() == original
 
@@ -84,10 +86,10 @@ def test_publication_recovery_is_idempotent_after_commit_before_marker_clear(roo
         return unlink(path, *args, **kwargs)
     monkeypatch.setattr(Path, 'unlink', fail_marker)
     with ws.control_lock(root):
-        assert 'injected' in index.publish(root, marker)
+        assert 'injected' in ws.publish_report_index(root, marker)
     assert index.status(root)['reports'] == 1
     monkeypatch.setattr(Path, 'unlink', unlink)
-    assert index.synchronize(root)['reports'] == 1
+    assert directory_operations.synchronize(root)['reports'] == 1
     assert index.status(root)['complete']
 
 
@@ -100,7 +102,7 @@ def test_corrupt_index_explicit_rebuild_preserves_sources_and_invalidates_cursor
     assert index.status(root)['reason'] == 'index_unavailable'
     with pytest.raises(ValueError, match='unavailable'):
         index.page(root, 'report')
-    assert index.rebuild(root)['reports'] == 3
+    assert directory_operations.rebuild(root)['reports'] == 3
     with pytest.raises(ValueError, match='cursor'):
         index.page(root, 'report', cursor=cursor)
     assert {p.name: p.read_bytes() for p in (root / '.forge/inspections').iterdir()} == originals
@@ -111,13 +113,13 @@ def test_rebuild_limits_and_legacy_reads_do_not_silently_change_sources(root):
         report(root, i)
     before = (root / '.forge/index.sqlite').read_bytes()
     with pytest.raises(ValueError, match='budget'):
-        index.rebuild(root, max_entries=2)
+        directory_operations.rebuild(root, max_entries=2)
     assert (root / '.forge/index.sqlite').read_bytes() == before
     (root / '.forge/index.sqlite').unlink()
     page = ws.list_reports(root)
     assert page['total'] == 3 and not page['index']['complete']
     assert not (root / '.forge/index.sqlite').exists()
-    assert index.rebuild(root)['complete']
+    assert directory_operations.rebuild(root)['complete']
 
 
 def test_pending_capacity_and_source_less_intent_recovery(root, monkeypatch):
@@ -126,5 +128,5 @@ def test_pending_capacity_and_source_less_intent_recovery(root, monkeypatch):
         index.begin(root, 'report', '0' * 64)
         with pytest.raises(ValueError, match='pending budget'):
             index.begin(root, 'report', '1' * 64)
-    result = index.synchronize(root)
+    result = directory_operations.synchronize(root)
     assert result['complete'] and result['reports'] == 0

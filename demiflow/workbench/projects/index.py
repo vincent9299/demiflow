@@ -15,7 +15,7 @@ import sqlite3
 import time
 import uuid
 
-from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench.projects import io as ws
 from demiflow.forge.schema import ForgeError
 
 FORMAT = 'demiflow_forge_index_v1'
@@ -92,23 +92,23 @@ def _metadata(db):
     return dict(format=row[0], epoch=row[1], revision=row[2], complete=bool(row[3]), runs=row[4], reports=row[5])
 
 
-def _ensure(root):
-    """Called only by explicit writers holding workspace.control_lock."""
+def _ensure(root, *, complete=False):
+    """Writers only. Only a new workspace can attest an empty source set."""
     path = _path(root)
     if path.exists():
         return
-    empty = True
-    for name in ('runs', 'inspections'):
-        directory = ws.relative_path(root, '.forge/' + name)
-        if directory.exists():
-            with os.scandir(directory) as entries:
-                empty &= next(entries, None) is None
     temp = path.with_name('.index-' + uuid.uuid4().hex + '.sqlite')
     try:
-        _create(temp, complete=empty)
+        _create(temp, complete=complete)
         os.replace(temp, path)
     finally:
         temp.unlink(missing_ok=True)
+        temp.with_name(temp.name + '-journal').unlink(missing_ok=True)
+
+
+def initialize_empty(root):
+    """The caller exclusively created the workspace control directory."""
+    _ensure(root, complete=True)
 
 
 def begin(root, kind, identity):
@@ -118,9 +118,9 @@ def begin(root, kind, identity):
     markers = _pending(root)
     path = ws.relative_path(root, '.forge/index-pending/' + kind + '-' + identity + '.json')
     if path in markers:
-        raise ForgeError('This directory entry has a pending update; synchronize the index first')
+        raise ForgeError('This directory entry has a pending update; run demiflow workbench index ROOT --synchronize first')
     if len(markers) >= MAX_PENDING:
-        raise ForgeError('Directory index pending budget is full; synchronize before more control writes')
+        raise ForgeError('Directory index pending budget is full; run demiflow workbench index ROOT --synchronize before more control writes')
     with _connect(_path(root)) as db:
         metadata = _metadata(db)
         exists = db.execute('SELECT 1 FROM entries WHERE kind=? AND identity=?', (kind, identity)).fetchone()
@@ -132,33 +132,41 @@ def begin(root, kind, identity):
     return marker
 
 
-def _source(root, kind, identity):
-    _identity(kind, identity)
-    if kind == 'run':
-        from demiflow.workbench.runs import manager as runs
-        target = runs.directory(root, identity)
-        if not target.exists():
-            return None
-        from demiflow.execution.host.inspection import observe_storage, RunReadError
-        try:
-            with observe_storage(target) as observation:
-                if not observation.exists:
-                    return None
-        except RunReadError as exc:
-            raise ForgeError(str(exc), code=exc.code or 'operation_rejected') from exc
-        _, value = runs._load(root, identity, detail='identity')
-        manifest = value['manifest']
-        created, digest = manifest['created_at'], manifest['digest']
-        active = value['state']['status'] in runs.ACTIVE
-    else:
-        path = ws.relative_path(root, '.forge/inspections/' + identity + '.json')
-        if not path.exists():
-            return None
-        report = ws.load_report(root, identity)
-        created, digest, active = path.stat().st_mtime_ns / 1e9, report['digest'], False
+def _entry(value, marker=None):
+    """Validate owner-supplied data, without reading or interpreting its source."""
+    if type(value) is not dict or set(value) != {'kind', 'identity', 'created_at', 'digest', 'active'}:
+        raise ForgeError('Invalid directory entry')
+    _identity(value['kind'], value['identity'])
+    created = value['created_at']
     if type(created) not in (int, float) or not math.isfinite(created) or created < 0:
         raise ForgeError('Directory source has an invalid creation timestamp')
-    return (kind, identity, float(created), digest, int(active))
+    if type(value['digest']) is not str or not re.fullmatch('[0-9a-f]{64}', value['digest']) or type(value['active']) is not bool:
+        raise ForgeError('Invalid directory source digest or activity')
+    if marker is not None and (value['kind'], value['identity']) != (marker['kind'], marker['identity']):
+        raise ForgeError('Directory entry does not match its marker')
+    return value['kind'], value['identity'], float(created), value['digest'], int(value['active'])
+
+
+def _marker(marker):
+    if (type(marker) is not dict or set(marker) != {'format', 'kind', 'identity', 'generation'}
+            or marker['format'] != FORMAT or type(marker['generation']) is not str
+            or not re.fullmatch('[0-9a-f]{32}', marker['generation'])):
+        raise ForgeError('Invalid pending marker')
+    _identity(marker['kind'], marker['identity'])
+
+
+def pending_markers(root):
+    """Bounded storage records/errors for explicit synchronization under control_lock."""
+    for path in _pending(root):
+        try:
+            marker = ws.read_control(path, 4096)
+            _marker(marker)
+            if path.name != marker['kind'] + '-' + marker['identity'] + '.json':
+                raise ForgeError('Pending marker filename differs')
+        except Exception as exc:
+            yield path.name, None, str(exc)[:1024]
+        else:
+            yield path.name, marker, None
 
 
 def _insert(db, value):
@@ -173,17 +181,18 @@ def _insert(db, value):
     _metadata(db)
 
 
-def publish(root, marker):
+def publish(root, marker, entry):
     """After source publication, under control_lock. Cache failure is reported.
 
     The writer must not roll back an already published source because this
     returns an error. The exact marker remains for explicit recovery.
     """
     try:
+        _marker(marker)
+        value = None if entry is None else _entry(entry, marker)
         path = ws.relative_path(root, '.forge/index-pending/' + marker['kind'] + '-' + marker['identity'] + '.json')
         if ws.read_control(path, 4096) != marker:
             raise ForgeError('Directory update marker changed')
-        value = _source(root, marker['kind'], marker['identity'])
         with _connect(_path(root), write=True) as db:
             if value is not None:
                 _insert(db, value)
@@ -200,19 +209,7 @@ def publish(root, marker):
         return str(error)[:1024]
 
 
-def synchronize(root):
-    errors = []
-    with ws.control_lock(root):
-        _ensure(root)
-        for path in _pending(root):
-            marker = ws.read_control(path, 4096)
-            if set(marker) != {'format', 'kind', 'identity', 'generation'} or marker['format'] != FORMAT:
-                errors.append('Invalid pending marker: ' + path.name)
-                continue
-            error = publish(root, marker)
-            if error:
-                errors.append(path.name + ': ' + error)
-    return {**status(root), 'errors': errors}
+
 
 
 def status(root):
@@ -271,41 +268,39 @@ def page(root, kind, *, limit=20, offset=0, cursor=None):
                 total=details['runs' if kind == 'run' else 'reports'], next_cursor=next_cursor, index=details)
 
 
-def rebuild(root, *, max_entries=MAX_ENTRIES, timeout_s=300):
-    if type(max_entries) is not int or not 1 <= max_entries <= MAX_ENTRIES or type(timeout_s) is not int or not 1 <= timeout_s <= 300:
+def rebuild_from_entries(root, entries, *, max_entries, deadline):
+    """Stream owner entries into a replacement; caller holds control_lock.
+
+    Failure after replace may leave the new database with pending markers.
+    Neither the old nor new database is an execution authority.
+    """
+    if type(max_entries) is not int or not 1 <= max_entries <= MAX_ENTRIES:
         raise ForgeError('Invalid index rebuild budget')
-    deadline = time.monotonic() + timeout_s
     target = _path(root)
     temp = target.with_name('.index-' + uuid.uuid4().hex + '.sqlite')
-    with ws.control_lock(root):
-        try:
-            _create(temp, complete=True)
-            count = 0
-            with _connect(temp, write=True) as db:
-                for kind, directory in [('run', 'runs'), ('report', 'inspections')]:
-                    parent = ws.relative_path(root, '.forge/' + directory)
-                    if not parent.exists():
-                        continue
-                    with os.scandir(parent) as entries:
-                        for entry in entries:
-                            count += 1
-                            if count > max_entries or time.monotonic() > deadline:
-                                raise ForgeError('Index rebuild exceeded its entry/time budget')
-                            if entry.is_symlink() or (kind == 'run' and not entry.is_dir(follow_symlinks=False)) or (kind == 'report' and not entry.is_file(follow_symlinks=False)):
-                                raise ForgeError('Invalid source directory entry')
-                            identity = entry.name[:-5] if kind == 'report' and entry.name.endswith('.json') else entry.name
-                            value = _source(root, kind, identity)
-                            if value is None:
-                                raise ForgeError('Directory source is incomplete: ' + identity)
-                            _insert(db, value)
-                            if count % 100 == 0:
-                                db.commit()
-                db.commit()
-            os.replace(temp, target)
-            # All writers use control_lock; every existing marker is now covered.
-            for path in _pending(root):
-                path.unlink()
-        finally:
-            temp.unlink(missing_ok=True)
-            temp.with_name(temp.name + '-journal').unlink(missing_ok=True)
+    def check():
+        if time.monotonic() >= deadline:
+            raise ForgeError('Index rebuild exceeded its entry/time budget')
+    try:
+        check()
+        _create(temp, complete=True)
+        with _connect(temp, write=True) as db:
+            for count, value in enumerate(entries, 1):
+                check()
+                if count > max_entries:
+                    raise ForgeError('Index rebuild exceeded its entry/time budget')
+                if value is None:
+                    raise ForgeError('Directory source is incomplete')
+                _insert(db, _entry(value))
+                if count % 100 == 0:
+                    db.commit()
+            check()
+            db.commit()
+        check()
+        os.replace(temp, target)
+        for path in _pending(root):
+            path.unlink()
+    finally:
+        temp.unlink(missing_ok=True)
+        temp.with_name(temp.name + '-journal').unlink(missing_ok=True)
     return status(root)

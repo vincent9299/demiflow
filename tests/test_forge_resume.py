@@ -55,15 +55,20 @@ def test_cancel_resume_reuses_owned_commit_and_retains_attempt_history(root):
 
 @pytest.mark.parametrize('failure,needle', [('unknown', 'accounting'), ('exhausted', 'exhausted'), ('changed', 'stale')])
 def test_resume_never_grants_unknown_reset_or_changed_binding(root, failure, needle):
-    value = prepared(root)
+    value = execute(root, prepared(root))
+    assert value['status'] == 'succeeded', value
+    stopped(root, value['run_id'])
     control = runs.journal(root, value['run_id'])
-    # Fault fixture models a positively stopped execution under runtime v1.
-    (runs.directory(root,value['run_id'])/'unit-1.lock').touch()
-    control.transition({'prepared'}, 'interrupted',execution_stopped=True,cleanup='complete')
+    assert control.recovery_identity() is not None
+    # Private fault injection follows a real stopped execution, retaining its
+    # original recovery identity and durable unit instead of inventing a seal.
+    control.transition({'succeeded'}, 'interrupted',execution_stopped=True,cleanup='complete')
     if failure == 'unknown':
-        control.record_usage(elapsed_ms=100, output_bytes=0)
+        control.record_usage(elapsed_ms=value['state']['usage']['elapsed_ms'],
+                             output_bytes=value['state']['usage']['output_bytes'])
     elif failure == 'exhausted':
-        control.record_usage(elapsed_ms=value['limits']['timeout_s'] * 1000, output_bytes=0, complete=True)
+        control.record_usage(elapsed_ms=value['limits']['timeout_s'] * 1000,
+                             output_bytes=value['state']['usage']['output_bytes'], complete=True)
     else:
         path = root / 'operators/question_rules.py'
         path.write_text(path.read_text() + '\n# changed binding\n')

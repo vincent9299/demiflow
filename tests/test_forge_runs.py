@@ -15,6 +15,7 @@ import pyarrow as pa
 
 from demiflow import data
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs import manager as runs
 from demiflow.execution.run_journal import RunJournal
 from demiflow.data.plan import CallableSpec, StandardCallable
@@ -63,7 +64,7 @@ def execute(root, value):
 
 
 def rows(root, run):
-    return ws.sample_table(root, 'run:' + run['run_id'] + ':target')['rows']
+    return project_ops.sample_table(root, 'run:' + run['run_id'] + ':target')['rows']
 
 
 def custom(root, body, *, operators='', arguments=None, limits=None):
