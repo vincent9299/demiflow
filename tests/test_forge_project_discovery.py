@@ -98,11 +98,14 @@ def test_partial_source_check_is_bound_to_originals_and_declarations(original):
 
 def test_project_check_tracks_the_checker_revision(original, monkeypatch):
     from demiflow.workbench.projects import checks as project_check
+    from demiflow.workbench.runs import manager as runs
+    from demiflow.workbench.table_bindings import make_resolver
     ws.init_workspace(original, existing=True)
     result = project_ops.check_project(original)
     assert result['checker_platform_digest']
     monkeypatch.setattr(ws, 'check_snapshot', lambda path: {'status': 'current', 'current_digest': '0'*64})
-    assert 'platform_changed' in project_check.status(original)['changes']
+    resolver = make_resolver(ws.table_binding, runs.result_table)
+    assert 'platform_changed' in project_check.status(original, table_resolver=resolver)['changes']
 
 
 @pytest.mark.parametrize('change,code', [
