@@ -390,8 +390,9 @@ def test_historical_resume_entry_retains_original_seal_without_new_certificate(a
     # pre-action fixture. Public resume, its bounded worker and start admission
     # remain real; intercept only the final native process spawn.
     from demiflow.execution.runtime_limits import execution_limits
-    configuration = dict(format=1, stream_protocol='aligned-barrier-v2', run_id=run['run_id'],
-                         platform_revision='original-platform', limits=execution_limits(None))
+    configuration = dict(format=1, stream_protocol='aligned-barrier-v2', run_id='4'*32,
+                         entry_identity=value['manifest']['source_digest'], started_at=time.time(),
+                         limits_explicit=[], platform_revision='original-platform', limits=execution_limits(None))
     journal.claim_execution(configuration, 'f'+'1'*32)
     journal.release_execution('f'+'1'*32)
     popen = subprocess.Popen
