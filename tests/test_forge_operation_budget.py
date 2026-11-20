@@ -9,6 +9,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from test_forge_runs import base, root
 
 from demiflow.execution.run_journal import RunJournal
 from demiflow.forge import operation_budget as budget
@@ -123,7 +124,7 @@ def test_validated_worker_bound_is_retained_and_transport_removed(monkeypatch):
 
 
 def test_one_shot_parent_binding_transports_remaining_without_global_env():
-    source = str(Path(runs.__file__).resolve().parents[2])
+    source = str(Path(runs.__file__).resolve().parents[3])
     program = f'''import sys, json, os
 sys.path.insert(0, {source!r})
 from demiflow.forge.platform_worker import _bind_parent
@@ -358,6 +359,7 @@ def minimal_run(root, monkeypatch, status='prepared'):
     run_id = 'r' + 'a' * 24
     target = runs.directory(root, run_id)
     manifest = dict(format=runs.FORMAT, root=str(root), run_id=run_id, outputs={},
+        platform={'files': [{'path': 'workbench/runs/worker.py'}]},
         entry='flows/private.py:run', created_at=time.time(), parameter_path='flows/private.json', report_digest='b' * 64,
         observation_instances=[], object_locations=[], limits=dict(runs.DEFAULT_LIMITS))
     manifest['digest'] = content_digest(manifest)
@@ -393,7 +395,7 @@ def test_launch_deadline_preserves_real_journal_and_ownership(tmp_path, monkeypa
             clock.now = 161
         return result
 
-    def environment(*args):
+    def environment(*args, **kwargs):
         if boundary == 'before_fork':
             clock.now = 161
         return {}
@@ -442,35 +444,41 @@ def test_cancel_remains_independent_of_expired_control_and_admission_locks(tmp_p
     assert journal.execution_status()['stop_phase'] == 'requested'
 
 
-def test_resume_attempt_commit_survives_expiry_before_nested_start(tmp_path, monkeypatch):
-    from demiflow.workbench import worker as workspace_worker
-    target, journal, manifest = minimal_run(tmp_path, monkeypatch, status='cancelled')
-    clock = Clock()
-    monkeypatch.setattr(budget, 'time', clock)
-    monkeypatch.setattr(runs, 'execution_stopped', lambda *a: True)
-    monkeypatch.setattr(runs, '_check_basis', lambda *a: None)
-    monkeypatch.setattr(runs, 'register_results', lambda *a, **kw: [])
-    monkeypatch.setattr(runs, '_report', lambda *a: {})
-    monkeypatch.setattr(runs, '_fact_actions', lambda *a: [])
+def test_resume_attempt_commit_survives_expiry_before_nested_start(root):
+    from test_forge_runs import execute
+    from test_workbench_native_submission import native_flow
+    from test_forge_resume import stopped
+    from _p12_bounded_test import bounded_test
+    value = execute(root, native_flow(root))
+    assert value['status'] == 'succeeded', value
+    stopped(root, value['run_id'])
+    journal = runs.journal(root, value['run_id'])
+    assert journal.recovery_identity() is not None
+    # A private fault state keeps the real execution identity/unit/publications.
+    journal.transition({'succeeded'}, 'cancelled', execution_stopped=True, cleanup='complete')
+    bounded_test(_expired_after_actual_resume_commit, root=root, value=value)
+
+
+def _expired_after_actual_resume_commit(root, value, monkeypatch):
+    from demiflow.workbench.projects import index
+    target = runs.directory(root, value['run_id'])
+    previous = runs.show(root, value['run_id'], attempt=1)
     original = RunJournal.begin_attempt
+    current_deadline = budget.current_deadline
     deadlines = []
-
     def commit(self, **kwargs):
-        deadlines.append(budget.current_deadline())
+        deadlines.append(current_deadline())
         result = original(self, **kwargs)
-        clock.now = 161
+        monkeypatch.setattr(budget, 'current_deadline', lambda: time.monotonic() - 1)
         return result
-
-    def operation(name, root, **kwargs):
-        assert name == 'run_resume'
-        kwargs.pop('_pass_fds')
-        return runs._resume(root, **kwargs)
-
     monkeypatch.setattr(RunJournal, 'begin_attempt', commit)
-    monkeypatch.setattr(workspace_worker, 'operation', operation)
-    with pytest.raises(ForgeError, match='deadline exceeded'):
-        runs.resume(tmp_path, manifest['run_id'], expected=manifest['digest'], expected_attempt=1)
-    assert deadlines == [160]
+    with pytest.raises(ForgeError) as caught, budget.scope():
+        runs._resume(root, value['run_id'], expected=value['digest'], expected_attempt=1)
+    assert caught.value.code == 'resource_limit'
+    monkeypatch.setattr(budget, 'current_deadline', current_deadline)
+    assert len(deadlines) == 1 and deadlines[0] is not None
     state = RunJournal(target).execution_status()
     assert state['attempt'] == 2 and state['status'] == 'prepared'
+    assert index.status(root)['pending'] == 1
+    assert runs.show(root, value['run_id'], attempt=1) == previous
     assert budget.current_deadline() is None

@@ -99,14 +99,24 @@ def test_run_page_at_capacity_reads_only_selected_outputs(isolated, monkeypatch)
         db.set_trace_callback(sql.append)
         return db
     monkeypatch.setattr(sqlite3, 'connect', traced)
+    loaded = []
+    original_load = runs._load
+    def selected_load(root, run_id, **kwargs):
+        loaded.append((run_id, kwargs.get('detail'), kwargs.get('action_ids')))
+        return original_load(root, run_id, **kwargs)
+    monkeypatch.setattr(runs, '_load', selected_load)
     started = time.monotonic()
     page = runs.list_runs(isolated, limit=20)
     elapsed = time.monotonic() - started
     assert page['total'] == 128 and len(page['runs']) == 20
     assert page['runs'][0]['run_id'] == prepared['run_id']
     assert not any('node_observations' in query or 'FROM completion' in query for query in sql)
-    assert sum('SELECT sequence' in query for query in sql) == 20
-    assert all('action_id IN' in query for query in sql if 'SELECT sequence' in query)
+    # Verify the host's P4 requests, not a frozen reader's private SQL spelling.
+    selected = {item['run_id'] for item in page['runs']}
+    assert len(loaded) == 40 and {item[0] for item in loaded} == selected
+    assert sum(detail == 'identity' for _, detail, _ in loaded) == 20
+    actions = tuple(spec['action_id'] for spec in original['outputs'].values())
+    assert [(detail, ids) for _, detail, ids in loaded if detail != 'identity'] == [('summary', actions)] * 20
     assert not any(query.startswith(('INSERT', 'CREATE', 'UPDATE', 'DELETE')) for query in sql)
     print(f'128 runs: page=20 elapsed={elapsed:.3f}s queries={len(sql)}')
     before = project_ops.workspace_changes(isolated)
@@ -124,18 +134,23 @@ def test_run_page_at_capacity_reads_only_selected_outputs(isolated, monkeypatch)
 
 
 def test_read_projections_preserve_committed_output_facts(isolated):
-    prepared = runs.prepare(isolated, 'flows/questions.py:select', params='flows/select_a.json')
+    from test_workbench_native_submission import native_flow
+    from test_forge_runs import execute
+    from test_forge_resume import stopped
+    prepared = native_flow(isolated)
+    completed = execute(isolated, prepared)
+    assert completed['status'] == 'succeeded'
     run_id = prepared['run_id']
+    stopped(isolated, run_id)
     journal = RunJournal(runs.directory(isolated, run_id))
-    action = next(iter(journal.execution_view()['manifest']['outputs'].values()))['action_id']
-    journal.action_event(action, 'intent', {'started': True})
-    journal.action_event(action, 'receipt', {'status': 'committed', 'committed_version': 1})
-    journal.action_event(action, 'result', {'location_id': 'local', 'ref': {'lance_version': 1, 'row_count': 2}})
+    # Keep real publication evidence; a private terminal-state fault must not
+    # cause the read-only projection to promote the whole run to success.
+    journal.transition({'succeeded'}, 'interrupted', execution_stopped=True, cleanup='complete')
     full = runs.show(isolated, run_id)
     listed = runs.list_runs(isolated)['runs'][0]
     assert listed['outputs'] == full['outputs']
-    assert listed['status'] == 'prepared'  # A receipt never upgrades overall execution status.
-    assert listed['outputs'][0]['status'] == 'committed'
+    assert listed['status'] == 'interrupted'
+    assert all(output['status'] == 'committed' for output in listed['outputs'])
 
 
 def test_journal_projection_does_not_require_a_forge_manifest(tmp_path):

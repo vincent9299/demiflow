@@ -14,6 +14,7 @@ from demiflow.workbench.projects import workspace as ws, index
 from demiflow.workbench.runs import manager as runs, domain
 from demiflow.workbench import project_operations
 from test_forge_runs import base, root, prepared
+from test_forge_resume import stopped
 from test_forge_markdown_reading import browser
 from test_forge_public_api import service
 from test_forge_panel_browser import open_panel
@@ -35,10 +36,14 @@ def test_pending_start_explicit_cli_sync_retry_and_current_dictionary(root, brow
     pending = root / '.forge/index-pending' / ('run-' + identity + '.json')
     pending_bytes = pending.read_bytes()
     out = Path(os.environ.get('FORGE_ACCEPTANCE_DIR', str(tmp_path / 'evidence'))); out.mkdir(parents=True, exist_ok=True)
-    network = []; receipt = dict(source_sha=subprocess.check_output(['git','rev-parse','HEAD'],cwd=TREE,text=True).strip(),
+    network = []; console = []; receipt = dict(service_pid=os.getpid(),viewport={'width':1440,'height':1050},source_sha=subprocess.check_output(['git','rev-parse','HEAD'],cwd=TREE,text=True).strip(),
         imported_from=demiflow.__file__, run_id=identity, attempt=1)
     with service(root, enable_runs=True) as app, page_for(browser, app) as (page, errors):
         receipt['origin'] = app.origin
+        receipt['static_sha256'] = {str(path.relative_to(TREE)):hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted((TREE / 'demiflow/workbench/web').rglob('*')) if path.is_file()}
+        page.on('console', lambda message: console.append(dict(level=message.type,text=message.text[:2048].replace(app.token,'REDACTED')))
+                if len(console)<256 else None)
         assert app.server_port not in (55971,55972,59865,59866)
         page.on('response', lambda response: network.append(dict(path=urlsplit(response.url).path,status=response.status))
                 if '/api/' in response.url and len(network)<512 else None)
@@ -84,7 +89,9 @@ def test_pending_start_explicit_cli_sync_retry_and_current_dictionary(root, brow
         assert not errors, errors
         receipt.update(refusal=refusal,synchronization=synced,result_ref=result['table']['ref'],binding=binding,
             source_preserved=True,notebook_sha256=hashlib.sha256(original_notebook).hexdigest(),
-            pageerrors=errors,network=network,view=page.evaluate('ForgeView.decodeView(location.hash)'))
+            pageerrors=errors,console=console,network=network,view=page.evaluate('ForgeView.decodeView(location.hash)'))
+    shown = stopped(root, identity)
     receipt['service_closed'] = app.fileno() == -1
     receipt['owned_run_processes_stopped'] = not any(runs.process_matches(shown['state'].get(name)) for name in ('supervisor','worker'))
+    assert receipt['service_closed'] and receipt['owned_run_processes_stopped']
     (out / 'p12-browser-receipt.json').write_text(json.dumps(receipt,ensure_ascii=False,indent=2)+'\n')

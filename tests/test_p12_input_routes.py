@@ -69,9 +69,16 @@ def run(*, source, target):
     assert observation['result']['status'] == 'checked'
     assert admission.describe(root, entry, params=path)['status'] == 'requires_prepare'
     native_target = root / 'native-preview-only.lance'
-    native = operation('native_submission_inspect', root, entry=entry, limits=runs.limits_with(),
-        parameters=dict(format='demiflow_forge_flow_parameters_v1', arguments={
-            'source': dict(kind='table', alias=explicit), 'target': {'uri': str(native_target)}}))
+    # Native capture requires its existing explicit Arrow schema contract.
+    # It reads the same fixed prior run through a separately registered entry.
+    native_entry, native_path = 'flows/native_consumer.py:run', 'flows/native_consumer.json'
+    (root / 'flows/native_consumer.py').write_text("from demiflow import data\nimport pyarrow as pa\ndef run(*, source, target):\n    return data.read_lance(source['uri'], version=source['version'], columns=['case_id']).limit(1).write_lance(target['uri'], schema=pa.schema([('case_id', pa.string())]), mode='create', return_receipt=True)\n")
+    native_parameters = dict(format='demiflow_forge_flow_parameters_v1', arguments={
+        'source': dict(kind='table', alias=explicit), 'target': {'uri': str(native_target)}})
+    (root / native_path).write_text(json.dumps(native_parameters))
+    ws.register_flow(root, native_entry, params=native_path)
+    native = operation('native_submission_inspect', root, entry=native_entry,
+        limits=runs.limits_with(), parameters=native_parameters)
     assert native['status'] == 'compiled'
     assert native['binding']['tables'][explicit]['reference']['ref'] == output['result']['ref']
     assert not native_target.exists()
@@ -81,9 +88,9 @@ def run(*, source, target):
     proposed = parameters.preview(root, **request)
     applied = parameters.update(root, authorize=lambda: None, proposed_sha256=proposed['proposed_sha256'], **request)
     assert applied['applied']
-    plan = preview.preview(root, entry=entry, params=path)
+    plan = preview.preview(root, entry=native_entry, params=native_path)
     assert plan['available'] and plan['entry_completed'] is False
-    assert not (root / 'data/consumer.lance').exists()
+    assert not (root / 'data/consumer.lance').exists() and not native_target.exists()
     # Original omitted-attempt and effective explicit-attempt parameters both
     # resolve through the real prepare worker before the sealed start recheck.
     continuation = runs.prepare(root, entry, params=path, inputs={'source': explicit})

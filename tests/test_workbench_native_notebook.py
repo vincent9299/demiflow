@@ -142,7 +142,9 @@ def test_native_edit_execute_save_reopen_and_dictionary(browser,native_project,t
             expect(page.locator('.dictionary-table:visible')).to_have_count(1)
             frame.locator('body').evaluate('async () => { const app=window.jupyterapp; await app.restored; const p=app.shell.currentWidget; await p.context.ready; await p.sessionContext.ready; }')
             editor=frame.locator('.jp-CodeCell .cm-content').first
-            editor.fill('answer = 40 + 2\nprint("native-ok", answer)')
+            editor.fill('from pathlib import Path\nimport demiflow\n'
+                + 'assert Path(demiflow.__file__).resolve().is_relative_to(Path(' + repr(str(Path(__file__).resolve().parents[1])) + '))\n'
+                + 'answer = 40 + 2\nprint("native-ok", answer)')
             editor.press('Shift+Enter')
             expect(frame.locator('.jp-OutputArea-output')).to_contain_text('native-ok 42',timeout=30000)
             session=page.locator('iframe.native-notebook-frame').evaluate('f=>f.contentWindow.jupyterapp.shell.currentWidget.sessionContext.session.id')
