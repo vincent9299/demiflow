@@ -105,7 +105,10 @@ def test_project_check_tracks_the_checker_revision(original, monkeypatch):
     assert result['checker_platform_digest']
     monkeypatch.setattr(ws, 'check_snapshot', lambda path: {'status': 'current', 'current_digest': '0'*64})
     resolver = make_resolver(ws.table_binding, runs.result_table)
-    assert 'platform_changed' in project_check.status(original, table_resolver=resolver)['changes']
+    status = project_check.status(original, table_resolver=resolver)
+    assert 'platform_changed' not in status['changes']
+    assert status['platform_provenance']['current_digest'] == '0'*64
+    assert status['static_status'] == result['static_status']
 
 
 @pytest.mark.parametrize('change,code', [

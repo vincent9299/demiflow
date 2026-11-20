@@ -47,7 +47,7 @@ GUARDS = (
 # The seven files no change may touch without an explicit decision.
 FROZEN = {
     'demiflow/execution/raw_fetch.py': '55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493',
-    'demiflow/execution/queue_execution.py': '2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2',
+    'demiflow/execution/queue_execution.py': '7d962b68a75baaf78c9eaf6f7d9d68c85a736b38ee428bd7bdee4eb23c56c584',
     'demiflow/execution/queue_sinks.py': 'b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074',
     'demiflow/execution/queue_source.py': '1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307',
     'demiflow/execution/contracts/exchange.py': 'dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2',

@@ -141,10 +141,6 @@
         "demiflow.execution.run_reader",
         "observe_storage"
       ],
-      "platform_identity": [
-        "demiflow.execution.recovery_identity",
-        "platform_identity"
-      ],
       "read_action_plan": [
         "demiflow.execution.sealed_plan_facts",
         "read_action_plan"
@@ -428,9 +424,10 @@
       "members": [
         "attach",
         "__enter__",
-        "__exit__"
+        "__exit__",
+        "validate_recovery_identity"
       ],
-      "returned": "Existing context manager establishment only; worker does not bind returned RunContext or access its state. CheckedExecution.bind_context() independently uses original ContextVar mechanism; no new coupling."
+      "returned": "Existing context manager establishment only; validate_recovery_identity accepts an original identity document, purely validates supported format/protocol without I/O, state change or platform comparison, and raises original RecoveryContractError; worker does not bind returned RunContext or access its state. CheckedExecution.bind_context() independently uses original ContextVar mechanism; no new coupling."
     },
     "control.RunJournal": {
       "conditional": "connection_scope is process-local bounded connection reuse; transactions and attempt fencing remain per operation. reserve_nodes/reserve_actions only initial prepare; resumed managed attempts must pass both to begin_attempt. Remove listed read members that final facts migration leaves unused; never expand to arbitrary class members.",
@@ -610,7 +607,8 @@
     "RunContext": [
       "attach",
       "__enter__",
-      "__exit__"
+      "__exit__",
+      "validate_recovery_identity"
     ],
     "RunJournal": [
       "directory",

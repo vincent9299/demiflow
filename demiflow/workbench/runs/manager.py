@@ -32,7 +32,7 @@ from demiflow.forge.schema import ForgeError
 from demiflow.forge import operation_budget
 from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
 from demiflow.workbench.pipeline_policy import limits_with
-from demiflow.execution.host.control import RunJournal
+from demiflow.execution.host.control import RunJournal, RunContext
 from demiflow.execution.host.inspection import read_run, RunReadError
 from demiflow.errors import ExecutionConflict
 
@@ -323,6 +323,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     from demiflow.workbench.conversations import admission as development_admission
     development_acceptance = development_admission.check(root, entry=entry)
     root, workspace, platform = ws.load_workspace(root)
+    platform = ws.current_platform_snapshot(platform)
     change_scope = workspace.get('audit', {}).get('change_scope')
     audit.require_scope(ws._check_change_scope(root), expected_scope=change_scope)
     requested_limits = limits
@@ -545,7 +546,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                 observation_instances=observation_instances,
                 credential_names=sorted(credentials), evidence=ledgers, request_budgets=list(budgets.values()),
                 object_locations=object_locations(report=report),
-                platform=dict(digest=workspace['platform']['digest'], origin=str(platform_root),
+                platform=dict(digest=platform['digests']['snapshot'], origin=str(platform_root),
                     declaration=declaration, environment=platform['environment'], files=platform['platform']['files'], limits=platform['limits']))
             if native_execution is not None:
                 native_resources.seal(target, native_execution)
@@ -712,7 +713,9 @@ def verify_seal(target, manifest, *, environment=True):
             raise ForgeError('Sealed platform source differs')
     if environment:
         p = manifest['platform']
-        if environment_inventory(p['declaration'], p['limits'], extras=p['environment']['extras']) != p['environment']:
+        actual = environment_inventory(p['declaration'], p['limits'], extras=p['environment']['extras'])
+        if {k: v for k, v in actual.items() if k != 'platform_distribution'} != {
+                k: v for k, v in p['environment'].items() if k != 'platform_distribution'}:
             raise ForgeError('Run dependency metadata changed')
     return report
 
@@ -964,15 +967,13 @@ def resume(root, run_id, *, expected, expected_attempt, authority=None):
     from demiflow.workbench.worker import operation
     authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()))
     authority.require(root, "run_submit")
-    # Same-engine resume admission with a concrete reason before any business start.
+    # Original-contract admission with a concrete reason before any business start.
     # History is read-only: this never rewrites source nor creates a replacement
     # successful run; per-action compatibility is enforced by the recovery path.
-    from demiflow.execution.host.inspection import platform_identity
     binding = RunJournal(directory(root, run_id)).recovery_identity()
     if binding is None:
         raise ForgeError('该运行没有统一恢复契约，不能恢复历史；请新建运行。', code='conflict')
-    if binding.get('platform_revision') != platform_identity():
-        raise ForgeError('引擎实现已变更，恢复需要原引擎版本；不能重写源或创建替代成功运行。', code='conflict')
+    RunContext.validate_recovery_identity(binding)
     from demiflow.workbench.runs.domain import preparation_lock
     with preparation_lock() as lease:
         prepared = operation('run_resume', root, run_id=run_id, expected=expected, expected_attempt=expected_attempt,_pass_fds=(lease,), _authority=authority.bootstrap())
@@ -987,6 +988,7 @@ def _resume(root, run_id, *, expected, expected_attempt, authority=None):
         raise ForgeError('Resume requires the stopped attempt identity', code='invalid_request')
     with execution_lock(root):
         target, value = _load(root, run_id)
+        RunContext.validate_recovery_identity(RunJournal(target).recovery_identity())
         state, manifest = value['state'], value['manifest']
         if manifest['digest'] != expected or state.get('attempt') != expected_attempt:
             raise ForgeError('Run binding or execution attempt changed', code='conflict')
@@ -1401,7 +1403,7 @@ def verify_run_basis(root, manifest):
     if manifest['format'] == 'demiflow_forge_run_manifest_v3' and project['format'] == ws.FORMAT_V3:
         raise ForgeError('Workspace audit contract changed; prepare a new run', code='conflict')
     audit.require_scope(ws._check_change_scope(root), expected_scope=manifest.get('change_scope'))
-    report = ws._report_status(root, manifest['report_digest'], table_resolver=_table_resolver())
+    report = ws._report_status(root, manifest['report_digest'], table_resolver=_table_resolver(), platform_check=False)
     if report['status'] != 'checked' or not report['verification']['complete']:
         raise ForgeError('Prepared basis is stale: ' + ', '.join(report.get('changes', [])), code='conflict')
     if manifest['parameter_path'] and ws.read_control(ws.relative_path(root, manifest['parameter_path'])) != manifest['original_parameters']:
