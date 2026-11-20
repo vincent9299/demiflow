@@ -336,7 +336,7 @@ def test_explicit_row_allowance_can_exceed_default_estimate_without_raising_othe
     assert explicit['max_row_bytes'] == explicit['max_batch_bytes'] == 16 * 2**20
     assert explicit['memory_bytes'] == defaults['memory_bytes']
     assert explicit['max_rss_bytes'] == defaults['max_rss_bytes']
-    from demiflow.workbench.runs.limits import limits_with
+    from demiflow.workbench.pipeline_policy import limits_with
     managed = limits_with(policy={'memory_bytes': 128 * 2**20, 'max_row_bytes': 16 * 2**20})
     assert managed['max_row_bytes'] == 16 * 2**20
 

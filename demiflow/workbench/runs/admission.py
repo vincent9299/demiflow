@@ -1,7 +1,7 @@
 """Common registered-input admission; preparation remains the execution gate."""
 
 from demiflow.workbench.projects import workspace as ws
-from demiflow.workbench.runs.limits import limits_with
+from demiflow.workbench.pipeline_policy import limits_with
 from demiflow.forge.schema import ForgeError
 
 

@@ -30,8 +30,8 @@ from demiflow.forge.platform_environment import platform_declaration
 from demiflow.forge.platform_environment import environment_inventory
 from demiflow.forge.schema import ForgeError
 from demiflow.forge import operation_budget
-from demiflow.workbench.runs.limits import DEFAULT_LIMITS
-from demiflow.workbench.runs.limits import limits_with
+from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
+from demiflow.workbench.pipeline_policy import limits_with
 from demiflow.execution.host.control import RunJournal
 from demiflow.execution.host.inspection import read_run, RunReadError
 from demiflow.errors import ExecutionConflict

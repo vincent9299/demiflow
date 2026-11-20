@@ -645,7 +645,7 @@ def _prompt_setup(root, count):
 
 def _prompt_execute(root):
     from demiflow.execution.checked import CheckedExecution
-    from demiflow.workbench.runs.limits import DEFAULT_LIMITS
+    from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
     root = Path(root)
     os.chdir(root)
     _prompt_load('operators.capture', root / 'operators/capture.py')

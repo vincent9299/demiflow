@@ -123,7 +123,7 @@ def load_workspace(root):
         from demiflow.forge.audit import validate_policy
         validate_policy(value['audit'])
     if modern:
-        from demiflow.workbench.runs.limits import limits_with
+        from demiflow.workbench.pipeline_policy import limits_with
         limits_with(policy=value.get('budgets'))
         if not isinstance(value['id'], str) or not re.fullmatch(r'w[0-9a-f]{32}', value['id']):
             raise ForgeError('Invalid workspace identity')
@@ -574,7 +574,7 @@ def audit_observe(root, *, expected_policy, session, previous_hint=None):
 
 
 def set_budgets(root, limits, *, expected):
-    from demiflow.workbench.runs.limits import limits_with
+    from demiflow.workbench.pipeline_policy import limits_with
     root, value, _ = load_workspace(root)
     if value['format'] not in MODERN_FORMATS or content_digest(value) != expected:
         raise ForgeError('Budget policy requires the current workspace-v2 binding')
@@ -1590,7 +1590,7 @@ def workspace_changes(root):
 
 def workspace_context(root):
     import ast
-    from demiflow.workbench.runs.limits import limits_with
+    from demiflow.workbench.pipeline_policy import limits_with
 
     root, value, snapshot = load_workspace(root)
     from demiflow.workbench.projects.discovery import discover
