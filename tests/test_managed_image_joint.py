@@ -302,6 +302,7 @@ def test_actual_forge_final_image_sink_resume_never_republishes(image_workspace_
     assert previous['status']=='cancelled' and previous['state']['usage_complete'] is True
     consumed=budgets(root,value['run_id'])
     published_before_resume = Path(uri).exists()
+    if window == 'after_acked': assert published_before_resume
     if published_before_resume: assert lance.dataset(uri).version == 1
     if damage:
         item=ready['fact']['prepared']['sinks']['write_lance']['objects']['objects'][0]
