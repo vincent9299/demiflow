@@ -55,13 +55,14 @@ def test_managed_native_lance_bindings_compile_without_reading_rows_or_writing_o
     import lance
     import pyarrow as pa
     from demiflow.workbench.projects import workspace as ws
+    from demiflow.workbench import project_operations as project_ops
     root, _ = registered_preview
     workspace = root/'orders'
     data = workspace/'data'; data.mkdir()
     (workspace/'tables').mkdir()
     lance.write_dataset(pa.table({'id': [1, 2, 3], 'name': ['One', 'Two', 'Three']}), str(data/'input.lance'))
     ws.add_location(workspace, 'local', data, writable=True)
-    ws.attach_table(workspace, 'input', relative_uri='input.lance', version=1,
+    project_ops.attach_table(workspace, 'input', relative_uri='input.lance', version=1,
         dataset_id='input', schema_name='input', schema_version='1')
     (workspace/'orders_pipeline.py').write_text('''import resource
 from demiflow import data

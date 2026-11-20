@@ -1,0 +1,125 @@
+P12 实施验收矩阵（设计 v1；未标已执行者全部待实施）
+
+0. 执行约束与回执
+
+统一使用既有 /yzp/zhaozy/yangzepeng/0905/env/bin/python，只读使用解释器/依赖。
+所有命令 cwd 显式本任务树或本任务固定 SHA 的私有导出；PYTHONPATH=该树:该树/tests；-P -B，PYTHONDONTWRITEBYTECODE=1。同一 pytest 进程先 assert Path(demiflow.__file__).resolve().is_relative_to(tree)，受管子进程通过现有 fixture source binding 再证明；不能仅父进程导入断言。
+独立 /tmp/demiflow-p12-<sha>-<group>/ 下 DEMIFLOW_RESOURCE_ROOT/RESOURCE_HOME/FORGE_DOMAIN/LOCATION_CACHE/TMPDIR 与 pytest basetemp，并行度 1；OPENBLAS/OMP/MKL=1。服务 port=0，仅 fixture 合成数据，无业务仓/模型服务/真实付费调用。
+pytest 使用 -q -p no:cacheprovider --basetemp <独占路径> --junitxml <持久 evidence.xml> <明确 nodeid/file>。测试前 collect-only 落 collection.txt/json；执行回执记录 source SHA、命令、解释器依赖、import 来源、测试清单 hash、资源域、并发、timeout、所有 collected/executed/passed/failed/error/skipped/timeout/not_run/deselected。原始 stdout/stderr/JUnit 与第一次失败永久保留。
+建议小组外层超时 300s，真实普通/native 运行组按现有单例预算合计上限 1800s，浏览器/Notebook 各 1200s；超时不改成跳过。以源码实际测试时长校准并记录，不并发全仓重跑。
+
+已执行基线（源 122edf4，设计文件不属于产品输入）：
+  tests/test_forge_index.py
+  tests/test_forge_index_runs.py
+  tests/test_workbench_engine_boundary.py
+51 collected=51 executed=51 passed；其余计数 0；11.54s；单进程外层 timeout 120s。
+原始 /yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/design-v1/baseline/{receipt.json,environment.log,pytest.log,results.xml}。
+/bin/python3 以及 demiflow-env 两次探针都无 pytest，未执行产品测试；env/bin/python 具备依赖且实际 import 在本树。环境未安装/更新。
+
+实施前补基线：以下受影响已有组至少 collection 全部并运行具体实际路径；已有非通过绑定 main known-state/source，工作台未在四线内的失败必须单独记录，不能引用四线绿代替。不会为了任务 B 清掉所有旧失败。
+
+1. 依赖边界 / P4（对应 v2.1 §10 第一组）
+
+现有：test_workbench_engine_boundary.py 全文件，test_package_dependency_ratchet.py；完整候选跑 tests/merge_gate.py --json <receipt>。
+新增 test_workbench_project_boundary.py：实际目录集合等于核心/应用/initializer 分类；七核心及 index 的直接/传递静态路径；table_bindings 与 pipeline_policy 窄依赖；模拟新增间接 edge 证明守卫有失败反例。
+在固定候选比较七冻结文件与基线摘要；比较 _surface.py、workbench-engine-surface-v3.json 与基线字节零变化；不改任何守卫旧范围/预算来通过。
+行为补证：冷导入七核心不加载 runs/worker/registry；实际混合 resolver 呼叫由应用入口驱动。动态 import/monkeypatch 字符串重扫 callsite-candidates，不宣称任意 Python 完整静态证明。
+
+2. 索引 / 发布 / 生命周期窗口（§10 第二组）
+
+现有：test_forge_index.py、test_forge_index_runs.py、test_forge_workspace_sync.py；test_forge_runtime_review_fixes.py 中 R2/R3/R4 生命周期，test_forge_development_admission.py 的 first-start/prepare guard；test_forge_runs.py 准备/失败/取消场景。
+
+新增有意义反例（真实临时 journal/control/index，昂贵业务预检可受控 stub；不 mock 被测 begin/marker/SQLite 结果）：
+I01 同 run 真实残留 pending：start 拒绝，state/attempt/revision/usage 完全等于 begin 前；_launch_unit/reserve/_claim_lease/Popen 调用计数 0；原 marker 字节不改；无 launch_failed；CLI synchronize 后同 prepared 可重试。
+I02 pending 满（小 MAX_PENDING 实际填满）、不可读 SQLite（真实损坏或禁止打开）分别拒绝；同 I01；不把 index_unavailable 当空。
+I03 authority/development guard 拒绝，index.begin 也未调用；防止为 begin 提前绕过授权。
+I04 begin 成功、_launch_unit 进入失败或 reserve 抛原异常：prepared/usage 不变，原异常类型/消息保留，安全 publish 结精确 marker；再注入摘要失败时留下 pending，不新 failed。
+I05 reserve 后真实启动失败（例 worker_environment 或 Popen 前真实可控拒绝）：原 failed/launch_failed、usage_complete、execution_stopped/cleanup、容量归还成立；与 I04 区分。
+I06 _prepare 已 prepared/durable_tree 后 run_index_entry 抛错，或 index.publish 抛 OSError/返回错误：run目录、manifest/report/状态仍存在且正常返回；pending/complete=false；有界日志；禁止 rmtree。报告保存后的同类失败保持报告 bytes/digest。
+I07 _prepare begin 拒绝无新 run target/initialize；report begin 拒绝无新报告；begin 后目标创建/写入失败保留业务原异常且 marker 当前/Missing 收尾；之前独立检查报告保留。
+I08 _resume 在 begin 前真实 register_results/clean_stopped 落盘；随后真实 pending 拒绝，已做登记/清理保留；snapshot 以 begin 前为准，无 begin_attempt、无新失败。begin 成功但 report/deadline/guard 拒绝也不新 attempt；begin_attempt 成功后的缓存失败保留新 attempt。
+I09 owner 摘要求值边界：run owner 与 report owner 分别注入 PermissionError/RunReadError/损坏/预算超限，与真正 FileNotFound/Missing 区分；摘要异常不能逃出 safe publisher。日志 handler 自身抛错不影响源成功；错误文本 <=1024，不修改 manifest/report digest；BaseException 不吞且 pending 可见。
+I10 generation 变更：旧 marker publish 不能写/删新 marker；同 generation 重试后 member 不重复、排序 created 不漂移；Missing 不删除既有成员。
+I11 index.publish 事务 commit 后 marker unlink 失败：源/已写条目保留；synchronize 重试无重复；旧 epoch cursor 仍按原语义。
+I12 新 init 根完整；旧缺库空根不完整；旧缺库有源不完整；synchronize 不能变完整；rebuild 成功才完整。只读 status/page/list/changes 不建库、不全扫；只有 index_not_initialized 可既有 bounded fallback。
+I13 rebuild 共享小 max_entries/deadline、非法名/符号链接/源损坏/Missing、磁盘/SQLite/temp commit/replace 失败：逐项先计数，旧库 hash/pending 保留，temp+journal 清理；迭代器消费时序验证不预先 list。末条耗尽 deadline 也拒 replace。
+I14 replace 已成功而 marker unlink 失败：明确失败、已换 epoch、新库内容、剩余 pending 与 incomplete；不伪称旧库保留。后续显式维护可完成。
+I15 refresh_index deadline 到达（begin 前/后）分别不建立或保留 marker；不越界延长维护；worker cleanup 保持原资源 owner 责任。
+
+必须调整但不削弱的旧断言：
+test_forge_runtime_review_fixes.py::test_r2_index_failure_before_spawn_is_terminal_and_releases_capacity（基线193）直接令 index.publish 抛 OSError，要求 failed/launch_failed。该期望与已批准“所有者隔离索引发布异常”冲突。拆为 I06“缓存失败不触发源失败”和 I05“真实启动失败释放容量”两例，保留等强度实际 journal/lease/fence/容量断言，解释预期行为变化而非简单删测试。
+::test_r2_launcher_hard_exit_has_durable_reconciliation_fence 的 admitted hook 若仍用 index.publish 保持其实际启动窗口；移动 safe publisher 后先验证 hook发生在 starting 后，不错误落到 begin前/收尾。reserved/spawning、lost Popen return、pending cleanup reservation 回归原样保持。
+
+3. 普通 / native 固定运行结果（§10 第三组）
+
+现有起点：
+- test_forge_runs.py::test_real_ab_receipts_case_comparison_and_fixed_continuation
+- test_forge_runs.py::test_prepare_does_not_execute_and_rejects_changed_basis
+- test_forge_runs.py::test_cancel_and_timeout_own_run_only
+- test_forge_runs.py::test_wrong_marker_never_promoted_and_registration_recovery
+- test_forge_public_api.py::test_attach_preserves_exact_result_and_rejects_catalog_identity_changes
+- test_workbench_native_submission.py（3 个实际 native 用例全部）
+- test_forge_resume.py 现有 attempt/继承/预算/cleanup 回归；test_runtime_v3_save_product.py 只选固定证明相关实际用例，collector 留 nodeid，不用全底座冒充受影响集。
+
+新增参数化矩阵：登记 alias/run:显式 attempt/run:省略 attempt × 普通已提交结果/native stage/继承结果。断言真实 ref 与 uri/version/schema_hash/row_count/store_id/relative_uri，P4 proof 缺失不可被路径存在代替；传统 location 改绑或移除拒绝，native 使用封存 location_root（不强塞当前 locations）。
+省略 attempt 在新 attempt 后变化：旧 expected_binding/source_snapshot 必须 conflict；显式 old attempt 仍固定原有效/继承产物。不存在/无证明/invalid 0/33/bool attempt/malformed selector 错误保持。
+attach_result expected_result 不匹配、metadata/catalog 在读取间被替换、existing alias、expected_ref 不一致均拒绝；绝不覆盖已有 alias/data。native 挂载沿既有能力限制，不额外要求新增支持。
+native dispatch 的 result verification metadata 不嵌套启动 worker；用计数和真实固定结果读路径证明；保留 reader reuse 与限额。
+
+4. 全输入入口（§10 第四组）
+
+现有：test_forge_workspace.py、test_forge_project_checks.py、test_forge_audit_runs.py、test_workbench_parameter_projection.py、test_workbench_managed_plan_preview.py；HTTP/CLI 的 test_forge_public_api.py；native_submission 组。
+
+fixture 用真实先前 run 的固定输出作为参数，走 inspect→project check/status→audit report→普通 prepare 的 original/effective 两次→start preflight→resume basis；另走 native inspect、graph 参数候选 preview/update、graph plan preview。
+每条断言参数传入实际 uri/version、绑定表 reference 固定、controls 不伪造 run:.json；无 executor/输出创建的只检查路径保持无副作用。
+每层缺 resolver 的直接调用必须 fail-fast（必填 keyword-only），注入冲突/不可读时返回既有拒绝/未完整事实，不能静默空表或 checked；核心不能临时 import 应用作为兜底。
+表别名写/删除/view/context 三处仍只支持登记 alias；run: 可读不自动可写。
+wire 捕获验证 worker payload 只有现有 JSON 字段，解析器不入消息，操作名/结果/错误码不变。
+
+5. 分析 / Notebook / 媒体（§10 第五组）
+
+现有：test_forge_analysis_fixed_reads.py、test_forge_analysis_source_admission.py、test_forge_analysis_media_source_export.py；版本与 source/export/query/profile 对应测试按 callsites 收集。test_workbench_native_notebook.py::test_dictionary_read_uses_fixed_binding 与浏览器两个 dictionary binding 测试。
+新增明确前后复核：resolve_version 第二次 reload 改 alias/ref/uri；source_export/fixed_input 前后改 binding；source_query.read/catalog_profile.profile；media _selection→_recheck 改 display/provenance/location/resource inode。必须 conflict 且没有 ready bytes/越权读取；解析器不能闭包持旧 control。
+run: 只读封存版本；普通 alias 可读注册历史版本，version_binding 与 current alias binding 同时核对；媒体依旧需要独立声明/权限，不能因 run ref 可读就有 media grant。
+取消分析读仍先 cleanup/owner/slot 释放后结束；Notebook 文档保存重开输出保留，读表不创建 Pipeline run、不要求活跃 Notebook 才能历史查看。真实内核只启动私有 fixture，不连任何现有会话。
+
+6. 刷新 / 预算 / 历史（§10 第六组）
+
+现有：test_forge_workspace_sync.py、test_forge_project_management.py、test_workbench_read_admission.py、test_forge_history_admission.py、test_forge_development_admission.py。
+预算精确回归：
+- test_forge_prompt_contract.py::test_workspace_capacity_is_explicit_and_runs_can_only_tighten_it
+- test_execution_payload_limits.py::test_explicit_row_allowance_can_exceed_default_estimate_without_raising_other_budgets
+- test_execution_payload_limits.py::test_real_forge_wide_join_uses_same_payload_contract
+- test_execution_payload_limits.py::test_real_forge_resume_delivers_new_output_under_original_cumulative_ceiling
+纯政策对比：从基线文件以私有模块名加载旧 limits（只用于测试比较，不给产品垫片），新旧 None/合法 tightening/unknown key/bool/超部署/余量/显式 payload 上限输入结果或原错误一致；覆盖真实资源规则而非镜像实现。
+刷新测试断言响应键集合与原值来源、index.status 仅一次；project helper 无 observe_storage/run目录读取；run helper 用 P4 opaque token；index_unavailable 不调用 _run_ids；index_not_initialized fallback 最大128；返回 token 不参与授权/启动。
+历史验证：保存基线 producer 的 run/report/Notebook fixture 字节摘要，候选只读无重签；平台 revision 不同则 resume conflict，不构造新成功 run；Forge snapshot stale 与 adoption 独立。新源码不影响既有已封存 runtime；本任务未改变 recovery_identity 范围。
+
+7. 真实浏览器固定候选验收（不是设计阶段已通过）
+
+复用 test_forge_public_api.service 的 port=0 私有服务与现有 browser fixture；其服务器按固定测试提交装配，真实 Chromium 读取已存在可执行路径，记录 Python/包依赖、服务 PID/origin、加载 workbench/__file__、静态资源 sha、candidate SHA、viewport、清理结果。服务需测试范围结束自动 shutdown，仅本人子进程退出；不操作在线预览。
+
+优先已有浏览器路径：
+- test_forge_workbench_browser.py::test_four_tabs_real_graph_parameters_code_and_layout：项目/配置→检查→图；保持四 tab/错误可达。
+- test_forge_workbench_result_navigation_browser.py::test_background_graph_cannot_cancel_clicked_fixed_result
+- test_forge_workbench_result_retry_browser.py::test_fixed_result_request_survives_failure_refresh_reload_history_and_conflict
+- test_workbench_native_notebook.py::test_native_edit_execute_save_reopen_and_dictionary
+- test_workbench_native_notebook.py::test_dictionary_old_locator_does_not_silently_adopt_new_binding
+- test_workbench_native_notebook.py::test_dictionary_resolved_request_stays_fixed_across_rebind_and_navigation
+原生 Notebook 可使用已有 /_demiflow/envs/native-jupyter-20261119/bin/python，只读依赖；实际 kernel/service/文件都在独占 tmp。
+
+增加一个聚焦 P12 的真实流程（可在新 test_workbench_project_boundary_browser.py，复用上述 fixture）：
+1 建私有合成 workspace，完成真实普通 Local run 与 native 输出，列表→封存图→固定结果表，记录 run/attempt/result ref/版本/schema/rows/URI；用 run: 参数做检查/预览与数据样本。
+2 在真实 prepared run 上制造 index 残留 marker，网页点启动显示索引拒绝，HTTP 回查仍 prepared/原 attempt；证明无新进程/容量占用。由测试操作者执行原 CLI --synchronize，然后网页明确重试启动完成。不要添加网页自动修复。
+3 数据→Notebook 字典读取同固定 binding，执行轻量 Python/SQL 输出、保存重开；在同私有服务记录 notebook/session/generation，表读取/轮询不重启 session、不清掉输出；变更 alias 后旧请求 conflict。
+4 一个媒体负例：固定表可读但未声明/撤销媒体位置时拒绝，不返回媒体 bytes；页面错误可达。
+5 页面刷新/历史回看仍固定 run/attempt；已保存 notebook 文件 bytes/输出与开发会话哨兵（只创建私有无模型记录）保持，不启动 coding/model loop。
+
+证据记录响应状态与固定身份、屏幕截图、浏览器 console/pageerror、网络请求/响应元数据、Notebook/session 保持与输出摘要、最终 owned PID/FD/slots 清理；token/cookie/真实业务数据不进入共享回执。服务/浏览器依赖缺失则明确 not-run 原因，不把 importorskip 当产品通过，不下载/安装或接管他人进程求绿。
+旧 Case 浏览器功能已退出活跃入口，不以复活旧界面取得“端到端”证据；保留其现有后端历史权限测试即可。
+
+8. 合流、差异与审阅
+
+B1–B4 完整候选固定后运行六组实际选择、P4/包边界、合入闸，并做浏览器；每组选定/未执行范围清楚列出。Fable 最终审阅依据原 R/AR、批准方案和完整 fixed diff/回执，区分作者测试、reviewer 独立探针与静态结论。
+测试任何首次失败、新 error/skip/timeout/缺失由父协调裁定；只修 P12 真回归，保留原证据。波动按发版规范同提交至少三次独立复跑和负责人裁定，不用一次绿覆盖首次红。
+总控在 integration staged tree 合并前另跑 merge gate；固定 T 四线由唯一平台总控统一窗口执行，B 不擅自跑/修改 integration，不把本任务 51 项或六组称全仓总闸。main/标签/推送/预览独立于本交付。

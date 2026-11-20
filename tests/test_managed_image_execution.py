@@ -17,7 +17,7 @@ from demiflow.execution.checked import CheckedExecution
 from demiflow.execution.run_context import RunContext
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules,LIMITS
-from demiflow.workbench.runs.limits import DEFAULT_LIMITS
+from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
 from demiflow.workbench.projects import workspace as ws
 from demiflow.objects import ObjectRef
 from demiflow.operator_llm.parser import parse_prompt_pack

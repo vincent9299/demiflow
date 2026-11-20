@@ -206,7 +206,7 @@ def state(root,*,path):
                 truncated=projection['truncated'],attribution='unknown',durability='not_proven_by_readback')
 
 
-def _candidate(root,*,path,expected_sha256,graph_binding,replace,proposed_sha256=None):
+def _candidate(root,*, table_resolver,path,expected_sha256,graph_binding,replace,proposed_sha256=None):
     from demiflow.workbench.graph.model import from_binding
     if not isinstance(expected_sha256,str) or not re.fullmatch('[0-9a-f]{64}',expected_sha256):
         raise ForgeError('Expected file SHA256 is required',code='invalid_request')
@@ -234,7 +234,7 @@ def _candidate(root,*,path,expected_sha256,graph_binding,replace,proposed_sha256
         if type(candidate) is not type(before):
             raise ForgeError('Parameter type must match the registered field',code='invalid_request')
         if field['kind']=='table_alias':
-            ws.table_binding(root,control,candidate)
+            table_resolver(root,control,candidate)
         if field['kind']=='output_path':
             owner=document
             for part in field['parts'][:-1]:owner=owner[part]
@@ -263,14 +263,14 @@ def _candidate(root,*,path,expected_sha256,graph_binding,replace,proposed_sha256
 
 
 def preview(root,**request):
-    return _candidate(root,**request)[3]
+    return _candidate(root,table_resolver=_table_resolver(),**request)[3]
 
 
 def update(root,*,authorize,**request):
     root,_,_=ws.load_workspace(root)
     with ws.control_lock(root):
         authorize()
-        root,original,encoded,result=_candidate(root,**request)
+        root,original,encoded,result=_candidate(root,table_resolver=_table_resolver(),**request)
         if result['no_change']:
             return dict(applied=False,no_change=True,new_sha256=_sha(original),needs_check=False)
         path=ws.validate_parameter_path(root,request['path'])
@@ -306,3 +306,9 @@ def update(root,*,authorize,**request):
         finally:
             if temporary is not None:Path(temporary).unlink(missing_ok=True)
         return dict(applied=True,new_sha256=result['proposed_sha256'],needs_check=True)
+
+
+def _table_resolver():
+    from demiflow.workbench.table_bindings import make_resolver
+    from demiflow.workbench.runs import manager as runs
+    return make_resolver(ws.table_binding, runs.result_table)

@@ -7,6 +7,7 @@ import shutil
 import lance
 import pyarrow as pa
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 
 
 def create(root):
@@ -30,7 +31,7 @@ def create(root):
     }
     for name, (schema, rows) in fixtures.items():
         lance.write_dataset(pa.Table.from_pylist(rows, schema=schema), str(root / 'data' / (name + '.lance')))
-        ws.attach_table(root, alias=name, location_id='local', relative_uri=name + '.lance', version=1,
+        project_ops.attach_table(root, alias=name, location_id='local', relative_uri=name + '.lance', version=1,
             dataset_id=name, schema_name=name, schema_version='1')
     for name, tolerance in [('strict', 0), ('tolerant', 1)]:
         params = {'format': 'demiflow_forge_flow_parameters_v1', 'arguments': {

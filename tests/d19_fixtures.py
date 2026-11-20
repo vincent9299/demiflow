@@ -229,6 +229,7 @@ def _make_versioned_table(root: Path) -> dict:
     import pyarrow as pa
     from PIL import Image, ImageDraw
     from demiflow.workbench.projects import workspace as ws
+    from demiflow.workbench import project_operations as project_ops
     from demiflow.workbench.worker import operation
     from demiflow.lance.refs import DatasetRef
     from demiflow.lance.registry import Catalog
@@ -290,7 +291,7 @@ def _make_versioned_table(root: Path) -> dict:
         metas[version] = meta
         catalog.register(DatasetRef(alias, alias + '.lance', version, alias, str(version),
                                     meta['schema_hash'], meta['row_count'], store_id='local'))
-    attached = ws.attach_table(root, alias, relative_uri=alias + '.lance', version=2,
+    attached = project_ops.attach_table(root, alias, relative_uri=alias + '.lance', version=2,
                                dataset_id=alias, schema_name=alias, schema_version='2')
     display = dict(fields=[
         dict(path=['image_uri'], kind='image', location_id='local', sha256_path=['image_sha'],
@@ -298,7 +299,7 @@ def _make_versioned_table(root: Path) -> dict:
         dict(path=['case_id'], kind='text'),
         dict(path=['question'], kind='text'),
     ])
-    ws.set_table_view(root, alias, expected=attached['digest'], display=display, provenance={})
+    project_ops.set_table_view(root, alias, expected=attached['digest'], display=display, provenance={})
 
     from demiflow.workbench.projects.workspace import preview_binding, table_binding
     control, ref, table_uri = table_binding(root, ws.load_workspace(root)[1], alias)
@@ -316,7 +317,7 @@ def _make_versioned_table(root: Path) -> dict:
     binding_v1 = version_binding(1)
     binding_v2 = version_binding(2)
     alias_binding = preview_binding(root, control, table_uri)
-    listed = ws.table_versions(root, alias, expected_binding=alias_binding['digest'])
+    listed = project_ops.table_versions(root, alias, expected_binding=alias_binding['digest'])
     assert listed['total_registered'] == 2, listed
     assert [item['lance_version'] for item in listed['versions']] == [1, 2]
     assert metas[1]['schema_hash'] != metas[2]['schema_hash']
@@ -348,6 +349,7 @@ import json, pathlib, sys, time, subprocess
 import demiflow
 from demiflow.workbench.runs import manager as runs
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 tree, root = map(pathlib.Path, sys.argv[1:])
 assert pathlib.Path(demiflow.__file__).resolve().is_relative_to(tree)
 # The historical producer must inspect against its own platform snapshot.
@@ -373,11 +375,12 @@ print(json.dumps(dict(run_id=prepared['run_id'], attempt=run['attempt'], status=
         assert result.returncode == 0, result.stdout + result.stderr
         facts = json.loads(result.stdout.splitlines()[-1])
         from demiflow.workbench.projects import workspace as ws
+        from demiflow.workbench import project_operations as project_ops
         # Explicitly upgrade the same workspace after producing the old run.
         # Its sealed artifacts remain untouched; all subsequent runs use this tree.
         ws.bind_platform(root, expected=ws.load_workspace(root)[1]['platform']['digest'])
         for variant in ('a', 'b'):
-            report = ws.inspect_flow(root, 'flows/questions.py:select',
+            report = project_ops.inspect_flow(root, 'flows/questions.py:select',
                                      params=f'flows/select_{variant}.json')
             assert report['status'] == 'checked', report
         return facts
@@ -440,6 +443,7 @@ def owned_fixture(tmp_path, monkeypatch, request):
 
     from demiflow.workbench.projects import registry as console
     from demiflow.workbench.projects import workspace as ws
+    from demiflow.workbench import project_operations as project_ops
     from demiflow.forge.platform import content_digest
     registry = tmp_path / 'registry.json'
     project_id = console.add(registry, root, allow_runs=True)['workspace_id']
@@ -563,6 +567,7 @@ def _build_case_world(root, tmp_path, project_id, monkeypatch, lock, calls, resp
     import lance
     import pyarrow as pa
     from demiflow.workbench.projects import workspace as ws
+    from demiflow.workbench import project_operations as project_ops
     from demiflow.workbench.analysis import web_sources, web_service
     from demiflow.workbench.analysis.output_transport import OutputRange
     from demiflow.forge.schema import ForgeError
@@ -589,9 +594,9 @@ def _build_case_world(root, tmp_path, project_id, monkeypatch, lock, calls, resp
     pa.set_io_thread_count(1)
     for alias, data in [('cases', rows), ('other', rows[:1])]:
         lance.write_dataset(pa.Table.from_pylist(data), str(root / 'data' / (alias + '.lance')))
-        attached = ws.attach_table(root, alias, relative_uri=alias + '.lance', version=1,
+        attached = project_ops.attach_table(root, alias, relative_uri=alias + '.lance', version=1,
                                    dataset_id=alias, schema_name='group-demo', schema_version='1')
-        ws.set_table_view(root, alias, expected=attached['digest'], display=dict(fields=[
+        project_ops.set_table_view(root, alias, expected=attached['digest'], display=dict(fields=[
             dict(path=[name + '_image'], kind='image', location_id='local', sha256_path=[name + '_sha'],
                  max_bytes=1024 * 1024, mime='image/png') for name in ['reference', 'base', 'next']] + [
             dict(path=[name], kind='json' if name.endswith('_score') else 'text')
@@ -606,7 +611,7 @@ def _build_case_world(root, tmp_path, project_id, monkeypatch, lock, calls, resp
         ('base_score', 'Base 模型分', 'evaluation', 'json'),
         ('next_image', 'Checkpoint 图片', 'output', 'image'), ('next_answer', 'Checkpoint 回答', 'output', 'md'),
         ('next_score', 'Checkpoint 模型分', 'evaluation', 'json'), ('spare_answer', '补充回答', 'output', 'text')]]
-    info = ws.describe_table(root, 'cases')
+    info = project_ops.describe_table(root, 'cases')
     locator = dict(kind='workspace_table', alias='cases', binding=info['binding']['digest'], columns=list(rows[0]))
     source = web_sources.resolve(root, locator)['source']
     outbox = tmp_path / 'outbox'

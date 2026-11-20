@@ -15,7 +15,7 @@ FORMAT = 'demiflow_forge_project_check_v1'
 MAX_VARIANTS = 32
 
 
-def check(root):
+def check(root, *, table_resolver):
     from demiflow.workbench.projects import workspace as ws
     root, control, snapshot = ws.load_workspace(root)
     destination = root / '.forge/project-check.json'
@@ -35,7 +35,7 @@ def check(root):
         if time.monotonic() - started > 35:
             break
         try:
-            report = ws._inspect_flow(root, entry, params=params, save=True)
+            report = ws._inspect_flow(root, entry, params=params, save=True, table_resolver=table_resolver)
             results.append(dict(entry=entry, params=params, status=report['status'], digest=report.get('digest')))
             for name, sha in report.get('binding', {}).get('sources', {}).items():
                 if name in sources and sources[name] != sha:
@@ -83,7 +83,7 @@ def check(root):
     if content_digest(ws.read_control(root / 'workspace.json')) != before:
         raise ForgeError('Project declarations changed during inspection', code='conflict')
     for item in results:
-        if item['digest'] and ws._report_status(root, item['digest'], platform_check=False)['status'] != item['status']:
+        if item['digest'] and ws._report_status(root, item['digest'], platform_check=False, table_resolver=table_resolver)['status'] != item['status']:
             raise ForgeError('Inspection inputs changed before project publication', code='conflict')
     total = 0
     for path, expected in sources.items():
@@ -133,7 +133,7 @@ def check(root):
     return result
 
 
-def status(root):
+def status(root, *, table_resolver):
     from demiflow.workbench.projects import workspace as ws
     root, control, _ = ws.load_workspace(root)
     path = root / '.forge/project-check.json'
@@ -157,7 +157,7 @@ def status(root):
         reasons.append('platform_changed')
     for item in result['entries']:
         try:
-            if item['digest'] and ws._report_status(root, item['digest'], platform_check=False)['status'] != item['status']:
+            if item['digest'] and ws._report_status(root, item['digest'], platform_check=False, table_resolver=table_resolver)['status'] != item['status']:
                 reasons.append('inspection_changed:' + item['entry'])
         except (ForgeError, OSError, ValueError):
             reasons.append('inspection_unverifiable:' + item['entry'])

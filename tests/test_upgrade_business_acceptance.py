@@ -69,6 +69,7 @@ from demiflow.resources.capacity import LocalCapacityPool
 from demiflow.resources.process_unit import ManagedProcessUnit
 from demiflow.workbench.graph import model as graph_model
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs import facts, manager as runs
 
 from test_map_prompt_async import PACK, server  # loopback fake model transport
@@ -333,7 +334,7 @@ def run_workbench_scenario(root, *, entry, params):
     rows = None
     for name, output in outputs.items():
         if output.get('result') is not None:
-            sampled = ws.sample_table(root, 'run:' + run_id + ':' + name, limit=100)['rows']
+            sampled = project_ops.sample_table(root, 'run:' + run_id + ':' + name, limit=100)['rows']
             # _rowid is the preview scanner's internal Lance row id, not a saved column.
             rows = [{k: v for k, v in row.items() if k != '_rowid'} for row in sampled]
             break
@@ -645,7 +646,7 @@ def _prompt_setup(root, count):
 
 def _prompt_execute(root):
     from demiflow.execution.checked import CheckedExecution
-    from demiflow.workbench.runs.limits import DEFAULT_LIMITS
+    from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
     root = Path(root)
     os.chdir(root)
     _prompt_load('operators.capture', root / 'operators/capture.py')

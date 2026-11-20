@@ -1,0 +1,203 @@
+任务 B / P12：main@122edf4 详细实施方案 v1
+作者：GPT 任务 B 原作者；日期：2026-11-20；状态：设计交付，等待父协调 Fable 复核
+
+0. 固定对象与采用范围
+
+工作树 /yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/workbench/p12-boundary-20261120
+分支 gpt/workbench/p12-boundary-20261120
+基线 main-20261119-3 / 122edf4bd0c827338846abd0114f0b36cf8c1b6d。
+本文件、source-inventory.json、callsite-candidates.json、TEST-PLAN.txt、references.json 构成设计包。
+设计提交完整 SHA、每件 SHA-256 和提交后状态放仓外 tasks/B/design-v1/HANDOFF.json，避免自引用。
+
+采用已通过的 P12 v2.1 全部契约，不重开方向：
+/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/p12-project-run-boundary-20261119/v2.1/design.json
+SHA-256 4a0bf5f6ae4af08e9b5dd927729498ab396ff93696111a483dd9fae5a8ba6dc7。
+通过意见原件：
+/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/CLAUDE-REVIEW-p12-project-run-boundary-v2.1-20261119.md
+SHA-256 e02c1f2478d4844d293987ba3baeef1d73ef67a3f67dae7d38da896d8424be7e。
+本稿是其在新基线的实施附录；契约或范围若出现偏离，先交父协调裁定并在原审阅会话复核，不改冻结件或 P4 名单消除失败。
+
+完整原始 R/15 叶、AR v1.3、全局架构、架构第三版、发版规范及最新授权按 references.json 固定原件路径/摘要。manifest 全部原件和副本均已校验；read_in_full 单列实际完整阅读，未冒称历史附件全读。
+原始意图不重写：本任务直接保障 R.2.2/2.3、R.3.1/3.2/3.3、R.5.1/5.2/5.3；支持 AR.1.2、AR.3.1/3.2/3.3、AR.5.1–5.4 与 C2–C6。R.1 现有四 tab 和已退出活跃入口的 Case 界面不重做；R.4 历史数据/后端读取仍受保护。
+
+1. 与旧设计基线的实际差异
+
+旧 main=e3b645ba97ddb57d9636d3d3f75fb1f6dff3d1f1；旧 integration=1855e0010b8c67d6d73d93b63708fce51f4cccc3。
+从旧 main 到 122edf4 共 44 个文件变化。workbench 产品源码仅 conversations/codex.py、policy.py、review.py、versions.py 四文件；P12 的 projects/runs/worker/api/cli/graph/analysis/Notebook 直接范围、P4 _surface 和生成说明均逐字未变。inventory 复核 48 件（含 AGENTS、测试）：只有 AGENTS 的发版入口变化。不可将架构 v3 的 1855e00 数字自动改绑本 SHA。
+
+11 个 execution/planning 修复及相关测试、P12 历史设计、known-state 留档、发版规范、provider 精确版本准入已经在新基线；本任务从新 main 建树自然继承，不复制旧分支、不回退预算/usage/worker disconnect/final ACK/graph cleanup 修复。四线 tested_commit=3640116，release_commit=122edf4；历史四线成绩不宣称为 122edf4 全套重跑。
+开工时 main/integration 都解析为 122edf4，树 clean；本次新增只含设计材料。
+
+基线有限测试已在本树完成：test_forge_index.py、test_forge_index_runs.py、test_workbench_engine_boundary.py，51 collected/executed/passed，0 failed/error/skipped/timeout/not_run，11.54 秒。原始回执见仓外 baseline/receipt.json。它验证既有索引与 P4 起点，不覆盖新行为；未跑全套六组、merge gate、浏览器或四线。系统 /bin/python3 和 demiflow-env 缺 pytest，之后使用既有 env/bin/python；没有安装包或改共享环境。
+
+2. 改前→改后与唯一 owner
+
+现状：projects.index._source 回读运行 journal/报告；workspace.table_binding 的 run: 分支进入 runs.manager；workspace_changes 观察运行；runs.limits 被项目借用；workspace 的 18 个 worker 代理形成核心→worker→runs 回路。
+目标：项目核心只处理项目控制/声明/登记表/报告，运行所有者解释运行事实，index 只持派生目录；应用层组合解析、worker 代理与刷新。HTTP/CLI 操作名和响应、Notebook 用户 API、持久格式保持。
+
+- projects.workspace：项目声明、路径/locations、登记表 DatasetRef、CAS、报告/参数算法和项目变化片段。报告摘要归它；不读 run 目录。
+- projects.index：校验 IndexEntry/marker，存 SQLite/pending，分页/epoch/revision；只使用 projects.io 的路径、读写/锁基础，不导入 workspace、runs、P4 或注入源读取回调。
+- runs.manager：run_index_entry/publish_run_index/run_change_hints、run 枚举、verify_run_basis 与原生命周期；result_table/P4 证明、register_results 不迁移。
+- project_operations.py 新增：原 18 代理及 bind_audit_report、attach_result、workspace_changes。只做既有跨域编排；无状态库、无新 gate、不被 core/manager 导入。
+- directory_operations.py 新增：显式 synchronize/rebuild，持 control_lock，按 kind 调所有者、组合有界枚举；无 HTTP API、无隐式修复。
+- table_bindings.py 新增：TableResolver 协议与 make_resolver(registered_table=..., run_result=...) 无状态工厂；只依赖标准库/ForgeError，不导入项目/运行/平台类型。工厂仅绑定两个函数，不绑定 root/control/ref。
+- pipeline_policy.py：整体迁入 runs/limits.py 的 DEFAULT_LIMITS 导入、DEPLOYMENT_LIMITS、_overlay、limits_with。仅改路径/职责文档；P4 DEFAULT_LIMITS/resolve_payload_bounds 继续唯一算法。
+
+3. 实际目录与静态守卫范围
+
+projects 当前 10 个功能模块 + __init__.py：
+核心七件 workspace.py、checks.py、discovery.py、definitions.py、documents.py、io.py、index.py。
+应用三件 registry.py（能力/readiness/ceiling/API 服务装配）、watch.py（audit 观察）、flow_arguments.py（图参数应用编排）。__init__.py 无导入副作用。
+
+runs 当前 17 个功能模块 + __init__.py：
+域 owner/support：manager、domain、authority、requests、storage、native_resources、native_stages、facts、view、context；
+准入及既有 worker 入口：admission、native_submission；
+入口/协议/监督：cli、tools、operations、worker；
+limits 迁出删除；__init__ 无副作用。交付后应为 16 + 1，新增四个 workbench 顶层模块。
+
+新增 test_workbench_project_boundary.py：枚举真实 projects/runs 文件集合与角色清单完全相等；AST 覆盖顶层和函数内、相对导入、已知字面量动态导入。七核心任意静态可达路径不得到 runs、worker、api、project_operations、directory_operations、registry、watch、flow_arguments；index 另不得到 workspace/P4；table_bindings 不到领域；pipeline_policy 不到 projects/runs。负例向临时源码图注入一条间接 core→应用→runs，证明守卫会拒绝。保留当前 package/P4 守卫。
+静态图是可解析依赖证据，不是任意动态 Python 的证明；动态消费者以行为验收补足。registry/flow_arguments 仍到运行，runs 仍有 worker 编排环，不宣称整个包/工作台 SCC 清零。
+
+4. 索引接口、写者与失败窗口
+
+不新增磁盘类型。内部 IndexEntry 用普通 dict，字段严格为 kind/identity/created_at/digest/active；Missing 采用 None，且仅所有者确认源不存在才可给出。index 负责类型、finite 非负时间、布尔 active、身份/摘要格式、与 marker 一致性；所有者负责源真实性。
+
+index.begin(root,kind,identity)->现有 marker；index.publish(root,marker,entry_or_missing)->None 或 <=1024 字错误。
+run_index_entry(root,run_id)、workspace.report_index_entry(root,digest)->entry|None。
+owner.publish_*_index(root,marker)->None|有界错误，并在失败时一次有界诊断。
+
+owner 必须在同一个 try/except Exception 中先求摘要、再调用 publish；不能把求值写到 index 的异常边界之外。index.publish 返回的错误也触发同一诊断。诊断含 kind/identity、错误和同步入口，本身失败不能改变源响应。BaseException 不吞，中断保留 marker 作为显式恢复证据；不将诊断写入带 digest 的 manifest/report 或新增成功响应字段。
+
+run owner 沿既有 directory + observe_storage.exists + _load(detail='identity')；created/digest 来自 manifest，active 来自原 ACTIVE。report owner 沿 load_report、mtime。权限失败、损坏、RunReadError、超时/预算超限均不是 Missing。Missing 完成本 marker 但不删除旧条目；rebuild 遇枚举到的源 Missing 必须失败，不能宣称完整。
+
+publish 保持先事务提交，再核对精确 generation 后清 marker；旧 generation 不能写/删新 marker。相同摘要重试不增加成员，保留 created 排序；revision 仍是提示而非权限/事实版本。索引更新失败不回滚已发布源，不覆盖原业务异常。
+
+4.1 start（manager.py:676–784）
+
+保留 authority.require、digest/attempt/state、pidfds、domain lock→execution_lock→control_lock、bounded preflight/history admission 及 operation deadline。预检仍先于 begin；authority.guard 与 development_guard 先进入。
+把原 :722 的组合 with 拆成两层；在两个授权/开发 guard 内先 index.begin，之后才进入 _launch_unit、reserve 和会写 launch_failed 的旧 try。
+执行 fence 注释更新为“预留/运行准入前持久围栏；派生目录 marker 在此之前，不构成运行准入”。
+
+begin 失败直接传播：prepared、attempt、revision、usage 均与 begin 前相同；不进入 _launch_unit，不 reserve，不 _claim_lease，不 Popen，不记 launch_failed。原本可能创建的执行锁文件/锁获取不冒称整个请求完全无文件活动。
+begin 成功建立的 marker 生命周期包住 _launch_unit.__enter__ 和 reserve 前失败：在 reservation 条件之外收尾当前源摘要；若收尾失败留下 marker，原失败优先。
+已取得 reservation 后的真实启动失败仍按原 record_usage/failed-or-cancelled/cleanup/abandon 处理；spawn_attempted 后仍保留不确定 owner，不偷放资源。将所有 index.publish 改 owner 安全发布。marker 收尾只处理本 generation。
+对普通 Exception 的收尾不替换原异常；BaseException 沿中断路径传播，不能被日志或假成功吞掉，pending 供之后 synchronize。
+
+4.2 _prepare（:256/461–511）
+
+begin 仍在新 run 目录 target.mkdir 和 initialize 之前；前置独立 inspection 报告/父 runs 目录可能已经存在，不能把“不新建 run”写成全请求零写入。
+marker 成功后 target.mkdir、封存、initialize/transition/durable_tree 失败，保留原未完成准备的清理语义；完成既有清理后安全发布 Missing/当前源收尾，失败留 pending。
+源发布完成后把索引摘要/发布放到会 rmtree(target) 的回滚区之外，避免摘要异常或中断回滚已持久 prepared。业务封存失败的清理不与缓存失败混同。
+
+4.3 _resume（:908–974）
+
+begin 前 register_results 与 clean_stopped 是真实合法维护，必须保留；owner/GC settled、remaining_limits、output validation、basis 和 authority 仍原职责。
+begin 失败不得调用 begin_attempt/记新失败；对比基准应为清理完成后、begin 前状态，另验证清理实际效果未回滚。
+begin 成功后 _report/deadline/guard/begin_attempt 前异常也需安全发布当前摘要；不构造新 attempt。begin_attempt 后索引失败保留真实新 prepared attempt，不重签/删除旧 attempt。
+
+4.4 report 与 refresh
+
+_inspect_flow 在同 control_lock 下 begin 后才写新报告；headroom/write_control 前失败用 Missing/已有 report 收尾；已写报告不能因摘要读取/SQLite失败删除。旧报告摘要/字节不重写。
+refresh_index 保留 deadline 早退及返回错误；begin 后 deadline 耗尽允许 pending 留待显式同步（不突破维护 deadline 强做摘要）；runs.worker:495、manager._reconcile:1222 仍调用 refresh，不新增运行账本/失败状态。
+
+4.5 缺库、同步、重建
+
+init_workspace 独占新 .forge 成功后调用 index.initialize_empty，complete=true。普通 _ensure 缺库仅 complete=false，不再窥探 runs/inspections。既有库不重写，损坏库不自动覆盖。
+这是唯一预期目录状态收紧：旧根两域为空且无库时也不再自动证明完整；--synchronize 只处理 pending，只有 --rebuild 才证明全源完整。
+CLI index root 保留 status；--synchronize/--rebuild 调 directory_operations。错误提示明确 “demiflow workbench index ROOT --synchronize”；需要完整恢复才 --rebuild。网页仍无同步入口，列为产品限制，非本轮扩 API 的条件。
+
+index 暴露窄存储 API（pending_markers/ensure/rebuild_from_entries）供编排使用，不加入读取源函数参数。
+directory_operations 持一次 control_lock；所有者分别流式枚举 runs/report，每个目录项先计数/验符号链接/类型/身份，不按过滤藏增长，budget 贯穿两域。index.rebuild_from_entries 在临时库逐项插入，每约 100 项 commit，末尾再查 deadline，关闭后 replace。成功替换再清本锁覆盖的 marker。
+替换前任一源/预算/磁盘/提交/replace 失败保留旧库和 pending，清 temp/journal；replace 成功后清 marker 失败须报失败、剩余 pending 可见，不能报告“旧库未变”。不自动回滚成功替换。
+资源上限保持：1,000,000 entries、256 MiB DB、256 pending/active、marker 4096B、SQLite timeout=1/cache=2MiB/mmap=0/temp FILE/FULL sync/DELETE journal；page limit 1..100、offset<=1e6、cursor<=1024；rebuild 1..1e6 与 1..300s。峰值包括旧库+临时库+journal，空间不足明确失败；不构造全量 list。
+
+5. 解析器与全调用链迁移
+
+TableResolver(root,workspace_control,selector)->(control dict, 实际 DatasetRef, Path URI)。表路由不克隆/包装 DatasetRef，不缓存路径或 control。协议注解用 Any，不以 TYPE_CHECKING 导入平台类型。
+registered alias 交 workspace.table_binding（删除其中 run 分支）；run:<id>:<name>[:attempt] 交 runs.result_table，attempt 1..32，省略保持当前选择语义。malformed/未知 selector 原错误，不退为文件路径。
+只在进程内传 callable；跨 worker 仍 JSON operation/root/arguments/bootstrap；禁止把 resolver 放进 **args wire。FORMAT、1MiB request/9MiB response、权限、FD/RSS/timeout、native metadata 同进程 dispatch 特例保持。
+
+核心算法 keyword-only 必填 table_resolver，无 None 默认：resolve_arguments、_inspect_flow、_report_status、_audit_check、checks.check/status。每层和内部 read_table 闭包明确传递；TypeError/漏传不可吞成 empty 或检查通过。
+
+具体迁移（基线行号，完整候选命中见 callsite-candidates.json）：
+A. 直接 table_binding 共 12 个调用：
+  worker.dispatch:220 → 同进程混合 resolver；
+  workspace.detach_table:898、set_table_view:914、workspace_context:1605 → 保留登记表专用，拒 run:；
+  workspace.resolve_arguments:952、_report_status.read_table:1355 → 必填 resolver；
+  graph.parameters._candidate:237 → 当前进程用 workspace.table_binding/runs.result_table 组装 resolver；
+  analysis.catalog_versions.resolve_version:64、:90 → 同一 resolver，第二次传新 load_workspace 的 control；
+  analysis.source_export.fixed_input:37 → resolver；
+  analysis.media_source_export._selection:62、_recheck:113 → resolver，复核读取新 workspace。
+B. resolve_arguments 六处：workspace._inspect_flow:1084；manager._prepare:276/286（original/effective 两次）；admission._describe:40；native_submission.inspect_submission:32；graph.preview._parameters:51。manager 自组装，不回到 project_operations；worker 为其余入口注入。
+C. _inspect_flow：worker inspect、checks.check、manager._prepare；_report_status：worker status、checks.check 的发布前复核、checks.status、workspace._audit_check、迁入 manager 的 verify_run_basis。verify_run_basis 当前 manager._prepare:500/_check_basis:818 两处同批改本域调用。
+D. graph.preview._preview→_parameters 显式转交；graph.parameters.preview/update 在当前应用入口组装并传 _candidate；graph.model:277 改 project_operations.report_status。
+E. 分析完整传播（防止只改直接 ws.table_binding）：
+  worker dispatch analysis_export/media_export/media_sources/source_read/table_profile 及 table 历史版本分支组装 resolver；
+  source_export.export→fixed_input（前/后各次）→catalog_versions.resolve_version；
+  source_query.read→fixed_input（前/后）；catalog_profile.profile→fixed_input 与 source_query.read；
+  media_source_export.export→_export→_selection/_recheck；resolve_fields→_selection/_recheck；二者传 fixed_input/resolve_version；
+  resolve_version 第二次加载 workspace 后仍使用显式新 control；selected 仅事实，不携带可序列化 callable。
+这些新增 keyword-only 参数为内部 Python 合同，不改变 worker 消息字段；父进程 analysis.web_sources 只改代理入口，仍通过 worker 进入这些算法。
+
+6. 18 代理、P4 零增减与文件清单
+
+以下 workspace 函数的实现移到 project_operations，旧定义删除，不 re-export：
+begin_change_scope、audit_check、audit_observe、describe_table、table_versions、attach_table、set_table_view、inspect_flow、check_project、project_check_status、sample_table、profile_table、project_profile、table_media、table_evidence、report_status、project_table、project_sample。
+另移 bind_audit_report 与 workspace_changes；manager.attach_result 同迁；verify_run_basis 反向归 runs.manager。
+
+attach_table 拆为应用 metadata/catalog worker 编排与 workspace._attach_table_control 核心提交 helper。DatasetRef.from_dict/构造、schema/row_count/store_id、expected_ref、一致 control、1024 alias 与 CAS 全留 workspace；helper 接收已观测 description/catalog 字典并执行原验证，不能信任应用层“checked”标记。
+set_table_view 的 worker describe 在应用；catalog.validate/validate_fields、登记 alias 固定引用、CAS 控制提交保留核心 helper。应用只组合，不能扩大 run: 控制写入。
+bind_audit_report 应用先走 report_status，核心 _audit_workspace/_publish_audit_policy 保留 scope/CAS；audit 的 lease、source budget 和 full_interval 按原代码。
+attach_result 保持 attempt 参数、observed expected_result 比对、只创建 alias、expected_ref 防换源。native location_root 的结果读取与现有 attach location 限制原样，不借迁移新增 native 挂载能力；register_results 留原 owner。
+
+产品调用方分组：
+- workbench/api.py、cli.py：同时明确导入 workspace 核心与 project_operations，逐调用改目标，不把 module api 整体换成兼容 facade；runs/cli.py 与 api 的 attach-result 改 project_operations。
+- projects/watch.py：audit_check/audit_observe 改应用入口；registry/flow_arguments 既有职责保持。
+- graph/model.py、parameters.py、preview.py；worker.py；runs/manager.py、admission.py、native_submission.py。
+- analysis/catalog_versions.py、source_export.py、source_query.py、catalog_profile.py、media_source_export.py、web_sources.py。
+- notebooks/data.py：sample 与 project_sample 改应用代理，Notebook 文档/kernel/授权/HTTP 用户合同不变。
+- examples/forge_workspace/make_demo.py、examples/forge_operator_foundation/make_demo.py 及仓内所有 Python fixtures/tests：直接 from-import、ws/api 别名、embedded child scripts、monkeypatch hook 同批迁移，保留行为断言。
+
+P4 约束：_surface.py 与 docs/workbench-engine-surface-v3.json 字节不改。
+workspace 五项独立域导入仍有真实消费者（DemiflowError、lance.preview.describe_table、DatasetRef、objects._local_path、sqlite_journal.MAX_DISK_BYTES）；manager 现有五项也留原文件。四新模块不增加独立域名字；pipeline_policy 仅用原公共 control 导出；run_change_hints 与 run_index_entry 用 inspection.observe_storage/RunReadError。parameter_origins 11、reflection_sites 5 个登记点不搬家/改名。全 workbench import/member/文档一致性守卫必须通过；出现意外依赖先调整实现，不扩名单。
+
+7. 刷新、预算、取消和资源合同
+
+workspace.project_change_hints(root) 仅原 workspace/workspace_id/discovery/audit/project_check/workspace_stamp/sources/source_diagnostics/tables，沿 regular files/source_inventory 预算，不读 Dataset/run。
+runs.run_change_hints(root,index_info) 返回 runs/run_revision；active_runs 来自本次 index_info，仅 index_not_initialized 用 _run_ids(maximum=128)，index_unavailable 不能全扫；observe_storage.change_token 只是 opaque 提示，错误不补造 token，缺失目标沿 digest(None)。
+project_operations.workspace_changes(root) 调一次 index.status，组合上述两段与 reports=digest(epoch/reports)、原 index 对象。既有字段/轮询语义保持；不是跨文件一致快照，不从 token 授权启动或数据读取。
+
+pipeline_policy 纯政策覆盖部署→项目→run tightening；正整数拒 bool、memory/RSS 余量、payload bounds 完全沿用，返回新 dict，不改 usage/cumulative remaining_limits、host partition、Notebook/analysis/Forge 预算。
+
+所有移动代理保留 operation_budget、reader reuse、超时/取消/父退出、FD/RSS 和所有者释放；不加线程池/进程/数据库/全局缓存。取消仍交领域 owner，rebuild 通过锁和 deadline 可控，进程中断不吞 BaseException，临时库 finally 清理且原 pending 可恢复；开始业务后的 uncertain/cleanup 阶段保持原语义。资源限制与错误优先级逐 writer/reader 验收，不能用小 fixture 通过声称实际物理 RSS 硬上限。
+
+8. 身份、历史和回退影响表
+
+平台 revision：普通 .py 移动/改动会改变全树 platform_identity；接受现有跨版本拒绝，不等待 C 去噪方案，也不承诺 hash 不变。
+对象 module/qualname/source：移动应用普通函数、纯预算函数；不移动 DatasetRef、引擎计划/声明类、已封存对象、worker supervisor 固定路径。完整实现后再扫描序列化/字符串路径/importlib/pickle/cloudpickle/parameter origins，偏离清单需逐对象评审。
+封存字节/路径：不重签 manifest/report/native plan、旧 runtime/source，不移动 runs/worker.py 或 forge/run_worker.py；新 prepare 用新版本完整封存。父子 worker 操作名不变。
+历史只读：run/attempt/report v1/v2/v3、固定结果/继承 attempt/原生阶段、Notebook 输出与会话保存保持；运行事实不靠 index 重构。
+恢复：同原版本且原预算/owner/GC/权限满足才恢复；新平台拒旧 revision，无替代成功 run、无改旧 seal 绕过。
+Forge snapshot：可能 stale，重新 adopt/check/new prepare；adopt 不授予跨版本 run resume。
+格式：workspace/table/report/run/index/marker 格式不变，无批量迁移；旧空根缺库 complete 更保守，完整 rebuild 才恢复完整状态。
+
+开发回退：B1–B4 内部提交可审，但不分批合入。失败在任务树修正；不得 reset 别人/主干、删除历史、停止服务。
+合流/发布回退：完整候选交唯一平台总控，必要时隔离反向提交→integration 闸→main，新标签，不回卷 main/强推；服务换版由负责人单独执行。已新建运行保留其生产版本，不能靠回退代码迁移/覆盖记录。
+本任务不操作正式树、integration、预览、共享解释器、业务项目/Notebook 状态或归档。私有验收 fixture 与依赖解释器只读复用，不更改解释器或全局配置。
+
+9. 四组内部提交、一次候选
+
+B1：保存基线/调用清单；迁纯 pipeline_policy 及全部 import（含 tests/embedded strings），删除 runs/limits；跑预算比较和相关静态守卫。
+B2：拆索引所有者/存储；空根 init、directory_operations、全部 writer/publisher 异常窗口（尤其 start guard/begin/fence/reserve、prepare rollback、resume cleanup）、CLI 入口；跑索引/生命周期负例。
+B3：TableResolver + project_operations、18 代理/核心 helper、verify_run_basis、attach_result；按第 5/6 节完整迁 worker/API/CLI/graph/analysis/Notebook/examples/tests，无缺省 resolver 或旧垫片；跑所有输入/结果/固定读取和媒体权限。
+B4：刷新片段组合、删除旧路径和无用 import；目录角色守卫、完整六组回归、P4/冻结字节检查、merge gate、固定源码浏览器 fixture 验收；全部证据绑定完整候选 SHA。
+
+每组临时失败照实保存，不能把内部半迁移 commit 当合流候选。最后一次源码修改后固定 T；后续只记录证据，可用 docs-only 提交 R 并逐字节证明源码/测试/资源/依赖未变，报告 T/R，不篡改原 receipt。A 对 merge gate 的独立扩展由父协调合流，不在 B 抢改该名单。
+父协调完成 Fable 设计无阻塞反馈后才实现；最终代码依批准方案逐条映射，再交同一 Fable 会话独立最终审阅。本人不调用 Fable、不合流、不部署。
+
+10. 完成条件与尚未做
+
+旧 test_forge_runtime_review_fixes.py:193 对抛出的 index.publish 错误要求 launch_failed，与已通过的缓存隔离契约冲突；按 TEST-PLAN 第2组拆为缓存失败隔离和真实启动失败释放容量，保留真实状态/资源断言。
+具体用例/故障注入/浏览器计划在 TEST-PLAN.txt，和原设计 §10 六组相互对应。完成条件是关键职责、失败窗口、固定身份/授权/资源、实际入口均有证据；P4 零增减独立证明。
+本阶段只有设计、只读源码核对和 51 项有限基线通过；实现、新负例、动态全调用验收、浏览器、完整合入闸、四线、Fable 本轮审阅均未完成。旧设计通过不是本轮实现通过。
+暂无需要真人新增承诺的设计项。保留产品限制：显式索引同步只有 CLI；平台跨版本恢复拒绝；工作台 Ray 不开放；不消全包 SCC，不新增旧 Case 界面。

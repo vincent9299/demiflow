@@ -9,6 +9,7 @@ import pytest
 
 from demiflow.workbench import catalog as table_view
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.forge.platform import content_digest
 from demiflow.workbench.worker import operation
 from test_forge_workspace import demo, isolated, attach
@@ -16,20 +17,20 @@ from test_forge_workspace import demo, isolated, attach
 
 def test_presentation_changes_keep_fixed_binding_and_inspection(isolated):
     root = isolated
-    before = ws.describe_table(root, 'candidates')
-    report = ws.inspect_flow(root, 'flows/questions.py:select', params='flows/select_a.json')
-    result = ws.set_table_view(root, 'candidates', expected=before['digest'],
+    before = project_ops.describe_table(root, 'candidates')
+    report = project_ops.inspect_flow(root, 'flows/questions.py:select', params='flows/select_a.json')
+    result = project_ops.set_table_view(root, 'candidates', expected=before['digest'],
         display={'title': 'Questions', 'fields': [{'path': ['question'], 'label': '正文', 'kind': 'text'}]},
         provenance={'kind': 'historical', 'note': 'Existing fixed input, no new run evidence'})
     assert result['digest'] != before['digest']
-    after = ws.describe_table(root, 'candidates', expected_binding=before['binding']['digest'])
+    after = project_ops.describe_table(root, 'candidates', expected_binding=before['binding']['digest'])
     assert after['binding'] == before['binding']
-    assert ws.report_status(root, report['digest'])['status'] == 'checked'
-    assert ws.sample_table(root, 'candidates')['columns'] == ['question']
+    assert project_ops.report_status(root, report['digest'])['status'] == 'checked'
+    assert project_ops.sample_table(root, 'candidates')['columns'] == ['question']
     with pytest.raises(ValueError, match='changed'):
-        ws.set_table_view(root, 'candidates', expected=before['digest'], display={}, provenance={})
+        project_ops.set_table_view(root, 'candidates', expected=before['digest'], display={}, provenance={})
     with pytest.raises(ValueError, match='not certify'):
-        ws.set_table_view(root, 'candidates', expected=result['digest'], display={}, provenance={'kind': 'managed'})
+        project_ops.set_table_view(root, 'candidates', expected=result['digest'], display={}, provenance={'kind': 'managed'})
 
 
 def test_nested_images_use_declared_location_and_fixed_hash(isolated, tmp_path):
@@ -45,8 +46,8 @@ def test_nested_images_use_declared_location_and_fixed_hash(isolated, tmp_path):
     attached = attach(root, 'nested', [{'items': [{'uri': image.as_uri(), 'sha': sha}]}], schema)
     field = dict(path=['items', '*', 'uri'], sha256_path=['items', '*', 'sha'], kind='image',
                  location_id='objects', max_bytes=1024)
-    ws.set_table_view(root, 'nested', expected=attached['digest'], display={'fields': [field]}, provenance={})
-    row = ws.sample_table(root, 'nested')['rows'][0]
+    project_ops.set_table_view(root, 'nested', expected=attached['digest'], display={'fields': [field]}, provenance={})
+    row = project_ops.sample_table(root, 'nested')['rows'][0]
     args = dict(alias='nested', row_id=int(row['_rowid']), field_path=['items', 0, 'uri'])
     shown = operation('media', root, **args)
     assert shown['media_identity'] == 'sha256:' + sha and shown['width'] == 8
@@ -78,9 +79,9 @@ def test_historical_evidence_reads_only_stored_json_and_scrubs_credentials(isola
     schema = pa.schema([('calls', pa.list_(pa.struct([(key, pa.string()) for key in reference])))])
     attached = attach(root, 'history', [{'calls': [reference]}], schema)
     field = dict(path=['calls', '*'], kind='evidence', location_id='evidence', max_bytes=1024**2)
-    ws.set_table_view(root, 'history', expected=attached['digest'], display={'fields': [field]},
+    project_ops.set_table_view(root, 'history', expected=attached['digest'], display={'fields': [field]},
                       provenance={'kind': 'historical', 'source': 'Original ledger'})
-    row = ws.sample_table(root, 'history')['rows'][0]
+    row = project_ops.sample_table(root, 'history')['rows'][0]
     args = dict(alias='history', row_id=int(row['_rowid']), field_path=['calls', 0])
     value = operation('table_evidence', root, **args)
     assert value['document']['answer'] == 'kept'
@@ -108,15 +109,15 @@ def test_nested_projection_and_matching_are_literal_schema_paths(isolated):
     schema = pa.schema([('detail', pa.struct([('answer', pa.string()), ('payload', pa.string())]))])
     attach(isolated, 'nested_projection', [{'detail': {'answer': 'yes', 'payload': 'unused'}},
                                           {'detail': {'answer': 'no', 'payload': 'other'}}], schema)
-    result = ws.sample_table(isolated, 'nested_projection', columns=['detail.answer'], match={'field': 'detail.answer', 'value': 'yes'})
+    result = project_ops.sample_table(isolated, 'nested_projection', columns=['detail.answer'], match={'field': 'detail.answer', 'value': 'yes'})
     assert len(result['rows']) == 1 and result['rows'][0]['detail.answer'] == 'yes'
     assert 'detail.payload' not in result['rows'][0]
     for column in ['detail.missing', 'detail.answer + 1', '1; DROP TABLE detail']:
         with pytest.raises(ValueError, match='column'):
-            ws.sample_table(isolated, 'nested_projection', columns=[column])
-    before = ws.describe_table(isolated, 'nested_projection')
+            project_ops.sample_table(isolated, 'nested_projection', columns=[column])
+    before = project_ops.describe_table(isolated, 'nested_projection')
     with pytest.raises(ValueError, match='schema'):
-        ws.set_table_view(isolated, 'nested_projection', expected=before['digest'],
+        project_ops.set_table_view(isolated, 'nested_projection', expected=before['digest'],
             display={'fields': [{'path': ['absent'], 'kind': 'text'}]}, provenance={})
 
 
@@ -133,25 +134,25 @@ def test_table_versions_list_registered_facts_and_preview_without_moving_binding
     for version in (1, 2):
         meta = operation('describe', uri, version=version)
         catalog.register(DatasetRef('vt', 'vt.lance', version, 'vt', '1', meta['schema_hash'], meta['row_count'], store_id='local'))
-    ws.attach_table(root, 'vt', relative_uri='vt.lance', version=2, dataset_id='vt', schema_name='vt', schema_version='1')
-    binding = ws.describe_table(root, 'vt')['binding']['digest']
-    listed = ws.table_versions(root, 'vt', expected_binding=binding)
+    project_ops.attach_table(root, 'vt', relative_uri='vt.lance', version=2, dataset_id='vt', schema_name='vt', schema_version='1')
+    binding = project_ops.describe_table(root, 'vt')['binding']['digest']
+    listed = project_ops.table_versions(root, 'vt', expected_binding=binding)
     assert listed['status'] == 'versions' and listed['truncated'] is False and listed['total_registered'] == 2
     assert [item['lance_version'] for item in listed['versions']] == [1, 2]
     assert listed['versions'][0]['row_count'] == 1 and listed['versions'][1]['row_count'] == 2
     assert listed['binding']['digest'] == binding
-    selected = ws.table_versions(root, 'vt', expected_binding=binding, version=1)
+    selected = project_ops.table_versions(root, 'vt', expected_binding=binding, version=1)
     assert selected['selected']['version'] == 1 and selected['selected']['metadata']['row_count'] == 1
     assert 'question' in selected['selected']['metadata']['fields']
     # Previewing another version never moves the fixed binding or the bound sample.
-    assert ws.describe_table(root, 'vt', expected_binding=binding)['binding']['digest'] == binding
-    assert ws.describe_table(root, 'vt')['metadata']['version'] == 2
+    assert project_ops.describe_table(root, 'vt', expected_binding=binding)['binding']['digest'] == binding
+    assert project_ops.describe_table(root, 'vt')['metadata']['version'] == 2
     with pytest.raises(ValueError, match='not a registered version'):
-        ws.table_versions(root, 'vt', version=3)
+        project_ops.table_versions(root, 'vt', version=3)
     with pytest.raises(ValueError, match='binding changed'):
-        ws.table_versions(root, 'vt', expected_binding='0' * 64)
+        project_ops.table_versions(root, 'vt', expected_binding='0' * 64)
     # An attached-but-unregistered table is honestly empty, never a guessed history.
-    unregistered = ws.table_versions(root, 'candidates')
+    unregistered = project_ops.table_versions(root, 'candidates')
     assert unregistered['versions'] == [] and unregistered['total_registered'] == 0
     assert unregistered['reason'] == 'no_registered_versions'
 
@@ -170,7 +171,7 @@ def test_table_versions_run_product_is_a_sealed_single_version(isolated, tmp_pat
             break
         time.sleep(0.1)
     assert run['status'] == 'succeeded', run
-    listed = ws.table_versions(root, 'run:' + run['run_id'] + ':target')
+    listed = project_ops.table_versions(root, 'run:' + run['run_id'] + ':target')
     assert listed['versions'] == [] and listed['total_registered'] == 0 and listed['truncated'] is False
     assert listed['reason'] == 'run_output_sealed_version'
     assert listed['binding']['reference']['ref']['lance_version'] >= 1

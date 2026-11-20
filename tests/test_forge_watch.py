@@ -10,6 +10,7 @@ import pytest
 from demiflow.cli import main
 from demiflow.workbench.projects import registry as console
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.projects import watch
 from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
@@ -24,7 +25,7 @@ def root(tmp_path):
         (root / directory).mkdir()
     ws.add_location(root, 'local', root / 'data', writable=True)
     (root / 'operators/a.py').write_text('# initial')
-    ws.begin_change_scope(root, writes=[], expected=content_digest(ws.load_workspace(root)[1]))
+    project_ops.begin_change_scope(root, writes=[], expected=content_digest(ws.load_workspace(root)[1]))
     return root
 
 
@@ -51,8 +52,8 @@ def test_scope_http_cli_and_corrupt_cache_recovery(root):
 
 def test_expiry_and_heartbeat_cannot_refresh_content(root):
     policy = ws.audit_status(root)['policy_digest']
-    completed = ws.audit_check(root, kind='scope', expected_policy=policy, full_interval=1)
-    observed = ws.audit_observe(root, expected_policy=policy, session='a'*32)
+    completed = project_ops.audit_check(root, kind='scope', expected_policy=policy, full_interval=1)
+    observed = project_ops.audit_observe(root, expected_policy=policy, session='a'*32)
     row = ws.audit_status(root)['observations'][0]
     assert row['verified_at'] == completed['verified_at'] and row['freshness'] == 'pending'
     path = root / '.forge/audit/status.json'
@@ -64,7 +65,7 @@ def test_expiry_and_heartbeat_cannot_refresh_content(root):
     assert ws.audit_status(root)['observations'][0]['freshness'] == 'overdue'
     with ws.audit_lease(root, 'check'):
         with pytest.raises(ForgeError) as caught:
-            ws.audit_check(root, kind='scope', expected_policy=policy)
+            project_ops.audit_check(root, kind='scope', expected_policy=policy)
         assert caught.value.code == 'busy'
     with ws.audit_lease(root, 'watch'):
         with pytest.raises(ForgeError):
@@ -108,10 +109,10 @@ def test_round_robin_does_not_starve_other_targets(monkeypatch):
     value = dict(format=ws.FORMAT_V3, audit=dict(reports=['b'*64, 'c'*64], change_scope=None))
     rows = [dict(kind='report', identity=d, freshness='pending') for d in value['audit']['reports']]
     monkeypatch.setattr(ws, 'load_workspace', lambda root: (root, value, None))
-    monkeypatch.setattr(ws, 'audit_observe', lambda *a, **kw: dict(hint='unchanged'))
+    monkeypatch.setattr(project_ops, 'audit_observe', lambda *a, **kw: dict(hint='unchanged'))
     monkeypatch.setattr(ws, 'audit_status', lambda root: dict(observations=rows))
     seen = []
-    monkeypatch.setattr(ws, 'audit_check', lambda root, **kw: seen.append(kw['report_digest']))
+    monkeypatch.setattr(project_ops, 'audit_check', lambda root, **kw: seen.append(kw['report_digest']))
     state = {}
     for _ in range(6):
         watch._step('fixture', state, session='a'*32, interval=30, full_interval=300)

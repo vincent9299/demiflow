@@ -18,6 +18,7 @@ def web(context):
     from demiflow.workbench.analysis import web_sources
     from demiflow.workbench.worker import operation
     from demiflow.workbench.projects import workspace as ws
+    from demiflow.workbench import project_operations as project_ops
     from demiflow.forge.schema import ForgeError
     root=Path(context['workspace']);box=Outbox(context['outbox'])
     for line in sys.stdin:
@@ -30,7 +31,7 @@ def web(context):
             elif name=='resolve-source':value=web_sources.resolve(root,payload['locator'])
             elif name=='source-query':value=operation('analysis_source_read',root,**{key:payload[key] for key in ('source_locator','source_snapshot','query')})
             elif name=='remove-declaration':
-                old=ws.describe_table(root,'rows');value=ws.set_table_view(root,'rows',expected=old['digest'],display={},provenance={})
+                old=project_ops.describe_table(root,'rows');value=project_ops.set_table_view(root,'rows',expected=old['digest'],display={},provenance={})
             else:raise ValueError(name)
             print(json.dumps(dict(value=value)),flush=True)
         except ForgeError as error:print(json.dumps(dict(error=str(error),code=error.code)),flush=True)

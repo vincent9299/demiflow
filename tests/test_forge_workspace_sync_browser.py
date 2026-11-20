@@ -9,6 +9,7 @@ import pytest
 
 from test_forge_panel_browser import panel, open_panel, demo, isolated
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs import manager as runs
 
 
@@ -36,8 +37,8 @@ def test_saved_changes_refresh_overview_without_host_or_writes(panel):
 
 def test_external_source_change_marks_report_stale_and_preserves_draft(panel):
     root, app, page, errors = panel
-    report = ws.inspect_flow(root, 'flows/questions.py:select', params='flows/select_a.json')['digest']
-    assert ws.report_status(root, report)['status'] == 'checked'
+    report = project_ops.inspect_flow(root, 'flows/questions.py:select', params='flows/select_a.json')['digest']
+    assert project_ops.report_status(root, report)['status'] == 'checked'
     open_panel(app, page, dict(v=1, workspace=str(root), kind='inspection', report_digest=report))
     page.get_by_role('button',name='整图配置',exact=True).click()
     page.get_by_text('本次运行设置',exact=True).click()

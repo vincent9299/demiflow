@@ -7,6 +7,7 @@ import click
 
 from demiflow.forge.platform_cli import output
 from demiflow.workbench.projects import workspace as api
+from demiflow.workbench import project_operations as project_ops
 
 
 def register(main):
@@ -78,10 +79,10 @@ def register(main):
             if binding is None:
                 if columns or offset or limit != 20 or row_id is not None:
                     raise ValueError('Read metadata first, then supply its version and binding for a page.')
-                return api.project_table(root, identity, expected=expected, version=version)
+                return project_ops.project_table(root, identity, expected=expected, version=version)
             if version is None:
                 raise ValueError('A page requires the exact observed version.')
-            return api.project_sample(root, identity, expected=expected, version=version, binding=binding,
+            return project_ops.project_sample(root, identity, expected=expected, version=version, binding=binding,
                                       columns=list(columns) or None, offset=offset, limit=limit, row_id=row_id)
         output(perform, pretty)
 
@@ -89,12 +90,12 @@ def register(main):
     @root_arg
     def project_check(root):
         """Check all declared entries against the unified platform standard."""
-        output(lambda: api.check_project(root), True)
+        output(lambda: project_ops.check_project(root), True)
 
     @workspace.command('check-status')
     @root_arg
     def project_status(root):
-        output(lambda: api.project_check_status(root), True)
+        output(lambda: project_ops.project_check_status(root), True)
 
     @workspace.group('audit')
     def audit():
@@ -111,7 +112,7 @@ def register(main):
     @click.option('--digest')
     @click.option('--expected-policy', required=True)
     def audit_check(root, kind, digest, expected_policy):
-        output(lambda: api.audit_check(root, kind=kind, report_digest=digest, expected_policy=expected_policy), True)
+        output(lambda: project_ops.audit_check(root, kind=kind, report_digest=digest, expected_policy=expected_policy), True)
 
     @audit.command('enable')
     @root_arg
@@ -124,7 +125,7 @@ def register(main):
     @click.argument('digest')
     @click.option('--expected', required=True)
     def audit_bind(root, digest, expected):
-        output(lambda: api.bind_audit_report(root, digest, expected=expected), True)
+        output(lambda: project_ops.bind_audit_report(root, digest, expected=expected), True)
 
     @audit.command('unbind')
     @root_arg
@@ -146,7 +147,7 @@ def register(main):
             value = api.read_control(declaration, 65536)
             if type(value) is not dict or 'writes' not in value or set(value) - {'writes', 'watch_roots', 'limits'}:
                 raise ValueError('Scope declaration needs writes and optional watch_roots/limits')
-            return api.begin_change_scope(root, expected=expected, **value)
+            return project_ops.begin_change_scope(root, expected=expected, **value)
         output(perform, True)
 
     @scope.command('import')
@@ -176,7 +177,7 @@ def register(main):
     @root_arg
     @pretty_option
     def changes(root, pretty):
-        output(lambda: api.workspace_changes(root), pretty)
+        output(lambda: project_ops.workspace_changes(root), pretty)
 
     @workspace.command('source')
     @root_arg
@@ -211,7 +212,8 @@ def register(main):
         def perform():
             if rebuild and synchronize:
                 raise ValueError('Select either rebuild or synchronize')
-            return index.rebuild(root) if rebuild else index.synchronize(root) if synchronize else index.status(root)
+            from demiflow.workbench import directory_operations
+            return directory_operations.rebuild(root) if rebuild else directory_operations.synchronize(root) if synchronize else index.status(root)
         output(perform, pretty)
 
     @workspace.command("bind-platform")
@@ -280,7 +282,7 @@ def register(main):
         if (version is None) == (not head):
             raise click.UsageError("Select exactly one of --version or --head")
         output(
-            lambda: api.attach_table(
+            lambda: project_ops.attach_table(
                 root,
                 alias,
                 relative_uri=relative_uri,
@@ -328,7 +330,7 @@ def register(main):
     @click.option("--expected-binding", help="Require the previously observed preview identity.")
     @pretty_option
     def show_table(root, alias, expected_binding, pretty):
-        output(lambda: api.describe_table(root, alias, expected_binding=expected_binding), pretty)
+        output(lambda: project_ops.describe_table(root, alias, expected_binding=expected_binding), pretty)
 
     @table.command('view')
     @root_arg
@@ -341,7 +343,7 @@ def register(main):
             value = api.read_control(declaration, 16384)
             if set(value) != {'display', 'provenance'}:
                 raise ValueError('Table view declaration requires display and provenance')
-            return api.set_table_view(root, alias, **value, expected=expected)
+            return project_ops.set_table_view(root, alias, **value, expected=expected)
         output(perform, pretty)
 
     @table.command("sample")
@@ -355,7 +357,7 @@ def register(main):
     @pretty_option
     def sample(root, alias, columns, offset, limit, row_id, expected_binding, pretty):
         output(
-            lambda: api.sample_table(
+            lambda: project_ops.sample_table(
                 root,
                 alias,
                 columns=list(columns) or None,
@@ -384,7 +386,7 @@ def register(main):
     @click.option('--expected-binding', required=True)
     @pretty_option
     def media(root, alias, row_id, field, field_path, expected_binding, pretty):
-        output(lambda: api.table_media(root, alias, row_id=row_id, field=field,
+        output(lambda: project_ops.table_media(root, alias, row_id=row_id, field=field,
             field_path=json.loads(field_path) if field_path is not None else None,
             expected_binding=expected_binding), pretty)
 
@@ -396,7 +398,7 @@ def register(main):
     @click.option('--expected-binding', required=True)
     @pretty_option
     def evidence(root, alias, row_id, field_path, expected_binding, pretty):
-        output(lambda: api.table_evidence(root, alias, row_id=row_id,
+        output(lambda: project_ops.table_evidence(root, alias, row_id=row_id,
             field_path=json.loads(field_path), expected_binding=expected_binding), pretty)
 
     @workspace.group("flow")
@@ -430,11 +432,11 @@ def register(main):
         def perform():
             if track != (expected_workspace is not None):
                 raise ValueError('--track requires --expected-workspace, and vice versa')
-            report = api.inspect_flow(root, entry, params=params)
+            report = project_ops.inspect_flow(root, entry, params=params)
             if not track or report.get('status') != 'checked':
                 return report
             try:
-                binding = api.bind_audit_report(root, report['digest'], expected=expected_workspace)
+                binding = project_ops.bind_audit_report(root, report['digest'], expected=expected_workspace)
             except ValueError as exc:
                 return dict(status='report_saved_binding_failed', report=report,
                             error=dict(code=getattr(exc, 'code', 'operation_rejected'), message=str(exc)))
@@ -452,7 +454,7 @@ def register(main):
                 from demiflow.workbench.api import export_report
 
                 return export_report(root, digest, out)
-            return api.report_status(root, digest)
+            return project_ops.report_status(root, digest)
 
         output(perform, pretty)
 

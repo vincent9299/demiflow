@@ -22,7 +22,7 @@ def fixture_run(root, number, *, state='prepared'):
     run.transition({None}, state)
     with ws.control_lock(root):
         marker = index.begin(root, 'run', identity)
-        assert index.publish(root, marker) is None
+        assert runs.publish_run_index(root, marker) is None
     return identity, run
 
 
@@ -30,7 +30,7 @@ def test_run_pages_only_load_page_members_and_have_no_128_limit(tmp_path, monkey
     (tmp_path / '.forge').mkdir()
     # Explicitly initialize an empty directory before source publication.
     with ws.control_lock(tmp_path):
-        index._ensure(tmp_path)
+        index.initialize_empty(tmp_path)
     ids = [fixture_run(tmp_path, i)[0] for i in range(140)]
     original, calls = runs._load, []
     def counted(root, identity, **kwargs):

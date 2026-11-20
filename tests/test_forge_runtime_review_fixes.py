@@ -190,7 +190,7 @@ def test_r1_supervisor_and_http_stop_ignore_malformed_optional_samples(root):
             wait(root, value["run_id"], timeout=20)
 
 
-def test_r2_index_failure_before_spawn_is_terminal_and_releases_capacity(
+def test_r2_actual_launch_failure_before_spawn_is_terminal_and_releases_capacity(
     tmp_path, monkeypatch
 ):
     root = tmp_path / "project"
@@ -201,14 +201,14 @@ def test_r2_index_failure_before_spawn_is_terminal_and_releases_capacity(
         lambda *a, **k: {"status": "checked"},
     )
     monkeypatch.setattr(
-        index,
-        "publish",
-        lambda *a: (_ for _ in ()).throw(OSError("owned index failure")),
+        runs,
+        "worker_environment",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("owned launch failure")),
     )
     monkeypatch.setattr(
         subprocess, "Popen", lambda *a, **k: pytest.fail("must not spawn")
     )
-    with pytest.raises(OSError, match="owned index failure"):
+    with pytest.raises(OSError, match="owned launch failure"):
         runs.start(root, manifest["run_id"], expected=manifest["digest"])
     state = journal.execution_status()
     assert state["status"] == "failed" and state["reason"] == "launch_failed"

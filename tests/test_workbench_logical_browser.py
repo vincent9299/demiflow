@@ -5,6 +5,7 @@ import pytest
 from playwright.sync_api import expect
 
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs import manager as runs
 from test_forge_workspace import demo, isolated
 from test_forge_public_api import service
@@ -68,7 +69,7 @@ def two_action_workspace(root):
                       'marked_target': {'kind': 'output', 'location_id': 'local', 'relative_uri': 'two_marked.lance'},
                       'minimum': 0.8}}))
     ws.register_flow(root, TWO_ENTRY, params=TWO_PARAMS)
-    report = ws.inspect_flow(root, TWO_ENTRY, params=TWO_PARAMS)
+    report = project_ops.inspect_flow(root, TWO_ENTRY, params=TWO_PARAMS)
     assert report['status'] == 'checked', report.get('diagnostics')
     return report
 

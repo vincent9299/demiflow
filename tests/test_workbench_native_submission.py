@@ -6,6 +6,7 @@ import time
 
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench.runs import manager as runs
+from demiflow.workbench import project_operations as project_ops
 from test_forge_runs import base, root, execute
 from test_forge_resume import stopped
 from test_forge_runs import wait
@@ -84,6 +85,10 @@ def run(*, directory):
         runs.cancel(root, identity, expected_attempt=1)
         before = stopped(root, identity)
         assert before['status'] == 'cancelled', before
+        committed = next(output for output in before['outputs'] if output['result'])
+        old_selector = 'run:' + identity + ':' + committed['name'] + ':1'
+        latest_selector = 'run:' + identity + ':' + committed['name']
+        old_binding = project_ops.describe_table(root, latest_selector)['binding']['digest']
         from demiflow.workbench.runs.view import snapshot
         assert snapshot(root, identity)['availability'] == 'available'
         runs.resume(root, identity, expected=prepared['digest'], expected_attempt=1)
@@ -92,6 +97,18 @@ def run(*, directory):
         assert after['attempt'] == 2 and runs.list_runs(root)['total'] == 1
         assert runs.show(root, identity, attempt=1) == before
         assert all(o['result']['ref']['row_count'] == 8 for o in after['outputs'])
+        assert project_ops.describe_table(root, old_selector)['reference']['ref'] == committed['result']['ref']
+        latest = project_ops.describe_table(root, latest_selector)
+        explicit = project_ops.describe_table(root, latest_selector + ':2')
+        assert latest['reference']['ref'] == explicit['reference']['ref']
+        if latest['reference']['ref'] != committed['result']['ref']:
+            assert latest['binding']['digest'] != old_binding
+            with pytest.raises(ValueError, match='binding'):
+                project_ops.describe_table(root, latest_selector, expected_binding=old_binding)
+        else:
+            # Existing preview identity is the exact table, not an added
+            # attempt generation. Reusing the same fixed ref stays admissible.
+            assert project_ops.describe_table(root, latest_selector, expected_binding=old_binding)['reference']['ref'] == committed['result']['ref']
         import lance
         for output in after['outputs']:
             table = lance.dataset(output['uri'], version=output['result']['ref']['lance_version']).to_table()

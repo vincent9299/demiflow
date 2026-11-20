@@ -8,7 +8,7 @@ from demiflow.workbench.analysis.source_export import fixed_input
 from demiflow.workbench.analysis.source_query import read
 
 
-def profile(root, *, kind, columns, alias=None, expected_binding=None, identity=None, expected=None, version=None, binding=None, version_binding=None):
+def profile(root, *, table_resolver, kind, columns, alias=None, expected_binding=None, identity=None, expected=None, version=None, binding=None, version_binding=None):
     if kind=="workspace_table":
         if any(value is not None for value in (identity,expected,binding)):
             c.reject("Catalog table profile has foreign locator fields")
@@ -23,6 +23,6 @@ def profile(root, *, kind, columns, alias=None, expected_binding=None, identity=
             c.reject("Project table profile has foreign locator fields")
         value=dict(kind=kind,id=identity,discovery=expected,version=version,binding=binding,columns=columns)
     else:c.reject("Unknown catalog profile source")
-    _,_,source=fixed_input(root,value)
-    result=read(root,source_locator=value,source_snapshot=source["digest"],query=dict(kind="profile",columns=columns))
+    _,_,source=fixed_input(root,value, table_resolver=table_resolver)
+    result=read(root,source_locator=value,source_snapshot=source["digest"],query=dict(kind="profile",columns=columns), table_resolver=table_resolver)
     return dict(result,binding=value["binding"])

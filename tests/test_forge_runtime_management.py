@@ -190,7 +190,7 @@ def test_rm05_domain_does_not_follow_process_tmpdir(tmp_path):
     code = """from pathlib import Path
 from demiflow.workbench.runs.domain import lock,reserve
 from demiflow.workbench.host_partition import location
-from demiflow.workbench.runs.limits import DEFAULT_LIMITS
+from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
 import sys,json
 print(location(),flush=True)
 with lock() as (domain,capacity):

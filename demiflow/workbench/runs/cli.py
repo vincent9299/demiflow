@@ -4,6 +4,7 @@ from pathlib import Path
 import time
 import click
 from demiflow.workbench.runs import manager as runs
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs import operations as run_operations
 
 
@@ -141,7 +142,7 @@ def register(workspace):
     def attach(root, run_id, output, alias, attempt, legacy_attempt, expected_result, pretty):
         if (attempt is None) == (not legacy_attempt):
             raise click.UsageError('Select exactly one of --attempt or --legacy-attempt')
-        emit(lambda: runs.attach_result(root, run_id, output, alias,
+        emit(lambda: project_ops.attach_result(root, run_id, output, alias,
              attempt=attempt, expected_result=expected_result), pretty)
 
     @group.command('compare')

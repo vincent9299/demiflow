@@ -23,6 +23,7 @@ import pytest
 
 from demiflow.workbench.runs import manager as runs
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.objects import ObjectRef
 from image_http_fixture import definition, json_definition
 
@@ -116,7 +117,7 @@ def make_run(root, server, *, count=2, chain=False, materialize=False, limits=No
     if fixed_input:
         schema=pa.schema([pa.field('instruction',pa.string(),nullable=False)])
         lance.write_dataset(pa.Table.from_pylist(items,schema=schema),str(root/'data/input.lance'))
-        ws.attach_table(root,'input',relative_uri='input.lance',version=1,dataset_id='input',schema_name='input',schema_version='1')
+        project_ops.attach_table(root,'input',relative_uri='input.lance',version=1,dataset_id='input',schema_name='input',schema_version='1')
     code = 'from demiflow import data\n'
     if chain:
         score = json_definition(server['base'])['prompts']['answer'];score['template'] = 'Score {{ pixels | image }}'
@@ -165,7 +166,7 @@ def bundle(row: Input) -> Output:
     if fixed_input:params['arguments']['source']=dict(kind='table',alias='input')
     (root/'flows/params.json').write_text(json.dumps(params))
     ws.register_flow(root,'flows/image.py:run',params='flows/params.json')
-    report = ws.inspect_flow(root,'flows/image.py:run',params='flows/params.json')
+    report = project_ops.inspect_flow(root,'flows/image.py:run',params='flows/params.json')
     assert report['status'] == 'checked',report['diagnostics']
     limit = dict(timeout_s=480,memory_bytes=160*1024**2,max_scratch_bytes=32*1024**2,max_output_bytes=2*1024**2,
         max_evidence_bytes=8*1024**2,max_row_bytes=65536,max_batch_bytes=262144,batch_rows=16,log_bytes=1024**2)

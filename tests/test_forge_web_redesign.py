@@ -14,6 +14,7 @@ import pytest
 
 from demiflow.workbench.projects import registry as console
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.api import ASSETS
 from demiflow.workbench.api import export_report
 from demiflow.workbench import api as workspace_view
@@ -134,7 +135,7 @@ def test_both_case_sources_use_field_reading_with_fixed_versions(original,isolat
     schema=pa.schema([('identifier',pa.string()),('alpha',pa.string()),('config',pa.string()),
                       ('nested',pa.struct([('n',pa.int64())])),('image_uri',pa.string())])
     attach(isolated,'reading_fixture',rows,schema)
-    description=ws.describe_table(isolated,'reading_fixture')
+    description=project_ops.describe_table(isolated,'reading_fixture')
     (isolated/'README.md').write_text('# Bound project\n\n[fixed table](data/reading_fixture.lance)\n')
     original_data=original/'records/notes.lance'
     lance.write_dataset(pa.Table.from_pylist(rows,schema=schema),str(original_data))
@@ -181,7 +182,7 @@ def test_both_case_sources_use_field_reading_with_fixed_versions(original,isolat
         page.get_by_role('button',name='返回当前表',exact=True).click()
         assert page.evaluate('ForgeView.decodeView(location.hash).kind')=='table'
         # Explicit text/json declarations take precedence over content heuristics.
-        ws.set_table_view(isolated,'reading_fixture',expected=description['digest'],display={'fields':[
+        project_ops.set_table_view(isolated,'reading_fixture',expected=description['digest'],display={'fields':[
             {'path':['config'],'kind':'text','label':'Declared text'},
             {'path':['alpha'],'kind':'json','label':'Declared raw'}]},provenance={})
         page.reload()
@@ -288,7 +289,7 @@ def test_case_change_disposes_reader_and_discards_late_worker(isolated,tmp_path,
     attach(isolated,'worker_fixture',[{'payload':'# First document\n\n'+('first '*80)},
         {'payload':'# Current document\n\n'+('current '*80)},
         {'payload':'x'*70000}],schema)
-    description=ws.describe_table(isolated,'worker_fixture')
+    description=project_ops.describe_table(isolated,'worker_fixture')
     with service(isolated) as app:
         context=browser.new_context();context.set_default_timeout(15000)
         page=context.new_page();page.add_init_script(TRACK_WORKERS)

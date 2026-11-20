@@ -13,9 +13,9 @@ from demiflow.execution.local_kernel import local_execution
 from demiflow.execution.run_context import RunContext
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules, LIMITS
-from demiflow.workbench.runs.limits import DEFAULT_LIMITS
-from demiflow.workbench.runs.limits import DEPLOYMENT_LIMITS
-from demiflow.workbench.runs.limits import limits_with
+from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
+from demiflow.workbench.pipeline_policy import DEPLOYMENT_LIMITS
+from demiflow.workbench.pipeline_policy import limits_with
 from demiflow.workbench.projects.workspace import resolve_flow_resources
 from demiflow.operator_llm.messages import admit_template
 from demiflow.operator_llm.parser import parse_prompt_pack

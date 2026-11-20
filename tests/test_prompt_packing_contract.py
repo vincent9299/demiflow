@@ -10,7 +10,7 @@ from demiflow.execution.checked import CheckedExecution
 from demiflow.execution.local_kernel import local_execution
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules, LIMITS
-from demiflow.workbench.runs.limits import DEFAULT_LIMITS
+from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
 from demiflow.workbench.projects.workspace import resolve_flow_resources
 from demiflow.operator_llm.packing import PackPromptInputs
 from demiflow.operator_llm.parser import parse_prompt_pack

@@ -1,0 +1,229 @@
+{
+  "task_id": "B",
+  "stage": "design-v1",
+  "source_sha": "122edf4bd0c827338846abd0114f0b36cf8c1b6d",
+  "product_implementation": "not_started",
+  "checks": {
+    "all_context_original_and_snapshot_hashes_match": true,
+    "source_files_checked": 48,
+    "unchanged_at_old_design_base_except": [
+      "AGENTS.md"
+    ],
+    "proxies": 18,
+    "lexical_callsite_candidates": 484,
+    "ast_resolved_calls": 325,
+    "candidate_file_hashes": 93,
+    "project_module_count": 11,
+    "run_module_count": 18,
+    "p4_surface_and_generated_document_unchanged": true,
+    "frozen_files_unchanged": {
+      "demiflow/execution/raw_fetch.py": "55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493",
+      "demiflow/execution/queue_execution.py": "2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2",
+      "demiflow/execution/queue_sinks.py": "b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074",
+      "demiflow/execution/queue_source.py": "1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307",
+      "demiflow/execution/contracts/exchange.py": "dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2",
+      "demiflow/planning/dag.py": "294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b",
+      "demiflow/resources/contracts.py": "61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff"
+    },
+    "product_and_tests_diff_empty": true
+  },
+  "baseline": {
+    "counts": {
+      "collected": 51,
+      "executed": 51,
+      "passed": 51,
+      "failed": 0,
+      "error": 0,
+      "skipped": 0,
+      "timeout": 0,
+      "not_run": 0
+    },
+    "environment": {
+      "python": "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+      "version": "3.11.16 (main, Sep  2 2026, 23:39:52) [GCC 15.3.0]",
+      "imported_from": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/workbench/p12-boundary-20261120/demiflow/__init__.py",
+      "dependencies": {
+        "pytest": "9.1.1",
+        "pyarrow": "25.0.1",
+        "datafusion": "54.0.0",
+        "pylance": "12.0.0+demiflow.arrowfix1",
+        "playwright": "1.63.0"
+      }
+    },
+    "raw_artifacts": {
+      "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/design-v1/baseline/environment.log": "f4124e90f43bf847a4421e1c2586fb8cc7a314a89ffb32661d3cf1a21e5b0265",
+      "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/design-v1/baseline/pytest.log": "1acc7eed9aafaf9026d844537e5502f3f9a9e6e0bd8d94f1cb27fe065e82664a",
+      "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/design-v1/baseline/receipt.json": "ac0faa424d89b0e1b7b488bd6acb96e8f718078ca0f38eaa45ffb6d5f5b8155d",
+      "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/B/design-v1/baseline/results.xml": "064e16ab67662915412210f374e73b4c8f06c329575af49a7caa8ecab97967d9"
+    },
+    "private_paths": {
+      "TMPDIR": "/tmp/demiflow-p12-design-baseline-ga_6mqg0/tmp",
+      "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-p12-design-baseline-ga_6mqg0/resources",
+      "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-p12-design-baseline-ga_6mqg0/resource-home",
+      "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-p12-design-baseline-ga_6mqg0/forge",
+      "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-p12-design-baseline-ga_6mqg0/locations"
+    },
+    "elapsed_seconds": 12.74661922454834,
+    "timeout_seconds": 120,
+    "description": "Existing index/index_runs/P4 tests only; not full contract acceptance or merge gate"
+  },
+  "environment_probes": [
+    {
+      "interpreter": "/bin/python3",
+      "result": "pytest missing; no product tests ran"
+    },
+    {
+      "interpreter": "/yzp/zhaozy/yangzepeng/0905/demiflow-env/bin/python",
+      "result": "pytest metadata missing; no product tests ran"
+    },
+    {
+      "interpreter": "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+      "result": "used successfully; no install or environment modification"
+    }
+  ],
+  "existing_test_sources": [
+    {
+      "path": "tests/test_execution_payload_limits.py",
+      "sha256": "06f49d79015291671bcae95598f460d1c00634ab6b0cf7911708e4fb4b539433"
+    },
+    {
+      "path": "tests/test_forge_analysis_fixed_reads.py",
+      "sha256": "62178f27388c23417a452affee6a84e6f4d724d5b3f75b7994f758145e6214c3"
+    },
+    {
+      "path": "tests/test_forge_analysis_media_source_export.py",
+      "sha256": "ca73d51e713c30db352a12c49226c7f9cb1e7dedac4cf6b02896bb0e5e9f798c"
+    },
+    {
+      "path": "tests/test_forge_analysis_source_admission.py",
+      "sha256": "66e775d201842d07d586e0e94a49d5890e944873d79febd499d9631e3e1470c6"
+    },
+    {
+      "path": "tests/test_forge_audit_runs.py",
+      "sha256": "9a19e0a8aee590d6f7c197ec1731ddce3a8a9760a033dbd2ce0d53e26e1fca1d"
+    },
+    {
+      "path": "tests/test_forge_development_admission.py",
+      "sha256": "0dfe6101399d7b289e667a8e04c8e8ff94da2292b0a3bb5ce23c961f6fa2e10a"
+    },
+    {
+      "path": "tests/test_forge_history_admission.py",
+      "sha256": "335f3455481a5ee608ee3d6ee3d1e6298a56a3bce240cd4b471206a3126db198"
+    },
+    {
+      "path": "tests/test_forge_index.py",
+      "sha256": "caf3cb43c92618e1857793fd5985303838e76141c1ecfe96f1e247ed1ca6111d"
+    },
+    {
+      "path": "tests/test_forge_index_runs.py",
+      "sha256": "ad151f617c2cfb231722ed2f340cfd78ed4b3286e64907796d08237a38660bfa"
+    },
+    {
+      "path": "tests/test_forge_project_checks.py",
+      "sha256": "c6392e53ed6b83d94e80686da852598088f5aa07801e5bdb2477d6308bfce824"
+    },
+    {
+      "path": "tests/test_forge_project_management.py",
+      "sha256": "dd05f2353283aacb8a28c551645310b0cdd4bb7dafd38bd30f49a79eb4c8ff2c"
+    },
+    {
+      "path": "tests/test_forge_prompt_contract.py",
+      "sha256": "ee054006d549853c74cdba2516f8f25b7513a604dc8ed67e4b1edffca2783035"
+    },
+    {
+      "path": "tests/test_forge_public_api.py",
+      "sha256": "aa75a556489846c7c3bd2c9cb7876e143fe9a6e39f2b394735bc6b5afc511fc1"
+    },
+    {
+      "path": "tests/test_forge_resume.py",
+      "sha256": "6cc652b9bb246e613c1ca5c606d802dc12b9794373d4e9bc53f82be4f6b22b12"
+    },
+    {
+      "path": "tests/test_forge_runs.py",
+      "sha256": "63b91359f99a361afd8bb227001f09f86884a7de792783f83369b42ba701d1f3"
+    },
+    {
+      "path": "tests/test_forge_runtime_review_fixes.py",
+      "sha256": "6ff9fade79dbfc3953e034a1a9065c8eb58941fb23021b28a2c58d3baddd2103"
+    },
+    {
+      "path": "tests/test_forge_workbench_browser.py",
+      "sha256": "e0fd9399202cfee6fc8afeba1ea44464ce66ce81ea8e9407c732f38752e86dab"
+    },
+    {
+      "path": "tests/test_forge_workbench_result_navigation_browser.py",
+      "sha256": "09c3e4085f01fae7ce7bafea78700ce6320c7a52e9d344ec5ca4ae9f71c64c7c"
+    },
+    {
+      "path": "tests/test_forge_workbench_result_retry_browser.py",
+      "sha256": "e12641d6b4e37e13e77e8b75d899c50672034573ebd564fddcc890f6048bdb7e"
+    },
+    {
+      "path": "tests/test_forge_workspace.py",
+      "sha256": "ff7f486b4047f2f12a1ee7d296938e5f941a55db45d50860cec904eb2add2225"
+    },
+    {
+      "path": "tests/test_forge_workspace_sync.py",
+      "sha256": "c19e43383ac213851ce0a05c4134c07f6f3a215794fe8c895708737dfbfbea55"
+    },
+    {
+      "path": "tests/test_package_dependency_ratchet.py",
+      "sha256": "34b32a67749f7a730909641e8e00818459810cbc482dedc64ccd81e9c5966c70"
+    },
+    {
+      "path": "tests/test_runtime_v3_save_product.py",
+      "sha256": "3ff3bc90b14b2842c28be38c1cb2d18c3beaac6dafae20e4989760897e80d567"
+    },
+    {
+      "path": "tests/test_workbench_engine_boundary.py",
+      "sha256": "ed44f6407f2c018dee9aa2a7cf5fd3e6e749a2f32cbd072a35955b5ece28582e"
+    },
+    {
+      "path": "tests/test_workbench_managed_plan_preview.py",
+      "sha256": "3ec50550288338287356b115ef362f64f34671a876981764a592485c50a1c69b"
+    },
+    {
+      "path": "tests/test_workbench_native_notebook.py",
+      "sha256": "a9dae6a76b4b595f2176493ecb8366ef15b888f43ec7e70f9d5a455e8e260a05"
+    },
+    {
+      "path": "tests/test_workbench_native_submission.py",
+      "sha256": "906bcbda051be6606e92cd96a72c823d4910b9bbf0d5fc728253a746e404da8d"
+    },
+    {
+      "path": "tests/test_workbench_parameter_projection.py",
+      "sha256": "d7252cf5b1c98c0b0683228ca79a5c21c419eecc27651b1e5ec8fa2971825da9"
+    },
+    {
+      "path": "tests/test_workbench_read_admission.py",
+      "sha256": "54900b8cf8c6b38ad8c1bec4f212d3a0323b0d9f66aa21954c473164e4ee86b8"
+    }
+  ],
+  "proposed_new_tests": [
+    "test_workbench_project_boundary.py",
+    "test_workbench_project_boundary_browser.py"
+  ],
+  "not_done": [
+    "product implementation",
+    "new fault-injection tests",
+    "full six contract groups",
+    "browser fixture acceptance",
+    "merge gate",
+    "four-lane release gate",
+    "Fable design review for this revision",
+    "merge",
+    "publish",
+    "deployment"
+  ],
+  "old_test_change": {
+    "path": "tests/test_forge_runtime_review_fixes.py:193",
+    "old_expectation": "raised index.publish OSError is terminal launch_failed",
+    "reason": "Contradicts approved owner safety boundary: cache failure must not trigger source failure",
+    "replacement": [
+      "I06 cache publication failure keeps source/marker and does not itself terminate start",
+      "I05 real startup failure still records launch_failed and returns capacity",
+      "existing durable fence / lost Popen / pending cleanup protections retained"
+    ],
+    "coordinator_response": "Parent coordinator explicitly agreed to split these two real failure classes and make the assertion-preservation map a Fable design-review focus; no new user compatibility commitment."
+  }
+}

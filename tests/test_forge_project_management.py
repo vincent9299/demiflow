@@ -7,6 +7,7 @@ from click.testing import CliRunner
 from demiflow.cli import main
 from demiflow.workbench.projects import registry as console
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.forge.schema import ForgeError
 
 
@@ -29,7 +30,7 @@ def test_create_only_control_files_and_no_false_pass(tmp_path):
     assert not result['allow_runs']
     assert ws.workspace_context(root)['flows'] == []
     assert ws.workspace_context(root)['tables'] == []
-    assert ws.workspace_changes(root)['workspace_id'] == result['workspace_id']
+    assert project_ops.workspace_changes(root)['workspace_id'] == result['workspace_id']
     with pytest.raises(ForgeError):
         console.create(registry, root, name='new')
 
@@ -76,10 +77,10 @@ def test_large_original_project_keeps_browsing_and_sync_without_data_configurati
     assert context['source_files'] == ['pipeline.py', 'processing/rows.py']
     assert context['locations'] == {} and context['flows'] == []
     assert any('arbitrary-history' in item for item in context['source_diagnostics'])
-    before = ws.workspace_changes(root)
+    before = project_ops.workspace_changes(root)
     assert before['source_diagnostics'] == context['source_diagnostics']
     (root / 'processing/rows.py').write_text('def normalize(value): return str(value)\n')
-    assert ws.workspace_changes(root)['sources'] != before['sources']
+    assert project_ops.workspace_changes(root)['sources'] != before['sources']
     assert (root / 'pipeline.py').read_bytes() == original
     assert len(list(history.iterdir())) == 1025
 

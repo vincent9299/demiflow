@@ -7,6 +7,7 @@ from urllib.parse import parse_qs,urlsplit
 from playwright.sync_api import expect
 
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from test_forge_workbench_result_navigation_browser import completed,select_run
 from test_forge_workspace import demo,isolated
 from test_forge_markdown_reading import browser
@@ -16,7 +17,7 @@ from test_forge_workbench_browser import page_for,pipeline
 
 def test_fixed_result_request_survives_failure_refresh_reload_history_and_conflict(completed,browser,tmp_path):
     root,(a,b)=completed;alias='run:'+a+':target'
-    expected=ws.describe_table(root,alias)['binding']['digest']
+    expected=project_ops.describe_table(root,alias)['binding']['digest']
     out=Path(os.environ.get('FORGE_ACCEPTANCE_DIR',str(tmp_path)));out.mkdir(parents=True,exist_ok=True)
     records=[];reads=[]
     with service(root) as app,page_for(browser,app) as (page,errors):
@@ -99,7 +100,7 @@ def test_fixed_result_request_survives_failure_refresh_reload_history_and_confli
             records.append(dict(action=action,refused_http=503,failed_request=failed,restored=actual,rows=2))
             pause()
 
-        candidate=ws.describe_table(root,'candidates')['binding']['digest']
+        candidate=project_ops.describe_table(root,'candidates')['binding']['digest']
         page.get_by_role('button',name='展开数据目录',exact=True).click()
         route_read,used=refuse_once('candidates')
         page.get_by_role('cell',name='candidates',exact=True).click()

@@ -7,6 +7,7 @@ from pathlib import Path
 import lance
 
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs import manager as runs
 
 from test_forge_runs import base, root, custom, execute
@@ -46,9 +47,9 @@ def test_stable_output_uses_explicit_permission_and_never_redirects(root):
     assert result['status'] == 'succeeded', result
     assert result['outputs'][0]['receipt']['committed_version'] == 4
     assert lance.dataset(str(root / 'data/candidates.lance'), version=3).count_rows() == 3
-    page = ws.sample_table(root, 'run:' + result['run_id'] + ':target')
+    page = project_ops.sample_table(root, 'run:' + result['run_id'] + ':target')
     assert page['version'] == 4 and len(page['rows']) == 1
-    assert ws.describe_table(root, 'candidates')['metadata']['version'] == 3
+    assert project_ops.describe_table(root, 'candidates')['metadata']['version'] == 3
 
 
 @pytest.mark.parametrize('minimum', [1, 4])
@@ -76,7 +77,7 @@ def run(*, source, stage, target, minimum):
     stage, final = ({o['name']: o for o in result['outputs']}[name] for name in ('stage', 'target'))
     assert stage['receipt']['committed_version'] == 1
     assert stage['result']['ref']['row_count'] == 3
-    assert len(ws.sample_table(root, 'run:' + result['run_id'] + ':stage')['rows']) == 3
+    assert len(project_ops.sample_table(root, 'run:' + result['run_id'] + ':stage')['rows']) == 3
     assert (final['result'] is not None) == (minimum == 1)
     if minimum == 4:
         # Simulate lost control publication after the native action commits.

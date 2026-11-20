@@ -5,6 +5,7 @@ from demiflow.planning.dag import validate_logical_dag
 from demiflow.workbench.graph import logical
 from demiflow.workbench.graph import model
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs import manager as runs
 from test_forge_workspace import demo, isolated
 
@@ -33,7 +34,7 @@ def synthetic():
 
 
 def test_report_graph_projects_validated_logical_dag(isolated):
-    report = ws.inspect_flow(isolated, ENTRY, params=PARAMS)
+    report = project_ops.inspect_flow(isolated, ENTRY, params=PARAMS)
     assert report['status'] == 'checked'
     g = model.get(isolated, basis_kind='report', report_digest=report['digest'])
     view = g['logical']
