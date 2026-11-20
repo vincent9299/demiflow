@@ -452,7 +452,7 @@ def test_known_inflight_model_response_crosses_barrier_and_recovers_once(tmp_pat
         if name == 'after_acked' and fact['intent']['sinks'] == ['materialize']:
             cuts.append(fact)
     monkeypatch.setattr(protocol, 'fault_point', fail)
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     pump = DataflowExecution.pump
     def stop_after_known_response(execution, **kwargs):
         status = pump(execution, **kwargs)

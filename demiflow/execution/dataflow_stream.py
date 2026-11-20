@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from .contracts.dataflow_errors import DataflowError
-from .dataflow import execute_action
+from .action_driver.dataflow import execute_action
 from .kernels.async_instance import AsyncInstance
 from .request_limits import ServiceStopped
 from .stream import StreamStats

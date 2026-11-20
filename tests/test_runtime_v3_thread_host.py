@@ -127,9 +127,9 @@ def test_hook_failure_never_substitutes_for_physical_exit(tmp_path, monkeypatch)
 
 
 def test_live_streaming_scope_is_attempt_only_and_releases_registry(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution import dataflow_thread_programs as live
-    from demiflow.execution.dataflow_seal import _read_json, PROGRAM_MEDIA
+    from demiflow.execution.seal.plan import _read_json, PROGRAM_MEDIA
     seen, shared = [], []
     prepare = DataflowExecution.prepare
     def capture(execution):
@@ -198,7 +198,7 @@ def _recovery_rows():
 
 
 def test_recovery_uses_original_sealed_thread_mode(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     class Interrupted(Exception): pass
     seen = []
     commit = DataflowCheckpointCoordinator.commit
@@ -258,9 +258,9 @@ def test_original_capacity_remains_charged_until_real_thread_exit(tmp_path, monk
 def test_live_program_still_checks_real_code_pin(tmp_path):
     from demiflow.data.plan import CallableSpec
     from demiflow.execution.contracts.dataflow import ProgramDeclaration
-    from demiflow.execution.dataflow_store import RunArtifactStore
+    from demiflow.execution.storage.objects import RunArtifactStore
     from demiflow.execution.dataflow_authority import DriverArtifactPort
-    from demiflow.execution.dataflow_seal import (_stage_one_program, verify_dataflow_program,
+    from demiflow.execution.seal.plan import (_stage_one_program, verify_dataflow_program,
         _read_json, PROGRAM_MEDIA)
     from demiflow.execution.dataflow_thread_programs import owner, release
     from demiflow.execution.contracts.dataflow_errors import DataflowError
@@ -366,9 +366,9 @@ def test_live_thread_callable_instance_keeps_per_action_copy_contract(tmp_path):
 def test_live_manifest_and_plan_identity_exclude_attempt_fence_and_token(tmp_path):
     from demiflow.data.plan import CallableSpec
     from demiflow.execution.contracts.dataflow import ProgramDeclaration
-    from demiflow.execution.dataflow_store import RunArtifactStore
+    from demiflow.execution.storage.objects import RunArtifactStore
     from demiflow.execution.dataflow_authority import DriverArtifactPort
-    from demiflow.execution.dataflow_seal import _stage_one_program, _read_json, PROGRAM_MEDIA
+    from demiflow.execution.seal.plan import _stage_one_program, _read_json, PROGRAM_MEDIA
     from demiflow.execution import dataflow_thread_programs as live
     from demiflow.execution.contracts.dataflow_codec import compute_graph_digest, compute_physical_digest
     from demiflow.execution.contracts.dataflow_errors import DataflowError

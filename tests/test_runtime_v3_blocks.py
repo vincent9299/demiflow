@@ -92,7 +92,7 @@ def test_real_target_rows_and_shuffle_partition_setting(tmp_path):
 
 
 def test_repartition_count_is_admitted_before_worker_launch(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     launched = []
     monkeypatch.setattr(DataflowExecution, '_prepare_launch', lambda *args: launched.append(args))
     with pytest.raises(DataflowError, match='block count'):
@@ -157,7 +157,7 @@ def recovery_dataset():
 
 
 def test_real_partition_manifest_survives_native_committed_recovery(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     original = DataflowCheckpointCoordinator.commit
     class Interrupted(Exception):
         pass

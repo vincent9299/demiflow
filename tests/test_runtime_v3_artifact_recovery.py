@@ -12,8 +12,8 @@ from demiflow.execution.contracts.dataflow import ArtifactCommand, ArtifactRef
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.dataflow_api import make_action_request
 from demiflow.execution.dataflow_authority import DriverArtifactPort
-from demiflow.execution.dataflow_staging import StagingLease, recover_staging, staging_paths
-from demiflow.execution.dataflow_store import RunArtifactStore
+from demiflow.execution.storage.staging import StagingLease, recover_staging, staging_paths
+from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
@@ -48,7 +48,7 @@ with _open(root) as run:
             link(*args, **kwargs)
             os._exit(73)
         os.link = crash_link
-        import demiflow.execution.dataflow_store as store_module
+        import demiflow.execution.storage.objects as store_module
         sync = store_module._sync_directory
         def crash_deduplicated_publish(path):
             sync(path)
@@ -138,7 +138,7 @@ def test_live_writer_and_open_fd_survive_new_driver_fence(tmp_path):
                 worker = subprocess.Popen([sys.executable, '-B', '-u', '-c', r'''
 import sys
 from pathlib import Path
-from demiflow.execution.dataflow_staging import StagingLease
+from demiflow.execution.storage.staging import StagingLease
 lease = StagingLease.create(Path(sys.argv[1]))
 stream = open(sys.argv[2], 'wb')
 stream.write(b'live'); stream.flush()

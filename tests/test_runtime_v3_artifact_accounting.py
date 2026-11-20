@@ -9,7 +9,7 @@ from demiflow import data
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.dataflow_api import make_action_request
 from demiflow.execution.dataflow_authority import DriverArtifactPort
-from demiflow.execution.dataflow_store import RunArtifactStore
+from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.recovery_contract import identity
 from demiflow.execution.contracts.dataflow import ArtifactCommand
@@ -57,7 +57,7 @@ def test_failed_iterator_and_creation_release_only_owned_staging(tmp_path, monke
             with pytest.raises(RuntimeError, match='upstream'):
                 store.put(broken(), max_bytes=1024, media_type='application/octet-stream')
         assert consumed(run) == 0
-        import demiflow.execution.dataflow_store as module
+        import demiflow.execution.storage.objects as module
         with monkeypatch.context() as patch:
             def full(*args, **kwargs):
                 raise OSError('disk full')

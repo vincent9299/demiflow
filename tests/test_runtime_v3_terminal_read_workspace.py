@@ -10,7 +10,7 @@ from test_runtime_v3_terminal_replay_admission import InterruptedAfterAction, _f
 
 @pytest.mark.parametrize('terminal', ['take_all', 'iter_rows', 'iter_batches'])
 def test_default_single_worker_small_memory_live_and_replay(tmp_path, monkeypatch, terminal):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     rows = [{'i': 1}]
     def consume():
         ds = data.from_items(rows)
@@ -66,7 +66,7 @@ def test_store_optional_chunk_is_physical_bounded_and_keeps_hash_and_fd(tmp_path
 def test_schema_change_conversion_retains_real_replay_prefetch(tmp_path, monkeypatch, limited):
     import pyarrow as pa
     from demiflow.execution import dataflow_terminals as terminals
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     first = pa.Table.from_pylist([{'v': None}], schema=pa.schema([('v', pa.binary(16384))]))
     second = pa.Table.from_pylist([{'v': 'x'*500} for _ in range(32)])
     limits = {'timeout_s': 30, 'max_row_bytes': 32768, 'max_batch_bytes': 65536,

@@ -5,7 +5,7 @@ import pytest
 
 from demiflow.execution.contracts.dataflow_codec import compute_participant_id
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.exchange.deliveries import DeliveryExchange
 from demiflow.execution.dataflow_operator_observations import restore_node_metrics
 from demiflow.execution.recovery_contract import identity, document

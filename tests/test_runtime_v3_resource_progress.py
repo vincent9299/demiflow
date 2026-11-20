@@ -72,7 +72,7 @@ def test_unavailable_capacity_times_out_without_business_effect(tmp_path, monkey
     pool = LocalCapacityPool(domain / 'capacity', capacity=capacity)
     pool.reserve('other-run', 'd' * 64, capacity, 1000)
     # Shorten only the admission policy; the business assertion is unchanged.
-    from demiflow.execution import dataflow as driver
+    from demiflow.execution.action_driver import dataflow as driver
     original = driver.make_driver_services
     def services(action, *, policy, bounds):
         return original(action, policy=replace(policy, control_timeout_ms=200), bounds=bounds)
@@ -94,7 +94,7 @@ def test_unavailable_capacity_times_out_without_business_effect(tmp_path, monkey
 
 
 def test_long_call_renews_same_worker_and_commits(tmp_path, monkeypatch):
-    from demiflow.execution import dataflow_scheduler
+    from demiflow.execution.scheduler import placement as dataflow_scheduler
     from demiflow.execution.dataflow_authority import DriverJournalService
     monkeypatch.setattr(dataflow_scheduler, 'lease_ttl_ms', lambda policy: 4000)
     original = DriverJournalService.renew_worker

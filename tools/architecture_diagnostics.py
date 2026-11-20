@@ -31,7 +31,8 @@ REPORTS = ('scc-membership.json', 'declaration-upward-imports.json')
 SHA = re.compile(r'(?:[0-9a-f]{40}|[0-9a-f]{64})\Z')
 SYMBOL = re.compile(r'(demiflow(?:\.[A-Za-z_][A-Za-z0-9_]*)+)(?::([A-Za-z_][A-Za-z0-9_.]*))?\Z')
 RUN_KINDS = {'top', 'guarded', 'lazy'}
-ANCHORS = {'base': 'demiflow.execution.dataflow', 'workbench': 'demiflow.workbench.worker'}
+ANCHORS = {'base': ('demiflow.execution.action_driver.dataflow', 'demiflow.execution.dataflow'),
+           'workbench': ('demiflow.workbench.worker',)}
 FIXED_SEEDS = ('demiflow.execution.contracts', 'demiflow.execution.recovery_contract', *(
     'demiflow.data.' + name for name in ('plan', 'sources', 'native_options', 'constraints',
         'dataflow_operation', 'runtime_contract', 'datasink', 'datasource', 'callable_contract',
@@ -435,7 +436,8 @@ def component_view(members, snapshot):
             'members': [member(m, snapshot) for m in members]}
 
 
-def anchor_view(snapshot, module):
+def anchor_view(snapshot, paths):
+    module = next((path for path in paths if path in snapshot['modules']), paths[0])
     if module not in snapshot['modules']:
         return {'module': module, 'status': 'missing', 'members': []}
     cycle = next((c for c in snapshot['cycles'] if module in c), None)

@@ -172,7 +172,7 @@ def test_checker_error_alone_does_not_add_a_production_refusal(monkeypatch):
 
 @reports_on_purpose
 def test_actual_new_execution_rejects_before_staging_source_seal_worker_or_sink(tmp_path, monkeypatch):
-    from demiflow.execution import dataflow as engine
+    from demiflow.execution.action_driver import dataflow as engine
     import pyarrow as pa
     touched=[]
     def forbidden(name):

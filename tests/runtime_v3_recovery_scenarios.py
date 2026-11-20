@@ -129,7 +129,7 @@ def _run_child(config):
     from demiflow.execution import commit as protocol
     from demiflow.execution.run_journal import RunJournal
     from demiflow.execution.dataflow_authority import DriverJournalService
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire
     from runtime_v3_support import _ExecuteActionRecorder, _RayDataBlocker
     root = Path(config['root'])

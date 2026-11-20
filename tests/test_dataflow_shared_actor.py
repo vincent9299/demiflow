@@ -43,7 +43,7 @@ async def identity(row):
 
 
 def capture_images(monkeypatch):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.dataflow_kernel_pack import PACK_MEDIA, iter_kernel_images
     from demiflow.execution.kernels import state_codec
     original = DataflowCheckpointCoordinator.commit
@@ -129,7 +129,7 @@ def test_shared_actor_default_public_entry_fits_original_budget(tmp_path):
 
 @pytest.mark.parametrize('worker_mode', ['thread', 'process'])
 def test_shared_actor_resumes_original_cut_once(tmp_path, monkeypatch, worker_mode):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     traces = capture_images(monkeypatch)
     original = DataflowCheckpointCoordinator.commit
     fault = []
@@ -225,7 +225,7 @@ def owned_ray():
 
 
 def test_shared_actor_real_ray_cut_recovery(tmp_path, monkeypatch, owned_ray):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     traces = capture_images(monkeypatch)
     original = DataflowCheckpointCoordinator.commit
     fault = []
@@ -266,7 +266,7 @@ def test_two_identical_shared_bundles_do_not_merge_distinct_actors(tmp_path, mon
 
 
 def test_shared_lifecycle_observation_reports_actual_close(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     original = DataflowExecution.close
     observed = []
     def close(execution):

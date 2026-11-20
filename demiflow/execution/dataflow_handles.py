@@ -42,7 +42,7 @@ if TYPE_CHECKING:  # runtime-type imports stay deferred (C04); no import cycle
         Row,
         TerminalResult,
     )
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
 
 # Bounded prefetch / control polling. These cap this handle's own read-ahead and
 # each control poll; the subscription's exchange credit bounds total in-flight data.
@@ -554,7 +554,7 @@ class StoredMaterializedHandle:
         return state
 
     def __setstate__(self, state):
-        from .dataflow_store import RunArtifactStore
+        from .storage.objects import RunArtifactStore
         self._store = RunArtifactStore(root=state["root"], store_id=state["store_id"],
             journal=None, bounds=state["bounds"], readonly=True)
         self._bounds = state["bounds"]

@@ -31,8 +31,8 @@ import pytest
 
 @pytest.mark.parametrize('boundary', ['before_commit', 'after_park', 'after_consume'])
 def test_durable_resume_preserves_original_delivery_and_actual_ack(tmp_path, monkeypatch, boundary):
-    from demiflow.execution.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     class Interrupted(Exception): pass
     def stop(ex, image):
         entries = ex._checkpoint.residency['deliveries']
@@ -69,7 +69,7 @@ def test_durable_resume_preserves_original_delivery_and_actual_ack(tmp_path, mon
 
 
 def test_lost_consumer_ack_reconciles_only_actual_input_frontier(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     original = DataflowExecution._handle_event
     dropped = []
     def drop(ex, event):
@@ -87,7 +87,7 @@ def test_lost_consumer_ack_reconciles_only_actual_input_frontier(tmp_path, monke
 
 
 def test_first_uncommitted_park_does_not_invent_recovery_proof(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     class Interrupted(Exception): pass
     def stop(*args, **kwargs):
@@ -169,7 +169,7 @@ def test_attempt_only_input_cannot_automatically_park(tmp_path):
 
 
 def test_limit_recovery_preserves_actual_closed_input_proof(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     class Interrupted(Exception): pass
     retire = DataflowExecution._retire_phase
     def stop(ex, image):
@@ -193,7 +193,7 @@ def test_limit_recovery_preserves_actual_closed_input_proof(tmp_path, monkeypatc
 
 def test_durable_write_lance_recovers_without_empty_early_publication(tmp_path, monkeypatch):
     import lance
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     class Interrupted(Exception): pass
     def stop(ex, image):
         raise Interrupted()

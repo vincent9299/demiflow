@@ -321,7 +321,7 @@ class StateAndOutput:
 def observe_execution(*, workers, memory_bytes):
     """Tap original successful decisions, never replace their results or grants."""
     from pytest import MonkeyPatch
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.resource_state import RunResourceState
     from demiflow.execution.exchange.dataflow_state import ChannelSetState
     from demiflow.execution.run_journal import RunJournal

@@ -43,7 +43,7 @@ def test_native_csv_ray_core_join_and_completed_recovery(tmp_path, monkeypatch):
                 commits = run.journal.execution_commits('action-1')
                 assert commits and commits[-1]['status'] == 'acked'
                 raise InterruptedAfterCommit()
-        from demiflow.execution.dataflow import DataflowExecution
+        from demiflow.execution.action_driver.dataflow import DataflowExecution
         def no_launch(*args, **kwargs):
             raise AssertionError('completed CSV replay must not launch workers')
         monkeypatch.setattr(DataflowExecution, '_launch_phase', no_launch)

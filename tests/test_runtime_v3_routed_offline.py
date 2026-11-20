@@ -31,7 +31,7 @@ def _pipeline(routes):
 @pytest.mark.parametrize('provider', ['local', 'ray'])
 def test_routed_offline_same_model_request_uses_each_sealed_store(tmp_path, storage, monkeypatch, provider):
     from runtime_v3_residency_scenarios import _provider
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     if provider == 'ray':
         pytest.importorskip('ray')
     opened = []

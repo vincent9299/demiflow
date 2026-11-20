@@ -368,7 +368,7 @@ def ack_source_claims(image: RecoveryImage, *, action: RunAction) -> None:
     """
     if not isinstance(image, RecoveryImage):
         raise DataflowError("INVALID_CONTRACT", "ack_source_claims requires a RecoveryImage")
-    from .dataflow_checkpoint import source_vector_position
+    from .checkpoint.coordinator import source_vector_position
     journal = action.context.journal
     fact = journal.execution_commit(image.commit_id)
     if fact is None or fact["action_id"] != action.action_id:
@@ -734,7 +734,7 @@ def inspect_native_write_receipt(journal, action_id):
     from .publication_facts import observation_action, commit_write_context
     from .lance_sink import LanceSink, spec_from_identity
     from .sealed_plans import _v3_read_store
-    from .dataflow_seal import load_dataflow
+    from .seal.plan import load_dataflow
     binding = journal.recovery_identity()
     action = journal.execution_action(action_id)
     facts = journal.execution_commits(action_id)

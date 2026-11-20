@@ -8,7 +8,7 @@ import pytest
 from demiflow import data
 from demiflow.execution import RunContext
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.dataflow_publication_budget import TERMINAL_WORKSPACE
 from demiflow.execution.lance_sink import LanceSink
 from test_runtime_v3_durable_residency import LIMITS

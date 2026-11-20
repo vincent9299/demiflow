@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from demiflow.data.api import _use_executor
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.queue import QueueChannel, QueueConfig, ProducerSourceSpec
 from demiflow.execution.run_context import RunContext

@@ -19,7 +19,7 @@ def flow(label='prepare'):
 
 
 def test_original_cut_restores_callback_counts_without_counting_prefix_twice(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     class Interrupted(Exception):
         pass
     original = DataflowCheckpointCoordinator.commit

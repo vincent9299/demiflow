@@ -126,7 +126,7 @@ class RelationalRegionRuntime:
     def records(self):
         bounds = self.services.bounds
         store = self.services.store
-        from ..dataflow_store import RunArtifactStore
+        from ..storage.objects import RunArtifactStore
         if isinstance(store, RunArtifactStore):
             store.require_file_slots(store.SCRATCH_FILES + 2 * store.READ_FILES,
                                      maximum=bounds.max_open_files)

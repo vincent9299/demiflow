@@ -11,8 +11,8 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow import ArtifactRef
-from demiflow.execution.dataflow import DataflowExecution
-from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+from demiflow.execution.action_driver.dataflow import DataflowExecution
+from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
 from demiflow.execution.dataflow_segments import tree_refs
 from demiflow.execution.recovery_contract import identity
 from demiflow.execution.run_context import RunContext

@@ -7,7 +7,7 @@ import pytest
 from demiflow.execution.contracts.dataflow import ArtifactRef, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.dataflow_authority import DriverArtifactPort
-from demiflow.execution.dataflow_store import RunArtifactStore
+from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution import dataflow_record_frames as frames
 from demiflow.execution import dataflow_sinks as sinks
 from demiflow.execution.run_context import RunAction, RunContext
@@ -19,7 +19,7 @@ def test_bounded_sink_table_consistency_drift_and_mixed_values(tmp_path):
     from test_runtime_v3_c import bounds
     from test_runtime_v3_d import (ACTION, SINK_ID, make_graph, make_physical,
         make_kernel, make_record, runtime_services, driver_services)
-    from demiflow.execution.dataflow_seal import compute_physical_digest
+    from demiflow.execution.seal.plan import compute_physical_digest
     assert_private()
     # This new case admits the actual frame workspace. D009/D010 retain their
     # original 1 KiB grants and are not changed to reach the metadata branch.

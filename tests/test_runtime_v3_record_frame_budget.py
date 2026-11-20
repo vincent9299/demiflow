@@ -93,7 +93,7 @@ def test_decoder_separates_document_and_actual_payload_and_admits_before_parse(m
 
 
 def test_real_nonfinal_ack_resume_and_stored_handle_keep_wide_typed_rows(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.state_artifacts import StateArtifacts
     import json
     import time

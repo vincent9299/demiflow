@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from demiflow.execution.dataflow_gc import _Trace, UnprovenGC
+from demiflow.execution.storage.gc import _Trace, UnprovenGC
 
 
 def trace(*, memory=1024 * 1024, depth=64):

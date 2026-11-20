@@ -8,7 +8,7 @@ from demiflow import data
 from demiflow.execution.contracts.dataflow_codec import (
     encode_wire, decode_wire, compute_physical_digest,
 )
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.run_context import RunContext
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 
@@ -179,7 +179,7 @@ def test_resume_tightens_live_worker_envelope_without_rewriting_sealed_plan(tmp_
                 pipeline().take_all()
     frozen = seen[0]
     assert frozen.policy.max_active_workers == 2
-    from demiflow.execution.dataflow_scheduler import DataflowScheduler
+    from demiflow.execution.scheduler.placement import DataflowScheduler
     original_place = DataflowScheduler.place_hosts
     def place(scheduler, pending):
         assert scheduler._physical.plan_id == frozen.plan_id

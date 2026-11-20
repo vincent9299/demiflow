@@ -13,12 +13,12 @@ import tempfile
 import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_gc import collect_published_orphans
-from demiflow.execution.dataflow_object_lease import (
+from demiflow.execution.storage.gc import collect_published_orphans
+from demiflow.execution.storage.lease import (
     HEADER, NAME, ObjectLease, exclusive_access, held_exclusive, journal_identity,
     protocol_identity, record_protocol, shared_access,
 )
-from demiflow.execution.dataflow_store import RunArtifactStore
+from demiflow.execution.storage.objects import RunArtifactStore
 from test_runtime_v3_artifact_accounting import consumed, store_fixture
 from test_runtime_v3_artifact_recovery import _open, _store
 from test_runtime_v3_real_seams import PreparationOnly
@@ -141,8 +141,8 @@ _REMOTE = r'''
 import json,os,socket,sys
 from pathlib import Path
 from demiflow.execution.contracts.dataflow import ArtifactRef,Bounds
-from demiflow.execution.dataflow_object_lease import ObjectLease,shared_access,NAME
-from demiflow.execution.dataflow_store import RunArtifactStore
+from demiflow.execution.storage.lease import ObjectLease,shared_access,NAME
+from demiflow.execution.storage.objects import RunArtifactStore
 cfg=json.loads(sys.stdin.readline());root=Path(cfg['root']);identity=tuple(cfg['identity'])
 answer={'host':socket.gethostname(),'device':(root/NAME).stat().st_dev,
         'inode':(root/NAME).stat().st_ino,'fsid':os.statvfs(root).f_fsid}

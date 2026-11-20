@@ -187,7 +187,7 @@ def verify_host_domain(host: "HostDescriptor", *, store: "ArtifactStore",
 def _probe_read_domain(root, store_id, challenge, max_bytes):
     """Executed on the specified Ray node without creating a run or journal."""
     import ray
-    from .dataflow_store import _no_symlink
+    from .storage.objects import _no_symlink
     if challenge['key'] != challenge['digest'] or challenge['size_bytes'] > max_bytes:
         raise ValueError('Unsupported read-domain challenge')
     identifier(store_id)

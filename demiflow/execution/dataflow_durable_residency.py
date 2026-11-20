@@ -199,7 +199,7 @@ class DurableResidency:
 
 
 def validate_recovered(physical, cut, contributions, residency, *, facts, artifacts, current_commit, store):
-    from .dataflow_checkpoint import _contribution_json, _contribution_from_json, _artifact_from_json
+    from .checkpoint.coordinator import _contribution_json, _contribution_from_json, _artifact_from_json
     from .contracts.dataflow_codec import compute_participant_id
     def reject(reason):
         raise DataflowError('CORRUPT_ARTIFACT', reason)

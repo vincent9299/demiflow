@@ -149,7 +149,7 @@ assert source.left is left
 assert compose_union_sources((left,)).inputs[0] is left
 assert validate_native_operation('lookup', {'key': 'key'}, bindings={'key': 'key'}) is None
 for prefix in ('demiflow.execution.run_context', 'demiflow.execution.checked',
-               'demiflow.execution.dataflow', 'demiflow.execution.dataflow_api',
+               'demiflow.execution.action_driver.dataflow', 'demiflow.execution.dataflow_api',
                'demiflow.execution.executors', 'demiflow.execution.package_loader',
                'demiflow.data.dataset', 'demiflow.data.local_relational'):
     assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix

@@ -309,7 +309,7 @@ def test_parallel_sort_matches_serial(tmp_path):
 def test_sort_and_join_cleanup_on_consumer_error(tmp_path, monkeypatch):
     from demiflow import data
     from demiflow.execution.run_context import RunContext
-    from demiflow.execution.dataflow_store import RunArtifactStore
+    from demiflow.execution.storage.objects import RunArtifactStore
     from demiflow.resources.thread import ThreadResourceProvider
     scratch, exits = [], []
     original_scratch, original_absent = RunArtifactStore.scratch, ThreadResourceProvider.ensure_absent

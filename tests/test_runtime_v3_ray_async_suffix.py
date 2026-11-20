@@ -90,7 +90,7 @@ def test_ray_async_colocation_keeps_actual_host_and_explicit_profile_constraints
 
 
 def test_real_ray_async_pipeline_uses_original_result_ack_and_cleanup(tmp_path, monkeypatch, private_ray_provider):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.data.api import _use_executor
     from demiflow.execution.executors.ray import RayDatasetExecutor
     captured = []

@@ -38,7 +38,7 @@ from .run_journal import RunJournal
 # Original sealed-plan facts schema for the native v1/v2 chain/graph generation.
 SEALED_PLAN_FACTS_SCHEMA = "demiflow.sealed_plan_facts.v1"
 # v3 native seal marker bound by seal_dataflow through the same journal slot family.
-from .dataflow_seal import SEAL_SCHEMA as DATAFLOW_SEALED_SCHEMA, _validate_seal_marker
+from .seal.plan import SEAL_SCHEMA as DATAFLOW_SEALED_SCHEMA, _validate_seal_marker
 # The only listed native checkpoint format translated into an in-memory image.
 CHECKPOINT_MANIFEST_SCHEMA = "demiflow.checkpoint_manifest.v1"
 PLAN_VIEW_SCHEMA = "demiflow.plan_view.v3"
@@ -185,7 +185,7 @@ def _load_v3(journal, directory, action_id, marker):
                              identity_bridge_ref=refs["identity_bridge_ref"],
                              source_refs=source_refs, constants_ref=refs["constants_ref"])
     from .sealed_plans import _v3_read_store
-    from .dataflow_seal import load_sealed_dataflow
+    from .seal.plan import load_sealed_dataflow
     store, bounds = _v3_read_store(directory, store_id=sealed.physical_ref.store_id)
     graph, physical, _ = load_sealed_dataflow(sealed, action_id=action_id, store=store, bounds=bounds)
     if "observation_labels" in marker:

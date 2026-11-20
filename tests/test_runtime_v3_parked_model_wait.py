@@ -45,7 +45,7 @@ def test_model_wait_requires_driver_parking_and_native_model_kind():
 def test_serial_native_model_completes_under_smaller_checkpoint_budget(tmp_path, monkeypatch, fake_cli):
     from demiflow import data
     from demiflow.execution.run_context import RunContext
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.operator_llm.parser import parse_prompt_pack
     cli, capture = fake_cli
     cli.write_text(cli.read_text().replace("output = pathlib.Path", "time.sleep(4)\noutput = pathlib.Path"))

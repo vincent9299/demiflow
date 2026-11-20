@@ -90,7 +90,7 @@ def _payload_bytes(event: WorkerEvent, bounds: "Bounds") -> None:
 def apply_artifact_command(action: "RunAction", command: ArtifactCommand, *, bounds: "Bounds") -> ArtifactReply:
     """Single pin/unpin/inspect/reserve_staging transaction shared by the driver
     port and the verified worker service (H074)."""
-    from .dataflow_store import ARTIFACT_STAGING_BUDGET
+    from .storage.objects import ARTIFACT_STAGING_BUDGET
     if command.kind not in _ARTIFACT_KINDS:
         raise DataflowError("INVALID_CONTRACT", "unknown artifact command kind")
     identifier(command.operation_id)
@@ -102,7 +102,7 @@ def apply_artifact_command(action: "RunAction", command: ArtifactCommand, *, bou
         # lease must already be held before either ownership or quota is recorded.
         if command.ref is not None or command.size_bytes <= 0:
             raise DataflowError('INVALID_CONTRACT', 'Begin requires a positive size without a ref')
-        from .dataflow_staging import staging_paths, inspect_held_owner
+        from .storage.staging import staging_paths, inspect_held_owner
         owner, _ = staging_paths(action.context.directory / '.dataflow-store', command.owner, command.operation_id)
         inode = inspect_held_owner(owner)
         charged = journal.begin_dataflow_staging(fence, command.operation_id, command.owner,
@@ -124,15 +124,15 @@ def apply_artifact_command(action: "RunAction", command: ArtifactCommand, *, bou
         ref = command.ref
         owned = journal.dataflow_staging_owner(fence, command.owner)
         if owned is not None:
-            from .dataflow_staging import staging_paths
-            from .dataflow_store import _no_symlink
+            from .storage.staging import staging_paths
+            from .storage.objects import _no_symlink
             _, pending = staging_paths(action.context.directory / '.dataflow-store', owned[0], command.owner)
             _no_symlink(pending)
             if pending.exists():
                 raise DataflowError('INVALID_CONTRACT', 'Settlement requires deletion of owned staging files')
             if command.kind == 'release_staging' and owned[3] is not None and not owned[4]:
                 from .contracts.dataflow import ArtifactRef
-                from .dataflow_store import RunArtifactStore
+                from .storage.objects import RunArtifactStore
                 proposed = ArtifactRef(**owned[3])
                 store = RunArtifactStore(root=action.context.directory / '.dataflow-store',
                     store_id=proposed.store_id, journal=None, bounds=bounds, readonly=True)
@@ -149,7 +149,7 @@ def apply_artifact_command(action: "RunAction", command: ArtifactCommand, *, bou
                 raise DataflowError('INVALID_CONTRACT', 'Settlement requires a durable artifact')
             if command.size_bytes != ref.size_bytes:
                 raise DataflowError('INVALID_CONTRACT', 'Settlement size differs from its artifact')
-            from .dataflow_store import RunArtifactStore
+            from .storage.objects import RunArtifactStore
             store = RunArtifactStore(root=action.context.directory / '.dataflow-store',
                 store_id=ref.store_id, journal=None, bounds=bounds, readonly=True)
             if not store.inspect(ref):
@@ -187,11 +187,11 @@ class DriverArtifactPort:
         self._action = action
         self._bounds = bounds
         if action.context.journal.pending_dataflow_gc():
-            from .dataflow_gc import recover_published_gc
+            from .storage.gc import recover_published_gc
             result = recover_published_gc(action.context.journal, action.context.fence)
             if result['blocked']:
                 raise DataflowError('UNKNOWN_EFFECT', result['blocked'])
-        from .dataflow_staging import recover_staging
+        from .storage.staging import recover_staging
         self.recovery = recover_staging(action, bounds=bounds)
 
     def bind_bounds(self, bounds: "Bounds") -> None:
@@ -205,7 +205,7 @@ class DriverArtifactPort:
         return self._action.context.journal.dataflow_gc_protocol()
 
     def reserve(self, operation_id: str, amounts: Mapping[str, int]) -> None:
-        from .dataflow_store import ARTIFACT_STAGING_BUDGET
+        from .storage.objects import ARTIFACT_STAGING_BUDGET
         identifier(operation_id)
         if type(amounts) is not dict or set(amounts) != {ARTIFACT_STAGING_BUDGET}:
             raise DataflowError("INVALID_CONTRACT", "driver port only admits artifact staging budget")
@@ -223,7 +223,7 @@ class DriverArtifactPort:
         # This method is deliberately absent from the worker RPC vocabulary.
         # Only a driver-created handle retains this port and its random owner.
         import hashlib
-        from .dataflow_store import _pin_identity
+        from .storage.objects import _pin_identity
         prefix = self._action.action_id + '-'
         suffix = owner[len(prefix):] if isinstance(owner, str) and owner.startswith(prefix) else ''
         if len(suffix) != 32 or any(char not in '0123456789abcdef' for char in suffix):
@@ -660,7 +660,7 @@ class DriverJournalService:
                            receipt_ref=_ref_from_json(record.get('receipt_ref')))
 
     def _budget_ceilings(self, names):
-        from .dataflow_store import ARTIFACT_STAGING_BUDGET
+        from .storage.objects import ARTIFACT_STAGING_BUDGET
         declared = {ARTIFACT_STAGING_BUDGET: self._bounds.max_spill_bytes,
                     'requests': self._action.context.limits['max_requests'],
                     'output_rows': self._bounds.max_output_rows}

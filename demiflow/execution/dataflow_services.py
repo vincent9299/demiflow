@@ -22,8 +22,8 @@ from .contracts.dataflow import (Bounds, DriverServices, HostDescriptor, LoadedP
 from .contracts.dataflow_errors import DataflowError
 from .dataflow_artifacts import verify_host_domain
 from .dataflow_authority import DriverArtifactPort, DriverJournalService, WorkerJournalClient
-from .dataflow_seal import load_sealed_dataflow, verify_dataflow_program
-from .dataflow_store import RunArtifactStore
+from .seal.plan import load_sealed_dataflow, verify_dataflow_program
+from .storage.objects import RunArtifactStore
 from .recovery_contract import identity
 
 if TYPE_CHECKING:
@@ -150,7 +150,7 @@ def make_driver_services(action: "RunAction", *, policy: RuntimePolicy, bounds: 
     try:
         if action.replaying and run.journal.source_binding(action.action_id + "-dataflow-sealed") is not None:
             from dataclasses import replace
-            from .dataflow_seal import load_dataflow
+            from .seal.plan import load_dataflow
             _, physical, _ = load_dataflow(run.directory, action.action_id, store=store, bounds=bounds)
             policy = replace(policy, worker_mode=physical.policy.worker_mode)
         resources = _driver_resources(action, policy)

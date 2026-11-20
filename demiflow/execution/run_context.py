@@ -449,7 +449,7 @@ class RunContext:
                     native_journal = getattr(self, '_native_prompt_journal', None)
                     if native_journal is not None:
                         native_journal.close()
-                    from .dataflow_gc import finish_run_gc
+                    from .storage.gc import finish_run_gc
                     finish_run_gc(self)
                     self.journal.clean_orphans(self.fence)
                     if not self.external_control:
@@ -474,7 +474,7 @@ class RunContext:
                 native_journal = getattr(self, '_native_prompt_journal', None)
                 if native_journal is not None:
                     native_journal.close()
-                from .dataflow_gc import finish_run_gc
+                from .storage.gc import finish_run_gc
                 finish_run_gc(self)
                 self.journal.clean_orphans(self.fence)
                 if failure is None:

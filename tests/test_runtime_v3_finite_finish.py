@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from demiflow import data
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.dataflow import DataflowExecution
-from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+from demiflow.execution.action_driver.dataflow import DataflowExecution
+from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
 from demiflow.execution.kernels import state_codec
 
 

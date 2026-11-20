@@ -12,7 +12,7 @@ import pytest
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.contracts.dataflow import LoadedProgram, ProgramDeclaration, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_seal import (_stage_one_program, _code_identity_from_value,
+from demiflow.execution.seal.plan import (_stage_one_program, _code_identity_from_value,
     verify_dataflow_program)
 from demiflow.execution.dataflow_sources import snapshot_source, plan_source_splits, open_source_reader
 from demiflow.execution.literal_source import items_fingerprint, literal_reference, LiteralSourceReference
@@ -186,8 +186,8 @@ class InterruptedLiteral(Exception):
 def test_real_dataset_literal_original_ack_gc_and_resume(tmp_path,monkeypatch):
     from demiflow import data
     from demiflow.execution import RunContext
-    from demiflow.execution.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.contracts.dataflow import ArtifactRef
     from demiflow.execution.dataflow_segments import tree_refs
     rows=list(example())

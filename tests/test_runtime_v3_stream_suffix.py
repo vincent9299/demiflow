@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from demiflow import data
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.run_context import RunContext
 
 
@@ -95,7 +95,7 @@ def test_live_native_write_uses_two_allocations_and_final_replay_never_recreates
 
 
 def test_nonfinal_live_checkpoint_cannot_recreate_retired_attempt(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     events = tmp_path/'calls'
     def callback(row):

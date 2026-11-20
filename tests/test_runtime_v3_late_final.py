@@ -8,8 +8,8 @@ import pytest
 from demiflow import data
 from demiflow.embeddings import EmbeddingModel
 from demiflow.execution.commit import CommitCoordinator
-from demiflow.execution.dataflow import DataflowExecution
-from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+from demiflow.execution.action_driver.dataflow import DataflowExecution
+from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
 from demiflow.execution.dataflow_hosts import _EndpointBase
 from demiflow.execution.run_context import RunContext
 from demiflow.operator_llm.stream_recovery import RunPromptJournal

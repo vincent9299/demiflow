@@ -114,7 +114,7 @@ def test_source_stop_during_final_artifact_inspection_does_not_ack(channel,tmp_p
     def inspection(self,prepared):
         original(self,prepared)
         if not fired:fired.append(True);stop.touch()
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     start = DataflowExecution.start
     def activate(self):
         self.prepare()

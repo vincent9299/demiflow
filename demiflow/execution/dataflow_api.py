@@ -17,7 +17,7 @@ from .contracts.dataflow import (
     NativeOperation, RuntimePolicy,
 )
 from .contracts.dataflow_errors import DataflowError
-from .dataflow import execute_action
+from .action_driver.dataflow import execute_action
 from .dataflow_models import build_model_factory
 from .recovery_identity import (
     describe, operation_identity, plan_identity, source_identity,

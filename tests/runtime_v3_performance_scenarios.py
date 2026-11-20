@@ -467,7 +467,8 @@ class Observations:
             return self
         # Import the consumer first, then patch both aliases, so the first API
         # call is observed rather than getting an unpatched late import alias.
-        from demiflow.execution import dataflow_api, dataflow
+        from demiflow.execution import dataflow_api
+        from demiflow.execution.action_driver import dataflow
         from demiflow.execution import dataflow_hosts
         from demiflow.execution.contracts import dataflow_codec
         for name, counter in (('encode_wire', 'driver_control_encode'), ('decode_wire', 'driver_control_decode')):

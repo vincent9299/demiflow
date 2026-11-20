@@ -81,7 +81,7 @@ def _mutate(store, ref, invoke, *, replacement=None):
 
 def _artifact_attacks(execution, root):
     from demiflow.execution.dataflow_artifacts import fetch_runtime_bundle
-    from demiflow.execution.dataflow_seal import (verify_dataflow_program, load_dataflow,
+    from demiflow.execution.seal.plan import (verify_dataflow_program, load_dataflow,
                                                 _artifact_from_json)
     from demiflow.execution.dataflow_code import mount_sources
     from demiflow.execution.recovery_contract import identity
@@ -243,8 +243,8 @@ def validate_evidence(evidence):
 
 def artifact_security(fx, fault=None):
     from demiflow import data
-    from demiflow.execution.dataflow import DataflowExecution
-    from demiflow.execution import dataflow as dataflow_module
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+    from demiflow.execution.action_driver import dataflow as dataflow_module
     from demiflow.execution.dataflow_hosts import _EndpointBase, LocalHostEndpoint, RayHostEndpoint
     from demiflow.execution.contracts.dataflow_codec import encode_wire
     from demiflow.execution.worker.runtime import _decode_v3_assignment

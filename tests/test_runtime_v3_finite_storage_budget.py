@@ -20,7 +20,7 @@ def _reduce(acc, row):
 
 @pytest.mark.parametrize('disk_bytes', [2 * 1024**3, 8 * 1024**2])
 def test_wide_hot_key_uses_original_disk_budget(tmp_path, monkeypatch, disk_bytes):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     prepare, plans, executions = DataflowExecution.prepare, [], []
     def capture(execution):
         result = prepare(execution)

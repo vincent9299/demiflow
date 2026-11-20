@@ -19,22 +19,22 @@ from pathlib import Path
 from collections.abc import Mapping
 from time import time_ns
 
-from ..data.datasink import Datasink
-from ..data.plan import CallableSpec, LogicalPlan, MapOp
-from .chain import _stable_code_identity, plan_code_pin
-from .contracts.dataflow import (
+from ...data.datasink import Datasink
+from ...data.plan import CallableSpec, LogicalPlan, MapOp
+from ..chain import _stable_code_identity, plan_code_pin
+from ..contracts.dataflow import (
     ArtifactRef, Bounds, CompiledDataflow, DataflowGraph, LoadedProgram,
     PhysicalDataflow, ProgramDeclaration, SealedExecution,
 )
-from .contracts.dataflow_codec import (
+from ..contracts.dataflow_codec import (
     compute_graph_digest, compute_physical_digest, decode_wire, encode_wire,
 )
-from .contracts.dataflow_errors import DataflowError
-from .identity_bridge import build_identity_bridge
-from .recovery_contract import RecoveryContractError, document, identifier, identity
-from .recovery_identity import describe
-from .run_context import RunAction
-from .run_journal import RunJournal
+from ..contracts.dataflow_errors import DataflowError
+from ..identity_bridge import build_identity_bridge
+from ..recovery_contract import RecoveryContractError, document, identifier, identity
+from ..recovery_identity import describe
+from ..run_context import RunAction
+from ..run_journal import RunJournal
 
 SEAL_SCHEMA = "demiflow.dataflow_seal.v3"
 PROGRAM_SCHEMA = "demiflow.dataflow_program.v3"
@@ -73,7 +73,7 @@ def _validate_seal_marker(marker):
 
 def _builtin_node(node):
     """Only registered platform implementations may omit a user program."""
-    from ..planning.dataflow_registry import operator_registry, source_registry, terminal_registry
+    from ...planning.dataflow_registry import operator_registry, source_registry, terminal_registry
     table = terminal_registry() if node.kind == "terminal" else (
         source_registry() if node.kind == "relational" else operator_registry())
     return node.kind != "source" and node.kernel.kind in table
@@ -132,11 +132,11 @@ def _program_value(declaration: ProgramDeclaration):
     if declaration.callable_spec is not None:
         return declaration.callable_spec
     if declaration.source_spec is not None:
-        from ..data.sources import DatasourceSource
-        from .queue_source import QueueDatasource
+        from ...data.sources import DatasourceSource
+        from ..queue_source import QueueDatasource
         source = declaration.source_spec
         if isinstance(source, DatasourceSource) and type(source.datasource) is QueueDatasource:
-            from .dataflow_acquisition_call import QueueSourceDeclaration
+            from ..dataflow_acquisition_call import QueueSourceDeclaration
             return replace(source, datasource=QueueSourceDeclaration(source.datasource.declaration()))
         return source
     if declaration.action_program is not None:
@@ -152,7 +152,7 @@ def _base_code_identity_from_value(kind: str, value):
         if kind == "source":
             return plan_code_pin(LogicalPlan(()), source=value)
         if kind == "aggregate":
-            from ..data.aggregate import AggregateFnV2
+            from ...data.aggregate import AggregateFnV2
             aggregates = value if isinstance(value, tuple) else (value,)
             if not aggregates or any(not isinstance(a, AggregateFnV2) for a in aggregates):
                 raise DataflowError("INVALID_CONTRACT", "aggregate program must declare AggregateFnV2")
@@ -162,7 +162,7 @@ def _base_code_identity_from_value(kind: str, value):
                     for method in ("aggregate_partial", "aggregate_block", "merge_states", "combine", "finalize_state", "finalize")]}
                 for a in aggregates]}
         if kind == "sink":
-            from ..lance.model import LanceWriteSpec
+            from ...lance.model import LanceWriteSpec
             if isinstance(value, LanceWriteSpec):
                 return {"sink": "demiflow.lance.spec", "declaration": value.to_dict()}
             if not isinstance(value, Datasink):
@@ -180,18 +180,18 @@ def _base_code_identity_from_value(kind: str, value):
 
 
 def _code_identity_from_value(kind, value):
-    from .dataflow_code import business_sources, source_identity
+    from ..dataflow_code import business_sources, source_identity
     return {**_base_code_identity_from_value(kind, value),
             'imports': source_identity(business_sources(kind, value))}
 
 
 def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds,
                        live_binding=None, force_live=False, shared_payload=None) -> ArtifactRef:
-    from .dataflow_program_pickle import dumps
+    from ..dataflow_program_pickle import dumps
     kind = _program_kind(declaration)
     value = _program_value(declaration)
     if kind == 'source':
-        from .literal_source import literal_reference
+        from ..literal_source import literal_reference
         literal = literal_reference(value, bounds)
         if literal is not None:
             value = literal
@@ -212,19 +212,19 @@ def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds
         manifest['shared_actor'] = binding
         manifest['shared_sources'] = {'refs': sources, 'imports': imports}
     elif payload is None:
-        from .dataflow_thread_programs import marker
+        from ..dataflow_thread_programs import marker
         manifest['thread_attempt'] = marker(declaration.occurrence_id, code_identity)
     else:
         if len(payload) > bounds.max_state_bytes:
             raise DataflowError("BUDGET_EXCEEDED", "Program payload exceeds byte budget")
         payload_ref = store.put(iter([payload]), max_bytes=bounds.max_state_bytes, media_type=PAYLOAD_MEDIA)
         manifest['payload_ref'] = _artifact_json(payload_ref)
-    from .dataflow_code import business_sources, stage_sources
+    from ..dataflow_code import business_sources, stage_sources
     manifest['business_sources'] = stage_sources(business_sources(kind, value), store=store)
     raw = document(manifest, bounds.max_control_bytes)
     ref = store.put(iter([raw]), max_bytes=bounds.max_control_bytes, media_type=PROGRAM_MEDIA)
     if 'thread_attempt' in manifest:
-        from .dataflow_thread_programs import register
+        from ..dataflow_thread_programs import register
         register(value, binding=live_binding, occurrence_id=declaration.occurrence_id,
                  max_entries=bounds.max_nodes, program_marker=manifest['thread_attempt'])
     return ref
@@ -238,7 +238,7 @@ def _owned_factory_declaration(spec):
     success alone cannot justify replacing it with a disconnected copy.
     """
     import types
-    from .kernels.task_scope import function_residency_kind
+    from ..kernels.task_scope import function_residency_kind
     if spec is None or not spec.is_class:
         return False
     immutable = (str, bytes, int, float, bool, type(None))
@@ -280,7 +280,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
         if declaration.occurrence_id in declarations:
             raise DataflowError("INVALID_CONTRACT", "Duplicate program declaration occurrence")
         declarations[declaration.occurrence_id] = declaration
-    from .dataflow_shared import shared_binding
+    from ..dataflow_shared import shared_binding
     shared_payloads = {}
     for node in graph.nodes:
         binding = shared_binding(node.kernel.configuration, node.occurrence_id)
@@ -288,7 +288,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
             continue
         import cloudpickle
         import io
-        from .dataflow_code import business_sources, source_identity, stage_sources, MAX_SOURCES, MAX_SOURCE_BYTES
+        from ..dataflow_code import business_sources, source_identity, stage_sources, MAX_SOURCES, MAX_SOURCE_BYTES
         sources = {}
         for occ in binding['members']:
             member = declarations[occ]
@@ -305,7 +305,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
                 return super().write(chunk)
         stream = BoundedPayload()
         try:
-            from .dataflow_program_pickle import ProgramPickler
+            from ..dataflow_program_pickle import ProgramPickler
             ProgramPickler(stream).dump(tuple(_program_value(declarations[o]) for o in binding['members']))
         except DataflowError:
             raise
@@ -349,13 +349,13 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
                           and node.kernel.kind == 'AsyncMapOp' and not config.get('task_batch_rows')))
         eligible = worker_mode == 'thread' and not config.get('task_batch_rows') and (
             thread_stream or force_live or node.kernel.kind == 'AsyncMapOp')
-        from .dataflow_thread_programs import owner
+        from ..dataflow_thread_programs import owner
         ref = _stage_one_program(declaration, store=store, bounds=bounds,
             live_binding=owner(action) if eligible else None, force_live=force_live,
             shared_payload=shared_payloads.get(config.get("shared_actor", {}).get("owner")))
         manifest = _read_json(store, ref, max_bytes=bounds.max_control_bytes, media_type=PROGRAM_MEDIA)
         if 'thread_attempt' in manifest:
-            from ..planning.dataflow_compile import _plain
+            from ...planning.dataflow_compile import _plain
             node = replace(node, kernel=replace(node.kernel, state='nonrecoverable',
                 configuration={**_plain(config), 'thread_attempt': True}))
         nodes.append(replace(node, program_ref=ref))
@@ -379,7 +379,7 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
     if 'shared_actor' in manifest and (type(shared_sources) is not dict or set(shared_sources) != {'refs', 'imports'}):
         raise DataflowError('CORRUPT_ARTIFACT', 'Shared actor program has no complete source bundle')
     if cache is not None:
-        from .dataflow_code import mount_sources
+        from ..dataflow_code import mount_sources
         if shared_sources is not None:
             mount_sources(shared_sources['refs'], shared_sources['imports'], store=store, cache=cache)
         mount_sources(manifest.get('business_sources', {}), code_identity.get('imports', {}),
@@ -387,12 +387,12 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
     if 'thread_attempt' in manifest:
         if 'payload_ref' in manifest:
             raise DataflowError('CORRUPT_ARTIFACT', 'live program cannot also claim a pickle payload')
-        from .dataflow_thread_programs import lookup
+        from ..dataflow_thread_programs import lookup
         value = lookup(manifest['thread_attempt'], binding=live_binding,
                        occurrence_id=manifest['occurrence_id'])
     else:
         payload_ref = _artifact_from_json(manifest["payload_ref"])
-        from .dataflow_shared import shared_binding
+        from ..dataflow_shared import shared_binding
         binding = shared_binding(manifest, manifest['occurrence_id'])
         cached = shared_cache.get(binding['owner']) if binding and shared_cache is not None else None
         if cached is not None and (cached[0] != payload_ref or cached[1] != binding):
@@ -423,8 +423,8 @@ def verify_completed_live_program(ref, *, expected_pin, declaration, store, boun
     original final ACKed cut before using it to read an already published result.
     Current declarations are inspected, never instantiated or invoked.
     """
-    from .dataflow_code import MAX_SOURCES, MAX_SOURCE_BYTES, SOURCE_MEDIA
-    from .dataflow_thread_programs import marker
+    from ..dataflow_code import MAX_SOURCES, MAX_SOURCE_BYTES, SOURCE_MEDIA
+    from ..dataflow_thread_programs import marker
     manifest = _read_json(store, ref, max_bytes=bounds.max_control_bytes, media_type=PROGRAM_MEDIA)
     if type(manifest) is not dict:
         raise DataflowError('CORRUPT_ARTIFACT', 'completed live program manifest must be an object')
@@ -511,7 +511,7 @@ def resolve_execution_constants(graph: DataflowGraph, *, action: RunAction, stor
         # Recovery reads the original constants; never re-generate seed=None.
         return _artifact_from_json(existing)
     constants = _generate_constants(graph)
-    from .dataflow_managed_devices import service_constants
+    from ..dataflow_managed_devices import service_constants
     for occurrence, value in service_constants(graph, policy=policy).items():
         constants.setdefault(occurrence, {}).update(value)
     raw = document({"schema": CONSTANTS_SCHEMA, "action_id": action.action_id,
@@ -568,7 +568,7 @@ def seal_dataflow(action: RunAction, graph: DataflowGraph, physical: PhysicalDat
     else:
         if bridge.get("action_id") != action.action_id or bridge.get("dag_id") != graph.dag_id:
             raise DataflowError("INVALID_CONTRACT", "report bridge differs from executed graph")
-        from .identity_bridge import seal_identity_bridge
+        from ..identity_bridge import seal_identity_bridge
         seal_identity_bridge(context, action, bridge)
     bridge_raw = document(bridge, bounds.max_control_bytes)
     identity_bridge_ref = store.put(iter([bridge_raw]), max_bytes=bounds.max_control_bytes, media_type=BRIDGE_MEDIA)
@@ -635,7 +635,7 @@ def load_dataflow(directory: Path, action_id: str, *, store, bounds: Bounds, _re
         raise DataflowError("INCOMPATIBLE_HISTORY", "Run journal is absent")
     facts = journal.source_binding(action_id + _SEAL_KEY)
     if facts is None:
-        from .dataflow_history import load_execution_version
+        from ..dataflow_history import load_execution_version
         binding = load_execution_version(directory, action_id, max_bytes=bounds.max_state_bytes)
         raise DataflowError("INCOMPATIBLE_HISTORY",
                             "Historical action schema " + str(binding.schema_version)
@@ -744,7 +744,7 @@ def verify_action_programs(action, graph, physical, sealed, *, store, bounds):
             if action.replaying:
                 pending.append((node, expected))
                 continue
-            from .dataflow_thread_programs import owner
+            from ..dataflow_thread_programs import owner
             live_binding = owner(action)
         verify_dataflow_program(node.program_ref, expected_pin=expected, store=store,
                                 bounds=bounds, live_binding=live_binding)

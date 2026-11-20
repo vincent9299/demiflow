@@ -294,7 +294,7 @@ class RunJournal:
 
     @contextmanager
     def _transaction(self):
-        from .dataflow_object_lease import shared_access, journal_identity
+        from .storage.lease import shared_access, journal_identity
         protocol = self.dataflow_gc_protocol() if self.path.exists() else None
         # GC is optional maintenance, not loss of this supervisor's attempt.
         # Wait before taking the writer connection/transaction; the original
@@ -780,9 +780,9 @@ class RunJournal:
 
     def _reconcile_published_gc(self, fence):
         self._check_maintenance_deadline()
-        from .dataflow_object_lease import exclusive_here
+        from .storage.lease import exclusive_here
         if not exclusive_here(self.directory / '.dataflow-store') and self.pending_dataflow_gc():
-            from .dataflow_gc import recover_published_gc
+            from .storage.gc import recover_published_gc
             result = recover_published_gc(self, fence, deadline=self._maintenance_deadline)
             if result.get('blocked'):
                 raise ExecutionConflict('Published artifact reconciliation is still owned or unknown: ' + result['blocked'])
@@ -814,7 +814,7 @@ class RunJournal:
         admitted between the ownership check and the external write.
         """
         from .recovery_contract import RecoveryContractError
-        from .dataflow_object_lease import exclusive_here
+        from .storage.lease import exclusive_here
         self._reconcile_published_gc(fence)
         with self._transaction() as db:
             if (not exclusive_here(self.directory / '.dataflow-store') and
@@ -937,7 +937,7 @@ class RunJournal:
     def bind_dataflow_gc_protocol(self, fence, inode, *, fresh):
         """Only a namespace born under the physical lease protocol is eligible."""
         from .recovery_contract import RecoveryContractError
-        from .dataflow_object_lease import NAME, validate_identity, journal_identity
+        from .storage.lease import NAME, validate_identity, journal_identity
         inode = validate_identity(inode)
         with self.execution_guard(fence) as db:
             old = self._dataflow_gc_protocol_row(db)
@@ -994,7 +994,7 @@ class RunJournal:
 
     def prepare_dataflow_gc(self, fence, *, store_id, digest, size, charge_id, inode):
         from .recovery_contract import identity, RecoveryContractError
-        from .dataflow_object_lease import exclusive_here
+        from .storage.lease import exclusive_here
         if not exclusive_here(self.directory / '.dataflow-store'):
             raise RecoveryContractError('GC requires the original exclusive physical lease')
         gc_id = identity(['dataflow-published-gc-v1', store_id, digest, charge_id])
@@ -1017,7 +1017,7 @@ class RunJournal:
     def finish_dataflow_gc(self, fence, gc_id):
         """Debit exactly the original allocation once; old RPC receipts stay immutable."""
         from .recovery_contract import RecoveryContractError
-        from .dataflow_object_lease import exclusive_here
+        from .storage.lease import exclusive_here
         if not exclusive_here(self.directory / '.dataflow-store'):
             raise RecoveryContractError('GC refund requires exclusive physical reconciliation')
         with self.execution_guard(fence) as db:
@@ -1026,7 +1026,7 @@ class RunJournal:
                 raise RecoveryContractError('GC lacks verified physical quarantine')
             if row[4] == 'done':
                 return 0
-            from .dataflow_gc import gc_paths
+            from .storage.gc import gc_paths
             target, quarantine = gc_paths(self, dict(gc_id=gc_id, store_id=row[0], digest=row[1]))
             if target.exists() or quarantine.exists():
                 raise RecoveryContractError('GC physical removal is not confirmed')

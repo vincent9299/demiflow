@@ -208,7 +208,7 @@ def _install_fakes():
     dto.MaterializedHandle = object
     dto.ActionProgram = object
 
-    df = _make_module("demiflow.execution.dataflow")
+    df = _make_module("demiflow.execution.action_driver.dataflow")
     df.execute_action = _fake_execute_action
 
     api = _make_module("demiflow.execution.dataflow_api")
@@ -233,7 +233,7 @@ from demiflow.execution.dataflow_inputs import build_input_handle, InputMaterial
 @pytest.fixture(autouse=True)
 def _reset_state(monkeypatch):
     """These are adapter unit tests; fake only the called cross-module seam."""
-    import demiflow.execution.dataflow as engine
+    import demiflow.execution.action_driver.dataflow as engine
     import demiflow.execution.dataflow_api as api
     import demiflow.planning.dataflow_policy as policy
     import demiflow.planning.dataflow_compile as compiler

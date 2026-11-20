@@ -3,15 +3,15 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from test_runtime_v3_checkpoint_progress import execution
 
 
 def driver(monkeypatch,*,damage=None):
     clock=[100.0]
-    monkeypatch.setattr('demiflow.execution.dataflow.time.monotonic',lambda:clock[0])
-    monkeypatch.setattr('demiflow.execution.dataflow.time.sleep',lambda _:None)
+    monkeypatch.setattr('demiflow.execution.action_driver.dataflow.time.monotonic',lambda:clock[0])
+    monkeypatch.setattr('demiflow.execution.action_driver.dataflow.time.sleep',lambda _:None)
     ex=execution({('source','p0'):23},source_rows=23)
     ex._checkpoint_at=100.0
     ex._policy=NS(checkpoint_rows=64,checkpoint_interval_ms=1000,provider='thread',

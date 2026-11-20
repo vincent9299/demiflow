@@ -159,7 +159,7 @@ def test_b002(tmp_path, monkeypatch):
         def forbidden(*args, **kwargs):
             raise AssertionError('worker opened the driver DB')
         with monkeypatch.context() as patch:
-            patch.setattr('demiflow.execution.dataflow_seal.RunJournal', forbidden)
+            patch.setattr('demiflow.execution.seal.plan.RunJournal', forbidden)
             item.worker.load(item.assignment)
         assert item.worker._state == 'loaded' and not item.worker._readers
         stale = env.make(load=False)
@@ -410,7 +410,7 @@ def test_b012(tmp_path, monkeypatch):
             def forbidden(*args, **kwargs):
                 raise AssertionError('worker constructed a driver journal')
             with monkeypatch.context() as patch:
-                patch.setattr('demiflow.execution.dataflow_seal.RunJournal', forbidden)
+                patch.setattr('demiflow.execution.seal.plan.RunJournal', forbidden)
                 runtime._verify({'manifest_id': pin, 'sha256': pin})
             assert runtime._v3_executor._state == 'loaded' and runtime.authority is None
             runtime._v3 = False

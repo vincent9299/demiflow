@@ -44,7 +44,7 @@ def _flow(rows=5, branches=16):
 @pytest.mark.parametrize('resume',[False, True])
 def test_actual_shared_source_fanout_keeps_one_read_and_original_ack(tmp_path, monkeypatch, resume):
     from demiflow.execution.source_readers import ItemsReader
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.sealed_plans import load_sealed_plan
     from demiflow.execution.run_journal import RunJournal
     reads, cuts, source_frontiers = [], [], []
@@ -119,7 +119,7 @@ def _disable_optional_fusion(monkeypatch):
 
 def test_unfused_source_parks_at_64_real_deliveries_before_reading_fifth_row(tmp_path, monkeypatch):
     from demiflow.execution.source_readers import ItemsReader
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.run_journal import RunJournal
     from demiflow.execution.sealed_plans import load_sealed_plan
     _disable_optional_fusion(monkeypatch)

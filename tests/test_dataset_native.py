@@ -26,8 +26,8 @@ def read(api, path, values):
 
 def sealed_plan(dataset, *, action_id='action-1'):
     """Read the real engine seal through its authenticated, read-only store."""
-    from demiflow.execution.dataflow_store import RunArtifactStore
-    from demiflow.execution.dataflow_seal import load_dataflow
+    from demiflow.execution.storage.objects import RunArtifactStore
+    from demiflow.execution.seal.plan import load_dataflow
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     metadata = dataset.execution_metadata()
     directory = Path(metadata.run_ref.directory)

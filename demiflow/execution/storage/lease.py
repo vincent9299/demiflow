@@ -13,7 +13,7 @@ import stat
 import threading
 import time
 
-from .contracts.dataflow_errors import DataflowError
+from ..contracts.dataflow_errors import DataflowError
 
 _LOCAL = threading.local()
 NAME = '.published-objects.lock'
@@ -97,7 +97,7 @@ def record_protocol(root, identity):
         if old != tuple(identity):
             raise DataflowError('FENCED', 'Published object protocol identity changed')
         return
-    from .dataflow_store import _sync_directory
+    from .objects import _sync_directory
     path = Path(root) / HEADER
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     try:
@@ -128,7 +128,7 @@ def inode(path, fd, *, size=0):
 class ObjectLease:
     def __init__(self, root, *, create=False, exclusive=False, expected=None, on_close=None,
                  wait_ms=0, protocol_version=2):
-        from .dataflow_store import _no_symlink, _sync_directory
+        from .objects import _no_symlink, _sync_directory
         self.fd = None
         self._on_close = on_close
         if type(wait_ms) is not int or not 0 <= wait_ms <= 5000 or (exclusive and wait_ms):

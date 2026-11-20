@@ -109,7 +109,7 @@ def test_failed_materialize_cleans_only_its_spills(tmp_path):
         assert prepared['manifest']['final'] is False
         assert prepared['manifest']['partitions'] == []
     assert failed.pending_dataflow_gc() is False
-    from demiflow.execution.dataflow_gc import gc_paths
+    from demiflow.execution.storage.gc import gc_paths
     with failed._connection() as db:
         collected = [dict(zip(('gc_id', 'store_id', 'digest', 'status'), row))
                      for row in db.execute('SELECT gc_id,store_id,digest,status FROM runtime_dataflow_gc')]

@@ -15,7 +15,9 @@ import demiflow
 from demiflow import data
 from demiflow.data.plan import CallableSpec, LogicalPlan
 from demiflow.data.sources import ItemsSource
-from demiflow.execution import dataflow as E, dataflow_api as API, dataflow_scheduler as S
+from demiflow.execution.action_driver import dataflow as E
+from demiflow.execution import dataflow_api as API
+from demiflow.execution.scheduler import placement as S
 from demiflow.execution.contracts import dataflow as dto
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.dataflow_services import make_driver_services

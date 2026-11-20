@@ -59,7 +59,7 @@ def test_stage_factory_restores_its_owned_state(tmp_path, monkeypatch):
 
 
 def _factory_slots_and_rotation_resume(tmp_path, monkeypatch, *, scope, concurrency):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     class Counter:
         def __init__(self):
             import uuid

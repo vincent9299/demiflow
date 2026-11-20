@@ -232,8 +232,8 @@ def test_partial_initialization_releases_owned_descriptors_and_threads(tmp_path,
 
 @pytest.mark.parametrize('provider', ['local', 'ray_core'])
 def test_original_pump_waits_for_reply_readiness_only_on_local(tmp_path, monkeypatch, provider):
-    from demiflow.execution.dataflow import DataflowExecution
-    import demiflow.execution.dataflow as runtime
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+    import demiflow.execution.action_driver.dataflow as runtime
     with service_env(tmp_path) as env:
         peer, sender = socket.socketpair()
         try:

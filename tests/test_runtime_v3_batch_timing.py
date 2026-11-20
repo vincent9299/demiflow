@@ -16,7 +16,7 @@ from runtime_v3_recovery_scenarios import _http_fixture, _provider
 @pytest.mark.parametrize('kind',['batch','save','embedding'])
 def test_timed_first_batch_reaches_downstream_before_slow_source_eoi(tmp_path,kind,monkeypatch):
     seen=tmp_path/'seen';source_eoi=tmp_path/'eoi';ready=tmp_path/'downstream-ready'
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     original_start=DataflowExecution.start
     def started(execution):
         original_start(execution)
@@ -74,7 +74,7 @@ class Slow:
         elif os.environ['DF_BATCH_TIMING_MODE']=='crash':time.sleep(1.2)
         if os.environ['DF_BATCH_TIMING_MODE']=='resume_drift':return {**row,'value':99,'text':'changed'}
         return row
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 original_start=DataflowExecution.start
 def started(execution):
     original_start(execution)

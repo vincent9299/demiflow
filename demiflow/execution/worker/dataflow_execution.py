@@ -175,7 +175,7 @@ class DataflowWorkerExecutor:
 
     # ---- B002 load ----
     def load(self, assignment: "WorkerAssignment") -> None:
-        from ..dataflow_seal import load_sealed_dataflow
+        from ..seal.plan import load_sealed_dataflow
         with self._control_lock:
             if self._state != "constructed":
                 raise _dataflow_error("INVALID_CONTRACT", "load requires a fresh executor",

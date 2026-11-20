@@ -12,7 +12,7 @@ from demiflow import data
 from demiflow.execution import RunContext
 from demiflow.execution.contracts.dataflow import ArtifactRef
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.dataflow_publication_budget import (
     PublicationReservation, FIELD, SCHEMA, PHASE_SCHEMA, REF_CARRIER)
 from demiflow.execution.lance_sink import LanceSink

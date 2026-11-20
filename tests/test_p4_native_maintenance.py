@@ -262,7 +262,7 @@ def test_legacy_no_attempt_no_identity_is_readonly_noop(tmp_path):
 
 def test_gc_deadline_reaches_original_reconcile_and_stops_next_intent(tmp_path, monkeypatch):
     from contextlib import nullcontext
-    from demiflow.execution import dataflow_gc as gc
+    from demiflow.execution.storage import gc
     journal = native(tmp_path)
     monkeypatch.setattr(gc, '_exclusive', lambda *args: nullcontext())
     monkeypatch.setattr(journal, 'dataflow_gc_intents', lambda: [{'gc_id': 'first'}, {'gc_id': 'next'}])

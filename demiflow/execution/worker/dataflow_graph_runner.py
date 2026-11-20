@@ -872,7 +872,7 @@ class WorkerGraphRunner:
         if wait_notice is not None:
             self._send('checkpoint_wait', wait_notice)
         if notify_done:
-            from ..dataflow_checkpoint import _cursor_json
+            from ..checkpoint.coordinator import _cursor_json
             self._send('eoi', {'scope': 'worker', 'cursors': [_cursor_json(r.snapshot())
                                                            for r in self.e._readers.values()],
                 'pruned_splits': [s.split_id for s in self.e.assignment.source_splits

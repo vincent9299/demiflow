@@ -17,16 +17,16 @@ import uuid
 from collections import deque
 from dataclasses import replace
 
-from .contracts.dataflow import (
+from ..contracts.dataflow import (
     ArtifactRef, PhysicalDataflow, ReadyWork, ScheduleChoice, WorkerLease,
 )
-from .contracts.dataflow_errors import DataflowError
-from ..planning.dataflow_policy import gpu_count
-from ..resources.contracts import (
+from ..contracts.dataflow_errors import DataflowError
+from ...planning.dataflow_policy import gpu_count
+from ...resources.contracts import (
     RESOURCE_PROTOCOL_VERSION, MutationContext, ReleaseSpec, ResourceError, ResourcePlan,
     WorkerLaunchSpec, WorkerRequest, identifier,
 )
-from ..resources.manager import ResourceManager
+from ...resources.manager import ResourceManager
 
 
 def _now_ms() -> int:
@@ -50,7 +50,7 @@ class DataflowScheduler:
         if resources is None:
             raise DataflowError("INVALID_CONTRACT", "scheduler requires the driver ResourceManager")
         if sealed is not None:
-            from .contracts.dataflow import SealedExecution
+            from ..contracts.dataflow import SealedExecution
             if not isinstance(sealed, SealedExecution):
                 raise DataflowError('INVALID_CONTRACT', 'scheduler requires sealed launch artifacts')
         self._sealed = sealed
@@ -352,7 +352,7 @@ class DataflowScheduler:
             if prepare is None:
                 raise DataflowError("INVALID_CONTRACT", "placement requires a staged worker launch")
             allocation_id, boot_id = uuid.uuid4().hex, uuid.uuid4().hex
-            from .dataflow_native_limits import admission_timeout_ms
+            from ..dataflow_native_limits import admission_timeout_ms
             request = WorkerRequest(uuid.uuid4().hex, allocation_id, stage.profile,
                 self._launch_spec(stage), provision_deadline_ms=admission_timeout_ms(self._policy),
                 placement=self._placements.get(work.stage_id), reservation_group=work.stage_id)
@@ -376,7 +376,7 @@ class DataflowScheduler:
         grant = json.loads(self.grants[allocation_id])
         if grant['fence'] != fence or grant['attempt'] != attempt:
             raise DataflowError("FENCED", "worker launch belongs to a different owner")
-        from .dataflow_native_limits import admission_timeout_ms
+        from ..dataflow_native_limits import admission_timeout_ms
         self._resources.reconcile_once(fence,
             time.monotonic() + admission_timeout_ms(self._policy) / 1000.0, 16)
         observed = self._observation(allocation_id)

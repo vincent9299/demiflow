@@ -500,7 +500,7 @@ def _graph_action_request(graph_spec, executor):
 
 def _run_graph(graph_spec, executor, *, control_timeout_s):
     from dataclasses import replace
-    from .dataflow import execute_action
+    from .action_driver.dataflow import execute_action
     from .dataflow_api import resolve_action_runtime, record_execution_metadata
     from ..planning.dataflow_graph_adapter import graph_credit, graph_result, validate_graph_replay
     if current_action() is None:

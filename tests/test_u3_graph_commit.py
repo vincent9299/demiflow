@@ -123,8 +123,8 @@ def test_finite_sealed_mode_commits(tmp_path):
 
 def test_durable_graph_reclaims_channel_segments(tmp_path, monkeypatch):
     from _native_receipt_fixtures import committed_rows
-    from demiflow.execution import dataflow_gc
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.storage import gc as dataflow_gc
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     observed = []
     collect = dataflow_gc.collect_published_orphans
     def collecting(action, **kwargs):

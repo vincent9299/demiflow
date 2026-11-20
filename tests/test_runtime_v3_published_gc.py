@@ -10,9 +10,9 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow import ArtifactCommand, ArtifactRef, Record
-from demiflow.execution.dataflow_gc import collect_published_orphans, recover_published_gc
-from demiflow.execution.dataflow_object_lease import ObjectLease, exclusive_access
-from demiflow.execution.dataflow_store import RunArtifactStore
+from demiflow.execution.storage.gc import collect_published_orphans, recover_published_gc
+from demiflow.execution.storage.lease import ObjectLease, exclusive_access
+from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.kernels import state_codec
 from demiflow.execution.run_context import RunContext
 from test_runtime_v3_artifact_accounting import store_fixture, consumed
@@ -154,8 +154,8 @@ def test_existing_namespace_cannot_be_retroactively_certified(tmp_path):
 
 
 def test_replaced_original_lease_during_gc_never_deletes_or_refunds(tmp_path,monkeypatch):
-    from demiflow.execution import dataflow_gc
-    from demiflow.execution.dataflow_object_lease import NAME
+    from demiflow.execution.storage import gc as dataflow_gc
+    from demiflow.execution.storage.lease import NAME
     from demiflow.errors import ExecutionConflict
     # The normal run finalizer must also reject this deliberately corrupted
     # namespace; no force-cleanup or repaired replacement inode is supplied.
@@ -176,7 +176,7 @@ def test_replaced_original_lease_during_gc_never_deletes_or_refunds(tmp_path,mon
 
 def test_concurrent_pin_cannot_cross_exclusive_gc_snapshot(tmp_path,monkeypatch):
     import threading
-    from demiflow.execution import dataflow_gc
+    from demiflow.execution.storage import gc as dataflow_gc
     with store_fixture(tmp_path) as (run,store,port):
         ref=put(store,b'pin-race')
         failures=[]
@@ -210,7 +210,7 @@ import os,sys
 from pathlib import Path
 from test_runtime_v3_artifact_recovery import _open,_store
 from test_runtime_v3_published_gc import put
-from demiflow.execution import dataflow_gc
+from demiflow.execution.storage import gc as dataflow_gc
 root,point=Path(sys.argv[1]),sys.argv[2]
 with _open(root) as run:
  store,port,bounds=_store(run,ceiling=1024*1024)
@@ -240,7 +240,7 @@ def test_actual_process_crash_reconciles_original_intent_and_refunds_once(tmp_pa
 
 
 def test_real_dataset_cleanup_keeps_acked_result_readable_and_reclaims_unrooted_bytes(tmp_path,monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     prepare,close=DataflowExecution.prepare,DataflowExecution.close
     observed=[]
     def prepared(execution):
@@ -269,7 +269,7 @@ def test_real_dataset_cleanup_keeps_acked_result_readable_and_reclaims_unrooted_
 
 @pytest.mark.parametrize('removed',['lock','header','both'])
 def test_registered_protocol_loss_rejects_read_pin_put_and_new_writer(tmp_path,removed):
-    from demiflow.execution.dataflow_object_lease import NAME,HEADER
+    from demiflow.execution.storage.lease import NAME,HEADER
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     with pytest.raises(DataflowError,match='missing|differs'):
         with store_fixture(tmp_path) as (run,store,port):
@@ -302,7 +302,7 @@ def test_default_metadata_budget_traces_more_than_32_live_roots(tmp_path):
 
 def test_native_journal_thread_keeps_lease_until_original_run_close(tmp_path):
     from test_runtime_v3_native_rpc_replay import interrupted_run, service, event
-    from demiflow.execution.dataflow_gc import defer_run_gc
+    from demiflow.execution.storage.gc import defer_run_gc
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority,store,lease):
         reply=authority.dispatch(event(run,store))
         assert reply.status=='ok' and reply.payload['value'] is True
@@ -336,7 +336,7 @@ def test_json_container_amplification_is_rejected_before_decode(tmp_path):
 @pytest.mark.parametrize('clock',['wall','monotonic'])
 def test_optional_gc_near_original_deadline_preserves_successful_run(tmp_path,monkeypatch,clock):
     import time
-    from demiflow.execution import dataflow_gc
+    from demiflow.execution.storage import gc as dataflow_gc
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     def unexpected(*args,**kwargs):
         raise AssertionError('Optional collection must not start near the original timeout')
@@ -356,7 +356,7 @@ def test_optional_gc_near_original_deadline_preserves_successful_run(tmp_path,mo
 
 def test_optional_gc_skip_does_not_bypass_original_timeout(tmp_path):
     import time
-    from demiflow.execution.dataflow_gc import defer_run_gc
+    from demiflow.execution.storage.gc import defer_run_gc
     from demiflow.execution.recovery_contract import RecoveryContractError
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     with pytest.raises(RecoveryContractError,match='time budget exhausted'):

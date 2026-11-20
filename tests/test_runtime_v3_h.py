@@ -55,7 +55,7 @@ from demiflow.execution import dataflow_control as CTRL
 from demiflow.execution import dataflow_hosts as HOSTS
 from demiflow.execution import dataflow_services as SVC
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_store import ARTIFACT_STAGING_BUDGET, RunArtifactStore
+from demiflow.execution.storage.objects import ARTIFACT_STAGING_BUDGET, RunArtifactStore
 from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.worker import dataflow_host as WH

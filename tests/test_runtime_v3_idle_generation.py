@@ -4,7 +4,7 @@ from types import SimpleNamespace as NS
 import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.dataflow_thread_host import ThreadHostEndpoint
 from test_runtime_v3_control_batching import Capture, _endpoint, _frames
 from test_runtime_v3_idle_notification import _finished_runner

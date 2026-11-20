@@ -17,12 +17,12 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
-from .contracts.dataflow import ArtifactRef, ArtifactCommand
-from .contracts.dataflow_errors import DataflowError
-from .recovery_contract import identifier, identity, RecoveryContractError
+from ..contracts.dataflow import ArtifactRef, ArtifactCommand
+from ..contracts.dataflow_errors import DataflowError
+from ..recovery_contract import identifier, identity, RecoveryContractError
 
 if TYPE_CHECKING:
-    from .contracts.dataflow import ArtifactAuthorityPort, Bounds
+    from ..contracts.dataflow import ArtifactAuthorityPort, Bounds
 
 ARTIFACT_STAGING_BUDGET = "artifact_staging_bytes"
 _MAX_CHUNK_BYTES = 1 << 20
@@ -112,7 +112,7 @@ class RunArtifactStore:
         self._bounds = bounds
         self._writer_lease = None
         self._writer_closed = False
-        from .dataflow_object_lease import protocol_identity, journal_identity
+        from .lease import protocol_identity, journal_identity
         self._lease_identity = protocol_identity(root)
         self._protocol_required = self._lease_identity is not None
         original_protocol = getattr(journal, 'store_protocol', lambda: None)()
@@ -123,7 +123,7 @@ class RunArtifactStore:
             self._lease_identity = original
             self._protocol_required = bool(original_protocol[2])
         if not readonly and journal is not None:
-            from .dataflow_object_lease import ObjectLease, held_exclusive, record_protocol
+            from .lease import ObjectLease, held_exclusive, record_protocol
             bind = getattr(journal, 'bind_store_lease', None)
             if bind is not None:
                 import fcntl
@@ -236,7 +236,7 @@ class RunArtifactStore:
             _release_files(self._file_state,count,limit)
 
     def native_owner_lease(self):
-        from .dataflow_object_lease import ObjectLease
+        from .lease import ObjectLease
         limit = self._acquire_files(1)
         state = self._file_state
         try:
@@ -267,11 +267,11 @@ class RunArtifactStore:
 
     def scratch(self, *, max_bytes, max_io_bytes):
         """Borrow bounded random-access scratch from this store's authority."""
-        from .dataflow_scratch import KernelScratch
+        from ..dataflow_scratch import KernelScratch
         return KernelScratch(self, max_bytes=max_bytes, max_io_bytes=max_io_bytes)
 
     def put(self, chunks: Iterator[bytes], *, max_bytes: int, media_type: str) -> ArtifactRef:
-        from .dataflow_object_lease import shared_access
+        from .lease import shared_access
         if self._writer_closed:
             raise DataflowError('FENCED', 'Artifact writer scope is closed')
         self.require_file_slots(self.PUT_FILES)
@@ -297,7 +297,7 @@ class RunArtifactStore:
             raise DataflowError("INVALID_CONTRACT", "media_type must be a nonempty string")
         operation_id = self._staging_operation()
         reserved = min(max_bytes, 64 * 1024)
-        from .dataflow_staging import StagingLease, staging_paths
+        from .staging import StagingLease, staging_paths
         owner, pending = staging_paths(self._root, self.store_id, operation_id)
         lease = StagingLease.create(owner)
         staging = None
@@ -327,7 +327,7 @@ class RunArtifactStore:
                         if size > reserved:
                             # Admission precedes every write beyond the owned extent.
                             # Do not reserve an entire source/spill ceiling up front.
-                            from .dataflow_staging_growth import grow_staging
+                            from ..dataflow_staging_growth import grow_staging
                             reserved = grow_staging(self._journal, operation_id,
                                 reserved=reserved, required=size, maximum=max_bytes,
                                 spill_budget=self._bounds.max_spill_bytes)
@@ -390,7 +390,7 @@ class RunArtifactStore:
                 lease.close()
 
     def read(self, ref: ArtifactRef, *, max_bytes: int, chunk_bytes: int | None = None) -> Iterator[bytes]:
-        from .dataflow_object_lease import shared_access
+        from .lease import shared_access
         # This lease covers the generator's actual FD lifetime, including yield.
         with self.file_slots(self.READ_FILES), shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
             yield from self._read(ref, max_bytes=max_bytes, chunk_bytes=chunk_bytes)
@@ -433,7 +433,7 @@ class RunArtifactStore:
             stream.close()
 
     def inspect(self, ref: ArtifactRef) -> bool:
-        from .dataflow_object_lease import shared_access
+        from .lease import shared_access
         with self.file_slots(self.READ_FILES), shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
             return self._inspect(ref)
 
@@ -452,7 +452,7 @@ class RunArtifactStore:
         return True
 
     def retain(self, ref: ArtifactRef, *, owner: str) -> None:
-        from .dataflow_object_lease import shared_access
+        from .lease import shared_access
         with self.file_slots(self.READ_FILES), shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
             if not self._inspect(ref):
                 raise DataflowError('UNKNOWN_EFFECT', 'Cannot pin an absent artifact')
@@ -461,7 +461,7 @@ class RunArtifactStore:
     def _retain(self, ref, *, owner):
         if self._readonly:
             raise DataflowError("FENCED", "historical artifact store is read-only")
-        from .contracts.dataflow import ArtifactCommand
+        from ..contracts.dataflow import ArtifactCommand
         identifier(owner)
         self._object_path(ref)
         operation_id = hashlib.sha256(("pin:" + _pin_identity(ref, owner)).encode()).hexdigest()
@@ -471,7 +471,7 @@ class RunArtifactStore:
     def release(self, ref: ArtifactRef, *, owner: str) -> None:
         if self._readonly:
             raise DataflowError("FENCED", "historical artifact store is read-only")
-        from .contracts.dataflow import ArtifactCommand
+        from ..contracts.dataflow import ArtifactCommand
         identifier(owner)
         self._object_path(ref)
         operation_id = hashlib.sha256(("unpin:" + _pin_identity(ref, owner)).encode()).hexdigest()
@@ -517,7 +517,7 @@ def _release_files(state, count, limit, *, final=True):
 
 
 def _pin_identity(ref: ArtifactRef, owner: str) -> str:
-    from .recovery_contract import identity
+    from ..recovery_contract import identity
     return identity({"digest": ref.digest, "store_id": ref.store_id, "key": ref.key, "owner": owner})
 
 

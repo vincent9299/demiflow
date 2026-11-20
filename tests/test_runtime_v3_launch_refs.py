@@ -9,8 +9,8 @@ from demiflow import data
 from demiflow.execution.contracts.dataflow import CutRequest, RecoveryImage, SourceCursor
 from demiflow.execution.contracts.dataflow_codec import encode_wire
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_gc import collect_published_orphans
-from demiflow.execution.dataflow_store import RunArtifactStore
+from demiflow.execution.storage.gc import collect_published_orphans
+from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.recovery_contract import identity
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.worker.runtime import _decode_v3_assignment, _decode_v3_ref, WorkerRuntime
@@ -119,7 +119,7 @@ def test_explicit_null_recovery_reference_cannot_become_fresh_execution(tmp_path
 def test_real_process_assignment_and_restore_launch_stay_below_original_64k(tmp_path, monkeypatch):
     from demiflow.execution.dataflow_hosts import _EndpointBase
     from demiflow.execution.worker.bootstrap import _MAX_LAUNCH_BYTES
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     observed, restores = [], []
     build, commit = _EndpointBase._build_launch, DataflowCheckpointCoordinator.commit
     def inspect(endpoint, assignment):

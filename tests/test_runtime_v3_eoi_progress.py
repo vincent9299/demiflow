@@ -52,7 +52,7 @@ from demiflow.embeddings import EmbeddingModel
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.recovery_contract import RunRef
-from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
 from demiflow.execution.kernels import state_codec
 root=Path(sys.argv[1]);mode=sys.argv[2];url=sys.argv[3]
 if mode=='crash':

@@ -18,7 +18,7 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
     ``WriteResult`` is returned unchanged. ``resource_root``/``control_timeout_s``
     are kept for signature compatibility and no longer select a separate worker.
     """
-    from .dataflow import execute_action
+    from .action_driver.dataflow import execute_action
     from .dataflow_api import make_action_request
     from ..planning.dataflow_policy import resolve_runtime_policy
 

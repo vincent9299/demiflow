@@ -21,7 +21,7 @@ def _actual_worktree():
 
 
 def test_plain_stream_seal_without_native_cut_does_not_authorize_recovery(tmp_path,monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     events=tmp_path/'calls'
     async def callback(row):
         with events.open('a') as output: output.write('call\n')

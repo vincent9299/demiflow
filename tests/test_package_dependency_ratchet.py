@@ -54,7 +54,7 @@ P1_ASSEMBLY_IMPORTS = {
 # code on it without deciding that on purpose. Value: today's importers.
 PRE_V3_MODULES = {
     'demiflow.execution.chain': {
-        'demiflow.execution.dataflow_code', 'demiflow.execution.dataflow_seal',
+        'demiflow.execution.dataflow_code', 'demiflow.execution.seal.plan',
         'demiflow.execution.graph', 'demiflow.execution.kernels.task_scope',
         'demiflow.execution.native_plan', 'demiflow.execution.queue_chain',
         'demiflow.execution.worker.bootstrap', 'demiflow.execution.worker.execution',

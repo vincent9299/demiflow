@@ -26,7 +26,7 @@ def _fd_count(directory):
 
 @pytest.mark.parametrize('limited', [True, False])
 def test_final_ack_replay_admits_each_window_and_preserves_result(tmp_path, monkeypatch, limited):
-    from demiflow.execution import dataflow
+    from demiflow.execution.action_driver import dataflow
     from demiflow.execution.dataflow_terminals import TerminalSubscription
     from demiflow.execution.exchange import dataflow_bridge
     rows = [{'i': i, 'payload': 'x' * 6000} for i in range(20)]
@@ -98,7 +98,7 @@ def test_shared_source_respects_total_limit(tmp_path,limit,overflow):
 
 @pytest.mark.parametrize('count,overflow',[(4,False),(5,True)])
 def test_checkpoint_prefix_counts_toward_limit(tmp_path,monkeypatch,count,overflow):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.state_artifacts import StateArtifacts
     limits={'memory_bytes':40*1024,'max_batch_bytes':16*1024,'max_row_bytes':8*1024,'max_state_bytes':128*1024,'timeout_s':30,'checkpoint_rows':2,'checkpoint_interval_ms':60000,'max_output_rows':4}
     original=DataflowExecution._retire_phase;prefix=[]
@@ -133,7 +133,7 @@ def test_checkpoint_prefix_counts_toward_limit(tmp_path,monkeypatch,count,overfl
 @pytest.mark.parametrize('limit', [0, 1])
 def test_original_published_blocks_probe_limit_without_decoding_payload(tmp_path, monkeypatch, limit):
     """A read-level negative proof over real ACKed blocks, with no new commit."""
-    from demiflow.execution import dataflow
+    from demiflow.execution.action_driver import dataflow
     from demiflow.execution.dataflow_terminals import TerminalSubscription
     from demiflow.execution.exchange import dataflow_bridge
     from demiflow.execution.run_journal import RunJournal

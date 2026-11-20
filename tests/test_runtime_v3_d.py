@@ -547,9 +547,9 @@ from demiflow.execution.contracts.dataflow_codec import (  # noqa: E402
     compute_graph_digest, compute_physical_digest,
 )
 from demiflow.execution.contracts.dataflow_errors import DataflowError  # noqa: E402
-from demiflow.execution import dataflow_checkpoint as ckpt  # noqa: E402
+from demiflow.execution.checkpoint import coordinator as ckpt  # noqa: E402
 from demiflow.execution import dataflow_sinks as sinks  # noqa: E402
-from demiflow.execution import dataflow_seal as seal  # noqa: E402
+from demiflow.execution.seal import plan as seal  # noqa: E402
 from demiflow.execution import commit as commit_module  # noqa: E402
 from demiflow.execution.recovery_contract import (  # noqa: E402
     RunRef, SourcePosition, document, identifier, identity,

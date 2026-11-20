@@ -8,8 +8,8 @@ import os
 
 from .contracts.dataflow import ArtifactCommand
 from .contracts.dataflow_errors import DataflowError
-from .dataflow_staging import StagingLease, staging_paths
-from .dataflow_store import _sync_directory
+from .storage.staging import StagingLease, staging_paths
+from .storage.objects import _sync_directory
 from .recovery_contract import identity, RecoveryContractError
 
 

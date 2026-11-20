@@ -39,7 +39,7 @@ if TYPE_CHECKING:  # runtime-type imports stay deferred (C04); no import cycle
         TerminalResult,
         WriteResult,
     )
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
 
 _BATCH_FORMATS = ("default", "numpy", "pandas", "pyarrow", "list")
 _INSPECT_KINDS = ("schema", "columns", "size_bytes", "stats", "collect_summary")

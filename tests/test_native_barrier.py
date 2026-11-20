@@ -35,7 +35,7 @@ class NestedCounter:
 
 def test_upstream_continues_before_commit_and_snapshot_is_detached(tmp_path, monkeypatch):
     import time
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.dataflow_sinks import _artifact_from_json
     from demiflow.execution.kernels import state_codec
 
@@ -476,8 +476,8 @@ class NativeSlowFixture:
 
 
 def test_native_inflight_cut_allows_free_slots_past_slow_call(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.kernels import state_codec
     from demiflow.execution.kernels.operator import IMAGE_MEDIA_TYPE
     from demiflow.operator_llm.stream_recovery import RunPromptJournal

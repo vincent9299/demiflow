@@ -53,7 +53,7 @@ def test_public_worker_error_preserves_builtin_and_closes_owner(tmp_path):
 @pytest.mark.parametrize('synchronous', [False, True])
 def test_cached_partial_actor_state_and_lifecycle_survive_checkpoint(tmp_path, monkeypatch, synchronous):
     from functools import partial
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     closed = tmp_path / 'closed'
     class Counter:
         def __init__(self):

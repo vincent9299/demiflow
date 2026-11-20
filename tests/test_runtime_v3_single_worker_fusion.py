@@ -2,7 +2,7 @@
 import pytest
 
 from demiflow import data
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.run_context import RunContext
 
 
@@ -63,7 +63,7 @@ def test_one_worker_crosses_credit_windows_without_process_restarts(tmp_path, mo
 
 
 def test_fused_checkpoint_restores_original_plan_and_result_prefix(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     class Interrupted(Exception):
         pass
     commit = DataflowCheckpointCoordinator.commit

@@ -8,7 +8,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire, compute_physical_digest
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.dataflow_native_limits import (
     NativeBudgetGuard, admission_timeout_ms, intersect_native_limits,
 )
@@ -160,7 +160,7 @@ def test_resume_retains_native_ceilings_and_original_plan_when_option_omitted(tm
 
 def test_public_native_admission_deadline_bounds_real_scheduler_retry(tmp_path, monkeypatch):
     import time
-    from demiflow.execution.dataflow_scheduler import DataflowScheduler
+    from demiflow.execution.scheduler.placement import DataflowScheduler
     retries = []
     def pending(scheduler, work, **kwargs):
         retries.append(time.monotonic())

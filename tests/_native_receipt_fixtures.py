@@ -5,7 +5,7 @@ from pathlib import Path
 from demiflow.execution.contracts.dataflow import ArtifactRef, thaw_record_value
 from demiflow.execution.dataflow_handles import _ChunkStream
 from demiflow.execution.dataflow_segments import segment_refs
-from demiflow.execution.dataflow_store import RunArtifactStore
+from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.exchange.dataflow_bridge import _decode_record_document, _decode_payload
 from demiflow.execution.sealed_plans import load_sealed_plan
 

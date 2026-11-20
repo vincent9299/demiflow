@@ -438,7 +438,7 @@ def test_typed_codec_values_and_mapping_order_contract(tmp_path):
 
 def test_legacy_formula_and_old_sealed_configuration_remain_unchanged(tmp_path, monkeypatch):
     from demiflow.execution.kernels.ordering import shuffle_key
-    from demiflow.execution import dataflow as execution_module
+    from demiflow.execution.action_driver import dataflow as execution_module
     from demiflow.planning import dataflow_compile
     from test_runtime_v3_real_seams import prepared
     expected = hashlib.sha256(b'["demiflow-shuffle-v3",7,"occ","rec-1"]').digest()
@@ -497,8 +497,8 @@ def test_same_typed_input_order_on_local_and_ray_core(tmp_path):
 
 
 def test_original_nonfinal_cut_resumes_the_same_seeded_order(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
-    from demiflow.execution import dataflow as execution_module
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+    from demiflow.execution.action_driver import dataflow as execution_module
     class Interrupted(Exception):
         pass
     def dataset():

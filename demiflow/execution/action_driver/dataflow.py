@@ -15,36 +15,36 @@ import time
 import json
 from typing import TYPE_CHECKING
 
-from .contracts.dataflow import (
+from ..contracts.dataflow import (
     ActionHandle, ActionRequest, ArtifactRef, Bounds, ControlReply, CutContribution,
     CutRequest, DriverServices, ExecutionStatus, PhysicalDataflow, ReadyWork,
     RecoveryImage, RuntimePolicy, SealedExecution, TerminalResult, WorkerAssignment,
     WorkerEvent, WorkerLease,
 )
-from .contracts.dataflow_errors import DataflowError
-from .dataflow_scheduler import DataflowScheduler
-from .dataflow_services import make_driver_services
-from .dataflow_terminals import open_terminal, TerminalSubscription
-from .dataflow_checkpoint import DataflowCheckpointCoordinator
-from .dataflow_seal import (
+from ..contracts.dataflow_errors import DataflowError
+from ..scheduler.placement import DataflowScheduler
+from ..dataflow_services import make_driver_services
+from ..dataflow_terminals import open_terminal, TerminalSubscription
+from ..checkpoint.coordinator import DataflowCheckpointCoordinator
+from ..seal.plan import (
     seal_dataflow, stage_dataflow_programs, resolve_execution_constants,
 )
-from .dataflow_sources import snapshot_source, plan_source_splits
-from .dataflow_queue import NativeAcquisitionService
-from .dataflow_artifacts import stage_runtime_bundle
-from .dataflow_hosts import make_host_endpoint
-from .exchange.dataflow_channels import close_channels
-from .exchange.deliveries import DeliveryExchange
-from ..planning.dataflow_compile import lower_action
-from ..planning.dataflow_place import compile_physical_dataflow
-from ..planning.dataflow_policy import normalize_native_options
-from ..resources.contracts import (
+from ..dataflow_sources import snapshot_source, plan_source_splits
+from ..dataflow_queue import NativeAcquisitionService
+from ..dataflow_artifacts import stage_runtime_bundle
+from ..dataflow_hosts import make_host_endpoint
+from ..exchange.dataflow_channels import close_channels
+from ..exchange.deliveries import DeliveryExchange
+from ...planning.dataflow_compile import lower_action
+from ...planning.dataflow_place import compile_physical_dataflow
+from ...planning.dataflow_policy import normalize_native_options
+from ...resources.contracts import (
     RESOURCE_PROTOCOL_VERSION, MutationContext, ReleaseSpec, ResourceScope,
 )
 
 if TYPE_CHECKING:
-    from .run_context import RunAction
-    from ..resources.manager import ResourceManager
+    from ..run_context import RunAction
+    from ...resources.manager import ResourceManager
 
 
 def _now_ms() -> int:
@@ -52,7 +52,7 @@ def _now_ms() -> int:
 
 
 def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bounds) -> ActionHandle:
-    from .plan_capture import current_capture
+    from ..plan_capture import current_capture
     capture = current_capture()
     if capture is not None:
         capture.intercept(request, policy=policy, bounds=bounds)
@@ -70,7 +70,7 @@ def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bou
         except Exception as cleanup:
             failure.add_note("Execution cleanup also failed: " + str(cleanup))
         try:
-            from .dataflow_api import record_execution_metadata
+            from ..dataflow_api import record_execution_metadata
             record_execution_metadata(request, execution)
         except Exception as observation:
             failure.add_note('Execution metadata also failed: ' + str(observation))
@@ -89,7 +89,7 @@ class DataflowExecution:
         self._policy = services.policy
         self._active_worker_limit = self._policy.max_active_workers
         self._bounds = services.bounds
-        from .dataflow_native_limits import NativeBudgetGuard
+        from ..dataflow_native_limits import NativeBudgetGuard
         self._native_limits = self._policy.native_limits
         self._native_guard = NativeBudgetGuard(self._native_limits)
         self._began_at = time.monotonic()
@@ -258,7 +258,7 @@ class DataflowExecution:
         self._native_guard.check()
         if (self._terminal_stop_deadline is not None and self._terminal_result is None
                 and time.monotonic() >= self._terminal_stop_deadline):
-            from .recovery_contract import RecoveryContractError
+            from ..recovery_contract import RecoveryContractError
             raise RecoveryContractError('Delivery exceeded cancel grace; unfinished writer is isolated while draining')
         self._check_checkpoint_deadline()
         if time.monotonic() - self._began_at >= self._bounds.timeout_ms / 1000:
@@ -320,7 +320,7 @@ class DataflowExecution:
         endpoint = make_host_endpoint(lease, services=self._services)
         self._services.journal_service.register_worker(lease, stage.occurrences)
         try:
-            from .dataflow_durable_residency import participant_ids
+            from ..dataflow_durable_residency import participant_ids
             owns_image = self._restore_image is not None and any(
                 c.participant_id in participant_ids(self._physical, lease.partition_ids)
                 for c in self._restore_image.contributions)
@@ -355,8 +355,8 @@ class DataflowExecution:
         self._check_stop()
         normalize_native_options(self._request.arguments.get("native_options"),
                                  operation_kind=self._request.kind)
-        from .queue_producer import producer_actor
-        from .dataflow_producer import NativeProducerService
+        from ..queue_producer import producer_actor
+        from ..dataflow_producer import NativeProducerService
         producer = producer_actor(self._request.plan)
         if producer is not None:
             if self._request.kind != 'run_stream':
@@ -376,21 +376,21 @@ class DataflowExecution:
         # load it exactly as on resume instead of compiling a second plan.
         # start() still requires original cut proof for an actual replay.
         if existing is not None:
-            from .dataflow_seal import load_dataflow, verify_action_programs
+            from ..seal.plan import load_dataflow, verify_action_programs
             graph, physical, sealed = load_dataflow(self._action.context.directory,
                 self._action.action_id, store=self._store, bounds=self._bounds)
-            from .dataflow_shared import validate_shared_actor_binding
+            from ..dataflow_shared import validate_shared_actor_binding
             validate_shared_actor_binding(self._request, graph, bounds=physical.bounds)
-            from .dataflow_schema import validate_literal_schema_replay
+            from ..dataflow_schema import validate_literal_schema_replay
             validate_literal_schema_replay(self._request, graph, bounds=self._bounds)
-            from .dataflow_native_limits import validate_execution_binding
+            from ..dataflow_native_limits import validate_execution_binding
             validate_execution_binding(self._request, graph)
             completed_live_nodes = verify_action_programs(
                 self._action, graph, physical, sealed, store=self._store, bounds=self._bounds)
         else:
             compiled = lower_action(self._request, bounds=self._bounds)
-            from .checked import current
-            from .managed_native import NativeExecution
+            from ..checked import current
+            from ..managed_native import NativeExecution
             checked = current()
             if isinstance(checked, NativeExecution):
                 compiled = checked.admit_compiled(self._request, compiled, bounds=self._bounds)
@@ -417,9 +417,9 @@ class DataflowExecution:
             physical = compile_physical_dataflow(
                 graph, tuple(snapshots), tuple(splits), policy=self._policy, hosts=self._services.hosts,
                 bounds=self._bounds, constants_ref=constants_ref)
-            from .checked import current
-            from .identity_bridge import build_identity_bridge
-            from .contracts.dataflow import thaw_record_value
+            from ..checked import current
+            from ..identity_bridge import build_identity_bridge
+            from ..contracts.dataflow import thaw_record_value
             checked = current()
             bridge = None
             if checked is not None and checked.report_digest and compiled.report_bindings:
@@ -436,7 +436,7 @@ class DataflowExecution:
         # Preserve the sealed plan; current execution budgets only intersect
         # its original ceilings. The same store/journal/allocator retain ownership.
         from dataclasses import replace
-        from .dataflow_native_limits import NativeBudgetGuard, intersect_bounds, intersect_native_limits
+        from ..dataflow_native_limits import NativeBudgetGuard, intersect_bounds, intersect_native_limits
         self._bounds = intersect_bounds(physical.bounds, self._bounds)
         self._native_limits = intersect_native_limits(physical.policy.native_limits, self._native_limits)
         self._native_guard = NativeBudgetGuard(self._native_limits)
@@ -448,7 +448,7 @@ class DataflowExecution:
         self._store.bind_driver_bounds(self._bounds)
         self._services.journal_service.bind_bounds(self._bounds)
         self._check_stop()
-        from .checked import current
+        from ..checked import current
         self._checked = current()
         if self._checked is not None:
             bridge_doc = json.loads(b"".join(self._store.read(sealed.identity_bridge_ref,
@@ -459,18 +459,18 @@ class DataflowExecution:
                 self._checked.bind_observation_scope(
                     report_key, plan_id=physical.plan_id, dag_id=graph.dag_id,
                     plan_revision=physical.plan_revision, occurrence_id=occurrence)
-        from .dataflow_sinks import make_sink_adapter
+        from ..dataflow_sinks import make_sink_adapter
         for node in graph.nodes:
             if node.kind == "terminal":
                 if self._request.kind in ("write_lance", "write_datasink", "write_file"):
-                    from .dataflow_sinks import make_native_terminal_sink
+                    from ..dataflow_sinks import make_native_terminal_sink
                     self._sinks[node.kernel.kind] = make_native_terminal_sink(node.kernel,
                         request=self._request, services=self._services,
                         publication_reserved_bytes=physical.residency.control_reserved_bytes,
                         admit_publication=lambda: self._scheduler.admit_publication())
                 else:
                     self._sinks[node.kernel.kind] = make_sink_adapter(node.kernel, services=self._services)
-        from .dataflow_images import bind_image_sinks
+        from ..dataflow_images import bind_image_sinks
         bind_image_sinks(graph, services=self._services, sinks=self._sinks)
         self._graph = graph
         # The legacy graph declaration measures cut_rows in source ordinals.
@@ -485,12 +485,12 @@ class DataflowExecution:
         self._policy = live_policy
         self._services.journal_service.bind_recovery_policy(physical.policy)
         self._sealed = sealed
-        from .dataflow_managed_devices import sealed_service_placements
+        from ..dataflow_managed_devices import sealed_service_placements
         placements = sealed_service_placements(graph, physical, store=self._store)
-        from .dataflow_publication_budget import PublicationReservation
+        from ..dataflow_publication_budget import PublicationReservation
         publication_reservation = PublicationReservation(graph, physical.stages, physical.bounds,
             declared=physical.residency.control_reserved_bytes)
-        from .contracts.dataflow_codec import runtime_scope_id
+        from ..contracts.dataflow_codec import runtime_scope_id
         self._scheduler = DataflowScheduler(physical, resources=self._services.resources, sealed=sealed,
             placements=placements, publication_reservation=publication_reservation,
             hosts=self._services.hosts, bounds=self._bounds, policy=live_policy,
@@ -505,8 +505,8 @@ class DataflowExecution:
             if image is None or not image.cut.final:
                 raise DataflowError('INCOMPATIBLE_HISTORY',
                                     'attempt-only live program has no final ACKed result')
-            from .dataflow_seal import verify_completed_live_program
-            from ..planning.dataflow_compile import revalidate_action
+            from ..seal.plan import verify_completed_live_program
+            from ...planning.dataflow_compile import revalidate_action
             current_declarations = revalidate_action(self._request, bounds=self._bounds).declarations
             declarations = {d.occurrence_id: d for d in current_declarations}
             for node, expected_pin in completed_live_nodes:
@@ -518,7 +518,7 @@ class DataflowExecution:
             if self._acquisition._state == 'constructed':
                 self._acquisition.configure(self._request.source, self._request.plan, None, graph=graph)
             self._services.journal_service.bind_queue(self._acquisition)
-        from .queue_execution import queue_source
+        from ..queue_execution import queue_source
         requires_acquisition = queue_source(self._request.source) is not None or any(
             node.kernel.configuration.get('native_operation') == 'acquire' for node in graph.nodes)
         if requires_acquisition:
@@ -530,17 +530,17 @@ class DataflowExecution:
                 self._acquisition = NativeAcquisitionService(self._action, services=self._services)
             self._acquisition.configure_searches(self._request.source, self._request.plan, graph)
             self._services.journal_service.bind_queue(self._acquisition)
-        from .dataflow_batch_membership import bind_contracts
+        from ..dataflow_batch_membership import bind_contracts
         bind_contracts(self._services.journal_service, graph, physical)
-        from .dataflow_embedding_journal import bind_private_embedding_contracts
+        from ..dataflow_embedding_journal import bind_private_embedding_contracts
         bind_private_embedding_contracts(self._services.journal_service, graph)
-        from .dataflow_prompt_journal import bind_private_prompt_contracts
+        from ..dataflow_prompt_journal import bind_private_prompt_contracts
         bind_private_prompt_contracts(self._services.journal_service, graph)
-        from .dataflow_private_storage import bind_private_storage
+        from ..dataflow_private_storage import bind_private_storage
         bind_private_storage(self._services.journal_service)
         self._stream_lance = None
         if any(node.kernel.kind == 'SaveLanceOp' for node in graph.nodes):
-            from .dataflow_stream_lance import NativeStreamLanceService
+            from ..dataflow_stream_lance import NativeStreamLanceService
             self._stream_lance = NativeStreamLanceService(self)
             self._services.journal_service.bind_stream_writer(self._stream_lance)
         self._prepared = True
@@ -560,7 +560,7 @@ class DataflowExecution:
                                              for h in self._services.hosts))),
                   "memory_bytes": self._bounds.max_resident_bytes,
                   "max_workers": self._active_worker_limit or self._bounds.max_partitions}
-        from .dataflow_native_limits import sealed_execution_ceilings
+        from ..dataflow_native_limits import sealed_execution_ceilings
         ceilings = sealed_execution_ceilings(self._graph)
         if 'cpu_millis' in ceilings:
             budget['cpu_millis'] = min(budget['cpu_millis'], ceilings['cpu_millis'])
@@ -570,7 +570,7 @@ class DataflowExecution:
         gpu_budget = int(sum(host.logical_resources.get('gpu', 0) for host in self._services.hosts))
         if gpu_budget:
             budget['accelerator_gpu'] = gpu_budget
-        from .dataflow_services import resource_scope_binding
+        from ..dataflow_services import resource_scope_binding
         self._services.resources.state.open_scope(self._fence(), ResourceScope(
             self._scheduler.scope_id, self._run_id(), resource_scope_binding(self._services.resources, self._policy),
             self._fence(), budget))
@@ -584,7 +584,7 @@ class DataflowExecution:
         self._restore_image = self._verified_completed_image or (self._checkpoint.recover(sinks=self._sinks)
             if self._action.replaying and not queue_owned_recovery else None)
         if self._restore_image is not None:
-            from .dataflow_operator_observations import restore_operator_observations, restore_node_metrics
+            from ..dataflow_operator_observations import restore_operator_observations, restore_node_metrics
             restore_operator_observations(self, self._restore_image)
             pub = self._publication(self._restore_image)
             self._terminal_seen = pub["manifest"]["total_rows"]
@@ -598,20 +598,20 @@ class DataflowExecution:
             self._last_checkpoint_rows, self._last_checkpoint_outputs = self._checkpoint_frontiers()
             # Validate all actor images before ANY participant executes again.
             # A completed final result is safe to read without recreating actors.
-            from .kernels import state_codec
-            from .dataflow_kernel_pack import read_kernel_image
-            from .contracts.dataflow_codec import compute_participant_id
+            from ..kernels import state_codec
+            from ..dataflow_kernel_pack import read_kernel_image
+            from ..contracts.dataflow_codec import compute_participant_id
             partitions = {compute_participant_id(stage.stage_id, partition): partition
                           for stage in self._physical.stages for partition in stage.partitions}
             transforms = {n.occurrence_id for n in self._graph.nodes if n.kind == "transform"}
-            from .dataflow_residency import participants_for
+            from ..dataflow_residency import participants_for
             residency = self._checkpoint.residency or {}
             retired = set(residency.get('completed_stages', ()))
             if residency.get('phase_complete'):
                 retired.update(residency['active_stages'])
             retired_ids = set(participants_for(self._physical, retired))
             if residency.get('schema') == 'demiflow.durable_residency.v2':
-                from .dataflow_durable_residency import member_partitions, participant_ids
+                from ..dataflow_durable_residency import member_partitions, participant_ids
                 parts = member_partitions(self._physical, residency, 'completed')
                 if residency['phase_complete']:
                     parts |= member_partitions(self._physical, residency, 'active')
@@ -654,7 +654,7 @@ class DataflowExecution:
         self._checkpoint_at = time.monotonic()
 
     def _configure_phases(self):
-        from .dataflow_residency import pack_finite_phases
+        from ..dataflow_residency import pack_finite_phases
         stages = self._stage_order()
         def phase_fits(phase):
             group = [s for s in stages if s.stage_id in phase]
@@ -671,7 +671,7 @@ class DataflowExecution:
         waves = any(len(s.partitions) > s.replica_target for s in stages)
         if (durable or waves) and (not fits or waves or prior is not None and
                 prior.get('schema') in ('demiflow.durable_residency.v1', 'demiflow.durable_residency.v2')):
-            from .dataflow_durable_residency import DurableResidency
+            from ..dataflow_durable_residency import DurableResidency
             if any(source.replay == 'attempt_only' for source in self._physical.sources):
                 raise DataflowError('UNSUPPORTED_CAPABILITY', 'attempt-only source cannot park and restore within an action')
             if prior is not None:
@@ -726,7 +726,7 @@ class DataflowExecution:
                    for stage in stages for partition in stage.partitions if partition in members]
         hosts = self._scheduler.place_hosts(pending)
         ready = []
-        from .dataflow_native_limits import admission_timeout_ms
+        from ..dataflow_native_limits import admission_timeout_ms
         deadline = time.monotonic() + admission_timeout_ms(self._policy) / 1000
         while pending:
             deferred = []
@@ -790,7 +790,7 @@ class DataflowExecution:
             self._scheduler.drain(stage_id, deadline_ms=self._policy.control_timeout_ms)
         for endpoint in self._endpoints.values():
             self._services.journal_service.retire_worker(endpoint._assignment.lease)
-        from .dataflow_staging import recover_staging
+        from ..storage.staging import recover_staging
         recover_staging(self._request.action, bounds=self._bounds)
         if self._durable_residency is not None:
             self._durable_residency.committed(image, set(self._endpoints) <= self._done)
@@ -907,7 +907,7 @@ class DataflowExecution:
             if time.monotonic() >= deadline:
                 break
         self._pending_events = len(events)
-        from .dataflow_hosts import batch_business_commands
+        from ..dataflow_hosts import batch_business_commands
         from contextlib import nullcontext
         commands = nullcontext() if draining else batch_business_commands(self._endpoints.values())
         self._update_checkpoint_wait_clock()
@@ -973,7 +973,7 @@ class DataflowExecution:
         never resurrected. No business operation is retried by renewal.
         """
         from dataclasses import replace
-        from .dataflow_scheduler import lease_ttl_ms
+        from ..scheduler.placement import lease_ttl_ms
         now = self._services.clock_ms()
         ttl = lease_ttl_ms(self._policy)
         for allocation_id, lease in tuple(self._scheduler.leases.items()):
@@ -994,7 +994,7 @@ class DataflowExecution:
         # WorkerEvent carries finite Json, whose immutable arrays are tuples.
         # Business-record thawing intentionally preserves tuples and is wrong
         # here (e.g. bounded dead-batch diagnostics are Json arrays).
-        from .contracts.dataflow_codec import _thaw_json
+        from ..contracts.dataflow_codec import _thaw_json
         payload = _thaw_json(event.payload) if event.payload is not None else {}
         endpoint = self._endpoints[event.allocation_id]
         lease = self._scheduler.leases[event.allocation_id]
@@ -1022,7 +1022,7 @@ class DataflowExecution:
                 self._worker_detail_bytes += detail_bytes
             return
         if event.kind == "failure":
-            from .dataflow_failures import restore_failure
+            from ..dataflow_failures import restore_failure
             self._failure = restore_failure(payload)
             self._state = "failed"
             raise self._failure
@@ -1031,19 +1031,19 @@ class DataflowExecution:
             assigned = {n for stage in endpoint._assignment.stages for n in stage.occurrences}
             if occ not in assigned or partition not in lease.partition_ids:
                 raise DataflowError("FENCED", "node observation is outside assigned stage")
-            from .dataflow_operator_observations import validated_node_counters
+            from ..dataflow_operator_observations import validated_node_counters
             metrics = validated_node_counters(payload['metrics'])
             old = self._node_metrics.get((occ, partition), {'rows_input': 0, 'rows_output': 0})
             if any(metrics[k] < old[k] for k in metrics):
                 raise DataflowError("FENCED", "node counters moved backwards within a worker boot")
             self._node_metrics[(occ, partition)] = metrics
-            from .dataflow_usage import observe_prompt_usage
+            from ..dataflow_usage import observe_prompt_usage
             observe_prompt_usage(self, event, payload)
-            from .dataflow_model_observations import observe_models
+            from ..dataflow_model_observations import observe_models
             observe_models(self, event, payload)
-            from .dataflow_operator_observations import observe_operator
+            from ..dataflow_operator_observations import observe_operator
             observe_operator(self, event, payload)
-            from ..planning.dataflow_graph_adapter import observe_graph_progress
+            from ...planning.dataflow_graph_adapter import observe_graph_progress
             observe_graph_progress(self, event, payload)
             key = self._report_keys.get(occ)
             if key is not None:
@@ -1089,10 +1089,10 @@ class DataflowExecution:
                         self._idle.discard(target._allocation_id)
                         target.send_business({"kind": "close_output", "edge_id": spec.edge_id})
             elif payload["scope"] == "finite":
-                from .contracts.dataflow import ProducerCompletion
-                from .exchange.dataflow_channels import seal_scope
-                from .dataflow_sinks import _artifact_json
-                from .recovery_contract import identity
+                from ..contracts.dataflow import ProducerCompletion
+                from ..exchange.dataflow_channels import seal_scope
+                from ..dataflow_sinks import _artifact_json
+                from ..recovery_contract import identity
                 spec = next(x for x in self._physical.exchanges if x.edge_id == payload["edge_id"])
                 producer = payload["producer_partition"]
                 if (spec.mode != "finite_sealed" or producer not in lease.partition_ids
@@ -1121,7 +1121,7 @@ class DataflowExecution:
                         self._idle.discard(target._allocation_id)
                         target.send_business(dict(payload, kind="edge_eoi"))
             else:
-                from .dataflow_checkpoint import _cursor_from_json
+                from ..checkpoint.coordinator import _cursor_from_json
                 assignment = endpoint._assignment
                 allowed = {s.split_id for s in assignment.source_splits}
                 cursors = tuple(_cursor_from_json(c) for c in payload["cursors"])
@@ -1198,10 +1198,10 @@ class DataflowExecution:
                             for key, credit in shares.items()):
                         self._source_credit_needs_rotation = True
         elif event.kind == "cut":
-            from .contracts.dataflow_codec import decode_wire
+            from ..contracts.dataflow_codec import decode_wire
             raw = b"".join(self._store.read(event.payload_ref, max_bytes=self._bounds.max_control_bytes))
             contribution = decode_wire(raw, type_name="CutContribution", bounds=self._bounds)
-            from .contracts.dataflow_codec import compute_participant_id
+            from ..contracts.dataflow_codec import compute_participant_id
             expected = {compute_participant_id(lease.stage_id, p) for p in lease.partition_ids}
             if contribution.boot_id != lease.boot_id or contribution.participant_id not in expected:
                 raise DataflowError("FENCED", "cut contribution differs from worker assignment")
@@ -1271,14 +1271,14 @@ class DataflowExecution:
             final = (phase_done and self._phase_index == len(self._phases) - 1
                      and self._checkpoint.inputs_complete())
             if durable is not None:
-                from .dataflow_durable_residency import participant_ids
+                from ..dataflow_durable_residency import participant_ids
                 final = durable.final(phase_done) and self._checkpoint.inputs_complete()
                 self._cut = self._checkpoint.begin(final=final,
                     participants=participant_ids(self._physical, durable.partition_groups[self._phase_index]),
                     residency=durable.metadata(phase_done, self._checkpoint.satisfied_splits()))
             elif len(self._phases) > 1 or self._completed_stages:
-                from .dataflow_residency import SCHEMA, participants_for
-                from .dataflow_sinks import _artifact_json
+                from ..dataflow_residency import SCHEMA, participants_for
+                from ..dataflow_sinks import _artifact_json
                 residency = {'schema': SCHEMA,
                     'active_stages': list(self._phases[self._phase_index]),
                     'completed_stages': sorted(self._completed_stages),
@@ -1297,7 +1297,7 @@ class DataflowExecution:
                 durable.before_commit(self._cut, self._contributions, self._store)
                 self._checkpoint.update_residency(self._cut,
                     durable.metadata(all_workers <= self._done, self._checkpoint.satisfied_splits()))
-            from .dataflow_producer import NativeProducerService
+            from ..dataflow_producer import NativeProducerService
             if isinstance(self._acquisition, NativeProducerService):
                 # A parked physical owner is not the end of the native input
                 # unit. All downstream/fanout deliveries retain that ownership
@@ -1411,7 +1411,7 @@ class DataflowExecution:
         from concurrent.futures import Future
         from contextvars import copy_context
         from threading import Thread
-        from ..resources.capacity import track_owned_thread
+        from ...resources.capacity import track_owned_thread
         if self._publication_future is not None:
             raise DataflowError('INVALID_CONTRACT', 'only one checkpoint publication may run')
         self._publication_frontiers = (*self._checkpoint_frontiers(), *self._exchange.snapshot_acks())
@@ -1459,7 +1459,7 @@ class DataflowExecution:
         limits = self._action.context.limits
         if len(sources) > min(limits['checkpoint_unconfirmed_rows'], limits['checkpoint_unconfirmed_bytes']):
             return  # A serial source grant rotates only at a real ACK boundary.
-        from .recovery_contract import identity
+        from ..recovery_contract import identity
         commit_id = identity([self._run_id(), self._action.action_id, self._cut.sequence])
         fact = self._action.context.journal.execution_commit(commit_id)
         if fact is not None and fact['prepared'] is not None:
@@ -1518,7 +1518,7 @@ class DataflowExecution:
             for contribution in image.contributions for c in contribution.sources)
         write = None
         if self._request.kind in ("write_lance", "write_datasink", "write_file"):
-            from ..data.datasink import WriteResult
+            from ...data.datasink import WriteResult
             fact = self._action.context.journal.execution_commit(image.commit_id)
             receipt_data = fact["receipts"][self._request.kind]["data"]
             if getattr(self._action, "object_sinks", None):
@@ -1601,7 +1601,7 @@ class DataflowExecution:
                 else:
                     cleanup_error.add_note("Physical cleanup also failed: " + str(exc))
         if not physical_closed and self._defer_live_thread_cleanup():
-            from .recovery_contract import RecoveryContractError
+            from ..recovery_contract import RecoveryContractError
             isolated = RecoveryContractError('Native writer is isolated while draining; run lease is retained')
             if cleanup_error is not None:
                 isolated.add_note('Original cleanup: ' + str(cleanup_error))
@@ -1674,7 +1674,7 @@ class DataflowExecution:
             close_channels(self._channels, reason="execution_close", deadline_ms=deadline_ms)
             self._channels = None
         try:
-            from .dataflow_staging import recover_staging
+            from ..storage.staging import recover_staging
             recover_staging(self._request.action, bounds=self._bounds)
         except Exception as exc:
             cleanup_error = cleanup_error or exc
@@ -1697,7 +1697,7 @@ class DataflowExecution:
         stopped = physically_stopped()
         if physical_closed and stopped:
             self._store.close()
-            from .dataflow_gc import collect_published_orphans, defer_run_gc
+            from ..storage.gc import collect_published_orphans, defer_run_gc
             if getattr(self._action.context, '_native_prompt_journal', None) is not None:
                 defer_run_gc(self._action.context, self._bounds)
                 self._published_gc = {'removed':0,'bytes':0,'blocked':'Deferred until original native journal closes'}
@@ -1709,7 +1709,7 @@ class DataflowExecution:
         self._active_worker_allocations.clear()
         self._current_worker_observations.clear()
         if physical_closed:
-            from .dataflow_thread_programs import owner, release
+            from ..dataflow_thread_programs import owner, release
             release(owner(self._action))
         if cleanup_error is not None:
             raise cleanup_error

@@ -14,7 +14,7 @@ def forbidden(*args, **kwargs):
 
 @pytest.fixture
 def no_execution(monkeypatch):
-    from demiflow.execution import dataflow
+    from demiflow.execution.action_driver import dataflow
     from demiflow.execution.run_context import RunContext
     from demiflow.observability import ActionObserver
     monkeypatch.setattr(dataflow, 'make_driver_services', forbidden)

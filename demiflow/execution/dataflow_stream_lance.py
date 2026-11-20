@@ -308,7 +308,7 @@ class NativeStreamLanceService:
         self._published = {}
         self.store=execution._store;self.bounds=execution._bounds
         self.writers={};self.partitions={};self.lock=threading.RLock();self.failed=False;self.started=False
-        from .dataflow_seal import load_sealed_dataflow,verify_dataflow_program
+        from .seal.plan import load_sealed_dataflow,verify_dataflow_program
         from ..data.plan import CallableSpec
         _,_,pin=load_sealed_dataflow(execution._sealed,action_id=self.action.action_id,
                                    store=self.store,bounds=self.bounds)

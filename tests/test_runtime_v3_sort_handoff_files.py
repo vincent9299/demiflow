@@ -79,7 +79,7 @@ def test_infeasible_final_read_and_output_windows_fail_before_read(tmp_path,monk
 
 
 def test_final_sort_uses_effective_window_of_other_live_view(tmp_path):
-    from demiflow.execution.dataflow_store import RunArtifactStore
+    from demiflow.execution.storage.objects import RunArtifactStore
     with sorted_runs(tmp_path,5) as (runtime,spec,records,runs):
         store=runtime.store
         other=RunArtifactStore(root=store.root,store_id=store.store_id,journal=store._journal,
@@ -107,7 +107,7 @@ def test_final_sort_uses_effective_window_of_other_live_view(tmp_path):
 
 
 def test_other_live_view_infeasibility_rejects_before_sort_read(tmp_path,monkeypatch):
-    from demiflow.execution.dataflow_store import RunArtifactStore
+    from demiflow.execution.storage.objects import RunArtifactStore
     with sorted_runs(tmp_path,5) as (runtime,spec,records,runs):
         store=runtime.store
         other=RunArtifactStore(root=store.root,store_id=store.store_id,journal=store._journal,

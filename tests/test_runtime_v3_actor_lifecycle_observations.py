@@ -7,7 +7,7 @@ from demiflow.execution.run_context import RunContext
 
 @pytest.mark.parametrize('phase', ['success', 'start', 'call_and_close', 'close', 'cancel', 'empty', 'stale_boot'])
 def test_real_process_hooks_survive_cleanup_and_preserve_failures(tmp_path, monkeypatch, phase):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     observed = []
     original = DataflowExecution.close
     def close(execution):
