@@ -37,6 +37,8 @@ for line in sys.stdin:
         send({'id':value['id'],'result':{'turn':{'id':turn}}})
         event('turn/started',{'threadId':thread,'turn':{'id':turn}})
         message=params['input'][0]['text']
+        if '## 当前版本 DemiFlow 原生 API' in instructions:
+            (Path.home() / 'received-request.txt').write_text(message)
         if message.startswith('guided fixture edit'):
             assert 'Dataset.map_prompt_async' in instructions and 'DF-02' in instructions
             flow = project_root / 'flows' / 'guided.py'

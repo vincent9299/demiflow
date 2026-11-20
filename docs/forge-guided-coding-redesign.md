@@ -24,7 +24,7 @@ AI 在首次写代码前收到本次实际使用的 DemiFlow 公共 API、项目
 
 1. `forge/api_reference.py` 的 `build_reference()` 通过现有 `platform.discover_catalog` 读取 `demiflow.data`、`demiflow.operator_llm`、`demiflow.objects`、`demiflow.agent`。`sdk_identity(catalog)` 绑定 SDK 源码及语义文件。 `render_reference(reference)` 投影常用 API 的真实签名、文档节选、出处和最小示例，公开但尚未覆盖的 API 明确标注。目录上限 2 MiB，参考正文上限 20 KiB。
 2. `workbench/projects/discovery.py:coding_view(root, *, exclude)` 读取当前根的控制文件和角色索引。它不打开平台快照、父项目声明、运行报告和数据文件。当前项目的 Pipeline 规范、README 和有范围的源码由 `conversations/context.py:assemble` 送进可信参考段。项目文本不能改变 grant。
-3. `Service._launch_provider` 在首次需要时生成 API 目录，利用私有的匿名文件描述符复用。worker 读取并关闭描述符后启动 provider，并核验源码摘要。Codex 首次和续聊的开发指令包含所附资料。DeepSeek ACP 在本轮真实 Prompt 中送出资料和用户要求。只读输入工具的能力由 Workbench 明确提供，适配器负责传递。
+3. `Service._launch_provider` 在首次需要时生成 API 目录，利用私有的匿名文件描述符复用。worker 读取并关闭描述符后启动 provider，并核验源码摘要。Codex 首次和续聊的开发指令包含所附资料，真人原文通过用户消息单独传递。DeepSeek ACP 在本轮 Prompt 中分别放入资料与原文。只读输入工具的能力由 Workbench 明确提供，适配器负责传递。
 4. `Deployment` 校验当前 grant 和 provider 配置。全局配置一次，项目复用连接。当前项目根、写入范围、受保护文件、已授予的输入、机密和操作系统进程边界继续由现有服务和沙箱掌握。
 
 ### 写后检查

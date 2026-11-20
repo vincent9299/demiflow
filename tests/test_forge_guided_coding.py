@@ -26,7 +26,13 @@ def test_guidance_crosses_start_and_resume_without_a_parent_task(tmp_path, acp):
             assert manifest['coding_guidance']['catalog_id']
             assert 'task_id' not in manifest
             received = (service.root / session / 'received-context.txt').read_text()
-            assert 'Dataset.map_prompt_async' in received and 'DF-02' in received and user in received
+            assert 'Dataset.map_prompt_async' in received and 'DF-02' in received
+            assert manifest['requirement'] == user
+            if acp:
+                assert received.count(user) == 1
+            else:
+                assert user not in received
+                assert (service.root / session / 'received-request.txt').read_text() == user
             assert 'pipeline_checks' not in json.loads(done['result'])
         assert not (service.root / 'forge-development').exists()
 
