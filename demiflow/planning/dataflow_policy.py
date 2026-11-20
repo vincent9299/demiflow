@@ -199,12 +199,13 @@ def fit_default_stream_windows(request, *, policy, bounds, explicit_limits=()):
     from dataclasses import replace
     from fractions import Fraction
     from .dataflow_compile import lower_action
+    from .dataflow_configuration import _PROBE
     from .dataflow_place import partition_stages
     adjustable = {'max_row_bytes', 'max_batch_bytes', 'max_state_bytes'} - set(explicit_limits)
     if not adjustable:
         return bounds
     for _ in range(8):
-        graph = lower_action(request, bounds=bounds).graph
+        graph = lower_action(request, bounds=bounds, _configuration_purpose=_PROBE).graph
         stages = partition_stages(graph, policy=policy, bounds=bounds)
         by_occurrence = {stage.occurrences[0]: stage for stage in stages}
         if policy.max_active_workers == 1:

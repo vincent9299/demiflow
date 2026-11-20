@@ -51,6 +51,7 @@ from .dataflow_budget import (
     codec_window, default_profile, fit_codec_windows, relational_profile, terminal_budget,
 )
 from .dataflow_registry import operator_registry, source_registry, terminal_registry
+from .dataflow_configuration import _NEW, _check_purpose
 
 _SCHEMA = "demiflow.dataflow_graph.v3"
 _NON_SEMANTIC_FIELDS = frozenset({"runtime_contract", "label", "node_id", "source_dataset"})
@@ -827,13 +828,15 @@ def _lower_request(request: ActionRequest) -> ActionRequest:
     return request
 
 
-def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None, on_compiled=None) -> CompiledDataflow:
+def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None, on_compiled=None,
+                  _configuration_purpose=_NEW) -> CompiledDataflow:
     """Capture the real source/plan/PlanInput topology into a v3 graph.
 
     ``inputs`` is a ``CompileInputs``: the executor defaults and report bindings
     this plan is compiled with. When it is not given, it is resolved here once,
     from the request's action and the current report context.
     """
+    _check_purpose(_configuration_purpose)
     if terminal_registry().get(request.kind) is None:
         raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
     request = _lower_request(request)
@@ -848,7 +851,7 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None, on_com
         report_configuration_stage(capture.nodes,
             ((capture.nodes[p].occurrence_id, capture.nodes[c].occurrence_id)
              for p, _, c, _ in capture.edges), action_id=request.action.action_id,
-            stage=stage, edge_count=len(capture.edges))
+            stage=stage, edge_count=len(capture.edges), _purpose=_configuration_purpose)
     report_stage('capture')
     from .dataflow_graph_adapter import decorate_graph_capture
     terminal = decorate_graph_capture(capture, request, terminal=captured_terminal)
@@ -882,9 +885,9 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None, on_com
         terminals=graph.terminals, sources=graph.sources,
     )
     validate_graph(graph, bounds=bounds)
-    # Report-only: a plan outside the configuration schema is logged as a warning, never refused.
+    # History/probes only report; new compilation enforces the qualified rules.
     report_configuration_stage(graph.nodes, ((edge.producer, edge.consumer) for edge in graph.edges),
-                               action_id=graph.action_id, stage='final', edge_count=len(graph.edges))
+        action_id=graph.action_id, stage='final', edge_count=len(graph.edges), _purpose=_configuration_purpose)
     # Report bindings name nodes of the graph that is returned. Graph adaptation can
     # fold the terminal into another node and re-derive semantic identities, so the
     # identities are read here, from the finished nodes, not when a node was captured.
@@ -905,7 +908,8 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None, on_com
     return compiled
 
 
-def lower_action(request: ActionRequest, *, bounds: Bounds, inputs=None, on_compiled=None) -> CompiledDataflow:
+def lower_action(request: ActionRequest, *, bounds: Bounds, inputs=None, on_compiled=None,
+                 _configuration_purpose=_NEW) -> CompiledDataflow:
     """Compile terminal collect/statistics/write semantics into the graph.
 
     The compiler's whole input is ``request``, ``bounds`` and ``inputs``
@@ -914,9 +918,11 @@ def lower_action(request: ActionRequest, *, bounds: Bounds, inputs=None, on_comp
     ``on_compiled`` optionally observes bounded provenance after final validation;
     it is not a semantic input and its result never enters the compiled contract.
     """
+    _check_purpose(_configuration_purpose)
     definition = terminal_registry().get(request.kind)
     if definition is None:
         raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
     if request.kind == "write_datasink" and request.sink is None:
         raise _error("INVALID_CONTRACT", "write terminal requires a registered sink declaration")
-    return capture_graph(request, bounds=bounds, inputs=inputs, on_compiled=on_compiled)
+    return capture_graph(request, bounds=bounds, inputs=inputs, on_compiled=on_compiled,
+                         _configuration_purpose=_configuration_purpose)
