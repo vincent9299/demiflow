@@ -63,6 +63,13 @@ def error_record(exc):
             'message': str(exc).encode('utf-8', 'replace')[:4096].decode('utf-8', 'replace')}
 
 
+def requested_value(value):
+    """Invalid input is evidence too, but must not expand a bounded failure receipt."""
+    if not isinstance(value, str):
+        return {'invalid_type': type(value).__name__}
+    return value if len(value) <= 64 else {'prefix': value[:64], 'characters': len(value)}
+
+
 class Budget:
     def __init__(self, limits=Limits(), clock=time.monotonic):
         if any(type(v) is not int or not 0 < v <= asdict(Limits())[k]
@@ -192,7 +199,7 @@ def fixed_inputs(repository, base, candidate, budget, inputs=None):
     inputs = {} if inputs is None else inputs
     with GitReader(repository, ['cat-file', '--batch'], budget) as reader:
         for label, oid in (('base', base), ('candidate', candidate)):
-            if not SHA.fullmatch(oid):
+            if not isinstance(oid, str) or len(oid) not in (40, 64) or not SHA.fullmatch(oid):
                 raise DiagnosticError('invalid_sha', f'{label} requires a full immutable lowercase object SHA')
             kind, raw = reader.object(oid, budget.limits.metadata_bytes)
             inputs[label] = {'requested_sha': oid, 'input_kind': kind,
@@ -577,11 +584,15 @@ def write_json(path, value, maximum, budget):
 
 def generate(repository, base, candidate, output_dir, *, limits=Limits(), backups=None):
     started = time.monotonic()
-    repository, output = Path(repository).resolve(), Path(output_dir).absolute()
-    receipt = {'status': 'failed', 'requested_inputs': {'base': base, 'candidate': candidate},
+    receipt = {'status': 'failed', 'requested_inputs': {'base': requested_value(base), 'candidate': requested_value(candidate)},
         'limits': asdict(limits), 'backups': backups or {'status': 'not_applied_in_process_api'}, 'files': []}
     owned, created = False, []
     try:
+        for path in (repository, output_dir):
+            value = os.fspath(path)
+            if not isinstance(value, str) or len(value) > 4096 or len(os.fsencode(value)) > 4096:
+                raise DiagnosticError('invalid_path', 'Repository/output path exceeds 4096 bytes')
+        repository, output = Path(repository).resolve(), Path(output_dir).absolute()
         if output.resolve().is_relative_to(repository):
             raise DiagnosticError('output_inside_repository', 'Output must be outside the repository')
         output.mkdir()  # Exclusive new stage; never use or overwrite existing evidence.

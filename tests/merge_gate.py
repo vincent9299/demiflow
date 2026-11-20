@@ -170,12 +170,22 @@ def diagnostics_process(command):
 
 def run_diagnostics(root, python, base=None, candidate=None, output=None, *, runner=None):
     """Optional report evidence; never reads or assigns the guard result's ok field."""
-    requested = {'base': base, 'candidate': candidate, 'output_dir': output}
-    if all(value is None for value in requested.values()):
+    values = {'base': base, 'candidate': candidate, 'output_dir': output}
+    requested = {}
+    for name, value in values.items():
+        if value is None:
+            requested[name] = None
+        else:
+            text = str(value)
+            maximum = 4096 if name == 'output_dir' else 64
+            requested[name] = text if len(text) <= maximum else {'prefix': text[:64], 'characters': len(text)}
+    if all(value is None for value in values.values()):
         return {'status': 'not_requested'}
     failed = {'status': 'failed', 'requested': requested}
-    if any(value is None for value in requested.values()):
+    if any(value is None for value in values.values()):
         return dict(failed, error={'code': 'invalid_configuration', 'message': 'All three diagnostic options are required'})
+    if any(not isinstance(v, str) or len(v) > 64 for v in (base, candidate)) or len(str(output)) > 4096:
+        return dict(failed, error={'code': 'invalid_configuration', 'message': 'Diagnostic SHA/path argument exceeds input bounds'})
     try:
         command = [python, '-I', '-B', str(root / 'tools/architecture_diagnostics.py'),
                    '--repository', str(root), '--base', base, '--candidate', candidate,

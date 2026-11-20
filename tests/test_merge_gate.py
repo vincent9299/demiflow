@@ -131,6 +131,16 @@ def test_diagnostics_not_requested_and_partial_configuration_are_explicit():
     assert result['status'] == 'failed' and result['error']['code'] == 'invalid_configuration'
 
 
+def test_oversized_diagnostic_arguments_have_bounded_failure_evidence(tmp_path):
+    def forbidden(command):
+        raise AssertionError('Oversized arguments must be rejected before child launch')
+    result = merge_gate.run_diagnostics(ROOT, sys.executable, 'x'*70000, 'y'*70000,
+        str(tmp_path/'reports'), runner=forbidden)
+    assert result['status'] == 'failed' and result['error']['code'] == 'invalid_configuration'
+    assert result['requested']['base'] == {'prefix': 'x'*64, 'characters': 70000}
+    assert len(json.dumps(result).encode()) < 65536
+
+
 @pytest.mark.parametrize('fault', ['timeout', 'nonzero', 'corrupt', 'write', 'missing', 'digest', 'input'])
 def test_diagnostic_failures_are_visible_not_empty_success(tmp_path, fault):
     def runner(command):

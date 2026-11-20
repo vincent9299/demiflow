@@ -282,3 +282,22 @@ def test_cli_exit_status_and_os_backup_receipt(repo, tmp_path):
     assert json.loads(good.stdout)['backups']['resource_limits'] == 'applied'
     bad = subprocess.run([*command, str(tmp_path/'cli-good')], capture_output=True, text=True, timeout=20)
     assert bad.returncode != 0 and json.loads(bad.stdout)['status'] == 'failed'
+
+
+@pytest.mark.parametrize('oversized', ['sha', 'repository', 'output'])
+def test_cli_rejects_oversized_metadata_without_expanding_error_receipts(repo, tmp_path, oversized):
+    commit = repo.commit({'demiflow/__init__.py': ''})
+    repository, base, candidate, output = str(repo.path), commit, commit, str(tmp_path/'bounded-error')
+    if oversized == 'sha': base = candidate = 'x'*70000
+    if oversized == 'repository': repository = 'x'*5000
+    if oversized == 'output': output = 'x'*5000
+    child = subprocess.run([sys.executable, '-I', '-B', str(ROOT/'tools/architecture_diagnostics.py'),
+        '--repository', repository, '--base', base, '--candidate', candidate, '--output-dir', output],
+        capture_output=True, text=True, timeout=20)
+    assert child.returncode != 0 and len(child.stdout.encode()) < 65536 and len(child.stderr.encode()) < 65536
+    receipt = json.loads(child.stdout)
+    assert receipt['status'] == 'failed' and receipt['files'] == []
+    if oversized == 'sha':
+        assert receipt['requested_inputs']['base'] == {'prefix': 'x'*64, 'characters': 70000}
+    else:
+        assert receipt['error']['code'] == 'invalid_path'
