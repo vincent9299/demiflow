@@ -411,7 +411,7 @@ class DataflowExecution:
         # load it exactly as on resume instead of compiling a second plan.
         # start() still requires original cut proof for an actual replay.
         if existing is not None:
-            from .dataflow_seal import load_dataflow, load_sealed_dataflow, verify_dataflow_program
+            from .dataflow_seal import load_dataflow, verify_action_programs
             graph, physical, sealed = load_dataflow(self._action.context.directory,
                 self._action.action_id, store=self._store, bounds=self._bounds)
             from .dataflow_shared import validate_shared_actor_binding
@@ -420,22 +420,8 @@ class DataflowExecution:
             validate_literal_schema_replay(self._request, graph, bounds=self._bounds)
             from .dataflow_native_limits import validate_execution_binding
             validate_execution_binding(self._request, graph)
-            _, _, pin = load_sealed_dataflow(sealed, action_id=self._action.action_id,
-                                             store=self._store, bounds=self._bounds)
-            for node in graph.nodes:
-                if node.program_ref is not None:
-                    live_binding = None
-                    if node.kernel.configuration.get('thread_attempt'):
-                        if self._action.replaying:
-                            completed_live_nodes.append(node)
-                            continue
-                        # A same-attempt live program must authenticate its
-                        # existing registry owner and code. It is not a past
-                        # result and therefore does not require a final ACK.
-                        from .dataflow_thread_programs import owner
-                        live_binding = owner(self._action)
-                    verify_dataflow_program(node.program_ref, expected_pin=pin["programs"][node.occurrence_id],
-                                            store=self._store, bounds=self._bounds, live_binding=live_binding)
+            completed_live_nodes = verify_action_programs(
+                self._action, graph, physical, sealed, store=self._store, bounds=self._bounds)
         else:
             compiled = lower_action(self._request, bounds=self._bounds)
             from .checked import current
@@ -560,9 +546,9 @@ class DataflowExecution:
             from ..planning.dataflow_compile import revalidate_action
             current_declarations = revalidate_action(self._request, bounds=self._bounds).declarations
             declarations = {d.occurrence_id: d for d in current_declarations}
-            for node in completed_live_nodes:
+            for node, expected_pin in completed_live_nodes:
                 verify_completed_live_program(node.program_ref,
-                    expected_pin=pin['programs'][node.occurrence_id],
+                    expected_pin=expected_pin,
                     declaration=declarations.get(node.occurrence_id), store=self._store, bounds=self._bounds)
             self._verified_completed_image = image
         if producer is not None:
