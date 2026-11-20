@@ -357,6 +357,19 @@ class DriverJournalService:
                              (lease.allocation_id,)).fetchone()
         if row is None or row[0] != 'CONFIRMED':
             raise DataflowError('INVALID_CONTRACT', 'Worker cleanup is not confirmed')
+        self._forget_worker(lease)
+
+    def discard_prepared_worker(self, lease):
+        """Drop a staged grant only before submission or after confirmed exit."""
+        self._check_grant()
+        with self._journal._connection() as db:
+            row = db.execute("SELECT cleanup FROM resource_allocations WHERE allocation_id=?",
+                                  (lease.allocation_id,)).fetchone()
+        if row is not None and row[0] != 'CONFIRMED':
+            raise DataflowError('FENCED', 'Submitted workers require confirmed retirement')
+        self._forget_worker(lease)
+
+    def _forget_worker(self, lease):
         owner = (lease.allocation_id, lease.boot_id)
         with self._native_reserve_lock, self._lock:
             old = self._leases.get(lease.allocation_id)
