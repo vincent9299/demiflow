@@ -201,7 +201,8 @@ class SearchRuntime:
                     effects = self._effects[command.node_id]
                     if actor not in self.started:
                         self.started.append(actor)
-                        await actor.astart(effects=effects)
+                        actor.bind_search_effects(effects)
+                        await actor.astart()
                     reply.set_result(await effects.apply(actor, row, include_proof_reader=True))
                 except BaseException as exc:
                     reply.set_exception(exc)

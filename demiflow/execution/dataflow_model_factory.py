@@ -116,9 +116,8 @@ def native_model_declaration(operation):
             raise DataflowError('INVALID_CONTRACT', 'Vector search requires an unstarted declaration')
         return CallableSpec.create(VectorSearch, fn_constructor_kwargs={
             **actor.spec, 'query': actor.query, 'output': actor.output, 'label': actor.label})
-    from ..collect.operators import SearchWeb
-    if type(actor) is SearchWeb:
-        from ..collect.search_contract import search_facts
+    from ..collect.search_contract import is_native_search_actor, search_facts
+    if is_native_search_actor(actor):
         from .dataflow_search import NativeSearchCall
         from .recovery_contract import identity
         search_facts(actor)

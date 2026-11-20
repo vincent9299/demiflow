@@ -44,11 +44,15 @@ class SearchWeb(WebOperatorLifecycle):
     def started(self):
         return self._effects is not None or self._session_lease is not None
 
-    async def astart(self, *, effects):
+    def bind_search_effects(self, effects):
         self._effects = effects
         self.session._native_execution_admission = self._effects.admit_http
         self.session._native_control_bytes = self._effects.control_bytes
         self.session._native_max_hosts = 64
+
+    async def astart(self):
+        if self._effects is None:
+            raise RuntimeError('Search has no native action')
         await super().astart()
 
     async def aclose(self):

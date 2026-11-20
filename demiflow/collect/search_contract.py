@@ -6,6 +6,15 @@ from pathlib import Path
 from dataclasses import asdict
 
 
+def is_native_search_actor(actor):
+    # Only a search declaration can request this binding. Pure stream users
+    # need neither the web operator package nor its optional HTTP client.
+    if not hasattr(type(actor), 'bind_search_effects'):
+        return False
+    from .operators import SearchWeb
+    return type(actor) is SearchWeb
+
+
 def session_declaration(session):
     from .session import WebSession
     if type(session) is not WebSession:
