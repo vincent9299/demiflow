@@ -19,6 +19,8 @@ from test_forge_index import report
 def prepared(tmp_path, monkeypatch):
     root = tmp_path / 'project'
     manifest, target, journal = control_fixture(root)
+    with runs.execution_lock(root) as lease:
+        runs._claim_lease(lease, None)
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path / 'domain'))
     monkeypatch.setattr('demiflow.workbench.worker.operation', lambda *a, **k: {'status': 'checked'})
     return root, manifest, target, journal
@@ -111,7 +113,14 @@ def test_reserve_post_replace_fsync_failure_preserves_owner_and_fence(prepared, 
     monkeypatch.setattr(io, 'fsync_directory', original)
     value = runs._reconcile(root, manifest['run_id'], expected_attempt=1)
     assert value['status'] == 'failed' and value['state']['cleanup'] == 'complete'
-    assert not domain.reserved(root, manifest['run_id'], 1)
+    # Reconciliation proves the retained slot reusable; domain.reserve lazily
+    # reclaims it. It does not delete owner files as a side effect.
+    slot = next(domain.host_partition.location().glob('slot-*.json'))
+    assert domain._owner_finished(json.loads(slot.read_text()))
+    with domain.lock() as (path, capacity):
+        reclaimed = domain.reserve(path, capacity, root, manifest, 1)
+        assert reclaimed['slot'] == int(slot.stem.split('-')[1])
+        domain.abandon(path, reclaimed['slot'], run_id=manifest['run_id'], attempt=1)
 
 
 def test_publish_exception_does_not_turn_start_into_launch_failed(prepared, monkeypatch):
