@@ -318,6 +318,11 @@ class RunContext:
     def limits(self, value):
         self._limits = value
 
+    @staticmethod
+    def validate_recovery_identity(configuration):
+        """Validate native durable protocol before external lifecycle changes."""
+        _validate_runtime_protocol(configuration)
+
     @classmethod
     def start(cls, directory=None, *, entry_identity=None, limits=None):
         directory = directory or Path(tempfile.gettempdir()) / "demiflow-runs" / uuid.uuid4().hex

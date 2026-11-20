@@ -32,7 +32,7 @@ from demiflow.forge.schema import ForgeError
 from demiflow.forge import operation_budget
 from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
 from demiflow.workbench.pipeline_policy import limits_with
-from demiflow.execution.host.control import RunJournal
+from demiflow.execution.host.control import RunJournal, RunContext
 from demiflow.execution.host.inspection import read_run, RunReadError
 from demiflow.errors import ExecutionConflict
 
@@ -973,6 +973,7 @@ def resume(root, run_id, *, expected, expected_attempt, authority=None):
     binding = RunJournal(directory(root, run_id)).recovery_identity()
     if binding is None:
         raise ForgeError('该运行没有统一恢复契约，不能恢复历史；请新建运行。', code='conflict')
+    RunContext.validate_recovery_identity(binding)
     from demiflow.workbench.runs.domain import preparation_lock
     with preparation_lock() as lease:
         prepared = operation('run_resume', root, run_id=run_id, expected=expected, expected_attempt=expected_attempt,_pass_fds=(lease,), _authority=authority.bootstrap())
@@ -987,6 +988,7 @@ def _resume(root, run_id, *, expected, expected_attempt, authority=None):
         raise ForgeError('Resume requires the stopped attempt identity', code='invalid_request')
     with execution_lock(root):
         target, value = _load(root, run_id)
+        RunContext.validate_recovery_identity(RunJournal(target).recovery_identity())
         state, manifest = value['state'], value['manifest']
         if manifest['digest'] != expected or state.get('attempt') != expected_attempt:
             raise ForgeError('Run binding or execution attempt changed', code='conflict')

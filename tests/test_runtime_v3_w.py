@@ -826,7 +826,7 @@ def test_w014(tmp_path, monkeypatch):
         manager.resume(tmp_path, run_id, expected="d", expected_attempt=1, authority=authority)
     assert exc.value.code == "conflict"
     # Platform implementation changed.
-    configuration = dict(run_id=run_id, platform_revision="other-engine",
+    configuration = dict(format=1, stream_protocol='aligned-barrier-v2', run_id=run_id, platform_revision="other-engine",
                          limits=dict(max_control_bytes=8 * 1024 ** 2, max_commits=1024, admission_timeout_s=30))
     journal.claim_execution(configuration, "f" + "1" * 32)
     # Platform provenance does not gate either old or current origins; this unit
@@ -850,7 +850,7 @@ def test_w014(tmp_path, monkeypatch):
     target2.mkdir(parents=True, exist_ok=True)
     j2 = RunJournal(target2)
     j2.initialize(dict(run_id=run_id2, object_locations=[]), attempts=True)
-    j2.claim_execution(dict(run_id=run_id2, platform_revision=platform_identity(),
+    j2.claim_execution(dict(format=1, stream_protocol='aligned-barrier-v2', run_id=run_id2, platform_revision=platform_identity(),
                             limits=dict(max_control_bytes=8 * 1024 ** 2, max_commits=1024, admission_timeout_s=30)),
                        "f" + "1" * 32)
     assert manager.resume(tmp_path, run_id2, expected="d", expected_attempt=1, authority=authority) == "started"

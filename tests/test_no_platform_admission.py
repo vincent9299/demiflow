@@ -142,3 +142,29 @@ def test_resume_rejects_unknown_durable_protocol_before_attempt(tmp_path,changes
         RunContext.resume(RunRef(str(target),configuration['run_id']))
     assert journal.execution_status()==before
     assert journal.recovery_identity()==configuration
+
+
+@pytest.mark.parametrize('changes',[{'format':999},{'stream_protocol':'unknown'}])
+def test_manager_rejects_unknown_protocol_before_dispatch_or_attempt(tmp_path,monkeypatch,changes):
+    from types import SimpleNamespace
+    from demiflow.workbench.runs import manager
+    import demiflow.workbench.worker as worker
+    run_id='r'+'4'*24
+    target=manager.directory(tmp_path,run_id);target.mkdir(parents=True)
+    journal=RunJournal(target)
+    configuration=dict(format=1,stream_protocol='aligned-barrier-v2',run_id=run_id,
+        platform_revision='unrelated',limits=dict(max_control_bytes=8*1024**2,max_commits=1024,admission_timeout_s=30))
+    configuration.update(changes)
+    journal.initialize(dict(run_id=run_id,object_locations=[]),attempts=True)
+    journal.claim_execution(configuration,'f'+'2'*32)
+    before=journal.execution_status()
+    authority=SimpleNamespace(require=lambda *a,**k:None)
+    monkeypatch.setattr(worker,'operation',lambda *a,**k:pytest.fail('protocol reached dispatch'))
+    with pytest.raises(RecoveryContractError,match='Unsupported or missing runtime'):
+        manager.resume(tmp_path,run_id,expected='d',expected_attempt=1,authority=authority)
+    # Private worker dispatch is also fenced before any cleanup/index/attempt work.
+    monkeypatch.setattr(manager,'_load',lambda *a,**k:(target,{}))
+    with pytest.raises(RecoveryContractError,match='Unsupported or missing runtime'):
+        manager._resume(tmp_path,run_id,expected='d',expected_attempt=1,authority=authority)
+    assert journal.execution_status()==before
+    assert journal.recovery_identity()==configuration

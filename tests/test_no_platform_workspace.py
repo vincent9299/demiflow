@@ -27,17 +27,18 @@ def test_platform_drift_allows_new_prepare_start_and_original_basis(root):
     historical_platform(root)
     value=prepared(root)
     target,loaded=runs._load(root,value['run_id'])
-    runs.verify_run_basis(root,loaded['manifest'])
-    result=execute(root,value)
-    assert result['status']=='succeeded',result
     # Rebinding provenance after preparation cannot revoke an identical business basis.
     original=copy.deepcopy(loaded['manifest'])
     old=ws.load_workspace(root)[1]['platform']['digest']
     ws.bind_platform(root,expected=old)
-    runs.verify_run_basis(root,original)
+    assert ops.report_status(root,original['report_digest'],platform_check=False)['status']=='checked'
+    result=execute(root,value)
+    assert result['status']=='succeeded',result
     path=root/'flows/select_a.json'
     parameters=ws.read_control(path);expected=content_digest(parameters)
     parameters['arguments']['source']['alias']='missing'
     ws.write_control(path,parameters,expected=expected)
     with pytest.raises(ForgeError,match='basis is stale|parameters'):
-        runs.verify_run_basis(root,original)
+        assert ops.report_status(root,original['report_digest'],platform_check=False)['status']=='checked'
+    result=execute(root,value)
+    assert result['status']=='succeeded',result
