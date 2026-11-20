@@ -1,0 +1,1823 @@
+{
+  "format": "G-source-inventory-v1",
+  "base_sha": "122edf4bd0c827338846abd0114f0b36cf8c1b6d",
+  "branch": "gpt/design/declaration-edges-20261120",
+  "head_at_scan": "122edf4bd0c827338846abd0114f0b36cf8c1b6d",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/design/declaration-edges-20261120",
+  "product_diff": "",
+  "edge_count": 18,
+  "groups": {
+    "top-seed": 3,
+    "lazy-into-anchor-scc": 9,
+    "lazy-outside-anchor-scc": 6
+  },
+  "edges": [
+    {
+      "id": "G-EDGE-01",
+      "group": "top-seed",
+      "source_path": "demiflow/data/plan.py",
+      "line": 12,
+      "target_module": "demiflow.operator_llm.model",
+      "imported_names": [
+        "PromptPack"
+      ],
+      "source_sha256": "f31f0cff949c18333903bbfcd442ab4a884883d4249599f83233fe19942c503d",
+      "owner": "<module>",
+      "owner_span": null,
+      "statement": "from ..operator_llm.model import PromptPack",
+      "provider_path": "demiflow/operator_llm/model.py",
+      "provider_sha256": "6824eafdbd4498122003383b5669be994b6ea3b2decc749375c1fe7d7cdf3cf6",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/agent.py",
+          "line": 11,
+          "scope": "<module>",
+          "names": [
+            "PromptPack"
+          ]
+        },
+        {
+          "path": "demiflow/data/dataset.py",
+          "line": 11,
+          "scope": "<module>",
+          "names": [
+            "PromptPack"
+          ]
+        },
+        {
+          "path": "demiflow/data/plan.py",
+          "line": 12,
+          "scope": "<module>",
+          "names": [
+            "PromptPack"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataflow_environment.py",
+          "line": 14,
+          "scope": "native_environment_names",
+          "names": [
+            "PromptPack"
+          ]
+        },
+        {
+          "path": "demiflow/execution/program_materials.py",
+          "line": 49,
+          "scope": "program_prompt_materials",
+          "names": [
+            "PromptPack"
+          ]
+        },
+        {
+          "path": "demiflow/operator_llm/__init__.py",
+          "line": 4,
+          "scope": "<module>",
+          "names": [
+            "PromptPack"
+          ]
+        },
+        {
+          "path": "demiflow/operator_llm/parser.py",
+          "line": 16,
+          "scope": "<module>",
+          "names": [
+            "PromptPack"
+          ]
+        },
+        {
+          "path": "demiflow/operator_llm/runtime.py",
+          "line": 16,
+          "scope": "<module>",
+          "names": [
+            "PromptPack"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-EDGE-02",
+      "group": "top-seed",
+      "source_path": "demiflow/data/sources.py",
+      "line": 9,
+      "target_module": "demiflow.lance.model",
+      "imported_names": [
+        "LanceQuerySpec"
+      ],
+      "source_sha256": "3033f1f14141c9759d29679ee5275492bfbc83bcd41b51c7bf9962afd115387f",
+      "owner": "<module>",
+      "owner_span": null,
+      "statement": "from ..lance.model import LanceQuerySpec",
+      "provider_path": "demiflow/lance/model.py",
+      "provider_sha256": "9d7d57db8ea3559b4705cb1212301d411dc27920bb865e3b6db148458f2efa8b",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/data/sources.py",
+          "line": 9,
+          "scope": "<module>",
+          "names": [
+            "LanceQuerySpec"
+          ]
+        },
+        {
+          "path": "demiflow/lance/__init__.py",
+          "line": 4,
+          "scope": "<module>",
+          "names": [
+            "LanceQuerySpec"
+          ]
+        },
+        {
+          "path": "demiflow/lance/read.py",
+          "line": 12,
+          "scope": "<module>",
+          "names": [
+            "LanceQuerySpec"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-EDGE-03",
+      "group": "top-seed",
+      "source_path": "demiflow/execution/contracts/pipeline.py",
+      "line": 16,
+      "target_module": "demiflow.pipeline",
+      "imported_names": [
+        "PIPELINE_PACKAGE_PATH",
+        "discover_pipeline_definition"
+      ],
+      "source_sha256": "98b4717cfa7c3989411c3021a9254e69756b405ecb75ee134220aa0667d27f9a",
+      "owner": "<module>",
+      "owner_span": null,
+      "statement": "from ...pipeline import PIPELINE_PACKAGE_PATH, discover_pipeline_definition",
+      "provider_path": "demiflow/pipeline/__init__.py",
+      "provider_sha256": "de1b22d4a5d001959fc58900acf47e93aea7554167c0f4636bcd89f0c433eaac",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/execution/contracts/pipeline.py",
+          "line": 16,
+          "scope": "<module>",
+          "names": [
+            "PIPELINE_PACKAGE_PATH",
+            "discover_pipeline_definition"
+          ]
+        },
+        {
+          "path": "demiflow/execution/driver.py",
+          "line": 19,
+          "scope": "<module>",
+          "names": [
+            "discover_pipeline_definition"
+          ]
+        },
+        {
+          "path": "demiflow/execution/environment.py",
+          "line": 8,
+          "scope": "<module>",
+          "names": [
+            "discover_pipeline_definition"
+          ]
+        },
+        {
+          "path": "demiflow/execution/local.py",
+          "line": 17,
+          "scope": "<module>",
+          "names": [
+            "discover_pipeline_definition"
+          ]
+        },
+        {
+          "path": "demiflow/execution/package_loader.py",
+          "line": 10,
+          "scope": "<module>",
+          "names": [
+            "PIPELINE_PACKAGE_PATH"
+          ]
+        },
+        {
+          "path": "demiflow/execution/ray.py",
+          "line": 18,
+          "scope": "<module>",
+          "names": [
+            "discover_pipeline_definition"
+          ]
+        },
+        {
+          "path": "demiflow/execution/readiness.py",
+          "line": 10,
+          "scope": "<module>",
+          "names": [
+            "discover_pipeline_definition"
+          ]
+        },
+        {
+          "path": "demiflow/operator_llm/parser.py",
+          "line": 210,
+          "scope": "load_referenced_prompt_packs",
+          "names": [
+            "discover_pipeline_definition"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-EDGE-04",
+      "group": "lazy-into-anchor-scc",
+      "source_path": "demiflow/data/native_options.py",
+      "line": 35,
+      "target_module": "demiflow.planning.dataflow_policy",
+      "imported_names": [
+        "normalize_native_options"
+      ],
+      "source_sha256": "b898a496c48ff10d491b874e0d4640f87dd6286b80bd06e717ff0e2f018f2580",
+      "owner": "resource_only_options",
+      "owner_span": [
+        16,
+        43
+      ],
+      "statement": "from ..planning.dataflow_policy import normalize_native_options",
+      "provider_path": "demiflow/planning/dataflow_policy.py",
+      "provider_sha256": "f4af21c1caf0cf9b31bea766bedb29a93f2db2bde5ce2f2d983affa607749af9",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/data/native_options.py",
+          "line": 35,
+          "scope": "resource_only_options",
+          "names": [
+            "normalize_native_options"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataflow.py",
+          "line": 40,
+          "scope": "<module>",
+          "names": [
+            "normalize_native_options"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataflow_api.py",
+          "line": 412,
+          "scope": "explain_dataset",
+          "names": [
+            "normalize_native_options"
+          ]
+        }
+      ],
+      "owner_direct_import_sites": [
+        {
+          "path": "demiflow/execution/capabilities.py",
+          "line": 73,
+          "scope": "check_call",
+          "names": [
+            "resource_only_options"
+          ]
+        },
+        {
+          "path": "demiflow/execution/plan_facts.py",
+          "line": 117,
+          "scope": "operation_capability",
+          "names": [
+            "resource_only_options"
+          ]
+        },
+        {
+          "path": "demiflow/forge/flow_check.py",
+          "line": 677,
+          "scope": "FlowChecker._native",
+          "names": [
+            "resource_only_options"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-EDGE-05",
+      "group": "lazy-into-anchor-scc",
+      "source_path": "demiflow/execution/contracts/artifact.py",
+      "line": 204,
+      "target_module": "demiflow.execution.artifacts",
+      "imported_names": [
+        "digest"
+      ],
+      "source_sha256": "150195c583bab52be02c4d8852e88463986482ec67b30c600223ffaec80ae697",
+      "owner": "manifest_digest",
+      "owner_span": [
+        202,
+        205
+      ],
+      "statement": "from ..artifacts import digest",
+      "provider_path": "demiflow/execution/artifacts.py",
+      "provider_sha256": "ee22a300cc1b4665823223119c0c2920e6c08091a8280219345a50fda92a06d5",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/execution/contracts/artifact.py",
+          "line": 204,
+          "scope": "manifest_digest",
+          "names": [
+            "digest"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataset_commit.py",
+          "line": 11,
+          "scope": "<module>",
+          "names": [
+            "digest"
+          ]
+        },
+        {
+          "path": "demiflow/execution/file_ref.py",
+          "line": 4,
+          "scope": "<module>",
+          "names": [
+            "digest"
+          ]
+        },
+        {
+          "path": "demiflow/execution/notebook.py",
+          "line": 3,
+          "scope": "<module>",
+          "names": [
+            "digest"
+          ]
+        },
+        {
+          "path": "demiflow/image_edit.py",
+          "line": 18,
+          "scope": "<module>",
+          "names": [
+            "digest"
+          ]
+        },
+        {
+          "path": "demiflow/lance/run.py",
+          "line": 12,
+          "scope": "<module>",
+          "names": [
+            "digest"
+          ]
+        },
+        {
+          "path": "demiflow/operator_llm/recorded_json.py",
+          "line": 7,
+          "scope": "<module>",
+          "names": [
+            "digest"
+          ]
+        }
+      ],
+      "owner_direct_import_sites": []
+    },
+    {
+      "id": "G-EDGE-06",
+      "group": "lazy-into-anchor-scc",
+      "source_path": "demiflow/execution/contracts/artifact.py",
+      "line": 221,
+      "target_module": "demiflow.execution.file_ref",
+      "imported_names": [
+        "save_json_artifact"
+      ],
+      "source_sha256": "150195c583bab52be02c4d8852e88463986482ec67b30c600223ffaec80ae697",
+      "owner": "save_manifest",
+      "owner_span": [
+        219,
+        226
+      ],
+      "statement": "from ..file_ref import save_json_artifact",
+      "provider_path": "demiflow/execution/file_ref.py",
+      "provider_sha256": "0ccf0e81fa22f2fdc1206c3cc4bda1841eb20ec6f2420511dec5083c2be55ffd",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/execution/contracts/artifact.py",
+          "line": 221,
+          "scope": "save_manifest",
+          "names": [
+            "save_json_artifact"
+          ]
+        }
+      ],
+      "owner_direct_import_sites": [
+        {
+          "path": "demiflow/execution/chain.py",
+          "line": 1263,
+          "scope": "_build_sealed_manifest",
+          "names": [
+            "save_manifest"
+          ]
+        },
+        {
+          "path": "demiflow/execution/graph.py",
+          "line": 104,
+          "scope": "_build_manifest",
+          "names": [
+            "save_manifest"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-EDGE-07",
+      "group": "lazy-into-anchor-scc",
+      "source_path": "demiflow/lance/storage.py",
+      "line": 36,
+      "target_module": "demiflow.execution.location_index",
+      "imported_names": [
+        "recent_digest"
+      ],
+      "source_sha256": "5250574ff0f5b9fb5c21b12b7fbfa74d9263736e2df2b0b14711a3ea7345bc7c",
+      "owner": "resolve_local_uri",
+      "owner_span": [
+        23,
+        47
+      ],
+      "statement": "from ..execution.location_index import recent_digest",
+      "provider_path": "demiflow/execution/location_index.py",
+      "provider_sha256": "3b85ffe5ce4696182d3ece3f125b230cd08718c35c5d87d6f9174c0a082f2ba8",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/execution/artifacts.py",
+          "line": 31,
+          "scope": "resolve_local_artifact",
+          "names": [
+            "recent_digest"
+          ]
+        },
+        {
+          "path": "demiflow/lance/storage.py",
+          "line": 36,
+          "scope": "resolve_local_uri",
+          "names": [
+            "recent_digest"
+          ]
+        }
+      ],
+      "owner_direct_import_sites": [
+        {
+          "path": "demiflow/execution/datafusion.py",
+          "line": 378,
+          "scope": "DataFusionSession.query",
+          "names": [
+            "resolve_local_uri"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataset_commit.py",
+          "line": 74,
+          "scope": "DatasetCommit._current_version",
+          "names": [
+            "resolve_local_uri"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataset_native.py",
+          "line": 229,
+          "scope": "Engine.typed",
+          "names": [
+            "resolve_local_uri"
+          ]
+        },
+        {
+          "path": "demiflow/lance/blobs.py",
+          "line": 6,
+          "scope": "<module>",
+          "names": [
+            "resolve_local_uri"
+          ]
+        },
+        {
+          "path": "demiflow/lance/legacy.py",
+          "line": 8,
+          "scope": "read_legacy_record",
+          "names": [
+            "resolve_local_uri"
+          ]
+        },
+        {
+          "path": "demiflow/lance/legacy.py",
+          "line": 20,
+          "scope": "scan_legacy_records",
+          "names": [
+            "resolve_local_uri"
+          ]
+        },
+        {
+          "path": "demiflow/lance/maintenance.py",
+          "line": 17,
+          "scope": "<module>",
+          "names": [
+            "resolve_local_uri"
+          ]
+        },
+        {
+          "path": "demiflow/lance/preview.py",
+          "line": 20,
+          "scope": "<module>",
+          "names": [
+            "resolve_local_uri"
+          ]
+        },
+        {
+          "path": "demiflow/lance/refs.py",
+          "line": 15,
+          "scope": "<module>",
+          "names": [
+            "resolve_local_uri"
+          ]
+        },
+        {
+          "path": "demiflow/lance/registry.py",
+          "line": 25,
+          "scope": "<module>",
+          "names": [
+            "resolve_local_uri"
+          ]
+        },
+        {
+          "path": "demiflow/lance/transaction.py",
+          "line": 12,
+          "scope": "<module>",
+          "names": [
+            "resolve_local_uri"
+          ]
+        },
+        {
+          "path": "demiflow/operator_llm/call_ref.py",
+          "line": 89,
+          "scope": "read_call",
+          "names": [
+            "resolve_local_uri"
+          ]
+        },
+        {
+          "path": "demiflow/operator_llm/sqlite_journal.py",
+          "line": 767,
+          "scope": "_SQLiteJournalShard.import_lance",
+          "names": [
+            "resolve_local_uri"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-EDGE-08",
+      "group": "lazy-into-anchor-scc",
+      "source_path": "demiflow/lance/storage.py",
+      "line": 54,
+      "target_module": "demiflow.execution.location_index",
+      "imported_names": [
+        "IndexedLocations"
+      ],
+      "source_sha256": "5250574ff0f5b9fb5c21b12b7fbfa74d9263736e2df2b0b14711a3ea7345bc7c",
+      "owner": "_location_mapping",
+      "owner_span": [
+        53,
+        56
+      ],
+      "statement": "from ..execution.location_index import IndexedLocations",
+      "provider_path": "demiflow/execution/location_index.py",
+      "provider_sha256": "3b85ffe5ce4696182d3ece3f125b230cd08718c35c5d87d6f9174c0a082f2ba8",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/execution/artifacts.py",
+          "line": 55,
+          "scope": "_artifact_locations",
+          "names": [
+            "IndexedLocations"
+          ]
+        },
+        {
+          "path": "demiflow/lance/storage.py",
+          "line": 54,
+          "scope": "_location_mapping",
+          "names": [
+            "IndexedLocations"
+          ]
+        }
+      ],
+      "owner_direct_import_sites": []
+    },
+    {
+      "id": "G-EDGE-09",
+      "group": "lazy-into-anchor-scc",
+      "source_path": "demiflow/operator_llm/model.py",
+      "line": 37,
+      "target_module": "demiflow.operator_llm.media",
+      "imported_names": [
+        "validate_provider"
+      ],
+      "source_sha256": "6824eafdbd4498122003383b5669be994b6ea3b2decc749375c1fe7d7cdf3cf6",
+      "owner": "inspect_prompt_model",
+      "owner_span": [
+        26,
+        89
+      ],
+      "statement": "from .media import validate_provider",
+      "provider_path": "demiflow/operator_llm/media.py",
+      "provider_sha256": "3fac1bbd89f07f1fc363945b4ca5b688f489b9cadd25877c809523a116597c11",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/operator_llm/model.py",
+          "line": 37,
+          "scope": "inspect_prompt_model",
+          "names": [
+            "validate_provider"
+          ]
+        }
+      ],
+      "owner_direct_import_sites": [
+        {
+          "path": "demiflow/operator_llm/parser.py",
+          "line": 16,
+          "scope": "<module>",
+          "names": [
+            "inspect_prompt_model"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-EDGE-10",
+      "group": "lazy-into-anchor-scc",
+      "source_path": "demiflow/operator_llm/model.py",
+      "line": 53,
+      "target_module": "demiflow.services.deployment",
+      "imported_names": [
+        "PROFILES",
+        "deployment_config",
+        "logical_base"
+      ],
+      "source_sha256": "6824eafdbd4498122003383b5669be994b6ea3b2decc749375c1fe7d7cdf3cf6",
+      "owner": "inspect_prompt_model",
+      "owner_span": [
+        26,
+        89
+      ],
+      "statement": "from demiflow.services.deployment import deployment_config, logical_base, PROFILES",
+      "provider_path": "demiflow/services/deployment.py",
+      "provider_sha256": "dc1922085874a992ccdedd1b42f1eafbc3ff9da32ea8dbf360ddbb2ce64da347",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/operator_llm/model.py",
+          "line": 53,
+          "scope": "inspect_prompt_model",
+          "names": [
+            "deployment_config",
+            "logical_base",
+            "PROFILES"
+          ]
+        },
+        {
+          "path": "demiflow/services/cli.py",
+          "line": 252,
+          "scope": "benchmark_singles",
+          "names": [
+            "PROFILES"
+          ]
+        },
+        {
+          "path": "demiflow/services/prepare.py",
+          "line": 14,
+          "scope": "<module>",
+          "names": [
+            "deployment_config"
+          ]
+        },
+        {
+          "path": "demiflow/services/tuning.py",
+          "line": 7,
+          "scope": "<module>",
+          "names": [
+            "deployment_config"
+          ]
+        },
+        {
+          "path": "demiflow/services/tuning_runner.py",
+          "line": 10,
+          "scope": "<module>",
+          "names": [
+            "deployment_config"
+          ]
+        }
+      ],
+      "owner_direct_import_sites": [
+        {
+          "path": "demiflow/operator_llm/parser.py",
+          "line": 16,
+          "scope": "<module>",
+          "names": [
+            "inspect_prompt_model"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-EDGE-11",
+      "group": "lazy-into-anchor-scc",
+      "source_path": "demiflow/pipeline/core.py",
+      "line": 97,
+      "target_module": "demiflow.pipeline.context",
+      "imported_names": [
+        "ProgramContext"
+      ],
+      "source_sha256": "a424efb7e1ffda26fe641f1ea98f0c3ed007ce4e07c9091a245348f37e47ec5f",
+      "owner": "Pipeline.run",
+      "owner_span": [
+        86,
+        120
+      ],
+      "statement": "from .context import ProgramContext",
+      "provider_path": "demiflow/pipeline/context.py",
+      "provider_sha256": "fed01ac41dbb8707c6731f7e040e9aa6f6f0356cfae51bbc9ea73a112c132e5d",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/pipeline/core.py",
+          "line": 15,
+          "scope": "<module>",
+          "names": [
+            "ProgramContext"
+          ]
+        },
+        {
+          "path": "demiflow/pipeline/core.py",
+          "line": 97,
+          "scope": "Pipeline.run",
+          "names": [
+            "ProgramContext"
+          ]
+        }
+      ],
+      "owner_direct_import_sites": []
+    },
+    {
+      "id": "G-EDGE-12",
+      "group": "lazy-into-anchor-scc",
+      "source_path": "demiflow/pipeline/core.py",
+      "line": 98,
+      "target_module": "demiflow.execution.run_context",
+      "imported_names": [
+        "execution_scope"
+      ],
+      "source_sha256": "a424efb7e1ffda26fe641f1ea98f0c3ed007ce4e07c9091a245348f37e47ec5f",
+      "owner": "Pipeline.run",
+      "owner_span": [
+        86,
+        120
+      ],
+      "statement": "from ..execution.run_context import execution_scope",
+      "provider_path": "demiflow/execution/run_context.py",
+      "provider_sha256": "1d30365ab55846d62f5597e4f3dd22779f1019d6357f93720260bd073a05757e",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/execution/checked.py",
+          "line": 740,
+          "scope": "action",
+          "names": [
+            "execution_scope"
+          ]
+        },
+        {
+          "path": "demiflow/execution/local_kernel.py",
+          "line": 149,
+          "scope": "local_execution",
+          "names": [
+            "execution_scope"
+          ]
+        },
+        {
+          "path": "demiflow/execution/stream_materialize.py",
+          "line": 144,
+          "scope": "bounded_stream_batches",
+          "names": [
+            "execution_scope"
+          ]
+        },
+        {
+          "path": "demiflow/pipeline/core.py",
+          "line": 98,
+          "scope": "Pipeline.run",
+          "names": [
+            "execution_scope"
+          ]
+        }
+      ],
+      "owner_direct_import_sites": []
+    },
+    {
+      "id": "G-EDGE-13",
+      "group": "lazy-outside-anchor-scc",
+      "source_path": "demiflow/execution/contracts/operator.py",
+      "line": 119,
+      "target_module": "demiflow.execution.operator_policy",
+      "imported_names": [
+        "classify_operator_state"
+      ],
+      "source_sha256": "dc76822d528aed8fcb75c22235696d48655f82af56bbc8224e9b4a91ce1c96d1",
+      "owner": "compile_operator_spec",
+      "owner_span": [
+        81,
+        157
+      ],
+      "statement": "from ..operator_policy import classify_operator_state",
+      "provider_path": "demiflow/execution/operator_policy.py",
+      "provider_sha256": "39e6f971b01182aaa4743f269d697a0fe7ff573fef637be35b5a1e9527c7d4de",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/data/result_cache.py",
+          "line": 41,
+          "scope": "_state_policy",
+          "names": [
+            "classify_operator_state"
+          ]
+        },
+        {
+          "path": "demiflow/execution/contracts/operator.py",
+          "line": 119,
+          "scope": "compile_operator_spec",
+          "names": [
+            "classify_operator_state"
+          ]
+        },
+        {
+          "path": "demiflow/execution/kernels/operator.py",
+          "line": 1317,
+          "scope": "OperatorKernel._snapshot_state",
+          "names": [
+            "classify_operator_state"
+          ]
+        },
+        {
+          "path": "demiflow/execution/kernels/operator.py",
+          "line": 636,
+          "scope": "OperatorKernel._create_instance",
+          "names": [
+            "classify_operator_state"
+          ]
+        },
+        {
+          "path": "demiflow/execution/operator_precheck.py",
+          "line": 17,
+          "scope": "<module>",
+          "names": [
+            "classify_operator_state"
+          ]
+        },
+        {
+          "path": "demiflow/execution/operator_state.py",
+          "line": 9,
+          "scope": "<module>",
+          "names": [
+            "classify_operator_state"
+          ]
+        },
+        {
+          "path": "demiflow/planning/dataflow_compile.py",
+          "line": 287,
+          "scope": "compile_kernel_spec",
+          "names": [
+            "classify_operator_state"
+          ]
+        },
+        {
+          "path": "demiflow/planning/traits.py",
+          "line": 76,
+          "scope": "unified_operation_traits",
+          "names": [
+            "classify_operator_state"
+          ]
+        }
+      ],
+      "owner_direct_import_sites": []
+    },
+    {
+      "id": "G-EDGE-14",
+      "group": "lazy-outside-anchor-scc",
+      "source_path": "demiflow/execution/contracts/pipeline.py",
+      "line": 64,
+      "target_module": "demiflow.execution.requirements",
+      "imported_names": [
+        "ResolvedWheel"
+      ],
+      "source_sha256": "98b4717cfa7c3989411c3021a9254e69756b405ecb75ee134220aa0667d27f9a",
+      "owner": "PlatformRuntimeIdentity.from_mapping",
+      "owner_span": [
+        50,
+        109
+      ],
+      "statement": "from ..requirements import ResolvedWheel",
+      "provider_path": "demiflow/execution/requirements.py",
+      "provider_sha256": "01da04645cc97e9d1e437dc3e11a10015af900d5f2f131a46a3e5af0cc1603ba",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/execution/contracts/pipeline.py",
+          "line": 14,
+          "scope": "<module>",
+          "names": [
+            "ResolvedWheel"
+          ]
+        },
+        {
+          "path": "demiflow/execution/contracts/pipeline.py",
+          "line": 64,
+          "scope": "PlatformRuntimeIdentity.from_mapping",
+          "names": [
+            "ResolvedWheel"
+          ]
+        }
+      ],
+      "owner_direct_import_sites": []
+    },
+    {
+      "id": "G-EDGE-15",
+      "group": "lazy-outside-anchor-scc",
+      "source_path": "demiflow/execution/contracts/pipeline.py",
+      "line": 147,
+      "target_module": "demiflow.execution.requirements",
+      "imported_names": [
+        "platform_wheel_paths"
+      ],
+      "source_sha256": "98b4717cfa7c3989411c3021a9254e69756b405ecb75ee134220aa0667d27f9a",
+      "owner": "PipelineExecutionEnvironment.verify_artifacts",
+      "owner_span": [
+        124,
+        150
+      ],
+      "statement": "from ..requirements import platform_wheel_paths",
+      "provider_path": "demiflow/execution/requirements.py",
+      "provider_sha256": "01da04645cc97e9d1e437dc3e11a10015af900d5f2f131a46a3e5af0cc1603ba",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/execution/contracts/pipeline.py",
+          "line": 147,
+          "scope": "PipelineExecutionEnvironment.verify_artifacts",
+          "names": [
+            "platform_wheel_paths"
+          ]
+        },
+        {
+          "path": "demiflow/execution/python_environment.py",
+          "line": 19,
+          "scope": "<module>",
+          "names": [
+            "platform_wheel_paths"
+          ]
+        },
+        {
+          "path": "demiflow/execution/ray.py",
+          "line": 26,
+          "scope": "<module>",
+          "names": [
+            "platform_wheel_paths"
+          ]
+        }
+      ],
+      "owner_direct_import_sites": []
+    },
+    {
+      "id": "G-EDGE-16",
+      "group": "lazy-outside-anchor-scc",
+      "source_path": "demiflow/execution/contracts/pipeline.py",
+      "line": 214,
+      "target_module": "demiflow.execution.target",
+      "imported_names": [
+        "PipelineExecutionTarget"
+      ],
+      "source_sha256": "98b4717cfa7c3989411c3021a9254e69756b405ecb75ee134220aa0667d27f9a",
+      "owner": "PipelineRunRequest.__post_init__",
+      "owner_span": [
+        211,
+        216
+      ],
+      "statement": "from ..target import PipelineExecutionTarget",
+      "provider_path": "demiflow/execution/target.py",
+      "provider_sha256": "3f7056787877ea10398014ca1d6c3c6bdb25a82ed75b1ed79f29f7938c4a05b3",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/execution/__init__.py",
+          "line": 36,
+          "scope": "backend_for",
+          "names": [
+            "PipelineExecutionTarget"
+          ]
+        },
+        {
+          "path": "demiflow/execution/contracts/pipeline.py",
+          "line": 214,
+          "scope": "PipelineRunRequest.__post_init__",
+          "names": [
+            "PipelineExecutionTarget"
+          ]
+        },
+        {
+          "path": "demiflow/execution/readiness.py",
+          "line": 6,
+          "scope": "<module>",
+          "names": [
+            "PipelineExecutionTarget"
+          ]
+        }
+      ],
+      "owner_direct_import_sites": []
+    },
+    {
+      "id": "G-EDGE-17",
+      "group": "lazy-outside-anchor-scc",
+      "source_path": "demiflow/operator_llm/model.py",
+      "line": 28,
+      "target_module": "demiflow.operator_llm.errors",
+      "imported_names": [
+        "PromptContractDiagnostic"
+      ],
+      "source_sha256": "6824eafdbd4498122003383b5669be994b6ea3b2decc749375c1fe7d7cdf3cf6",
+      "owner": "inspect_prompt_model",
+      "owner_span": [
+        26,
+        89
+      ],
+      "statement": "from .errors import PromptContractDiagnostic",
+      "provider_path": "demiflow/operator_llm/errors.py",
+      "provider_sha256": "c31a49add93a850ed852b9caeec0638e7526b81e3e23e0653f835fbb81ddaa2b",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/operator_llm/model.py",
+          "line": 28,
+          "scope": "inspect_prompt_model",
+          "names": [
+            "PromptContractDiagnostic"
+          ]
+        },
+        {
+          "path": "demiflow/operator_llm/parser.py",
+          "line": 12,
+          "scope": "<module>",
+          "names": [
+            "PromptContractDiagnostic"
+          ]
+        },
+        {
+          "path": "demiflow/operator_llm/template.py",
+          "line": 62,
+          "scope": "inspect_template",
+          "names": [
+            "PromptContractDiagnostic"
+          ]
+        }
+      ],
+      "owner_direct_import_sites": [
+        {
+          "path": "demiflow/operator_llm/parser.py",
+          "line": 16,
+          "scope": "<module>",
+          "names": [
+            "inspect_prompt_model"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-EDGE-18",
+      "group": "lazy-outside-anchor-scc",
+      "source_path": "demiflow/operator_llm/model.py",
+      "line": 164,
+      "target_module": "demiflow.schema",
+      "imported_names": [
+        "required_properties"
+      ],
+      "source_sha256": "6824eafdbd4498122003383b5669be994b6ea3b2decc749375c1fe7d7cdf3cf6",
+      "owner": "PromptDefinition.response_keys",
+      "owner_span": [
+        163,
+        165
+      ],
+      "statement": "from demiflow.schema import required_properties",
+      "provider_path": "demiflow/schema.py",
+      "provider_sha256": "1a0bbf5e9ee713a88171b4adab5b9ff5703f600c32501ff05a1c91275804d423",
+      "all_direct_provider_import_sites": [
+        {
+          "path": "demiflow/operator_llm/model.py",
+          "line": 164,
+          "scope": "PromptDefinition.response_keys",
+          "names": [
+            "required_properties"
+          ]
+        }
+      ],
+      "owner_direct_import_sites": []
+    }
+  ],
+  "P1_retained_runtime_types": [
+    {
+      "type": "demiflow.execution.queue_producer.QueueProducer",
+      "path": "demiflow/execution/queue_producer.py",
+      "line": 74,
+      "end": 352,
+      "source_sha256": "34e9d47dec68267e557f50b10b327262e18561d6e0de95b69367b23bdeabbc3a",
+      "class_ast_sha256": "66adde4e6cc7b0f041f0a08317779448c7c1465db6d020221912219ddc5467ef",
+      "imports": [
+        {
+          "path": "demiflow/data/dataset.py",
+          "line": 889,
+          "scope": "Dataset.enqueue",
+          "names": [
+            "QueueProducer"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataflow_model_factory.py",
+          "line": 128,
+          "scope": "native_model_declaration",
+          "names": [
+            "QueueProducer"
+          ]
+        },
+        {
+          "path": "demiflow/execution/plan_facts.py",
+          "line": 265,
+          "scope": "operation_facts",
+          "names": [
+            "QueueProducer"
+          ]
+        },
+        {
+          "path": "demiflow/execution/queue_flow.py",
+          "line": 55,
+          "scope": "normalize_enqueue",
+          "names": [
+            "QueueProducer"
+          ]
+        }
+      ],
+      "SDK_consumer": "demiflow.data.dataset.Dataset.enqueue"
+    },
+    {
+      "type": "demiflow.execution.queue_ack.QueueAcknowledge",
+      "path": "demiflow/execution/queue_ack.py",
+      "line": 7,
+      "end": 33,
+      "source_sha256": "2b161125bff17d279af759f6b876d182ba453d3c94fd61b7b922ee79e8fc4e86",
+      "class_ast_sha256": "c85b7871298246184a29c5b871e2f73c8e03246d8e598c9f83812c997153a3c8",
+      "imports": [
+        {
+          "path": "demiflow/data/dataset.py",
+          "line": 905,
+          "scope": "Dataset.ack_queue",
+          "names": [
+            "QueueAcknowledge"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataflow_model_factory.py",
+          "line": 134,
+          "scope": "native_model_declaration",
+          "names": [
+            "QueueAcknowledge"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataflow_queue.py",
+          "line": 31,
+          "scope": "<module>",
+          "names": [
+            "QueueAcknowledge"
+          ]
+        },
+        {
+          "path": "demiflow/execution/plan_facts.py",
+          "line": 266,
+          "scope": "operation_facts",
+          "names": [
+            "QueueAcknowledge"
+          ]
+        },
+        {
+          "path": "demiflow/execution/queue_execution.py",
+          "line": 179,
+          "scope": "configure_explicit",
+          "names": [
+            "QueueAcknowledge"
+          ]
+        },
+        {
+          "path": "demiflow/execution/queue_flow.py",
+          "line": 64,
+          "scope": "normalize_ack",
+          "names": [
+            "QueueAcknowledge"
+          ]
+        }
+      ],
+      "SDK_consumer": "demiflow.data.dataset.Dataset.ack_queue"
+    },
+    {
+      "type": "demiflow.execution.raw_fetch.RawFetch",
+      "path": "demiflow/execution/raw_fetch.py",
+      "line": 19,
+      "end": 240,
+      "source_sha256": "55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493",
+      "class_ast_sha256": "471533e7503b1216ea29984d3e7935121767e5f5d0ca2933f0802a59561dc669",
+      "imports": [
+        {
+          "path": "demiflow/collect/fetch_flow.py",
+          "line": 48,
+          "scope": "normalize_fetch",
+          "names": [
+            "RawFetch"
+          ]
+        },
+        {
+          "path": "demiflow/collect/fetch_flow.py",
+          "line": 80,
+          "scope": "analyze_fetch",
+          "names": [
+            "RawFetch"
+          ]
+        },
+        {
+          "path": "demiflow/data/dataset.py",
+          "line": 785,
+          "scope": "Dataset.fetch",
+          "names": [
+            "RawFetch"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataflow_fetch.py",
+          "line": 7,
+          "scope": "<module>",
+          "names": [
+            "RawFetch"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataflow_model_factory.py",
+          "line": 133,
+          "scope": "native_model_declaration",
+          "names": [
+            "RawFetch"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataflow_queue.py",
+          "line": 41,
+          "scope": "<module>",
+          "names": [
+            "RawFetch"
+          ]
+        },
+        {
+          "path": "demiflow/execution/plan_facts.py",
+          "line": 264,
+          "scope": "operation_facts",
+          "names": [
+            "RawFetch"
+          ]
+        },
+        {
+          "path": "demiflow/execution/queue_execution.py",
+          "line": 65,
+          "scope": "validate_topology",
+          "names": [
+            "RawFetch"
+          ]
+        },
+        {
+          "path": "demiflow/execution/stream.py",
+          "line": 771,
+          "scope": "_arun",
+          "names": [
+            "RawFetch"
+          ]
+        }
+      ],
+      "SDK_consumer": "demiflow.data.dataset.Dataset.fetch"
+    },
+    {
+      "type": "demiflow.execution.stream_lookup.LanceLookup",
+      "path": "demiflow/execution/stream_lookup.py",
+      "line": 10,
+      "end": 125,
+      "source_sha256": "5e2ca61b7df5b62809e5b855cfa995e7a1c451756576ec2014673e282e267f09",
+      "class_ast_sha256": "c629ca6ea0c54080029290caae77256213c4dcbbda3af97e79555f3b989856ab",
+      "imports": [
+        {
+          "path": "demiflow/data/dataset.py",
+          "line": 986,
+          "scope": "Dataset.lookup_lance",
+          "names": [
+            "LanceLookup"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataflow_model_factory.py",
+          "line": 94,
+          "scope": "native_model_declaration",
+          "names": [
+            "LanceLookup"
+          ]
+        },
+        {
+          "path": "demiflow/execution/plan_facts.py",
+          "line": 258,
+          "scope": "operation_facts",
+          "names": [
+            "LanceLookup"
+          ]
+        }
+      ],
+      "SDK_consumer": "demiflow.data.dataset.Dataset.lookup_lance"
+    },
+    {
+      "type": "demiflow.execution.stream_admission.StreamAdmission",
+      "path": "demiflow/execution/stream_admission.py",
+      "line": 112,
+      "end": 237,
+      "source_sha256": "15f125519cd47e6001560203f0222f5633442d007a0059ed07b6139deb53b908",
+      "class_ast_sha256": "5960f1b0235210a132109ee30902df1033fad5856b13fd3f772de7c1291cf189",
+      "imports": [
+        {
+          "path": "demiflow/data/dataset.py",
+          "line": 927,
+          "scope": "Dataset.admit_rows",
+          "names": [
+            "StreamAdmission"
+          ]
+        },
+        {
+          "path": "demiflow/execution/plan_facts.py",
+          "line": 375,
+          "scope": "_specialization_domain",
+          "names": [
+            "StreamAdmission"
+          ]
+        }
+      ],
+      "SDK_consumer": "demiflow.data.dataset.Dataset.admit_rows"
+    },
+    {
+      "type": "demiflow.execution.stream_lance.StreamLanceSink",
+      "path": "demiflow/execution/stream_lance.py",
+      "line": 275,
+      "end": 309,
+      "source_sha256": "42af2f586f84601dc0f932e83bab060e91b2d953f58da3bbaab6c70c543bda93",
+      "class_ast_sha256": "e98e892bdd13a361bfff6bd98a6986e090658ba750f86ad46f39e2c79029e76f",
+      "imports": [
+        {
+          "path": "demiflow/data/dataset.py",
+          "line": 1041,
+          "scope": "Dataset.save_lance",
+          "names": [
+            "StreamLanceSink"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataflow_stream_lance.py",
+          "line": 99,
+          "scope": "declaration",
+          "names": [
+            "StreamLanceSink"
+          ]
+        },
+        {
+          "path": "demiflow/execution/plan_facts.py",
+          "line": 234,
+          "scope": "operation_facts",
+          "names": [
+            "StreamLanceSink"
+          ]
+        }
+      ],
+      "SDK_consumer": "demiflow.data.dataset.Dataset.save_lance"
+    }
+  ],
+  "mixed_locations": [
+    {
+      "module": "demiflow.execution.local_kernel",
+      "path": "demiflow/execution/local_kernel.py",
+      "sha256": "e67e3703f03ea14f8bcefb803bafc3251072e78bc17a5c1f2df60fad2ca2f83f",
+      "direct_import_statements": 21,
+      "engine_import_statements": 12,
+      "engine_imported_symbols": 22,
+      "imports": [
+        {
+          "path": "demiflow/data/dataset.py",
+          "line": 122,
+          "scope": "Dataset.join",
+          "names": [
+            "PlanInput"
+          ]
+        },
+        {
+          "path": "demiflow/data/dataset.py",
+          "line": 145,
+          "scope": "Dataset.reduce_by_key",
+          "names": [
+            "PlanInput"
+          ]
+        },
+        {
+          "path": "demiflow/data/dataset.py",
+          "line": 166,
+          "scope": "Dataset.exclude_keys",
+          "names": [
+            "PlanInput"
+          ]
+        },
+        {
+          "path": "demiflow/data/dataset.py",
+          "line": 216,
+          "scope": "Dataset.group_batches",
+          "names": [
+            "PlanInput"
+          ]
+        },
+        {
+          "path": "demiflow/data/dataset.py",
+          "line": 287,
+          "scope": "Dataset.union",
+          "names": [
+            "PlanInput"
+          ]
+        },
+        {
+          "path": "demiflow/data/relational_declaration.py",
+          "line": 11,
+          "scope": "<module>",
+          "names": [
+            "PlanInput",
+            "KeyedSource",
+            "UnionSource"
+          ]
+        },
+        {
+          "path": "demiflow/execution/chain.py",
+          "line": 747,
+          "scope": "source_callable_roots",
+          "names": [
+            "KeyedSource",
+            "PlanInput",
+            "UnionSource"
+          ]
+        },
+        {
+          "path": "demiflow/execution/checked.py",
+          "line": 22,
+          "scope": "<module>",
+          "names": [
+            "KeyedSource",
+            "UnionSource"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataflow_shared.py",
+          "line": 141,
+          "scope": "_recipe_actor_relation",
+          "names": [
+            "KeyedSource",
+            "UnionSource"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataset_native.py",
+          "line": 22,
+          "scope": "<module>",
+          "names": [
+            "KeyedSource",
+            "UnionSource",
+            "PlanInput"
+          ]
+        },
+        {
+          "path": "demiflow/execution/lance_key_filter.py",
+          "line": 13,
+          "scope": "exclude_lance_rows",
+          "names": [
+            "PlanInput"
+          ]
+        },
+        {
+          "path": "demiflow/execution/local_tasks.py",
+          "line": 35,
+          "scope": "<module>",
+          "names": [
+            "KeyedSource",
+            "UnionSource"
+          ]
+        },
+        {
+          "path": "demiflow/execution/managed_native.py",
+          "line": 21,
+          "scope": "capture_managed_pipeline",
+          "names": [
+            "local_execution"
+          ]
+        },
+        {
+          "path": "demiflow/execution/native_plan.py",
+          "line": 23,
+          "scope": "<module>",
+          "names": [
+            "PlanInput"
+          ]
+        },
+        {
+          "path": "demiflow/execution/plan_facts.py",
+          "line": 40,
+          "scope": "source_facts",
+          "names": [
+            "KeyedSource",
+            "UnionSource"
+          ]
+        },
+        {
+          "path": "demiflow/execution/recovery_identity.py",
+          "line": 100,
+          "scope": "describe",
+          "names": [
+            "PlanInput"
+          ]
+        },
+        {
+          "path": "demiflow/execution/recovery_identity.py",
+          "line": 219,
+          "scope": "_source_identity",
+          "names": [
+            "UnionSource",
+            "KeyedSource"
+          ]
+        },
+        {
+          "path": "demiflow/execution/source_snapshot.py",
+          "line": 12,
+          "scope": "freeze_source",
+          "names": [
+            "KeyedSource",
+            "UnionSource"
+          ]
+        },
+        {
+          "path": "demiflow/planning/dataflow_compile.py",
+          "line": 47,
+          "scope": "<module>",
+          "names": [
+            "KeyedSource",
+            "PlanInput",
+            "UnionSource"
+          ]
+        },
+        {
+          "path": "demiflow/planning/dataflow_graph_adapter.py",
+          "line": 12,
+          "scope": "<module>",
+          "names": [
+            "PlanInput",
+            "UnionSource"
+          ]
+        },
+        {
+          "path": "demiflow/planning/dataset_dag.py",
+          "line": 18,
+          "scope": "<module>",
+          "names": [
+            "KeyedSource",
+            "UnionSource"
+          ]
+        }
+      ]
+    },
+    {
+      "module": "demiflow.data.local_relational",
+      "path": "demiflow/data/local_relational.py",
+      "sha256": "4b7ba843573cc023d472f3ae874bfee46572dee104aa0e4b0aba6212d488eb94",
+      "direct_import_statements": 3,
+      "engine_import_statements": 2,
+      "engine_imported_symbols": 10,
+      "imports": [
+        {
+          "path": "demiflow/data/dataset.py",
+          "line": 299,
+          "scope": "Dataset.checkpoint",
+          "names": [
+            "checkpoint"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataset_native.py",
+          "line": 19,
+          "scope": "<module>",
+          "names": [
+            "key_of",
+            "_merge_row"
+          ]
+        },
+        {
+          "path": "demiflow/execution/local_tasks.py",
+          "line": 31,
+          "scope": "<module>",
+          "names": [
+            "key_of",
+            "_write_records",
+            "_read_records",
+            "_merge_records",
+            "sorted_rows",
+            "_right_index",
+            "_matched_rows",
+            "_merge_row"
+          ]
+        }
+      ]
+    },
+    {
+      "module": "demiflow.data.result_cache",
+      "path": "demiflow/data/result_cache.py",
+      "sha256": "dc6858f90a4ea48fb5c950027e405084d9f820ba26b3159592b38a9f42d46788",
+      "direct_import_statements": 7,
+      "engine_import_statements": 6,
+      "engine_imported_symbols": 9,
+      "imports": [
+        {
+          "path": "demiflow/data/dataset.py",
+          "line": 240,
+          "scope": "Dataset.map_cached",
+          "names": [
+            "CachedMap",
+            "CachedSyncMap"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataflow_model_factory.py",
+          "line": 140,
+          "scope": "native_model_declaration",
+          "names": [
+            "CachedMap",
+            "CachedSyncMap"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataflow_model_factory.py",
+          "line": 52,
+          "scope": "CacheFactory.__new__",
+          "names": [
+            "CachedMap",
+            "CachedSyncMap"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataflow_models.py",
+          "line": 47,
+          "scope": "<module>",
+          "names": [
+            "CachedMap",
+            "CachedSyncMap"
+          ]
+        },
+        {
+          "path": "demiflow/execution/dataflow_usage.py",
+          "line": 13,
+          "scope": "worker_prompt_usage",
+          "names": [
+            "CacheCall"
+          ]
+        },
+        {
+          "path": "demiflow/execution/kernels/operator.py",
+          "line": 580,
+          "scope": "OperatorKernel._create_instance",
+          "names": [
+            "CacheCall"
+          ]
+        },
+        {
+          "path": "demiflow/execution/kernels/operator.py",
+          "line": 1337,
+          "scope": "OperatorKernel._snapshot_state",
+          "names": [
+            "CacheCall"
+          ]
+        }
+      ]
+    }
+  ],
+  "frozen": [
+    {
+      "path": "demiflow/execution/raw_fetch.py",
+      "sha256": "55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493"
+    },
+    {
+      "path": "demiflow/execution/queue_execution.py",
+      "sha256": "2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2"
+    },
+    {
+      "path": "demiflow/execution/queue_sinks.py",
+      "sha256": "b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074"
+    },
+    {
+      "path": "demiflow/execution/queue_source.py",
+      "sha256": "1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307"
+    },
+    {
+      "path": "demiflow/planning/dag.py",
+      "sha256": "294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b"
+    },
+    {
+      "path": "demiflow/execution/contracts/exchange.py",
+      "sha256": "dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2"
+    },
+    {
+      "path": "demiflow/resources/contracts.py",
+      "sha256": "61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff"
+    }
+  ],
+  "references": [
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/design/runtime-services-20261120/docs/architecture-upgrade-20261120/F/G-input.json",
+      "sha256": "72d2d112a4722d81da823181398705bc154f84ca75d9de41c970099204d86942",
+      "bytes": 24649
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/design/runtime-services-20261120/docs/architecture-upgrade-20261120/F/F2-SERVICE-CONTRACTS.txt",
+      "sha256": "27ca682e9cd504ad487e8a25688b3d2da264cf95fb57ededda1686b2e8a75dcc",
+      "bytes": 11951
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/context-manifest.json",
+      "sha256": "26b94ecee45cb19f6d60d6f6d7db868efcc8a3551ac78cffa10b5746d2a1c749",
+      "bytes": 10396
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/context-amendments-gpt-review-20261120.json",
+      "sha256": "b48e8fe317aa490823047315298e6d3be06adb9a5b7b69723cd20ec9cd3374f0",
+      "bytes": 1214
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/DISPATCH-G.txt",
+      "sha256": "6b9a279dd56f9fcc0ff1531bcb356959cbade7329291fce20884e83a524abb73",
+      "bytes": 6363
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/G-SCOPE-CORRECTION.txt",
+      "sha256": "081f3d5a000c2a1bebff6ddbbe4ca7fd50aa43cce8dcc8b703f97bd373c0513d",
+      "bytes": 285
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/TASK-G.txt",
+      "sha256": "7c8294bd343d4aa143920e7717896b0249f47092dae92c5c3cd6813ea8b76298",
+      "bytes": 8719
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/USER-AUTHORIZATION.txt",
+      "sha256": "0ba187560297285dcff066f594ff0a82c807e378122a368197b0e5df2888e5bf",
+      "bytes": 2958
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/CONTEXT.txt",
+      "sha256": "34263d66b252c42ea0fcb2b34594a7f83f9fbbc1b2b92f16d7caf0d17439e8cc",
+      "bytes": 6902
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/REVIEW-HANDOFF.txt",
+      "sha256": "862e20ce5d0b8d72cef55cc9ac7393bf749348e4579eb97208675e17ef10d6b3",
+      "bytes": 5366
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/reviews/C-gpt-design-v1/receipt.json",
+      "sha256": "6eb9d829e6d0255803d0e6ac19838882d232a4f50940b53eedac9d79d649e4c3",
+      "bytes": 1232
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/reviews/F-gpt-design-v1/receipt.json",
+      "sha256": "13ed0b2a59c368b40709926ccb3ff174229faac48e8e68eea52e60e127d43ade",
+      "bytes": 1210
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/design/declaration-edges-20261120/AGENTS.md",
+      "sha256": "69dd102a239dce76146a874c68bbf2733ea52ce936388c44119c4370f43e26c2",
+      "bytes": 13248
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/design/declaration-edges-20261120/docs/repository-rules.md",
+      "sha256": "192b7660107b0ff39447569d863c2c73b70870af66f3bb9da3387f1ae9c88d71",
+      "bytes": 18884
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/design/declaration-edges-20261120/docs/p1-sdk-engine-boundary-20261119.md",
+      "sha256": "11fbbb3b90a27590c753eec56b397ff5bc90d197153272bff7d1b4520f5172e6",
+      "bytes": 6358
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/design/declaration-edges-20261120/tests/fixtures/p1-native-uses.json",
+      "sha256": "47a54664ac306aea294d9a9dccaef5d6c9ef4b441cec9579543ed9670f883cce",
+      "bytes": 7069
+    }
+  ],
+  "limits": "AST ImportFrom inventory of repository product Python excluding vendor; not a complete dynamic call graph, SCC recomputation, runtime acceptance or external-consumer guarantee.",
+  "adjacent_findings": [
+    {
+      "id": "G-ADJ-01",
+      "source_path": "demiflow/operator_llm/parser.py",
+      "line": 151,
+      "statement": "from .media import IMAGE_RESPONSE_SCHEMA",
+      "sha256": "167fb0a64da475b3861f2c9508fba5d30377d9edd30d2430c48e896c016cf084",
+      "discovery": "Full parser chain inspection, not an added original v3/F seed edge"
+    }
+  ]
+}
