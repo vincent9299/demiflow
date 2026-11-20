@@ -389,8 +389,11 @@ def test_historical_resume_entry_retains_original_seal_without_new_certificate(a
     # Supply the already-tested native recovery entry identity for this stopped
     # pre-action fixture. Public resume, its bounded worker and start admission
     # remain real; intercept only the final native process spawn.
-    from demiflow.execution.recovery_identity import platform_identity
-    monkeypatch.setattr(RunJournal, 'recovery_identity', lambda _: dict(platform_revision=platform_identity()))
+    from demiflow.execution.runtime_limits import execution_limits
+    configuration = dict(format=1, stream_protocol='aligned-barrier-v2', run_id=run['run_id'],
+                         platform_revision='original-platform', limits=execution_limits(None))
+    journal.claim_execution(configuration, 'f'+'1'*32)
+    journal.release_execution('f'+'1'*32)
     popen = subprocess.Popen
     def no_native_execution(argv, *args, **kwargs):
         if 'supervise' in argv:

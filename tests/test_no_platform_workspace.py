@@ -32,13 +32,14 @@ def test_platform_drift_allows_new_prepare_start_and_original_basis(root):
     old=ws.load_workspace(root)[1]['platform']['digest']
     ws.bind_platform(root,expected=old)
     assert ops.report_status(root,original['report_digest'],platform_check=False)['status']=='checked'
-    result=execute(root,value)
-    assert result['status']=='succeeded',result
     path=root/'flows/select_a.json'
-    parameters=ws.read_control(path);expected=content_digest(parameters)
-    parameters['arguments']['source']['alias']='missing'
+    parameters=ws.read_control(path);unchanged=copy.deepcopy(parameters)
+    expected=content_digest(parameters)
+    parameters['arguments']['minimum']=0.99
     ws.write_control(path,parameters,expected=expected)
     with pytest.raises(ForgeError,match='basis is stale|parameters'):
-        assert ops.report_status(root,original['report_digest'],platform_check=False)['status']=='checked'
+        runs.start(root,value['run_id'],expected=value['digest'])
+    assert runs.show(root,value['run_id'])['status']=='prepared'
+    ws.write_control(path,unchanged,expected=content_digest(parameters))
     result=execute(root,value)
     assert result['status']=='succeeded',result

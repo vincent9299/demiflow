@@ -180,9 +180,9 @@ SURFACE = {'constructor_keywords': {'RunJournal': ['directory', 'attempt'],
                                                          'context manager with existing exact '
                                                          'action-completion check.',
                                           'members': ['bind_context']},
-             'control.RunContext': {'members': ['attach', '__enter__', '__exit__'],
+             'control.RunContext': {'members': ['attach', '__enter__', '__exit__', 'validate_recovery_identity'],
                                     'returned': 'Existing context manager establishment only; '
-                                                'worker does not bind returned RunContext or '
+                                                'validate_recovery_identity accepts an original identity document, purely validates supported format/protocol without I/O, state change or platform comparison, and raises original RecoveryContractError; worker does not bind returned RunContext or '
                                                 'access its state. CheckedExecution.bind_context() '
                                                 'independently uses original ContextVar mechanism; '
                                                 'no new coupling.'},
@@ -318,7 +318,7 @@ SURFACE = {'constructor_keywords': {'RunJournal': ['directory', 'attempt'],
                                 'outputs',
                                 'max_requests'],
              'PromptRecordRef': ['read'],
-             'RunContext': ['attach', '__enter__', '__exit__'],
+             'RunContext': ['attach', '__enter__', '__exit__', 'validate_recovery_identity'],
              'RunJournal': ['directory',
                             'attempt',
                             'connection_scope',

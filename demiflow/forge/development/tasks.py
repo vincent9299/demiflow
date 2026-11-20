@@ -154,32 +154,80 @@ def _runtime_config_pin(project, state, expected_binding):
     return pin
 
 
-def _runtime_provenance(project, state, readonly, sources):
-    """Reuse authenticated old platform-only values while rechecking business files."""
+def _platform_provenance_path(project, name):
     from .resources import PACKAGE_ROOT, CHECKOUT_ROOT
     roots = [PACKAGE_ROOT.resolve()]
     if CHECKOUT_ROOT is not None:
         roots.append(CHECKOUT_ROOT.resolve())
-    def platform_path(name):
-        path = (project.root / name).resolve()
-        return not path.is_relative_to(project.root.resolve()) and any(
-            path == root or path.is_relative_to(root) for root in roots)
+    path = (project.root / name).resolve()
+    return not path.is_relative_to(project.root.resolve()) and any(
+        path == root or path.is_relative_to(root) for root in roots)
+
+
+def _runtime_workspace(project, state):
+    """Original signed workspace bytes, after rechecking every business field."""
+    if 'managed' not in state:
+        return None
+    from .registration import records, sha, _read, _object
+    items = [item for item in records(project, state) if item['status'] == 'committed'
+             and item['plan'].get('kind', 'registration') == 'registration']
+    if not items:
+        return None
+    original = items[-1]['plan']['workspace']
+    current = _read(project.root / 'workspace.json')
+    if (sha(original['after_raw']) != original['after_sha256'] or
+            {k: v for k, v in _object(current).items() if k != 'platform'} !=
+            {k: v for k, v in _object(original['after_raw']).items() if k != 'platform'}):
+        raise ForgeError('Registered workspace business declaration changed')
+    return original
+
+
+def _runtime_provenance(project, state, tree, readonly, sources, workspace):
+    """Reuse authenticated old provenance while rechecking business files."""
     before = readonly_baseline(project, state)
     readonly = dict(readonly)
     for key in set(readonly) | set(before):
-        if platform_path(key):
+        if _platform_provenance_path(project, key):
             if key in before:
                 readonly[key] = before[key]
             else:
                 readonly.pop(key, None)
     sources = dict(sources)
     for key, item in sources.items():
-        if platform_path(item['definition']['path']):
+        if _platform_provenance_path(project, item['definition']['path']):
             original = state['sources'].get(key)
             if original is None or original['definition'] != item['definition']:
                 raise ForgeError('Original platform context declaration is unavailable')
             sources[key] = original
-    return readonly, sources
+    tree = dict(tree)
+    if workspace is not None:
+        path = (project.root / 'workspace.json').resolve()
+        for snapshot in (tree, readonly):
+            for key in snapshot:
+                if (project.root / key).resolve() == path:
+                    snapshot[key] = workspace['after_sha256']
+        for key, item in list(sources.items()):
+            definition = item['definition']
+            if (project.root / definition['path']).resolve() == path:
+                text = workspace['after_raw']
+                if 'lines' in definition:
+                    start, end = definition['lines']
+                    text = ''.join(text.splitlines(keepends=True)[start-1:end])
+                sources[key] = dict(definition=definition, sha256=digest(text),
+                                    pages=max(1, (len(text) + PAGE_SIZE - 1) // PAGE_SIZE))
+    return tree, readonly, sources
+
+
+def _runtime_context_provenance(project, supplemental, workspace):
+    result = {}
+    for source in supplemental:
+        path = source['canonical_path']
+        if _platform_provenance_path(project, path):
+            result[path] = source['sha256']
+        elif (workspace is not None and Path(path) == project.root / 'workspace.json'
+              and source['sha256'] == workspace['after_sha256']):
+            result[path] = source['sha256']
+    return result
 
 
 def current(project, state, *, with_observation=False, _runtime=False):
@@ -195,8 +243,9 @@ def current(project, state, *, with_observation=False, _runtime=False):
                          "do not restart this task from the current tree")
     observation = project.observe(state['pipeline'])
     tree, readonly, sources = observation.tree, observation.readonly, observation.sources
+    workspace = _runtime_workspace(project, state) if _runtime else None
     if _runtime:
-        readonly, sources = _runtime_provenance(project, state, readonly, sources)
+        tree, readonly, sources = _runtime_provenance(project, state, tree, readonly, sources, workspace)
     if (file_hash(project.path) if _runtime else project.binding()) != binding:
         raise ForgeError('Tool/config changed during current observation')
     basis = {"tree": tree, "readonly": readonly, "sources": sources,
@@ -211,7 +260,8 @@ def current(project, state, *, with_observation=False, _runtime=False):
         basis['managed_questions'] = managed_questions(state)
         supplemental = context_baseline(project, state)
         if supplemental is not None:
-            basis['managed_context'] = supplemental_context(supplemental)
+            provenance = _runtime_context_provenance(project, supplemental, workspace) if _runtime else None
+            basis['managed_context'] = supplemental_context(supplemental, _original_provenance=provenance)
     fingerprint = digest(basis)
     values = (tree, readonly, sources, fingerprint)
     return (*values, observation) if with_observation else values
@@ -276,7 +326,7 @@ def pending_questions(state):
             if n['kind'] == 'question' and not n.get('resolved')]
 
 
-def supplemental_context(sources):
+def supplemental_context(sources, *, _original_provenance=None):
     """Recheck controller-delivered full files, without granting new write scope."""
     if type(sources) is not list or len(sources) > 64:
         raise ForgeError('Supplementary context requires at most 64 full-file sources')
@@ -296,7 +346,8 @@ def supplemental_context(sources):
         if (not isinstance(expected, str) or len(expected) != 64 or
                 any(char not in '0123456789abcdef' for char in expected)):
             raise ForgeError('Supplementary context requires a raw SHA-256 digest')
-        actual = file_hash(path, limit=1024 * 1024, deadline=deadline)
+        actual = ((_original_provenance or {}).get(label) or
+                  file_hash(path, limit=1024 * 1024, deadline=deadline))
         if actual != expected:
             raise ForgeError(f'Supplementary authoritative context changed: {label}')
         if label in result and result[label] != expected:

@@ -32,3 +32,46 @@ def test_require_uses_original_signed_business_after_tool_and_sandbox_change(adm
     with pytest.raises(ForgeError):admission.check(f.root)
     path.write_bytes(original)
     assert admission.check(f.root)==before
+
+
+def test_runtime_supplemental_platform_provenance_keeps_business_checks(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from demiflow.forge.development import resources
+    from demiflow.forge.development.project import file_hash
+    checkout=tmp_path/'checkout';root=checkout/'business';root.mkdir(parents=True)
+    platform=checkout/'platform.md';business=root/'rules.md'
+    platform.write_text('old platform');business.write_text('business')
+    monkeypatch.setattr(resources,'PACKAGE_ROOT',checkout)
+    monkeypatch.setattr(resources,'CHECKOUT_ROOT',checkout)
+    project=SimpleNamespace(root=root)
+    sources=[dict(canonical_path=str(p),sha256=file_hash(p)) for p in (platform,business)]
+    platform.write_text('new platform')
+    provenance=task_module._runtime_context_provenance(project,sources,None)
+    assert set(provenance)=={str(platform)}
+    assert task_module.supplemental_context(sources,_original_provenance=provenance)==sorted(sources,key=lambda v:v['canonical_path'])
+    with pytest.raises(ForgeError,match='context changed'):
+        task_module.supplemental_context(sources)
+    business.write_text('changed business')
+    with pytest.raises(ForgeError,match='context changed'):
+        task_module.supplemental_context(sources,_original_provenance=provenance)
+
+
+def test_runtime_workspace_projection_requires_authenticated_business_bytes(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from demiflow.forge.development import registration
+    root=tmp_path/'business';root.mkdir()
+    raw=json.dumps(dict(platform={'digest':'old'},locations={'data':'records'}))
+    original=dict(after_raw=raw,after_sha256=registration.sha(raw))
+    # The signing/chain validator is the established records boundary; this narrow
+    # projection test supplies its authenticated result and tests byte/business proof.
+    monkeypatch.setattr(registration,'records',lambda *a:[dict(status='committed',plan={'workspace':original})])
+    (root/'workspace.json').write_text(json.dumps(dict(platform={'digest':'new'},locations={'data':'records'})))
+    project=SimpleNamespace(root=root);state={'managed':{}}
+    assert task_module._runtime_workspace(project,state)==original
+    (root/'workspace.json').write_text(json.dumps(dict(platform={'digest':'new'},locations={'data':'other'})))
+    with pytest.raises(ForgeError,match='business declaration changed'):
+        task_module._runtime_workspace(project,state)
+    (root/'workspace.json').write_text(raw)
+    original['after_sha256']='0'*64
+    with pytest.raises(ForgeError,match='business declaration changed'):
+        task_module._runtime_workspace(project,state)
