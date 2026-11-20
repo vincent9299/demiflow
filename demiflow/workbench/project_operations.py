@@ -1,5 +1,4 @@
 """Project application operations: worker proxies and cross-domain composition."""
-from pathlib import Path
 import re
 
 from demiflow.forge.platform import content_digest
@@ -123,11 +122,9 @@ def attach_table(
 def set_table_view(root, alias, *, display, provenance, expected):
     """Read fixed table metadata, then CAS the presentation control in core."""
     from demiflow.workbench.worker import operation
-    root, value, _ = ws.load_workspace(root)
-    ws.identifier(alias)
-    control, ref, uri = ws.table_binding(root, value, alias)
+    root, ref, uri = ws._table_view_inputs(root, alias, display=display, provenance=provenance)
     description = operation('describe', uri, version=ref.lance_version)
-    return ws._set_table_view_control(root, alias, value=value, control=control,
+    return ws._set_table_view_control(root, alias,
         display=display, provenance=provenance, expected=expected, fields=description['fields'])
 
 
@@ -253,3 +250,17 @@ def attach_result(root, run_id, output, alias, *, attempt, expected_result):
                            location_id=ref.store_id, dataset_id=ref.dataset_id,
                            schema_name=ref.schema_name, schema_version=ref.schema_version,
                            expected_ref=ref)
+
+
+def workspace_changes(root):
+    """Compose the existing refresh fields from their domain owners.
+
+    The application reads directory status once for composition. The project's
+    existing bounded author inventory separately reads recent report metadata;
+    these hints do not constitute a transaction or an execution authorization.
+    """
+    from demiflow.workbench.projects import index
+    info = index.status(root)
+    return {**ws.project_change_hints(root), **runs.run_change_hints(root, info),
+            'reports': content_digest({key: info.get(key) for key in ('epoch', 'reports')}),
+            'index': info}

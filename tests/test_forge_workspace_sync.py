@@ -6,7 +6,9 @@ import time
 import pytest
 
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs import manager as runs
+from demiflow.workbench import project_operations as project_ops
 from demiflow.forge.platform import content_digest
 from demiflow.execution.run_journal import RunJournal
 from test_forge_workspace import demo, isolated
@@ -28,7 +30,7 @@ def test_change_hints_cover_controls_configs_and_wal_without_content_reads(isola
     with ws.control_lock(root):
         marker = index.begin(root, 'run', run_id)
         assert runs.publish_run_index(root, marker) is None
-    baseline = ws.workspace_changes(root)
+    baseline = project_ops.workspace_changes(root)
     def forbidden(*args, **kwargs):
         raise AssertionError('Change hints must not read report/journal contents')
     read_control = ws.read_control
@@ -38,23 +40,23 @@ def test_change_hints_cover_controls_configs_and_wal_without_content_reads(isola
     monkeypatch.setattr(ws, 'read_control', bounded_control)
     monkeypatch.setattr(ws, 'load_report', forbidden)
     monkeypatch.setattr(RunJournal, 'execution_view', forbidden)
-    assert ws.workspace_changes(root) == baseline
+    assert project_ops.workspace_changes(root) == baseline
     for path, group in [('flows/model.yaml', 'sources'), ('flows/model.config', 'sources'), ('operators/new.py', 'sources'),
                         ('README.md', 'workspace_stamp'), ('tables/new.json', 'tables')]:
-        before = ws.workspace_changes(root)
+        before = project_ops.workspace_changes(root)
         (root / path).write_text('changed')
-        after = ws.workspace_changes(root)
+        after = project_ops.workspace_changes(root)
         # README is also an input to original-project discovery. The unchanged
         # platform baseline already invalidates that metadata alongside its text.
         expected={group,'discovery'} if path=='README.md' else {group}
         assert {key for key in after if after[key] != before[key]} == expected
-    before = ws.workspace_changes(root)
+    before = project_ops.workspace_changes(root)
     run.transition({'starting'}, 'running')
-    after = ws.workspace_changes(root)
+    after = project_ops.workspace_changes(root)
     assert after['runs'][run_id] != before['runs'][run_id]
     (directory / 'runtime/ignored.py').write_text('another version')
     (root / 'data/ignored').write_bytes(b'data')
-    assert ws.workspace_changes(root) == after
+    assert project_ops.workspace_changes(root) == after
 
 
 def test_change_inventory_reports_omissions_without_disabling_other_scopes(isolated):
@@ -63,16 +65,16 @@ def test_change_inventory_reports_omissions_without_disabling_other_scopes(isola
     link.symlink_to(root / 'data', target_is_directory=True)
     with pytest.raises(ValueError, match='Symlink'):
         ws.source_files(root, 'flows')
-    assert 'Symlink' in ws.workspace_changes(root)['source_diagnostics'][0]
+    assert 'Symlink' in project_ops.workspace_changes(root)['source_diagnostics'][0]
     link.unlink()
     for index in range(1025):
         (root / 'operators' / f'file{index}.py').touch()
     with pytest.raises(ValueError, match='budget'):
         ws.source_files(root, 'operators')
-    before = ws.workspace_changes(root)
+    before = project_ops.workspace_changes(root)
     assert any('operators' in item and 'budget' in item for item in before['source_diagnostics'])
     (root / 'flows/new.py').write_text('# discoverable source\n')
-    after = ws.workspace_changes(root)
+    after = project_ops.workspace_changes(root)
     assert after['sources'] != before['sources']
     assert after['source_diagnostics'] == before['source_diagnostics']
 
@@ -89,8 +91,8 @@ def test_run_page_at_capacity_reads_only_selected_outputs(isolated, monkeypatch)
         journal.initialize(manifest, attempts=True)
         journal.transition({None}, 'prepared')
         ids.append(run_id)
-    from demiflow.workbench.projects import index as catalog
-    catalog.rebuild(isolated)  # Explicit adoption of these native fixture records.
+    from demiflow.workbench import directory_operations
+    directory_operations.rebuild(isolated)  # Explicit adoption of these native fixture records.
     sql = []
     connect = sqlite3.connect
     def traced(*args, **kwargs):
@@ -108,9 +110,9 @@ def test_run_page_at_capacity_reads_only_selected_outputs(isolated, monkeypatch)
     assert all('action_id IN' in query for query in sql if 'SELECT sequence' in query)
     assert not any(query.startswith(('INSERT', 'CREATE', 'UPDATE', 'DELETE')) for query in sql)
     print(f'128 runs: page=20 elapsed={elapsed:.3f}s queries={len(sql)}')
-    before = ws.workspace_changes(isolated)
+    before = project_ops.workspace_changes(isolated)
     runs.list_runs(isolated, offset=120, limit=20)
-    assert ws.workspace_changes(isolated) == before
+    assert project_ops.workspace_changes(isolated) == before
     # Page reads validate their original facts; off-page corruption is checked
     # when that page is requested or during an explicit directory rebuild.
     journal = RunJournal(runs.directory(isolated, ids[1]))

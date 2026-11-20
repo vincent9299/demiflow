@@ -177,7 +177,7 @@ def register(main):
     @root_arg
     @pretty_option
     def changes(root, pretty):
-        output(lambda: api.workspace_changes(root), pretty)
+        output(lambda: project_ops.workspace_changes(root), pretty)
 
     @workspace.command('source')
     @root_arg

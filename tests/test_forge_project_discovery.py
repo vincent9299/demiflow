@@ -267,7 +267,7 @@ def test_preview_fixes_version_and_rejects_changed_evidence(original):
 def test_http_cli_and_change_observation_share_recognition(original, tmp_path):
     registry = tmp_path / 'console.json'
     registered = console.add(registry, original)
-    first = ws.workspace_changes(original)
+    first = project_ops.workspace_changes(original)
     with service(None, registry=registry, api_only=True) as app:
         prefix = '/api/workspaces/' + registered['workspace_id'] + '/'
         code, value = request(app, prefix + 'project-discovery')

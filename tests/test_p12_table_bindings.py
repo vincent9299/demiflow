@@ -45,5 +45,8 @@ def test_core_requires_explicit_resolver_and_has_no_domain_fallback(target):
     parameter = inspect.signature(target).parameters['table_resolver']
     assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
     assert parameter.default is inspect.Parameter.empty
+    signature = inspect.signature(target)
+    supplied = {name: None for name, item in signature.parameters.items()
+                if name != 'table_resolver' and item.default is inspect.Parameter.empty}
     with pytest.raises(TypeError, match='table_resolver'):
-        inspect.signature(target).bind_partial().signature.bind(*([Path('/fixture'), 'entry'] if target in [ws._inspect_flow, ws._report_status] else [Path('/fixture')]))
+        signature.bind(**supplied)

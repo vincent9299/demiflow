@@ -20,11 +20,11 @@ def pin(root, params='flows/select_a.json'):
 
 def test_report_tamper_without_index_revision_and_explicit_unbind(root):
     report = pin(root)
-    before = ws.workspace_changes(root)['reports']
+    before = project_ops.workspace_changes(root)['reports']
     path = root / '.forge/inspections' / (report['digest'] + '.json')
     modified = dict(report, status='invalid')
     path.write_text(json.dumps(modified))
-    assert ws.workspace_changes(root)['reports'] == before
+    assert project_ops.workspace_changes(root)['reports'] == before
     result = project_ops.audit_check(root, kind='report', report_digest=report['digest'],
                             expected_policy=ws.audit_status(root)['policy_digest'])
     assert result['result']['status'] == 'unverifiable'

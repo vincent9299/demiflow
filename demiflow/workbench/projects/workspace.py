@@ -768,9 +768,22 @@ def detach_table(root, alias, *, expected):
     return {"status": "detached", "alias": alias, "data_deleted": False}
 
 
-def _set_table_view_control(root, alias, *, value, control, display, provenance, expected, fields):
+def _table_view_inputs(root, alias, *, display, provenance):
+    """Check the registered control and presentation before native metadata IO."""
+    from demiflow.workbench.catalog import validate
+    root, value, _ = load_workspace(root)
+    identifier(alias)
+    _, ref, uri = table_binding(root, value, alias)
+    validate(display, provenance, value['locations'])
+    return root, ref, uri
+
+
+def _set_table_view_control(root, alias, *, display, provenance, expected, fields):
     """Validate presentation facts and atomically replace only its control."""
     from demiflow.workbench.catalog import validate, validate_fields
+    root, value, _ = load_workspace(root)
+    identifier(alias)
+    control, _, _ = table_binding(root, value, alias)
     validate(display, provenance, value['locations'])
     validate_fields(display, fields)
     updated = {**control, 'format': 'demiflow_forge_table_v2', 'display': display, 'provenance': provenance}
@@ -1372,10 +1385,8 @@ def list_reports(root, *, offset=0, limit=20, cursor=None):
     return dict(reports=reports, total=page['total'], next_cursor=page['next_cursor'], index=page['index'])
 
 
-def workspace_changes(root):
+def project_change_hints(root):
     """Metadata hints, not bindings or snapshots. Never read datasets or journals."""
-    from demiflow.workbench.projects import index
-    from demiflow.execution.host.inspection import observe_storage
 
     root = Path(root).absolute()
     no_symlinks(root)
@@ -1395,19 +1406,6 @@ def workspace_changes(root):
                            info.st_size, info.st_mtime_ns, info.st_ctime_ns))
         return content_digest(values)
 
-    info = index.status(root)
-    active = info.get('active_runs', [])
-    if info.get('reason') == 'index_not_initialized':
-        from demiflow.workbench.runs.manager import _run_ids
-        active = _run_ids(root, maximum=128)
-    runs = {}
-    for run_id in active:
-        target = relative_path(root, '.forge/runs/' + run_id)
-        if not target.exists():
-            runs[run_id] = content_digest(None)  # A stale catalogue entry is only a refresh hint.
-            continue
-        with observe_storage(target) as observation:
-            runs[run_id] = observation.change_token
     value = read_control(root / 'workspace.json')
     source_paths, source_diagnostics = source_inventory(root, value)
     from demiflow.workbench.projects.discovery import discover
@@ -1418,8 +1416,7 @@ def workspace_changes(root):
                 workspace_stamp=stamp([root / 'workspace.json', root / 'README.md']),
                 sources=content_digest(dict(files=stamp(source_paths), diagnostics=source_diagnostics)),
                 source_diagnostics=source_diagnostics,
-                tables=stamp(table_files(root)), reports=content_digest({k: info.get(k) for k in ('epoch', 'reports')}),
-                runs=runs, run_revision=content_digest(info), index=info)
+                tables=stamp(table_files(root)))
 
 
 def workspace_context(root):

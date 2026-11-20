@@ -66,10 +66,10 @@ def test_forbidden_effects_are_reported_and_never_fixed(project):
 
 
 def test_generic_source_read_and_observation(project):
-    first = ws.workspace_changes(project)
+    first = project_ops.workspace_changes(project)
     assert ws.source_text(project, 'processing.py')['text']
     source = project / 'recipe.py'; source.write_text(source.read_text() + '\n# changed\n')
-    assert first['sources'] != ws.workspace_changes(project)['sources']
+    assert first['sources'] != project_ops.workspace_changes(project)['sources']
     for name in ('../outside.py', '.forge/internal.py'):
         with pytest.raises(ForgeError):
             ws.source_text(project, name)

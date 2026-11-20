@@ -192,6 +192,8 @@ def run_index_entries(root, *, check, deadline):
 def refresh_index(root, run_id, *, deadline=None):
     """Best-effort activity hint; source journal and execution lease own state."""
     from demiflow.workbench.projects import index
+    current = operation_budget.current_deadline()
+    deadline = current if deadline is None else deadline if current is None else min(deadline, current)
     try:
         if deadline is not None and time.monotonic() >= deadline:
             return 'Index refresh deferred after maintenance deadline'
@@ -1147,9 +1149,6 @@ def result_table(root, run_id, name, *, attempt=None):
             'location_id': ref.store_id, 'ref': ref.to_dict()}, ref, uri
 
 
-
-
-
 def register_results(root, run_id, *, recover=False, attempt=None, maintenance_deadline=None):
     from demiflow.lance.refs import DatasetRef
     from demiflow.execution.host.inspection import action_recovery_facts
@@ -1407,3 +1406,23 @@ def verify_run_basis(root, manifest):
         raise ForgeError('Prepared basis is stale: ' + ', '.join(report.get('changes', [])), code='conflict')
     if manifest['parameter_path'] and ws.read_control(ws.relative_path(root, manifest['parameter_path'])) != manifest['original_parameters']:
         raise ForgeError('Prepared parameters changed', code='conflict')
+
+
+def run_change_hints(root, index_info):
+    """Opaque native storage hints, never execution or data authority."""
+    from demiflow.execution.host.inspection import observe_storage
+    root = Path(root).absolute()
+    active = index_info.get('active_runs', [])
+    if index_info.get('reason') == 'index_not_initialized':
+        active = _run_ids(root, maximum=128)
+    values = {}
+    for run_id in active:
+        target = directory(root, run_id)
+        if not target.exists():
+            values[run_id] = content_digest(None)
+            continue
+        deadline = operation_budget.current_deadline()
+        operation_budget.check(deadline)
+        with observe_storage(target, deadline=deadline) as observation:
+            values[run_id] = observation.change_token
+    return dict(runs=values, run_revision=content_digest(index_info))

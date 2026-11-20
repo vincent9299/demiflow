@@ -22,6 +22,7 @@ from demiflow.workbench.conversations.policy import Deployment
 from demiflow.workbench.conversations.review import review_authority
 from demiflow.workbench.conversations.store import Store
 from demiflow.workbench.runs import manager as runs
+from demiflow.workbench import project_operations as project_ops
 from demiflow.execution.run_journal import RunJournal
 from test_forge_development_runtime import combined_configuration
 from test_forge_development_managed import read_all, claims
@@ -62,7 +63,7 @@ def admitted(root, tmp_path, monkeypatch):
     declaration['pipelines']['orders'].update(entry=dict(path='orders/flows/questions.py', symbol='select'), operators=['orders/operators'])
     declaration_path.write_text(json.dumps(declaration))
     runs.ws.register_flow(root, ENTRY, params=PARAMS)
-    assert runs.ws.inspect_flow(root, ENTRY, params=PARAMS)['status'] == 'checked'
+    assert project_ops.inspect_flow(root, ENTRY, params=PARAMS)['status'] == 'checked'
     value = json.loads(config.read_text())
     value['mode'] = 'restricted'
     value['projects'][workspace].update(kind='demiforge_registered', pipeline='orders',
@@ -280,6 +281,7 @@ from demiflow.workbench.worker import prepare_native
 prepare_native(analysis_read=False)
 from demiflow.workbench.conversations import admission
 from demiflow.workbench.runs import manager as runs
+from demiflow.workbench import project_operations as project_ops
 original = admission.guard
 @contextmanager
 def previous_guard(root, **kwargs):
@@ -351,6 +353,7 @@ from demiflow.workbench.worker import prepare_native
 prepare_native(analysis_read=False)
 from pathlib import Path
 from demiflow.workbench.runs import manager as runs
+from demiflow.workbench import project_operations as project_ops
 from demiflow.forge.schema import ForgeError
 root = Path(sys.argv[1])
 original = runs.verify_run_basis

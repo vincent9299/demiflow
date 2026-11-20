@@ -777,7 +777,7 @@ class Handler(BaseHTTPRequestHandler):
                         offset=int(query.get('offset', 0)), limit=int(query.get('limit', 20)),
                         row_id=int(query['row_id']) if 'row_id' in query else None)
                 elif url.path == '/api/changes':
-                    value = api.workspace_changes(root)
+                    value = project_ops.workspace_changes(root)
                 elif url.path == '/api/audit':
                     value = api.audit_status(root)
                 elif url.path == '/api/reports':
