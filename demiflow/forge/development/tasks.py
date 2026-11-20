@@ -84,7 +84,9 @@ def start(project, task_id, pipeline, goal, writes, non_goals, *, metadata=None)
             protected = (project.root / readonly).resolve()
             if target.is_relative_to(protected) or protected.is_relative_to(target):
                 raise ForgeError(f"Writable scope intersects readonly: {name}")
-    binding = project.binding()
+    from .project import binding_components
+    components = binding_components(project.path, project.config)
+    binding = digest(components)
     observation = project.observe(pipeline)
     if observation.coverage is not None:
         if observation.facts.unwatched:
@@ -98,7 +100,7 @@ def start(project, task_id, pipeline, goal, writes, non_goals, *, metadata=None)
         raise ForgeError('Tool/config changed during start observation')
     initial = {"schema": "demiforge-task-v1", "id": task_id, "pipeline": pipeline,
                "goal": goal, "writes": sorted(set(writes)), "non_goals": non_goals,
-               "created": now(), "binding": binding, "baseline": observation.tree,
+               "created": now(), "binding": binding, "binding_components": components, "baseline": observation.tree,
                "readonly_baseline": observation.readonly, "sources": observation.sources,
                "reads": {}, "notes": [], "check": None, "verification": None, "review": None}
     if observation.coverage is not None:
@@ -117,19 +119,85 @@ def start(project, task_id, pipeline, goal, writes, non_goals, *, metadata=None)
             "next": f"context --id {task_id}", "note": "Baseline includes existing dirty/untracked files"}
 
 
-def current(project, state, *, with_observation=False):
+def _runtime_config_pin(project, state, expected_binding):
+    """Authenticate original config independently of implementation provenance."""
+    components = state.get('binding_components')
+    pin = None
+    if components is not None:
+        if (type(components) is not dict or set(components) != {'config', 'tool'}
+                or digest(components) != state['binding']):
+            raise ForgeError('Original task binding components differ')
+        pin = components['config']
+    if 'managed' in state:
+        from .registration import records, sha
+        for item in records(project, state):  # Authenticated chain and fixed original head.
+            if item['status'] != 'committed':
+                continue
+            plan = item['plan']
+            if plan.get('kind', 'registration') == 'registration':
+                declaration = plan['project']
+                if sha(declaration['after_raw']) != declaration['after_sha256']:
+                    raise ForgeError('Original registered project configuration differs')
+                pin = declaration['after_sha256']
+            else:
+                parts = plan['request']['after_components']
+                if digest(parts) != plan['after_binding']:
+                    raise ForgeError('Original implementation binding components differ')
+                pin = parts['config']
+    if pin is None:
+        # Same intact old binding can still authenticate config, but never infer
+        # its separated config value from a different mixed implementation hash.
+        if project.binding() == expected_binding:
+            pin = file_hash(project.path)
+        else:
+            raise ForgeError('Historical acceptance lacks independent project configuration evidence (hash only)')
+    return pin
+
+
+def _runtime_provenance(project, state, readonly, sources):
+    """Reuse authenticated old platform-only values while rechecking business files."""
+    from .resources import PACKAGE_ROOT, CHECKOUT_ROOT
+    roots = [PACKAGE_ROOT.resolve()]
+    if CHECKOUT_ROOT is not None:
+        roots.append(CHECKOUT_ROOT.resolve())
+    def platform_path(name):
+        path = (project.root / name).resolve()
+        return not path.is_relative_to(project.root.resolve()) and any(
+            path == root or path.is_relative_to(root) for root in roots)
+    before = readonly_baseline(project, state)
+    readonly = dict(readonly)
+    for key in set(readonly) | set(before):
+        if platform_path(key):
+            if key in before:
+                readonly[key] = before[key]
+            else:
+                readonly.pop(key, None)
+    sources = dict(sources)
+    for key, item in sources.items():
+        if platform_path(item['definition']['path']):
+            original = state['sources'].get(key)
+            if original is None or original['definition'] != item['definition']:
+                raise ForgeError('Original platform context declaration is unavailable')
+            sources[key] = original
+    return readonly, sources
+
+
+def current(project, state, *, with_observation=False, _runtime=False):
     if state.get('managed', {}).get('context_binding_problem'):
         raise ForgeError('Supplementary authority source set changed; an explicit contract update is required')
-    binding = project.binding()
     from .registration import binding_for
-    expected_binding = binding_for(project, state) if 'managed' in state else state["binding"]
-    if binding != expected_binding:
+    expected_binding = binding_for(project, state, runtime=_runtime) if 'managed' in state else state["binding"]
+    config_pin = _runtime_config_pin(project, state, expected_binding) if _runtime else None
+    binding = file_hash(project.path) if _runtime else project.binding()
+    if binding != (config_pin if _runtime else expected_binding):
         raise ForgeError("Tool, standard or project configuration changed; use read-only history. "
                          "Continuation requires a separately reviewed plan preserving the original baseline; "
                          "do not restart this task from the current tree")
     observation = project.observe(state['pipeline'])
     tree, readonly, sources = observation.tree, observation.readonly, observation.sources
-    if project.binding() != binding:
+    if _runtime:
+        readonly, sources = _runtime_provenance(project, state, readonly, sources)
+    if (file_hash(project.path) if _runtime else project.binding()) != binding:
         raise ForgeError('Tool/config changed during current observation')
     basis = {"tree": tree, "readonly": readonly, "sources": sources,
                           "binding": state["binding"],

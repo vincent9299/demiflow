@@ -215,7 +215,7 @@ acquire one silently after require was enabled. Observe remains unchanged.
                     turn['cleanup'] != 'complete' or turn['gate_cleanup'] != 'complete' or turn['gate_phase'] != 'finished' or
                     state.get('state') != 'accepted' or state.get('busy') is not False or state.get('assurance') != 'enforced'):
                 _reject('latest user request has no completed, uncancelled acceptance receipt')
-            current = project_tasks(deployment, session, project).status(session['id'])
+            current = project_tasks(deployment, session, project).runtime_acceptance(session['id'])
             fingerprint = current.get('source_fingerprint')
             if (not current.get('ready') or current.get('development_state') != 'accepted' or
                     current.get('assurance') != 'enforced' or not fingerprint or

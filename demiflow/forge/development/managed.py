@@ -833,7 +833,14 @@ class ManagedTasks:
             self._validate(state, task_id)
             return self._projection(project, state, directory)
 
-    def _projection(self, project, state, directory, *, stale=False):
+    def runtime_acceptance(self, task_id):
+        """Read accepted business evidence without requiring the producing tool version."""
+        project = self._project()
+        with tasks.locked(project, task_id, write=False) as (directory, state):
+            self._validate(state, task_id)
+            return self._projection(project, state, directory, runtime=True)
+
+    def _projection(self, project, state, directory, *, stale=False, runtime=False):
         metadata = self._validate(state, state['id'])
         acceptance = metadata.get('acceptance') or {}
         pending = tasks.pending_questions(state)
@@ -858,7 +865,7 @@ class ManagedTasks:
         try:
             if _project_identity(self.project_root) != metadata['bound_contract']['project_identity']:
                 raise ForgeError('Physical project root changed from the original task baseline')
-            tree, readonly, _, fingerprint, observation = tasks.current(project, state, with_observation=True)
+            tree, readonly, _, fingerprint, observation = tasks.current(project, state, with_observation=True, _runtime=runtime)
             result['source_fingerprint'] = fingerprint
             changed = changes(state['baseline'], tree)
             result.update(changed=_bounded(changed), changed_total=len(changed))
@@ -956,7 +963,7 @@ class ManagedTasks:
                                 raise ForgeError('Invalid execution provenance')
                             status = 'passed' if proof['fingerprint'] == fingerprint else 'stale'
                             identity = dict(backend=proof['backend'], implementation=proof['implementation'])
-                            if self.review_authority.execution_identity is not None and identity != self.review_authority.execution_identity:
+                            if not runtime and self.review_authority.execution_identity is not None and identity != self.review_authority.execution_identity:
                                 status = 'stale'
                                 repair_safe = False
                             implementations.add((proof['backend'], proof['implementation']))
@@ -972,7 +979,7 @@ class ManagedTasks:
                 if not execution_ok:
                     violations.append('Enforced execution requires current trusted developer and verifier completion evidence')
                 unchanged_checked &= result['execution_evidence'].get('developer') == 'passed'
-            if (tasks.current(project, state)[3] != fingerprint or stale or
+            if (tasks.current(project, state, _runtime=runtime)[3] != fingerprint or stale or
                     _project_identity(self.project_root) != metadata['bound_contract']['project_identity']):
                 repair_safe = False
                 gates = {key: 'stale' for key in gates}
