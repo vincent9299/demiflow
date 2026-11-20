@@ -9,7 +9,7 @@ Run it in the tree that holds the merge result, with the interpreter the tests u
   3. runs the guard tests in one pytest process with private temporary directories.
 
 Exit code 0 only when all three hold. A guard file that is missing is a failure, not a skip:
-a guard that was deleted no longer guards.
+a guard that was deleted no longer guards. Skipped mandatory guards do not count as passing.
 
 To change a frozen file or the set of guards on purpose, change FROZEN or GUARDS in the same
 merge and say why in the commit message.
@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # What may cross a package or module boundary, and the inventories that record it.
 GUARDS = (
     'tests/test_package_dependency_ratchet.py',
+    'tests/test_package_cold_imports.py',
     'tests/test_workbench_engine_boundary.py',
     'tests/test_p1_*.py',
     'tests/test_p4_managed_cleanup.py',
@@ -141,7 +142,8 @@ def gate(root=ROOT, python=sys.executable, patterns=GUARDS, frozen=FROZEN, scrat
         result['tests'] = run_guards(root, python, files, env, scratch) if files and bound else None
         tests = result['tests']
         result['ok'] = bool(bound and not result['frozen_differences'] and not missing
-                            and tests and tests['returncode'] == 0 and not tests['failed'])
+                            and tests and tests['returncode'] == 0 and not tests['failed']
+                            and tests['skipped'] == 0)
         return result
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
@@ -164,6 +166,8 @@ def describe(result):
         lines.append(f"guard tests: {tests['passed']} passed, {len(tests['failed'])} failed, "
                      f"{tests['skipped']} skipped in {len(result['guard_files'])} files")
         lines.extend(f'FAILED: {nodeid}' for nodeid in tests['failed'])
+        if tests['skipped']:
+            lines.append('Skipped mandatory guards do not count as passing')
         if tests['returncode'] and not tests['failed']:
             lines.append(f"pytest exited {tests['returncode']}: {tests['summary']}")
     lines.append('MERGE GATE: ' + ('passed' if result['ok'] else 'FAILED'))

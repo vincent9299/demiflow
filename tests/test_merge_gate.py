@@ -50,6 +50,18 @@ def test_a_failing_guard_fails_the_gate_and_is_named(tmp_path):
     assert 'FAILED:' in merge_gate.describe(result) and 'test_breaks' in merge_gate.describe(result)
 
 
+def test_a_skipped_guard_fails_the_gate_even_when_pytest_passes(tmp_path):
+    skipping = 'import pytest\n\ndef test_skips():\n    pytest.skip("missing dependency")\n'
+    root = tree(tmp_path, tests={'test_a.py': PASSING, 'test_b.py': skipping})
+    result = run(root, ('tests/test_a.py', 'tests/test_b.py'), tmp_path)
+    assert result['tests']['returncode'] == 0
+    assert result['tests']['passed'] == 1
+    assert result['tests']['skipped'] == 1
+    assert result['tests']['failed'] == []
+    assert not result['ok']
+    assert 'Skipped mandatory guards' in merge_gate.describe(result)
+
+
 def test_a_deleted_guard_file_is_a_failure_not_a_skip(tmp_path):
     root = tree(tmp_path, tests={'test_a.py': PASSING})
     result = run(root, ('tests/test_a.py', 'tests/test_gone.py', 'tests/test_p9_*.py'), tmp_path)
@@ -84,3 +96,9 @@ def test_a_glob_contributes_every_matching_file_once(tmp_path):
 def test_the_frozen_files_of_this_tree_are_the_recorded_ones():
     assert merge_gate.frozen_differences(ROOT) == []
     assert len(merge_gate.FROZEN) == 7
+
+
+def test_the_real_guard_roster_includes_the_entire_cold_import_file():
+    files, missing = merge_gate.guard_files(ROOT)
+    assert missing == []
+    assert 'tests/test_package_cold_imports.py' in files
