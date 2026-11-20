@@ -196,10 +196,10 @@ def _release_orphans(run_dir, *, capacity):
 
 
 def _chain_child_id(run):
-    with run.journal._connection() as db:
-        row = db.execute("SELECT action_id FROM runtime_actions WHERE action_id LIKE '%-chain'").fetchone()
-    assert row is not None, 'chain output child action was not bound'
-    return row[0]
+    # The unified v3 action owns the checkpoint and final result commits;
+    # the former folded %-chain action no longer exists.
+    assert run.journal.source_binding('action-1-dataflow-sealed') is not None
+    return 'action-1'
 
 
 def _crash_hook(root):
@@ -209,7 +209,7 @@ def _crash_hook(root):
     def hook(row):
         counter[0] += 1
         if counter[0] == 5 and not marker.exists():
-            marker.touch()
+            marker.write_text(json.dumps({'pid': os.getpid(), 'row': counter[0]}))
             os.kill(os.getpid(), signal.SIGKILL)
         return row
 
@@ -395,18 +395,33 @@ def _chain_recovery(fixture, *, fault):
                 .map_async(hook, concurrency=1))
 
     def execute():
-        with data.local_execution(workers=1, worker_mode='thread', partitions=1,
+        with data.local_execution(workers=1, worker_mode='process', partitions=1,
                                   unified_chain=True):
             return pipeline().materialize().take_all()
 
     run_dir = root / 'run'
     started = time.monotonic()
-    with pytest.raises((RecoveryContractError, OSError)):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    with pytest.raises(DataflowError, match='worker.*(connection|confirmation)') as loss:
         with RunContext.start(run_dir, limits=LIMITS) as run:
             reference = run.ref
             execute()
+    assert loss.value.code == 'UNKNOWN_EFFECT'
     assert marker.exists(), 'first run must crash after acked cuts, not fail at load'
-    before = _resource_evidence(run_dir, capacity=_CHAIN_CAPACITY, started=started)
+    killed = json.loads(marker.read_text())
+    assert killed['pid'] != os.getpid() and killed['row'] == 5
+    prefix = RunJournal(run_dir).execution_commits('action-1')
+    assert prefix and all(f['status'] == 'acked' for f in prefix), 'crash must retain a genuine ACK prefix'
+    def resource_evidence():
+        value = _resource_evidence(run_dir, capacity=_CHAIN_CAPACITY, started=started)
+        # v3 uses the selected deployment capacity domain, not run-resources.
+        from demiflow.execution.dataflow_capacity import local_capacity
+        domain, capacity = local_capacity()
+        value['capacity_charged'] = LocalCapacityPool(domain / 'capacity', capacity=capacity).snapshot()['charged']
+        return value
+    before = resource_evidence()
+    assert before['capacity_charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
+
 
     if fault == 'edit_helper':
         fixture['helper_path'].write_text('def delta():\n    return 9999\n')
@@ -414,16 +429,18 @@ def _chain_recovery(fixture, *, fault):
 
     rows, commits, refused = None, None, False
     if fault == 'edit_helper':
-        with pytest.raises(RecoveryContractError, match='code') as excinfo:
+        with pytest.raises(DataflowError, match='Loaded program code differs from the sealed pin') as excinfo:
             with RunContext.resume(reference):
                 execute()
+        assert excinfo.value.code == 'INVALID_CONTRACT'
         assert not isinstance(excinfo.value, TimeoutError)
         refused = True
+        assert RunJournal(run_dir).execution_commits('action-1') == prefix
     else:
         with RunContext.resume(reference) as run2:
             rows = execute()
             commits = run2.journal.execution_commits(_chain_child_id(run2))
-    after = _resource_evidence(run_dir, capacity=_CHAIN_CAPACITY, started=started)
+    after = resource_evidence()
     _release_orphans(run_dir, capacity=_CHAIN_CAPACITY)
     return dict(before=before, after=after, rows=rows, commits=commits,
                 refused=refused, reference=reference)

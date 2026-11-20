@@ -597,6 +597,32 @@ def _bounded_object(raw, *, characters=None, _object=True):
     return value
 
 
+def _read_object_roots(db):
+    """Bound native namespace records before they leave SQLite."""
+    records = []
+    fields = ('root_id', 'logical_root', 'physical_root', 'run_id')
+    bounds = (64, 4096, 4096, 32)
+    projection = ','.join(
+        f"CASE WHEN typeof({field})='text' THEN "
+        f'substr(CAST({field} AS BLOB),1,{maximum + 1}) END'
+        for field, maximum in zip(fields, bounds))
+    rows = db.execute('SELECT ' + projection + ' FROM runtime_object_roots LIMIT 65').fetchall()
+    if len(rows) > 64:
+        raise RecoveryContractError('Object resource count exceeds ceiling')
+    for row in rows:
+        if any(not isinstance(v, bytes) or len(v) > maximum
+               for v, maximum in zip(row, bounds)):
+            raise RecoveryContractError('Historical object root field exceeds byte budget')
+        record = dict(zip(fields, (v.decode('utf-8') for v in row)))
+        # Same aggregate record limit used by register_object_root.
+        _checked_document(record, 8192)
+        records.append(record)
+    # Sort only the bounded result, never an untrusted entire
+    # table (legacy/corrupt schemas may lack the native index).
+    records.sort(key=lambda record: record['root_id'])
+    return records
+
+
 def storage_snapshot(directory, *, _file_fd=None, _deadline=None, _footprint_only=False):
     """Bounded native ownership/control facts in a short read transaction.
 
@@ -652,26 +678,7 @@ def storage_snapshot(directory, *, _file_fd=None, _deadline=None, _footprint_onl
             state = None if _footprint_only else document('execution_state', 4 * 65536)
             records = []
             if 'runtime_object_roots' in tables:
-                fields = ('root_id', 'logical_root', 'physical_root', 'run_id')
-                bounds = (64, 4096, 4096, 32)
-                projection = ','.join(
-                    f"CASE WHEN typeof({field})='text' THEN "
-                    f'substr(CAST({field} AS BLOB),1,{maximum + 1}) END'
-                    for field, maximum in zip(fields, bounds))
-                rows = db.execute('SELECT ' + projection + ' FROM runtime_object_roots LIMIT 65').fetchall()
-                if len(rows) > 64:
-                    raise RecoveryContractError('Object resource count exceeds ceiling')
-                for row in rows:
-                    if any(not isinstance(v, bytes) or len(v) > maximum
-                           for v, maximum in zip(row, bounds)):
-                        raise RecoveryContractError('Historical object root field exceeds byte budget')
-                    record = dict(zip(fields, (v.decode('utf-8') for v in row)))
-                    # Same aggregate record limit used by register_object_root.
-                    _checked_document(record, 8192)
-                    records.append(record)
-                # Sort only the bounded result, never an untrusted entire
-                # table (legacy/corrupt schemas may lack the native index).
-                records.sort(key=lambda record: record['root_id'])
+                records = _read_object_roots(db)
             # Validate/hash complete documents, then retain only storage
             # fields. No large source inventories live across traversal.
             manifest = None if _footprint_only else document('manifest', _MANIFEST_BYTES)
@@ -734,6 +741,26 @@ class _ReadonlyJournal:
             if len(raw) > maximum:
                 raise RunReadError('Native document exceeds budget', code='resource_limit')
             return _bounded_object(raw)
+
+    def object_roots(self):
+        """Registered namespaces and their owner from one bounded read snapshot."""
+        with self._connection() as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='runtime_object_roots'").fetchone():
+                return []
+            records = _read_object_roots(db)
+            binding = None
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='runtime_identity'").fetchone():
+                rows = db.execute('SELECT ' + _TEXT_BYTES + ' FROM runtime_identity LIMIT 2',
+                                  (MAX_DOCUMENT_BYTES + 1,)).fetchall()
+                if len(rows) > 1:
+                    raise RunReadError('Ambiguous native identity')
+                if rows:
+                    raw = rows[0][0]
+                    if not isinstance(raw, bytes) or len(raw) > MAX_DOCUMENT_BYTES:
+                        raise RunReadError('Native identity exceeds budget', code='resource_limit')
+                    binding = _bounded_object(raw)
+            _checked_native_roots(dict(identity=binding, object_roots=records))
+        return records
 
     def recovery_identity(self):
         return self._one('runtime_identity')
