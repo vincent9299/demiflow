@@ -291,7 +291,7 @@ def test_internal_checker_failure_keeps_partial_and_later_findings(graphs, monke
 
 
 def test_unknown_keys_are_observations_with_safe_stable_locations(graphs):
-    key = 'private-key-material-' * 100
+    key = ('private-key-material-' * 100)[:256]  # maximum admitted DTO key length
     graph = _mutate(graphs['case map'], 'MapOp', _set(key, {'secret': 'model body'}))
     findings = tuple(schema._graph_findings(graph))
     assert len(findings) == 1
