@@ -1,0 +1,81 @@
+任务 A2：固定 Git 对象的两份只报告诊断
+
+用途与输入
+
+给审阅者查看两个固定源码版本的 SCC 完整成员/关联变化，以及明示声明种子/闭包的导入候选；不作运行期依赖证明、
+缺陷计数或已批准五层规范，不自动迁移或删边。任意 SCC/导入数字增加都不会使诊断拒绝，更不会改变合入守卫结果。
+工具只依赖 Python 标准库和既有 Git，不导入被分析的 demiflow 或业务代码，不执行源码、插件或入口，不安装包。
+
+在自己的隔离树或管理者持有的固定集成树调用（以下命令是示例，不授权在正式目录测试）：
+  "$PYTHON" -I -B "$TREE/tools/architecture_diagnostics.py" --repository "$TREE" \
+    --base <上次已发布main的完整commit SHA> --candidate <完整commit SHA或staged tree SHA> \
+    --output-dir "$EVIDENCE/architecture-diagnostics"
+
+repository 必须是 Git 仓库根；base 必须为 commit，candidate 可为 commit 或 tree；必须先解析 full SHA，不接受 HEAD、
+分支、标签对象或短 SHA。commit 记录 tree_sha；tree 的 commit_sha 明确为 null，不伪造尚未生成的 merge commit。
+未提交的试合并由唯一管理者按现行发版规范先 git write-tree；本工具只读该 tree，不写 INDEX、引用、对象或工作树。
+工具只使用 cat-file/ls-tree 读取对象，禁 Git replace 和继承的 GIT_* 路由；工作树的未提交源码不会混入报告。
+受测实际树是否等于此 tree、无 unstaged 变动以及后续 merge commit 的关联仍由现行发版流程证明，报告本身不给实时树背书。
+
+output-dir 必须在仓库外、父目录已存在且本次目录不存在。已有证据不覆盖；禁止把仓库内目录当输出。
+完成时有 scc-membership.json、declaration-upward-imports.json、receipt.json，stdout 也是外围 receipt JSON，退出 0。
+分析、参数、模式、预算、语法或写入失败退出 1，能写时记录 status=failed 及具体错误；主报告不伪造成 [] 或空成功。
+两份报告先写有界临时文件，再独占发布；部分发布失败会清掉本次已创建的主报告/临时文件，留下失败回执。
+目录无法创建/回执不可写或进程被强杀时，stdout/退出值或缺失回执就是未交付证据，不能称 complete。
+无效超长 SHA 的失败留痕只保留64字符前缀与原长度；repository/output 参数在文件系统访问前限4096字节。
+不将任意长的无效输入原样抄进失败回执；有效的完整 SHA 保留原值。
+
+可选合入报告接入
+
+原 A1 GUARDS、skip 拒绝、FROZEN 和 CLI 0/1 语义保留。以下三个参数一起给出，诊断在真实 gate 得到结果后执行：
+  "$PYTHON" -B "$INTEGRATION/tests/merge_gate.py" --json "$EVIDENCE/merge-gate.json" \
+    --diagnostics-base <上次已发布main的完整commit SHA> --diagnostics-candidate "$MERGE_TREE" \
+    --diagnostics-dir "$EVIDENCE/architecture-diagnostics"
+
+省略三项：diagnostics.status=not_requested，describe 明示 not generated，不称零变化或已经交诊断。
+少参数、无效 SHA、工具失败/超时、损坏回执、主报告缺失/摘要不符或不可写：diagnostics.status=failed，describe 单列报告失败。
+完成：status=complete，附固定 inputs、两份实际文件/字节/SHA-256 和外围 receipt 路径/摘要。
+真实 guard fail + complete 仍为失败；真实 guard pass + failed 仍保留原成功及诊断失败两个事实。诊断不写 result.ok，
+gate 的退出仍只由真实 A1 guard 判定。JSON 总回执本身写失败沿原规则记为证据缺失，不伪称交付成功。
+--list 保持只列名单、不执行测试/诊断；不能用 --list 声称交报告。
+诊断失败补证独立排队，不拖 A1/P12；不得静默拿旧报告充数。人工具体例外仍按发版规范保存，工具不新增 allow-skip。
+
+报告口径
+
+每版本遍历固定 demiflow/**/*.py regular blob；排除 _vendor 子树。根门面 demiflow 有 inventory/观察，SCC 与声明闭包边
+排除它和自边；其余 package __init__ 保留。snapshot inventory 列每个模块的路径、Git blob OID、字节、行数和 package 标记。
+所有源码每个 import 名字一条，静态 kinds 为 top/guarded/lazy/typing。沿用旧扫描器的函数子树 lazy 口径，包括 defaults、
+decorators 和 annotations，不声称这是严格求值顺序图。直接 TYPE_CHECKING Name/Attribute 的 body 为 typing；复杂布尔/别名不保证识别。
+字面量动态 import 与字符串符号另列，computed first argument/package 逐处 unresolved，不混入静态 SCC。import_module 等调用
+按语法名字观察，不证明实际函数来源或可达性；最长已有模块前缀也不等于 reexport 的最终对象提供者。不得由“无静态边”推导运行无依赖。
+
+scc-membership.json：两个版本所有非平凡组件的完整有序成员/源路径，base execution.dataflow 和 workbench.worker 锚点
+有 missing/acyclic/cyclic 状态。delta 区分新增/删除模块、原有/新建入环、保留退环/删除，以及变更组件完整成员和交集关联的 merge/split。
+依赖差异 key=(src,dst,names,kind)，同关系聚合所有源位置；纯行号变化为 relocated，保留 before/after，不伪报新增依赖或已证明根因。
+
+declaration-upward-imports.json：实际 execution.contracts.* 和固定 recovery_contract/data 声明模块种子、缺失 fixed seeds、
+top/guarded 闭包，种子到旧口径之外包的 top/guarded 候选，以及闭包外 lazy 到 base SCC 内/外两组。每项保留名字和所有位置；
+imported_name_sites 与 statements 分开。typing/动态/字符串观察单列；实际 seed/closure 和三类候选有双版本增减/位置变化。
+种子和边的理由/排除规则写在 method，不能将本候选清单升级为新的五层规范或违规判断。
+
+主报告包含输入类型/SHA、工具 source SHA/method version、原 graph.py/facts.py 来源摘要、精确 scope/规则/限度；不混时间、
+绝对输出目录或耗时，同输入和工具版本可逐字节复现。时长、实际资源后备支持和输出绝对路径只在 receipt。
+
+资源与清理
+
+两个源快照顺序分析，每次一份源码 AST；每快照最多 4096 模块、2 MiB/blob、64 MiB 源、1024 字节路径、
+20000 tree metadata entries/4 MiB metadata、50000 合计静态/补充观察行；Git header 先验类型/声明大小再准入 body，.py symlink/special mode 拒绝。
+每份主报告最多 8 MiB；Git stderr 至多 64 KiB，输出 error message 进一步限 4 KiB，外围 receipt/stdout 至多 64 KiB。
+CLI 本身是独立分析子进程，设置 512 MiB address-space、60s CPU 后备限制及 90s wall timer；主动阶段 deadline 为 60s。
+同时最多一个串行 Git reader 子进程；SCC 用迭代遍历。导入 Python 函数 API 不改当前进程的 OS 限制，便于私有小预算测试。
+OS 限制可用性写入 receipt；主动输入/行/输出预算是主防线，不将 OS 分配/进程调度说成宿主机 RSS 硬保证。
+gate 另监督 90s，超时/异常只终止它创建的诊断进程组（含 Git）；有界清理等待最多 2s 后强制回收，不终止他人的进程。
+独立 CLI 的信号/异常路径关闭 pipe、回收本 Git child 并清本次临时报告；硬杀可能只留下缺失/失败证据，绝不补写空成功。
+
+身份、保留与恢复
+
+只改 tools/tests/docs，不改产品包、对象路径、封存/历史格式、恢复匹配、冻结摘要或 P1/P2/P4/P8 共识。
+平台内容身份需用实际包路径/字节核对，不能单凭 Git SHA 或目录推断；Forge 项目 watch 若覆盖这些文件会使开发快照变化。
+A1 固定祖先仍可单独合流；A2 新增提交不重写它。回退用自己分支的独立反向提交，禁止 reset/rewrite main 或覆盖旧证据。
+真实固定报告/测试/预算负例/首次失败与源 SHA 记录在本轮共享 implementation-a2-v1，最终 review 和合流发版由父协调负责。
+Fable 无独立结论；当前按最新真人授权由 GPT 审阅，不声称外部评审通过。

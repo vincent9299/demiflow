@@ -146,3 +146,31 @@ def publishes_natively(sink) -> bool:
     """
     from .queue_sinks import QueueResultSink
     return not isinstance(sink, QueueResultSink)
+
+
+def collect_fixed_residency(operation, *, concurrency):
+    """Fixed native collect workspace, counted once per actual concurrent call.
+
+    Only exact platform actors supply facts. Never probe attributes of an
+    unknown callable or execute its constructor while compiling a plan.
+    """
+    import types
+    from ..data.plan import CallableSpec
+    declaration = getattr(operation, 'callable', None)
+    if not isinstance(declaration, CallableSpec):
+        return 0
+    target = declaration.target
+    actor = target.__self__ if type(target) is types.MethodType else target
+    if actor is None or type(actor) in (types.FunctionType, types.BuiltinFunctionType):
+        return 0
+    from ..objects import ReadLocalObject
+    from ..collect.documents import DecodeDocument
+    from ..collect.image_resize import EncodeImage
+    from ..collect.wiki_syntax import ParseWikitext
+    if type(actor) not in (ReadLocalObject, DecodeDocument, EncodeImage, ParseWikitext):
+        return 0
+    from ..collect.flow_contract import collect_facts
+    facts = collect_facts(actor)
+    # The original declaration already includes its concurrency. A public map
+    # may override that value: use the actual scheduled concurrency exactly once.
+    return facts['reserved_bytes'] // actor.arguments['concurrency'] * concurrency

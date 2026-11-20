@@ -9,7 +9,7 @@ Run it in the tree that holds the merge result, with the interpreter the tests u
   3. runs the guard tests in one pytest process with private temporary directories.
 
 Exit code 0 only when all three hold. A guard file that is missing is a failure, not a skip:
-a guard that was deleted no longer guards.
+a guard that was deleted no longer guards. Skipped mandatory guards do not count as passing.
 
 To change a frozen file or the set of guards on purpose, change FROZEN or GUARDS in the same
 merge and say why in the commit message.
@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -30,11 +31,14 @@ ROOT = Path(__file__).resolve().parents[1]
 # What may cross a package or module boundary, and the inventories that record it.
 GUARDS = (
     'tests/test_package_dependency_ratchet.py',
+    'tests/test_package_cold_imports.py',
     'tests/test_workbench_engine_boundary.py',
+    'tests/test_workbench_project_boundary.py',
     'tests/test_p1_*.py',
     'tests/test_p4_managed_cleanup.py',
     'tests/test_compile_contract_inventory.py',
     'tests/test_dataflow_compile_inputs.py',
+    'tests/test_dataflow_configuration.py',
     'tests/test_pre_v3_retention.py',
     'tests/test_engine_known_state.py',
     'tests/test_merge_gate.py',
@@ -141,10 +145,88 @@ def gate(root=ROOT, python=sys.executable, patterns=GUARDS, frozen=FROZEN, scrat
         result['tests'] = run_guards(root, python, files, env, scratch) if files and bound else None
         tests = result['tests']
         result['ok'] = bool(bound and not result['frozen_differences'] and not missing
-                            and tests and tests['returncode'] == 0 and not tests['failed'])
+                            and tests and tests['returncode'] == 0 and not tests['failed']
+                            and tests['skipped'] == 0)
+        result['diagnostics'] = {'status': 'not_requested'}
         return result
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
+
+
+def diagnostics_process(command):
+    """Supervise only the independent diagnostic process and its Git child."""
+    child = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, start_new_session=True)
+    try:
+        stdout, stderr = child.communicate(timeout=90)
+        return subprocess.CompletedProcess(command, child.returncode, stdout, stderr)
+    finally:
+        if child.poll() is None:
+            os.killpg(child.pid, signal.SIGTERM)
+            try:
+                child.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                os.killpg(child.pid, signal.SIGKILL)
+                child.communicate()
+
+
+def run_diagnostics(root, python, base=None, candidate=None, output=None, *, runner=None):
+    """Optional report evidence; never reads or assigns the guard result's ok field."""
+    values = {'base': base, 'candidate': candidate, 'output_dir': output}
+    requested = {}
+    for name, value in values.items():
+        if value is None:
+            requested[name] = None
+        else:
+            text = str(value)
+            maximum = 4096 if name == 'output_dir' else 64
+            requested[name] = text if len(text) <= maximum else {'prefix': text[:64], 'characters': len(text)}
+    if all(value is None for value in values.values()):
+        return {'status': 'not_requested'}
+    failed = {'status': 'failed', 'requested': requested}
+    if any(value is None for value in values.values()):
+        return dict(failed, error={'code': 'invalid_configuration', 'message': 'All three diagnostic options are required'})
+    if any(not isinstance(v, str) or len(v) > 64 for v in (base, candidate)) or len(str(output)) > 4096:
+        return dict(failed, error={'code': 'invalid_configuration', 'message': 'Diagnostic SHA/path argument exceeds input bounds'})
+    try:
+        command = [python, '-I', '-B', str(root / 'tools/architecture_diagnostics.py'),
+                   '--repository', str(root), '--base', base, '--candidate', candidate,
+                   '--output-dir', str(output)]
+        child = (runner or diagnostics_process)(command)
+        if len(child.stdout.encode()) > 65536 or len(child.stderr.encode()) > 65536:
+            raise ValueError('Diagnostic process output exceeds 64 KiB')
+        value = json.loads(child.stdout)
+        if child.returncode or value.get('status') != 'complete':
+            return dict(failed, error=value.get('error') or {'code': 'process_failed', 'message': f'Diagnostic exited {child.returncode}'})
+        for label, expected in (('base', base), ('candidate', candidate)):
+            if value['inputs'][label]['requested_sha'] != expected:
+                raise ValueError('Diagnostic input binding mismatch')
+        expected_names = {'scc-membership.json', 'declaration-upward-imports.json'}
+        if len(value['files']) != 2 or {Path(r['path']).name for r in value['files']} != expected_names:
+            raise ValueError('Missing diagnostic reports')
+        for record in value['files']:
+            path = Path(record['path'])
+            if path.resolve() != (Path(output)/path.name).resolve() or path.is_symlink():
+                raise ValueError('Diagnostic report path mismatch')
+            if not 0 < path.stat().st_size <= 8*1024**2 or path.stat().st_size != record['bytes']:
+                raise ValueError('Diagnostic report size mismatch')
+            digest = hashlib.sha256()
+            with path.open('rb') as stream:
+                for chunk in iter(lambda: stream.read(65536), b''):
+                    digest.update(chunk)
+            if digest.hexdigest() != record['sha256']:
+                raise ValueError('Diagnostic report digest mismatch')
+        receipt = Path(output)/'receipt.json'
+        if receipt.is_symlink() or not receipt.is_file() or receipt.stat().st_size > 65536:
+            raise ValueError('Missing or oversized diagnostic receipt')
+        with receipt.open('rb') as stream:
+            raw = stream.read(65537)
+        if len(raw) > 65536 or json.loads(raw) != value:
+            raise ValueError('Diagnostic receipt mismatch')
+        return dict(value, receipt_path=str(receipt.absolute()), receipt_sha256=hashlib.sha256(raw).hexdigest())
+    except Exception as exc:
+        return dict(failed, error={'code': 'timeout' if isinstance(exc, subprocess.TimeoutExpired) else 'diagnostic_error',
+                                  'message': str(exc).encode()[:4096].decode(errors='replace')})
 
 
 def describe(result):
@@ -164,8 +246,15 @@ def describe(result):
         lines.append(f"guard tests: {tests['passed']} passed, {len(tests['failed'])} failed, "
                      f"{tests['skipped']} skipped in {len(result['guard_files'])} files")
         lines.extend(f'FAILED: {nodeid}' for nodeid in tests['failed'])
+        if tests['skipped']:
+            lines.append('Skipped mandatory guards do not count as passing')
         if tests['returncode'] and not tests['failed']:
             lines.append(f"pytest exited {tests['returncode']}: {tests['summary']}")
+    diagnostics = result.get('diagnostics', {'status': 'not_requested'})
+    lines.append('architecture diagnostics: ' + diagnostics['status']
+                 + (' (not generated)' if diagnostics['status'] == 'not_requested' else ''))
+    if diagnostics['status'] == 'failed':
+        lines.append('DIAGNOSTIC FAILED (report only): ' + str(diagnostics.get('error', {})))
     lines.append('MERGE GATE: ' + ('passed' if result['ok'] else 'FAILED'))
     return '\n'.join(lines)
 
@@ -174,12 +263,17 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('--list', action='store_true', help='print the guard files and frozen files, run nothing')
     parser.add_argument('--json', metavar='OUT', help='also write the result as JSON')
+    parser.add_argument('--diagnostics-base', help='full released-main commit SHA; report only')
+    parser.add_argument('--diagnostics-candidate', help='full candidate commit or staged tree SHA; report only')
+    parser.add_argument('--diagnostics-dir', help='new external report directory; never overwrite')
     options = parser.parse_args(argv)
     if options.list:
         files, missing = guard_files(ROOT)
         print('\n'.join(files + [f'(missing) {pattern}' for pattern in missing] + sorted(FROZEN)))
         return 0
     result = gate()
+    result['diagnostics'] = run_diagnostics(ROOT, sys.executable, options.diagnostics_base,
+                                            options.diagnostics_candidate, options.diagnostics_dir)
     print(describe(result))
     if options.json:
         Path(options.json).write_text(json.dumps(result, indent=1) + '\n')

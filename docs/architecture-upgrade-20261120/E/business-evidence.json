@@ -1,0 +1,108 @@
+{
+  "schema": "demiflow.E1.business_evidence.v1",
+  "assessment_date": "2026-11-20",
+  "production_policy": "warning_only",
+  "E2_ready": false,
+  "current_candidate_business_execution": "not_run",
+  "historical_platform_revision": "e993cfdf2c5009f8c3920988cde2b7ee356dd763",
+  "historical_tree_clean": false,
+  "historical_verification": {
+    "compilation_entries": [
+      {
+        "entry": "flows/candidate_pool.py:run",
+        "status": "compiled",
+        "nodes": 24,
+        "outputs": 3,
+        "sources": 12,
+        "prompt_nodes": 4
+      },
+      {
+        "entry": "flows/instruction_variants.py:run",
+        "status": "compiled",
+        "nodes": 10,
+        "outputs": 1,
+        "sources": 10,
+        "prompt_nodes": 1
+      },
+      {
+        "entry": "flows/question_tiers.py:run",
+        "status": "compiled",
+        "nodes": 11,
+        "outputs": 2,
+        "sources": 11,
+        "prompt_nodes": 2
+      },
+      {
+        "entry": "flows/reference_comparison.py:run",
+        "status": "compiled",
+        "nodes": 29,
+        "outputs": 4,
+        "sources": 4,
+        "prompt_nodes": 5
+      },
+      {
+        "entry": "flows/reference_delivery.py:run",
+        "status": "compiled",
+        "nodes": 16,
+        "outputs": 3,
+        "sources": 33,
+        "prompt_nodes": 3
+      },
+      {
+        "entry": "flows/repair_pairs.py:run",
+        "status": "compiled",
+        "nodes": 15,
+        "outputs": 2,
+        "sources": 13,
+        "prompt_nodes": 2
+      },
+      {
+        "entry": "flows/supplement_candidates.py:run",
+        "status": "compiled",
+        "nodes": 19,
+        "outputs": 1,
+        "sources": 11,
+        "prompt_nodes": 3
+      }
+    ],
+    "dataset_lance_recovery_tests": 10,
+    "external_models": "replaced_by_fixtures",
+    "real_model_requests": "not_run",
+    "context": "directory relocation, not configuration-invariant qualification"
+  },
+  "sources": [
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/refgen-formal-relocation-20261119/REPORT.md",
+      "sha256": "30b91e2404b77a3f538e93221c50e56a608ff545a95f08bef59a2d672d5dcdfb"
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/refgen-formal-relocation-20261119/compile-seven-results.json",
+      "sha256": "610a65240462f6d0d2882fb3e86c8f4d10135d3db0dca5152d7be311c08770ea"
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/refgen-formal-relocation-20261119/fixtures.log",
+      "sha256": "3727c805474531e1bd37205f019e3a099e49f8fa2cd8d0c5ba5ebb402ef0b1c6"
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/refgen-formal-relocation-20261119/fixtures.xml",
+      "sha256": "3c0c9c5be34257dd6694ae6a4726ff9482d60e543d75c5c77c32ddd3eb84b147"
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/refgen-formal-relocation-20261119/integrity.json",
+      "sha256": "48071eda89eab9a9a61f2c55ae762d6a3f9c694baa13770b33d48b422886bbf4"
+    }
+  ],
+  "missing": [
+    "required real pipeline and input/configuration manifest for E2",
+    "fixed current-source complete compiler process receipts",
+    "four mature stages and checker completion for each compiler PID",
+    "actual role/call-chain evidence for processes labeled not_a_compiler",
+    "E2 reject-before-side-effects and historical declaration revalidation tests"
+  ],
+  "not_inferred": [
+    "historical tests count is not current zero-findings evidence",
+    "unobserved children are not zero reports",
+    "corpus capture count is not business pipeline count",
+    "no live source or business execution was performed by E"
+  ]
+}

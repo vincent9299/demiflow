@@ -1,0 +1,203 @@
+{
+  "format": "demiflow_task_a_design_v1",
+  "status": "design_awaiting_fable_review",
+  "base_main_sha": "122edf4bd0c827338846abd0114f0b36cf8c1b6d",
+  "base_main_tag": "main-20261119-3",
+  "branch": "gpt/test/public-imports-20261120",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/test/public-imports-20261120",
+  "owner": "original task A subagent a_guards",
+  "authorization": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/USER-AUTHORIZATION.txt",
+  "phases": [
+    {
+      "id": "A1",
+      "independent_delivery": true,
+      "depends_on": [
+        "approved A design and parent implementation instruction"
+      ],
+      "files": [
+        "tests/fixtures/data-public-exports.json",
+        "tests/merge_gate.py",
+        "tests/test_merge_gate.py"
+      ],
+      "changes": [
+        "Register read_legacy_queue_records in ordered all and objects mapping to demiflow.data.read_api:read_legacy_queue_records.",
+        "Run entire tests/test_package_cold_imports.py through GUARDS.",
+        "Reject any skipped mandatory guard test, including mixed pass plus skip with pytest return code 0.",
+        "Add roster and pass-plus-skip negative metatests."
+      ],
+      "preserved": [
+        "All original cold-import source and assertions.",
+        "All old guard patterns, failure checks and seven FROZEN digests.",
+        "All package source, P4 inventory, P8 inventory and P2 production policy."
+      ],
+      "success_evidence": [
+        "Complete cold file executed with all 12 entries and no failures or skipped tests.",
+        "Real merge_gate receipt includes cold file and passes without skips.",
+        "Existing gate negative cases and new skip negative case pass."
+      ],
+      "failure_exit": 1,
+      "policy_scope": "Only mandatory merge guards; no change to global pytest/known-state policies. Manual specific exceptions stay separately documented under current release rules; no bypass switch."
+    },
+    {
+      "id": "A2",
+      "independent_delivery": true,
+      "must_not_delay": [
+        "A1",
+        "P12 release"
+      ],
+      "depends_on": [
+        "approved A design and parent implementation instruction"
+      ],
+      "files": [
+        "tools/architecture_diagnostics.py",
+        "tests/test_architecture_diagnostics.py",
+        "tests/merge_gate.py",
+        "tests/test_merge_gate.py",
+        "docs/architecture-upgrade-20261120/A/DIAGNOSTICS-USAGE.txt"
+      ],
+      "inputs": {
+        "repository": "read-only Git object database",
+        "base": "full released-main commit SHA",
+        "candidate": "full commit or pre-commit staged tree SHA",
+        "source_scope": "demiflow/**/*.py; exclude _vendor; exclude root facade demiflow from SCC; preserve other package initializers",
+        "unstaged_source_binding": "remains release coordinator responsibility; report describes immutable Git sources only"
+      },
+      "outputs": [
+        "scc-membership.json",
+        "declaration-upward-imports.json",
+        "outer receipt with status, paths and SHA-256"
+      ],
+      "determinism": "Main report bytes do not include clock, output absolute paths or elapsed time.",
+      "diagnostic_semantics": {
+        "scc_edges": [
+          "top",
+          "guarded",
+          "lazy"
+        ],
+        "excluded_from_scc": [
+          "typing",
+          "literal dynamic import observations",
+          "symbol-string observations",
+          "nonliteral dynamic unknowns",
+          "self edges"
+        ],
+        "declaration_scope": "Existing architecture v3 seeds plus import-time closure; report exact seed list and absences. Upward candidates are analytical, not a new approved layer policy.",
+        "delta_key": [
+          "src",
+          "dst",
+          "names",
+          "kind"
+        ],
+        "not_thresholds": [
+          "SCC size",
+          "import count",
+          "declaration upward count"
+        ]
+      },
+      "limits": {
+        "snapshots": 2,
+        "py_modules_per_snapshot": 4096,
+        "blob_bytes": 2097152,
+        "source_bytes_per_snapshot": 67108864,
+        "path_bytes": 1024,
+        "tree_metadata_entries": 20000,
+        "tree_metadata_bytes": 4194304,
+        "edges_per_snapshot": 50000,
+        "report_bytes_each": 8388608,
+        "stderr_bytes": 65536,
+        "software_deadline_seconds": 60,
+        "outer_timeout_seconds": 90,
+        "cpu_seconds_backup": 60,
+        "address_space_bytes_backup": 536870912,
+        "concurrency": "One analysis process and at most one serial Git reader; one source AST resident at a time."
+      },
+      "standalone_error_exit": "nonzero on incomplete/failed generation, never on numeric growth",
+      "gate_adapter": {
+        "optional_flags": [
+          "--diagnostics-base",
+          "--diagnostics-candidate",
+          "--diagnostics-dir"
+        ],
+        "statuses": [
+          "not_requested",
+          "complete",
+          "failed"
+        ],
+        "error_behavior": "Record failure and bounded error independently; preserve actual gate.ok and its exit code.",
+        "report_write_failure": "Missing output receipt remains missing evidence, not successful delivery."
+      },
+      "report_formats": {
+        "shared_fields": {
+          "format": "versioned diagnostic identifier, not product/runtime protocol",
+          "method": "scanner version, scanner source SHA256, exact included/excluded modules, edge-kind policy and limitations",
+          "inputs": "base/candidate requested SHA, input kind, commit SHA or null, tree SHA",
+          "snapshots": "sorted inventories of module paths/content OIDs and per-snapshot analysis",
+          "delta": "normalized dependency/member differences with before/after locations"
+        },
+        "scc-membership.json": {
+          "format": "demiflow_architecture_scc_report_v1",
+          "snapshots": "all nontrivial components sorted by members; base/workbench anchor presence and members; source paths",
+          "delta": "new/deleted modules, cyclic entrants/exits split by new/existing/deleted, overlap links for changed components, changed edge rows"
+        },
+        "declaration-upward-imports.json": {
+          "format": "demiflow_architecture_declaration_report_v1",
+          "snapshots": "actual/absent seeds, import-time closure, seed cross-package top/guarded candidates, closure lazy external edges grouped into anchor SCC and outside; typing/dynamic/symbol observations separate",
+          "delta": "new/removed normalized candidate rows and before/after source locations"
+        },
+        "outer_receipt": {
+          "status": "complete or failed; not_requested belongs to merge_gate adapter",
+          "runtime_fields": "timestamps/elapsed/limits/interpreter and bounded error, not deterministic report contents",
+          "files": "absolute artifact path, bytes and SHA256 for each report actually generated"
+        }
+      }
+    }
+  ],
+  "identity_impact": {
+    "engine_platform_identity": "Expected unchanged because no package .py input changes; prove package path/byte equality. Git SHA advances.",
+    "object_identity": "No runtime object moves or source changes.",
+    "sealed_history": "No change to serialized paths, bytes, formats or resume policy; old history and source preserved.",
+    "forge_platform_snapshot": "Package source/declaration/dependency inputs expected unchanged; does not follow solely from engine hash.",
+    "forge_project_snapshot": "Configured watch/sources may cover tests/tools/docs and therefore change; do not reuse old development evidence or alter watches."
+  },
+  "baseline_evidence": {
+    "root": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/design-v1/baseline",
+    "cold_imports": {
+      "exit_code": 1,
+      "pytest_summary": "12 failed, 3 passed",
+      "collected_top_level_cases": 3,
+      "subtests_failed": 12
+    },
+    "merge_gate": {
+      "exit_code": 0,
+      "passed": 199,
+      "failed": 0,
+      "skipped": 0,
+      "guard_files": 16
+    },
+    "old_analyzers": {
+      "graph_exit": 0,
+      "facts_exit": 0,
+      "base_scc": 297,
+      "workbench_scc": 87,
+      "declaration_seeds": 27,
+      "declaration_closure": 42,
+      "statements_top_into_cycle_outside_cycle": [
+        3,
+        9,
+        6
+      ]
+    },
+    "not_run": [
+      "A1/A2 implementation tests",
+      "four release lanes",
+      "Ray",
+      "browser",
+      "business pipelines",
+      "paid models",
+      "new diagnostics tool",
+      "Fable review"
+    ]
+  },
+  "implementation_status": "No product or test implementation modified.",
+  "human_decisions_needed": []
+}

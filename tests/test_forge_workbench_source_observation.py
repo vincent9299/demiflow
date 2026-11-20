@@ -66,7 +66,7 @@ def test_browser_unadmitted_source_keeps_diagnostics_without_fake_execution_grap
         expect(page.locator('.wb-graph')).not_to_have_attribute('aria-busy','true')
         expect(page.locator('.wb-node')).to_have_count(0)
         expect(page.get_by_role('button',name='解析执行计划',exact=True)).to_be_disabled()
-        expect(page.get_by_role('button',name='运行',exact=True)).to_be_disabled()
+        expect(page.locator('.wb-actions').get_by_role('button',name='运行',exact=True)).to_be_disabled()
         page.locator('.wb-more > summary').click()
         page.get_by_role('button',name='检查问题',exact=True).click()
         expect(page.locator('.wb-check-issues')).to_contain_text('OP-06')

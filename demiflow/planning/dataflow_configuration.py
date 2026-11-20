@@ -21,15 +21,11 @@ A key reaches a node from exactly one of these writers, in the order they run:
 ``graph``        marks of the routed-graph adapter.
 ``shared``       same-instance actor ownership.
 
-``configuration_findings(graph)`` checks a newly compiled graph against this
-schema and returns what does not fit. Nothing here rejects a plan:
-``report_configuration`` logs each finding as a warning on the
-``demiflow.planning.configuration`` logger and returns. A sealed plan is never
-checked; it keeps the keys it was sealed with.
-
-Enforcement is staged. Tests can already fail on a finding (the opt-in
-``configuration_schema_gate`` pytest plugin). Production warns. Refusing a plan
-is a later step, for the invariants only, once real pipelines have run clean.
+``configuration_findings`` and ``report_configuration`` remain report-only
+diagnostic APIs. New compilation also rejects the explicitly qualified rules
+below, through the same scan. Other findings still warn. Budget probes and the
+two historical declaration rechecks only report; sealed graphs are not checked
+retroactively. Purpose is an internal call-site token, never a DTO/config field.
 
 The key names owned by other modules (``publication_workspace``,
 ``reducer_memory_v1``, ``shuffle_order_version``, ``declared_arrow_schema``,
@@ -38,7 +34,9 @@ initialises nothing; a test holds them equal to the constants they mirror.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
 from dataclasses import dataclass, fields, is_dataclass
 from functools import lru_cache
 from typing import Any, Callable, Mapping
@@ -46,7 +44,24 @@ from typing import Any, Callable, Mapping
 from ..execution.contracts.dataflow_kinds import kinds_with
 
 _LOG = logging.getLogger('demiflow.planning.configuration')
-_MAX_REPORTED = 20          # findings logged per graph; the rest are counted
+_MAX_REPORTED = 20          # findings logged per stage; the rest are counted
+STAGES = ('capture', 'graph', 'budget', 'final')
+
+# Qualified by fixed compiler corpus and seven read-only real pipeline entry
+# captures. These are specific rules, not a default rejection of every present
+# or future 'invariant' category. The shape predicates remain in COMPILER_KEYS.
+_REJECT_BINDINGS = frozenset({'occurrence_binding', 'program_binding', 'terminal_kind'})
+_REJECT_SHAPES = frozenset({'actor_binding_version', 'occurrence_id', 'program',
+    'publication_workspace', 'task_batch_rows', 'task_group', 'task_origin', 'terminal_memory'})
+_NEW = object()
+_PROBE = object()
+_HISTORY_REVALIDATION = object()
+
+
+def _check_purpose(purpose):
+    if not any(purpose is allowed for allowed in (_NEW, _PROBE, _HISTORY_REVALIDATION)):
+        from ..execution.contracts.dataflow_errors import DataflowError
+        raise DataflowError('INVALID_CONTRACT', 'Unknown internal configuration inspection purpose')
 
 # Operation fields the generic lowering does not copy into the configuration.
 NOT_COPIED = frozenset({'runtime_contract', 'label', 'node_id', 'source_dataset',
@@ -98,7 +113,8 @@ def _terminal_memory(value) -> bool:
 
 def _publication(value) -> bool:
     return (_mapping(value) and set(value) == {'schema', 'resident_bytes'}
-            and value['schema'] in PUBLICATION_SCHEMAS and _count(value['resident_bytes']))
+            and _text(value['schema']) and value['schema'] in PUBLICATION_SCHEMAS
+            and _count(value['resident_bytes']))
 
 
 def _shared_actor(value) -> bool:
@@ -134,7 +150,7 @@ COMPILER_KEYS: Mapping[str, ConfigurationKey] = {key.name: key for key in (
     _key('shuffle_order_version', 'lowering', _text, 'shuffle formula of a newly compiled random_shuffle; absent in older sealed plans'),
     _key('streaming_map', 'lowering', _true, 'the map declared stream options and runs as a streaming actor'),
     _key('callable_scope', 'lowering', _text, 'stream option: one callable per stage or per worker'),
-    _key('native_operation', 'lowering', lambda v: v in NATIVE_OPERATIONS, 'the service a recognised declaration performs'),
+    _key('native_operation', 'lowering', lambda v: _text(v) and v in NATIVE_OPERATIONS, 'the service a recognised declaration performs'),
     _key('native_key', 'lowering', _text, 'declaration key of an acquire or search service'),
     _key('terminal_memory', 'budget', _terminal_memory, 'terminal index and payload windows, or one bounded workspace; bytes'),
     _key('publication_workspace', 'budget', _publication, 'resident window of a native publication; bytes'),
@@ -272,88 +288,233 @@ def _admitted(node) -> frozenset | None:
     return frozenset(keys)
 
 
-def _node_findings(node, by_occurrence):
+@dataclass(frozen=True)
+class _Finding:
+    """Process-local diagnostics, never part of a compiled or sealed plan."""
+    code: str
+    category: str
+    stage: str
+    node_kind: str
+    kernel_kind: str
+    occurrence_id: str
+    key: str | None
+    message: str
+
+    def text(self):
+        return self.kernel_kind + ' ' + self.occurrence_id[:12] + ': ' + self.message
+
+
+def _identity(value):
+    # Identity fields come from DTOs. Unexpected user-controlled text is hashed,
+    # not logged, including an exception's message or an unknown key/kind.
+    if type(value) is str and len(value) <= 64 and all(c in '0123456789abcdef' for c in value):
+        return value
+    return _opaque(value)
+
+
+def _opaque(value):
+    raw = value if type(value) is str else type(value).__name__
+    return hashlib.sha256(raw.encode('utf-8', errors='replace')).hexdigest()[:16]
+
+
+def _key_label(name, admitted):
+    known = name in COMPILER_KEYS or name in admitted or name in TERMINAL_KEYS
+    known = known or any(name in keys for keys in (*SOURCE_KEYS.values(), *MODEL_KEYS.values()))
+    return name if known else 'unknown#' + _opaque(name)
+
+
+def _finding(node, code, message, *, stage, key=None, category='invariant'):
+    kind = node.kernel.kind
+    known = kind in SOURCE_KEYS or kind in MODEL_KEYS or declared_fields(kind) is not None
+    # Terminal names are validated by the compiler, but a diagnostic must not
+    # reflect arbitrary text supplied by a standalone caller.
+    if node.kind == 'terminal':
+        from .dataflow_registry import terminal_registry
+        known = kind in terminal_registry()
+    return _Finding(code, category, stage, node.kind if node.kind in (
+        'source', 'relational', 'transform', 'terminal') else 'unknown',
+        kind if known else 'unknown#' + _opaque(kind), _identity(node.occurrence_id), key, message)
+
+
+def _check_error(stage):
+    return _Finding('check_error', 'check_error', stage, '', '', '', None,
+                    'configuration schema check failed; inspection is incomplete')
+
+
+def _node_findings(node, by_occurrence, *, stage='final'):
     configuration, kind = node.kernel.configuration, node.kernel.kind
     admitted = _admitted(node)
+    def finding(code, message, *, key=None, category='invariant'):
+        return _finding(node, code, message, stage=stage, key=key, category=category)
     if admitted is None:
-        yield 'kind is not described by the configuration schema'
+        yield finding('unknown_kind', 'kind is not described by the configuration schema', category='observation')
         return
-    for name in sorted(set(configuration) - admitted):
-        yield 'key ' + name + ' is not admitted on this node'
-    # A shape belongs to a key the compiler writes. Where a typed operation declares
-    # a field of the same name, the value on this node is the declaration's.
+    for name in configuration:
+        if name not in admitted:
+            label = _key_label(name, admitted)
+            yield finding('unknown_key', 'key ' + label + ' is not admitted on this node',
+                          key=label, category='observation')
     declared = (declared_fields(kind) or frozenset()) if node.kind == 'transform' else frozenset()
+    invalid = set()
     for name, value in configuration.items():
         described = COMPILER_KEYS.get(name)
         if described is None or name not in admitted or name in declared:
             continue
         if not described.shape(value):
-            yield 'key ' + name + ' does not have the shape its writer gives it'
-    if configuration.get('occurrence_id') != node.occurrence_id:
-        yield 'occurrence_id does not name this node'
-    for name in ('program', 'reducer_program'):
-        if name in configuration and configuration[name] != node.occurrence_id:
-            yield name + ' does not name this node'
+            invalid.add(name)
+            yield finding('compiler_key_shape', 'key ' + name + ' does not have the shape its writer gives it', key=name)
+    if 'occurrence_id' not in invalid and configuration.get('occurrence_id') != node.occurrence_id:
+        yield finding('occurrence_binding', 'occurrence_id does not name this node', key='occurrence_id')
+    for name, code in (('program', 'program_binding'), ('reducer_program', 'reducer_binding')):
+        if name in configuration and name not in invalid and configuration[name] != node.occurrence_id:
+            yield finding(code, name + ' does not name this node', key=name)
     if node.kind == 'terminal' and configuration.get('kind') != kind:
-        yield 'terminal kind differs from its kernel kind'
+        yield finding('terminal_kind', 'terminal kind differs from its kernel kind', key='kind')
     if node.kind != 'transform':
-        if 'lance_key_source' in configuration:
-            source = by_occurrence.get(configuration['lance_key_source'])
+        reference = configuration.get('lance_key_source')
+        # Hashability is insufficient: [] freezes to a hashable tuple, [{}] to
+        # an unhashable tuple. Neither is an occurrence reference.
+        if _text(reference):
+            source = by_occurrence.get(reference)
             if source is None or source.kind != 'source':
-                yield 'lance_key_source does not name a source of this graph'
+                yield finding('source_reference', 'lance_key_source does not name a source of this graph',
+                              key='lance_key_source')
         return
     present = [name for name in TASK_KEYS if name in configuration]
-    if kind in TASK_KINDS and not configuration.get('streaming_map'):
-        if len(present) != len(TASK_KEYS):
-            yield 'a task-scoped kernel needs task_batch_rows, task_group and task_origin together'
-    elif kind in TASK_FOLLOWERS:
-        if present not in ([], ['task_group']):
-            yield 'a projection may only join a task group'
-    elif present:
-        yield 'task keys on a kernel that is not task-scoped'
-    if 'native_key' in configuration and configuration.get('native_operation') not in ('acquire', 'search'):
-        yield 'native_key without an acquire or search declaration'
-    if 'default_batch_size' in configuration and configuration.get('batch_size'):
-        yield 'default_batch_size beside a declared batch_size'
+    if 'streaming_map' not in invalid:
+        if kind in TASK_KINDS and not configuration.get('streaming_map'):
+            if len(present) != len(TASK_KEYS):
+                yield finding('task_complete', 'a task-scoped kernel needs task_batch_rows, task_group and task_origin together')
+        elif kind in TASK_FOLLOWERS:
+            if present not in ([], ['task_group']):
+                yield finding('task_follower', 'a projection may only join a task group')
+        elif present:
+            yield finding('task_outside_scope', 'task keys on a kernel that is not task-scoped')
+    if ('native_key' in configuration and not invalid.intersection(('native_key', 'native_operation'))
+            and configuration.get('native_operation') not in ('acquire', 'search')):
+        yield finding('native_key_owner', 'native_key without an acquire or search declaration', key='native_key')
+    if ('default_batch_size' in configuration and 'default_batch_size' not in invalid
+            and configuration.get('batch_size')):
+        yield finding('batch_default_conflict', 'default_batch_size beside a declared batch_size', key='default_batch_size')
     shared = configuration.get('shared_actor')
-    if _mapping(shared) and _sequence(shared.get('members')) and node.occurrence_id not in shared['members']:
-        yield 'shared_actor does not list this node'
+    if ('shared_actor' not in invalid and _mapping(shared) and _sequence(shared.get('members'))
+            and node.occurrence_id not in shared['members']):
+        yield finding('shared_membership', 'shared_actor does not list this node', key='shared_actor')
+
+
+def _findings(nodes, connections, *, stage):
+    """One rule source for whole graphs and mature capture stages.
+
+    ``connections`` yields occurrence pairs; no public graph DTO is fabricated
+    for intermediate stages. A checker defect preserves earlier findings and
+    does not prevent inspection of other nodes. No exception text is exposed.
+    """
+    by_occurrence = {node.occurrence_id: node for node in nodes}
+    for node in nodes:
+        try:
+            yield from _node_findings(node, by_occurrence, stage=stage)
+        except Exception:
+            yield _check_error(stage)
+    consumers = {}
+    for producer, consumer in connections:
+        consumers.setdefault(producer, []).append(by_occurrence.get(consumer))
+    for node in nodes:
+        carrier = node.kernel.configuration.get('output_carrier')
+        if not _text(carrier):
+            continue                 # already a shape finding, or no carrier
+        try:
+            targets = consumers.get(node.occurrence_id, ())
+            # All outgoing consumers must understand this representation. A
+            # consumer's bad input shape has its own finding; do not guess it.
+            mismatch = not targets or any(target is None or (
+                target.kernel.configuration.get('input_carrier') is None or (
+                    _text(target.kernel.configuration.get('input_carrier')) and
+                    target.kernel.configuration.get('input_carrier') != carrier)) for target in targets)
+            if mismatch:
+                yield _finding(node, 'carrier_pair', 'output_carrier has no matching consumer',
+                               stage=stage, key='output_carrier', category='observation')
+        except Exception:
+            yield _check_error(stage)
+
+
+def _scan(nodes, connections, *, stage):
+    try:
+        yield from _findings(nodes, connections, stage=stage)
+    except Exception:
+        yield _check_error(stage)    # retain partial results even if indexing fails
+
+
+def _graph_findings(graph, *, stage='final'):
+    try:
+        yield from _scan(graph.nodes, ((edge.producer, edge.consumer) for edge in graph.edges), stage=stage)
+    except Exception:
+        yield _check_error(stage)
 
 
 def configuration_findings(graph) -> tuple[str, ...]:
-    """Everything in ``graph`` that does not fit the configuration schema. Empty when it fits."""
-    by_occurrence = {node.occurrence_id: node for node in graph.nodes}
-    found = []
-    for node in graph.nodes:
-        for finding in _node_findings(node, by_occurrence):
-            found.append(node.kernel.kind + ' ' + node.occurrence_id[:12] + ': ' + finding)
-    consumers = {edge.producer: by_occurrence.get(edge.consumer) for edge in graph.edges}
-    for node in graph.nodes:
-        carrier = node.kernel.configuration.get('output_carrier')
-        if carrier is not None:
-            consumer = consumers.get(node.occurrence_id)
-            if consumer is None or consumer.kernel.configuration.get('input_carrier') != carrier:
-                found.append(node.kernel.kind + ' ' + node.occurrence_id[:12] + ': output_carrier has no matching consumer')
-    return tuple(found)
+    """All diagnostics, including a checker failure; an empty tuple means a complete clean scan."""
+    return tuple(finding.text() for finding in _graph_findings(graph))
+
+
+def _report(findings, *, action_id, stage, node_count, edge_count, collect_all, _reject=False):
+    samples, all_text = [], [] if collect_all else None
+    rejected, rejected_count = [], 0
+    counts = {}
+    categories = {}
+    total = 0
+    for finding in findings:
+        total += 1
+        counts[finding.code] = counts.get(finding.code, 0) + 1
+        categories[finding.category] = categories.get(finding.category, 0) + 1
+        if len(samples) < _MAX_REPORTED:
+            samples.append(finding)
+        if all_text is not None:
+            all_text.append(finding.text())
+        if _reject and (finding.code in _REJECT_BINDINGS or (
+                finding.code == 'compiler_key_shape' and finding.key in _REJECT_SHAPES)):
+            rejected_count += 1
+            if len(rejected) < 4:
+                rejected.append(finding)
+    action = _identity(action_id)
+    for finding in samples:
+        _LOG.warning('configuration schema: action %s: %s', action, finding.text())
+    if total > len(samples):
+        _LOG.warning('configuration schema: action %s: and %d more findings', action, total - len(samples))
+    summary = {'version': 1, 'pid': os.getpid(), 'action': action, 'stage': stage,
+               'nodes': node_count, 'edges': edge_count, 'findings': total,
+               'codes': counts, 'categories': categories, 'check_completed': 'check_error' not in counts}
+    _LOG.debug('configuration schema: action %s: %d nodes checked, %d findings',
+               action, node_count, total, extra={'configuration_schema': summary})
+    if rejected_count:
+        from ..execution.contracts.dataflow_errors import DataflowError
+        locations = [f.code + ('/' + f.key if f.key else '') + ' at ' +
+                     f.node_kind + ' ' + f.occurrence_id[:12] for f in rejected]
+        message = 'Compiled configuration invariant at ' + stage + ': ' + '; '.join(locations)
+        raise DataflowError('INVALID_CONTRACT', message[:1024], retryable=False,
+            context={'stage': stage, 'finding_count': rejected_count,
+                     'inspection_completed': summary['check_completed'], 'locations': locations})
+    return tuple(all_text) if all_text is not None else None
 
 
 def report_configuration(graph) -> tuple[str, ...]:
-    """Check a newly compiled graph; log what does not fit as warnings and return it.
+    """Warn, never reject; retain partial diagnostics on an incomplete inspection.
 
-    Never raises and never rejects: a plan outside the schema still compiles, and
-    a defect in this check is logged, not propagated.
+    This compatibility API returns every diagnostic. The compiler uses the
+    bounded stage reporter instead; it does not retain a full finding list.
     """
-    try:
-        found = configuration_findings(graph)
-    except Exception:  # a defect in this check must never fail a compile
-        _LOG.warning('configuration schema check failed for action %s', getattr(graph, 'action_id', None),
-                     exc_info=True)
-        return ()
-    _LOG.debug('configuration schema: action %s: %d nodes checked, %d findings',
-               graph.action_id, len(graph.nodes), len(found))
-    for finding in found[:_MAX_REPORTED]:
-        _LOG.warning('configuration schema: action %s: %s', graph.action_id, finding)
-    if len(found) > _MAX_REPORTED:
-        _LOG.warning('configuration schema: action %s: and %d more findings', graph.action_id,
-                     len(found) - _MAX_REPORTED)
-    return found
+    return _report(_graph_findings(graph), action_id=getattr(graph, 'action_id', None), stage='final',
+                   node_count=len(getattr(graph, 'nodes', ())), edge_count=len(getattr(graph, 'edges', ())),
+                   collect_all=True)
+
+
+def report_configuration_stage(nodes, connections, *, action_id, stage, edge_count,
+                               _purpose=_NEW):
+    """Check one mature boundary; reject only qualified new-compile violations.
+
+    Connections are occurrence pairs, including at stages with private integer
+    edge indices. No intermediate public graph, digest or configuration copy is
+    needed. Probes and historical declaration rechecks retain warning semantics.
+    """
+    _check_purpose(_purpose)
+    _report(_scan(nodes, connections, stage=stage), action_id=action_id, stage=stage,
+            node_count=len(nodes), edge_count=edge_count, collect_all=False, _reject=_purpose is _NEW)
