@@ -67,7 +67,7 @@ def test_pending_start_explicit_cli_sync_retry_and_current_dictionary(root, brow
         with page.expect_response('**/run-start') as started:
             start.click()
         assert started.value.status == 200, started.value.text()
-        expect(page.locator('.wb-run-bar > .wb-tag')).to_have_text('成功',timeout=240000)
+        expect(page.locator('.wb-run-bar > .wb-tag')).to_have_text('已完成',timeout=240000)
         shown = runs.show(root, identity)
         assert shown['status'] == 'succeeded' and shown['attempt'] == 1
         page.get_by_role('button',name='输出结果',exact=True).click()
