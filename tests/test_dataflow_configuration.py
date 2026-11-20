@@ -142,7 +142,7 @@ def _set(name, value):
 
 
 @pytest.mark.parametrize('case, kind, change, expected', [
-    ('case map', 'MapOp', _set('not_a_key', 1), 'key not_a_key is not admitted'),
+    ('case map', 'MapOp', _set('not_a_key', 1), 'is not admitted on this node'),
     ('case map', 'MapOp', _set('occurrence_id', 'f' * 64), 'occurrence_id does not name this node'),
     ('case map', 'MapOp', _set('program', 'f' * 64), 'program does not name this node'),
     ('case map', 'MapOp', _drop('task_origin'), 'needs task_batch_rows, task_group and task_origin together'),
@@ -207,11 +207,11 @@ def test_production_warns_and_never_refuses(graphs, caplog):
             assert report_configuration(graphs['case map']) == ()
             assert not [record for record in caplog.records if record.name == logger.name]   # a clean plan is silent
             found = report_configuration(broken)                # returned, logged, not raised
-            assert len(found) == 1 and 'not_a_key' in found[0]
+            assert len(found) == 1 and 'unknown#' in found[0] and 'not_a_key' not in found[0]
             warnings = [record for record in caplog.records if record.name == logger.name]
-            assert len(warnings) == 1 and warnings[0].levelno == logging.WARNING and 'not_a_key' in warnings[0].getMessage()
+            assert len(warnings) == 1 and warnings[0].levelno == logging.WARNING and 'unknown#' in warnings[0].getMessage()
             caplog.clear()
-            assert report_configuration(object()) == ()         # a defect in the check itself never escapes
+            assert 'inspection is incomplete' in report_configuration(object())[0]  # not a false clean result
             assert [record.levelno for record in caplog.records if record.name == logger.name] == [logging.WARNING]
             caplog.clear()
             many = _mutate(graphs['case map'], 'MapOp', lambda configuration: {
@@ -226,3 +226,92 @@ def test_production_warns_and_never_refuses(graphs, caplog):
     finally:
         logger.setLevel(level)
         logger.propagate = propagate
+
+
+@pytest.mark.parametrize('value', [{}, [], [{}], None, 0, True])
+def test_invalid_source_reference_keeps_other_findings(graphs, value):
+    graph = _mutate(graphs['case exclude_keys'], 'exclude_keys', lambda c: {
+        **c, 'lance_key_source': value, 'occurrence_id': 'f' * 64})
+    terminal = next(node for node in graph.nodes if node.kind == 'terminal')
+    graph = _mutate(graph, terminal.kernel.kind, _set('kind', 'wrong'))
+    findings = tuple(schema._graph_findings(graph))
+    codes = {finding.code for finding in findings}
+    assert {'compiler_key_shape', 'occurrence_binding', 'terminal_kind'} <= codes
+    assert not {'source_reference', 'check_error'} & codes
+    assert all(finding.category == 'invariant' for finding in findings)
+
+
+def test_full_scan_is_total_for_compiler_fields_and_nested_json(graphs):
+    # Exercise the real collector, not only individual predicates. Each field
+    # uses a node on which the compiler owns it, including the two optional
+    # shared-actor fields not present in the main corpus.
+    values = (None, False, True, 0, -1, 1, 1.5, '', 'text', [], {}, [{}],
+              {'schema': {}, 'resident_bytes': 1},
+              {'owner': {}, 'members': [{}], 'state_owner': {}},
+              {'owner': 'x', 'members': [{'nested': [[]]}], 'state_owner': 'x'})
+    checked = set()
+    for key in schema.COMPILER_KEYS:
+        for graph in graphs.values():
+            candidates = [node for node in graph.nodes if key in (schema._admitted(node) or ())
+                          and not (node.kind == 'transform' and key in (schema.declared_fields(node.kernel.kind) or ()))]
+            if candidates:
+                node = candidates[0]
+                break
+        else:
+            raise AssertionError('no admitted node for ' + key)
+        for value in values:
+            changed = _mutate(graph, node.kernel.kind, _set(key, value))
+            findings = tuple(schema._graph_findings(changed))
+            assert all(f.code != 'check_error' for f in findings), (key, value, findings)
+            assert tuple(f.text() for f in findings) == configuration_findings(changed)
+        checked.add(key)
+    assert checked == set(schema.COMPILER_KEYS)
+
+
+@reports_on_purpose
+def test_internal_checker_failure_keeps_partial_and_later_findings(graphs, monkeypatch, caplog):
+    graph = _mutate(graphs['case map'], 'MapOp', _set('occurrence_id', 'f' * 64))
+    graph = _mutate(graph, 'take', _set('kind', 'wrong'))
+    original = schema._node_findings
+    def failing(node, by_occurrence, *, stage):
+        for finding in original(node, by_occurrence, stage=stage):
+            yield finding
+            if node.kernel.kind == 'MapOp':
+                raise RuntimeError('api_key=never-log-this-value')
+    monkeypatch.setattr(schema, '_node_findings', failing)
+    with caplog.at_level(logging.DEBUG, logger=schema._LOG.name):
+        result = report_configuration(graph)
+    assert any('occurrence_id does not name' in f for f in result)
+    assert any('terminal kind differs' in f for f in result)
+    assert any('inspection is incomplete' in f for f in result)
+    summaries = [r.configuration_schema for r in caplog.records if hasattr(r, 'configuration_schema')]
+    assert len(summaries) == 1 and summaries[0]['check_completed'] is False
+    assert summaries[0]['codes']['check_error'] == 1
+    assert 'never-log-this-value' not in caplog.text
+
+
+def test_unknown_keys_are_observations_with_safe_stable_locations(graphs):
+    key = 'private-key-material-' * 100
+    graph = _mutate(graphs['case map'], 'MapOp', _set(key, {'secret': 'model body'}))
+    findings = tuple(schema._graph_findings(graph))
+    assert len(findings) == 1
+    finding = findings[0]
+    assert (finding.code, finding.category, finding.stage) == ('unknown_key', 'observation', 'final')
+    assert finding.key.startswith('unknown#') and len(finding.text()) < 160
+    assert key not in finding.text() and 'model body' not in finding.text()
+    assert finding == tuple(schema._graph_findings(graph))[0]
+
+
+def test_carrier_check_inspects_all_edges_independent_of_order(graphs):
+    from types import SimpleNamespace
+    graph = _mutate(graphs['case join'], 'join', _set('output_carrier', 'stored_typed_row.v1'))
+    producer = next(n for n in graph.nodes if n.kernel.kind == 'join')
+    terminal = next(n for n in graph.nodes if n.kind == 'terminal')
+    graph = _mutate(graph, terminal.kernel.kind, _set('input_carrier', 'stored_typed_row.v1'))
+    assert not any(f.code == 'carrier_pair' for f in schema._graph_findings(graph))
+    other = next(n for n in graph.nodes if n.kind == 'source')
+    bad = SimpleNamespace(producer=producer.occurrence_id, consumer=other.occurrence_id)
+    for edges in ((*graph.edges, bad), (bad, *graph.edges)):
+        view = SimpleNamespace(nodes=graph.nodes, edges=edges)
+        found = [f for f in schema._graph_findings(view) if f.code == 'carrier_pair']
+        assert len(found) == 1 and found[0].category == 'observation'
