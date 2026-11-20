@@ -66,8 +66,10 @@ def test_live_iterator_partial_cut_cannot_resume_a_new_attempt(tmp_path, monkeyp
         raise StopAfterCut()
     def build():
         return data.from_iter(source).map(lambda row: row, execution='thread')
+    # Bound prefetch so that this interrupted attempt still has unread input.
+    limits = {'checkpoint_rows': 1, 'checkpoint_unconfirmed_rows': 1}
     with pytest.raises(StopAfterCut):
-        with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 1}) as run, data.local_execution(workers=2):
+        with RunContext.start(tmp_path/'run', limits=limits) as run, data.local_execution(workers=2):
             ref = run.ref
             with monkeypatch.context() as patch:
                 patch.setattr(DataflowCheckpointCoordinator, 'commit', stop_after_commit)
