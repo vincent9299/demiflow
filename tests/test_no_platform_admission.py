@@ -110,3 +110,19 @@ def test_old_producer_reconstructs_hash_and_preserves_business(queue):
     with channel.database.connection() as db:
         assert db.execute('SELECT producer_contract FROM queue_pools').fetchone()[0]==sha
         assert not db.execute('SELECT 1 FROM runtime_commit_scopes').fetchall()
+
+
+@pytest.mark.parametrize('payload',[b'not-text','x'*65537])
+def test_old_scope_read_is_bounded_and_text_only(queue,tmp_path,payload):
+    from demiflow.execution.queue_commit import task_action
+    channel,p=queue;src=SimpleNamespace(config=channel.config,pool='p');body=consumer()
+    old={**body,'protocol':'demiflow.queue.consumer.v2','platform':'original'}
+    with native_parent(tmp_path/'fixture') as action:
+        publish(action,channel,p,0,[task_message('task',{},pool='p')])
+        worker=channel.register_worker('p',domain(),old,action.context.limits)
+        delivery=channel.claim(worker)
+        scoped=task_action(action,channel,'p',delivery,'acquisition','node-0',old)
+        with channel.database.connection(write=True) as db:
+            db.execute('UPDATE runtime_commit_scopes SET declaration=? WHERE scope_id=?',(payload,scoped.action_id))
+        with pytest.raises(RecoveryContractError,match='byte budget or is not text'):
+            resolve_consumer_contract(src,body,action=parent('another'))

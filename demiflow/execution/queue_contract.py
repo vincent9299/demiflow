@@ -250,15 +250,18 @@ def resolve_consumer_contract(source, declaration, *, action=None):
             return legacy
         # One original task scope carries the full consumer declaration. The
         # generation primary-key prefix and DB timeout bound this old-record read.
-        row = db.execute('SELECT s.scope_id,s.declaration,t.task_id,t.fingerprint '
+        payload = ("CASE WHEN typeof(s.declaration)='text' THEN substr(CAST(s.declaration AS BLOB),1,65537) ELSE NULL END"
+                   if channel.config.backend == 'sqlite' else
+                   "substring(convert_to(s.declaration,'UTF8') from 1 for 65537)")
+        row = db.execute('SELECT s.scope_id,' + payload + ',t.task_id,t.fingerprint '
                          'FROM queue_tasks t JOIN runtime_commit_scopes s '
                          'ON s.scope_id=t.acquisition_scope WHERE t.generation=? LIMIT 1',
                          (pool[0],)).fetchone()
     if row is not None:
         import json
-        if len(row[1].encode()) > 65536:
-            raise RecoveryContractError('Original consumer declaration exceeds byte budget')
-        old = json.loads(row[1])
+        if not isinstance(row[1], (bytes, memoryview)) or len(row[1]) > 65536:
+            raise RecoveryContractError('Original consumer declaration exceeds byte budget or is not text')
+        old = json.loads(bytes(row[1]).decode('utf-8'))
         document(old, 65536)
         original = old.get('consumer') if type(old) is dict else None
         expected_keys = {'protocol', 'platform', 'operations', 'result', 'settlement'}
