@@ -82,10 +82,24 @@ def _execute(root, run_id, run, attempt=None):
         allocation_guard(manifest['limits'], native_execution=manifest.get('native_execution'))
         check_stop()
         run.transition({'starting'}, 'running', worker=process_identity(os.getpid()), running_at=time.time())
-        source = target / 'source'
-        _source_imports(source, report['binding']['sources'])
-        module, function = report['binding'].get('source_entry', manifest['entry']).split(':')
-        entry = getattr(importlib.import_module(module[:-3].replace('/', '.')), function)
+        from demiflow.workbench.python_sources import SharedSourceImports, bound_files, package_parts, read_sealed, sealed_root
+        binding = report['binding']
+        package = package_parts(binding.get('source_package'))
+        source = sealed_root(target, binding)
+        _source_imports(source, binding['sources'], package=package)
+        shared = {name: (target / relative, digest) for name, _, relative, digest in bound_files(binding)}
+        shared_paths = {path for path, _ in shared.values()}
+        if shared:
+            project_roots = {Path(name).parts[0].removesuffix('.py') for name in binding['sources']}
+            def read_shared(name):
+                return read_sealed(name, *shared[name])
+            imports = SharedSourceImports({name: path for name, (path, _) in shared.items()},
+                                         read=read_shared, project_roots=project_roots)
+            imports.set_project_package(package)
+            sys.meta_path.insert(0, imports)
+        module, function = binding.get('source_entry', manifest['entry']).split(':')
+        module_name = binding.get('entry_module', module[:-3].replace('/', '.'))
+        entry = getattr(importlib.import_module(module_name), function)
         import inspect
         if Path(inspect.getfile(entry)).resolve() != source / module:
             raise RuntimeError('Flow entry is not from the sealed source closure')
@@ -94,7 +108,7 @@ def _execute(root, run_id, run, attempt=None):
         # than re-resolving candidate namespace packages against site-packages.
         for loaded in tuple(sys.modules.values()):
             filename = getattr(loaded, '__file__', None)
-            if filename and Path(filename).is_relative_to(source):
+            if filename and (Path(filename).is_relative_to(source) or Path(filename) in shared_paths):
                 cloudpickle.register_pickle_by_value(loaded)
         limits = runs.remaining_limits(manifest['limits'], value['state'])
         work.mkdir(parents=True, exist_ok=True)
@@ -153,26 +167,38 @@ def _execute(root, run_id, run, attempt=None):
     return 0
 
 
-def _source_imports(source, files):
+def _source_imports(source, files, *, package=()):
     """Resolve candidate packages only from the inspected closure, including namespaces."""
     import importlib.abc
     import importlib.machinery
     import importlib.util
     roots = {Path(name).parts[0].removesuffix('.py') for name in files}
+    if package:
+        roots.add(package[0])
+    import_root = source.parents[len(package) - 1] if package else source
     for name in roots:
         if name in sys.modules:
             raise ImportError('Candidate module collides with a loaded runtime module: ' + name)
 
     class SourceFinder(importlib.abc.MetaPathFinder):
         def find_spec(self, fullname, path=None, target=None):
-            if fullname.split('.')[0] not in roots:
+            parts = tuple(fullname.split('.'))
+            if parts[0] not in roots:
                 return None
-            relative = fullname.replace('.', '/')
-            for name in (relative + '.py', relative + '/__init__.py'):
+            if parts == package[:len(parts)] and parts != package:
+                spec = importlib.machinery.ModuleSpec(fullname, None, is_package=True)
+                spec.submodule_search_locations = [str(import_root.joinpath(*parts))]
+                return spec
+            qualified = parts[:len(package)] == package if package else False
+            if package and parts[0] == package[0] and not qualified:
+                raise ImportError('Candidate import is outside the checked closure: ' + fullname)
+            relative = '/'.join(parts[len(package):] if qualified else parts)
+            initializer = f'{relative}/__init__.py' if relative else '__init__.py'
+            for name in (initializer, relative + '.py'):
                 if name in files:
                     return importlib.util.spec_from_file_location(fullname, source / name,
-                        submodule_search_locations=[str(source / relative)] if name.endswith('/__init__.py') else None)
-            if any(name.startswith(relative + '/') for name in files):
+                        submodule_search_locations=[str(source / relative)] if name == initializer else None)
+            if not relative or any(name.startswith(relative + '/') for name in files):
                 spec = importlib.machinery.ModuleSpec(fullname, None, is_package=True)
                 spec.submodule_search_locations = [str(source / relative)]
                 return spec
@@ -181,6 +207,9 @@ def _source_imports(source, files):
     sys.meta_path.insert(0, SourceFinder())
     # Native child processes may deserialize references to these checked modules.
     sys.path.insert(1, str(source))
+    if package:
+        sys.path.insert(2, str(import_root))
+        os.environ['PYTHONPATH'] = os.pathsep.join(filter(None, [os.environ.get('PYTHONPATH'), str(source)]))
 
 
 def _tree_rss(pid):

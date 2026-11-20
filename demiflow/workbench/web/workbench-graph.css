@@ -30,11 +30,11 @@
 .wb-graph-view .wb-edge-action{stroke:#96a2b8;stroke-dasharray:2 5}
 .wb-graph-view .wb-edge-reference{stroke:#afbbcc;stroke-dasharray:4 5}
 .wb-graph-view .wb-edge-port{font:12px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#5b6b86;
-  text-anchor:middle;pointer-events:none;paint-order:stroke;stroke:#fafcff;stroke-width:3px}
+  text-anchor:middle;paint-order:stroke;stroke:#fafcff;stroke-width:3px}
 
 .wb-graph-view .wb-node{cursor:pointer}
 .wb-graph-view .wb-node rect{fill:#fff;stroke:#d8e0ed;stroke-width:1.4}
-.wb-graph-view .wb-node text{pointer-events:none;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+.wb-graph-view .wb-node text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
 .wb-graph-view .wb-node-kind{font-size:12px;fill:#8793a8}
 .wb-graph-view .wb-node-title{font-size:14px;font-weight:600;fill:#29364b}
 .wb-graph-view .wb-node-summary{font-size:12px;fill:#65748c}

@@ -207,7 +207,14 @@
     function graphLoading(loading){graphHost.inert=inspector.inert=checks.inert=loading;if(loading){graphHost.setAttribute('aria-busy','true');basisLabel.textContent='正在读取图…';disposeReaders(sourceBody);sourceBody.replaceChildren($('p','正在读取绑定来源…','wb-caption'));}else graphHost.removeAttribute('aria-busy');updateActions();}
     function transition(patch){detailOpen=false;runDefinition=null;definitionSequence++;runDefinitionPanel.hidden=true;runDefinitionPanel.replaceChildren();runConfirmation.hidden=true;clearPlanPreview();notice.hidden=true;notice.textContent='';delete notice.dataset.observationError;observer.stop();controller.abort();controller=new AbortController();snapshot=null;sourceSequence++;nodeSequence++;graphSequence++;scopeNode=null;nodeOffset=0;graphModel=null;actionExplicit=false;logOffset=0;logBody='';eventCursor=null;eventRows=[];lastMetricAt=lastEventAt=0;observationCursor=null;observationPages=[];lastObservationRevision=null;trend.hidden=true;trendPlot.replaceChildren();runFacts.hidden=results.hidden=runDetail.hidden=true;runFacts.replaceChildren();results.replaceChildren();runDetailBody.replaceChildren();outputFingerprint=null;graphLoading(true);const ticket=state.transition(patch);markHistorySelection();updateActions();return ticket;}
     function registered(){return !!working&&ctx.flows.some(f=>f.entry===working.entry&&(f.parameters||[]).includes(working.params));}
-    function requiredPreviewArguments(){return ctx.project?.entries?.find(e=>e.entry===working?.entry)?.required_arguments||[];}
+    function declaredEntry(entry=working?.entry){return ctx.project?.entries?.find(e=>e.entry===entry);}
+    function requiredPreviewArguments(){return declaredEntry()?.required_arguments||[];}
+    function entryIssue(){
+      if(!working?.entry)return ctx.project?.diagnostics?.find(d=>d.code==='entry_not_declared')?.detail||'尚无已声明入口。';
+      const entry=declaredEntry();
+      if(entry?.status==='invalid')return ctx.project?.diagnostics?.find(d=>d.path===entry.path)?.detail||'入口声明无法读取。';
+      return null;
+    }
     function choices(){
       const entries=new Map();
       for(const e of ctx.project?.entries||[])entries.set(e.entry,{value:e.entry,label:e.entry});
@@ -278,8 +285,10 @@
       runButton.title=run?'返回当前配置后提交新运行':dirty?'先保存当前配置草稿':!can('run_submit')?'项目或服务尚未开放提交权限':!registered()?'先登记原生流程与参数文件':!data().graph?'正在读取图与配置':data().graph.freshness.current===false?'检查依据已变化，请先读取当前配置或重新检查':!data().graph.parameters.available?'登记配置暂不可用':'提交新运行；检查、封存并启动';
       wholeButton.disabled=!data().graph;
       const needsConfiguration=!(working?.params||'')&&requiredPreviewArguments().length>0;
-      previewButton.disabled=busy||previewBusy||!!run||!!data().run||!working?.entry||dirty||needsConfiguration||graphHost.hasAttribute('aria-busy');
-      const previewHelp=needsConfiguration?'请先绑定这条流程的业务参数。入口需要：'+requiredPreviewArguments().slice(0,8).join('、')+'。':'只编译当前入口与已保存配置，不启动数据处理。';
+      const invalidEntry=declaredEntry()?.status==='invalid';
+      runButton.disabled ||= invalidEntry;
+      previewButton.disabled=busy||previewBusy||!!run||!!data().run||!working?.entry||invalidEntry||dirty||needsConfiguration||graphHost.hasAttribute('aria-busy');
+      const previewHelp=invalidEntry?entryIssue():needsConfiguration?'请先绑定这条流程的业务参数。入口需要：'+requiredPreviewArguments().slice(0,8).join('、')+'。':'只编译当前入口与已保存配置，不启动数据处理。';
       previewButton.textContent=previewBusy?'正在解析…':'解析执行计划';
       previewButton.title=dirty?'先保存业务参数，解析使用已保存值':previewHelp;
       previewButton.hidden=monitoring||!!run;runButton.hidden=monitoring||!!run;
@@ -287,8 +296,8 @@
       const diagnostics=data().graph?.diagnostics||[];
       issuesButton.hidden=!diagnostics.length||checksActive;
       issuesButton.textContent='问题 '+diagnostics.length;issuesButton.title='查看当前图依据中的诊断；不代表执行状态';
-      accessState.hidden=!!run||registered()&&can('run_submit');
-      accessState.textContent=!working?.entry?'尚未发现可用入口。可在开发中编写流程，再通过“接入与权限”登记。':!registered()?'已发现原项目入口，尚未绑定可执行的原生流程与参数；可解析已保存配置的执行计划，接入不会自动授予运行权限。':'原生流程已登记；当前可阅读与检查，项目或服务尚未开放提交权限。';
+      accessState.hidden=!!run||!invalidEntry&&registered()&&can('run_submit');
+      accessState.textContent=invalidEntry?working.entry+' · '+previewHelp:!working?.entry?'请在“接入与权限”登记入口和业务参数。':!registered()?'已发现原项目入口，尚未绑定可执行的原生流程与参数；可解析已保存配置的执行计划，接入不会自动授予运行权限。':'原生流程已登记；当前可阅读与检查，项目或服务尚未开放提交权限。';
       const previewNode=!run&&planPreview?.dag.nodes.find(n=>n.occurrence_id===previewSelection?.occurrenceId);
       const reportNode=data().graph?.nodes.find(n=>n.id===data().node);
       for(const[key,b]of sourceButtons){
@@ -302,7 +311,7 @@
       guardSettings();
     }
     function uniqueParams(entry){const paths=ctx.flows.find(f=>f.entry===entry)?.parameters||[];return paths.length===1?paths[0]:null;}
-    entryChoice.onchange=async()=>{if(disposed)return;const entry=entryChoice.value;try{await useWorking(entry,uniqueParams(entry));if(working?.entry===entry&&!argumentEditor.dirty())await compilePlanPreview();}catch(error){if(!disposed&&working?.entry===entry&&error.name!=='AbortError')message(error.message,'error-box');}finally{if(!disposed)paintSelectors();}};
+    entryChoice.onchange=async()=>{if(disposed)return;const entry=entryChoice.value;try{await useWorking(entry,uniqueParams(entry));if(working?.entry===entry&&!argumentEditor.dirty())await compilePlanPreview();}catch(error){if(!disposed&&working?.entry===entry&&error.name!=='AbortError')message('解析未完成：'+error.message,'error-box');}finally{if(!disposed)paintSelectors();}};
     function diagnosticTarget(d){return (d.related_nodes||[])[0]||data().graph?.nodes.find(n=>n.source===d.path&&n.line===d.line)?.id;}
     function renderDiagnostics(items,parent,onLocate=null){
       if(!items.length){parent.append($('p','此范围没有诊断；是否通过仍以检查状态和覆盖为准。','wb-caption'));return;}
@@ -358,6 +367,7 @@
     async function compilePlanPreview({restore=null}={}){
       if(previewBusy||busy||run||data().run)return;
       if(!working?.entry)throw new Error('请先选择流程入口。');
+      if(declaredEntry()?.status==='invalid'){message(working.entry+' · '+entryIssue(),'error-box');return;}
       if(argumentEditor.dirty()||Object.keys(getDraft().values).length)throw new Error('请先保存业务参数；计划解析只使用已保存值。');
       clearPlanPreview(true);
       const ticket=state.capture(),sequence=++previewSequence,entry=working.entry,params=(working?.params||'')||null;
@@ -575,7 +585,7 @@
       run=null;comparison=null;working={entry,params};const ticket=transition({entry,params,report,run:null,attempt:null,mode});
       runBar.hidden=runFacts.hidden=results.hidden=true;results.replaceChildren();paintSelectors();
       try{if(entry){if(mode!=='operators')await fetchGraph(ticket);if(current(ticket))rememberView(report?{kind:'inspection',report_digest:report}:{kind:'flows',entry,...(params?{params}:{})});}
-        else{basisLabel.textContent='尚无已声明入口';graphHost.replaceChildren($('p','尚无已声明入口。可在开发中编写流程，再在“接入与权限”登记。'));inspector.replaceChildren($('p','可查看项目说明、数据和检查结果。'));sourceBody.replaceChildren($('p','发现或登记入口后，可在这里阅读选中节点的源码。','wb-caption'));settings.hidden=false;paintSettings();}}
+        else{basisLabel.textContent='尚无已声明入口';graphHost.replaceChildren($('p',entryIssue()+' 请在“接入与权限”登记入口和业务参数。'));inspector.replaceChildren($('p','可查看项目说明、数据和检查结果。'));sourceBody.replaceChildren($('p','发现或登记入口后，可在这里阅读选中节点的源码。','wb-caption'));settings.hidden=false;paintSettings();}}
       catch(error){if(current(ticket)&&error.name!=='AbortError')message(error.message,'error-box',ticket);}
       finally{if(current(ticket))graphLoading(false);}
       paintPending();

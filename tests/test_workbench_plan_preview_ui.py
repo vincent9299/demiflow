@@ -44,6 +44,60 @@ def run_pipeline(*, stage: str):
                                   capabilities={k: k == 'config_write' for k in registry.CAPABILITIES})
 
 
+def test_sidebar_and_graph_text_copy_preserves_navigation(original, tmp_path, browser):
+    registry_path = tmp_path / 'registry.json'
+    register_preview_project(original, registry_path)
+    (original / 'other.py').write_bytes((original / 'dispatch.py').read_bytes())
+    (original / 'settings/other.json').write_bytes((original / 'settings/small.json').read_bytes())
+    ws.register_flow(original, 'other.py:run_pipeline', params='settings/other.json')
+    with service(None, registry=registry_path) as app, opened(browser, app) as (page, _):
+        page.context.grant_permissions(['clipboard-read', 'clipboard-write'], origin=app.origin)
+        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        expect(page.locator('.wb-node')).to_have_count(3)
+        row = page.get_by_role('button', name='other.py:run_pipeline', exact=True)
+        expect(row).to_have_attribute('aria-pressed', 'false')
+
+        def drag_and_copy(locator, expected):
+            locator.scroll_into_view_if_needed()
+            rect = locator.evaluate("""element => {
+                const range = document.createRange();
+                range.selectNodeContents(element);
+                const {left, right, top, height} = range.getBoundingClientRect();
+                return {left, right, y: top + height / 2};
+            }""")
+            page.mouse.move(rect['left'] + 1, rect['y'])
+            page.mouse.down()
+            page.mouse.move(rect['right'] - 1, rect['y'], steps=12)
+            page.mouse.up()
+            page.keyboard.press('Control+c')
+            assert expected in page.evaluate('navigator.clipboard.readText()')
+
+        drag_and_copy(row.get_by_text('other.py:run_pipeline', exact=True), 'other.py:run_pipelin')
+        expect(row).to_have_attribute('aria-pressed', 'false')
+        with page.expect_response(lambda response: response.status == 200 and response.url.endswith('/plan-preview')
+                                  and response.request.post_data_json['entry'] == 'other.py:run_pipeline'):
+            row.click()
+        expect(row).to_have_attribute('aria-current', 'page')
+        expect(page.get_by_role('button', name='解析执行计划', exact=True)).to_be_enabled()
+        node = page.locator('.wb-node').nth(1)
+        expect(node).to_have_attribute('aria-pressed', 'false')
+        title = node.locator('.wb-node-title').first
+        drag_and_copy(title, title.text_content()[:3])
+        expect(node).to_have_attribute('aria-pressed', 'false')
+        node.click()
+        expect(node).to_have_attribute('aria-pressed', 'true')
+
+
+def test_unbound_project_explains_missing_entry_before_compile(original, tmp_path, browser):
+    registry_path = tmp_path / 'registry.json'
+    registry.add(registry_path, original)
+    with service(None, registry=registry_path) as app, opened(browser, app) as (page, requests):
+        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        expect(page.get_by_text('未识别到受支持的入口声明', exact=False).first).to_be_visible()
+        expect(page.get_by_role('button', name='解析执行计划', exact=True)).to_be_disabled()
+        assert not any(method == 'POST' and url.endswith('/plan-preview') for method, url in requests)
+
+
 def test_original_configuration_selector_compiles_through_real_http(original, tmp_path, browser):
     registry_path = tmp_path / 'registry.json'
     register_preview_project(original, registry_path, writable=True)

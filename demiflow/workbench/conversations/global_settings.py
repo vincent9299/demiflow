@@ -56,9 +56,10 @@ def automatic_project(root):
                     scopes.add(entry.name)
     scopes.difference_update({'AGENTS.md', 'PIPELINE_SPEC.md', 'workspace.json', 'runs', 'datasets', 'data', 'notebooks', 'results', 'outputs'})
     if len(scopes) > 128: reject('项目代码范围超过 128 项。', 'resource_limit')
-    grant['writes'] = sorted(scopes); grant['watch'] = sorted(scopes)
-    # Existing notebooks/data/control paths inside a source directory remain protected.
-    protected = []
+    grant['watch'] = sorted(scopes)
+    # Landlock write grants are additive. Grant only existing subtrees with no
+    # protected descendants, so logs, notebooks and caches stay read-only.
+    protected, existing = [], set()
     pending = list(scopes); seen = 0
     while pending:
         name = pending.pop(); seen += 1
@@ -67,12 +68,19 @@ def automatic_project(root):
         if (path.name.startswith('.') or path.name in {'AGENTS.md','PIPELINE_SPEC.md','workspace.json','data','datasets','runs','results','outputs','notebooks','__pycache__','node_modules','.venv'}
                 or path.suffix in {'.ipynb','.lance','.parquet','.arrow','.db','.sqlite','.sqlite3'}):
             protected.append(name); continue
+        if not path.exists():
+            continue
+        existing.add(name)
         if path.is_dir():
             with os.scandir(path) as entries:
                 for entry in entries:
                     if seen + len(pending) >= 4096: reject('项目代码范围扫描超过预算。', 'resource_limit')
                     pending.append(name + '/' + entry.name)
     if len(protected)>128: reject('项目受保护路径超过预算。', 'resource_limit')
+    blocked = {parent.as_posix() for name in protected for parent in Path(name).parents}
+    eligible = existing - blocked
+    grant['writes'] = sorted(name for name in eligible if Path(name).parent.as_posix() not in eligible)
+    if len(grant['writes']) > 128: reject('项目安全可写路径超过 128 项。', 'resource_limit')
     if protected: grant['protected'] = sorted(protected)
     return grant
 

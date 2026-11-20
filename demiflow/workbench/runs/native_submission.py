@@ -14,11 +14,12 @@ from demiflow.workbench.projects import workspace as ws
 FORMAT = 'demiflow_forge_native_inspection_v1'
 
 
-def inspect_submission(root, *, table_resolver, entry, parameters, limits):
+def inspect_submission(root, *, table_resolver, entry, parameters, limits, source_modules=None):
     """Fixed disposable worker: original code construction is read-only."""
     from contextlib import redirect_stdout
     from demiflow.execution.host.inspection import capture_managed_pipeline, native_submission_view
-    from demiflow.workbench.graph.preview import _Sources, _Discard
+    from demiflow.workbench.graph.preview import _Discard
+    from demiflow.workbench.python_sources import PythonSources, SharedSources
     from demiflow.workbench.graph.preview_guard import enter_readonly
     from demiflow.workbench.projects.discovery import discover
     root, control, platform = ws.load_workspace(root)
@@ -26,14 +27,16 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits):
     if not any(item['entry'] == entry and item['status'] == 'recognized' for item in project['entries']):
         raise ForgeError('Native entry must be declared by this project')
     target, symbol = ws.validate_entry(root, entry)
-    sources = _Sources(root)
-    sources.read(target)
+    shared = SharedSources(root, {} if source_modules is None else source_modules)
+    sources = PythonSources(root, shared_imports=shared.importer)
+    module = sources.entry_module(target)
     arguments, tables, targets, _ = ws.resolve_arguments(root, control, parameters, table_resolver=table_resolver)
     if targets:
         raise ForgeError('Native admission cannot mix implicit and explicit output grants')
     sys.dont_write_bytecode = True
     sys.path[:0] = [str(root)]
     sys.meta_path.insert(0, sources)
+    sys.meta_path.insert(0, shared.importer)
     os.chdir(root)
     reads = set()
     tracking = [False]
@@ -51,7 +54,6 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits):
     tracking[0] = True
     try:
         with redirect_stdout(_Discard()):
-            module = target.relative_to(root).as_posix()[:-3].replace('/', '.')
             function = getattr(importlib.import_module(module), symbol)
             if not inspect.isfunction(function) or Path(inspect.getfile(function)) != target:
                 raise ForgeError('Native entry resolved outside its declared source')
@@ -60,9 +62,12 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits):
             from demiflow.workbench.graph.plan_details import build_plan_details
             with PlanCallsites(root, sources.digests) as callsites:
                 captured = capture_managed_pipeline(function, arguments, limits=limits, on_compiled=callsites.bind_compilation)
+            shared_binding = shared.binding()
             details = build_plan_details(captured.compiled, sources=sources.digests, root=root,
-                                         callsites=callsites, bounds=captured.bounds)
+                                         callsites=callsites, bounds=captured.bounds, shared_sources=shared_binding)
             pipeline = pipeline_material(root, target, sources.digests)
+    except ModuleNotFoundError as exc:
+        raise sources.missing_import(exc) from exc
     finally:
         tracking[0] = False
     sources.verify()
@@ -88,14 +93,19 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits):
             sources=sources.digests, resources=resources, arguments=arguments,
             parameters=parameters, tables=tables, targets={},
             workspace_digest=content_digest(control), platform_digest=content_digest(platform)))
+    if sources.package:
+        result['binding'].update(source_package='.'.join(sources.package), entry_module=module)
+    if shared_binding:
+        result['binding']['shared_sources'] = shared_binding
     result['digest'] = content_digest(result)
     bounded_json(result, 8 * 1024**2)
     return result
 
 
-def prepare(root, entry, *, parameters, limits, metadata):
+def prepare(root, entry, *, parameters, limits, metadata, source_modules=None):
     from demiflow.workbench.worker import operation
-    report = operation('native_submission_inspect', root, entry=entry, parameters=parameters, limits=limits)
+    report = operation('native_submission_inspect', root, entry=entry, parameters=parameters,
+                       limits=limits, _source_modules=source_modules)
     outputs = {}
     for index, output in enumerate(report['native_contract']['outputs']):
         uri = ws.no_symlinks(Path(output['uri']))
@@ -132,6 +142,7 @@ def prepare(root, entry, *, parameters, limits, metadata):
 
 def verify_basis(root, manifest, report):
     from demiflow.forge import audit
+    from demiflow.workbench.python_sources import MAX_MODULE_BYTES, bound_files
     root, workspace, platform = ws.load_workspace(root)
     audit.require_scope(ws._check_change_scope(root), expected_scope=manifest.get('change_scope'))
     binding = report['binding']
@@ -145,6 +156,9 @@ def verify_basis(root, manifest, report):
     for name, digest in binding['sources'].items():
         if hashlib.sha256(read_bounded(ws.relative_path(base, name), 4 * 1024**2)).hexdigest() != digest:
             raise ForgeError('Native prepared source changed', code='conflict')
+    for name, origin, _, digest in bound_files(binding):
+        if hashlib.sha256(read_bounded(ws.no_symlinks(origin), MAX_MODULE_BYTES)).hexdigest() != digest:
+            raise ForgeError('Native prepared shared source changed: ' + name, code='conflict')
     for resource in binding['resources'].values():
         if resource['kind'] in {'config', 'file'} and hashlib.sha256(read_bounded(
                 ws.relative_path(base, resource['path']), resource['max_bytes'])).hexdigest() != resource['sha256']:

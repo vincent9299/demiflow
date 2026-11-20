@@ -108,6 +108,8 @@ def test_automatic_project_does_not_inherit_parent_forge_tasks(tmp_path):
     (parent / 'project.json').write_text('intentionally invalid legacy declaration')
     selected = tmp_path / 'orders'
     selected.mkdir()
+    for directory in ('flows', 'operators', 'prompts'):
+        (selected / directory).mkdir()
     grant = automatic_project(selected)
     assert grant['kind'] == 'pipeline'
     assert not {'managed', 'development_root', 'pipeline'} & grant.keys()
@@ -119,9 +121,20 @@ def test_automatic_scope_preserves_nested_data_and_notebooks(tmp_path):
     root=tmp_path/'code';root.mkdir();src=root/'src';src.mkdir()
     (src/'data').mkdir();(src/'data/raw.txt').write_text('business data')
     (src/'result.ipynb').write_text('{}');(src/'AGENTS.md').write_text('rules')
+    cache=src/'__pycache__';cache.mkdir();(cache/'app.pyc').write_bytes(b'cache')
     (src/'app.py').write_text('x=1')
+    (src/'models').mkdir()
     grant=automatic_project(root)
-    assert set(grant['protected'])=={'src/data','src/result.ipynb','src/AGENTS.md'}
+    assert set(grant['protected'])=={'src/data','src/result.ipynb','src/AGENTS.md','src/__pycache__'}
+    assert grant['writes'] == ['src/app.py', 'src/models']
+    assert 'src' in grant['watch']
+    from demiflow.workbench.conversations.sandbox import SandboxSpec, specification
+    home = tmp_path / 'private'; home.mkdir(mode=0o700)
+    spec = SandboxSpec(read_paths=(str(root),), runtime_paths=('/usr', '/lib', '/lib64'),
+                       write_paths=tuple(str(root / path) for path in grant['writes']),
+                       protected_paths=tuple(str(root / path) for path in grant['protected']), private_home=str(home))
+    assert specification(spec, ['/usr/bin/true'], {}, root)['source_roots'] == [
+        str(src/'app.py'), str(src/'models')]
 
 
 def call(server,body=None,token=None):

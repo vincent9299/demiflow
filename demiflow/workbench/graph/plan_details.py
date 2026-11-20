@@ -68,17 +68,20 @@ def safe_json(value, *, depth=0, budget=None):
     raise ValueError('配置不是可直接呈现的 JSON')
 
 
-def _implementation(reference, root, sources):
+def _implementation(reference, root, sources, shared):
     if reference.availability != 'available':
         return unavailable('函数身份与编译声明不一致。' if reference.reason == 'identity_mismatch'
                            else '本节点没有已绑定的业务函数源码；原生算子可查看 API 调用与入参。')
     method = reference.function
     is_class = reference.kind == 'callable_class'
     path = Path(method.__code__.co_filename)
-    if not path.is_absolute() or not path.is_relative_to(root):
+    if path.is_relative_to(root):
+        relative = path.relative_to(root).as_posix()
+        expected = sources.get(relative)
+    elif path in shared:
+        relative, expected = shared[path]
+    else:
         return unavailable('函数不在本次项目源码范围内。')
-    relative = path.relative_to(root).as_posix()
-    expected = sources.get(relative)
     if not expected or (reference.kind == 'function' and reference.source_hash != expected):
         return unavailable('函数源码未绑定本次解析的文件摘要。')
     ws.no_symlinks(path)
@@ -152,8 +155,11 @@ def _configuration_detail(projected, callsite=None):
             engine_configuration=configuration))
 
 
-def build_plan_details(compiled, *, sources, root, callsites=None, bounds=None):
+def build_plan_details(compiled, *, sources, root, callsites=None, bounds=None, shared_sources=None):
     root = Path(root)
+    from demiflow.workbench.python_sources import bound_files
+    shared = {origin: (path.as_posix(), digest)
+              for _, origin, path, digest in bound_files({'shared_sources': shared_sources or {}})}
     if len(compiled.graph.nodes) > 256:
         raise ValueError('Plan materials exceed node budget')
     if callsites is not None:
@@ -166,7 +172,7 @@ def build_plan_details(compiled, *, sources, root, callsites=None, bounds=None):
     for node in compiled.graph.nodes:
         details = {kind: unavailable('本节点没有已核验的这类材料。') for kind in KINDS}
         native = projected[node.occurrence_id]
-        details['implementation'] = _implementation(native.implementation, root, sources)
+        details['implementation'] = _implementation(native.implementation, root, sources, shared)
         details['implementation']['referenced'] = native.implementation.referenced
         prompts = native.prompts
         if prompts is not None:
