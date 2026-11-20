@@ -35,17 +35,24 @@ def test_closed_subscription_acknowledges_late_real_output(tmp_path, monkeypatch
     """Delay one genuine terminal envelope past close, without forging output."""
     import time
     from dataclasses import replace
-    from demiflow.execution.dataflow import _OutputSubscription
+    from demiflow.execution.dataflow_terminals import TerminalSubscription
     from demiflow.execution.contracts.dataflow_codec import _thaw_json
     from demiflow.execution.contracts.dataflow_errors import DataflowError
 
     held, released, acknowledgements = [], [], []
     handle_event = DataflowExecution._handle_event
-    read = _OutputSubscription.read_admitted
-    close = _OutputSubscription.close
-    ack = DataflowExecution._ack
+    read = TerminalSubscription.read_admitted
+    close = TerminalSubscription.close
+    from demiflow.execution.exchange.deliveries import DeliveryExchange
+    ack = DeliveryExchange.acknowledge
+    active = []
+    subscribe = DataflowExecution.subscribe_terminal
+    def remember(execution):
+        active.append(execution)
+        return subscribe(execution)
+    monkeypatch.setattr(DataflowExecution, 'subscribe_terminal', remember)
     def delayed(execution, event):
-        if (event.kind == 'terminal' and execution._terminal_queue
+        if (event.kind == 'terminal' and execution._terminal._queue
                 and not held and not released):
             held.append(event)
             return
@@ -54,21 +61,21 @@ def test_closed_subscription_acknowledges_late_real_output(tmp_path, monkeypatch
         if not released and not held:
             deadline = time.monotonic() + 2
             while not held and time.monotonic() < deadline:
-                subscription.execution.pump(deadline_ms=1)
+                active[-1].pump(deadline_ms=1)
             assert held, 'the real producer must emit its second bounded record'
         return read(subscription, **kwargs)
-    def observe_ack(execution, delivery):
+    def observe_ack(exchange, delivery, receiver):
         acknowledgements.append(delivery)
-        return ack(execution, delivery)
+        return ack(exchange, delivery, receiver)
     def release_after_close(subscription):
         close(subscription)
         if not held:
             return
-        execution = subscription.execution
+        execution = active[-1]
         event = held.pop()
         delivery = event.payload['delivery_id']
-        assert execution._terminal_subscription_closed and execution._stopping
-        assert delivery not in execution._deliveries
+        assert execution._terminal.closed and execution._stopping
+        assert delivery not in execution._exchange._inflight
         before = list(acknowledgements)
         with pytest.raises(DataflowError, match='FENCED'):
             execution._validate_event(replace(event, boot_id='stale-boot',
@@ -77,13 +84,13 @@ def test_closed_subscription_acknowledges_late_real_output(tmp_path, monkeypatch
         execution._validate_event(event)
         handle_event(execution, event)
         assert acknowledgements.count(delivery) == 1
-        assert delivery not in execution._deliveries and not execution._terminal_queue
+        assert delivery not in execution._exchange._inflight and not execution._terminal._queue
         released.append((execution, event))
 
     monkeypatch.setattr(DataflowExecution, '_handle_event', delayed)
-    monkeypatch.setattr(DataflowExecution, '_ack', observe_ack)
-    monkeypatch.setattr(_OutputSubscription, 'read_admitted', await_real_envelope)
-    monkeypatch.setattr(_OutputSubscription, 'close', release_after_close)
+    monkeypatch.setattr(DeliveryExchange, 'acknowledge', observe_ack)
+    monkeypatch.setattr(TerminalSubscription, 'read_admitted', await_real_envelope)
+    monkeypatch.setattr(TerminalSubscription, 'close', release_after_close)
     with RunContext.start(tmp_path/'run', limits={'timeout_s':20,
             'checkpoint_interval_ms':60000}) as run, data.local_execution(
             workers=workers, worker_mode='thread'):
@@ -92,7 +99,7 @@ def test_closed_subscription_acknowledges_late_real_output(tmp_path, monkeypatch
         rows.close()
         assert len(released) == 1
         execution, event = released[0]
-        assert not execution._deliveries and not execution._terminal_queue
+        assert not execution._exchange._inflight and not execution._terminal._queue
         assert acknowledgements.count(event.payload['delivery_id']) == 1
         image = execution._restore_image
         assert image is not None and not image.cut.final

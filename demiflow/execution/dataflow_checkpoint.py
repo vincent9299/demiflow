@@ -241,13 +241,37 @@ class DataflowCheckpointCoordinator:
                 if cursor.end_of_input:
                     self._source_eoi[cursor.split_id] = True
 
-    def _sources_exhausted(self) -> bool:
+    def sources_exhausted(self) -> bool:
         # A zero-source (literal_empty) plan is trivially exhausted. Otherwise every
         # declared source split must have reported end_of_input.
         splits = {s.split_id for s in self._physical.splits}
         if not splits:
             return True
         return all(self._source_eoi.get(split, False) for split in splits)
+
+    def is_latest_image(self, image):
+        with self._lock:
+            return image is not None and image is self._last_image
+
+    def satisfied_splits(self):
+        return tuple(sorted(self._operator_complete))
+
+    def update_residency(self, cut: CutRequest, residency) -> None:
+        import copy
+        with self._lock:
+            self._check_open()
+            pending = self._pending.get(cut.cut_id)
+            if (pending is None or pending.request is not cut or pending.aborted
+                    or pending.residency is None):
+                raise DataflowError("FENCED", "residency update does not own an active parked cut")
+            document(residency, self._physical.bounds.max_state_bytes)
+            pending.residency = copy.deepcopy(residency)
+
+    def abort_pending(self, cut: CutRequest, *, reason: str) -> None:
+        with self._lock:
+            pending = self._pending.get(cut.cut_id)
+            if pending is not None and pending.request is cut:
+                self.abort(cut.cut_id, reason=reason)
 
     def observe_source_eoi(self, cursors):
         """Driver has authenticated the worker and exact split ownership first."""

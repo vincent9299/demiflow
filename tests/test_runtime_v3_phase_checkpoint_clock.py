@@ -17,9 +17,9 @@ def driver(monkeypatch,*,damage=None):
     ex._policy=NS(checkpoint_rows=64,checkpoint_interval_ms=1000,provider='thread',
         native_limits=None,control_timeout_ms=30000)
     image=NS(cut=NS(final=False))
-    ex._restore_image=image;ex._checkpoint=NS(_last_image=image)
+    ex._restore_image=image;ex._checkpoint=NS(is_latest_image=lambda candidate: candidate is image and damage != 'unacknowledged')
     ex._active_worker_allocations=set();ex._by_partition={};ex._lease_by_operation={}
-    ex._endpoints={};ex._durable_residency=NS(launched=lambda:None,partition_groups=[('p0',)])
+    ex._endpoints={};ex._durable_residency=NS(launched=lambda endpoints, by_partition: (),partition_groups=[('p0',)])
     ex._phases=[('stage',)];ex._phase_index=0
     stage=NS(stage_id='stage',partitions=('p0',))
     ex._stage_order=lambda:[stage]
@@ -48,7 +48,6 @@ def driver(monkeypatch,*,damage=None):
     if damage=='old_active':ex._active_worker_allocations.add('old')
     if damage=='old_partition':ex._by_partition['old']=endpoint
     if damage=='old_lease':ex._lease_by_operation['old']=object()
-    if damage=='unacknowledged':ex._checkpoint._last_image=None
     if damage=='initial_start':ex._started=False
     return ex,clock
 
@@ -60,7 +59,7 @@ def test_acked_retired_handoff_starts_original_interval_before_first_activation(
     assert ex.sent == [{'kind': 'resume', 'publishing': False, 'observation_rows': 0,
         'source_credit': {'rows': 4096, 'bytes': 64*1024**2}}]
     ex.sent.clear()
-    assert ex._last_checkpoint_rows==23 and ex._checkpoint_deliveries==0
+    assert ex._last_checkpoint_rows==23 and ex._exchange.snapshot_acks()[0]==0
     ex._node_metrics[('source','p0')]['rows_output']=24
     clock[0]=102.5;ex.pump(deadline_ms=1)
     assert not ex._checkpoint_requested

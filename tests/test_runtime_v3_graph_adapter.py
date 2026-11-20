@@ -412,8 +412,8 @@ def test_source_credit_pause_drains_pending_memory_before_original_cut(graph_env
         durable = execution._durable_residency
         if (durable is not None and sources - execution._done
                 and sources <= execution._idle | execution._done):
-            pending = [key for key, (producer, consumer) in execution._deliveries.items()
-                       if producer is not None and consumer is not None and key not in durable.entries]
+            pending = [key for key, (producer, consumer, _) in execution._exchange._inflight.items()
+                       if producer is not None and consumer is not None and key not in execution._exchange._parked]
             if pending:
                 observations.append({'source_owners': sorted(sources), 'pending_memory': pending})
         return request(execution)

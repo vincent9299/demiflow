@@ -218,20 +218,22 @@ def test_park_metadata_rechecks_bound_after_actual_cut_proofs_grow(schema):
     from demiflow.execution.dataflow_durable_residency import DurableResidency
     from demiflow.execution.recovery_contract import RecoveryContractError, document
     controller = object.__new__(DurableResidency)
-    controller.ex = SimpleNamespace(_bounds=SimpleNamespace(max_state_bytes=65536),
-                                    _finite_seals={}, _checkpoint=SimpleNamespace(_operator_complete=set()),
-                                    _physical=SimpleNamespace(stages=(
-                                        SimpleNamespace(stage_id='stage', partitions=('partition',)),)))
+    from demiflow.execution.exchange.deliveries import DeliveryExchange
+    controller._bounds = SimpleNamespace(max_state_bytes=65536)
+    controller._finite_seals = {}
+    controller._exchange = DeliveryExchange()
+    controller._physical = SimpleNamespace(stages=(
+        SimpleNamespace(stage_id='stage', partitions=('partition',)),))
     controller.epoch = 0
     controller.active_index = 0
     controller.groups = [('stage',)]
     controller.partition_groups = [('partition',)]
     controller.schema = schema
-    controller.visited = controller.completed = controller.acked_live = controller.edge_eoi = controller.satisfied_inputs = set()
-    controller.entries = {'delivery': {'payload': {'ref': 'durable-reference'}, 'consumed': False,
+    controller.visited = controller.completed = controller.edge_eoi = controller.satisfied_inputs = set()
+    controller._exchange._parked = {'delivery': {'payload': {'ref': 'durable-reference'}, 'consumed': False,
                                        'producer_cut': None, 'consumer_cut': None}}
-    size_before = len(document(controller.metadata(False)))
-    controller.ex._bounds.max_state_bytes = size_before + 32
-    controller.entries['delivery']['producer_cut'] = 'a'*64
+    size_before = len(document(controller.metadata(False, ())))
+    controller._bounds.max_state_bytes = size_before + 32
+    controller._exchange._parked['delivery']['producer_cut'] = 'a'*64
     with pytest.raises(RecoveryContractError, match='budget'):
-        controller.metadata(False)
+        controller.metadata(False, ())

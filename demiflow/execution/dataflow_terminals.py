@@ -21,6 +21,7 @@ import pickle
 import uuid
 from typing import TYPE_CHECKING, Iterator
 
+from .contracts.dataflow_errors import DataflowError
 from demiflow.execution.dataflow_handles import (
     RuntimeActionHandle,
     StoredMaterializedHandle,
@@ -319,3 +320,145 @@ def inspect_result(handle: "ActionHandle", *, kind: str) -> object:
             raise _error("INVALID_CONTRACT", "stats were not executed for this action")
         return scalar
     return scalar
+
+
+class TerminalSubscription:
+    """One action's ordered result window and replay cursor, sharing transport credit."""
+
+    def __init__(self, bounds, exchange, endpoints):
+        from collections import deque
+        self._bounds = bounds
+        self._exchange = exchange
+        self._endpoints = endpoints
+        self._queue = deque()
+        self._replay = None
+        self.closed = False
+
+    def restore(self, publication, *, store):
+        from .dataflow_replay import PublishedRecordReader
+        self._replay = PublishedRecordReader(publication, store=store, bounds=self._bounds)
+
+    def receive(self, payload, producer):
+        if not self.closed and len(self._queue) >= self._bounds.max_pending_events:
+            raise DataflowError("BUDGET_EXCEEDED", "terminal subscription credit exceeded")
+        key = payload['delivery_id']
+        self._exchange.terminal(key, producer)
+        if self.closed:
+            self._exchange.acknowledge(key, None)
+        else:
+            self._queue.append(payload)
+
+    def read(self, *, max_records, deadline_ms):
+        return self.read_admitted(max_records=max_records, deadline_ms=deadline_ms)
+
+    @property
+    def buffered_bytes(self):
+        replay = self._replay
+        retained = replay.buffered_bytes if replay is not None else 0
+        return max(retained, getattr(self, '_working_bytes', 0))
+
+    def read_admitted(self, *, max_records, deadline_ms, admit=None, admit_workspace=None):
+        from .exchange.dataflow_transport import read_peer_many, MAX_PEER_BATCH, peer_batch_limit
+        from .dataflow_record_frames import decode_document, document_limit
+        from .dataflow_replay import record_encoded_bytes
+        records = []
+        byte_window = min(self._bounds.max_batch_bytes, self._bounds.max_resident_bytes)
+        admitted = payload_bytes = 0
+
+        def workspace(size):
+            self._working_bytes = size
+            if payload_bytes + size > self._bounds.max_resident_bytes:
+                raise DataflowError('BUDGET_EXCEEDED', 'terminal read workspace exceeds resident budget')
+            if admit_workspace is not None:
+                admit_workspace(len(records), payload_bytes)
+
+        def decode_admission(required, *, record_bytes, reader_bytes=0):
+            workspace(reader_bytes + required)
+            if admit is not None:
+                # This must observe the updated codec workspace together with
+                # the next row, not two independent smaller peak estimates.
+                admit(record_bytes, len(records), payload_bytes)
+
+        try:
+            while not self.closed and self._replay is not None and len(records) < max_records:
+                try:
+                    raw, record_id, sequence, size = self._replay.peek(check_workspace=workspace)
+                except StopIteration:
+                    self._replay.close()
+                    self._replay = None
+                    break
+                required = max(len(raw), size)
+                if records and admitted + required > byte_window:
+                    break
+                if required > byte_window:
+                    raise DataflowError('BUDGET_EXCEEDED', 'terminal replay row exceeds admitted read window')
+                # Existing raw frame, the typed decode/canonical re-encode
+                # workspace and the original leased chunk remain simultaneous.
+                records.append(decode_document(raw, record_id=record_id,
+                    sequence=sequence, bounds=self._bounds, retained=payload_bytes + self._replay.buffered_bytes,
+                    check_workspace=lambda required: decode_admission(required,
+                        record_bytes=size, reader_bytes=self._replay.buffered_bytes)))
+                admitted += required
+                payload_bytes += size
+                self._replay.pop()
+                del raw
+            from itertools import islice
+            # A historical prefix stays before all newly produced records.
+            while not self.closed and self._replay is None and self._queue and len(records) < max_records:
+                batch, size, endpoint, limit = [], 0, None, MAX_PEER_BATCH
+                for payload in islice(self._queue, min(MAX_PEER_BATCH, max_records - len(records))):
+                    peer = payload['peer']
+                    limit = min(limit, peer_batch_limit(peer))
+                    if len(batch) >= limit:
+                        break
+                    owner = (payload.get('producer_partition'), payload.get('edge_id'),
+                             payload.get('route_epoch'), peer['host'], peer['port'], peer['token'])
+                    if endpoint is not None and owner != endpoint:
+                        break
+                    if (records or batch) and admitted + size + peer['bytes'] > byte_window:
+                        break
+                    if peer['bytes'] > byte_window:
+                        raise DataflowError('BUDGET_EXCEEDED', 'terminal row exceeds admitted read window')
+                    endpoint = owner
+                    batch.append(payload)
+                    size += peer['bytes']
+                if not batch:
+                    break
+                largest = max(item['peer']['bytes'] for item in batch)
+                # read_peer_many retains its prior frame while _read builds a
+                # bytearray, recv fragment and returned bytes for the next one.
+                receive_bytes = 3 * largest + min(65536, largest) + 256
+                workspace(receive_bytes)  # before opening/receiving payload data
+                frames = read_peer_many(tuple(item['peer'] for item in batch), bounds=self._bounds)
+                try:
+                    from .dataflow_hosts import batch_business_commands
+                    with batch_business_commands(self._endpoints):
+                        for payload in batch:
+                            workspace(receive_bytes)
+                            raw = next(frames)
+                            size = record_encoded_bytes(raw, maximum=self._bounds.max_row_bytes,
+                                frame_maximum=document_limit(self._bounds))
+                            records.append(decode_document(raw, record_id=payload['record_id'],
+                                sequence=payload['sequence'], bounds=self._bounds, retained=payload_bytes,
+                                check_workspace=lambda required: decode_admission(required, record_bytes=size)))
+                            self._queue.popleft()
+                            self._exchange.acknowledge(payload['delivery_id'], None)
+                            admitted += payload['peer']['bytes']
+                            payload_bytes += size
+                            del raw
+                finally:
+                    frames.close()
+            return tuple(records)
+        finally:
+            self._working_bytes = 0
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        replay, self._replay = self._replay, None
+        if replay is not None:
+            replay.close()
+        while self._queue:
+            payload = self._queue.popleft()
+            self._exchange.acknowledge(payload["delivery_id"], None)
