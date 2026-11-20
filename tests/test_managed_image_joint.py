@@ -288,7 +288,7 @@ def test_actual_forge_multibatch_cancel_resume_prefix(image_workspace_base,tmp_p
     save_facts(root,value,result,joint_http,prefix_window=window,prefix_fact=ready['fact'],before_budgets=before_budgets)
 
 
-@pytest.mark.parametrize('window,damage',[('after_prepared',False),('after_acked',False),('after_acked',True)])
+@pytest.mark.parametrize('window,damage',[('after_prepared',False),('after_acked',False),('after_acked',True),('after_prepared',True)])
 def test_actual_forge_final_image_sink_resume_never_republishes(image_workspace_base,tmp_path,joint_http,monkeypatch,window,damage):
     root=tmp_path/'workspace';shutil.copytree(image_workspace_base,root)
     value=make_run(root,joint_http,count=2)
@@ -301,6 +301,8 @@ def test_actual_forge_final_image_sink_resume_never_republishes(image_workspace_
     runs.cancel(root,value['run_id']);previous=stop(root,value['run_id'])
     assert previous['status']=='cancelled' and previous['state']['usage_complete'] is True
     consumed=budgets(root,value['run_id'])
+    published_before_resume = Path(uri).exists()
+    if published_before_resume: assert lance.dataset(uri).version == 1
     if damage:
         item=ready['fact']['prepared']['sinks']['write_lance']['objects']['objects'][0]
         path=next((root/'data/.demiflow-objects').rglob(item['sha256']))
@@ -308,8 +310,10 @@ def test_actual_forge_final_image_sink_resume_never_republishes(image_workspace_
         with pytest.raises(ValueError,match='checksum differs'):
             launch_observed(root,value,'observe_only',monkeypatch,resume=True)
         result=runs.show(root,value['run_id'])
-        assert result['attempt']==1 and len(joint_http['requests'])==2 and lance.dataset(uri).version==1
-        save_facts(root,value,result,joint_http,final_sink_window=window,expected_blocked=True,publication_before_cancel=True)
+        assert result['attempt']==1 and len(joint_http['requests'])==2
+        assert Path(uri).exists() == published_before_resume
+        if published_before_resume: assert lance.dataset(uri).version == 1
+        save_facts(root,value,result,joint_http,final_sink_window=window,expected_blocked=True,publication_before_cancel=window=='after_acked',publication_before_resume=published_before_resume)
         return
     launch_observed(root,value,'observe_only',monkeypatch,resume=True)
     result=stop(root,value['run_id'])

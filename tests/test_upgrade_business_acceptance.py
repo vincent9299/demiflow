@@ -400,16 +400,27 @@ def _chain_recovery(fixture, *, fault):
 
     run_dir = root / 'run'
     started = time.monotonic()
-    with pytest.raises((RecoveryContractError, OSError)):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    with pytest.raises(DataflowError, match='worker.*(connection|confirmation)') as loss:
         with RunContext.start(run_dir, limits=LIMITS) as run:
             reference = run.ref
             execute()
+    assert loss.value.code == 'UNKNOWN_EFFECT'
     assert marker.exists(), 'first run must crash after acked cuts, not fail at load'
     killed = json.loads(marker.read_text())
     assert killed['pid'] != os.getpid() and killed['row'] == 5
     prefix = RunJournal(run_dir).execution_commits('action-1')
     assert prefix and all(f['status'] == 'acked' for f in prefix), 'crash must retain a genuine ACK prefix'
-    before = _resource_evidence(run_dir, capacity=_CHAIN_CAPACITY, started=started)
+    def resource_evidence():
+        value = _resource_evidence(run_dir, capacity=_CHAIN_CAPACITY, started=started)
+        # v3 uses the selected deployment capacity domain, not run-resources.
+        from demiflow.execution.dataflow_capacity import local_capacity
+        domain, capacity = local_capacity()
+        value['capacity_charged'] = LocalCapacityPool(domain / 'capacity', capacity=capacity).snapshot()['charged']
+        return value
+    before = resource_evidence()
+    assert before['capacity_charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
+
 
     if fault == 'edit_helper':
         fixture['helper_path'].write_text('def delta():\n    return 9999\n')
@@ -427,7 +438,7 @@ def _chain_recovery(fixture, *, fault):
         with RunContext.resume(reference) as run2:
             rows = execute()
             commits = run2.journal.execution_commits(_chain_child_id(run2))
-    after = _resource_evidence(run_dir, capacity=_CHAIN_CAPACITY, started=started)
+    after = resource_evidence()
     _release_orphans(run_dir, capacity=_CHAIN_CAPACITY)
     return dict(before=before, after=after, rows=rows, commits=commits,
                 refused=refused, reference=reference)
