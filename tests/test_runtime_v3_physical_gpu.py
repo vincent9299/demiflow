@@ -162,7 +162,7 @@ def test_physical_cuda_cpu_gpu_cpu_final_ack_and_replay(tmp_path, physical_gpu, 
             raise InterruptedAfterAction()
     _assert_released(tmp_path, selected, evidence)
     original_calls = _calls(evidence)
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     def no_launch(*args, **kwargs):
         raise AssertionError('final ACK must replay without new CPU/GPU work')
     monkeypatch.setattr(DataflowExecution, '_launch_phase', no_launch)
@@ -181,7 +181,7 @@ def test_physical_cuda_failure_releases_original_grant(tmp_path, physical_gpu):
 
 
 def test_physical_cuda_early_close_releases_original_grant(tmp_path, physical_gpu, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     selected, evidence = physical_gpu
     executions = []
     start = DataflowExecution.start
@@ -203,7 +203,7 @@ def test_physical_cuda_early_close_releases_original_grant(tmp_path, physical_gp
 
 
 def test_physical_cuda_nonfinal_ack_recovery_uses_original_cut(tmp_path, physical_gpu, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     selected, evidence = physical_gpu
     class InterruptedAfterAck(Exception):
         pass

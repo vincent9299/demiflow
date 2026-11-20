@@ -13,8 +13,8 @@ def disk_gc(fx, fault):
     from pytest import MonkeyPatch, raises
     from demiflow import data
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_gc import collect_published_orphans
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+    from demiflow.execution.storage.gc import collect_published_orphans
     from demiflow.execution.run_context import current_run
 
     def consumed(run):

@@ -139,7 +139,7 @@ def test_restore_validates_whole_state_before_mutating_any_slot(tmp_path):
 
 @pytest.mark.parametrize('form',['cell','bound'])
 def test_actual_function_restore_uses_committed_counter_and_no_prefix_reexecution(tmp_path, monkeypatch, form):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.kernels import state_codec
     class Interrupted(Exception):
         pass

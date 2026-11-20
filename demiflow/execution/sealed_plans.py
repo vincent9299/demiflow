@@ -129,7 +129,7 @@ def _v3_read_store(directory, *, store_id):
     comes from its authenticated artifact reference. Reading history creates no
     directories, reservations or journal writes.
     """
-    from .dataflow_store import RunArtifactStore
+    from .storage.objects import RunArtifactStore
     bounds = _v3_read_bounds()
     store = RunArtifactStore(root=Path(directory).absolute() / ".dataflow-store", store_id=store_id,
                              journal=None, bounds=bounds, readonly=True)
@@ -138,7 +138,7 @@ def _v3_read_store(directory, *, store_id):
 
 def _load_sealed_v3(directory, action_id, marker, *, _reader=None, _max_carrier_bytes=None, _deadline=None):
     """v3 branch: read and fully validate the original artifacts via load_dataflow."""
-    from .dataflow_seal import load_dataflow
+    from .seal.plan import load_dataflow
     from .dataflow_history import _ref_from_json
     ref = _ref_from_json(marker["physical_ref"], "physical_ref")
     store, bounds = _v3_read_store(directory, store_id=ref.store_id)

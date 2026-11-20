@@ -194,7 +194,7 @@ def test_nonfinite_or_invalid_deadlines_are_rejected(tmp_path,deadline):
 
 def test_readonly_v3_carrier_budget_precedes_reads_and_deadline_follows_inspect(tmp_path,monkeypatch):
     from types import SimpleNamespace
-    from demiflow.execution import dataflow_seal as seal
+    from demiflow.execution.seal import plan as seal
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     def ref(size=1):
         return dict(digest='a'*64,size_bytes=size,store_id='store',key='a'*64,media_type='application/json')

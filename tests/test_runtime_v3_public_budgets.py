@@ -8,7 +8,7 @@ from demiflow import data
 from demiflow.execution.contracts.dataflow_codec import (
     encode_wire, decode_wire, compute_physical_digest,
 )
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.run_context import RunContext
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 
@@ -179,16 +179,18 @@ def test_resume_tightens_live_worker_envelope_without_rewriting_sealed_plan(tmp_
                 pipeline().take_all()
     frozen = seen[0]
     assert frozen.policy.max_active_workers == 2
-    original_place = DataflowExecution._place_hosts
-    def place(execution, pending):
-        assert execution._physical.plan_id == frozen.plan_id
-        assert execution._physical.policy.max_active_workers == 2
-        assert execution._active_worker_limit == 1
-        assert len(pending) <= 1 or not execution._started
-        return original_place(execution, pending)
+    from demiflow.execution.scheduler.placement import DataflowScheduler
+    original_place = DataflowScheduler.place_hosts
+    def place(scheduler, pending):
+        assert scheduler._physical.plan_id == frozen.plan_id
+        assert scheduler._physical.policy.max_active_workers == 2
+        assert scheduler._policy.max_active_workers == 1
+        hosts = original_place(scheduler, pending)
+        assert len(hosts) <= 1
+        return hosts
     with RunContext.resume(ref), data.local_execution(workers=1) as session:
         with monkeypatch.context() as patch:
-            patch.setattr(DataflowExecution, '_place_hosts', place)
+            patch.setattr(DataflowScheduler, 'place_hosts', place)
             assert pipeline().take_all() == [{'n': n} for n in range(1, 9)]
 
         assert session.stats['admitted_bounds']['max_active_workers'] == 1

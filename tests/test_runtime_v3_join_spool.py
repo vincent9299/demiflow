@@ -63,7 +63,7 @@ with _open(Path(sys.argv[1])) as run:
 
 def test_worker_stream_is_lazy_and_refunds_only_with_original_lease_proof(tmp_path):
     from demiflow.execution.dataflow_scratch import ScratchStream
-    from demiflow.execution.dataflow_staging import recover_staging
+    from demiflow.execution.storage.staging import recover_staging
     with pytest.raises(PreparationOnly), RunContext.start(tmp_path / 'run') as run:
         store, port, bounds = _store(run, ceiling=200000)
         stream = ScratchStream(store, max_bytes=100000, max_io_bytes=80000)

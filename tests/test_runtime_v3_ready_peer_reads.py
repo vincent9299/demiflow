@@ -10,7 +10,7 @@ import pytest
 
 from demiflow.execution.contracts.dataflow import thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_store import RunArtifactStore
+from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.exchange.dataflow_transport import PeerBuffers, read_peer
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 from test_runtime_v3_b import worker_env, _events, _cut

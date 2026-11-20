@@ -98,7 +98,7 @@ class HostedDataflowWorker:
                 raise DataflowError("CANCELLED", "worker has been cancelled")
 
         self._mailbox = ControlMailbox(bounds=bounds, check_stop=check_stop)
-        from ..dataflow_store import RunArtifactStore
+        from ..storage.objects import RunArtifactStore
         self._mailbox.check_stop = check_stop
         self._mailbox.store = RunArtifactStore(root=Path(config["store_root"]),
             store_id=config["store_id"], journal=None, bounds=bounds)

@@ -11,7 +11,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.contracts.dataflow import Record
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_store import RunArtifactStore
+from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _encode_record_document, _decode_record_document
 from demiflow.execution.kernels.dataflow import _materialize_row
 from test_runtime_v3_artifact_accounting import store_fixture,consumed

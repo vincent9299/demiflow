@@ -35,8 +35,8 @@ def test_gzip_csv_join_keeps_original_strings_and_multiplicity(tmp_path, how):
         assert_same_rows(result.take_all(), _oracle_join(left, right, ['id'], ['id'], how))
         # The unified engine reads native CSV in its sealed source worker;
         # DataFusion no longer owns a second file-scan plan or query directory.
-        from demiflow.execution.dataflow_seal import load_dataflow
-        from demiflow.execution.dataflow_store import RunArtifactStore
+        from demiflow.execution.seal.plan import load_dataflow
+        from demiflow.execution.storage.objects import RunArtifactStore
         from demiflow.planning.dataflow_policy import resolve_runtime_policy
         metadata = result.execution_metadata().diagnostics
         assert metadata['engine'] == 'dataflow_v3'

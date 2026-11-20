@@ -8,7 +8,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.dataset_native import execute, _cast_sink_batch
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunContext

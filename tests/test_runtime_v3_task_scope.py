@@ -155,7 +155,7 @@ def test_filtered_and_expanded_chains_keep_original_task_boundaries():
 
 @pytest.mark.parametrize('form', ['class', 'closure'])
 def test_actual_driver_resume_preserves_partial_task_and_committed_prefix(tmp_path, monkeypatch, form):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.kernels import state_codec
     class Interrupted(Exception):
         pass

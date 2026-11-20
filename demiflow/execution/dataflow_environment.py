@@ -60,7 +60,7 @@ def native_environment_names(spec, *, depth=0):
 
 
 def allocation_environment(assignment, *, store, bounds):
-    from .dataflow_seal import load_sealed_dataflow, verify_dataflow_program
+    from .seal.plan import load_sealed_dataflow, verify_dataflow_program
     from .environment import select_pipeline_environment
     from .recovery_contract import document
     graph, physical, pin = load_sealed_dataflow(assignment.sealed,

@@ -6,7 +6,7 @@ import pytest
 
 from test_u2_resources_local import local_env, context, plan_payload, sleep_argv, reconcile
 from demiflow.resources.contracts import ResourceError
-from demiflow.execution.dataflow_scheduler import DataflowScheduler
+from demiflow.execution.scheduler.placement import DataflowScheduler
 from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
 
 

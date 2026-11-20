@@ -15,16 +15,18 @@ import sys
 import time
 import uuid
 from collections import deque
+from dataclasses import replace
 
-from .contracts.dataflow import (
+from ..contracts.dataflow import (
     ArtifactRef, PhysicalDataflow, ReadyWork, ScheduleChoice, WorkerLease,
 )
-from .contracts.dataflow_errors import DataflowError
-from ..resources.contracts import (
-    RESOURCE_PROTOCOL_VERSION, MutationContext, ReleaseSpec, ResourcePlan,
+from ..contracts.dataflow_errors import DataflowError
+from ...planning.dataflow_policy import gpu_count
+from ...resources.contracts import (
+    RESOURCE_PROTOCOL_VERSION, MutationContext, ReleaseSpec, ResourceError, ResourcePlan,
     WorkerLaunchSpec, WorkerRequest, identifier,
 )
-from ..resources.manager import ResourceManager
+from ...resources.manager import ResourceManager
 
 
 def _now_ms() -> int:
@@ -42,21 +44,22 @@ def _grant_bytes(document_value: dict) -> bytes:
 
 class DataflowScheduler:
     def __init__(self, physical: PhysicalDataflow, *, resources: ResourceManager, sealed=None, placements=None,
-                 publication_reservation=None) -> None:
+                 publication_reservation=None, hosts=(), bounds=None, policy=None, scope_id=None) -> None:
         if not isinstance(physical, PhysicalDataflow):
             raise DataflowError("INVALID_CONTRACT", "scheduler requires a sealed PhysicalDataflow")
         if resources is None:
             raise DataflowError("INVALID_CONTRACT", "scheduler requires the driver ResourceManager")
         if sealed is not None:
-            from .contracts.dataflow import SealedExecution
+            from ..contracts.dataflow import SealedExecution
             if not isinstance(sealed, SealedExecution):
                 raise DataflowError('INVALID_CONTRACT', 'scheduler requires sealed launch artifacts')
         self._sealed = sealed
         self._physical = physical
         self._resources = resources
-        self._policy = physical.policy
-        self._bounds = physical.bounds
-        self.scope_id = "df-" + physical.plan_id
+        self._policy = policy if policy is not None else physical.policy
+        self._bounds = bounds if bounds is not None else physical.bounds
+        self._hosts = tuple(hosts)
+        self.scope_id = scope_id or ("df-" + physical.plan_id)
         identifier(self.scope_id)
         self._stages = {stage.stage_id: stage for stage in physical.stages}
         self._placements = dict(placements or {})
@@ -73,6 +76,7 @@ class DataflowScheduler:
         self._publication_reservation = publication_reservation
         self._consumer_slots = self._residency.consumer_reserved_slots
         self._ready_limit = self._bounds.max_pending_events
+        self._worker_limit = self._policy.max_active_workers or self._bounds.max_partitions
         self._lease_limit = self._bounds.max_partitions
         self._ready: deque[ReadyWork] = deque()
         self._ready_index: dict[str, ReadyWork] = {}
@@ -93,6 +97,7 @@ class DataflowScheduler:
         self._desired_revision = 0
         self._closed = False
         self._physical_exit_confirmed = False
+        self._pending_apply = None
         self._requests = {}
         self._allocation_by_operation = {}
         # Grant documents staged by the driver before activate; the lease carries
@@ -148,21 +153,62 @@ class DataflowScheduler:
         self._ready_index[work.operation_id] = work
 
     # -- E011 choose ------------------------------------------------------
+    def place_hosts(self, pending):
+        """Plan bounded per-host admission; the ResourceManager still allocates.
+
+        Summing cluster capacity cannot prove that any individual worker fits.
+        Bind each partition to a host whose runtime/store were actually probed.
+        """
+        if len(pending) > self._lease_limit:
+            raise DataflowError('RESOURCE_INFEASIBLE', 'resident group exceeds partition limit')
+        if len(pending) > self._worker_limit:
+            raise DataflowError('RESOURCE_INFEASIBLE', 'resident group exceeds active worker budget')
+        resident = sum(work.resident_bytes for _, work in pending)
+        if not self._fits_resident(resident, {stage.stage_id for stage, _ in pending}):
+            raise DataflowError('RESOURCE_INFEASIBLE', 'resident group exceeds admitted memory budget')
+        remaining = {h.host_id: dict(h.logical_resources) for h in self._hosts}
+        assigned = {}
+        for stage, work in sorted(pending, key=lambda pair:
+                (pair[0].profile.requests['memory_bytes'], pair[0].profile.requests['cpu_millis']), reverse=True):
+            need = {key: stage.profile.requests[key] for key in ('cpu_millis', 'memory_bytes')}
+            need['gpu'] = gpu_count(stage.profile)
+            feasible = [host for host, capacity in remaining.items()
+                        if all(need[key] <= capacity.get(key, 0) for key in need)
+                        and (not need['gpu'] or not hasattr(self._resources.provider, 'device_host_feasible')
+                             or self._resources.provider.device_host_feasible(host, stage.profile))]
+            if not feasible:
+                raise DataflowError('RESOURCE_INFEASIBLE',
+                    'No verified host has capacity for this worker placement')
+            host = max(feasible, key=lambda key: remaining[key]['cpu_millis'])
+            assigned[work.operation_id] = host
+            for key, amount in need.items():
+                remaining[host][key] = remaining[host].get(key, 0) - amount
+        return assigned
+
+    def _fits_resident(self, resident, active_stages):
+        reserved = (self._publication_reservation.reserved(active_stages)
+                    if self._publication_reservation is not None else self._control_reserved)
+        return resident + reserved <= self._resident_budget
+
     def _feasible(self, work: ReadyWork) -> bool:
+        if self._pending_apply is not None:
+            return self._pending_apply[0] == work
         if work.operation_id in self._allocation_by_operation:
             return True  # This pending allocation already holds its reservation.
         active = {self._lease_stage[allocation] for allocation in self._resident_by_allocation}
         active.add(work.stage_id)
-        reserved = (self._publication_reservation.reserved(active)
-                    if self._publication_reservation is not None else self._control_reserved)
-        available = self._resident_budget - reserved - self._resident_used
-        return work.resident_bytes <= available
+        return (len(self._resident_by_allocation) < self._worker_limit
+                and self._fits_resident(self._resident_used + work.resident_bytes, active))
 
     def admit_publication(self):
         if self._publication_reservation is not None:
             active = {self._lease_stage[allocation] for allocation in self._resident_by_allocation}
-            self._publication_reservation.admit(active, self._resident_used,
-                self._resident_budget, publishing=True)
+            resident = self._resident_used
+            if self._pending_apply is not None:
+                pending_work = self._pending_apply[0]
+                active.add(pending_work.stage_id)
+                resident += pending_work.resident_bytes
+            self._publication_reservation.admit(active, resident, self._resident_budget, publishing=True)
 
     def choose(self, *, now_ms: int) -> ScheduleChoice:
         if self._closed:
@@ -236,6 +282,44 @@ class DataflowScheduler:
         return next((a for a in self._resources.get(self.scope_id)['allocations']
                      if a['allocation_id'] == allocation_id), None)
 
+    def _apply_launch(self):
+        # Each mutation replaces the scope's whole desired plan. Serialize an
+        # ambiguous receipt before issuing a sibling mutation at a new revision.
+        work, lease, context, plan = self._pending_apply
+        allocation_id = lease.allocation_id
+        try:
+            revision = self._resources.apply(context, plan)["desired_revision"]
+        except ResourceError as error:
+            if not error.retriable:
+                raise
+            raise DataflowError("CAPACITY_PENDING", str(error), retryable=True,
+                                context={"allocation_id": allocation_id}) from error
+        except Exception as error:
+            # The allocator may have committed before the caller lost the reply.
+            # A scoped observation for this unique allocation proves acceptance.
+            # Otherwise retain the exact payload and context for idempotent replay.
+            try:
+                observed = self._observation(allocation_id)
+                revision = self._resources.get(self.scope_id)["desired_revision"] if observed else None
+            except Exception as observation_error:
+                error.add_note("Resource observation unavailable: " + str(observation_error))
+                revision = None
+            if revision is None:
+                raise DataflowError("CAPACITY_PENDING", "worker acceptance remains unconfirmed",
+                                    retryable=True, context={"allocation_id": allocation_id}) from error
+            if revision != context.expected_revision + 1:
+                raise DataflowError("FENCED", "resource scope changed after uncertain acceptance",
+                                    context={"allocation_id": allocation_id}) from error
+        self._desired_revision = revision
+        self._requests[allocation_id] = plan.desired_workers[-1]
+        self._allocation_by_operation[work.operation_id] = allocation_id
+        self.leases[allocation_id] = lease
+        self._lease_stage[allocation_id] = work.stage_id
+        self._resident_used += work.resident_bytes
+        self._resident_by_allocation[allocation_id] = work.resident_bytes
+        self._cumulative_cost += work.resident_bytes
+        self._pending_apply = None
+
     def place(self, work: ReadyWork, *, prepare=None, host_id: str | None = None) -> WorkerLease:
         """Stage the immutable launch before asking the sole allocator to spawn.
 
@@ -252,36 +336,47 @@ class DataflowScheduler:
             raise DataflowError("INVALID_CONTRACT", "operation already placed")
         run_id, attempt, fence = self._owner_binding()
         allocation_id = self._allocation_by_operation.get(work.operation_id)
+        if allocation_id is None and self._pending_apply is not None:
+            pending_work, lease, context, _ = self._pending_apply
+            if context.controller_epoch != attempt or context.authority_token != fence:
+                raise DataflowError("FENCED", "pending launch belongs to a different owner")
+            if pending_work.operation_id != work.operation_id:
+                raise DataflowError("CAPACITY_PENDING", "another worker acceptance remains unconfirmed", retryable=True)
+            if pending_work != work or (host_id is not None and lease.host_id != host_id):
+                raise DataflowError("INVALID_CONTRACT", "pending worker launch changed")
+            allocation_id = lease.allocation_id
+            self._apply_launch()
         if allocation_id is None:
             if len(self.leases) >= self._lease_limit or not self._feasible(work):
                 raise DataflowError("CAPACITY_PENDING", "worker/resident admission pending", retryable=True)
+            if prepare is None:
+                raise DataflowError("INVALID_CONTRACT", "placement requires a staged worker launch")
             allocation_id, boot_id = uuid.uuid4().hex, uuid.uuid4().hex
+            from ..dataflow_native_limits import admission_timeout_ms
+            request = WorkerRequest(uuid.uuid4().hex, allocation_id, stage.profile,
+                self._launch_spec(stage), provision_deadline_ms=admission_timeout_ms(self._policy),
+                placement=self._placements.get(work.stage_id), reservation_group=work.stage_id)
+            plan = ResourcePlan(self.scope_id, (*self._requests.values(), request), tuple(self._retirements.values()))
+            context = self._context(uuid.uuid4().hex)
             grant_ref = self._grant(allocation_id, boot_id, work, run_id, attempt, fence)
             lease = WorkerLease(allocation_id, boot_id, work.stage_id, (work.partition_id,),
                                 host_id or self._policy.provider, allocation_id, grant_ref,
                                 json.loads(self.grants[allocation_id])['expires_at_ms'])
-            if prepare is None:
-                raise DataflowError("INVALID_CONTRACT", "placement requires a staged worker launch")
-            lease = prepare(lease, stage)
-            if not isinstance(lease, WorkerLease) or lease.allocation_id != allocation_id:
-                raise DataflowError("INVALID_CONTRACT", "launch preparation changed allocation identity")
-            from .dataflow_native_limits import admission_timeout_ms
-            request = WorkerRequest(uuid.uuid4().hex, allocation_id, stage.profile,
-                self._launch_spec(stage), provision_deadline_ms=admission_timeout_ms(self._policy),
-                placement=self._placements.get(work.stage_id), reservation_group=work.stage_id)
-            desired = (*self._requests.values(), request)
-            accepted = self._resources.apply(self._context(uuid.uuid4().hex),
-                                             ResourcePlan(self.scope_id, desired, tuple(self._retirements.values())))
-            self._desired_revision = accepted["desired_revision"]
-            self._requests[allocation_id] = request
-            self._allocation_by_operation[work.operation_id] = allocation_id
-            self.leases[allocation_id] = lease
-            self._lease_stage[allocation_id] = work.stage_id
-            self._resident_used += work.resident_bytes
-            self._resident_by_allocation[allocation_id] = work.resident_bytes
-            self._cumulative_cost += work.resident_bytes
+            try:
+                prepared = prepare(lease, stage)
+                if not isinstance(prepared, WorkerLease) or replace(prepared, grant_ref=grant_ref) != lease:
+                    raise DataflowError("INVALID_CONTRACT", "launch preparation changed allocation identity")
+            except BaseException:
+                self.grants.pop(allocation_id, None)
+                self.grant_refs.pop(allocation_id, None)
+                raise
+            self._pending_apply = (work, prepared, context, plan)
+            self._apply_launch()
         lease = self.leases[allocation_id]
-        from .dataflow_native_limits import admission_timeout_ms
+        grant = json.loads(self.grants[allocation_id])
+        if grant['fence'] != fence or grant['attempt'] != attempt:
+            raise DataflowError("FENCED", "worker launch belongs to a different owner")
+        from ..dataflow_native_limits import admission_timeout_ms
         self._resources.reconcile_once(fence,
             time.monotonic() + admission_timeout_ms(self._policy) / 1000.0, 16)
         observed = self._observation(allocation_id)
@@ -302,6 +397,8 @@ class DataflowScheduler:
             return
         _, _, fence = self._owner_binding()
         try:
+            if self._pending_apply is not None:
+                self._desired_revision = self._resources.get(self.scope_id)["desired_revision"]
             accepted = self._resources.close(self._context("close-" + uuid.uuid4().hex), {
                 "mode": "ABANDON", "engine_receipt_ref": "execution-close",
                 "terminate_deadline_ms": deadline_ms, "reason": "execution_close"})
@@ -334,6 +431,10 @@ class DataflowScheduler:
 
     def _retire_after_close_failure(self, *, deadline_ms: int) -> None:
         allocations = tuple(self._requests)
+        if self._pending_apply is not None:
+            _, lease, _, _ = self._pending_apply
+            if self._observation(lease.allocation_id) is not None:
+                allocations += (lease.allocation_id,)
         if not allocations:
             return
         deadline = time.monotonic() + deadline_ms / 1000.0
@@ -383,6 +484,14 @@ class DataflowScheduler:
         del self._inflight[operation_id]
         # Completion is not process exit. Keep its resident reservation until
         # ResourceManager confirms physical cleanup during drain.
+
+    def complete_phase(self, *, receipt_ref: ArtifactRef) -> None:
+        for operation_id in tuple(self._inflight):
+            self.complete(operation_id, receipt_ref=receipt_ref)
+
+    @property
+    def physical_exit_confirmed(self):
+        return self._physical_exit_confirmed
 
     # -- E014 drain -------------------------------------------------------
     def _release_lease(self, allocation_id: str, *, deadline_ms: int, reason: str) -> bool:

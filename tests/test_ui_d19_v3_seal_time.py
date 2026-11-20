@@ -8,7 +8,7 @@ import pytest
 
 import demiflow
 from demiflow import data
-from demiflow.execution import dataflow_seal as seal
+from demiflow.execution.seal import plan as seal
 from demiflow.execution.contracts.dataflow_codec import compute_graph_digest, compute_physical_digest
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.dataflow_history import load_execution_version

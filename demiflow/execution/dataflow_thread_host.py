@@ -155,6 +155,9 @@ class DataflowThreadConnector:
     def request_cut(self, allocation_id, request):
         self._host(allocation_id).request_cut(request)
 
+    def abort(self, allocation_id):
+        self.retire(allocation_id)
+
     def retire(self, allocation_id):
         unit = self.units.get(allocation_id)
         if unit is not None and unit.thread.is_alive():

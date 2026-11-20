@@ -68,7 +68,7 @@ def test_region_planner_preserves_legacy_disable_isolation_and_budget():
 def test_region_original_final_ack_replay_does_not_repeat_reducer(tmp_path):
     import pytest
     from demiflow.data.api import DataAPI
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     calls = tmp_path/'calls.txt'
     def reducer(state,row):
         with calls.open('a') as output:
@@ -100,7 +100,7 @@ def test_region_original_final_ack_replay_does_not_repeat_reducer(tmp_path):
 
 def test_region_pure_join_nonfinal_ack_restores_original_input_refs(tmp_path,monkeypatch):
     import pytest
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.dataflow_kernel_pack import read_kernel_image
     from demiflow.execution.kernels import state_codec
     def flow():

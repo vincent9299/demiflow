@@ -5,7 +5,7 @@ import time
 import pytest
 
 from demiflow import data
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal

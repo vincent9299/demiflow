@@ -12,12 +12,12 @@ import os
 import stat
 from pathlib import Path
 
-from .contracts.dataflow_errors import DataflowError
-from .recovery_contract import identifier
+from ..contracts.dataflow_errors import DataflowError
+from ..recovery_contract import identifier
 
 
 def staging_paths(root, store_id, reservation_id):
-    from .dataflow_store import _no_symlink
+    from .objects import _no_symlink
     identifier(store_id)
     identifier(reservation_id)
     directory = Path(root) / store_id / 'staging'
@@ -41,7 +41,7 @@ class StagingLease:
 
     @classmethod
     def create(cls, path):
-        from .dataflow_store import _sync_directory
+        from .objects import _sync_directory
         fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -71,7 +71,7 @@ class StagingLease:
             return None
 
     def remove(self):
-        from .dataflow_store import _sync_directory
+        from .objects import _sync_directory
         _same_inode(self.path, self.fd)
         self.path.unlink()
         _sync_directory(self.path.parent)
@@ -102,8 +102,8 @@ def recover_staging(action, *, bounds, max_items=1024):
     uniquely charged, including objects with historical/committed references.
     Legacy reservations lacking ownership evidence remain conservatively charged.
     """
-    from .contracts.dataflow import ArtifactRef
-    from .dataflow_store import RunArtifactStore, _no_symlink, _sync_directory
+    from ..contracts.dataflow import ArtifactRef
+    from .objects import RunArtifactStore, _no_symlink, _sync_directory
     if type(max_items) is not int or not 0 < max_items <= 4096:
         raise ValueError('Recovery item limit must be in 1..4096')
     journal, fence = action.context.journal, action.context.fence

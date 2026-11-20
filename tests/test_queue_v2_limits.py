@@ -187,7 +187,7 @@ def test_hash_verification_does_not_block_lease_renewal_or_other_claim(channel, 
     monkeypatch.setattr(QueueChannel, 'renew', renew)
     # The fault is driver-owned. Install it after the immutable worker program
     # has been sealed, so this probe does not change the program's code pin.
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     start = DataflowExecution.start
     def activate(self):
         self.prepare()

@@ -73,7 +73,7 @@ def test_replay_committed_result_reuses_seal_and_commit(tmp_path):
 
 
 def test_partial_cut_restores_input_kernel_and_terminal_prefix(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     call_log = tmp_path / 'calls'
     def record(row):
         import time
@@ -206,7 +206,7 @@ def test_public_automatic_cuts_lance_publishes_once(tmp_path):
 
 
 def test_public_recovery_preserves_completed_branch_frontier(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     def slow(row):
         import time
         time.sleep(.01)
@@ -289,7 +289,7 @@ def test_public_async_lifecycle_same_loop_and_cleanup(tmp_path):
 
 
 def test_private_actor_state_resumes_at_committed_prefix(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     class Counter:
         def __init__(self):
             self._count = 0
@@ -317,7 +317,7 @@ def test_private_actor_state_resumes_at_committed_prefix(tmp_path, monkeypatch):
 
 
 def test_resource_actor_partial_resume_rejects_before_any_new_call(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.recovery_contract import RecoveryContractError
     log = str(tmp_path / 'calls')
     class ResourceActor:

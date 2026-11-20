@@ -209,8 +209,8 @@ def test_native_copy_through_limit_preserves_batch_reference(tmp_path, monkeypat
 
 
 def test_original_gc_keeps_shared_batch_reachable_from_real_materialized_result(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_gc import collect_published_orphans
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+    from demiflow.execution.storage.gc import collect_published_orphans
     proof = install_arrow_probe(tmp_path, monkeypatch, forbid_rows=False)
     source = str(tmp_path/'input.lance')
     table = source_table(16)
@@ -234,7 +234,7 @@ def test_original_gc_keeps_shared_batch_reachable_from_real_materialized_result(
             result = collect_published_orphans(execution._action, bounds=execution._bounds)
             assert result['blocked'] is None
             assert not execution._store.inspect(orphan)
-            from demiflow.execution.dataflow_gc import _Trace
+            from demiflow.execution.storage.gc import _Trace
             reachable = _Trace(run.journal, execution._bounds).walk()
             assert all((execution._store.store_id, digest) in reachable for digest in digests)
             assert materialized.take_all() == table.to_pylist()
@@ -346,7 +346,7 @@ def test_slow_consumer_and_early_close_release_original_grants(tmp_path, monkeyp
 
 
 def test_real_committed_cut_inside_arrow_batch_resumes_once(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.contracts.dataflow import ArtifactRef
     from demiflow.execution.state_artifacts import StateArtifacts
     class Interrupted(Exception):

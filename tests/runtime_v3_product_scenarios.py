@@ -84,7 +84,7 @@ def read_native_execution(workspace, run_id, *, attempt, owned_root):
         actual = _sha(WORKTREE / 'demiflow' / path)
         assert actual == item['sha256'], ('sealed platform is not this candidate', path)
         source_digests[str(path)] = actual
-    assert {'execution/dataflow.py', 'execution/dataflow_checkpoint.py',
+    assert {'execution/action_driver/dataflow.py', 'execution/checkpoint/coordinator.py',
             'workbench/runs/worker.py'} <= set(source_digests)
     result = runs.show(workspace, run_id, attempt=attempt)
     graph = model.get(workspace, basis_kind='run', run_id=run_id, attempt=attempt)

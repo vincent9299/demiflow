@@ -39,7 +39,7 @@ def test_real_host_mode_controls_borrowed_state_admission(tmp_path, mode):
 
 
 def test_borrowed_json_state_cannot_resume_after_original_ack(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     class Interrupted(Exception):
         pass
     commit = DataflowCheckpointCoordinator.commit

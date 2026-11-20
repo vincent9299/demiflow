@@ -18,11 +18,11 @@ from demiflow.data.sources import ItemsSource
 from demiflow.execution.contracts.dataflow import Record, thaw_record_value
 from demiflow.execution.contracts.dataflow import WorkerLease, RuntimeServices
 from demiflow.execution.contracts.dataflow_codec import compute_graph_digest, compute_physical_digest
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.dataflow_api import make_action_request
 from demiflow.execution.dataflow_inputs import build_input_handle
-from demiflow.execution.dataflow_seal import load_dataflow
-from demiflow.execution.dataflow_seal import verify_dataflow_program
+from demiflow.execution.seal.plan import load_dataflow
+from demiflow.execution.seal.plan import verify_dataflow_program
 from demiflow.execution.dataflow_services import make_driver_services
 from demiflow.execution.dataflow_sources import spool_record
 from demiflow.execution.dataflow_sources import open_source_reader
@@ -182,7 +182,7 @@ def test_assignment_only_contains_sources_owned_by_its_stage(tmp_path):
 
 
 def test_worker_reads_original_sealed_refs_without_opening_journal(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_seal import load_sealed_dataflow
+    from demiflow.execution.seal.plan import load_sealed_dataflow
     from demiflow.execution.dataflow_services import _load_programs
     from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
     from demiflow.execution.dataflow_hosts import ControlMailbox
@@ -191,7 +191,7 @@ def test_worker_reads_original_sealed_refs_without_opening_journal(tmp_path, mon
         def forbidden(*args, **kwargs):
             raise AssertionError("worker opened the driver database")
         with monkeypatch.context() as patch:
-            patch.setattr("demiflow.execution.dataflow_seal.RunJournal", forbidden)
+            patch.setattr("demiflow.execution.seal.plan.RunJournal", forbidden)
             graph, physical, pin = load_sealed_dataflow(ex._sealed,
                 action_id=ex._action.action_id, store=services.store, bounds=services.bounds)
             programs = _load_programs(runtime.assignment, store=services.store, bounds=services.bounds)

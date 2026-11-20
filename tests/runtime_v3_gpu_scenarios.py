@@ -126,7 +126,7 @@ def _execute(root, provider):
     from unittest.mock import patch
     from demiflow import data
     from demiflow.execution.run_context import RunContext
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.dataflow_devices import device_pool
     from runtime_v3_residency_scenarios import _provider
     from runtime_v3_performance_scenarios import _plain

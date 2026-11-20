@@ -5,7 +5,7 @@ import pytest
 
 from demiflow import data
 from demiflow.data.plan import CallableSpec
-from demiflow.execution.dataflow_seal import _owned_factory_declaration
+from demiflow.execution.seal.plan import _owned_factory_declaration
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.sealed_plans import load_sealed_plan
 

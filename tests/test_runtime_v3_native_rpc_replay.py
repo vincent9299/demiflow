@@ -10,7 +10,7 @@ import pytest
 from demiflow.execution.contracts.dataflow import Bounds, WorkerEvent, WorkerLease
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.dataflow_authority import DriverArtifactPort, DriverJournalService, _ref_to_json
-from demiflow.execution.dataflow_store import RunArtifactStore
+from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.recovery_contract import identity
 from demiflow.execution.run_context import RunContext, RunAction
 from demiflow.operator_llm.journal import RequestRecord, UncertainPromptCall

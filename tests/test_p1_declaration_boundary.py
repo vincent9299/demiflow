@@ -33,7 +33,7 @@ source = KeyedSource('join', left, ('id',), right, ('id',))
 assert validate_relational_inputs(source, expected_inputs=2) is None
 forbidden = (
     'demiflow.execution.run_context', 'demiflow.execution.checked',
-    'demiflow.execution.dataflow', 'demiflow.execution.executors',
+    'demiflow.execution.action_driver.dataflow', 'demiflow.execution.executors',
     'demiflow.execution.package_loader', 'demiflow.execution.dataflow_api',
     'demiflow.execution.dataflow_models',
 )

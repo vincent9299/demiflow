@@ -12,8 +12,8 @@ from demiflow.execution.contracts.dataflow import ArtifactCommand, ArtifactRef
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.dataflow_api import make_action_request
 from demiflow.execution.dataflow_authority import DriverArtifactPort
-from demiflow.execution.dataflow_staging import StagingLease, recover_staging, staging_paths
-from demiflow.execution.dataflow_store import RunArtifactStore
+from demiflow.execution.storage.staging import StagingLease, recover_staging, staging_paths
+from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
@@ -48,7 +48,7 @@ with _open(root) as run:
             link(*args, **kwargs)
             os._exit(73)
         os.link = crash_link
-        import demiflow.execution.dataflow_store as store_module
+        import demiflow.execution.storage.objects as store_module
         sync = store_module._sync_directory
         def crash_deduplicated_publish(path):
             sync(path)
@@ -138,7 +138,7 @@ def test_live_writer_and_open_fd_survive_new_driver_fence(tmp_path):
                 worker = subprocess.Popen([sys.executable, '-B', '-u', '-c', r'''
 import sys
 from pathlib import Path
-from demiflow.execution.dataflow_staging import StagingLease
+from demiflow.execution.storage.staging import StagingLease
 lease = StagingLease.create(Path(sys.argv[1]))
 stream = open(sys.argv[2], 'wb')
 stream.write(b'live'); stream.flush()
@@ -300,3 +300,22 @@ def test_definite_initial_quota_rejection_does_not_leak_empty_owner_files(tmp_pa
                 store.put(iter([b'new']), max_bytes=1024, media_type='application/octet-stream')
         assert consumed(run) == 1500 and store.inspect(ref)
         assert not list((store.root / store.store_id / 'staging').iterdir())
+
+
+def test_sealed_store_limits_apply_to_other_views_and_the_original_reservation(tmp_path):
+    with store_fixture(tmp_path, ceiling=4096) as (run, store, port):
+        _, bounds = resolve_runtime_policy({}, run.limits, provider='local')
+        view = RunArtifactStore(root=store.root, store_id=store.store_id, journal=None,
+                                bounds=bounds, readonly=True)
+        try:
+            effective = replace(bounds, max_open_files=6, max_spill_bytes=32)
+            used = store.open_file_slots
+            store.bind_driver_bounds(effective)
+            assert view.available_file_slots() == 6 - used
+            with pytest.raises(RecoveryContractError):
+                port.reserve('over-sealed-budget', {'artifact_staging_bytes': 33})
+            ref = store.put(iter([b'original']), max_bytes=8, media_type='application/octet-stream')
+            assert b''.join(view.read(ref, max_bytes=8)) == b'original'
+        finally:
+            view.close()
+            store.close()

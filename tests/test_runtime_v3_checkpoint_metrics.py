@@ -5,7 +5,8 @@ import pytest
 
 from demiflow.execution.contracts.dataflow_codec import compute_participant_id
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
+from demiflow.execution.exchange.deliveries import DeliveryExchange
 from demiflow.execution.dataflow_operator_observations import restore_node_metrics
 from demiflow.execution.recovery_contract import identity, document
 from test_runtime_v3_native_rpc_replay import interrupted_run, service
@@ -28,7 +29,7 @@ def test_original_frontier_counters_restore_owned_checkpoint_delta_once(tmp_path
             operator_states={identity(['worker-frontier','p0']):ref}) for stage in stages))
         execution=NS(_physical=NS(stages=stages),_store=store,_bounds=NS(max_state_bytes=4096),
             _graph=NS(sources=(source,)),_checkpoint_source_rows_only=False,
-            _edge_ack_frontiers={},_last_edge_acks={},_policy=NS(checkpoint_rows=128))
+            _exchange=DeliveryExchange(),_last_edge_acks={},_policy=NS(checkpoint_rows=128))
         reads=[];original=store.read
         def read(value,**kwargs):
             reads.append(value)
@@ -48,4 +49,4 @@ def test_original_frontier_counters_restore_owned_checkpoint_delta_once(tmp_path
         execution._node_metrics[(source,'p0')]['rows_output']+=2
         execution._node_metrics[(output,'p0')]['rows_output']+=2
         assert DataflowExecution._checkpoint_progress(execution)==2
-        assert execution._edge_ack_frontiers==execution._last_edge_acks=={}
+        assert execution._exchange.snapshot_acks()[1]==execution._last_edge_acks=={}

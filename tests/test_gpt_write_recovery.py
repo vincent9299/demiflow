@@ -125,7 +125,7 @@ def test_r_e_stale_absence_fact_never_overwrites_foreign_rows(tmp_path, monkeypa
 
 def test_resume_reuses_original_program_manifest_and_bindings(tmp_path, monkeypatch):
     import hashlib
-    from demiflow.execution import dataflow_seal
+    from demiflow.execution.seal import plan as dataflow_seal
     paused = _pause_native(tmp_path, monkeypatch)
     journal = RunJournal(tmp_path / 'run')
     aid = paused['action_id']

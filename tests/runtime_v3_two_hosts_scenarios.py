@@ -107,7 +107,7 @@ def two_hosts(fx, fault=None):
         fx._record_not_run('two_hosts', detail)
         raise NotRunError('two_hosts', detail)
     import test_runtime_v3_physical_hosts as original_cases
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution import dataflow_services
     original_domain = dataflow_services.verify_host_domain
     domain_proofs, caches, cases = [], [], {}

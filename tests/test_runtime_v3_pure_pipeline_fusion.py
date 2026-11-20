@@ -103,7 +103,7 @@ def test_blocking_source_cannot_starve_async_or_timer_before_first_public_result
 
 
 def test_resume_uses_original_unfused_seal_instead_of_new_automatic_layout(tmp_path,monkeypatch):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.planning import dataflow_fusion
     from test_runtime_v3_stream_suffix import _capture
     plans,_=_capture(monkeypatch)

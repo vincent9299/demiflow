@@ -13,7 +13,7 @@ def _plain(row):return {**row,'out':row['i']*2}
 
 @contextmanager
 def _prepared(tmp_path,*,thread=False,wrong_program_pin=False):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.dataflow_api import make_action_request
     from demiflow.execution.dataflow_services import make_driver_services
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
@@ -31,7 +31,7 @@ def _prepared(tmp_path,*,thread=False,wrong_program_pin=False):
             services=make_driver_services(request.action,policy=policy,bounds=bounds)
             second=DataflowExecution(request,services=services)
             from demiflow.planning.dataflow_compile import lower_action
-            from demiflow.execution.dataflow_seal import stage_dataflow_programs,resolve_execution_constants,seal_dataflow
+            from demiflow.execution.seal.plan import stage_dataflow_programs,resolve_execution_constants,seal_dataflow
             from demiflow.execution.dataflow_sources import snapshot_source,plan_source_splits
             from demiflow.execution.dataflow_artifacts import stage_runtime_bundle
             from demiflow.planning.dataflow_place import compile_physical_dataflow
@@ -79,7 +79,7 @@ def isolated_tree(tmp_path,monkeypatch):
 
 @pytest.mark.parametrize('thread',[False,True])
 def test_first_sealed_plan_executes_without_a_second_compile_or_final_ack(tmp_path,monkeypatch,thread):
-    from demiflow.execution import dataflow as driver
+    from demiflow.execution.action_driver import dataflow as driver
     from demiflow.execution.dataflow_terminals import open_terminal,collect_rows
     observed=[];lower=driver.lower_action
     def watch(*args,**kwargs):observed.append(1);return lower(*args,**kwargs)
@@ -108,7 +108,7 @@ def test_first_sealed_plan_bad_code_pin_carrier_is_rejected_before_execution(tmp
 
 
 def test_first_sealed_plan_for_another_action_is_rejected(tmp_path):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.dataflow_api import make_action_request
     from demiflow.execution.dataflow_services import make_driver_services
     with _prepared(tmp_path) as (run,ds,first,unused,_):

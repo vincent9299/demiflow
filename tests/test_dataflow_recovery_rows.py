@@ -56,7 +56,7 @@ class ExpandingRecoveryActor(RecoveryActor):
 
 
 def test_recovery_output_prefix_resumes_without_reinvoking_actor(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     original = DataflowCheckpointCoordinator.commit
     stopped=[]
     confirmed=[]

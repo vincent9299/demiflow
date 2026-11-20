@@ -221,7 +221,7 @@ class InterruptedAfterAck(Exception):
 
 
 def test_final_original_ack_replays_values_without_workers_or_reducer(provider, tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     calls = tmp_path / 'calls'
     expected = [[(i, b'\x00\xff', -0.0)] for i in range(3)]
     with pytest.raises(InterruptedAfterAck):
@@ -242,7 +242,7 @@ def test_final_original_ack_replays_values_without_workers_or_reducer(provider, 
 
 
 def test_materialized_reducer_values_resume_original_nonfinal_ack(provider, tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.state_artifacts import StateArtifacts
     calls = tmp_path / 'calls'
     expected = [[(i, b'\x00\xff', -0.0)] for i in range(12)]

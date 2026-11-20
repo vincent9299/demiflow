@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from demiflow import data
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.dataflow_api import make_action_request
 from demiflow.execution.dataflow_services import make_driver_services

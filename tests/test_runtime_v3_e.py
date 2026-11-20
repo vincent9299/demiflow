@@ -15,7 +15,9 @@ import demiflow
 from demiflow import data
 from demiflow.data.plan import CallableSpec, LogicalPlan
 from demiflow.data.sources import ItemsSource
-from demiflow.execution import dataflow as E, dataflow_api as API, dataflow_scheduler as S
+from demiflow.execution.action_driver import dataflow as E
+from demiflow.execution import dataflow_api as API
+from demiflow.execution.scheduler import placement as S
 from demiflow.execution.contracts import dataflow as dto
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.dataflow_services import make_driver_services
@@ -357,3 +359,110 @@ def test_e019():
     assert native['contract'] == 'demiflow.native.operation.v3' and native['kind'] == 'embedding'
     assert 'code_identity' in native
     with pytest.raises(DataflowError): API.declare_action_v3(None, LogicalPlan(), kind='bogus', arguments={}, sink_declaration=None)
+
+
+@pytest.mark.parametrize('committed', [False, True])
+def test_uncertain_worker_acceptance_preserves_original_mutation_and_reservation(committed):
+    scheduler = new_scheduler()
+    resources = scheduler._resources
+    submit = resources.apply
+    snapshots = resources.get
+    calls = []
+
+    def lose_first_receipt(context, plan):
+        calls.append((context, plan))
+        if len(calls) == 1:
+            if committed:
+                submit(context, plan)
+            raise ConnectionError('receipt unavailable')
+        return submit(context, plan)
+
+    resources.apply = lose_first_receipt
+    resources.get = lambda scope: dict(snapshots(scope), desired_revision=len(resources.applied))
+    work = make_work()
+    if not committed:
+        with pytest.raises(DataflowError, match='acceptance remains unconfirmed'):
+            place(scheduler, work)
+        assert not scheduler.leases and scheduler._resident_used == 0
+        with pytest.raises(DataflowError, match='another worker acceptance'):
+            place(scheduler, make_work())
+        assert len(calls) == len(resources.boots) == 1
+    lease = place(scheduler, work)
+    if not committed:
+        assert len(calls) == 2 and calls[0] == calls[1]
+    assert len(resources.applied) == len(resources.boots) == len(scheduler.leases) == 1
+    assert resources.boots[lease.allocation_id] == lease.boot_id
+    assert scheduler._resident_used == scheduler._cumulative_cost == work.resident_bytes
+
+
+def test_group_placement_reserves_publication_and_checks_each_host():
+    physical = make_physical()
+    stage = physical.stages[0]
+    hosts = tuple(NS(host_id=name, logical_resources={'cpu_millis': 2000, 'memory_bytes': 512})
+                  for name in ('one', 'two'))
+    scheduler = S.DataflowScheduler(physical, resources=ResourceObservations(), hosts=hosts,
+                                    publication_reservation=NS(reserved=lambda stages: 128))
+    work = make_work(resident=400)
+    too_big = replace(stage, profile=ResourceProfile(requests={'cpu_millis': 3000, 'memory_bytes': 16}))
+    with pytest.raises(DataflowError, match='No verified host'):
+        scheduler.place_hosts([(too_big, work)])
+    with pytest.raises(DataflowError, match='memory budget'):
+        scheduler.place_hosts([(stage, work), (stage, make_work(resident=500))])
+    assert scheduler.place_hosts([(stage, work)]) == {work.operation_id: 'one'}
+    assert not scheduler._resources.applied and not scheduler.leases
+
+
+@pytest.mark.parametrize('failure', ['before_accept', 'after_accept', 'second_activate'])
+def test_partial_group_launch_retires_original_workers(tmp_path, monkeypatch, failure):
+    from demiflow import data
+    from demiflow.resources.manager import ResourceManager
+    resolve = API.resolve_runtime_policy
+
+    def policy(*args, **kwargs):
+        policy, bounds = resolve(*args, **kwargs)
+        return replace(policy, default_partitions=8, max_replicas=8), bounds
+
+    monkeypatch.setattr(API, 'resolve_runtime_policy', policy)
+
+    starts, activated = [], []
+    original_apply = ResourceManager.apply
+    original_prepare = E.DataflowExecution._prepare_launch
+    original_activate = E.DataflowExecution._activate
+
+    def prepare(execution, lease, stage):
+        staged = original_prepare(execution, lease, stage)
+        starts.append((execution, staged))
+        return staged
+
+    def apply(resources, context, plan):
+        if len(plan.desired_workers) == 2 and failure != 'second_activate':
+            if failure == 'after_accept':
+                original_apply(resources, context, plan)
+            # Interrupt the phase without offering driver-level retries.
+            raise KeyboardInterrupt('second worker interrupted')
+        return original_apply(resources, context, plan)
+
+    def activate(execution, lease, stage):
+        if failure == 'second_activate' and activated:
+            raise KeyboardInterrupt('second worker interrupted')
+        activated.append(lease.allocation_id)
+        return original_activate(execution, lease, stage)
+
+    monkeypatch.setattr(E.DataflowExecution, '_prepare_launch', prepare)
+    monkeypatch.setattr(E.DataflowExecution, '_activate', activate)
+    monkeypatch.setattr(ResourceManager, 'apply', apply)
+    with pytest.raises(KeyboardInterrupt, match='second worker'):
+        with RunContext.start(tmp_path/'run') as run, data.local_execution(workers=2):
+            data.from_items([{'n': n} for n in range(8)]).map(lambda row: {'n': row['n'] + 1}).take_all()
+    assert len(starts) == 2
+    assert activated == ([starts[0][1].allocation_id] if failure == 'second_activate' else [])
+    execution = starts[0][0]
+    assert execution._scheduler.physical_exit_confirmed
+    connector = execution._services.resources.provider._control
+    assert not connector._staged
+    # Inspect the actual journal after the owning context closes.
+    import sqlite3
+    with sqlite3.connect(str(run.journal.path)) as db:
+        rows = dict(db.execute("SELECT allocation_id,cleanup FROM resource_allocations"))
+    assert rows == {lease.allocation_id: 'CONFIRMED' for _, lease in
+                    (starts[:1] if failure == 'before_accept' else starts)}

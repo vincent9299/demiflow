@@ -375,7 +375,7 @@ def read_document(ref, store, bounds, *, services=None, retained=0, _maximum=Non
     maximum = document_limit(bounds) if _maximum is None else min(_maximum, line_limit(bounds))
     if type(size) is not int or not 0 <= size <= maximum:
         _fail('stored document exceeds frame byte bound')
-    from .dataflow_store import RunArtifactStore
+    from .storage.objects import RunArtifactStore
     chunk_size = min(size, read_chunk_bytes(bounds, services)) if isinstance(store, RunArtifactStore) else size
     _admit(retained + 2 * size + 2 * chunk_size + 512, resident_limit(bounds, services))
     options = {'chunk_bytes':max(1, chunk_size)} if isinstance(store, RunArtifactStore) else {}

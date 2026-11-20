@@ -29,6 +29,7 @@ from demiflow.execution.contracts.dataflow import (
 from demiflow.execution.contracts.dataflow_codec import compute_physical_digest
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.resources.contracts import ResourceProfile
+from .dataflow_policy import gpu_count
 
 _RECOVERY_STRENGTH = {"attempt_only": 0, "delivery_only": 1, "final_commit": 2, "checkpoint": 3}
 _RECOVERY_NAME = {value: key for key, value in _RECOVERY_STRENGTH.items()}
@@ -79,14 +80,6 @@ def _topo_order(graph: DataflowGraph) -> list[str]:
     if len(result) != len(graph.nodes):
         raise _error("INVALID_CONTRACT", "graph contains a cycle")
     return result
-
-
-def _gpu_count(profile: ResourceProfile) -> int:
-    total = 0
-    for item in profile.requests.get("accelerators", []):
-        if item.get("type") == "gpu":
-            total += int(item.get("count", 0))
-    return total
 
 
 def _isolation_tokens(profile: ResourceProfile) -> tuple[str, ...]:
@@ -523,7 +516,7 @@ def solve_residency(
         count = lambda s: min(len(s.partitions), s.replica_target) if len(group) == 1 else len(s.partitions)
         cpu_needed = sum(s.profile.requests["cpu_millis"] * count(s) for s in group)
         memory_needed = sum(s.profile.requests["memory_bytes"] * count(s) for s in group)
-        gpu_needed = sum(_gpu_count(s.profile) * count(s) for s in group)
+        gpu_needed = sum(gpu_count(s.profile) * count(s) for s in group)
         for stage in group:
             isolation.update(_isolation_tokens(stage.profile))
         if cpu_needed > cpu_capacity:

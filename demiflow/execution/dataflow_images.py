@@ -59,7 +59,7 @@ def bind_image_sinks(graph, *, services, sinks):
 
 
 def stage_image(service, journal, command, request):
-    from .dataflow_seal import _artifact_from_json
+    from .seal.plan import _artifact_from_json
     from ..operator_llm.media import store_image, media_limits
     options = getattr(service, '_image_declarations', {}).get(command.node_id)
     if options is None or set(request) != {'image_ref'}:

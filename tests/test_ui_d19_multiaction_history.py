@@ -37,8 +37,8 @@ def run(*, source, target):
 
 def _assert_imports():
     import demiflow
-    import demiflow.execution.dataflow as runtime
-    import demiflow.execution.dataflow_seal as seals
+    import demiflow.execution.action_driver.dataflow as runtime
+    import demiflow.execution.seal.plan as seals
     imports = {}
     for module in (demiflow, runtime, seals, runs, view, model):
         path = Path(module.__file__).resolve()
@@ -103,7 +103,7 @@ def _verify_history(root, finished, imports, tmp_path):
     """Read the same real run repeatedly while diagnosing consumer assertions."""
     run_id, attempt = finished['run_id'], finished['attempt']
     target = runs.directory(root, run_id)
-    for relative in ('demiflow/execution/dataflow.py', 'demiflow/execution/dataflow_seal.py'):
+    for relative in ('demiflow/execution/action_driver/dataflow.py', 'demiflow/execution/seal/plan.py'):
         assert _digest(target / 'runtime' / relative) == _digest(TREE / relative)
     graph = model.get(root, basis_kind='run', run_id=run_id, attempt=attempt)
     assert graph['report_digest'] != graph['binding']['basis_digest']

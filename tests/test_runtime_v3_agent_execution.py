@@ -43,7 +43,7 @@ def test_codex_native_callback_uses_driver_request_journal(tmp_path, app_server,
 
 @pytest.mark.parametrize('unknown', [False, True])
 def test_codex_native_response_resume_before_first_cut(tmp_path, app_server, resource, monkeypatch, unknown):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.run_journal import RunJournal
     from demiflow.operator_llm.journal import UncertainPromptCall
     if unknown:

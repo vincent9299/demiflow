@@ -114,3 +114,69 @@ def test_standalone_search_run_stream_retains_native_metrics(tmp_path, engines, 
     assert stats.emitted == 1
     assert stats.metrics['resources']['WebSession:0']['search_http_requests'] == 1
     assert len(server[1]) == 1 and session.native is None
+
+
+@pytest.mark.asyncio
+async def test_stream_actor_late_binding_reuses_original_row_fact(tmp_path, engines, server):
+    from demiflow.collect.operators import SearchWeb
+    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.row_scope import RowScope, set_row_scope
+    from demiflow.execution.stream_resources import StreamResources
+
+    session = _session(tmp_path, engines)
+    actor = SearchWeb('queries', 'found', session, None, 5, 2)
+    row = {'queries': [{'query': 'oak'}, {'query': 'pine'}]}
+    with RunContext.start(tmp_path / 'legacy-run') as run, run.action({'kind': 'stream'}) as parent:
+        # In the legacy stream, resources start before restore_stages binds node IDs.
+        resources = StreamResources([actor])
+        await resources.prepare()
+        try:
+            actor.bind_execution(run, 'stream-node')
+            set_row_scope(RowScope('original-occurrence'))
+            first = await actor(row)
+            assert await actor(row) == first
+            assert [entry['query'] for entry in first['found']] == ['oak', 'pine']
+            assert len(server[1]) == 2
+            key = identity([parent.action_id, 'stream-node', 'original-occurrence', 'search'])
+            fact, = run.journal.execution_commits(key)
+            assert fact['status'] == 'acked'
+            assert fact['prepared']['sinks']['search']['row'] == first
+            with run.journal._connection() as db:
+                assert db.execute("SELECT consumed FROM runtime_budgets WHERE name='requests'").fetchone()[0] == 2
+        finally:
+            set_row_scope(None)
+            await resources.close()
+        parent.complete({'rows': 1})
+    assert session.native is None and session.connections.closed
+
+
+def test_ordinary_stream_lifecycle_does_not_import_http_client():
+    import subprocess
+    import sys
+    import textwrap
+
+    probe = textwrap.dedent("""
+        import sys
+        sys.modules['httpx'] = None
+        from demiflow import data
+        from demiflow.execution.stream import run_stream
+        from demiflow.execution.stream_resources import StreamResources
+
+        class Actor:
+            async def astart(self):
+                self.started = True
+            async def __call__(self, row):
+                assert self.started
+                return {'id': row['id'] + 1}
+
+        actor = Actor()
+        rows = [{'id': 1}]
+        plan = data.from_items(rows).map_async(actor, concurrency=1, queue_depth=1)._plan
+        seen = []
+        resources = StreamResources([actor])
+        stats = run_stream(iter(rows), plan, consume=seen.append,
+                           on_start=resources.prepare, on_close=resources.close)
+        assert stats.emitted == 1 and seen == [{'id': 2}], seen
+        assert 'demiflow.collect.operators' not in sys.modules
+    """)
+    subprocess.run([sys.executable, '-B', '-c', probe], check=True, timeout=30)

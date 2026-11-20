@@ -537,7 +537,7 @@ def merge_sort_runs(
         window.validate(services.bounds)
     if not runs:
         return
-    from ..dataflow_store import RunArtifactStore
+    from ..storage.objects import RunArtifactStore
     if isinstance(services.store, RunArtifactStore):
         store = services.store
         available = store.available_file_slots(maximum=services.bounds.max_open_files)

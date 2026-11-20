@@ -110,7 +110,7 @@ def test_async_none_list_and_business_miss_preserve_native_semantics(data):
 
 def test_materialize_consumer_does_not_append_business_operator(data, monkeypatch):
     ds = data.from_items([{"x": 1}]).map_async(lambda row: row)
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     original = DataflowExecution.prepare
     observed = []
 

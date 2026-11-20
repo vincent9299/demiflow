@@ -10,7 +10,7 @@ def test_real_ray_pack_and_old_image_recovery(tmp_path, monkeypatch, old_carrier
     ray = pytest.importorskip('ray')
     from demiflow import data
     from demiflow.data.api import _use_executor
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.executors.ray import RayDatasetExecutor
     from runtime_v3_support import _RayDataBlocker
     import test_runtime_v3_kernel_pack as proof

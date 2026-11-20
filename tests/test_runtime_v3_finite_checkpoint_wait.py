@@ -11,7 +11,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
@@ -20,7 +20,7 @@ from test_runtime_v3_ray_terminal_seams import private_ray_provider
 
 def _driver(monkeypatch, *, peers=1):
     clock = [0.0]
-    monkeypatch.setattr('demiflow.execution.dataflow.time.monotonic', lambda: clock[0])
+    monkeypatch.setattr('demiflow.execution.action_driver.dataflow.time.monotonic', lambda: clock[0])
     driver = object.__new__(DataflowExecution)
     driver._checkpoint_deadline = 60.0
     driver._clear_checkpoint_wait()

@@ -153,7 +153,7 @@ def test_runtime_resource_execution_is_honest_and_resume_fails_closed(tmp_path):
             with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 2}) as run:
                 reference = run.ref
                 # Interrupt the actual worker graph after a non-final native commit.
-                from demiflow.execution.dataflow import DataflowExecution
+                from demiflow.execution.action_driver.dataflow import DataflowExecution
                 original = DataflowExecution.pump
                 def interrupt(execution, **kwargs):
                     result = original(execution, **kwargs)

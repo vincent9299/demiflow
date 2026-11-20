@@ -27,7 +27,8 @@ def _entry(tmp_path):
 
 
 def _observe(monkeypatch):
-    from demiflow.execution import dataflow, dataflow_api
+    from demiflow.execution.action_driver import dataflow
+    from demiflow.execution import dataflow_api
     original = dataflow_api.execute_action
     observed = []
     def execute(request, *, policy, bounds):

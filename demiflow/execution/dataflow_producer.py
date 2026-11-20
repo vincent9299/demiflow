@@ -50,7 +50,6 @@ class NativeProducerService(NativeAcquisitionService):
         self._mode = 'producer'
         self._unit = None
         self._source_eoi = False
-        self._restore_image = None
         self._rows = None
         self._state = 'configured'
         return self._binding
@@ -70,10 +69,11 @@ class NativeProducerService(NativeAcquisitionService):
         return bool(self._action.context.resuming and self._prior_binding == asdict(self._binding)
                     and not self._action.context.journal.execution_commits(self.action_id))
 
-    def start(self):
-        super().start()  # native astart reconciles native pending publish receipts first
+    def start(self, *, recovery_image=None, residency=None, queue_state=None):
+        # Reconcile the native pending publications before comparing source frontiers.
+        super().start(recovery_image=recovery_image, queue_state=queue_state)
         if self._action.context.resuming:
-            cursors = self._restore_image.source_vector if self._restore_image is not None else ()
+            cursors = recovery_image.source_vector if recovery_image is not None else ()
             if len(cursors) > 1:
                 raise DataflowError('INCOMPATIBLE_HISTORY', 'Producer checkpoint has multiple source owners')
             offset = thaw_record_value(cursors[0].offset) if cursors else {}
@@ -94,7 +94,7 @@ class NativeProducerService(NativeAcquisitionService):
                             'producer-unit', self._binding.generation, descriptor['position']])
                         or descriptor['next_cursor'] != offset.get('producer_cursor')):
                     raise DataflowError('INCOMPATIBLE_HISTORY', 'Producer cursor lost its native unit ownership')
-            residency = getattr(self, '_restore_residency', None) or {}
+            residency = residency or {}
             pending = any(not entry['consumed'] for entry in residency.get('deliveries', {}).values())
             if position > native_position or pending:
                 if descriptor is None or cursors[0].end_of_input:

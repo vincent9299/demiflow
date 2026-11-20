@@ -133,7 +133,7 @@ def test_prompt_run_budget_is_atomic_before_second_http(tmp_path, native_server)
 
 
 def test_prompt_partial_checkpoint_resume_does_not_resend(tmp_path, native_server, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     class Interrupted(Exception):
         pass
     def pipeline():

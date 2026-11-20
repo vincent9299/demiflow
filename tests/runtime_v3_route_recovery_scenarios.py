@@ -117,8 +117,8 @@ def _kill_owned_worker(execution,fx):
 
 
 def _recover(fx,name,build,*,eligible=None,workers=8,first_run=None,parked=False):
-    from demiflow.execution.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.contracts.dataflow import thaw_record_value
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.run_context import RunContext
@@ -157,12 +157,12 @@ def _recover(fx,name,build,*,eligible=None,workers=8,first_run=None,parked=False
             events.append({'kind':event.kind,'attempt':event.attempt,'allocation_id':event.allocation_id,
                            'boot_id':event.boot_id,'payload':value,'row':row})
         durable = execution._durable_residency if parked else None
-        stored = (durable.entries.get(value['delivery_id'])
+        stored = (execution._exchange._parked.get(value['delivery_id'])
                   if event.kind=='data' and durable is not None else None)
-        if event.kind=='data' and not duplicates and (stored is not None if parked else value['delivery_id'] in execution._deliveries):
+        if event.kind=='data' and not duplicates and (stored is not None if parked else value['delivery_id'] in execution._exchange._inflight):
             from copy import deepcopy
-            before=dict(execution._deliveries)
-            retained=deepcopy(durable.entries) if durable is not None else None
+            before=dict(execution._exchange._inflight)
+            retained=deepcopy(execution._exchange._parked) if durable is not None else None
             counters=(execution._confirmed_rows,execution._terminal_seen)
             action=execution.request.action
             prefix=action.context.journal.execution_commits(action.action_id)
@@ -173,8 +173,8 @@ def _recover(fx,name,build,*,eligible=None,workers=8,first_run=None,parked=False
             try:handle(execution,event)
             except DataflowError as error:
                 assert error.code=='INVALID_CONTRACT' and 'duplicate' in str(error)
-                assert execution._deliveries==before
-                assert durable is None or durable.entries==retained
+                assert execution._exchange._inflight==before
+                assert durable is None or execution._exchange._parked==retained
                 assert (execution._confirmed_rows,execution._terminal_seen)==counters
                 assert action.context.journal.execution_commits(action.action_id)==prefix
                 duplicates.append({'delivery_id':value['delivery_id'],'error':str(error),
@@ -385,7 +385,7 @@ def _first_native_action(fx,dataset,run,routing,evidence):
     scheduler. Resume must consume exactly this plan and an original ACK.
     """
     from dataclasses import replace
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.dataflow_api import make_action_request
     from demiflow.execution.dataflow_services import make_driver_services
     from demiflow.execution.run_context import RunContext
@@ -393,7 +393,7 @@ def _first_native_action(fx,dataset,run,routing,evidence):
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     from demiflow.planning.dataflow_place import (compile_physical_dataflow,validate_physical_dataflow,
         solve_residency)
-    from demiflow.execution.dataflow_seal import (stage_dataflow_programs,resolve_execution_constants,seal_dataflow)
+    from demiflow.execution.seal.plan import (stage_dataflow_programs,resolve_execution_constants,seal_dataflow)
     from demiflow.execution.dataflow_sources import snapshot_source,plan_source_splits
     from demiflow.execution.dataflow_artifacts import stage_runtime_bundle
     from demiflow.execution.contracts.dataflow_codec import compute_physical_digest

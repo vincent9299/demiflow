@@ -5,8 +5,8 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.dataflow import DataflowExecution
-from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+from demiflow.execution.action_driver.dataflow import DataflowExecution
+from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
 
 
 def test_completed_overwrite_replay_uses_original_receipt_after_newer_head(tmp_path, monkeypatch):

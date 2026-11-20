@@ -7,7 +7,7 @@ import pytest
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.contracts.dataflow import ArtifactRef
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_gc import collect_published_orphans
+from demiflow.execution.storage.gc import collect_published_orphans
 from demiflow.execution.dataflow_segments import (
     SegmentForest, RECORDS_MEDIA, block_chunks, tree_refs,
 )

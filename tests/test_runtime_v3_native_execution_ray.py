@@ -8,7 +8,7 @@ import pytest
 import pyarrow as pa
 
 from demiflow.data.api import DataAPI
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.executors.ray import RayDatasetExecutor
 from demiflow.execution.dataset_native import execute
 from demiflow.execution.run_context import RunContext

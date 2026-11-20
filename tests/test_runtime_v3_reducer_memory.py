@@ -21,7 +21,7 @@ def _flow(reducer,initial,*,region):
 
 
 def test_large_initial_is_admitted_before_copy_on_general_and_region_paths(tmp_path,monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     state_bytes=256*1024
     for region in (False,True):
         for memory in (1024*1024,4*1024*1024):

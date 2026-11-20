@@ -18,7 +18,7 @@ def test_empty_relational_scope_has_real_zero_row_completion(tmp_path, how):
 
 
 def test_five_joins_share_the_run_spill_budget_and_preserve_multiplicity(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     plans = []
     start = DataflowExecution.start
     def observe(execution):

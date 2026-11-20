@@ -296,7 +296,7 @@ def test_real_ray_terminal_acks_use_bounded_batch_rpcs(tmp_path, monkeypatch, pr
 @pytest.mark.parametrize('fault', ['early_close', 'read_error'])
 def test_actual_process_terminal_partial_read_and_error_release_workers(tmp_path, monkeypatch, fault):
     from demiflow.data.api import DataAPI
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.executors.local import LocalDatasetExecutor
     from demiflow.execution.local_kernel import LocalKernelOptions
     from demiflow.execution.run_context import RunContext

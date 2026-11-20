@@ -4,7 +4,7 @@ from ..dataflow_records import clone_record
 
 from ..contracts.dataflow import thaw_record_value
 from ..contracts.dataflow_errors import DataflowError
-from ..dataflow_seal import load_sealed_dataflow
+from ..seal.plan import load_sealed_dataflow
 from ..record_schema import RecordSchemas
 from .dataflow import _materialize_row, _output_record, _hash_id, _OutputBudget
 from .ordering import build_sort_runs, merge_sort_runs

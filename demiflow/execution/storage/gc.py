@@ -11,10 +11,10 @@ import os
 import stat
 import time
 
-from .contracts.dataflow import ArtifactRef
-from .contracts.dataflow_errors import DataflowError
-from .dataflow_object_lease import exclusive_access, exclusive_here, journal_identity
-from .dataflow_store import RunArtifactStore, _no_symlink, _sync_directory
+from ..contracts.dataflow import ArtifactRef
+from ..contracts.dataflow_errors import DataflowError
+from .lease import exclusive_access, exclusive_here, journal_identity
+from .objects import RunArtifactStore, _no_symlink, _sync_directory
 
 
 class UnprovenGC(Exception):
@@ -26,7 +26,7 @@ def _fault(point):
 
 
 def gc_paths(journal, item):
-    from .recovery_contract import identifier
+    from ..recovery_contract import identifier
     for name in ('store_id', 'digest', 'gc_id'):
         identifier(item[name])
     root = journal.directory / '.dataflow-store' / item['store_id']
@@ -242,14 +242,14 @@ class _Trace:
                     if len(self.states) >= self.maximum:
                         raise UnprovenGC('State carriers exceed trace budget')
                     self.states.add(path)
-                    from .artifact_manifest import _read
+                    from ..artifact_manifest import _read
                     raw = _read(self.journal.directory / path,
                                 min(self.bounds.max_state_bytes,self.bounds.max_resident_bytes//32),
                                 size=value['bytes'], digest=value['sha256'])
                     self.check(len(raw))
                     self.value(self.decode(raw), depth + 1)
             if value.get('format') == 'paged-artifacts-v1':
-                from .artifact_manifest import manifest_pages
+                from ..artifact_manifest import manifest_pages
                 for _, page in manifest_pages(self.journal.directory, value, maximum=self.maximum):
                     self.value(page, depth + 1)
             for field in ('data_b64', 'typed_result'):
@@ -339,7 +339,7 @@ class _Trace:
             store = RunArtifactStore(root=self.journal.directory / '.dataflow-store',
                 store_id=ref.store_id, journal=None, bounds=self.bounds, readonly=True)
             media = ref.media_type
-            from .dataflow_kernel_pack import PACK_MEDIA, iter_kernel_images
+            from ..dataflow_kernel_pack import PACK_MEDIA, iter_kernel_images
             if media == PACK_MEDIA:
                 self.check(ref.size_bytes)
                 for _, raw in iter_kernel_images(store, ref, self.bounds):
@@ -436,7 +436,7 @@ def _collect(journal, fence, *, bounds, max_objects=64, deadline=None):
                     after = (store_id,digest)
                     if after in protected or charge_id is None:
                         continue
-                    from .recovery_contract import identifier
+                    from ..recovery_contract import identifier
                     identifier(store_id)
                     if len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest):
                         raise UnprovenGC('GC object registry has an invalid digest')

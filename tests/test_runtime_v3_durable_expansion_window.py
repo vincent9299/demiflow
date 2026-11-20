@@ -22,7 +22,7 @@ def pipeline():
 def test_two_outputs_park_and_resume_before_single_row_consumer(tmp_path, monkeypatch, interrupt):
     from dataclasses import replace
     from demiflow.execution import dataflow_api
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     # This is the existing compiler's declared unfused mode, not a replacement
     # kernel or scheduler. A fused pure pipeline would never cross this seam.
     resolve = dataflow_api.resolve_action_runtime

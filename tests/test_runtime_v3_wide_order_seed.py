@@ -34,7 +34,7 @@ def test_noncommutative_fold_preserves_numeric_source_order(tmp_path):
 
 
 def test_generated_shuffle_seed_is_consumed_from_sealed_constants(tmp_path, monkeypatch):
-    from demiflow.execution import dataflow_seal
+    from demiflow.execution.seal import plan as dataflow_seal
     calls = []
     generate = dataflow_seal._generate_constants
     def observe(graph):

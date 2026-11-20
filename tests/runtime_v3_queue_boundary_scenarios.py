@@ -111,7 +111,7 @@ def run_boundaries(root, base, calls):
             expired.append(delivery.task_id)
         return result
     with pytest.MonkeyPatch.context() as patch:
-        from demiflow.execution.dataflow import DataflowExecution
+        from demiflow.execution.action_driver.dataflow import DataflowExecution
         start = DataflowExecution.start
         def start_with_external_deadline_fault(execution):
             execution.prepare()  # seal the genuine, unchanged sink program first

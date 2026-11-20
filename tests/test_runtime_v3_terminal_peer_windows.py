@@ -1,12 +1,11 @@
 """Actual peer sockets through the original terminal decoder and ACK order."""
-from collections import deque
 from types import SimpleNamespace
 import socket
 
 import pytest
 
 from demiflow.execution.contracts.dataflow import Record, thaw_record_value
-from demiflow.execution.dataflow import _OutputSubscription
+from demiflow.execution.dataflow_terminals import TerminalSubscription
 from demiflow.execution.exchange.dataflow_bridge import _encode_record_document
 from demiflow.execution.kernels.dataflow import _row_bytes
 from demiflow.execution.recovery_contract import identity
@@ -38,10 +37,13 @@ def test_terminal_honours_original_or_low_fd_peer_window(tmp_path, monkeypatch, 
         def ack(delivery_id):
             acked.append(delivery_id)
             peer.release(payloads[int(delivery_id)]['peer']['key'])
-        execution = SimpleNamespace(_replay=None, _terminal_queue=deque(payloads),
-            _bounds=bounds, _endpoints={}, _ack=ack)
-        records = _OutputSubscription(execution).read_admitted(max_records=3, deadline_ms=1000)
+        exchange = SimpleNamespace(terminal=lambda key, producer: None,
+                                   acknowledge=lambda key, receiver: ack(key))
+        subscription = TerminalSubscription(bounds, exchange, ())
+        for payload in payloads:
+            subscription.receive(payload, None)
+        records = subscription.read_admitted(max_records=3, deadline_ms=1000)
         assert [thaw_record_value(record.inline) for record in records] == [{'n': i} for i in range(3)]
-        assert acked == ['0', '1', '2'] and not execution._terminal_queue
+        assert acked == ['0', '1', '2'] and not subscription._queue
         assert len(connects) == expected_connections and all(c.fileno() == -1 for c in connects)
         assert not peer._buffers and peer._bytes == 0

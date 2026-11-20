@@ -4,7 +4,7 @@ The journal is real; the content-addressed store is the D lane's bounded unit
 fixture. Real workbench/browser coverage lives in execution_binding_browser.
 """
 from test_runtime_v3_d import ACTION, env, make_graph, make_physical, _stage_graph
-from demiflow.execution import dataflow_seal as seal
+from demiflow.execution.seal import plan as seal
 
 
 def test_first_seal_time_is_epoch_ms_and_reseal_preserves_every_identity(env, monkeypatch):

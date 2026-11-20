@@ -6,7 +6,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution import RunContext, current_run
-from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
 from demiflow.execution.run_journal import RunJournal
 
 

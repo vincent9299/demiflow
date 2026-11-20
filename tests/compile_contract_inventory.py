@@ -27,7 +27,7 @@ OPERATOR = 'execution/kernels/operator.py'
 TASK_SCOPE = 'execution/kernels/task_scope.py'
 BATCH_MEMBERSHIP = 'execution/dataflow_batch_membership.py'
 TERMINAL_BLOCKS = 'execution/worker/terminal_blocks.py'
-SEAL = 'execution/dataflow_seal.py'
+SEAL = 'execution/seal/plan.py'
 KINDS = 'execution/contracts/dataflow_kinds.py'
 API = 'execution/dataflow_api.py'
 SDK = 'data/dataset.py'
@@ -275,11 +275,27 @@ _GENERIC = {'FunctionType', 'BuiltinFunctionType', 'MethodWrapperType', 'Callabl
             'Mapping', 'SourcePlan', 'LogicalPlan'}
 
 
-def _classes_tested(relative, functions=None):
+def _imported_type_predicates(function, relative):
+    """Resolve local is_* predicates only when the dispatcher calls the imported name."""
+    nodes = list(ast.walk(function))
+    calls = {n.func.id for n in nodes if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    for node in nodes:
+        if not isinstance(node, ast.ImportFrom) or not node.level or not node.module:
+            continue
+        target = Path(relative).parents[node.level - 1] / (node.module.replace('.', '/') + '.py')
+        for alias in node.names:
+            if alias.name.startswith('is_') and (alias.asname or alias.name) in calls:
+                yield target, alias.name
+
+
+def _classes_tested(relative, functions=None, *, follow_predicates=False):
     found = set()
     for function in ast.walk(ast.parse(source(relative))):
         if not isinstance(function, ast.FunctionDef) or (functions and function.name not in functions):
             continue
+        if follow_predicates:
+            for target, predicate in _imported_type_predicates(function, relative):
+                found.update(_classes_tested(target, {predicate}))
         for node in ast.walk(function):
             candidates = []
             if isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'isinstance' and len(node.args) == 2:
@@ -299,7 +315,8 @@ def _classes_tested(relative, functions=None):
 
 def class_dispatch():
     return {
-        'execution.native_model_declaration': _classes_tested(NATIVE_DECLARATION, {'native_model_declaration'}),
+        'execution.native_model_declaration': _classes_tested(
+            NATIVE_DECLARATION, {'native_model_declaration'}, follow_predicates=True),
         'execution.plan_facts': _classes_tested(PLAN_FACTS, {'operation_facts', 'operation_capability'}),
         'planning.compiler': _classes_tested(COMPILER),
         'planning.legacy_traits': _classes_tested(LEGACY_TRAITS),

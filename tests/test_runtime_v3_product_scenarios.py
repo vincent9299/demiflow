@@ -39,14 +39,14 @@ def run(*, source, target):
         lambda p: p.update(candidate_project_digest='0'*64),
         lambda p: p['plans'][0].update(plan_id='0'*64),
         lambda p: p['outputs'][0]['receipt'].update(committed_version=99),
-        lambda p: p['candidate_sources'].update({'execution/dataflow.py':'0'*64}),
+        lambda p: p['candidate_sources'].update({'execution/action_driver/dataflow.py':'0'*64}),
     ]
     for alter in alterations:
         changed = copy.deepcopy(proof); alter(changed)
         with pytest.raises((AssertionError, ValueError, FileNotFoundError)):
             gate(dict(original_native_execution_evidence=[changed]))
     # A valid looking proof cannot mask modified sealed code on disk either.
-    sealed = root/'.forge/runs'/result['run_id']/'runtime/demiflow/execution/dataflow.py'
+    sealed = root/'.forge/runs'/result['run_id']/'runtime/demiflow/execution/action_driver/dataflow.py'
     original = sealed.read_bytes(); mode = sealed.stat().st_mode
     try:
         sealed.chmod(0o600); sealed.write_bytes(original+b'\n# owned negative fixture\n')

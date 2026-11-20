@@ -5,9 +5,8 @@ from dataclasses import asdict
 from .contracts.dataflow import QueueBinding, QueueReply
 from .contracts.dataflow_errors import DataflowError
 from .dataflow_acquisition_call import AcquisitionCall
-from .dataflow_search_runtime import SearchRuntime
+from .dataflow_search_runtime import SearchEffects, SearchRuntime
 from .recovery_contract import identity
-from .row_scope import RowScope
 
 
 class NativeSearchCall(AcquisitionCall):
@@ -39,7 +38,7 @@ def _search_actors(source, plan, bounds):
             target = getattr(getattr(operation, 'callable', None), 'target', None)
             actor = getattr(target, '__self__', target)
             if type(actor) is SearchWeb:
-                if actor.io is not None or actor._session_lease is not None:
+                if actor.started:
                     raise DataflowError('INVALID_CONTRACT', 'Native search requires an unstarted actor')
                 actors[identity(actor.recovery_identity())] = actor
             pending.extend((binding.source, binding.plan) for binding in
@@ -55,16 +54,21 @@ class NativeSearchOperations:
     def configure_searches(self, source, plan, graph):
         actors = _search_actors(source, plan, self._services.bounds)
         self._searches = {}
+        effects = {}
+        producer = self._fetch if self._mode == 'producer' else None
         for node in graph.nodes:
             if node.kernel.configuration.get('native_operation') != 'search':
                 continue
             key = node.kernel.configuration['native_key']
             if key not in actors:
                 raise DataflowError('INVALID_CONTRACT', 'Search occurrence has no matching native declaration')
-            self._searches[node.occurrence_id] = copy(actors[key])
+            actor = actors[key]
+            self._searches[node.occurrence_id] = copy(actor)
+            effects[node.occurrence_id] = SearchEffects.for_actor(self._action, actor, node.occurrence_id,
+                                                                 producer=producer)
         if not self._searches:
             raise DataflowError('INVALID_CONTRACT', 'Search authority requires a declared search occurrence')
-        self._search_runtime = SearchRuntime(self._action, self._services.bounds.max_nodes)
+        self._search_runtime = SearchRuntime(self._action, self._services.bounds.max_nodes, effects)
         if self._binding is None:
             self._mode = 'native_search'
             self._binding = QueueBinding(self.action_id, None, self._mode,
@@ -97,14 +101,11 @@ class NativeSearchOperations:
         row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
         self._admit_io()
         try:
-            result = self._run_io(self._search_runtime.call(actor, command, row),
-                                  timeout_s=self._services.bounds.timeout_ms / 1000)
+            result, read_proofs = self._run_io(self._search_runtime.call(actor, command, row),
+                                               timeout_s=self._services.bounds.timeout_ms / 1000)
         finally:
             self._release_io()
-        def facts():
-            action = actor._action(RowScope(command.record_id))
-            return action.context.journal.execution_commits(action.action_id)
-        proofs = self._run_io(actor.io.run(facts), timeout_s=self._services.bounds.timeout_ms / 1000)
+        proofs = self._run_io(read_proofs(), timeout_s=self._services.bounds.timeout_ms / 1000)
         return self._confirmed(command, result, proofs)
 
     def _confirmed(self, command, result, proofs):

@@ -53,7 +53,7 @@ def test_early_terminal_completion_reports_actual_prefix_stop(tmp_path):
 
 def test_ready_identity_must_be_stable_and_nonnegative():
     # Explicit event-consumer component boundary; actual process execution above.
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     execution = DataflowExecution.__new__(DataflowExecution)
     lease = SimpleNamespace(stage_id='s', partition_ids=('p',))
@@ -79,7 +79,7 @@ def test_ready_identity_must_be_stable_and_nonnegative():
 
 
 def test_worker_identity_details_are_bounded_without_losing_exact_boot_count():
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     execution = DataflowExecution.__new__(DataflowExecution)
     lease = SimpleNamespace(stage_id='s', partition_ids=('p',))

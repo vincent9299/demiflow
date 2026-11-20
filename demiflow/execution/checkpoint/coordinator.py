@@ -20,19 +20,19 @@ from __future__ import annotations
 import threading
 import weakref
 
-from .commit import CommitCoordinator
-from .contracts.dataflow import (
+from ..commit import CommitCoordinator
+from ..contracts.dataflow import (
     ArtifactRef, CutContribution, CutRequest, PhysicalDataflow, RecoveryImage,
     SourceCursor,
 )
-from .contracts.dataflow_errors import DataflowError
-from .recovery_contract import (
+from ..contracts.dataflow_errors import DataflowError
+from ..recovery_contract import (
     MAX_SINKS, MAX_STATES, RecoveryContractError, UnresolvedCommit, SourcePosition, document,
     identifier, identity,
 )
-from .run_context import RunAction
-from .run_journal import ExecutionBudgetExceeded
-from .state_artifacts import StateArtifacts
+from ..run_context import RunAction
+from ..run_journal import ExecutionBudgetExceeded
+from ..state_artifacts import StateArtifacts
 
 # Reserved vector slot named by ARCHITECTURE §6. It is nested inside the
 # native-safe carrier below because native state identifiers forbid '.'.
@@ -64,7 +64,7 @@ def _artifact_from_json(value) -> ArtifactRef:
 
 
 def _cursor_json(cursor: SourceCursor) -> dict:
-    from .contracts.dataflow import thaw_record_value
+    from ..contracts.dataflow import thaw_record_value
     return {"split_id": cursor.split_id, "offset": thaw_record_value(cursor.offset),
             "next_sequence": cursor.next_sequence, "end_of_input": cursor.end_of_input,
             "lease_ref": _artifact_json(cursor.lease_ref) if cursor.lease_ref is not None else None,
@@ -98,7 +98,7 @@ def _cut_from_json(value) -> CutRequest:
 
 
 def _contribution_json(contribution: CutContribution) -> dict:
-    from .contracts.dataflow import thaw_record_value
+    from ..contracts.dataflow import thaw_record_value
     return {"cut_id": contribution.cut_id, "participant_id": contribution.participant_id,
             "boot_id": contribution.boot_id,
             "sources": [_cursor_json(c) for c in contribution.sources],
@@ -179,7 +179,7 @@ class DataflowCheckpointCoordinator:
             raise DataflowError("FENCED", "Checkpoint coordinator requires the live driver context")
         if not isinstance(physical, PhysicalDataflow):
             raise DataflowError("INVALID_CONTRACT", "Checkpoint coordinator requires a PhysicalDataflow")
-        from .contracts.dataflow_codec import compute_participant_id
+        from ..contracts.dataflow_codec import compute_participant_id
         participants = []
         for stage in physical.stages:
             for partition in stage.partitions:
@@ -241,13 +241,37 @@ class DataflowCheckpointCoordinator:
                 if cursor.end_of_input:
                     self._source_eoi[cursor.split_id] = True
 
-    def _sources_exhausted(self) -> bool:
+    def sources_exhausted(self) -> bool:
         # A zero-source (literal_empty) plan is trivially exhausted. Otherwise every
         # declared source split must have reported end_of_input.
         splits = {s.split_id for s in self._physical.splits}
         if not splits:
             return True
         return all(self._source_eoi.get(split, False) for split in splits)
+
+    def is_latest_image(self, image):
+        with self._lock:
+            return image is not None and image is self._last_image
+
+    def satisfied_splits(self):
+        return tuple(sorted(self._operator_complete))
+
+    def update_residency(self, cut: CutRequest, residency) -> None:
+        import copy
+        with self._lock:
+            self._check_open()
+            pending = self._pending.get(cut.cut_id)
+            if (pending is None or pending.request is not cut or pending.aborted
+                    or pending.residency is None):
+                raise DataflowError("FENCED", "residency update does not own an active parked cut")
+            document(residency, self._physical.bounds.max_state_bytes)
+            pending.residency = copy.deepcopy(residency)
+
+    def abort_pending(self, cut: CutRequest, *, reason: str) -> None:
+        with self._lock:
+            pending = self._pending.get(cut.cut_id)
+            if pending is not None and pending.request is cut:
+                self.abort(cut.cut_id, reason=reason)
 
     def observe_source_eoi(self, cursors):
         """Driver has authenticated the worker and exact split ownership first."""
@@ -360,7 +384,7 @@ class DataflowCheckpointCoordinator:
 
     # -- D004 -------------------------------------------------------------
     def commit(self, cut_id: str, *, sinks, native_queue_state=None) -> RecoveryImage:
-        from .dataflow_sinks import ack_source_claims, combine_prepared_sinks
+        from ..dataflow_sinks import ack_source_claims, combine_prepared_sinks
         with self._lock:
             self._check_open()
             pending = self._pending.get(cut_id)
@@ -416,7 +440,7 @@ class DataflowCheckpointCoordinator:
                 fact = self._commit.commit(request.sequence, outputs=outputs,
                                            position=position, states=states, acknowledge=None)
             except UnresolvedCommit as exc:
-                from .contracts.dataflow_errors import DataflowUnresolvedCommit
+                from ..contracts.dataflow_errors import DataflowUnresolvedCommit
                 if isinstance(exc, DataflowUnresolvedCommit):
                     raise
                 raise DataflowUnresolvedCommit(str(exc)) from exc
@@ -426,7 +450,7 @@ class DataflowCheckpointCoordinator:
                 raise DataflowError("INVALID_CONTRACT", str(exc)) from exc
             confirmed = {}
             for sink_id in sinks:
-                from .dataflow_images import row_preparation
+                from ..dataflow_images import row_preparation
                 prepared_sink = row_preparation(sinks[sink_id], fact["prepared"]["sinks"].get(sink_id))
                 if type(prepared_sink) is dict and "ref" in prepared_sink:
                     confirmed[sink_id] = _artifact_from_json(prepared_sink["ref"])
@@ -446,7 +470,7 @@ class DataflowCheckpointCoordinator:
     def _driver_services(self):
         # combine_prepared_sinks only needs the driver store; build the minimal
         # frozen service view without re-deriving any authority.
-        from .contracts.dataflow import DriverServices
+        from ..contracts.dataflow import DriverServices
         return DriverServices(action=self._action, journal_service=None, store=self._store,
                               resources=None, policy=self._physical.policy,
                               bounds=self._physical.bounds, hosts=(),
@@ -454,7 +478,7 @@ class DataflowCheckpointCoordinator:
 
     # -- D005 -------------------------------------------------------------
     def recover(self, *, sinks) -> RecoveryImage | None:
-        from .dataflow_sinks import ack_source_claims
+        from ..dataflow_sinks import ack_source_claims
         with self._lock:
             self._check_open()
             journal = self._action.context.journal
@@ -485,14 +509,14 @@ class DataflowCheckpointCoordinator:
             try:
                 self._commit.recover(sinks, acknowledge=None)
             except UnresolvedCommit as exc:
-                from .contracts.dataflow_errors import DataflowUnresolvedCommit
+                from ..contracts.dataflow_errors import DataflowUnresolvedCommit
                 if isinstance(exc, DataflowUnresolvedCommit):
                     raise
                 raise DataflowUnresolvedCommit(str(exc)) from exc
             except ExecutionBudgetExceeded:
                 raise
             except RecoveryContractError as exc:
-                from .contracts.dataflow_errors import DataflowRecoveryError
+                from ..contracts.dataflow_errors import DataflowRecoveryError
                 raise DataflowRecoveryError("UNKNOWN_EFFECT", str(exc)) from exc
             facts = journal.execution_commits(self._action.action_id)
             acked = [f for f in facts if f["status"] == "acked"
@@ -517,11 +541,11 @@ class DataflowCheckpointCoordinator:
                 if set(c.participant_id for c in contributions) != set(self._participants):
                     raise DataflowError("CORRUPT_ARTIFACT", "Recovered cut participant set differs")
             elif residency.get('schema') in ('demiflow.durable_residency.v1', 'demiflow.durable_residency.v2'):
-                from .dataflow_durable_residency import validate_recovered
+                from ..dataflow_durable_residency import validate_recovered
                 validate_recovered(self._physical, cut, contributions, residency,
                     facts=acked, artifacts=self._artifacts, current_commit=fact["commit_id"], store=self._store)
             else:
-                from .dataflow_residency import validate_recovered_residency
+                from ..dataflow_residency import validate_recovered_residency
                 validate_recovered_residency(self._physical, cut, contributions, residency,
                     facts=acked, artifacts=self._artifacts, current_commit=fact["commit_id"])
             self.residency = residency
@@ -532,7 +556,7 @@ class DataflowCheckpointCoordinator:
                 raise DataflowError("SOURCE_CHANGED", "Recovered source vector disagrees with contributions")
             confirmed = {}
             for sink_id in sinks:
-                from .dataflow_images import row_preparation
+                from ..dataflow_images import row_preparation
                 prepared_sink = row_preparation(sinks[sink_id], fact["prepared"]["sinks"].get(sink_id))
                 if type(prepared_sink) is dict and "ref" in prepared_sink:
                     confirmed[sink_id] = _artifact_from_json(prepared_sink["ref"])
@@ -548,7 +572,7 @@ class DataflowCheckpointCoordinator:
             return image
 
     def _recover_historical(self, sinks) -> RecoveryImage:
-        from .dataflow_history import (
+        from ..dataflow_history import (
             load_execution_version, translate_native_checkpoint,
             validate_resume_compatibility,
         )

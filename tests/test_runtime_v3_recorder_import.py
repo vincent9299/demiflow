@@ -21,7 +21,7 @@ if __name__ == '__main__':
         with _ExecuteActionRecorder() as recorder:
             with RunContext.start(Path(sys.argv[1]) / str(index)), data.local_execution():
                 assert data.from_items([{'n': index}]).count() == 1
-        import demiflow.execution.dataflow as core
+        import demiflow.execution.action_driver.dataflow as core
         import demiflow.execution.dataflow_api as api
         assert core.execute_action is api.execute_action
         seen.append(recorder)

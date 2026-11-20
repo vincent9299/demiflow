@@ -123,7 +123,7 @@ def test_routed_native_atomic_budget_layers(tmp_path, routed_server, scope, tota
 @pytest.mark.parametrize('provider', ['local', 'ray'])
 def test_routed_native_original_ack_resume(tmp_path, routed_server, monkeypatch, provider):
     from runtime_v3_residency_scenarios import _provider
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     if provider == 'ray':
         pytest.importorskip('ray')
     class Interrupted(Exception):
@@ -191,7 +191,7 @@ class _StatefulPredicate:
 
 
 def test_routed_mutable_predicate_cannot_claim_http_only_recovery(tmp_path, routed_server, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.recovery_contract import RecoveryContractError
     class Interrupted(Exception):

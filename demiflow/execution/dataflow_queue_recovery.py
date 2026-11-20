@@ -36,14 +36,14 @@ def _check_size(service, value):
         raise DataflowError('BUDGET_EXCEEDED', 'Native queue cut exceeds state/control budget')
 
 
-def restore_claims(service, value):
+def restore_claims(service, value, *, has_cut):
     source = service._source
     if source is None:
         if value is not None:
             raise DataflowError('INCOMPATIBLE_HISTORY', 'Queue cut belongs to a different source')
         return
     if value is None:
-        if getattr(service, '_restore_image', None) is not None:
+        if has_cut:
             raise DataflowError('INCOMPATIBLE_HISTORY', 'Historical dataflow cut lacks native queue ownership references')
         return
     _check_size(service, value)

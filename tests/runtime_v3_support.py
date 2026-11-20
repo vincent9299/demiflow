@@ -95,36 +95,36 @@ SCENARIOS = load_scenarios()
 # the module lands). Presence of the module is NOT sufficient: the scenario then
 # really runs and really fails if the default path is not unified.
 SCENARIO_MODULES: dict[str, tuple[tuple[str, str], ...]] = {
-    "no_ray_data": (("demiflow.execution.dataflow", "E"), ("demiflow.data.dataset", "U")),
-    "api_matrix": (("demiflow.execution.dataflow", "E"), ("demiflow.data.dataset", "U")),
-    "shared_diamond": (("demiflow.execution.dataflow", "E"), ("demiflow.planning.dataflow_compile", "G")),
-    "incremental_first_row": (("demiflow.execution.dataflow", "E"), ("demiflow.execution.source_readers", "S")),
-    "three_exchange_modes": (("demiflow.execution.exchange.dataflow_channels", "X"), ("demiflow.execution.dataflow", "E")),
-    "cpu_gpu_isolation": (("demiflow.planning.dataflow_place", "P"), ("demiflow.execution.dataflow", "E")),
-    "fairness_deadlock": (("demiflow.execution.dataflow_scheduler", "E"), ("demiflow.execution.dataflow", "E")),
-    "relational_semantics": (("demiflow.execution.kernels.relational", "K"), ("demiflow.execution.dataflow", "E")),
+    "no_ray_data": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.data.dataset", "U")),
+    "api_matrix": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.data.dataset", "U")),
+    "shared_diamond": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.planning.dataflow_compile", "G")),
+    "incremental_first_row": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.execution.source_readers", "S")),
+    "three_exchange_modes": (("demiflow.execution.exchange.dataflow_channels", "X"), ("demiflow.execution.action_driver.dataflow", "E")),
+    "cpu_gpu_isolation": (("demiflow.planning.dataflow_place", "P"), ("demiflow.execution.action_driver.dataflow", "E")),
+    "fairness_deadlock": (("demiflow.execution.scheduler.placement", "E"), ("demiflow.execution.action_driver.dataflow", "E")),
+    "relational_semantics": (("demiflow.execution.kernels.relational", "K"), ("demiflow.execution.action_driver.dataflow", "E")),
     "sort_shuffle_aggregate": (("demiflow.execution.kernels.ordering", "K"), ("demiflow.execution.kernels.aggregate", "K")),
     "source_snapshots": (("demiflow.execution.source_readers", "S"), ("demiflow.execution.dataflow_sources", "S")),
-    "multiworker_barrier": (("demiflow.execution.dataflow_checkpoint", "D"), ("demiflow.execution.worker.dataflow_execution", "B")),
-    "route_recovery": (("demiflow.execution.exchange.dataflow_state", "X"), ("demiflow.execution.dataflow_checkpoint", "D")),
-    "commit_crash_matrix": (("demiflow.execution.dataflow_checkpoint", "D"), ("demiflow.execution.commit", "D")),
+    "multiworker_barrier": (("demiflow.execution.checkpoint.coordinator", "D"), ("demiflow.execution.worker.dataflow_execution", "B")),
+    "route_recovery": (("demiflow.execution.exchange.dataflow_state", "X"), ("demiflow.execution.checkpoint.coordinator", "D")),
+    "commit_crash_matrix": (("demiflow.execution.checkpoint.coordinator", "D"), ("demiflow.execution.commit", "D")),
     "model_effect_recovery": (("demiflow.execution.dataflow_models", "M"), ("demiflow.execution.dataflow_model_journal", "M")),
     "actor_state_lifecycle": (("demiflow.execution.kernels.operator", "K"), ("demiflow.execution.worker.runtime", "B")),
     "cache_materialize": (("demiflow.execution.dataflow_models", "M"), ("demiflow.execution.dataflow_handles", "T")),
     "queue_full_business": (("demiflow.execution.dataflow_queue", "Q"), ("demiflow.execution.queue_execution", "Q")),
-    "memory_peak": (("demiflow.execution.dataflow", "E"), ("demiflow.execution.payload_limits", "E")),
-    "disk_gc": (("demiflow.execution.exchange.dataflow_channels", "X"), ("demiflow.execution.dataflow_store", "H")),
+    "memory_peak": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.execution.payload_limits", "E")),
+    "disk_gc": (("demiflow.execution.exchange.dataflow_channels", "X"), ("demiflow.execution.storage.objects", "H")),
     "remote_journal": (("demiflow.execution.dataflow_authority", "H"), ("demiflow.execution.worker.dataflow_host", "H")),
-    "two_hosts": (("demiflow.execution.dataflow_hosts", "H"), ("demiflow.execution.dataflow_store", "H")),
-    "node_loss": (("demiflow.execution.dataflow_hosts", "H"), ("demiflow.execution.dataflow_checkpoint", "D")),
-    "driver_restart": (("demiflow.execution.dataflow_authority", "H"), ("demiflow.execution.dataflow", "E")),
+    "two_hosts": (("demiflow.execution.dataflow_hosts", "H"), ("demiflow.execution.storage.objects", "H")),
+    "node_loss": (("demiflow.execution.dataflow_hosts", "H"), ("demiflow.execution.checkpoint.coordinator", "D")),
+    "driver_restart": (("demiflow.execution.dataflow_authority", "H"), ("demiflow.execution.action_driver.dataflow", "E")),
     "history_identity": (("demiflow.execution.dataflow_history", "W"), ("demiflow.execution.recovery_identity", "W")),
     "workbench_real_plan": (("demiflow.workbench.runs.facts", "W"), ("demiflow.workbench.graph.model", "W")),
     "product_regression": (("demiflow.workbench.runs.manager", "W"), ("demiflow.workbench.graph.model", "W")),
-    "bounded_terminal": (("demiflow.execution.dataflow_terminals", "T"), ("demiflow.execution.dataflow", "E")),
-    "artifact_security": (("demiflow.execution.dataflow_artifacts", "H"), ("demiflow.execution.dataflow_store", "H")),
-    "performance": (("demiflow.execution.dataflow", "E"), ("demiflow.execution.dataflow_scheduler", "E")),
-    "all_regressions": (("demiflow.execution.dataflow", "E"),),
+    "bounded_terminal": (("demiflow.execution.dataflow_terminals", "T"), ("demiflow.execution.action_driver.dataflow", "E")),
+    "artifact_security": (("demiflow.execution.dataflow_artifacts", "H"), ("demiflow.execution.storage.objects", "H")),
+    "performance": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.execution.scheduler.placement", "E")),
+    "all_regressions": (("demiflow.execution.action_driver.dataflow", "E"),),
 }
 
 
@@ -355,7 +355,7 @@ class _ExecuteActionRecorder:
 
     def __enter__(self) -> "_ExecuteActionRecorder":
         try:
-            self._module = importlib.import_module("demiflow.execution.dataflow")
+            self._module = importlib.import_module("demiflow.execution.action_driver.dataflow")
         except ImportError:
             self._module = None
             return self
@@ -1032,7 +1032,7 @@ def _s_three_exchange_modes(fx: RuntimeV3Fixture, fault: str | None) -> dict[str
     from dataclasses import replace
     from pytest import MonkeyPatch
     from demiflow.execution import dataflow_api as api
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     resolve, prepare = api.resolve_runtime_policy, DataflowExecution.prepare
     observed, results = [], {}
     for mode in ('memory_incremental', 'durable_incremental', 'finite_sealed'):

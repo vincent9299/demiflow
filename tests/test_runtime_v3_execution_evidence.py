@@ -53,7 +53,7 @@ def test_nested_facade_invocations_get_separate_observation_identities(monkeypat
     # Counting-only component boundary, not a business acceptance substitute:
     # simulate a facade that itself calls the public facade again. This proves
     # identity sharing is limited to observer wrappers, not dynamic call scope.
-    from demiflow.execution import dataflow
+    from demiflow.execution.action_driver import dataflow
     from demiflow.execution import dataflow_api
     calls=[]
     request=SimpleNamespace(provider='local',kind='take',action=SimpleNamespace(action_id='action-1'))

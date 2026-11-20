@@ -23,7 +23,7 @@ def ray_credit_case():
     import tempfile
     from unittest.mock import patch
     from demiflow.data.api import _current_executor
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.dataflow_terminals import materialized_handle
     from demiflow.execution.dataflow_api import resolve_action_runtime
     from demiflow.execution.graph import _graph_action_request

@@ -186,7 +186,7 @@ def test_relational_drift_fail_closed_before_publication(tmp_path, monkeypatch):
     from dataclasses import asdict
     import cloudpickle
     import json
-    from demiflow.execution import dataflow_seal as sealing
+    from demiflow.execution.seal import plan as sealing
     from demiflow.execution.recovery_contract import document
     original = sealing._stage_one_program
     altered = []
@@ -229,7 +229,7 @@ def test_relational_drift_fail_closed_before_publication(tmp_path, monkeypatch):
 # --- Streamed layer-3: the sealed layout is really consumed -------------------
 
 def test_streamed_consumes_sealed_checkpoint_and_stage_limits(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.dataflow_hosts import _EndpointBase
     captured, assignments = [], []
     original = DataflowExecution.start
@@ -360,7 +360,7 @@ def test_pure_copy_consumes_sealed_native_plan(tmp_path):
 
 def test_code_pin_source_archive_survives_run_exit(tmp_path, monkeypatch):
     """Every pinned source remains readable after actual run-exit collection."""
-    from demiflow.execution.dataflow_seal import _artifact_from_json
+    from demiflow.execution.seal.plan import _artifact_from_json
     ds = relational_dataset()
     run_dir = tmp_path / "run"
     with RunContext.start(run_dir) as run:

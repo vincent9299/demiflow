@@ -51,7 +51,7 @@ def test_full_case_capture_is_one_real_action_with_shared_model_prefixes(case_mo
                           for name in ('concepts', 'images', 'relations')},
               'output_root': str(root), 'models': fixture.profiles('http://127.0.0.1:1/v1'),
               'execution_kind': 'fixture', 'max_concepts': 1}
-    from demiflow.execution import dataflow
+    from demiflow.execution.action_driver import dataflow
     def forbidden(*args, **kwargs): raise AssertionError('Preview attempted execution')
     monkeypatch.setattr(dataflow.DataflowExecution, 'start', forbidden)
     monkeypatch.setattr(dataflow, 'snapshot_source', forbidden)

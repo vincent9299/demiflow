@@ -1,7 +1,7 @@
 """Optional published-object GC cannot turn supervisor accounting into fencing."""
 import threading
 
-from demiflow.execution.dataflow_gc import _exclusive
+from demiflow.execution.storage.gc import _exclusive
 from demiflow.execution.run_journal import RunJournal, ExecutionConflict
 from test_runtime_v3_artifact_accounting import store_fixture
 
@@ -9,7 +9,7 @@ from test_runtime_v3_artifact_accounting import store_fixture
 def test_supervisor_waits_for_first_store_registration(tmp_path, monkeypatch):
     """Exercise the real writer's initial registration against usage polling."""
     import fcntl
-    import demiflow.execution.dataflow_object_lease as leases
+    import demiflow.execution.storage.lease as leases
     waiting, finished = threading.Event(), threading.Event()
     failures, observers = [], []
     record = leases.record_protocol
@@ -126,7 +126,7 @@ def test_contended_shared_wait_is_bounded_and_leaves_no_descriptor(tmp_path):
     import os
     import time
     import pytest
-    from demiflow.execution.dataflow_object_lease import shared_access
+    from demiflow.execution.storage.lease import shared_access
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     with store_fixture(tmp_path) as (run, store, port):
         store.close()
@@ -161,7 +161,7 @@ def test_contended_shared_wait_is_bounded_and_leaves_no_descriptor(tmp_path):
 def test_changed_protocol_during_wait_is_still_fenced(tmp_path, monkeypatch):
     import fcntl
     import json
-    from demiflow.execution.dataflow_object_lease import HEADER, shared_access
+    from demiflow.execution.storage.lease import HEADER, shared_access
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     with store_fixture(tmp_path) as (run, store, port):
         store.close()

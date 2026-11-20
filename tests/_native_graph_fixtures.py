@@ -6,7 +6,7 @@ from pathlib import Path
 from _native_receipt_fixtures import committed_rows
 from demiflow.execution.contracts.dataflow import ArtifactRef
 from demiflow.execution.contracts.dataflow_codec import compute_participant_id
-from demiflow.execution.dataflow_store import RunArtifactStore
+from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.recovery_contract import identity
 from demiflow.execution.sealed_plans import load_sealed_plan
 from demiflow.execution.state_artifacts import StateArtifacts

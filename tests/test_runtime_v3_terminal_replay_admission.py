@@ -26,7 +26,8 @@ def _fd_count(directory):
 
 @pytest.mark.parametrize('limited', [True, False])
 def test_final_ack_replay_admits_each_window_and_preserves_result(tmp_path, monkeypatch, limited):
-    from demiflow.execution import dataflow
+    from demiflow.execution.action_driver import dataflow
+    from demiflow.execution.dataflow_terminals import TerminalSubscription
     from demiflow.execution.exchange import dataflow_bridge
     rows = [{'i': i, 'payload': 'x' * 6000} for i in range(20)]
     source = tmp_path / 'input.jsonl'
@@ -39,7 +40,7 @@ def test_final_ack_replay_admits_each_window_and_preserves_result(tmp_path, monk
             previous = run.journal.execution_commits('action-1')
             raise InterruptedAfterAction()
     decoder = dataflow_bridge._decode_record_document
-    read = dataflow._OutputSubscription.read_admitted
+    read = TerminalSubscription.read_admitted
     decoded, windows, coexistence = [], [], []
     active = [None]
     def observe_decode(raw, **kwargs):
@@ -56,7 +57,7 @@ def test_final_ack_replay_admits_each_window_and_preserves_result(tmp_path, monk
         raise AssertionError('ACKed final result must not launch a worker')
     with monkeypatch.context() as patch:
         patch.setattr(dataflow_bridge, '_decode_record_document', observe_decode)
-        patch.setattr(dataflow._OutputSubscription, 'read_admitted', observe_read)
+        patch.setattr(TerminalSubscription, 'read_admitted', observe_read)
         patch.setattr(dataflow.DataflowExecution, '_launch_phase', forbidden_launch)
         def replay():
             with RunContext.resume(ref) as run, data.local_execution(workers=1,
@@ -97,7 +98,7 @@ def test_shared_source_respects_total_limit(tmp_path,limit,overflow):
 
 @pytest.mark.parametrize('count,overflow',[(4,False),(5,True)])
 def test_checkpoint_prefix_counts_toward_limit(tmp_path,monkeypatch,count,overflow):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.state_artifacts import StateArtifacts
     limits={'memory_bytes':40*1024,'max_batch_bytes':16*1024,'max_row_bytes':8*1024,'max_state_bytes':128*1024,'timeout_s':30,'checkpoint_rows':2,'checkpoint_interval_ms':60000,'max_output_rows':4}
     original=DataflowExecution._retire_phase;prefix=[]
@@ -132,10 +133,8 @@ def test_checkpoint_prefix_counts_toward_limit(tmp_path,monkeypatch,count,overfl
 @pytest.mark.parametrize('limit', [0, 1])
 def test_original_published_blocks_probe_limit_without_decoding_payload(tmp_path, monkeypatch, limit):
     """A read-level negative proof over real ACKed blocks, with no new commit."""
-    from collections import deque
-    from types import SimpleNamespace
-    from demiflow.execution import dataflow
-    from demiflow.execution.dataflow_replay import PublishedRecordReader
+    from demiflow.execution.action_driver import dataflow
+    from demiflow.execution.dataflow_terminals import TerminalSubscription
     from demiflow.execution.exchange import dataflow_bridge
     from demiflow.execution.run_journal import RunJournal
     captured = []
@@ -150,9 +149,8 @@ def test_original_published_blocks_probe_limit_without_decoding_payload(tmp_path
             assert data.from_items(rows).repartition(2).take_all() == rows
             before = run.journal.execution_commits('action-1')
     execution, publication = captured[-1]
-    replay = PublishedRecordReader(publication, store=execution._store, bounds=execution._bounds)
-    owner = SimpleNamespace(_replay=replay, _bounds=execution._bounds, _terminal_queue=deque())
-    subscription = dataflow._OutputSubscription(owner)
+    subscription = TerminalSubscription(execution._bounds, execution._exchange, ())
+    subscription.restore(publication, store=execution._store)
     decoded = []
     decode = dataflow_bridge._decode_record_document
     def observe(raw, **kwargs):

@@ -58,6 +58,13 @@ class StreamResources:
         return q
 
     async def prepare(self):
+        from ..collect.search_contract import is_native_search_actor
+        searches = {id(actor) for actor in self.actors if is_native_search_actor(actor)}
+        if searches:
+            from .dataflow_search_runtime import SearchEffects
+            from .queue_producer import QueueProducer
+            from .run_context import current_action
+            producer = next((a for a in self.actors if type(a) is QueueProducer), None)
         gates={id(gate):gate for actor in self.actors
                if (gate:=getattr(getattr(actor,'_runtime',None),'request_gate',None)) is not None}
         for gate in gates.values():
@@ -71,6 +78,9 @@ class StreamResources:
                 checked = current()
                 completed = False
                 try:
+                    if id(actor) in searches:
+                        effects = SearchEffects.for_actor(current_action(), actor, actor.node_id, producer=producer)
+                        actor.bind_search_effects(effects)
                     await begin()
                     completed = True
                 finally:

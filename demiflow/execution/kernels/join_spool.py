@@ -260,7 +260,7 @@ def join_pairs(left, right, *, left_keys, right_keys, how, services, bounded=Fal
     bounds = services.bounds
     if bounds.max_open_files < 2:
         raise _err('RESOURCE_INFEASIBLE', 'Join needs one scratch file and its owner lease')
-    from ..dataflow_store import RunArtifactStore
+    from ..storage.objects import RunArtifactStore
     if isinstance(services.store,RunArtifactStore):
         # One scratch extent, a streaming input record and a possible external
         # payload read coexist. Preserve the original same-store file authority.

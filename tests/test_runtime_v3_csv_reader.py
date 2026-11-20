@@ -11,7 +11,7 @@ import pytest
 from demiflow.data.sources import FileSource
 from demiflow.execution.contracts.dataflow import ProgramDeclaration
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_seal import _stage_one_program, verify_dataflow_program
+from demiflow.execution.seal.plan import _stage_one_program, verify_dataflow_program
 from demiflow.execution.recovery_contract import identity
 from test_runtime_v3_s import (FakeStore, drain, first_split, make_bounds,
                                make_services, make_snapshot, open_reader)

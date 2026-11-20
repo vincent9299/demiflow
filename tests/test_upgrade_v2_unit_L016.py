@@ -151,7 +151,7 @@ def test_actor_kill_stays_after_the_resource_terminal(ray_chain_facts):
 
 @pytest.mark.ray
 def test_local_and_ray_share_one_terminal_protocol(ray_chain_facts):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     assert type(ray_chain_facts['execution']) is DataflowExecution
     for name in ('run_local_chain', 'run_ray_chain'):
         fn = _function(name)
@@ -275,9 +275,9 @@ def _repair_owned_resource_terminal(execution):
 
 def _ray_failure(tmp_path, ray, *, mode, reference=None):
     """Inject one transport/provision fault; execute the real Ray chain driver."""
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.dataflow_hosts import RayHostEndpoint, DataflowRayConnector
-    from demiflow.execution.dataflow_scheduler import DataflowScheduler
+    from demiflow.execution.scheduler.placement import DataflowScheduler
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.resources.contracts import ResourceError
     from demiflow.resources.ray import RayResourceProvider

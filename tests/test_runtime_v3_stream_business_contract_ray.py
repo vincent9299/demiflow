@@ -37,7 +37,7 @@ def stream_owned_ray():
 
 @pytest.fixture
 def actual_ray_binding(stream_owned_ray, monkeypatch, tmp_path):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
 
     activations = []
     original = DataflowExecution._prepare_launch

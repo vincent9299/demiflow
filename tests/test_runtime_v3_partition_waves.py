@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.dataflow_terminals import materialized_handle
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.run_context import RunContext
@@ -89,7 +89,7 @@ def test_single_worker_partition_wave_resume_keeps_original_membership(graph_env
         # Every inherited participant must retain an actual earlier ACKed fact;
         # a forged "completed" partition may not be used to skip business work.
         from demiflow.execution.dataflow_durable_residency import validate_recovered
-        from demiflow.execution.dataflow_checkpoint import _cut_from_json, _contribution_from_json
+        from demiflow.execution.checkpoint.coordinator import _cut_from_json, _contribution_from_json
         from demiflow.execution.contracts.dataflow_errors import DataflowError
         value = states[-1]
         kwargs = dict(facts=after, artifacts=StateArtifacts(run), current_commit=after[-1]['commit_id'],
@@ -121,7 +121,7 @@ def test_explicit_graph_storage_is_sealed_and_not_silently_enlarged(graph_enviro
 
 @pytest.mark.parametrize('mode', ['finite_sealed', 'memory_incremental'])
 def test_graph_storage_remains_per_channel_under_original_aggregate_grant(graph_environment, monkeypatch, mode):
-    from demiflow.execution import dataflow
+    from demiflow.execution.action_driver import dataflow
     from demiflow.execution.sealed_plans import load_sealed_plan
     original, captures = dataflow.execute_action, []
     def capture(request, **kwargs):

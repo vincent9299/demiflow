@@ -4,7 +4,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 
 
 def test_sql_recovery_reuses_sealed_spool_after_database_changes(tmp_path, monkeypatch):

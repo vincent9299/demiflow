@@ -27,7 +27,7 @@ LEAVES = {'resources', '_compat'}    # import no other demiflow package
 # 'root' is the top-level modules of ``demiflow/`` (errors, objects, cli, ...).
 PRIVATE_IMPORT_BUDGET = {
     ('execution', 'data'): 7, ('execution', 'lance'): 10, ('workbench', 'resources'): 8,
-    ('execution', 'planning'): 7, ('execution', 'root'): 4, ('root', 'operator_llm'): 3,
+    ('execution', 'planning'): 5, ('execution', 'root'): 4, ('root', 'operator_llm'): 3,
     ('data', 'root'): 3, ('execution', 'operator_llm'): 3, ('execution', 'resources'): 3,
     ('workbench', 'execution'): 3, ('data', 'execution'): 2, ('execution', 'services'): 2,
     ('workbench', 'root'): 2, ('planning', 'execution'): 2, ('operator_llm', 'root'): 1,
@@ -54,7 +54,7 @@ P1_ASSEMBLY_IMPORTS = {
 # code on it without deciding that on purpose. Value: today's importers.
 PRE_V3_MODULES = {
     'demiflow.execution.chain': {
-        'demiflow.execution.dataflow_code', 'demiflow.execution.dataflow_seal',
+        'demiflow.execution.dataflow_code', 'demiflow.execution.seal.plan',
         'demiflow.execution.graph', 'demiflow.execution.kernels.task_scope',
         'demiflow.execution.native_plan', 'demiflow.execution.queue_chain',
         'demiflow.execution.worker.bootstrap', 'demiflow.execution.worker.execution',

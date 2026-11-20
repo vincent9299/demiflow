@@ -90,7 +90,7 @@ def _payload_bytes(event: WorkerEvent, bounds: "Bounds") -> None:
 def apply_artifact_command(action: "RunAction", command: ArtifactCommand, *, bounds: "Bounds") -> ArtifactReply:
     """Single pin/unpin/inspect/reserve_staging transaction shared by the driver
     port and the verified worker service (H074)."""
-    from .dataflow_store import ARTIFACT_STAGING_BUDGET
+    from .storage.objects import ARTIFACT_STAGING_BUDGET
     if command.kind not in _ARTIFACT_KINDS:
         raise DataflowError("INVALID_CONTRACT", "unknown artifact command kind")
     identifier(command.operation_id)
@@ -102,7 +102,7 @@ def apply_artifact_command(action: "RunAction", command: ArtifactCommand, *, bou
         # lease must already be held before either ownership or quota is recorded.
         if command.ref is not None or command.size_bytes <= 0:
             raise DataflowError('INVALID_CONTRACT', 'Begin requires a positive size without a ref')
-        from .dataflow_staging import staging_paths, inspect_held_owner
+        from .storage.staging import staging_paths, inspect_held_owner
         owner, _ = staging_paths(action.context.directory / '.dataflow-store', command.owner, command.operation_id)
         inode = inspect_held_owner(owner)
         charged = journal.begin_dataflow_staging(fence, command.operation_id, command.owner,
@@ -124,15 +124,15 @@ def apply_artifact_command(action: "RunAction", command: ArtifactCommand, *, bou
         ref = command.ref
         owned = journal.dataflow_staging_owner(fence, command.owner)
         if owned is not None:
-            from .dataflow_staging import staging_paths
-            from .dataflow_store import _no_symlink
+            from .storage.staging import staging_paths
+            from .storage.objects import _no_symlink
             _, pending = staging_paths(action.context.directory / '.dataflow-store', owned[0], command.owner)
             _no_symlink(pending)
             if pending.exists():
                 raise DataflowError('INVALID_CONTRACT', 'Settlement requires deletion of owned staging files')
             if command.kind == 'release_staging' and owned[3] is not None and not owned[4]:
                 from .contracts.dataflow import ArtifactRef
-                from .dataflow_store import RunArtifactStore
+                from .storage.objects import RunArtifactStore
                 proposed = ArtifactRef(**owned[3])
                 store = RunArtifactStore(root=action.context.directory / '.dataflow-store',
                     store_id=proposed.store_id, journal=None, bounds=bounds, readonly=True)
@@ -149,7 +149,7 @@ def apply_artifact_command(action: "RunAction", command: ArtifactCommand, *, bou
                 raise DataflowError('INVALID_CONTRACT', 'Settlement requires a durable artifact')
             if command.size_bytes != ref.size_bytes:
                 raise DataflowError('INVALID_CONTRACT', 'Settlement size differs from its artifact')
-            from .dataflow_store import RunArtifactStore
+            from .storage.objects import RunArtifactStore
             store = RunArtifactStore(root=action.context.directory / '.dataflow-store',
                 store_id=ref.store_id, journal=None, bounds=bounds, readonly=True)
             if not store.inspect(ref):
@@ -187,12 +187,15 @@ class DriverArtifactPort:
         self._action = action
         self._bounds = bounds
         if action.context.journal.pending_dataflow_gc():
-            from .dataflow_gc import recover_published_gc
+            from .storage.gc import recover_published_gc
             result = recover_published_gc(action.context.journal, action.context.fence)
             if result['blocked']:
                 raise DataflowError('UNKNOWN_EFFECT', result['blocked'])
-        from .dataflow_staging import recover_staging
+        from .storage.staging import recover_staging
         self.recovery = recover_staging(action, bounds=bounds)
+
+    def bind_bounds(self, bounds: "Bounds") -> None:
+        self._bounds = bounds
 
     def bind_store_lease(self, inode, *, fresh):
         return self._action.context.journal.bind_dataflow_gc_protocol(
@@ -202,7 +205,7 @@ class DriverArtifactPort:
         return self._action.context.journal.dataflow_gc_protocol()
 
     def reserve(self, operation_id: str, amounts: Mapping[str, int]) -> None:
-        from .dataflow_store import ARTIFACT_STAGING_BUDGET
+        from .storage.objects import ARTIFACT_STAGING_BUDGET
         identifier(operation_id)
         if type(amounts) is not dict or set(amounts) != {ARTIFACT_STAGING_BUDGET}:
             raise DataflowError("INVALID_CONTRACT", "driver port only admits artifact staging budget")
@@ -220,7 +223,7 @@ class DriverArtifactPort:
         # This method is deliberately absent from the worker RPC vocabulary.
         # Only a driver-created handle retains this port and its random owner.
         import hashlib
-        from .dataflow_store import _pin_identity
+        from .storage.objects import _pin_identity
         prefix = self._action.action_id + '-'
         suffix = owner[len(prefix):] if isinstance(owner, str) and owner.startswith(prefix) else ''
         if len(suffix) != 32 or any(char not in '0123456789abcdef' for char in suffix):
@@ -246,6 +249,7 @@ class DriverJournalService:
         self._closed = False
         self._native = None
         self._recovery_policy = None
+        self._stream_lance = None
         self._leases = {}
         self._worker_occurrences = {}
         self._native_action_id = None
@@ -309,6 +313,22 @@ class DriverJournalService:
             if writer is not None:
                 writer.close()
 
+    def bind_bounds(self, bounds: "Bounds") -> None:
+        """Bind the effective control window before admitting workers."""
+        self._bounds = bounds
+
+    def bind_stream_writer(self, writer) -> None:
+        if writer.action is not self._action:
+            raise DataflowError('FENCED', 'Stream writer belongs to another action')
+        if self._stream_lance is not None and self._stream_lance is not writer:
+            raise DataflowError('FENCED', 'Action already has a stream writer')
+        self._stream_lance = writer
+
+    def check_model_recovery(self) -> None:
+        if self._action.replaying and self._journal.source_binding(
+                self._action.action_id + '-native-model-journal') is not None:
+            self._native_journal().check_recovery()
+
     def bind_recovery_policy(self, policy):
         """Bind the authenticated physical policy before any worker can call."""
         from .contracts.dataflow import RuntimePolicy
@@ -337,6 +357,19 @@ class DriverJournalService:
                              (lease.allocation_id,)).fetchone()
         if row is None or row[0] != 'CONFIRMED':
             raise DataflowError('INVALID_CONTRACT', 'Worker cleanup is not confirmed')
+        self._forget_worker(lease)
+
+    def discard_prepared_worker(self, lease):
+        """Drop a staged grant only before submission or after confirmed exit."""
+        self._check_grant()
+        with self._journal._connection() as db:
+            row = db.execute("SELECT cleanup FROM resource_allocations WHERE allocation_id=?",
+                                  (lease.allocation_id,)).fetchone()
+        if row is not None and row[0] != 'CONFIRMED':
+            raise DataflowError('FENCED', 'Submitted workers require confirmed retirement')
+        self._forget_worker(lease)
+
+    def _forget_worker(self, lease):
         owner = (lease.allocation_id, lease.boot_id)
         with self._native_reserve_lock, self._lock:
             old = self._leases.get(lease.allocation_id)
@@ -627,7 +660,7 @@ class DriverJournalService:
                            receipt_ref=_ref_from_json(record.get('receipt_ref')))
 
     def _budget_ceilings(self, names):
-        from .dataflow_store import ARTIFACT_STAGING_BUDGET
+        from .storage.objects import ARTIFACT_STAGING_BUDGET
         declared = {ARTIFACT_STAGING_BUDGET: self._bounds.max_spill_bytes,
                     'requests': self._action.context.limits['max_requests'],
                     'output_rows': self._bounds.max_output_rows}
@@ -699,7 +732,7 @@ class DriverJournalService:
             from .dataflow_batch_membership import request as batch_membership
             return batch_membership(self, command, request)
         if command.operation == 'stream_lance':
-            service = getattr(self, '_stream_lance', None)
+            service = self._stream_lance
             if service is None:
                 raise DataflowError('FENCED', 'Action declares no streaming Lance writer')
             return service.request(command, request)

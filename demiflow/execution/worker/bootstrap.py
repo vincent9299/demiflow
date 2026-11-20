@@ -186,7 +186,7 @@ def _run_v3_worker(launch_spec, sock):
     from ..contracts.dataflow_codec import encode_wire, decode_wire
     from ..contracts.dataflow_errors import DataflowError
     from ..dataflow_hosts import ControlMailbox
-    from ..dataflow_store import RunArtifactStore
+    from ..storage.objects import RunArtifactStore
     from .runtime import WorkerRuntime
 
     config = dict(launch_spec["dataflow_v3"])

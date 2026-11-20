@@ -117,8 +117,8 @@ def test_real_ray_typed_finite_borrow(ray_api_scope, tmp_path):
 
 
 def test_real_ray_finite_join_restores_original_cut(ray_api_scope, tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.kernels import state_codec
     from demiflow.execution.run_context import RunContext
     from test_runtime_v3_finite_finish import pipeline, Interrupted

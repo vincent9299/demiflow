@@ -14,7 +14,7 @@ def test_real_block_switch_does_not_hold_extra_wire_during_old_tail_flush(tmp_pa
     def observe(row):
         import sys
         from demiflow.execution.worker.terminal_blocks import TerminalBlocks
-        from demiflow.execution.dataflow_store import RunArtifactStore
+        from demiflow.execution.storage.objects import RunArtifactStore
         from demiflow.execution.dataflow_segments import RECORDS_MEDIA
         from demiflow.execution.dataflow_scratch import ScratchStream
         if getattr(TerminalBlocks, '_owned_flush_trace', None) != trace:

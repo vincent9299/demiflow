@@ -212,7 +212,7 @@ def _double(row):
 def test_real_dataset_restores_committed_pack_or_old_images_then_continues_packing(tmp_path, monkeypatch, old_carrier):
     from demiflow import data
     from demiflow.execution.run_context import RunContext
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.contracts.dataflow_codec import compute_participant_id
     class Interrupted(Exception):
         pass
@@ -237,7 +237,7 @@ def test_real_dataset_restores_committed_pack_or_old_images_then_continues_packi
                                                                   media_type=IMAGE_MEDIA_TYPE)
                 pending.contributions[participant] = replace(contribution, operator_states=states)
                 # Digest is the original bounded contribution calculation.
-                from demiflow.execution.dataflow_checkpoint import _contribution_digest
+                from demiflow.execution.checkpoint.coordinator import _contribution_digest
                 pending.digests[participant] = _contribution_digest(pending.contributions[participant])
         image = original_commit(coordinator, *args, **kwargs)
         assert not image.cut.final

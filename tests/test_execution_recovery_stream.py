@@ -46,7 +46,7 @@ class CutWindowInterrupted(RuntimeError):
 
 def run_graph(root, window=None):
     from contextlib import ExitStack
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from runtime_v3_residency_scenarios import _cut_facts
     root = Path(root)
     directory = root / "run"
@@ -245,7 +245,7 @@ def test_checkpoint_accepts_plain_state_and_explicit_hooks(tmp_path, monkeypatch
 
 
 def test_opaque_actor_default_attempt_only_is_recorded_and_cannot_resume(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     calls = tmp_path/'opaque-calls'
     class UnsafeCounter:
         def __init__(self):
@@ -289,7 +289,7 @@ def test_opaque_actor_default_attempt_only_is_recorded_and_cannot_resume(tmp_pat
 
 def test_resume_keeps_sealed_checkpoint_requirement_over_current_default(tmp_path, monkeypatch):
     from demiflow.execution import dataflow_api
-    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.sealed_plans import load_sealed_plan
     calls = tmp_path/'calls'
     class RuntimeResourceCounter:

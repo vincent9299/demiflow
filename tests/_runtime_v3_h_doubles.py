@@ -284,12 +284,12 @@ SEAL_STATE = {'sealed': None, 'plan_id': None, 'plan_revision': None, 'program_r
 
 def install_fake_seal():
     """Spec-bound fake of the absent D-lane seal loader (test_doubles)."""
-    if _real_module_available('demiflow.execution.dataflow_seal'):
-        return importlib.import_module('demiflow.execution.dataflow_seal')
+    if _real_module_available('demiflow.execution.seal.plan'):
+        return importlib.import_module('demiflow.execution.seal.plan')
     import hashlib
     import json
     df = sys.modules['demiflow.execution.contracts.dataflow']
-    seal = types.ModuleType('demiflow.execution.dataflow_seal')
+    seal = types.ModuleType('demiflow.execution.seal.plan')
 
     def verify_dataflow_program(ref, *, expected_pin, store, bounds):
         return df.LoadedProgram(kind='callable', value={'digest': ref.digest}, digest=ref.digest)
@@ -312,7 +312,7 @@ def install_fake_seal():
 
     seal.verify_dataflow_program = verify_dataflow_program
     seal.load_dataflow = load_dataflow
-    sys.modules['demiflow.execution.dataflow_seal'] = seal
+    sys.modules['demiflow.execution.seal.plan'] = seal
     import demiflow.execution.contracts as pkg
     pkg.dataflow_seal = seal
     return seal

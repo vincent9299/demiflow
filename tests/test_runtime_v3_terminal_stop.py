@@ -5,7 +5,7 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.run_context import RunContext
 
 

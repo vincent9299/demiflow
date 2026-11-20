@@ -4,8 +4,8 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow import DataflowExecution
-from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+from demiflow.execution.action_driver.dataflow import DataflowExecution
+from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
 from demiflow.execution.run_context import RunContext
 from _worker_event_fixtures import emit, events
 

@@ -118,7 +118,7 @@ def test_private_prompt_materialization_reuses_original_committed_result(tmp_pat
 
 
 def test_interrupted_private_materialization_never_becomes_a_resumable_result(tmp_path, native_server, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     class Interrupted(Exception):
         pass
     pump = DataflowExecution.pump

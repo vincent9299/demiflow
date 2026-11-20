@@ -316,16 +316,23 @@ class _EndpointBase:
                 "RecoveryImage", "application/x-demiflow-recovery-image-v3")
         return launch_spec, grant, manifest_ref
 
-    def prepare(self, assignment: "WorkerAssignment") -> None:
+    def prepare(self, assignment: "WorkerAssignment", *, recovery_image=None) -> None:
         if self._assignment is not None:
             if self._assignment != assignment:
                 raise DataflowError("FENCED", "allocation assignment changed after staging")
             return
+        self._recovery_image = recovery_image
         launch, grant, _ = self._build_launch(assignment)
         self._grant = grant
         self._scope_id = grant["scope_id"]
         self._assignment = assignment
         self._connector.stage(self._allocation_id, launch)
+
+    def discard_prepared(self) -> None:
+        """Release staged launch data before apply or after confirmed scope cleanup."""
+        if not self._activated:
+            self._services.journal_service.discard_prepared_worker(self._lease)
+            self._connector.abort(self._allocation_id)
 
     def _check_event_identity(self, event):
         assignment = self._assignment
@@ -759,14 +766,14 @@ class RayHostEndpoint(_EndpointBase):
             raise DataflowError('INVALID_CONTRACT', 'Ray mailbox exceeded its requested event credit')
         return tuple(events)
 
-    def prepare(self, assignment: "WorkerAssignment") -> None:
+    def prepare(self, assignment: "WorkerAssignment", *, recovery_image=None) -> None:
         if self._assignment is None:
             from .dataflow_environment import allocation_environment
             environment = allocation_environment(assignment, store=self._services.store,
                                                  bounds=self._services.bounds)
             self._connector.stage_environment(self._allocation_id, environment)
         try:
-            super().prepare(assignment)
+            super().prepare(assignment, recovery_image=recovery_image)
         except BaseException:
             self._connector.abort(self._allocation_id)
             raise

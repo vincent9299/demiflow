@@ -82,7 +82,7 @@ def test_real_ray_function_state_is_independent_of_host_capacity(tmp_path, ray_c
 
 
 def test_real_ray_bound_state_resumes_the_original_ack(tmp_path, ray_capacity, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
     class InterruptedAfterAck(Exception):
         pass
     log = str(tmp_path / 'calls.jsonl')

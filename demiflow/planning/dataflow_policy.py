@@ -14,6 +14,7 @@ from typing import Mapping
 from demiflow.execution.contracts.dataflow import Bounds, RuntimePolicy
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.runtime_limits import execution_limits
+from demiflow.resources.contracts import ResourceProfile
 
 RUNTIME_POLICY_VERSION = "demiflow.runtime_policy.v3"
 
@@ -54,6 +55,14 @@ _OPTION_KEYS = (
     _INT_BUDGET_OPTIONS | _SCALE_OPTIONS | frozenset(_STR_OPTIONS)
     | _BOOL_OPTIONS | _FREE_STR_OPTIONS
 )
+
+
+def gpu_count(profile: ResourceProfile) -> int:
+    total = 0
+    for item in profile.requests.get("accelerators", []):
+        if item.get("type") == "gpu":
+            total += int(item.get("count", 0))
+    return total
 
 
 def _reject(message: str, **context: object) -> DataflowError:

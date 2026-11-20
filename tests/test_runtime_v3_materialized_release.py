@@ -6,7 +6,7 @@ import pytest
 from demiflow import data
 from demiflow.errors import ExecutionConflict
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.dataflow_store import _pin_identity
+from demiflow.execution.storage.objects import _pin_identity
 from demiflow.execution.recovery_contract import RecoveryContractError
 
 

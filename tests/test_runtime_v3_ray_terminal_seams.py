@@ -2,7 +2,7 @@
 import json
 import pytest
 from demiflow import data
-from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.run_context import RunContext
 
 
@@ -96,7 +96,7 @@ def test_iter_rows_close_keeps_real_nonfinal_prefix(tmp_path, actual_ray):
         assert run.journal.execution_commit(image.commit_id)['status'] == 'acked'
         cursors = [cursor for part in image.contributions for cursor in part.sources]
         assert cursors and all(not cursor.end_of_input and cursor.next_sequence < 1000 for cursor in cursors)
-        assert not execution._deliveries and not execution._terminal_queue
+        assert not execution._exchange._inflight and not execution._terminal._queue
         assert not execution._endpoints and not execution._active_worker_allocations
 
 
