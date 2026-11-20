@@ -24,6 +24,20 @@ def test_snapshot_is_current():
         '`python tests/compile_contract_inventory.py --write` and review its diff.')
 
 
+def test_native_dispatch_includes_only_called_type_predicates(monkeypatch):
+    original_source = inventory.source
+    def without_search_call(relative):
+        source = original_source(relative)
+        if relative == inventory.NATIVE_DECLARATION:
+            return source.replace('if is_native_search_actor(actor):', 'if False:')
+        return source
+
+    key = 'execution.native_model_declaration'
+    assert 'SearchWeb' in inventory.class_dispatch()[key]
+    monkeypatch.setattr(inventory, 'source', without_search_call)
+    assert 'SearchWeb' not in inventory.class_dispatch()[key]
+
+
 def test_recorded_runtime_decisions_still_match_their_use_sites():
     assert inventory.missing_predicate_snippets() == [], (
         'A runtime use site changed. Revisit the decision recorded in compile_contract_inventory.PREDICATES.')
