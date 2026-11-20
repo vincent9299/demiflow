@@ -17,11 +17,12 @@ def test_many_entries_in_one_module_fit_the_source_budget(tmp_path, monkeypatch)
         return raw
 
     monkeypatch.setattr(discovery, 'read_bounded', count)
+    (tmp_path / 'params.json').write_text('{"format":"demiflow_forge_flow_parameters_v2","arguments":{}}')
     result = discovery.discover(tmp_path, {'entries': {
-        f'recipe.py:flow_{n}': [] for n in range(8)}})
+        f'recipe.py:flow_{n}': ['params.json'] for n in range(8)}})
     assert len(result['entries']) == 8
     assert all(e['status'] == 'recognized' for e in result['entries'])
-    assert {d['code'] for d in result['diagnostics']} == {'parameters_unbound'}
+    assert result['diagnostics'] == []
     assert sum(size for path, size in reads if path == source) == source.stat().st_size
 
 

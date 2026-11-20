@@ -84,7 +84,7 @@ def test_project_check_tracks_the_checker_revision(original, monkeypatch):
     status = project_check.status(original, table_resolver=resolver)
     assert 'platform_changed' not in status['changes']
     assert status['platform_provenance']['current_digest'] == '0'*64
-    assert status['static_status'] == result['static_status']
+    assert status['status'] == result['status']
 
 
 def test_config_reference_budget_is_visible_without_hiding_the_project(original):

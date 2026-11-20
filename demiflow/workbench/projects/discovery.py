@@ -84,7 +84,7 @@ def discover(root, control=None):
     from demiflow.workbench.projects import workspace as ws
     root = ws.no_symlinks(Path(root).absolute()).resolve(strict=True)
     if control is None:
-        control = ws.read_control(root / 'workspace.json')
+        root, control = ws.load_workspace_control(root)
     evidence, diagnostics, entries, configurations, tables, runs = {}, [], [], [], {}, []
     operator_paths, prompt_paths, total = {}, {}, 0
     entry_sources = {}
@@ -158,7 +158,7 @@ def discover(root, control=None):
             raise ForgeError('Invalid Python entry declaration')
         relative = target.relative_to(root).as_posix()
         item = dict(entry=relative + ':' + symbol, path=relative, symbol=symbol,
-                    protocol='native_flow', evidence='workspace.json', parameters=list(params), status='recognized')
+                    evidence='workspace.json', parameters=list(params), status='recognized')
         try:
             source = entry_source(target, relative)
             item['sha256'] = source['sha256']
@@ -300,9 +300,6 @@ def discover(root, control=None):
             row['status'] = 'unreadable';issue('configuration_unreadable', path, exc)
         configurations.append(row)
 
-    for entry in entries:
-        if not entry['parameters']:
-            issue('parameters_unbound', entry['path'], '已识别入口，但缺少入口与原生参数配置的明确绑定；文档引用不自动成为执行配置。',cause='source',scope='entry')
     result = dict(format=FORMAT, status='partial' if diagnostics else 'recognized',
         entries=entries, operators=[operator_paths[p] for p in sorted(operator_paths)],
         prompts=[prompt_paths[p] for p in sorted(prompt_paths)], configurations=configurations,

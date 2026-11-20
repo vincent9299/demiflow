@@ -49,8 +49,14 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/absolute/isolated/demiflow \
 工作台项目根目录取本例目录，按明确登记的 `flows/` 入口显示两条流程。
 部署时把生成配置中的业务值分别写入各流程唯一的 `settings/reference.json`、
 `settings/quality.json`，把 `models` / `execution_kind` 写入 `settings/runtime.json`。
-参数文档沿用 `{"arguments": ...}` 格式，模型部署文档是这两个键组成的对象。
-工作台不提供参数文件选择器；`flow.py:run` 只为原测试和直接调用保留兼容。
+每份登记参数写为 `{"format": "demiflow_forge_flow_parameters_v2", "arguments": {...}}`，
+模型部署文档是上述两个键组成的对象。配置就绪后，在示例的隔离副本内登记入口。
+
+```bash
+demiflow workbench init "$PWD" --existing
+demiflow workbench flow register "$PWD" flows/reference.py:run --params settings/reference.json
+demiflow workbench flow register "$PWD" flows/quality.py:run --params settings/quality.json
+```
 实际执行环境设置公开模拟值
 `REFGEN_FIXTURE_KEY=synthetic-fixture-only`；它不是服务密钥，禁止改用真实业务 token。
 source、对象、题图表、结果表与运行目录均应在本次专属 `/tmp/demiflow-*` 下；不要指向
@@ -119,9 +125,7 @@ Dataset、编译器、journal、writer、图或执行结果。验收结果应以
 - 固定输入、显式条件分支、模型节点与业务交付必须映射到真实编译图。检查共享前缀只
   执行一次、配置的阶段是否确实可达、失败分母是否保留，不能靠节点数量“认证”。
 - 静态 import/ownership 检查不能证明任意 Python helper 无副作用；应把配置、源码、
-  提示词摘要和受控 fixture 的运行证据绑定后才给验收结论。本例已按 candidate.10
-  登记明确的 flows/operators/prompts，尚未取得完整 Forge 项目验收认证，不能继承
-  原生产 pipeline 的 certification。
+  提示词摘要和受控 fixture 的运行证据绑定后才给验收结论。本例的工作台入口以当前项目的工作区登记及对应参数为准。
 - 分阶段生产入口各有一个真实 action 时，first-action 预览只展示该入口当前 action，
   不能声称自动追踪多个历史表和独立运行。本例通过一个真实 lazy 图覆盖完整流程。
 
@@ -129,7 +133,7 @@ Dataset、编译器、journal、writer、图或执行结果。验收结果应以
 
 工作台直接读取本项目。`flows/reference.py:run` 是完整参考图对照实验；
 `flows/quality.py:run` 是独立图片质量审核。二者共用 `refgen_operators.py`
-与 `prompts/quality.yaml`，不互相调用流程入口。原 `flow.py` 只保留旧夹具调用兼容入口。
+与 `prompts/quality.yaml`，各自独立调用共享定义。
 
 每个流程只绑定一个当前业务参数文件：`settings/reference.json`、
 `settings/quality.json`。文件由隔离预览部署生成，不提交地址或运行状态。
@@ -137,7 +141,6 @@ Dataset、编译器、journal、writer、图或执行结果。验收结果应以
 `settings/runtime.json`，算子默认值位于代码签名，Prompt 定义与输出协议位于
 `prompts/`。`image.yaml` 显式管理原先内联的合成与 Boogu 图片指令。
 
-工作台“算子”读取声明定义与真实 Git 历史；“管道”选择具体流程，显示
-引擎编译图并可编辑该流程的唯一当前业务参数。预览只编译，运行使用原生
+工作台的“管道”读取工作区已登记入口，显示引擎编译图并可编辑该流程的当前业务参数。预览只编译，运行使用原生
 Dataset/RunContext。标杆 HTTP 服务仅模拟外部模型响应；数据读取、算子、
 图片对象、提交与结果均走真实引擎。这不表示已验证真实模型效果。

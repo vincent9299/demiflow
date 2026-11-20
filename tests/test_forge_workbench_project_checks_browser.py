@@ -19,7 +19,7 @@ def test_late_project_status_cannot_replace_newer_check_result(project,browser,m
         project_info(page)
         with page.expect_response('**/project-check') as checked:
             page.get_by_role('button',name='检查当前项目',exact=True).click()
-        assert checked.value.json()['static_status']=='checked'
+        assert checked.value.json()['status']=='checked'
         source=project/'processing.py';source.write_text('import subprocess\n'+source.read_text())
         page.evaluate('''() => {
           const native=fetch.bind(window);window.__heldStatus=false;
@@ -39,22 +39,22 @@ def test_late_project_status_cannot_replace_newer_check_result(project,browser,m
         with page.expect_response('**/project-check') as violation:
             page.get_by_role('button',name='检查当前项目',exact=True).click()
         fresh=violation.value.json()
-        assert fresh['status']==fresh['static_status']=='invalid'
+        assert fresh['status']=='invalid'
         page.evaluate('fail => window.__releaseStatus(fail)',late_error)
         expect(page.get_by_role('button',name='刷新当前视图',exact=True)).to_be_enabled(timeout=65000)
-        evidence=dict(old_status=old['status'],old_static_status=old['static_status'],
-                      explicit_check_status=fresh['status'],explicit_static_status=fresh['static_status'],
+        evidence=dict(old_status=old['status'],
+                      explicit_check_status=fresh['status'],
                       shown=page.locator('.wb-checks details').filter(has=page.locator('summary',has_text='当前项目检查与来源')).inner_text())
         out=tmp_path/'evidence'
         out.mkdir(exist_ok=True)
         (out/('project-check-status-'+('error' if late_error else 'success')+'.json')).write_text(json.dumps(evidence,ensure_ascii=False,indent=2)+'\n')
-        expect(page.get_by_text('整体：不符合规范；静态检查：不符合规范',exact=True)).to_be_visible(timeout=5000)
+        expect(page.get_by_text('静态检查：不符合规范',exact=True)).to_be_visible(timeout=5000)
         expect(page.locator('.wb-notice')).not_to_contain_text('owned old project status fault')
         # A genuinely newer source change must still make the current status stale.
         source.write_text(source.read_text()+'\n# newer author revision\n')
         with page.expect_response('**/project-status'):
             page.get_by_role('button',name='刷新当前视图',exact=True).click()
-        expect(page.get_by_text('整体：依据已变化；静态检查：依据已变化',exact=True)).to_be_visible(timeout=65000)
+        expect(page.get_by_text('静态检查：依据已变化',exact=True)).to_be_visible(timeout=65000)
         assert not errors,errors
 
 

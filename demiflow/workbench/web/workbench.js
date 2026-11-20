@@ -210,7 +210,7 @@
     function requiredPreviewArguments(){return ctx.project?.entries?.find(e=>e.entry===working?.entry)?.required_arguments||[];}
     function choices(){
       const entries=new Map();
-      for(const e of ctx.project?.entries||[])entries.set(e.entry,{value:e.entry,label:e.entry+(e.protocol==='native_flow'?'':' · 原入口')});
+      for(const e of ctx.project?.entries||[])entries.set(e.entry,{value:e.entry,label:e.entry});
       for(const e of ctx.flows)entries.set(e.entry,{value:e.entry,label:e.description?.split('\n')[0]||e.entry});
       if(run?.entry&&!entries.has(run.entry))entries.set(run.entry,{value:run.entry,label:run.entry+' · 封存入口'});
       return [...entries.values()];

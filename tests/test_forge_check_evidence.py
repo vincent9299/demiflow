@@ -50,7 +50,7 @@ def project(tmp_path, empty_workspace):
 def test_syntax_failure_is_bound_and_repair_stales_old_reports(project, dependency):
     root, source = project(dependency=dependency)
     checked = project_ops.check_project(root)
-    assert checked["status"] == checked["static_status"] == "incomplete", checked
+    assert checked["status"] == "incomplete", checked
     assert set(checked["sources"]) == {"recipe.py", dependency}
     assert checked["sources"][dependency] == hashlib.sha256(source.read_bytes()).hexdigest()
     diagnostic = next(d for d in checked["diagnostics"] if d["rule"] == "FL-01")
@@ -67,7 +67,7 @@ def test_syntax_failure_is_bound_and_repair_stales_old_reports(project, dependen
 
     source.write_text("def clean(value):\n    return value\n")
     stale = project_ops.project_check_status(root)
-    assert stale["status"] == stale["static_status"] == "stale", stale
+    assert stale["status"] == "stale", stale
     assert "source_changed:" + dependency in stale["changes"]
     assert record.read_bytes() == saved  # A status read cannot rewrite old evidence.
     assert project_ops.report_status(root, digest)["status"] == "stale"
@@ -78,7 +78,7 @@ def test_ast_budget_failure_is_bound_before_repair(project):
     text = "VALUES = [" + "0," * SOURCE_LIMITS["file_nodes"] + "]\ndef clean(value): return value\n"
     root, source = project(text=text)
     checked = project_ops.check_project(root)
-    assert checked["status"] == checked["static_status"] == "incomplete", checked
+    assert checked["status"] == "incomplete", checked
     assert checked["sources"]["processing.py"] == hashlib.sha256(source.read_bytes()).hexdigest()
     diagnostic = next(d for d in checked["diagnostics"] if d["rule"] == "FL-10")
     assert diagnostic["path"] == "processing.py" and "AST budget" in diagnostic["detail"]
@@ -152,6 +152,6 @@ def test_documented_check_commands_reach_the_real_worker_without_json_option(pro
         result = CliRunner().invoke(main, ["workbench", command, str(root)])
         assert result.exit_code == 1, result.output  # Non-native flow, with the command accepted.
         value = json.loads(result.output)
-        assert value["format"] == "demiflow_forge_project_check_v1"
+        assert value["format"] == "demiflow_workbench_project_static_check_v2"
         assert value["status"] == "invalid"
         assert set(value["sources"]) == {"recipe.py", "processing.py"}

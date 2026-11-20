@@ -42,20 +42,18 @@ def test_create_register_and_check_in_browser(tmp_path):
         dialog.get_by_role('button',name='新建项目',exact=True).click()
         page.locator('#workspace-name').filter(has_text='新建项目验收').wait_for()
         assert set(p.name for p in (tmp_path/'new-project').iterdir()) == {'.forge','workspace.json'}
-        page.get_by_role('button',name='注册已有项目',exact=True).click()
-        dialog=page.get_by_role('dialog');dialog.get_by_label('项目目录').fill(str(existing))
+        page.locator('#project-switcher').click()
+        page.locator('#project-picker').get_by_role('button',name='注册已有项目',exact=True).click()
+        dialog=page.locator('dialog[open]');dialog.get_by_label('项目目录').fill(str(existing))
         dialog.get_by_role('button',name='注册已有项目',exact=True).click()
         page.locator('#workspace-name').filter(has_text='original-pipeline').wait_for()
         page.locator('#sync-status').filter(has_text='自动同步已开启').wait_for()
         page.get_by_role('button',name='管道',exact=True).click()
         project_info(page)
-        page.locator('.notice').filter(has_text='arbitrary-history').wait_for()
-        page.get_by_text('pipeline.py',exact=True).click()
-        page.locator('pre').filter(has_text='DO NOT EXECUTE').wait_for()
+        page.get_by_text('尚未识别入口。具体原因见下面的问题列表。', exact=True).wait_for()
         page.screenshot(path=str(artifact/'registered-project.png'))
-        project_info(page)
         page.get_by_role('button',name='检查当前项目',exact=True).click()
-        page.get_by_text('统一规范版本：2.4.0',exact=True).wait_for()
+        page.get_by_text('静态检查：尚未完成',exact=True).wait_for()
         page.locator('.error-box').filter(has_text='FL-01').wait_for()
         page.screenshot(path=str(artifact/'project-check.png'),full_page=True)
         assert (existing/'pipeline.py').read_bytes() == before
@@ -93,7 +91,7 @@ def test_existing_declared_project_check_and_violation(project, tmp_path):
                     page.get_by_role('button',name='检查当前项目',exact=True).click()
                 reply=response.value;value=reply.json()
                 admission.append(dict(expected=expected,http_status=reply.status,
-                    status=value.get('status'),static_status=value.get('static_status'),code=value.get('code'),
+                    status=value.get('status'),code=value.get('code'),
                     operation_started=value.get('operation_started')))
                 (artifact/'project-check-admission.json').write_text(json.dumps(admission,ensure_ascii=False,indent=2)+'\n')
                 if reply.status==503:
@@ -108,15 +106,15 @@ def test_existing_declared_project_check_and_violation(project, tmp_path):
                     playwright.expect(refresh).not_to_have_attribute('data-pending','true',timeout=65000)
                     continue
                 assert reply.status==200,value
-                assert value['static_status']==expected,value
+                assert value['status']==expected,value
                 return
         checked_click('checked')
-        page.get_by_text('整体：尚未完成；静态检查：静态检查通过',exact=True).wait_for()
+        page.get_by_text('静态检查：通过',exact=True).wait_for()
         page.screenshot(path=str(artifact/'static-check-passed.png'))
         source=project/'processing.py';source.write_text('import subprocess\n'+source.read_text())
         before=source.read_bytes()
         checked_click('invalid')
-        page.get_by_text('整体：不符合规范；静态检查：不符合规范',exact=True).wait_for()
+        page.get_by_text('静态检查：不符合规范',exact=True).wait_for()
         page.screenshot(path=str(artifact/'violation-check.png'))
         assert source.read_bytes()==before
         assert not errors, errors
@@ -147,8 +145,8 @@ def test_project_check_busy_is_unapplied_until_explicit_retry(project,tmp_path,p
         playwright.expect(refresh).not_to_have_attribute('data-pending','true',timeout=65000)
         with page.expect_response('**/project-check') as initial:
             page.get_by_role('button',name='检查当前项目',exact=True).click()
-        assert initial.value.status==200 and initial.value.json()['static_status']=='checked'
-        page.get_by_text('整体：尚未完成；静态检查：静态检查通过',exact=True).wait_for()
+        assert initial.value.status==200 and initial.value.json()['status']=='checked'
+        page.get_by_text('静态检查：通过',exact=True).wait_for()
         source=project/'processing.py';source.write_text('import subprocess\n'+source.read_text())
         check=project/'.forge/project-check.json';assert check.stat().st_size<=2*1024**2
         before=check.read_bytes()
@@ -175,16 +173,16 @@ def test_project_check_busy_is_unapplied_until_explicit_retry(project,tmp_path,p
                 notice=page.locator('.error-box').filter(has_text=body['error']).last;notice.wait_for()
                 assert '写入结果可能尚未确认' in notice.inner_text()
                 assert '检查未受理' not in notice.inner_text() and '尚未开始' not in notice.inner_text()
-            page.get_by_text('整体：尚未完成；静态检查：静态检查通过',exact=True).wait_for()
+            page.get_by_text('静态检查：通过',exact=True).wait_for()
             assert check.read_bytes()==before and len(writes)==2
             trace.append(dict(http_status=503,code='busy',operation_started=body.get('operation_started'),
                 shown=notice.inner_text(),check_file_unchanged=True,writes=len(writes)))
         with page.expect_response('**/project-check') as retry:
             page.get_by_role('button',name='检查当前项目',exact=True).click()
-        assert retry.value.status==200 and retry.value.json()['static_status']=='invalid'
-        page.get_by_text('整体：不符合规范；静态检查：不符合规范',exact=True).wait_for()
+        assert retry.value.status==200 and retry.value.json()['status']=='invalid'
+        page.get_by_text('静态检查：不符合规范',exact=True).wait_for()
         assert len(writes)==3 and not errors,errors
-        trace.append(dict(http_status=200,static_status='invalid',explicit_retry=True,writes=len(writes)))
+        trace.append(dict(http_status=200,status='invalid',explicit_retry=True,writes=len(writes)))
         (artifact/('project-check-busy-'+('before' if pre_dispatch else 'after')+'-dispatch.json')).write_text(json.dumps(trace,ensure_ascii=False,indent=2)+'\n')
         browser.close()
 
@@ -210,10 +208,10 @@ def test_empty_console_observes_registration_from_cli(tmp_path):
         page.locator('#workspace-name').filter(has_text='cli-pipeline').wait_for()
         page.get_by_role('button',name='管道',exact=True).click()
         project_info(page)
-        page.get_by_text('main.py',exact=True).wait_for()
+        page.get_by_text('尚未识别入口。具体原因见下面的问题列表。', exact=True).wait_for()
         # Platform/environment diagnostics need not have a business filename.
         page.route('**/project-status',lambda route:route.fulfill(json={
-            'status':'stale','static_status':'stale',
+            'status':'stale',
             'diagnostics':[{'rule':'FL-10','detail':'Platform changed during inspection'}]}))
         with page.expect_response('**/project-status'):
             page.get_by_role('button',name='刷新当前视图',exact=True).click()
