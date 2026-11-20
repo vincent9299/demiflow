@@ -275,7 +275,7 @@ class NativeAcquisitionService(NativeSearchOperations):
                     and binding.get('queue_uuid') and binding.get('generation'))
 
     # -- Q003 start -----------------------------------------------------
-    def start(self) -> None:
+    def start(self, *, recovery_image=None, residency=None, queue_state=None) -> None:
         with self._lock:
             if self._state != 'configured':
                 raise DataflowError('INVALID_CONTRACT', 'native acquisition must be configured before start')
@@ -287,7 +287,7 @@ class NativeAcquisitionService(NativeSearchOperations):
         try:
             self._run_io(self._astart(), timeout_s=self._services.bounds.timeout_ms / 1000)
             from .dataflow_queue_recovery import restore_claims
-            restore_claims(self, getattr(self, '_restore_queue_state', None))
+            restore_claims(self, queue_state, has_cut=recovery_image is not None)
         except BaseException:
             self._close_owners()
             self._stop_loop()

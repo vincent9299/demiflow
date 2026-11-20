@@ -515,7 +515,7 @@ class DataflowExecution:
                     declaration=declarations.get(node.occurrence_id), store=self._store, bounds=self._bounds)
             self._verified_completed_image = image
         if producer is not None:
-            if self._acquisition._state == 'constructed':
+            if existing is not None:
                 self._acquisition.configure(self._request.source, self._request.plan, None, graph=graph)
             self._services.journal_service.bind_queue(self._acquisition)
         from ..queue_execution import queue_source
@@ -644,10 +644,9 @@ class DataflowExecution:
         # pending. Check before native acquisition or any business activation.
         self._configure_phases()
         if self._acquisition is not None:
-            self._acquisition._restore_image = self._restore_image
-            self._acquisition._restore_residency = self._checkpoint.residency
-            self._acquisition._restore_queue_state = self._checkpoint.native_queue_state
-            self._acquisition.start()
+            self._acquisition.start(recovery_image=self._restore_image,
+                                    residency=self._checkpoint.residency,
+                                    queue_state=self._checkpoint.native_queue_state)
         self._launch_phase()
         self._started = True
         self._state = "running"
