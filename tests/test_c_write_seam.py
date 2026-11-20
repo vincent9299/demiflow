@@ -235,8 +235,8 @@ def test_streamed_consumes_sealed_checkpoint_and_stage_limits(tmp_path, monkeypa
     original = DataflowExecution.start
     original_prepare = _EndpointBase.prepare
 
-    def prepare(endpoint, assignment):
-        result = original_prepare(endpoint, assignment)
+    def prepare(endpoint, assignment, *, recovery_image=None):
+        result = original_prepare(endpoint, assignment, recovery_image=recovery_image)
         assignments.append(assignment)
         return result
 
