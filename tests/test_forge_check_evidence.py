@@ -9,6 +9,7 @@ import pytest
 
 from demiflow.cli import main
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.projects.discovery import discover
 from demiflow.forge.source import InspectionError, SOURCE_LIMITS, SourceTree
 
@@ -59,32 +60,32 @@ def project(tmp_path, empty_workspace):
 @pytest.mark.parametrize("dependency", ["processing.py", "helpers/__init__.py"])
 def test_syntax_failure_is_bound_and_repair_stales_old_reports(project, dependency, native):
     root, source = project(dependency=dependency, native=native)
-    checked = ws.check_project(root)
+    checked = project_ops.check_project(root)
     assert checked["status"] == checked["static_status"] == "incomplete", checked
     assert set(checked["sources"]) == {"recipe.py", dependency}
     assert checked["sources"][dependency] == hashlib.sha256(source.read_bytes()).hexdigest()
     diagnostic = next(d for d in checked["diagnostics"] if d["rule"] == "FL-01")
     assert diagnostic["status"] == "incomplete" and diagnostic["path"] == dependency
     assert diagnostic["line"] == 1
-    current = ws.project_check_status(root)
+    current = project_ops.project_check_status(root)
     assert current["status"] == "incomplete" and current["changes"] == []
     record = root / ".forge/project-check.json"
     saved = record.read_bytes()
     if native:
         digest = checked["entries"][0]["digest"]
-        flow = ws.report_status(root, digest)
+        flow = project_ops.report_status(root, digest)
         assert flow["status"] == "incomplete"
         assert flow["report"]["binding"]["sources"] == checked["sources"]
 
     source.write_text("def clean(value):\n    return value\n")
-    stale = ws.project_check_status(root)
+    stale = project_ops.project_check_status(root)
     assert stale["status"] == stale["static_status"] == "stale", stale
     assert "source_changed:" + dependency in stale["changes"]
     assert record.read_bytes() == saved  # A status read cannot rewrite old evidence.
     if native:
-        assert ws.report_status(root, digest)["status"] == "stale"
+        assert project_ops.report_status(root, digest)["status"] == "stale"
     else:
-        rechecked = ws.check_project(root)
+        rechecked = project_ops.check_project(root)
         assert rechecked["source_checks"][0]["status"] == "checked"
         assert set(rechecked["sources"]) == {"recipe.py", dependency}
         assert rechecked["status"] == "incomplete"  # Flow/behavior/review remain unproved.
@@ -93,15 +94,15 @@ def test_syntax_failure_is_bound_and_repair_stales_old_reports(project, dependen
 def test_ast_budget_failure_is_bound_before_repair(project):
     text = "VALUES = [" + "0," * SOURCE_LIMITS["file_nodes"] + "]\ndef clean(value): return value\n"
     root, source = project(text=text)
-    checked = ws.check_project(root)
+    checked = project_ops.check_project(root)
     assert checked["status"] == checked["static_status"] == "incomplete", checked
     assert checked["sources"]["processing.py"] == hashlib.sha256(source.read_bytes()).hexdigest()
     diagnostic = next(d for d in checked["diagnostics"] if d["rule"] == "FL-10")
     assert diagnostic["path"] == "processing.py" and "AST budget" in diagnostic["detail"]
     assert checked["source_checks"][0]["status"] == "incomplete"
-    assert ws.project_check_status(root)["changes"] == []
+    assert project_ops.project_check_status(root)["changes"] == []
     source.write_text("def clean(value): return value\n")
-    stale = ws.project_check_status(root)
+    stale = project_ops.project_check_status(root)
     assert stale["status"] == "stale" and "source_changed:processing.py" in stale["changes"]
 
 
@@ -155,12 +156,12 @@ def test_declared_operator_outside_read_closure_has_existence_only_coverage(proj
     root, _ = project(text="def clean(value): return value\n")
     recognized = discover(root)
     assert recognized["coverage"]["operator_checks"] == "declared_path_existence_only"
-    checked = ws.check_project(root)
+    checked = project_ops.check_project(root)
     assert set(checked["sources"]) == {"recipe.py", "processing.py"}
     assert checked["source_checks"][0]["status"] == "checked"
     (root / "unused.py").write_text("def unused(:\n")
     assert discover(root)["digest"] == recognized["digest"]
-    status = ws.project_check_status(root)
+    status = project_ops.project_check_status(root)
     assert status["status"] == "incomplete" and status["changes"] == []
 
 

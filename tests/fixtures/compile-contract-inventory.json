@@ -208,6 +208,9 @@
     "planning/dataflow_single_worker.py",
     "planning/dataflow_thread_fusion.py"
    ],
+   "format": [
+    "execution/run_context.py"
+   ],
    "graph_literal_prefix": [
     "planning/dataflow_graph_adapter.py"
    ],
@@ -407,6 +410,9 @@
    "started_at": [
     "execution/run_context.py",
     "execution/worker/authority.py"
+   ],
+   "stream_protocol": [
+    "execution/run_context.py"
    ],
    "streaming_map": [
     "execution/dataflow_seal.py",

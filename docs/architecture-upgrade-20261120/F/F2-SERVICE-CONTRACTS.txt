@@ -1,0 +1,108 @@
+F2 运行服务契约与局部实施切片 v1（仅设计，未批准实施）
+固定源 122edf4bd0c827338846abd0114f0b36cf8c1b6d；逐符号提供者/消费者/方法签名见 F2-symbols.json。
+下面按真实调用路径解释边界；这些合同不新增持久协议、服务部署或万能接口。
+
+F2-PROMPT：保持已验证的显式注入，不为消除 import 发明新一层
+
+当前路径：execution/dataflow_model_journal.py:make_native_action_view/bind_prompt_adapter/bind_embedding_adapter/bind_agent_adapter
+与 dataflow_prompt_journal.py:bind_private_prompt_adapter 在真正 worker 装配处绑定 RuntimeServices/node_id。
+它们给 NativeActionView/NativeRunView（限 action_id/limits/fence/check_stop 与原预算端口），以及原 RemotePromptRecovery/RemotePrivatePromptJournal。
+operator_llm/client.py:AsyncOperatorLLMClient.__init__、create_async_operator_llm_client 和 codex_exec.py 仅接 native_journal 参数；
+runtime.py 的原 recovery 绑定真实 occurrence，RemoteOfflinePromptClient 只经 verified port 查原声明的离线数据。
+
+输入：原 model/options/max_requests；由原引擎 owner 创建的 journal/view（不是业务提供的裸dict/db/fence字符串）。
+保留原具名调用 lookup/lookup_with_references/reserve/reserve_http_retry/response/failed/references/media_references/close；
+客户端读取原 declaration/read_only/limit 做一致性核对，不获准读 journal私有路径、原生db或任意RPC。
+输出：原 lookup/response/引用/预算保留回执；offline 的 OperatorLLMResponse 或 PromptResponsePending。
+错误：真实类型/声明不符、只读或limit无界拒绝；private/native dual write拒绝；旧private journal作为只读历史保留；
+pending/unknown不能变cache miss，不转在线provider自动请求；调用原错误不能吞成普通row失败。
+资源：payload/RPC/store refs沿 Bounds与driver实准入，actor/client拥有自己HTTP/BlockingIO资源；journal/view close不关闭driver run owner。
+并发：原port核allocation/boot/occurrence/fence；reserved额度不因重试重新扩大；已准入effect的cooperative drain与普通cancel分开。
+
+决策：当前显式注入已成立，保留 Remote* 真实类验证，不以 hasattrs/自报“verified”或仅 Protocol 替代权限依据。
+本设计不移类、不新增 PromptJournalPort wrapper/service locator。若未来为了真实复用改变结构，具体更改须证明原capability/身份/预算仍在owner核验，
+所有 create_async/client/Codex/offline/runtime调用同批完成；G 的被动声明设计不以该额外重构为前置。
+
+F2-SEARCH：复用现有 SearchRuntime，把同一份原生协议归回 owner
+
+现状入口与实际反向回调：
+dataflow_search.py:NativeSearchOperations.search/_search_row 校验worker lease/绑定/node/row_ref后，
+SearchRuntime.call -> _serve 设置原 _ACTION/RowScope，actor.bind_execution/astart -> collect/operators.py:SearchWeb.__call__。
+库代码现在直接使用 _action/_claim_exchange/_charge_http、RunAction/CommitCoordinator、原Journal SQL和budget_delta。
+完成后 dataflow_search._search_row 还反向调用 actor._action 取 proofs。只删 import 而不改这条反向协议不算边界收敛。
+
+推荐实现落点：现有 execution/dataflow_search_runtime.py 的 SearchRuntime 内私有、每actor的 SearchEffects/Exchange helper。
+不新建运行中心或第二账本；原runtime已经是driver I/O owner，其现有序列队列与actor生命周期继续使用。
+collect/operators.py 保留SearchWeb构造/参数校验、session调用/字段、when、32请求/500 candidates/并发<=4语义；
+将原生scope/SQL/额度/commit算法完整搬回该现有owner，删除库中的旧原生实现。不是简单在库方法前增加转发层。
+
+具体能力形状（仅进程内可信平台协议，不进ActionSpec/封存业务对象，不供用户任意获取）：
+- owner根据原parent action、node_id、原封存search声明及可选queue producer绑定创建 SearchEffects。
+  不接受业务row传run_id/db/fence/attempt/预算，queue phase仍只由原engine绑定决定。
+- effects.exchange(original RowScope) 建立本次有限Exchange作用域，返回原固定response或可执行状态；
+  原 `_action` 的key/declaration、producer_action/source phase、SourcePosition语义逐字节保留。
+- exchange.admit_http() 只在原protected事务核scope/fence后计 requests/raw_wire/control/reservation_records；
+  重复/旧owner按原记录判断，不允许调用方指定任意budget name/delta或自选ceiling。
+- exchange.finish(output_row) 按原 CommitCoordinator 写原prepared/data/checkpoint/ACK，再返回原结果row；
+  methods只接受当前已绑定的exchange，不返回可变Journal/db/完整RunContext。
+- effects.proofs(original occurrence) 给 engine 的 _search_row 读取原commit事实，取代通过actor._action读取；
+  worker payload/owner/fence校验仍由原 search/_confirmed 保持。库不解释成功/ACK，原response sink保留唯一原生真值。
+
+当前 `_SEARCH_NATIVE` ContextVar 的action/allow字段移为owner内部Exchange作用域；现有WebSession execution_admission回调仍是具名
+effects.admit_http，不给任意命令分派。继承到并行request task的context只引用当前exchange，退出reset，不复制状态owner。
+保留原Search actor公开构造与generic bind_execution形状。PREFLIGHT必须覆盖原native driver、queue producer、仍受支持的legacy generic
+stream绑定调用者，不能只追直接SearchWeb导入；若某旧路径也需适配，调用同一owner实现，不能永久留一份旧SQL算法。
+外部动态绑定未证明的路径明确保留/退出当前实施切片，不凭本设计删能力或静默改成失败。
+
+资源/生命周期：复用一个现有BlockingIOPool与一个runtime队列，不另建池。owner先准备能力/资源，library session开始请求；
+结束按session停止/已准入HTTP排空→数据库/commit已启动工作排空→owned BlockingIOPool关闭。部分astart失败也走原started列表收尾。
+队列/row/control/result上限来自现有Bounds/max_nodes/max_pending_events及原Search参数，不聚合无限结果；CPU/解码内存仍由domain操作限额。
+所有SQL/额度仍使用同一Journal的execution_guard/fence，request timeout为原service bound，等原子阶段结束不冒充可抢占硬超时。
+owner退出不自动ACK未知effect，不把late reply当新请求，不自动重试paid/network未知结果。
+
+状态与错误：已确认response复用；prior pending/已花费但未固定响应的exchange仍在admit_http前抛UnresolvedCommit；
+原ceiling/execution conflict、invalid RowScope、decl mismatch、session停止/取消原样区分。源写入成功后后续确认失败不回滚源或补成功。
+取消不得释放尚未排空的线程/HTTP占用。并发旧owner/新attempt不共享可写Exchange；expected/fence由原owner验证。
+历史：保持表/schema/source key/预算key/SourcePosition/响应编码/ACK事实；类方法与源码identity可能变，精确列diff与派生ID。
+旧run保持原固定源码/环境恢复，新候选不重算旧seal；不承诺跨版本继续。此普通责任迁移不依赖C缩小身份算法。
+
+实施文件：execution/dataflow_search_runtime.py、dataflow_search.py，collect/operators.py，必要原NativeSearchResultSink的配合消费者与对应tests/docs。
+不改 frozen raw_fetch/queue_execution/queue_sinks/queue_source/contracts.exchange/planning.dag/resources.contracts。
+若实施预检触及这些文件、原路径反序列化或新的兼容承诺，退出具体项另审，而非修改摘要或拖整个F2/G。
+删除：库原 `_action/_claim_exchange/_charge_http` 和数据flow对actor私有action的取证；所有当前支持调用者同批采用同一owner。
+保留：公开Search行为/参数、现有session/provider/requests、原runtime/QueueCommitStore/Journal/CommitCoordinator，域私有代码不搬成万能服务。
+
+F2-IMAGE：已有remote注入成立；本地原生资源访问只做有收益的后续切片
+
+当前remote：bind_media_adapter验证services.store、声明object_store，创建RemoteImageStore并注入actor._runtime.artifact_store。
+media.store_image 对该真实类型调用store_image(bytes)；owner把有界编码bytes放store后，原journal stage_image，driver唯一对象发布者。
+输入bytes<=max_image_bytes、原options声明；输出原ObjectRef/回执；store refs、action/occurrence/fence在既有port上验证。
+worker不能因拿到storehandle自行发布/ACK或改变预算；close不夺run owner。
+当前local：PromptActor.bind_execution访问current_action/object_sinks并调用check_image_replay/image_request_budget/reserve_capacity；
+media._store_image访问store.run的锁、验证缓存、scratch与storage_usage。这些是具体状态耦合，不用“接口已注入”掩盖。
+
+推荐：保留remote现有合同；local若另开切片，由原object_sink/绑定owner提供已绑定的store-image能力，
+输入只有有界编码bytes和原媒体政策/受控验证回调，输出原固定引用；decode/policy仍归媒体库，
+action/水位/资源锁/临时文件/charge/replay事实留engine。能力在原bind_execution提供，不接受用户自报“已验证”。
+不先建立通用ImageService或复制媒体验证；实际复用收益不足可以保留原路径，不把local改造设为G/Prompt前置。
+如果实施，必须覆盖decode失败、已验证cache命中/淘汰、scope取消、scratch超限、journal拒绝和“bytes已到但stop需保留唯一恢复证据”；
+原ObjectSink水位不一致仍UnresolvedCommit，不自动再生成。存储发布/资源计量原owner、原error/cleanup顺序保持。
+潜在文件：原execution/object_sink.py、dataflow_model_journal.py与operator_llm/media.py/runtime.py；不是现在获准的代码变更。
+
+F2-INDEX：独立 DataFusion 能力与 index 的真实私有边界
+
+当前lance.index固定expected_version后构造DataFusionSession，自有slots/finite options，调用_prepare_lance_index两处，
+_save一处记录index control JSON，后由Lance本身CAS commit再按version核验。它不是Pipeline run，P4明确不经host两索引。
+输入为fixed uri/version/column/config/uuid；输出原segment/removed/contract/rows/fragments proof及固定结果；
+索引构建worker不能发布manifest，最终publication owner仍Lance Dataset commit lock与expected_version，unknown不自动重建。
+生命周期：query/worker占用和diagnostic/scratch排空后还slot，异常前后保持原未提交文件处置与committed事实，不称slot为硬内存隔离。
+推荐低优先局部切片：若修改此路径，把真正可公开的prepare_lance_index能力放原DataFusionSession并同批迁当前调用者/删除旧私有方法；
+index记录发布留其Lance owner，_save是否替换先对当前编码/临时文件/fsync/竞争语义作具体选择，不能复制不明helper为“去依赖”。
+不改类模块路径、不统一查询服务；需要的class code identity变化按现行拒绝处理。不因一条私有导入延迟其他交付。
+
+中立 location/artifact 合同（G 直接可用）
+
+artifacts.resolve_local_artifact/lance.resolve_local_uri使用显式位置manifest、精确原路径键；不得靠basename/前缀/链式fallback读错历史。
+recent_digest对近ctime字节取hash；IndexedLocations大manifest以有界流式解析建立派生缓存，锁/数据库不是新的运行事实源。
+原manifest、内容摘要/源stat元组、缓存key都需一致；cache损坏/不可写/锁超时/源并发改写是原拒绝/回退语义，不自动改原history。
+get与get_readonly不能混用；声明层调用不表示无IO或无资源费用。移位置/编码/缓存政策由具体G条目评审，当前建议保留合理依赖。

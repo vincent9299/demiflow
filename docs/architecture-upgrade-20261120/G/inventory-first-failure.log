@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/design/declaration-edges-20261120/docs/architecture-upgrade-20261120/G/inventory.py", line 52, in <module>
+    assert len(hits)==1 and sha(path)==edge['source_sha256'],edge['id']
+AssertionError: G-EDGE-10

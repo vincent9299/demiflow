@@ -23,6 +23,7 @@ import pytest
 
 from demiflow.workbench.runs import manager as runs
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.objects import ObjectRef
 from image_http_fixture import definition, json_definition
 
@@ -116,7 +117,7 @@ def make_run(root, server, *, count=2, chain=False, materialize=False, limits=No
     if fixed_input:
         schema=pa.schema([pa.field('instruction',pa.string(),nullable=False)])
         lance.write_dataset(pa.Table.from_pylist(items,schema=schema),str(root/'data/input.lance'))
-        ws.attach_table(root,'input',relative_uri='input.lance',version=1,dataset_id='input',schema_name='input',schema_version='1')
+        project_ops.attach_table(root,'input',relative_uri='input.lance',version=1,dataset_id='input',schema_name='input',schema_version='1')
     code = 'from demiflow import data\n'
     if chain:
         score = json_definition(server['base'])['prompts']['answer'];score['template'] = 'Score {{ pixels | image }}'
@@ -165,7 +166,7 @@ def bundle(row: Input) -> Output:
     if fixed_input:params['arguments']['source']=dict(kind='table',alias='input')
     (root/'flows/params.json').write_text(json.dumps(params))
     ws.register_flow(root,'flows/image.py:run',params='flows/params.json')
-    report = ws.inspect_flow(root,'flows/image.py:run',params='flows/params.json')
+    report = project_ops.inspect_flow(root,'flows/image.py:run',params='flows/params.json')
     assert report['status'] == 'checked',report['diagnostics']
     limit = dict(timeout_s=480,memory_bytes=160*1024**2,max_scratch_bytes=32*1024**2,max_output_bytes=2*1024**2,
         max_evidence_bytes=8*1024**2,max_row_bytes=65536,max_batch_bytes=262144,batch_rows=16,log_bytes=1024**2)
@@ -288,7 +289,7 @@ def test_actual_forge_multibatch_cancel_resume_prefix(image_workspace_base,tmp_p
     save_facts(root,value,result,joint_http,prefix_window=window,prefix_fact=ready['fact'],before_budgets=before_budgets)
 
 
-@pytest.mark.parametrize('window,damage',[('after_prepared',False),('after_acked',False),('after_acked',True)])
+@pytest.mark.parametrize('window,damage',[('after_prepared',False),('after_acked',False),('after_acked',True),('after_prepared',True)])
 def test_actual_forge_final_image_sink_resume_never_republishes(image_workspace_base,tmp_path,joint_http,monkeypatch,window,damage):
     root=tmp_path/'workspace';shutil.copytree(image_workspace_base,root)
     value=make_run(root,joint_http,count=2)
@@ -301,6 +302,9 @@ def test_actual_forge_final_image_sink_resume_never_republishes(image_workspace_
     runs.cancel(root,value['run_id']);previous=stop(root,value['run_id'])
     assert previous['status']=='cancelled' and previous['state']['usage_complete'] is True
     consumed=budgets(root,value['run_id'])
+    published_before_resume = Path(uri).exists()
+    if window == 'after_acked': assert published_before_resume
+    if published_before_resume: assert lance.dataset(uri).version == 1
     if damage:
         item=ready['fact']['prepared']['sinks']['write_lance']['objects']['objects'][0]
         path=next((root/'data/.demiflow-objects').rglob(item['sha256']))
@@ -308,8 +312,10 @@ def test_actual_forge_final_image_sink_resume_never_republishes(image_workspace_
         with pytest.raises(ValueError,match='checksum differs'):
             launch_observed(root,value,'observe_only',monkeypatch,resume=True)
         result=runs.show(root,value['run_id'])
-        assert result['attempt']==1 and len(joint_http['requests'])==2 and lance.dataset(uri).version==1
-        save_facts(root,value,result,joint_http,final_sink_window=window,expected_blocked=True,publication_before_cancel=True)
+        assert result['attempt']==1 and len(joint_http['requests'])==2
+        assert Path(uri).exists() == published_before_resume
+        if published_before_resume: assert lance.dataset(uri).version == 1
+        save_facts(root,value,result,joint_http,final_sink_window=window,expected_blocked=True,publication_before_cancel=window=='after_acked',publication_before_resume=published_before_resume)
         return
     launch_observed(root,value,'observe_only',monkeypatch,resume=True)
     result=stop(root,value['run_id'])

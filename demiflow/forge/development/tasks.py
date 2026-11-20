@@ -84,7 +84,9 @@ def start(project, task_id, pipeline, goal, writes, non_goals, *, metadata=None)
             protected = (project.root / readonly).resolve()
             if target.is_relative_to(protected) or protected.is_relative_to(target):
                 raise ForgeError(f"Writable scope intersects readonly: {name}")
-    binding = project.binding()
+    from .project import binding_components
+    components = binding_components(project.path, project.config)
+    binding = digest(components)
     observation = project.observe(pipeline)
     if observation.coverage is not None:
         if observation.facts.unwatched:
@@ -98,7 +100,7 @@ def start(project, task_id, pipeline, goal, writes, non_goals, *, metadata=None)
         raise ForgeError('Tool/config changed during start observation')
     initial = {"schema": "demiforge-task-v1", "id": task_id, "pipeline": pipeline,
                "goal": goal, "writes": sorted(set(writes)), "non_goals": non_goals,
-               "created": now(), "binding": binding, "baseline": observation.tree,
+               "created": now(), "binding": binding, "binding_components": components, "baseline": observation.tree,
                "readonly_baseline": observation.readonly, "sources": observation.sources,
                "reads": {}, "notes": [], "check": None, "verification": None, "review": None}
     if observation.coverage is not None:
@@ -117,19 +119,134 @@ def start(project, task_id, pipeline, goal, writes, non_goals, *, metadata=None)
             "next": f"context --id {task_id}", "note": "Baseline includes existing dirty/untracked files"}
 
 
-def current(project, state, *, with_observation=False):
+def _runtime_config_pin(project, state, expected_binding):
+    """Authenticate original config independently of implementation provenance."""
+    components = state.get('binding_components')
+    pin = None
+    if components is not None:
+        if (type(components) is not dict or set(components) != {'config', 'tool'}
+                or digest(components) != state['binding']):
+            raise ForgeError('Original task binding components differ')
+        pin = components['config']
+    if 'managed' in state:
+        from .registration import records, sha
+        for item in records(project, state):  # Authenticated chain and fixed original head.
+            if item['status'] != 'committed':
+                continue
+            plan = item['plan']
+            if plan.get('kind', 'registration') == 'registration':
+                declaration = plan['project']
+                if sha(declaration['after_raw']) != declaration['after_sha256']:
+                    raise ForgeError('Original registered project configuration differs')
+                pin = declaration['after_sha256']
+            else:
+                parts = plan['request']['after_components']
+                if digest(parts) != plan['after_binding']:
+                    raise ForgeError('Original implementation binding components differ')
+                pin = parts['config']
+    if pin is None:
+        # Same intact old binding can still authenticate config, but never infer
+        # its separated config value from a different mixed implementation hash.
+        if project.binding() == expected_binding:
+            pin = file_hash(project.path)
+        else:
+            raise ForgeError('Historical acceptance lacks independent project configuration evidence (hash only)')
+    return pin
+
+
+def _platform_provenance_path(project, name):
+    from .resources import PACKAGE_ROOT, CHECKOUT_ROOT
+    roots = [PACKAGE_ROOT.resolve()]
+    if CHECKOUT_ROOT is not None:
+        roots.append(CHECKOUT_ROOT.resolve())
+    path = (project.root / name).resolve()
+    return not path.is_relative_to(project.root.resolve()) and any(
+        path == root or path.is_relative_to(root) for root in roots)
+
+
+def _runtime_workspace(project, state):
+    """Original signed workspace bytes, after rechecking every business field."""
+    if 'managed' not in state:
+        return None
+    from .registration import records, sha, _read, _object
+    items = [item for item in records(project, state) if item['status'] == 'committed'
+             and item['plan'].get('kind', 'registration') == 'registration']
+    if not items:
+        return None
+    original = items[-1]['plan']['workspace']
+    current = _read(project.root / 'workspace.json')
+    if (sha(original['after_raw']) != original['after_sha256'] or
+            {k: v for k, v in _object(current).items() if k != 'platform'} !=
+            {k: v for k, v in _object(original['after_raw']).items() if k != 'platform'}):
+        raise ForgeError('Registered workspace business declaration changed')
+    return original
+
+
+def _runtime_provenance(project, state, tree, readonly, sources, workspace):
+    """Reuse authenticated old provenance while rechecking business files."""
+    before = readonly_baseline(project, state)
+    readonly = dict(readonly)
+    for key in set(readonly) | set(before):
+        if _platform_provenance_path(project, key):
+            if key in before:
+                readonly[key] = before[key]
+            else:
+                readonly.pop(key, None)
+    sources = dict(sources)
+    for key, item in sources.items():
+        if _platform_provenance_path(project, item['definition']['path']):
+            original = state['sources'].get(key)
+            if original is None or original['definition'] != item['definition']:
+                raise ForgeError('Original platform context declaration is unavailable')
+            sources[key] = original
+    tree = dict(tree)
+    if workspace is not None:
+        path = (project.root / 'workspace.json').resolve()
+        for snapshot in (tree, readonly):
+            for key in snapshot:
+                if (project.root / key).resolve() == path:
+                    snapshot[key] = workspace['after_sha256']
+        for key, item in list(sources.items()):
+            definition = item['definition']
+            if (project.root / definition['path']).resolve() == path:
+                text = workspace['after_raw']
+                if 'lines' in definition:
+                    start, end = definition['lines']
+                    text = ''.join(text.splitlines(keepends=True)[start-1:end])
+                sources[key] = dict(definition=definition, sha256=digest(text),
+                                    pages=max(1, (len(text) + PAGE_SIZE - 1) // PAGE_SIZE))
+    return tree, readonly, sources
+
+
+def _runtime_context_provenance(project, supplemental, workspace):
+    result = {}
+    for source in supplemental:
+        path = source['canonical_path']
+        if _platform_provenance_path(project, path):
+            result[path] = source['sha256']
+        elif (workspace is not None and Path(path) == project.root / 'workspace.json'
+              and source['sha256'] == workspace['after_sha256']):
+            result[path] = source['sha256']
+    return result
+
+
+def current(project, state, *, with_observation=False, _runtime=False):
     if state.get('managed', {}).get('context_binding_problem'):
         raise ForgeError('Supplementary authority source set changed; an explicit contract update is required')
-    binding = project.binding()
     from .registration import binding_for
-    expected_binding = binding_for(project, state) if 'managed' in state else state["binding"]
-    if binding != expected_binding:
+    expected_binding = binding_for(project, state, runtime=_runtime) if 'managed' in state else state["binding"]
+    config_pin = _runtime_config_pin(project, state, expected_binding) if _runtime else None
+    binding = file_hash(project.path) if _runtime else project.binding()
+    if binding != (config_pin if _runtime else expected_binding):
         raise ForgeError("Tool, standard or project configuration changed; use read-only history. "
                          "Continuation requires a separately reviewed plan preserving the original baseline; "
                          "do not restart this task from the current tree")
     observation = project.observe(state['pipeline'])
     tree, readonly, sources = observation.tree, observation.readonly, observation.sources
-    if project.binding() != binding:
+    workspace = _runtime_workspace(project, state) if _runtime else None
+    if _runtime:
+        tree, readonly, sources = _runtime_provenance(project, state, tree, readonly, sources, workspace)
+    if (file_hash(project.path) if _runtime else project.binding()) != binding:
         raise ForgeError('Tool/config changed during current observation')
     basis = {"tree": tree, "readonly": readonly, "sources": sources,
                           "binding": state["binding"],
@@ -143,7 +260,8 @@ def current(project, state, *, with_observation=False):
         basis['managed_questions'] = managed_questions(state)
         supplemental = context_baseline(project, state)
         if supplemental is not None:
-            basis['managed_context'] = supplemental_context(supplemental)
+            provenance = _runtime_context_provenance(project, supplemental, workspace) if _runtime else None
+            basis['managed_context'] = supplemental_context(supplemental, _original_provenance=provenance)
     fingerprint = digest(basis)
     values = (tree, readonly, sources, fingerprint)
     return (*values, observation) if with_observation else values
@@ -208,7 +326,7 @@ def pending_questions(state):
             if n['kind'] == 'question' and not n.get('resolved')]
 
 
-def supplemental_context(sources):
+def supplemental_context(sources, *, _original_provenance=None):
     """Recheck controller-delivered full files, without granting new write scope."""
     if type(sources) is not list or len(sources) > 64:
         raise ForgeError('Supplementary context requires at most 64 full-file sources')
@@ -228,7 +346,8 @@ def supplemental_context(sources):
         if (not isinstance(expected, str) or len(expected) != 64 or
                 any(char not in '0123456789abcdef' for char in expected)):
             raise ForgeError('Supplementary context requires a raw SHA-256 digest')
-        actual = file_hash(path, limit=1024 * 1024, deadline=deadline)
+        actual = ((_original_provenance or {}).get(label) or
+                  file_hash(path, limit=1024 * 1024, deadline=deadline))
         if actual != expected:
             raise ForgeError(f'Supplementary authoritative context changed: {label}')
         if label in result and result[label] != expected:

@@ -463,7 +463,7 @@ def translate_native_checkpoint(binding: HistoricalBinding, *, store, bounds) ->
 
 # --- W002 ------------------------------------------------------------------
 
-def validate_resume_compatibility(binding: HistoricalBinding, *, current_runtime: str,
+def validate_resume_compatibility(binding: HistoricalBinding, *, current_runtime: str | None = None,
                                   store) -> CapabilityReport:
     """Check original code/source/state/sink/cursor/recovery guarantees item by item.
 
@@ -473,8 +473,7 @@ def validate_resume_compatibility(binding: HistoricalBinding, *, current_runtime
     """
     if not isinstance(binding, HistoricalBinding):
         raise _err("INVALID_CONTRACT", "validate_resume_compatibility requires a HistoricalBinding")
-    if type(current_runtime) is not str or not current_runtime:
-        raise _err("INVALID_CONTRACT", "current_runtime must be a bounded nonempty string")
+    # current_runtime is retained for callers of the old API; provenance is not admission.
     reasons = []
     recovery = "attempt_only"
     domains = []
@@ -517,8 +516,6 @@ def validate_resume_compatibility(binding: HistoricalBinding, *, current_runtime
             try:
                 pin = _store_read_json(store, binding.original_code_pin_ref,
                                       max_bytes=_MAX_SEALED_PLAN_BYTES)
-                if pin.get("platform_revision") != current_runtime:
-                    reasons.append("original platform code differs from the current runtime")
             except DataflowError as exc:
                 reasons.append("original platform code pin unreadable: " + exc.code)
         else:

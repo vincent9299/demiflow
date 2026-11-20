@@ -1,0 +1,774 @@
+{
+  "base_main": "122edf4bd0c827338846abd0114f0b36cf8c1b6d",
+  "read_only_integration": "b68bf815bee5c4e8ae27a0d0459e48c98db0e03c",
+  "paths": [
+    {
+      "path": "demiflow/execution/run_context.py",
+      "category": "blocking",
+      "reason": "resume/__enter__ exact platform equality; original configuration reused",
+      "base_sha256": "1d30365ab55846d62f5597e4f3dd22779f1019d6357f93720260bd073a05757e",
+      "integration_sha256": "1d30365ab55846d62f5597e4f3dd22779f1019d6357f93720260bd073a05757e",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 327,
+          "function": "resume",
+          "text": "from .recovery_identity import platform_identity"
+        },
+        {
+          "line": 332,
+          "function": "resume",
+          "text": "if binding.get(\"platform_revision\") != platform_identity():"
+        },
+        {
+          "line": 368,
+          "function": "__enter__",
+          "text": "from .recovery_identity import platform_identity"
+        },
+        {
+          "line": 369,
+          "function": "__enter__",
+          "text": "revision = platform_identity()"
+        },
+        {
+          "line": 376,
+          "function": "__enter__",
+          "text": "if old[\"platform_revision\"] != revision:"
+        },
+        {
+          "line": 388,
+          "function": "__enter__",
+          "text": "platform_revision=revision, started_at=time.time(),"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/execution/dataflow.py",
+      "category": "blocking",
+      "reason": "existing seal current-platform equality",
+      "base_sha256": "a318e120513b72ce2d9a836c825e368f13cf27c7c24ee518af1ce53db8bced25",
+      "integration_sha256": "a318e120513b72ce2d9a836c825e368f13cf27c7c24ee518af1ce53db8bced25",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 415,
+          "function": "prepare",
+          "text": "from .recovery_identity import platform_identity"
+        },
+        {
+          "line": 426,
+          "function": "prepare",
+          "text": "if pin.get(\"platform_revision\") != platform_identity():"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/execution/dataflow_services.py",
+      "category": "blocking",
+      "reason": "_load_programs exact equality; hosts runtime_revision provenance",
+      "base_sha256": "b88de53155aaf1d2d4442561b1ca722bf2b9c33e0ef49745723bfdd2b2e9dd63",
+      "integration_sha256": "b88de53155aaf1d2d4442561b1ca722bf2b9c33e0ef49745723bfdd2b2e9dd63",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 93,
+          "function": "_driver_hosts",
+          "text": "revision = run.journal.recovery_identity()[\"platform_revision\"]"
+        },
+        {
+          "line": 100,
+          "function": "_driver_hosts",
+          "text": "host_id=\"local\", provider=\"local\", runtime_revision=revision,"
+        },
+        {
+          "line": 129,
+          "function": "_ray_hosts",
+          "text": "host_id=host_id, provider=\"ray_core\", runtime_revision=revision,"
+        },
+        {
+          "line": 192,
+          "function": "_load_programs",
+          "text": "from .recovery_identity import platform_identity"
+        },
+        {
+          "line": 193,
+          "function": "_load_programs",
+          "text": "if pin.get(\"platform_revision\") != platform_identity():"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/execution/dataflow_history.py",
+      "category": "blocking",
+      "reason": "validate_resume_compatibility current_runtime comparison",
+      "base_sha256": "9734453fbbccb98877404d5761c018e6d416ebbc590ee7bb298ed3a4e2837fef",
+      "integration_sha256": "9734453fbbccb98877404d5761c018e6d416ebbc590ee7bb298ed3a4e2837fef",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 520,
+          "function": "validate_resume_compatibility",
+          "text": "if pin.get(\"platform_revision\") != current_runtime:"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/execution/dataflow_checkpoint.py",
+      "category": "blocking",
+      "reason": "_recover_historical calls current platform identity",
+      "base_sha256": "4b31c89e09a3e9f98fceb6998314bdd0ef2566718f65afd8506cdd992b6c03fb",
+      "integration_sha256": "4b31c89e09a3e9f98fceb6998314bdd0ef2566718f65afd8506cdd992b6c03fb",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 555,
+          "function": "_recover_historical",
+          "text": "from .recovery_identity import platform_identity"
+        },
+        {
+          "line": 559,
+          "function": "_recover_historical",
+          "text": "report = validate_resume_compatibility(binding, current_runtime=platform_identity(),"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/execution/dataflow_artifacts.py",
+      "category": "blocking",
+      "reason": "Ray probe runtime_revision equality independent from node/challenge integrity",
+      "base_sha256": "80c668803a18f101adb10643e3a13e026e2f366c4eae5f0aafb0ea14e3bd2a93",
+      "integration_sha256": "80c668803a18f101adb10643e3a13e026e2f366c4eae5f0aafb0ea14e3bd2a93",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 172,
+          "function": "verify_host_domain",
+          "text": "if proof['node_id'] != host.host_id[4:] or proof['runtime_revision'] != host.runtime_revision:"
+        },
+        {
+          "line": 190,
+          "function": "_probe_read_domain",
+          "text": "from .recovery_identity import platform_identity"
+        },
+        {
+          "line": 203,
+          "function": "_probe_read_domain",
+          "text": "'runtime_revision': platform_identity(), 'digest': hashlib.sha256(raw).hexdigest()}"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/execution/queue_execution.py",
+      "category": "semantic-hash",
+      "reason": "consumer.v2 platform mixed into nested contract; frozen exact proposal",
+      "base_sha256": "2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2",
+      "integration_sha256": "2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 126,
+          "function": "validate_topology",
+          "text": "from .recovery_identity import platform_identity"
+        },
+        {
+          "line": 127,
+          "function": "validate_topology",
+          "text": "return fetch[0],dict(protocol='demiflow.queue.consumer.v2',platform=platform_identity(),"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/execution/queue_producer.py",
+      "category": "semantic-hash",
+      "reason": "producer-transform.v2 mixed hash",
+      "base_sha256": "34e9d47dec68267e557f50b10b327262e18561d6e0de95b69367b23bdeabbc3a",
+      "integration_sha256": "34e9d47dec68267e557f50b10b327262e18561d6e0de95b69367b23bdeabbc3a",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 16,
+          "function": null,
+          "text": "from .recovery_identity import describe, platform_identity, source_identity"
+        },
+        {
+          "line": 127,
+          "function": "configure",
+          "text": "self.contract = identity(dict(protocol='demiflow.queue.producer-transform.v2', platform=platform_identity(),"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/execution/queue_contract.py",
+      "category": "planned-helper",
+      "reason": "narrow queue original contract resolution; no generic compatibility service",
+      "base_sha256": "217cf44c5b3592a15f3bd7cc6a7864ffb44ea2a4e28a69252476f130261b90b6",
+      "integration_sha256": "217cf44c5b3592a15f3bd7cc6a7864ffb44ea2a4e28a69252476f130261b90b6",
+      "equal_base_integration": true,
+      "hits": []
+    },
+    {
+      "path": "demiflow/execution/dataflow_queue.py",
+      "category": "consumer",
+      "reason": "validate_topology caller; original contract used by no-cut recovery",
+      "base_sha256": "3dfd480e00e1a606fe8464fa14134b6a8f57e1def91d319ce20d4010a20e1138",
+      "integration_sha256": "3dfd480e00e1a606fe8464fa14134b6a8f57e1def91d319ce20d4010a20e1138",
+      "equal_base_integration": true,
+      "hits": []
+    },
+    {
+      "path": "demiflow/execution/queue_source.py",
+      "category": "preserve-integrity",
+      "reason": "consumer hash original binding/completion; frozen remains untouched",
+      "base_sha256": "1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307",
+      "integration_sha256": "1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307",
+      "equal_base_integration": true,
+      "hits": []
+    },
+    {
+      "path": "demiflow/execution/queue.py",
+      "category": "preserve-integrity",
+      "reason": "queue pool and worker immutable hash transaction",
+      "base_sha256": "d720f02a9c94282c4238c2657d91ca4406187bda46dc0dbb1dbb10aa365ebec6",
+      "integration_sha256": "d720f02a9c94282c4238c2657d91ca4406187bda46dc0dbb1dbb10aa365ebec6",
+      "equal_base_integration": true,
+      "hits": []
+    },
+    {
+      "path": "demiflow/execution/queue_commit.py",
+      "category": "preserve-integrity",
+      "reason": "consumer full declaration and producer transform hash in scope/commit identities",
+      "base_sha256": "28ad72991e7ca9b0af92b37476675843e8d2d5b9e05d496ec6950784443daa04",
+      "integration_sha256": "28ad72991e7ca9b0af92b37476675843e8d2d5b9e05d496ec6950784443daa04",
+      "equal_base_integration": true,
+      "hits": []
+    },
+    {
+      "path": "demiflow/execution/queue_history.py",
+      "category": "preserve-integrity",
+      "reason": "original proof/hash/receipt reads",
+      "base_sha256": "96043b82bc8011cfe9b44a5b1bdb0a2201a605adf073df888a20bf595d6c7e7e",
+      "integration_sha256": "96043b82bc8011cfe9b44a5b1bdb0a2201a605adf073df888a20bf595d6c7e7e",
+      "equal_base_integration": true,
+      "hits": []
+    },
+    {
+      "path": "demiflow/execution/dataflow_queue_recovery.py",
+      "category": "preserve-integrity",
+      "reason": "original queue completion proof",
+      "base_sha256": "3829a4a32e3cbe9c0052ee3c2707019c2f1ce39ebccf9879a84725f52b18d4dc",
+      "integration_sha256": "3829a4a32e3cbe9c0052ee3c2707019c2f1ce39ebccf9879a84725f52b18d4dc",
+      "equal_base_integration": true,
+      "hits": []
+    },
+    {
+      "path": "demiflow/execution/queue_sql.py",
+      "category": "record-shape",
+      "reason": "producer/consumer hash columns; no new table planned",
+      "base_sha256": "cd07b51b44170f92646aed2a39b12730bbd490e49206fe946493d4994361a557",
+      "integration_sha256": "cd07b51b44170f92646aed2a39b12730bbd490e49206fe946493d4994361a557",
+      "equal_base_integration": true,
+      "hits": []
+    },
+    {
+      "path": "demiflow/execution/dataflow_seal.py",
+      "category": "provenance-only",
+      "reason": "platform_revision in original code pin; business program pin still mandatory",
+      "base_sha256": "a7d82a990ebb243554647e0dbf409dcaa574b1fdd901619b03daef5a55d53914",
+      "integration_sha256": "a7d82a990ebb243554647e0dbf409dcaa574b1fdd901619b03daef5a55d53914",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 560,
+          "function": "seal_dataflow",
+          "text": "\"platform_revision\": context.journal.recovery_identity()[\"platform_revision\"],"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/execution/graph.py",
+      "category": "provenance-only",
+      "reason": "run artifact manifest platform source_digest from original configuration",
+      "base_sha256": "60ffd62e1eb2074f38d23a1b077d77800f594cccd5792bb27daf17f037b89129",
+      "integration_sha256": "60ffd62e1eb2074f38d23a1b077d77800f594cccd5792bb27daf17f037b89129",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 109,
+          "function": "_build_manifest",
+          "text": "platform={\"source_digest\": config[\"platform_revision\"], \"distribution\": \"demiflow\","
+        }
+      ]
+    },
+    {
+      "path": "demiflow/execution/chain.py",
+      "category": "provenance-only",
+      "reason": "same manifest origin; business source_identity remains; update stale pin comments",
+      "base_sha256": "e3a9103a0ec0aef6032474935bbde97c6218fd5ee213294e4a90ac96c9e6eee2",
+      "integration_sha256": "e3a9103a0ec0aef6032474935bbde97c6218fd5ee213294e4a90ac96c9e6eee2",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 829,
+          "function": "_business_dependency_modules",
+          "text": "skipped — platform code is pinned by ``platform_revision``; third-party env"
+        },
+        {
+          "line": 931,
+          "function": "plan_code_pin",
+          "text": "actors (engine code, separately pinned by ``platform_revision``), ``describe``"
+        },
+        {
+          "line": 955,
+          "function": "snapshot_code_sources",
+          "text": "code pinned by ``platform_revision``. Dependency modules archive through the"
+        },
+        {
+          "line": 1270,
+          "function": "_build_sealed_manifest",
+          "text": "platform={\"source_digest\": config[\"platform_revision\"], \"distribution\": \"demiflow\","
+        }
+      ]
+    },
+    {
+      "path": "demiflow/execution/worker/runtime.py",
+      "category": "provenance-only",
+      "reason": "artifact_digest_observed from original launch, not current source comparison",
+      "base_sha256": "69ac46f1f5690ed00672d134a47fcf2eec8268455e3950413f05ea9845ec072f",
+      "integration_sha256": "69ac46f1f5690ed00672d134a47fcf2eec8268455e3950413f05ea9845ec072f",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 160,
+          "function": "__init__",
+          "text": "\"artifact_digest_observed\", config[\"platform_revision\"])"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/execution/recovery_identity.py",
+      "category": "source-utility",
+      "reason": "platform_identity full tree retained; business describe/plan_identity unchanged",
+      "base_sha256": "6f1d957b27fd5840b154ac78408ea10669a97ece763db3ba435c12da856c122f",
+      "integration_sha256": "6f1d957b27fd5840b154ac78408ea10669a97ece763db3ba435c12da856c122f",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 309,
+          "function": "platform_identity",
+          "text": "def platform_identity():"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/execution/host/_surface.py",
+      "category": "public-compatibility",
+      "reason": "platform_identity export retained",
+      "base_sha256": "9fa69cc83074bdb05b117dad7ef8189b7c2a50cb1ae6b8991a608fbc1f86d87f",
+      "integration_sha256": "9fa69cc83074bdb05b117dad7ef8189b7c2a50cb1ae6b8991a608fbc1f86d87f",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 52,
+          "function": null,
+          "text": "'platform_identity': ['demiflow.execution.recovery_identity',"
+        },
+        {
+          "line": 53,
+          "function": null,
+          "text": "'platform_identity'],"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/execution/contracts/artifact.py",
+      "category": "preserve-integrity",
+      "reason": "source_digest shape and original artifact seal identity",
+      "base_sha256": "150195c583bab52be02c4d8852e88463986482ec67b30c600223ffaec80ae697",
+      "integration_sha256": "150195c583bab52be02c4d8852e88463986482ec67b30c600223ffaec80ae697",
+      "equal_base_integration": true,
+      "hits": []
+    },
+    {
+      "path": "demiflow/workbench/runs/manager.py",
+      "category": "blocking",
+      "reason": "resume exact platform gate and snapshot/env admission; P12 delta preserved",
+      "base_sha256": "e7dce9c58938f48451f94304d503d22fa3a15a7c0a9283189fcc4f78ad3168d4",
+      "integration_sha256": "c898dfd97f3ed226238964365e53bfe71bcdcd9b553082280b25bb5173193a92",
+      "equal_base_integration": false,
+      "hits": [
+        {
+          "line": 896,
+          "function": "resume",
+          "text": "from demiflow.execution.host.inspection import platform_identity"
+        },
+        {
+          "line": 900,
+          "function": "resume",
+          "text": "if binding.get('platform_revision') != platform_identity():"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/runs/native_submission.py",
+      "category": "semantic-hash",
+      "reason": "workspace_digest/platform_digest compared as runtime basis",
+      "base_sha256": "69447e3d5721fa1953a24ba30c0d53697f96b9920117c77e5c927973b940826b",
+      "integration_sha256": "d3c0d94ed9e8b2fc7a9b25aa747665b6b9557d46d1007cc4549eaa9ce9dbd05c",
+      "equal_base_integration": false,
+      "hits": [
+        {
+          "line": 91,
+          "function": "inspect_submission",
+          "text": "workspace_digest=content_digest(control), platform_digest=content_digest(platform)))"
+        },
+        {
+          "line": 139,
+          "function": "verify_basis",
+          "text": "if (content_digest(workspace) != binding['workspace_digest']"
+        },
+        {
+          "line": 140,
+          "function": "verify_basis",
+          "text": "or content_digest(platform) != binding['platform_digest']):"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/projects/workspace.py",
+      "category": "blocking-semantic-hash",
+      "reason": "inspect snapshot current gate; report policy platform; verification complete",
+      "base_sha256": "63089fad3f43ac77a726967d96041b7994bdca023a1d9fcef5520f3ff9420d23",
+      "integration_sha256": "97b2002da60d049c3ba6ee3e974823976f9e55efb7011cfd8d151826c4e7fdb2",
+      "equal_base_integration": false,
+      "hits": [
+        {
+          "line": 27,
+          "function": null,
+          "text": "from demiflow.forge.platform_snapshot import build_snapshot"
+        },
+        {
+          "line": 28,
+          "function": null,
+          "text": "from demiflow.forge.platform_snapshot import check_snapshot"
+        },
+        {
+          "line": 29,
+          "function": null,
+          "text": "from demiflow.forge.platform_snapshot import load_snapshot"
+        },
+        {
+          "line": 30,
+          "function": null,
+          "text": "from demiflow.forge.platform_snapshot import write_snapshot"
+        },
+        {
+          "line": 185,
+          "function": "_publish_audit_policy",
+          "text": "return dict(status='updated', workspace_digest=content_digest(value), audit=value['audit'], **details)"
+        },
+        {
+          "line": 260,
+          "function": "_capture_change_baseline",
+          "text": "workspace_policy_sha256=audit.workspace_digest(value), created_at=time.time())"
+        },
+        {
+          "line": 302,
+          "function": "_store_scope",
+          "text": "return dict(status='updated', workspace_digest=content_digest(value), audit=value['audit'])"
+        },
+        {
+          "line": 357,
+          "function": "_check_change_scope",
+          "text": "result = audit.compare(baseline, current, scope['writes'], workspace_policy_sha256=audit.workspace_digest(value))"
+        },
+        {
+          "line": 585,
+          "function": "set_budgets",
+          "text": "return {'status': 'updated', 'workspace_digest': content_digest(value), 'limits': effective}"
+        },
+        {
+          "line": 1365,
+          "function": "_report_status",
+          "text": "'current', 'platform_changed')"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/projects/checks.py",
+      "category": "evidence-status",
+      "reason": "checker/current snapshot stale separate from business basis",
+      "base_sha256": "655e1d2f5c77c2aaf429d4834c46f77f9553f849a2b8f0ef117c1f6900f74a53",
+      "integration_sha256": "9ecec9fecc8d023604327484eaf6a4b0b57861829d35640c21c874b3a676a7a8",
+      "equal_base_integration": false,
+      "hits": [
+        {
+          "line": 123,
+          "function": "check",
+          "text": "checker_platform_digest=platform['current_digest'], workspace_platform_status=platform['status'],"
+        },
+        {
+          "line": 155,
+          "function": "status",
+          "text": "if (result.get('checker_platform_digest') != platform.get('current_digest') if result.get('checker_platform_digest')"
+        },
+        {
+          "line": 157,
+          "function": "status",
+          "text": "reasons.append('platform_changed')"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/forge/platform_snapshot.py",
+      "category": "provenance-integrity",
+      "reason": "build/load/compare current source/dependencies; snapshot digest authentication retained",
+      "base_sha256": "b89057365df6ae51b2ac7a49062a3c0b22d544cd924eb33039880d7da260157b",
+      "integration_sha256": "b89057365df6ae51b2ac7a49062a3c0b22d544cd924eb33039880d7da260157b",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 19,
+          "function": null,
+          "text": "FORMAT = \"demiflow_forge_platform_snapshot_v5\""
+        },
+        {
+          "line": 115,
+          "function": "build_snapshot",
+          "text": "\"format\": f\"demiflow_forge_platform_snapshot_v{version}\","
+        },
+        {
+          "line": 168,
+          "function": "load_snapshot",
+          "text": "} or value[\"format\"] not in {\"demiflow_forge_platform_snapshot_v1\", \"demiflow_forge_platform_snapshot_v2\", \"demiflow_forge_platform_snapshot_v3\", \"demiflow_forge_platform_snapshot_v4\", FORMAT}:"
+        },
+        {
+          "line": 174,
+          "function": "load_snapshot",
+          "text": "modern = value['format'] in {'demiflow_forge_platform_snapshot_v4', FORMAT}"
+        },
+        {
+          "line": 178,
+          "function": "load_snapshot",
+          "text": "if modern and (version != 3 or scope['standard_version'] != int(value['format'].rsplit('v', 1)[1])) or not modern and value[\"format\"] != f\"demiflow_forge_platform_snapshot_v{version}\":"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/forge/platform_environment.py",
+      "category": "mixed-environment",
+      "reason": "own platform metadata separated; third party/Python actual environment preserved",
+      "base_sha256": "1ae856549592f015001e0005bc25742e6d8eef4db271594198eddd25f11f36df",
+      "integration_sha256": "1ae856549592f015001e0005bc25742e6d8eef4db271594198eddd25f11f36df",
+      "equal_base_integration": true,
+      "hits": []
+    },
+    {
+      "path": "demiflow/forge/platform_cli.py",
+      "category": "diagnostic",
+      "reason": "explicit platform snapshot stale comparison retained",
+      "base_sha256": "0507ba7c65cb69a69a476b63da72b2ff2ed7c17d0a990280616fb2408e6e0e98",
+      "integration_sha256": "0507ba7c65cb69a69a476b63da72b2ff2ed7c17d0a990280616fb2408e6e0e98",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 8,
+          "function": null,
+          "text": "from .platform_snapshot import build_snapshot, check_snapshot, write_snapshot, _complete, _diagnostics"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/conversations/admission.py",
+      "category": "blocking",
+      "reason": "require runtime follows live development status currently",
+      "base_sha256": "905741fd871b304003b8ae9a47c421974af3c6c6412ac486cd7e1ee69223ff41",
+      "integration_sha256": "905741fd871b304003b8ae9a47c421974af3c6c6412ac486cd7e1ee69223ff41",
+      "equal_base_integration": true,
+      "hits": []
+    },
+    {
+      "path": "demiflow/workbench/conversations/development.py",
+      "category": "consumer",
+      "reason": "project_tasks constructs ManagedTasks; no new executor",
+      "base_sha256": "53e2856cae7a53cc39d439f0f99e5b8ddc73f77d8425d553470bc212093cdb7a",
+      "integration_sha256": "53e2856cae7a53cc39d439f0f99e5b8ddc73f77d8425d553470bc212093cdb7a",
+      "equal_base_integration": true,
+      "hits": []
+    },
+    {
+      "path": "demiflow/forge/development/tasks.py",
+      "category": "semantic-hash",
+      "reason": "binding config+tool gate before accepted business fingerprint",
+      "base_sha256": "05f678d308b8c6c7855c1d0628b5e72b6904efb85e37d4b96ad7ad278be5bd02",
+      "integration_sha256": "05f678d308b8c6c7855c1d0628b5e72b6904efb85e37d4b96ad7ad278be5bd02",
+      "equal_base_integration": true,
+      "hits": []
+    },
+    {
+      "path": "demiflow/forge/development/managed.py",
+      "category": "blocking",
+      "reason": "_projection tasks.current and current sandbox implementation matcher",
+      "base_sha256": "13a3271804b58a72c1044d3e2b5a1450131baff323b10397e8150226c27e3fe3",
+      "integration_sha256": "13a3271804b58a72c1044d3e2b5a1450131baff323b10397e8150226c27e3fe3",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 204,
+          "function": "__init__",
+          "text": "def __init__(self, *, _key=None, available=True, execution_identity=None):"
+        },
+        {
+          "line": 207,
+          "function": "__init__",
+          "text": "self.execution_identity = execution_identity"
+        },
+        {
+          "line": 210,
+          "function": "persistent",
+          "text": "def persistent(cls, state_root, *, execution_identity=None):"
+        },
+        {
+          "line": 242,
+          "function": "persistent",
+          "text": "return cls(_key=key, available=False, execution_identity=execution_identity)"
+        },
+        {
+          "line": 269,
+          "function": "issue_execution",
+          "text": "if self.execution_identity is not None and self.execution_identity != dict(backend=backend, implementation=implementation):"
+        },
+        {
+          "line": 959,
+          "function": "_projection",
+          "text": "if self.review_authority.execution_identity is not None and identity != self.review_authority.execution_identity:"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/forge/development/project.py",
+      "category": "semantic-hash",
+      "reason": "binding_components complete config/tool map; observe business+readonly source",
+      "base_sha256": "8e3de19b83f92cb52b4516506b9a82085246303c815e21a1f0cfcacfd1b3810b",
+      "integration_sha256": "8e3de19b83f92cb52b4516506b9a82085246303c815e21a1f0cfcacfd1b3810b",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 638,
+          "function": "binding_components",
+          "text": "def binding_components(config_path, config, *, hash_file=None):"
+        },
+        {
+          "line": 652,
+          "function": "binding",
+          "text": "return digest(binding_components(config_path, config, hash_file=hash_file))"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/forge/development/resources.py",
+      "category": "source-utility",
+      "reason": "implementation_files enumerates actual tool source binding",
+      "base_sha256": "84654bef64a7d2b4870264866efe62d2be2c51e1fad671332853cb0b376f870b",
+      "integration_sha256": "84654bef64a7d2b4870264866efe62d2be2c51e1fad671332853cb0b376f870b",
+      "equal_base_integration": true,
+      "hits": []
+    },
+    {
+      "path": "demiflow/forge/development/registration.py",
+      "category": "old-proof",
+      "reason": "signed project raw config or implementation components can recover original config proof",
+      "base_sha256": "c41ac8e70c8f70e0056c43640d6f287fb34591a386d5bc5201e20d422ab59d6f",
+      "integration_sha256": "c41ac8e70c8f70e0056c43640d6f287fb34591a386d5bc5201e20d422ab59d6f",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 13,
+          "function": null,
+          "text": "from .project import ForgeError, Project, binding_components, digest, no_symlinks, relative, safe_id, within"
+        },
+        {
+          "line": 209,
+          "function": "prepare",
+          "text": "components = binding_components(project.path, project.config)"
+        },
+        {
+          "line": 303,
+          "function": "adopt_implementation",
+          "text": "if binding_components(project.path, project.config) != after_components:"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/conversations/review.py",
+      "category": "consumer",
+      "reason": "persistent signature authority built with current sandbox execution_identity",
+      "base_sha256": "916c3ff5bc891c76c4d4ba2b02654a245de70905bb6232f018baa2f7433fd9b3",
+      "integration_sha256": "916c3ff5bc891c76c4d4ba2b02654a245de70905bb6232f018baa2f7433fd9b3",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 37,
+          "function": "review_authority",
+          "text": "from .sandbox import execution_identity"
+        },
+        {
+          "line": 38,
+          "function": "review_authority",
+          "text": "return ReviewAuthority.persistent(state_root, execution_identity=execution_identity())"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/workbench/conversations/sandbox.py",
+      "category": "provenance-for-runtime",
+      "reason": "actual sandbox hash still qualifies development execution; no current-match runtime gate",
+      "base_sha256": "361993eed44c813315745fc71cc0cf95703ecc12bf8b54bec8d1e566b5c92e99",
+      "integration_sha256": "361993eed44c813315745fc71cc0cf95703ecc12bf8b54bec8d1e566b5c92e99",
+      "equal_base_integration": true,
+      "hits": [
+        {
+          "line": 42,
+          "function": "execution_identity",
+          "text": "def execution_identity():"
+        },
+        {
+          "line": 190,
+          "function": "launch_sandbox",
+          "text": "implementation = execution_identity()"
+        },
+        {
+          "line": 237,
+          "function": "launch_sandbox",
+          "text": "if execution_identity() != implementation:"
+        }
+      ]
+    },
+    {
+      "path": "demiflow/execution/requirements.py",
+      "category": "preserve-integrity",
+      "reason": "actual wheel/requirements resolution identity, not global installed source version",
+      "base_sha256": "01da04645cc97e9d1e437dc3e11a10015af900d5f2f131a46a3e5af0cc1603ba",
+      "integration_sha256": "01da04645cc97e9d1e437dc3e11a10015af900d5f2f131a46a3e5af0cc1603ba",
+      "equal_base_integration": true,
+      "hits": []
+    },
+    {
+      "path": "demiflow/execution/managed_native.py",
+      "category": "preserve-semantic",
+      "reason": "native compiled submission business contract",
+      "base_sha256": "f67c040affac0d452e328aa1ce8278efd8c69fc253d94f8ff66e21809a850c39",
+      "integration_sha256": "f67c040affac0d452e328aa1ce8278efd8c69fc253d94f8ff66e21809a850c39",
+      "equal_base_integration": true,
+      "hits": []
+    },
+    {
+      "path": "demiflow/execution/checked.py",
+      "category": "preserve-semantic",
+      "reason": "actual checked operations and business binding",
+      "base_sha256": "c0bd50a16060a2e1e5b22c8c2283b0e151bf3243549fdfc4bed809fb8294a343",
+      "integration_sha256": "c0bd50a16060a2e1e5b22c8c2283b0e151bf3243549fdfc4bed809fb8294a343",
+      "equal_base_integration": true,
+      "hits": []
+    }
+  ]
+}

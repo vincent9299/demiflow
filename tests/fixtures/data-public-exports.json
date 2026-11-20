@@ -6,6 +6,7 @@
     "read_checkpoint",
     "read_queue",
     "read_queue_records",
+    "read_legacy_queue_records",
     "add_lance_columns",
     "ensure_lance_vector_index",
     "local_execution",
@@ -67,6 +68,10 @@
     "read_queue_records": [
       "demiflow.data.read_api",
       "read_queue_records"
+    ],
+    "read_legacy_queue_records": [
+      "demiflow.data.read_api",
+      "read_legacy_queue_records"
     ],
     "add_lance_columns": [
       "demiflow.lance",

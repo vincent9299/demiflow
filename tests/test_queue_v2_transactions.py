@@ -124,7 +124,11 @@ def test_public_workers_consume_before_seal_without_duplicate_effects(channel, t
     with origin_server() as (url, calls):
         def consume(index):
             with RunContext.start(tmp_path/('worker-'+str(index))):
-                (data.read_queue(channel.config, pool='p', max_tasks=4, max_inflight=2, idle_timeout_s=10)
+                # This checks concurrent consumption before seal, not an idle
+                # deadline. Include producer compilation and twelve durable
+                # publications; a waiting worker may receive no early task.
+                # The 30-second future deadline below still detects a stall.
+                (data.read_queue(channel.config, pool='p', max_tasks=4, max_inflight=2, idle_timeout_s=60)
                     .fetch(store=LocalObjectStore(tmp_path/('objects-'+str(index))), concurrency=2,
                         policy=FetchPolicy(max_object_bytes=128*1024, http=HttpSource(allow_private=True)))
                     .write_datasink(QueueResultSink(channel.config, pool='p')))

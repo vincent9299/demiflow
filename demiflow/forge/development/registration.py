@@ -70,11 +70,17 @@ def records(project, state, *, pending=False):
     return items
 
 
-def binding_for(project, state):
+def binding_for(project, state, *, runtime=False):
     items = [i for i in records(project, state) if i['status'] == 'committed']
     declarations = [i for i in items if i['plan'].get('kind', 'registration') == 'registration']
-    if declarations and sha(_read(project.root / 'workspace.json')) != declarations[-1]['plan']['workspace']['after_sha256']:
-        raise ForgeError('Registered workspace metadata changed outside its authorized revision')
+    if declarations:
+        original = declarations[-1]['plan']['workspace']
+        current = _read(project.root / 'workspace.json')
+        if sha(current) != original['after_sha256']:
+            if (not runtime or sha(original['after_raw']) != original['after_sha256'] or
+                    {k: v for k, v in _object(current).items() if k != 'platform'} !=
+                    {k: v for k, v in _object(original['after_raw']).items() if k != 'platform'}):
+                raise ForgeError('Registered workspace metadata changed outside its authorized revision')
     return items[-1]['plan']['after_binding'] if items else state['binding']
 
 

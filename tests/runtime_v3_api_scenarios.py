@@ -364,8 +364,12 @@ def _run_case(fx,case,index,source):
     recorder=_ExecuteActionRecorder()
     outcome={'name':case.name,'apis':case.apis,'kind':case.kind,'variants':case.variants,'run_directory':str(root/'run')}
     observed=None
+    limits={'timeout_s':120,'max_input_rows':1000,'max_output_rows':4000,'checkpoint_rows':64}
+    if case.name == 'object-image':
+        # The image actor reserves 256 MiB plus bounded input/output workspace.
+        limits['memory_bytes']=1024**3
     try:
-        with recorder, _RayDataBlocker() as blocker, (nullcontext(None) if case.self_managed else RunContext.start(root/'run',limits={'timeout_s':120,'max_input_rows':1000,'max_output_rows':4000,'checkpoint_rows':64})) as run:
+        with recorder, _RayDataBlocker() as blocker, (nullcontext(None) if case.self_managed else RunContext.start(root/'run',limits=limits)) as run:
             observed=run
             value=case.run(root)
             if case.error: raise AssertionError('Invalid API input was silently accepted')

@@ -7,13 +7,14 @@ import pytest
 from urllib.parse import urlencode
 
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from test_forge_workspace import demo,isolated
 from test_forge_project_discovery import original,business_bytes
 from test_forge_public_api import request,service
 
 
 def test_catalog_profile_is_read_only_fixed_and_available_without_analysis_environment(isolated):
-    description=ws.describe_table(isolated,'candidates');binding=description['binding']['digest']
+    description=project_ops.describe_table(isolated,'candidates');binding=description['binding']['digest']
     query=dict(alias='candidates',expected_binding=binding,columns=json.dumps(['case_id','question']))
     with service(isolated) as app:
         code,value=request(app,'/api/table-profile?'+urlencode(query))
@@ -36,7 +37,7 @@ def test_catalog_profile_is_read_only_fixed_and_available_without_analysis_envir
 def test_original_declared_profile_keeps_fixed_version_and_does_not_edit_business_files(original):
     ws.init_workspace(original,existing=True);before=business_bytes(original)
     discovery=ws.discover_project(original);item=next(row for row in discovery['tables'] if row['version']==1)
-    metadata=ws.project_table(original,item['id'],expected=discovery['digest'])
+    metadata=project_ops.project_table(original,item['id'],expected=discovery['digest'])
     with service(original) as app:
         query=dict(id=item['id'],expected=discovery['digest'],version=1,binding=metadata['binding'],columns='["order","amount"]')
         code,value=request(app,'/api/project-table-profile?'+urlencode(query))
@@ -52,7 +53,7 @@ def test_original_declared_profile_keeps_fixed_version_and_does_not_edit_busines
 def test_idle_housekeeping_and_real_foreground_http_share_the_original_reader_permit(isolated,monkeypatch):
     import threading
     import time
-    description=ws.describe_table(isolated,'candidates')
+    description=project_ops.describe_table(isolated,'candidates')
     query=dict(alias='candidates',expected_binding=description['binding']['digest'],columns='["case_id"]')
     url='/api/table-profile?'+urlencode(query)
     entered=threading.Event();release=threading.Event();finished=threading.Event();answers=[]
@@ -115,7 +116,7 @@ def test_deferred_owner_start_cancel_or_shutdown_never_launches_a_late_child(iso
     import threading
     import time
     from urllib.parse import urlsplit
-    description=ws.describe_table(isolated,'candidates')
+    description=project_ops.describe_table(isolated,'candidates')
     query=dict(alias='candidates',expected_binding=description['binding']['digest'],columns='["case_id"]')
     endpoint='/api/table-profile?'+urlencode(query)
     allow=threading.Event();client=None

@@ -20,7 +20,7 @@ from demiflow.workbench.analysis.sources import locator
 from demiflow.workbench.analysis.web_sources import _snapshot
 
 
-def fixed_input(root, value):
+def fixed_input(root, value, *, table_resolver):
     """Worker-only resolution; never recursively launch another worker."""
     from demiflow.lance import preview
     from demiflow.workbench.projects import discovery as project_discovery
@@ -30,11 +30,11 @@ def fixed_input(root, value):
         if "version" in value:
             from demiflow.workbench.analysis.catalog_versions import resolve_version
             resolution = resolve_version(root, alias=value["alias"], expected_binding=value["alias_binding"],
-                                         version=value["version"], expected_version_binding=value["binding"])
+                                         version=value["version"], expected_version_binding=value["binding"], table_resolver=table_resolver)
             # Plain JSON metadata: _snapshot rejects MappingProxyType fields.
             uri, version, metadata = resolution.uri, resolution.ref.lance_version, resolution.to_wire()["metadata"]
         else:
-            control, ref, uri = ws.table_binding(root, workspace, value["alias"])
+            control, ref, uri = table_resolver(root, workspace, value["alias"])
             if ws.preview_binding(root, control, uri)["digest"] != value["binding"]:
                 c.reject("Source binding changed before Arrow export", code="conflict")
             metadata = preview.describe_table(uri, ref.lance_version)
@@ -47,7 +47,7 @@ def fixed_input(root, value):
     return Path(uri), version, _snapshot(metadata, value)
 
 
-def export(root, *, source_locator, source_snapshot, output_fd):
+def export(root, *, table_resolver, source_locator, source_snapshot, output_fd):
     """Called only with the parent-owned FD explicitly inherited by the worker."""
     c.sha(source_snapshot, "fixed export source")
     c.integer(output_fd, "inherited exclusive export FD", 127, 3)
@@ -60,7 +60,7 @@ def export(root, *, source_locator, source_snapshot, output_fd):
     if maximum < 64*1024*1024:
         c.reject("Export worker cannot admit its fixed file reservation", code="resource_limit")
     resource.setrlimit(resource.RLIMIT_FSIZE, (maximum, maximum))
-    uri, version, source = fixed_input(root, source_locator)
+    uri, version, source = fixed_input(root, source_locator, table_resolver=table_resolver)
     if source["digest"] != source_snapshot or source["rows"] > 100000:
         c.reject("Source changed or exceeds explicit Notebook import row quota", code="resource_limit" if source["rows"] > 100000 else "conflict")
     from demiflow.lance import preview
@@ -108,7 +108,7 @@ def export(root, *, source_locator, source_snapshot, output_fd):
         c.reject("Exclusive Arrow export FD identity/size differs",code="conflict")
     # Re-resolve the same fixed source after reading. Alias/version changes do
     # not silently rebind this exported input to a newer table.
-    _,_,current=fixed_input(root,source_locator)
+    _,_,current=fixed_input(root,source_locator, table_resolver=table_resolver)
     if current!=source:c.reject("Source authority changed during export",code="conflict")
     return dict(source_snapshot=source_snapshot,schema_sha256=schema_digest(schema),stream_sha256=digest.hexdigest(),
                 encoded_bytes=encoded_bytes,chunks=chunks,rows=source["rows"])

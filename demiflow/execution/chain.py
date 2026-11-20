@@ -826,7 +826,7 @@ def _business_dependency_modules(plan, *, source=None):
     additionally reaches the business modules a closure/lambda/``__main__`` UDF
     CAPTURES (cells + instance/partial/container state, R2), seeding the same BFS.
     Platform (``demiflow.*``), stdlib and site-packages third-party modules are
-    skipped — platform code is pinned by ``platform_revision``; third-party env
+    skipped — platform source is provenance, not business code; third-party env
     resolution is deferred (D5). Bounded (≤64 modules, ≤8 MiB total source, plus
     function/value walk budgets), deterministic (sorted by name), cycle-safe (visited
     set) and passive (no code execution). Over-budget or an unresolvable business
@@ -928,7 +928,7 @@ def plan_code_pin(plan, *, source=None):
     """Code-sensitive identity of the plan's actually-executed operations.
 
     Mirrors ``plan_identity``'s operation identity: native domain facts for native
-    actors (engine code, separately pinned by ``platform_revision``), ``describe``
+    actors (engine code expressed by native declarations), ``describe``
     for pure UDF maps so each business function's ``source_hash`` + ``code_record``
     is bound. Editing business code changes this pin even when cloudpickle carries
     an importable UDF by reference (pickle bytes unchanged). The ``dependencies``
@@ -952,7 +952,7 @@ def snapshot_code_sources(action, plan, *, source=None):
     ``source_hash``) and its transitive business dependencies; this preserves the
     actual sealed source so a refused resume can be audited against the code that
     was pinned. Best-effort for plain module functions; native actors are engine
-    code pinned by ``platform_revision``. Dependency modules archive through the
+    code identified by their native declarations. Dependency modules archive through the
     same content-addressed path — no second artifact authority. ``source`` adds the
     native source's own callable files and walks the identical dependency set the
     pin used, so the archive can never cover less than the pin claims.

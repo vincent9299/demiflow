@@ -10,6 +10,7 @@ from demiflow.workbench.projects import registry as console
 from demiflow.workbench.runs import manager as runs
 from demiflow.workbench.runs import view as run_view
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.forge.platform import content_digest,bounded_json
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.graph import model
@@ -132,7 +133,7 @@ def test_fsync_failure_after_replace_is_not_reported_applied(isolated,monkeypatc
 
 
 def test_native_provenance_and_real_author_source_are_bound_to_report(isolated):
-    report=ws.inspect_flow(isolated,ENTRY,params=PARAMS)
+    report=project_ops.inspect_flow(isolated,ENTRY,params=PARAMS)
     assert report['status']=='checked',report
     threshold=next(n for n in report['nodes'] if (n.get('operator') or {}).get('name')=='above_threshold')
     assert threshold['parameter_origins']['fn_kwargs/minimum']==dict(argument='minimum',path=[])
@@ -164,14 +165,14 @@ def test_sealed_graph_source_survives_current_source_and_params_removal(isolated
 
 
 def test_report_source_reads_bound_revision_without_rechecking(isolated,monkeypatch):
-    report=ws.inspect_flow(isolated,ENTRY,params=PARAMS)
+    report=project_ops.inspect_flow(isolated,ENTRY,params=PARAMS)
     g=model.get(isolated,basis_kind='report',report_digest=report['digest'])
     node=next(n for n in report['nodes'] if (n.get('operator') or {}).get('name')=='above_threshold')
     original=report['binding']['parameters']['arguments']['minimum']
     changed=json.loads((isolated/PARAMS).read_text());changed['arguments']['minimum']=0.95
     (isolated/PARAMS).write_text(json.dumps(changed))
     def forbidden(*args,**kwargs):raise AssertionError('Source preview must not launch freshness verification')
-    monkeypatch.setattr(ws,'report_status',forbidden)
+    monkeypatch.setattr(project_ops,'report_status',forbidden)
     value=source_view.get(isolated,graph_binding=g['binding'],node_id=node['id'],kind='configuration')
     assert value['source_basis']=='report_bound' and value['read_only']
     field=next(f for f in value['fields'] if f['pointer']=='/arguments/minimum')
@@ -236,7 +237,7 @@ def test_nested_parameter_paths_correlate_only_the_actual_consumers(isolated):
     value['arguments']['settings']=dict(minimum=minimum,max_chars=1024)
     (isolated/'flows/nested.json').write_text(json.dumps(value))
     ws.register_flow(isolated,'flows/nested.py:run',params='flows/nested.json')
-    report=ws.inspect_flow(isolated,'flows/nested.py:run',params='flows/nested.json')
+    report=project_ops.inspect_flow(isolated,'flows/nested.py:run',params='flows/nested.json')
     assert report['status']=='checked',report['diagnostics']
     graph=model.get(isolated,basis_kind='report',report_digest=report['digest'])
     fields={f['pointer']:f for f in graph['parameters']['fields']}

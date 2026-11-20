@@ -6,7 +6,7 @@ a URI, new root, row decoder or arbitrary filesystem path.
 """
 from __future__ import annotations
 
-from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.analysis import contracts as c
 from demiflow.workbench.analysis.records import Records
 from demiflow.workbench.analysis.sources import locator
@@ -42,15 +42,15 @@ def resolve(root, value):
     value = locator(value)
     if value["kind"] == "workspace_table":
         if "version" in value:
-            description = ws.describe_table(root, value["alias"], expected_binding=value["alias_binding"],
+            description = project_ops.describe_table(root, value["alias"], expected_binding=value["alias_binding"],
                                             version=value["version"], version_binding=value["binding"])
         else:
-            description = ws.describe_table(root, value["alias"], expected_binding=value["binding"])
+            description = project_ops.describe_table(root, value["alias"], expected_binding=value["binding"])
         if description["binding"]["digest"] != value["binding"]:
             c.reject("Registered source binding changed", code="conflict")
         metadata = description["metadata"]
     else:
-        description = ws.project_table(root, value["id"], expected=value["discovery"], version=value["version"])
+        description = project_ops.project_table(root, value["id"], expected=value["discovery"], version=value["version"])
         if description["binding"] != value["binding"]:
             c.reject("Recognized source binding changed", code="conflict")
         metadata = description
@@ -71,12 +71,12 @@ def verify(root, *, locator: dict, source, target):
     arguments = dict(columns=[], row_id=int(target["case_key"]))
     if locator["kind"] == "workspace_table":
         if "version" in locator:
-            result = ws.sample_table(root, locator["alias"], expected_binding=locator["alias_binding"],
+            result = project_ops.sample_table(root, locator["alias"], expected_binding=locator["alias_binding"],
                                      version=locator["version"], version_binding=locator["binding"], **arguments)
         else:
-            result = ws.sample_table(root, locator["alias"], expected_binding=locator["binding"], **arguments)
+            result = project_ops.sample_table(root, locator["alias"], expected_binding=locator["binding"], **arguments)
     else:
-        result = ws.project_sample(root, locator["id"], expected=locator["discovery"],
+        result = project_ops.project_sample(root, locator["id"], expected=locator["discovery"],
             version=locator["version"], binding=locator["binding"], **arguments)
     if len(result["rows"]) != 1 or result["rows"][0].get("_rowid") != target["case_key"]:
         c.reject("Case does not exist in its exact fixed source", code="conflict")

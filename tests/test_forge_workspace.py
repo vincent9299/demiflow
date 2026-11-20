@@ -16,7 +16,10 @@ import pyarrow as pa
 import pytest
 
 from demiflow.cli import main
+from demiflow.workbench.table_bindings import make_resolver
+from demiflow.workbench.runs import manager as runs
 from demiflow.workbench.projects import workspace as api
+from demiflow.workbench import project_operations as project_ops
 from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.worker import operation
@@ -47,7 +50,7 @@ def attach(root, alias, rows, schema):
     lance.write_dataset(
         pa.Table.from_pylist(rows, schema=schema), str(root / "data" / f"{alias}.lance")
     )
-    return api.attach_table(
+    return project_ops.attach_table(
         root,
         alias,
         relative_uri=f"{alias}.lance",
@@ -70,13 +73,13 @@ def test_real_workspace_inspection_variants_and_case_reads(demo):
         "OP-08",
     }
     for digest in reports.values():
-        result = api.report_status(root, digest)
+        result = project_ops.report_status(root, digest)
         assert result["status"] == "checked", result["changes"]
         report = result["report"]
         assert len(report["nodes"]) == 7 and len(report["edges"]) == 6
         assert report["coverage"]["operator_behavior"] == "not_run"
     assert not (root / "data/selected_a.lance").exists()
-    page = api.sample_table(
+    page = project_ops.sample_table(
         root, "candidates", columns=["case_id", "question"], limit=1
     )
     assert (
@@ -85,10 +88,10 @@ def test_real_workspace_inspection_variants_and_case_reads(demo):
         and page["has_more"]
     )
     assert set(page["rows"][0]) == {"case_id", "question", "_rowid"}
-    detail = api.sample_table(root, "candidates", row_id=int(page["rows"][0]["_rowid"]))
+    detail = project_ops.sample_table(root, "candidates", row_id=int(page["rows"][0]["_rowid"]))
     assert detail["rows"][0]["question"].strip() == "三角形的面积是多少？"
     assert (
-        api.sample_table(root, "candidates", offset=2, limit=1)["rows"][0]["case_id"]
+        project_ops.sample_table(root, "candidates", offset=2, limit=1)["rows"][0]["case_id"]
         == "c03"
     )
     diff = api.diff_reports(root, reports["a"], reports["b"])
@@ -101,11 +104,11 @@ def test_real_workspace_inspection_variants_and_case_reads(demo):
 
 def test_preview_binding_pins_alias_across_detail_media_and_cli(isolated):
     root = isolated
-    description = api.describe_table(root, "candidates")
+    description = project_ops.describe_table(root, "candidates")
     expected = description["binding"]["digest"]
     assert description["columns"][:3] == ["case_id", "question", "image_uri"]
     assert set(description["columns"]) == set(description["metadata"]["fields"])
-    page = api.sample_table(root, "candidates", columns=["case_id", "image_uri"], expected_binding=expected)
+    page = project_ops.sample_table(root, "candidates", columns=["case_id", "image_uri"], expected_binding=expected)
     assert page["binding"] == description["binding"]
     row_id = int(page["rows"][0]["_rowid"])
     media = operation("media", root, alias="candidates", row_id=row_id, field="image_uri", expected_binding=expected)
@@ -117,14 +120,14 @@ def test_preview_binding_pins_alias_across_detail_media_and_cli(isolated):
     replacement = json.loads((root / "tables/comparison_fixture.json").read_text())
     replacement["alias"] = "candidates"
     control.write_text(json.dumps(replacement))
-    for action in [lambda: api.describe_table(root, "candidates", expected_binding=expected),
-                   lambda: api.sample_table(root, "candidates", row_id=row_id, expected_binding=expected),
+    for action in [lambda: project_ops.describe_table(root, "candidates", expected_binding=expected),
+                   lambda: project_ops.sample_table(root, "candidates", row_id=row_id, expected_binding=expected),
                    lambda: operation("media", root, alias="candidates", row_id=row_id, field="image_uri", expected_binding=expected)]:
         with pytest.raises(ForgeError, match="binding changed"):
             action()
     result = CliRunner().invoke(main, ["workbench", "table", "sample", str(root), "candidates", "--expected-binding", expected, "--json"])
     assert result.exit_code != 0 and "binding changed" in result.output
-    assert api.describe_table(root, "candidates")["binding"]["digest"] != expected
+    assert project_ops.describe_table(root, "candidates")["binding"]["digest"] != expected
 
 
 def test_preview_identity_includes_location_and_source_hash(isolated, tmp_path):
@@ -136,7 +139,7 @@ def test_preview_identity_includes_location_and_source_hash(isolated, tmp_path):
     assert api.preview_binding(root, control, tmp_path / "moved.lance")["digest"] != first["digest"]
     for invalid in ["", "g" * 64, True, 123]:
         with pytest.raises(ForgeError, match="digest"):
-            api.sample_table(root, "candidates", expected_binding=invalid)
+            project_ops.sample_table(root, "candidates", expected_binding=invalid)
     path = "operators/question_rules.py"
     source = root / path
     expected = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -152,10 +155,11 @@ def test_preview_uses_the_binding_it_checked_when_alias_changes(isolated):
     import sys
 
     root = isolated
-    expected = api.describe_table(root, "candidates")["binding"]["digest"]
+    expected = project_ops.describe_table(root, "candidates")["binding"]["digest"]
     script = '''
 import json
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.worker import main
 original = ws.table_binding
 def replace_after_resolution(root, workspace, alias):
@@ -180,18 +184,18 @@ main()
 
 def test_explicit_matching_keeps_duplicate_and_missing_keys(demo):
     root, _ = demo
-    rows = api.sample_table(
+    rows = project_ops.sample_table(
         root, "comparison_fixture", match={"field": "case_id", "value": "c02"}
     )["rows"]
     assert len(rows) == 2 and rows[0]["question"] != rows[1]["question"]
     assert (
-        api.sample_table(
+        project_ops.sample_table(
             root, "comparison_fixture", match={"field": "case_id", "value": "c03"}
         )["rows"]
         == []
     )
     assert (
-        api.sample_table(
+        project_ops.sample_table(
             root,
             "comparison_fixture",
             match={"field": "case_id", "value": "x' OR true --"},
@@ -199,7 +203,7 @@ def test_explicit_matching_keeps_duplicate_and_missing_keys(demo):
         == []
     )
     with pytest.raises(ForgeError, match="Unknown preview column: missing"):
-        api.sample_table(root, "candidates", match={"field": "missing", "value": "c01"})
+        project_ops.sample_table(root, "candidates", match={"field": "missing", "value": "c01"})
 
 
 def test_inspection_respects_inherited_address_space_limit(demo):
@@ -240,7 +244,7 @@ assert resource.getrlimit(resource.RLIMIT_AS) == (ceiling, ceiling)
 def test_images_header_budget_and_paths(isolated):
     root = isolated
     row_id = int(
-        api.sample_table(root, "candidates", columns=["case_id"], limit=1)["rows"][0][
+        project_ops.sample_table(root, "candidates", columns=["case_id"], limit=1)["rows"][0][
             "_rowid"
         ]
     )
@@ -285,13 +289,13 @@ def test_projection_and_byte_budgets_before_python_conversion(isolated):
         [{"id": 1, "huge": "x" * (2 * 1024**2)}],
         pa.schema([("id", pa.int64()), ("huge", pa.string())]),
     )
-    assert api.sample_table(root, "wide", columns=["id"])["rows"][0]["id"] == 1
+    assert project_ops.sample_table(root, "wide", columns=["id"])["rows"][0]["id"] == 1
     with pytest.raises(ForgeError, match="budget"):
-        api.sample_table(root, "wide", columns=["huge"])
+        project_ops.sample_table(root, "wide", columns=["huge"])
     with pytest.raises(ForgeError, match="budget"):
-        api.sample_table(root, "wide", columns=["huge"], row_id=0)
+        project_ops.sample_table(root, "wide", columns=["huge"], row_id=0)
     with pytest.raises(ForgeError, match="page"):
-        api.sample_table(root, "wide", limit=101)
+        project_ops.sample_table(root, "wide", limit=101)
     from demiflow.lance.preview import describe_table
 
     with pytest.raises(RuntimeError, match="isolated worker"):
@@ -306,14 +310,14 @@ def test_attach_head_replace_detach_and_readonly_locations(isolated, tmp_path):
     lance.write_dataset(pa.table({"id": [1]}), str(uri))
     api.add_location(root, "external", external)
     with pytest.raises(ForgeError, match="require dataset_id"):
-        api.attach_table(
+        project_ops.attach_table(
             root,
             "source",
             relative_uri="input.lance",
             version=1,
             location_id="external",
         )
-    attached = api.attach_table(
+    attached = project_ops.attach_table(
         root,
         "source",
         relative_uri="input.lance",
@@ -325,9 +329,9 @@ def test_attach_head_replace_detach_and_readonly_locations(isolated, tmp_path):
     )
     assert attached["table"]["ref"]["lance_version"] == 1
     lance.write_dataset(pa.table({"id": [2]}), str(uri), mode="overwrite")
-    assert api.sample_table(root, "source")["rows"][0]["id"] == 1
+    assert project_ops.sample_table(root, "source")["rows"][0]["id"] == 1
     with pytest.raises(ForgeError, match="changed"):
-        api.attach_table(
+        project_ops.attach_table(
             root,
             "source",
             relative_uri="input.lance",
@@ -338,7 +342,7 @@ def test_attach_head_replace_detach_and_readonly_locations(isolated, tmp_path):
             schema_version="1",
             expected="wrong",
         )
-    replaced = api.attach_table(
+    replaced = project_ops.attach_table(
         root,
         "source",
         relative_uri="input.lance",
@@ -349,7 +353,7 @@ def test_attach_head_replace_detach_and_readonly_locations(isolated, tmp_path):
         schema_version="1",
         expected=attached["digest"],
     )
-    assert api.sample_table(root, "source")["rows"][0]["id"] == 2
+    assert project_ops.sample_table(root, "source")["rows"][0]["id"] == 2
     assert not api.detach_table(root, "source", expected=replaced["digest"])[
         "data_deleted"
     ]
@@ -357,23 +361,23 @@ def test_attach_head_replace_detach_and_readonly_locations(isolated, tmp_path):
     params = json.loads((root / "flows/select_a.json").read_text())
     params["arguments"]["target"]["location_id"] = "external"
     with pytest.raises(ForgeError, match="workspace-owned"):
-        api.inspect_flow(root, "flows/questions.py:select", params=params)
+        project_ops.inspect_flow(root, "flows/questions.py:select", params=params)
 
 
 def test_report_binding_relocation_changes_and_unrelated_flow(isolated):
     root = isolated
     old = api.workspace_context(root)["reports"][0]["digest"]
-    assert "workspace_root_changed" in api.report_status(root, old)["changes"]
-    report = api.inspect_flow(
+    assert "workspace_root_changed" in project_ops.report_status(root, old)["changes"]
+    report = project_ops.inspect_flow(
         root, "flows/questions.py:select", params="flows/select_a.json"
     )
     digest = report["digest"]
     assert report["status"] == "checked"
     (root / "flows/unrelated.py").write_text('raise RuntimeError("not a dependency")\n')
-    assert api.report_status(root, digest)["status"] == "checked"
+    assert project_ops.report_status(root, digest)["status"] == "checked"
     operator = root / "operators/question_rules.py"
     operator.write_text(operator.read_text() + "\n# changed\n")
-    status = api.report_status(root, digest)
+    status = project_ops.report_status(root, digest)
     assert status["status"] == "stale" and any(
         c.startswith("source_changed:") for c in status["changes"]
     )
@@ -382,11 +386,11 @@ def test_report_binding_relocation_changes_and_unrelated_flow(isolated):
     value = json.loads(params.read_text())
     value["arguments"]["minimum"] = 0.6
     params.write_text(json.dumps(value))
-    assert "parameters_changed" in api.report_status(root, digest)["changes"]
+    assert "parameters_changed" in project_ops.report_status(root, digest)["changes"]
     (root / "data/candidates.lance").rename(root / "data/moved.lance")
     assert any(
         c.startswith("table_unavailable:")
-        for c in api.report_status(root, digest)["changes"]
+        for c in project_ops.report_status(root, digest)["changes"]
     )
 
 
@@ -433,7 +437,8 @@ def test_store_quota_and_concurrent_parameter_change(isolated, monkeypatch):
     before = set((root / ".forge/inspections").iterdir())
     with pytest.raises(ForgeError, match="changed"):
         api._inspect_flow(
-            root, "flows/questions.py:select", params="flows/select_a.json"
+            root, "flows/questions.py:select", params="flows/select_a.json",
+            table_resolver=make_resolver(api.table_binding, runs.result_table),
         )
     assert set((root / ".forge/inspections").iterdir()) == before
     monkeypatch.setattr(flow_check.FlowChecker, "inspect", original)
@@ -442,7 +447,7 @@ def test_store_quota_and_concurrent_parameter_change(isolated, monkeypatch):
         for number in range(catalog.MAX_PENDING):
             catalog.begin(root, 'report', format(number, '064x'))
     with pytest.raises(ForgeError, match="pending budget.*full"):
-        api.inspect_flow(
+        project_ops.inspect_flow(
             root, "flows/questions.py:select", params="flows/select_b.json"
         )
 
@@ -465,7 +470,7 @@ def test_cli_matches_python_and_rejects_new_workspace_in_legacy_entry(demo):
         ],
     )
     assert value.exit_code == 0, value.output
-    assert json.loads(value.output) == api.sample_table(
+    assert json.loads(value.output) == project_ops.sample_table(
         root, "candidates", columns=["case_id"], limit=1
     )
     bad = runner.invoke(
@@ -599,11 +604,11 @@ def test_native_directory_links_and_file_budgets(isolated):
     # Unused history is not traversed; the actual fixed-version files are checked.
     table = root / 'data/candidates.lance'
     (table / 'unused-history-link').symlink_to(root / 'data/scores.lance')
-    assert api.sample_table(root, 'candidates', columns=['case_id'])['rows']
+    assert project_ops.sample_table(root, 'candidates', columns=['case_id'])['rows']
     filename = lance.dataset(str(table), version=3).get_fragments()[0].data_files()[0].path
     data_file = table / 'data' / filename
     moved = root / 'owned-fixture-copy.lance'
     data_file.rename(moved)
     data_file.symlink_to(moved)
     with pytest.raises(ForgeError, match="Symlink"):
-        api.sample_table(root, "candidates", columns=["case_id"])
+        project_ops.sample_table(root, "candidates", columns=["case_id"])

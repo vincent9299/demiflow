@@ -94,9 +94,9 @@ def _profile(snapshot, source, columns):
         stopped_by="bytes" if byte_limited else "rows" if rows<source["rows"] else None))
 
 
-def read(root, *, source_locator, source_snapshot, query):
+def read(root, *, table_resolver, source_locator, source_snapshot, query):
     c.sha(source_snapshot)
-    uri,version,source=fixed_input(root,source_locator)
+    uri,version,source=fixed_input(root,source_locator, table_resolver=table_resolver)
     if source["digest"]!=source_snapshot:c.reject("Fixed source changed before preview",code="conflict")
     query=request(query,source)
     from demiflow.lance import preview
@@ -112,7 +112,7 @@ def read(root, *, source_locator, source_snapshot, query):
         rows=preview._rows(snapshot,columns,offset=offset,limit=limit,maximum=48*1024)
         value=dict(rows=rows,columns=columns,offset=offset,next_offset=offset+len(rows) if offset+len(rows)<source["rows"] else None,
             total_rows=source["rows"],encoding="demiflow_preview_json_v1",complete=offset==0 and len(rows)==source["rows"])
-    _,_,after=fixed_input(root,source_locator)
+    _,_,after=fixed_input(root,source_locator, table_resolver=table_resolver)
     if after!=source:c.reject("Fixed source changed while preview was read",code="conflict")
     result=dict(source_snapshot=source_snapshot,kind=query["kind"],**value)
     c.encoded(result,maximum=56*1024)

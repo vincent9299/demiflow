@@ -169,8 +169,8 @@ def verify_host_domain(host: "HostDescriptor", *, store: "ArtifactStore",
             ray.cancel(future, force=True)
             raise DataflowError('RESOURCE_INFEASIBLE',
                 'Ray host cannot prove access to the sealed runtime and durable store') from exc
-        if proof['node_id'] != host.host_id[4:] or proof['runtime_revision'] != host.runtime_revision:
-            raise DataflowError('CODE_MISMATCH', 'Remote host runtime/node differs from its declaration')
+        if proof['node_id'] != host.host_id[4:]:
+            raise DataflowError('CODE_MISMATCH', 'Remote node differs from its declaration')
         if proof['digest'] != challenge.digest:
             raise DataflowError('CORRUPT_ARTIFACT', 'Remote read-domain challenge differs')
     raw = _read_bytes(store, challenge, bounds)
@@ -187,7 +187,6 @@ def verify_host_domain(host: "HostDescriptor", *, store: "ArtifactStore",
 def _probe_read_domain(root, store_id, challenge, max_bytes):
     """Executed on the specified Ray node without creating a run or journal."""
     import ray
-    from .recovery_identity import platform_identity
     from .dataflow_store import _no_symlink
     if challenge['key'] != challenge['digest'] or challenge['size_bytes'] > max_bytes:
         raise ValueError('Unsupported read-domain challenge')
@@ -200,7 +199,7 @@ def _probe_read_domain(root, store_id, challenge, max_bytes):
     if len(raw) != challenge['size_bytes']:
         raise ValueError('Remote challenge size differs')
     return {'node_id': ray.get_runtime_context().get_node_id(),
-            'runtime_revision': platform_identity(), 'digest': hashlib.sha256(raw).hexdigest()}
+            'digest': hashlib.sha256(raw).hexdigest()}
 
 
 def resolve_data_location(ref: "ArtifactRef", *, host: "HostDescriptor", store: "ArtifactStore") -> DataLocation:

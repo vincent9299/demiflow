@@ -12,6 +12,7 @@ import pyarrow as pa
 import pytest
 
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench import catalog as table_view
 from demiflow.workbench.analysis import web_sources
 from demiflow.workbench.analysis import contracts as c
@@ -31,14 +32,14 @@ def declared(tmp_path,row_path='picture.png'):
     raw=image_bytes();(root/'data/picture.png').write_bytes(raw)
     pa.set_cpu_count(1);pa.set_io_thread_count(1)
     lance.write_dataset(pa.table(dict(image_path=[row_path],image_sha=[hashlib.sha256(raw).hexdigest()])),str(root/'data/rows.lance'))
-    attached=ws.attach_table(root,'rows',relative_uri='rows.lance',version=1,dataset_id='rows',schema_name='media',schema_version='1')
+    attached=project_ops.attach_table(root,'rows',relative_uri='rows.lance',version=1,dataset_id='rows',schema_name='media',schema_version='1')
     field=dict(path=['image_path'],kind='image',location_id='local',sha256_path=['image_sha'],max_bytes=8*1024*1024,mime='image/png')
-    ws.set_table_view(root,'rows',expected=attached['digest'],display=dict(fields=[field]),provenance={})
+    project_ops.set_table_view(root,'rows',expected=attached['digest'],display=dict(fields=[field]),provenance={})
     return root,raw
 
 
 def fixed(root):
-    info=ws.describe_table(root,'rows')
+    info=project_ops.describe_table(root,'rows')
     locator=dict(kind='workspace_table',alias='rows',binding=info['binding']['digest'],columns=['image_path'])
     return locator,web_sources.resolve(root,locator)['source']
 
@@ -69,7 +70,7 @@ def test_missing_declaration_or_symlink_never_uses_a_project_root_fallback(tmp_p
     image=root/'data/picture.png';image.unlink();outside=tmp_path/'outside.png';outside.write_bytes(raw);image.symlink_to(outside)
     with pytest.raises(ForgeError):exported(root,tmp_path,locator,source,'link')
     image.unlink();image.write_bytes(raw)
-    control=ws.describe_table(root,'rows');ws.set_table_view(root,'rows',expected=control['digest'],display={},provenance={})
+    control=project_ops.describe_table(root,'rows');project_ops.set_table_view(root,'rows',expected=control['digest'],display={},provenance={})
     locator,source=fixed(root)
     with pytest.raises(ForgeError) as error:exported(root,tmp_path,locator,source,'undeclared')
     assert error.value.code=='operation_rejected'
@@ -93,9 +94,9 @@ def test_control_root_itself_ancestor_and_child_refuse_before_copy(base_name,tmp
     target.write_bytes(raw)
     workspace=ws.read_control(root/'workspace.json');previous=content_digest(workspace)
     workspace['locations']['media']=dict(root=base_name,writable=False);ws.write_control(root/'workspace.json',workspace,expected=previous)
-    before=ws.describe_table(root,'rows')
+    before=project_ops.describe_table(root,'rows')
     field=dict(path=['image_path'],kind='image',location_id='media',sha256_path=['image_sha'],max_bytes=8*1024*1024,mime='image/png')
-    ws.set_table_view(root,'rows',expected=before['digest'],display=dict(fields=[field]),provenance={})
+    project_ops.set_table_view(root,'rows',expected=before['digest'],display=dict(fields=[field]),provenance={})
     locator,source=fixed(root);output=tmp_path/'refused.bin';fd=os.open(output,os.O_CREAT|os.O_EXCL|os.O_RDWR,0o600)
     try:
         with pytest.raises(ForgeError):operation('analysis_media_export',root,source_locator=locator,source_snapshot=source['digest'],case_key='0',field='image_path',output_fd=fd,_pass_fds=(fd,))

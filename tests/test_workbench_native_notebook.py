@@ -10,6 +10,7 @@ import pytest
 from playwright.sync_api import expect
 
 from demiflow.workbench.projects import workspace as ws, registry
+from demiflow.workbench import project_operations as project_ops
 from test_forge_public_api import service
 from test_forge_markdown_reading import browser
 
@@ -34,7 +35,7 @@ def native_project(tmp_path, monkeypatch):
     data=root/'data';data.mkdir();lance.write_dataset(pa.table({'name':['alpha','beta','gamma'],'score':[1,2,3]}),data/'samples.lance')
     (root/'tables').mkdir()
     ws.add_location(root,'local',data)
-    ws.attach_table(root,'samples',relative_uri='samples.lance',version=1,
+    project_ops.attach_table(root,'samples',relative_uri='samples.lance',version=1,
                     dataset_id='samples',schema_name='fixture',schema_version='1')
     return root,path,key
 
@@ -115,7 +116,7 @@ def test_dictionary_read_uses_fixed_binding(native_project,monkeypatch,tmp_path)
     from demiflow.forge.schema import ForgeError
     root,path,key=native_project
     monkeypatch.setenv('DEMIFLOW_NOTEBOOK_ROOT',str(root))
-    binding=ws.describe_table(root,'samples')['binding']['digest']
+    binding=project_ops.describe_table(root,'samples')['binding']['digest']
     assert sample('samples',binding=binding,columns=['name'],limit=2).name.tolist()==['alpha','beta']
     with pytest.raises(ForgeError):sample('samples',binding='f'*64,columns=['name'])
 
@@ -141,7 +142,9 @@ def test_native_edit_execute_save_reopen_and_dictionary(browser,native_project,t
             expect(page.locator('.dictionary-table:visible')).to_have_count(1)
             frame.locator('body').evaluate('async () => { const app=window.jupyterapp; await app.restored; const p=app.shell.currentWidget; await p.context.ready; await p.sessionContext.ready; }')
             editor=frame.locator('.jp-CodeCell .cm-content').first
-            editor.fill('answer = 40 + 2\nprint("native-ok", answer)')
+            editor.fill('from pathlib import Path\nimport demiflow\n'
+                + 'assert Path(demiflow.__file__).resolve().is_relative_to(Path(' + repr(str(Path(__file__).resolve().parents[1])) + '))\n'
+                + 'answer = 40 + 2\nprint("native-ok", answer)')
             editor.press('Shift+Enter')
             expect(frame.locator('.jp-OutputArea-output')).to_contain_text('native-ok 42',timeout=30000)
             session=page.locator('iframe.native-notebook-frame').evaluate('f=>f.contentWindow.jupyterapp.shell.currentWidget.sessionContext.session.id')
@@ -348,9 +351,9 @@ def test_idle_native_server_capacity_recycles_without_rebinding_roots(native_pro
 def test_dictionary_old_locator_does_not_silently_adopt_new_binding(browser,native_project,kind):
     from demiflow.forge.platform import content_digest
     root,path,key=native_project
-    original=ws.describe_table(root,'samples')['binding']['digest']
+    original=project_ops.describe_table(root,'samples')['binding']['digest']
     rebind_sample(root)
-    assert ws.describe_table(root,'samples')['binding']['digest']!=original
+    assert project_ops.describe_table(root,'samples')['binding']['digest']!=original
     with service(None,registry=path) as app:
         context=browser.new_context();page=context.new_page();requests=[]
         page.on('request',lambda r:requests.append(r.url))
@@ -370,13 +373,13 @@ def rebind_sample(root):
     from demiflow.forge.platform import content_digest
     control=ws.read_control(root/'tables/samples.json')
     lance.write_dataset(pa.table({'name':['replacement'],'score':[99]}),root/'data/replacement.lance')
-    ws.attach_table(root,'samples',relative_uri='replacement.lance',version=1,dataset_id='replacement',
+    project_ops.attach_table(root,'samples',relative_uri='replacement.lance',version=1,dataset_id='replacement',
                     schema_name='fixture',schema_version='1',expected=content_digest(control))
 
 
 def test_dictionary_resolved_request_stays_fixed_across_rebind_and_navigation(browser,native_project):
     root,path,key=native_project
-    original=ws.describe_table(root,'samples')['binding']['digest']
+    original=project_ops.describe_table(root,'samples')['binding']['digest']
     with service(None,registry=path) as app:
         context=browser.new_context();page=context.new_page()
         try:

@@ -1,7 +1,7 @@
 """Common registered-input admission; preparation remains the execution gate."""
 
 from demiflow.workbench.projects import workspace as ws
-from demiflow.workbench.runs.limits import limits_with
+from demiflow.workbench.pipeline_policy import limits_with
 from demiflow.forge.schema import ForgeError
 
 
@@ -33,11 +33,11 @@ def describe(root, entry, *, params, limits=None):
         )
 
 
-def _describe(root, entry, *, params, limits=None):
+def _describe(root, entry, *, table_resolver, params, limits=None):
     root, workspace, _ = ws.load_workspace(root)
     admitted, path = inputs(root, workspace, entry, params, limits)
     parameters = ws.read_control(path) if path else params
-    arguments = ws.resolve_arguments(root, workspace, parameters)
+    arguments = ws.resolve_arguments(root, workspace, parameters, table_resolver=table_resolver)
     pending = [parameters.get('arguments', {})]
     outputs = 0
     while pending:

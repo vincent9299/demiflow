@@ -69,7 +69,7 @@ def run(*, source, target):
     prepared = custom(root, flow, operators=operator)
     if family in {'flat_batch', 'flat_batch_bounded'}:
         from demiflow.workbench.runs import manager as runs
-        from demiflow.workbench.runs.limits import limits_with
+        from demiflow.workbench.pipeline_policy import limits_with
         _, sealed = runs._load(root, prepared['run_id'])
         caps = sealed['manifest']['limits']
         if family == 'flat_batch':

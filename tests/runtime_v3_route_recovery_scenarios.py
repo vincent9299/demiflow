@@ -452,6 +452,43 @@ def _first_native_action(fx,dataset,run,routing,evidence):
     finally:execution.close()
 
 
+def _assert_broadcast_recovery(result, incoming):
+    """Check the committed prefix and complete replay of this 12-row fixture."""
+    from demiflow.execution.contracts.dataflow_codec import compute_participant_id
+    producer, = incoming['producer_partitions']
+    stage = next(s for s in result['physical']['stages'] if producer in s['partitions'])
+    owner = compute_participant_id(stage['stage_id'], producer)
+    saved, = [c['state'] for c in result['loss']['boundary']['channels']
+              if c['participant'] == owner and c['state']['channel_id'] == incoming['channel_id']]
+    frontier = saved['routing_ordinal']
+    assert 0 < frontier < 12
+    old, new = result['attempts']['old'], result['attempts']['new']
+    readers = set(incoming['consumer_partitions'])
+    assert readers == {'r0', 'r1'}
+    groups = {old: {}, new: {}}
+    for event in result['events']:
+        if event['kind'] != 'data' or event['payload']['edge_id'] != incoming['edge_id']:
+            continue
+        p = event['payload']
+        assert p['producer_partition'] == producer and p['target_partition'] in readers
+        targets = groups[event['attempt']].setdefault(p['route_sequence'], {})
+        assert p['target_partition'] not in targets, 'duplicate physical delivery appeared'
+        targets[p['target_partition']] = p['record_id']
+    assert set(range(frontier)) <= set(groups[old]) <= set(range(12))
+    assert set(groups[new]) == set(range(frontier, 12)), 'incomplete recovered routing suffix'
+    for sequence, targets in groups[old].items():
+        assert len(set(targets.values())) == 1, 'broadcast readers received different records'
+        if sequence < frontier:
+            assert set(targets) == readers, 'incomplete committed broadcast prefix'
+        else:
+            # Failure may interrupt either reader of an uncommitted broadcast.
+            # Every observed tail record must be replayed to both real readers.
+            assert set(targets.values()) == set(groups[new][sequence].values()), 'replay record differs'
+    for targets in groups[new].values():
+        assert set(targets) == readers, 'incomplete recovered broadcast'
+        assert len(set(targets.values())) == 1, 'broadcast readers received different records'
+
+
 def native_exchange(fx,routing):
     assert routing in ('hash','rebalance','target','broadcast')
     from demiflow import data
@@ -479,10 +516,7 @@ def native_exchange(fx,routing):
     else:
         assert len(result['rows'])==24 and Counter(r['i'] for r in result['rows'])=={i:2 for i in range(12)}
         for i in range(12):assert len({r['consumer_pid'] for r in result['rows'] if r['i']==i})==2
-        targets={}
-        for event in route_events:
-            p=event['payload'];targets.setdefault((event['attempt'],p['route_sequence']),set()).add(p['target_partition'])
-        assert all(readers=={'r0','r1'} for readers in targets.values())
+        _assert_broadcast_recovery(result, incoming)
     result['scope']=prepared['scope']
     return result
 

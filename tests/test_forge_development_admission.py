@@ -22,6 +22,7 @@ from demiflow.workbench.conversations.policy import Deployment
 from demiflow.workbench.conversations.review import review_authority
 from demiflow.workbench.conversations.store import Store
 from demiflow.workbench.runs import manager as runs
+from demiflow.workbench import project_operations as project_ops
 from demiflow.execution.run_journal import RunJournal
 from test_forge_development_runtime import combined_configuration
 from test_forge_development_managed import read_all, claims
@@ -62,7 +63,7 @@ def admitted(root, tmp_path, monkeypatch):
     declaration['pipelines']['orders'].update(entry=dict(path='orders/flows/questions.py', symbol='select'), operators=['orders/operators'])
     declaration_path.write_text(json.dumps(declaration))
     runs.ws.register_flow(root, ENTRY, params=PARAMS)
-    assert runs.ws.inspect_flow(root, ENTRY, params=PARAMS)['status'] == 'checked'
+    assert project_ops.inspect_flow(root, ENTRY, params=PARAMS)['status'] == 'checked'
     value = json.loads(config.read_text())
     value['mode'] = 'restricted'
     value['projects'][workspace].update(kind='demiforge_registered', pipeline='orders',
@@ -280,6 +281,7 @@ from demiflow.workbench.worker import prepare_native
 prepare_native(analysis_read=False)
 from demiflow.workbench.conversations import admission
 from demiflow.workbench.runs import manager as runs
+from demiflow.workbench import project_operations as project_ops
 original = admission.guard
 @contextmanager
 def previous_guard(root, **kwargs):
@@ -351,14 +353,15 @@ from demiflow.workbench.worker import prepare_native
 prepare_native(analysis_read=False)
 from pathlib import Path
 from demiflow.workbench.runs import manager as runs
+from demiflow.workbench import project_operations as project_ops
 from demiflow.forge.schema import ForgeError
 root = Path(sys.argv[1])
-original = runs.ws.verify_run_basis
+original = runs.verify_run_basis
 def change_after_seal(*args, **kwargs):
     result = original(*args, **kwargs)
     (root/'orders/rules.py').write_text('def keep(row): return False\\n')
     return result
-runs.ws.verify_run_basis = change_after_seal
+runs.verify_run_basis = change_after_seal
 try:
     runs._prepare(root, 'orders/flows/questions.py:select', params='orders/flows/select_a.json')
 except ForgeError as exc:
@@ -386,8 +389,12 @@ def test_historical_resume_entry_retains_original_seal_without_new_certificate(a
     # Supply the already-tested native recovery entry identity for this stopped
     # pre-action fixture. Public resume, its bounded worker and start admission
     # remain real; intercept only the final native process spawn.
-    from demiflow.execution.recovery_identity import platform_identity
-    monkeypatch.setattr(RunJournal, 'recovery_identity', lambda _: dict(platform_revision=platform_identity()))
+    from demiflow.execution.runtime_limits import execution_limits
+    configuration = dict(format=1, stream_protocol='aligned-barrier-v2', run_id='4'*32,
+                         entry_identity=value['manifest'].get('source_digest'), started_at=time.time(),
+                         limits_explicit=[], platform_revision='original-platform', limits=execution_limits(None))
+    journal.claim_execution(configuration, 'f'+'1'*32)
+    journal.release_execution('f'+'1'*32)
     popen = subprocess.Popen
     def no_native_execution(argv, *args, **kwargs):
         if 'supervise' in argv:

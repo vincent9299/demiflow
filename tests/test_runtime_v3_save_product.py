@@ -7,6 +7,7 @@ import lance
 import pyarrow as pa
 import pytest
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs import manager as runs
 from demiflow.execution.run_journal import RunJournal
 from test_forge_runs import base, root, execute
@@ -44,7 +45,7 @@ def test_native_save_prepare_execute_and_fixed_result(root):
     original=RunJournal(runs.directory(root,result['run_id'])).execution_commit(commit['commit_id'])
     assert original['status']=='acked' and original['action_id']==commit['scope_id']
     assert original['receipts']['lance']['data']['reference']==commit['reference']
-    assert [row['case_id'] for row in ws.sample_table(root,'run:'+result['run_id']+':stage')['rows']]==['c01','c02','c03']
+    assert [row['case_id'] for row in project_ops.sample_table(root,'run:'+result['run_id']+':stage')['rows']]==['c01','c02','c03']
     assert by['target']['result']['ref']['row_count']==3
     journal=RunJournal(runs.directory(root,result['run_id']))
     with journal._connection() as db:
@@ -191,7 +192,7 @@ def select(row: Row) -> bool:
     assert by['stage']['result']['ref']['row_count']==1
     assert by['stage']['commit']['reference']['version']==1
     assert by['target']['result'] is None
-    assert [r['case_id'] for r in ws.sample_table(root,'run:'+result['run_id']+':stage')['rows']]==['c01']
+    assert [r['case_id'] for r in project_ops.sample_table(root,'run:'+result['run_id']+':stage')['rows']]==['c01']
     original=RunJournal(runs.directory(root,result['run_id'])).execution_commit(by['stage']['commit']['commit_id'])
     assert original['status']=='acked'
     assert len(lance.dataset(by['stage']['uri']).versions())==1

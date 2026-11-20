@@ -79,7 +79,7 @@ def test_service_facts_keep_native_identity_and_private_environment_in_program(t
     from demiflow.execution.dataflow_models import build_model_factory
     from demiflow.execution.contracts.dataflow import thaw_record_value
     from demiflow.execution.dataflow_api import resolve_runtime_policy
-    from demiflow.workbench.runs.limits import DEFAULT_LIMITS
+    from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
     value = fixture(tmp_path, monkeypatch, request)
     value['service'].env['FIXTURE_PRIVATE_TOKEN'] = 'fixture-secret-only'
     op = dataset(value, tmp_path)._plan.operations[-1]

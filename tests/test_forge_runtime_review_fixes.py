@@ -190,7 +190,7 @@ def test_r1_supervisor_and_http_stop_ignore_malformed_optional_samples(root):
             wait(root, value["run_id"], timeout=20)
 
 
-def test_r2_index_failure_before_spawn_is_terminal_and_releases_capacity(
+def test_r2_actual_launch_failure_before_spawn_is_terminal_and_releases_capacity(
     tmp_path, monkeypatch
 ):
     root = tmp_path / "project"
@@ -201,14 +201,14 @@ def test_r2_index_failure_before_spawn_is_terminal_and_releases_capacity(
         lambda *a, **k: {"status": "checked"},
     )
     monkeypatch.setattr(
-        index,
-        "publish",
-        lambda *a: (_ for _ in ()).throw(OSError("owned index failure")),
+        runs,
+        "worker_environment",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("owned launch failure")),
     )
     monkeypatch.setattr(
         subprocess, "Popen", lambda *a, **k: pytest.fail("must not spawn")
     )
-    with pytest.raises(OSError, match="owned index failure"):
+    with pytest.raises(OSError, match="owned launch failure"):
         runs.start(root, manifest["run_id"], expected=manifest["digest"])
     state = journal.execution_status()
     assert state["status"] == "failed" and state["reason"] == "launch_failed"
@@ -312,10 +312,21 @@ def test_r3_pending_cleanup_retains_device_reservation_until_reconcile(
                 domain, config, other, {**manifest, "run_id": "r" + "2" * 24}, 1
             )
         assert (scratch / "owned-residue").exists()
+    # This control-only fixture needs a valid native protocol to reach the
+    # cleanup gate. Claim/release is fixture setup, not native execution evidence.
+    from demiflow.execution.runtime_limits import execution_limits
+    configuration = dict(format=1, stream_protocol="aligned-barrier-v2", run_id="4"*32,
+                         entry_identity=None, started_at=time.time(), limits_explicit=[],
+                         platform_revision="original-platform", limits=execution_limits(None))
+    journal.claim_execution(configuration, "f"+"1"*32)
+    journal.release_execution("f"+"1"*32)
+    before = journal.execution_status()
     with pytest.raises(ForgeError, match="reconcile pending cleanup"):
         runs._resume(
             root, manifest["run_id"], expected=manifest["digest"], expected_attempt=1
         )
+    assert journal.execution_status() == before
+    assert journal.recovery_identity() == configuration
     assert journal.execution_status()["attempt"] == 1
     assert len(RunJournal(target).list_attempts()) == 1
     runs._reconcile(root, manifest["run_id"], expected_attempt=1)

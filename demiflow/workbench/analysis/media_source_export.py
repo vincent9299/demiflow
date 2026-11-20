@@ -44,29 +44,29 @@ def _open(path):
     finally:os.close(parent)
 
 
-def export(root,**kwargs):
+def export(root, *, table_resolver, **kwargs):
     from demiflow.forge.schema import ForgeError
-    try:return _export(root,**kwargs)
+    try:return _export(root,table_resolver=table_resolver, **kwargs)
     except ForgeError:raise
     except (OSError,ValueError,KeyError,TypeError):
         c.reject('Declared fixed media is unavailable or changed; no bytes were published',code='operation_rejected')
 
 
-def _selection(root,*,source_locator,source_snapshot,case_key,field):
+def _selection(root,*, table_resolver,source_locator,source_snapshot,case_key,field):
     c.sha(source_snapshot);c.text(field,'declared media field',256);c.text(case_key,'fixed media Case key',20)
     if not case_key.isascii() or not case_key.isdecimal() or str(int(case_key))!=case_key or int(case_key)>=2**64:c.reject('Media row must be a canonical uint64 key')
     if source_locator.get('kind')!='workspace_table':c.reject('This source has no supported explicit public resource-root declaration',code='operation_rejected')
     root,workspace,_=ws.load_workspace(root)
-    uri,version,source=fixed_input(root,source_locator)
+    uri,version,source=fixed_input(root,source_locator, table_resolver=table_resolver)
     if source['digest']!=source_snapshot or field not in {item['name'] for item in source['schema']}:c.reject('Media field/source differs from its registered fixed projection',code='conflict')
-    control,ref,current_uri=ws.table_binding(root,workspace,source_locator['alias'])
+    control,ref,current_uri=table_resolver(root,workspace,source_locator['alias'])
     if Path(current_uri)!=uri:c.reject('Media table authority changed',code='conflict')
     if 'version' in source_locator:
         # Historical rows sample the F02-verified registered ref; the current
         # alias control above only grants the public resource declaration.
         from demiflow.workbench.analysis.catalog_versions import resolve_version
         resolution=resolve_version(root,alias=source_locator['alias'],expected_binding=source_locator['alias_binding'],
-            version=source_locator['version'],expected_version_binding=source_locator['binding'])
+            version=source_locator['version'],expected_version_binding=source_locator['binding'], table_resolver=table_resolver)
         ref=resolution.ref
     elif ref.lance_version!=version:c.reject('Media table authority changed',code='conflict')
     from demiflow.lance import preview
@@ -99,18 +99,18 @@ def _selection(root,*,source_locator,source_snapshot,case_key,field):
         path=path,declared=declared,target=target,mime=mime,maximum=maximum,witness=witness)
 
 
-def _recheck(selected):
+def _recheck(selected, *, table_resolver):
     root,workspace,source_locator,source,base,root_identity,path,declared=(selected[key] for key in
         ('root','workspace','source_locator','source','base','root_identity','path','declared'))
     current=no_symlinks(base).stat()
     if identity(current)!=root_identity:c.reject('Original public resource root changed',code='conflict')
-    _,_,latest=fixed_input(root,source_locator)
+    _,_,latest=fixed_input(root,source_locator, table_resolver=table_resolver)
     if latest!=source:c.reject('Source binding changed during media export',code='conflict')
     # Display/resource declarations intentionally do not change a Lance table
     # binding. Recheck them separately instead of treating the table digest as
     # a permission witness for external files.
     _,workspace_now,_=ws.load_workspace(root)
-    control_now,_,_=ws.table_binding(root,workspace_now,source_locator['alias'])
+    control_now,_,_=table_resolver(root,workspace_now,source_locator['alias'])
     fields_now=[item for item in control_now.get('display',{}).get('fields',[]) if item['kind'] in {'image','audio','video'} and item['path']==path]
     if (fields_now!=[declared] or workspace_now['locations'].get(declared['location_id'])!=workspace['locations'][declared['location_id']]
             or no_symlinks(ws.location_root(root,workspace_now['locations'][declared['location_id']]))!=base):
@@ -118,7 +118,7 @@ def _recheck(selected):
     return True
 
 
-def resolve_fields(root,*,source_locator,source_snapshot,case_key,fields):
+def resolve_fields(root,*, table_resolver,source_locator,source_snapshot,case_key,fields):
     """Current fixed row/declaration/root proof; never read media bytes or pin."""
     from demiflow.forge.schema import ForgeError
     try:
@@ -126,15 +126,15 @@ def resolve_fields(root,*,source_locator,source_snapshot,case_key,fields):
         if len(set(fields))!=len(fields):c.reject('Repeated media resource field')
         values=[]
         for field in fields:
-            selected=_selection(root,source_locator=source_locator,source_snapshot=source_snapshot,case_key=case_key,field=field)
-            _recheck(selected);values.append(dict(source=selected['witness'],mime=selected['mime']))
+            selected=_selection(root,source_locator=source_locator,source_snapshot=source_snapshot,case_key=case_key,field=field, table_resolver=table_resolver)
+            _recheck(selected, table_resolver=table_resolver);values.append(dict(source=selected['witness'],mime=selected['mime']))
         return dict(source_snapshot=source_snapshot,case_key=case_key,fields=values)
     except ForgeError:raise
     except (OSError,ValueError,KeyError,TypeError):
         c.reject('Current fixed media declaration or public resource root is unavailable',code='operation_rejected')
 
 
-def _export(root,*,source_locator,source_snapshot,case_key,field,output_fd):
+def _export(root,*, table_resolver,source_locator,source_snapshot,case_key,field,output_fd):
     c.sha(source_snapshot);c.text(field,'declared media field',256);c.text(case_key,'fixed media Case key',20)
     if not case_key.isascii() or not case_key.isdecimal() or str(int(case_key))!=case_key or int(case_key)>=2**64:c.reject('Media row must be a canonical uint64 key')
     if source_locator.get('kind')!='workspace_table':c.reject('This source has no supported explicit public resource-root declaration',code='operation_rejected')
@@ -143,7 +143,7 @@ def _export(root,*,source_locator,source_snapshot,case_key,field,output_fd):
     _,hard=resource.getrlimit(resource.RLIMIT_FSIZE)
     if hard!=resource.RLIM_INFINITY and hard<64*MIB:c.reject('Media export lacks its finite file reservation',code='resource_limit')
     resource.setrlimit(resource.RLIMIT_FSIZE,(64*MIB,64*MIB))
-    selected=_selection(root,source_locator=source_locator,source_snapshot=source_snapshot,case_key=case_key,field=field)
+    selected=_selection(root,source_locator=source_locator,source_snapshot=source_snapshot,case_key=case_key,field=field, table_resolver=table_resolver)
     target,maximum,expected,mime=(selected['target'],selected['maximum'],selected['witness']['declared_sha256'],selected['mime'])
     descriptor=_open(target);digest=hashlib.sha256();size=0
     try:
@@ -162,7 +162,7 @@ def _export(root,*,source_locator,source_snapshot,case_key,field,output_fd):
     finally:os.close(descriptor)
     facts=lambda info:(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
     if facts(initial)!=facts(after) or size!=initial.st_size or digest.hexdigest()!=expected:c.reject('Declared media content changed or its hash differs',code='conflict')
-    _recheck(selected)
+    _recheck(selected, table_resolver=table_resolver)
     os.fsync(output_fd);end=os.fstat(output_fd)
     if (end.st_dev,end.st_ino,end.st_size)!=(before.st_dev,before.st_ino,size):c.reject('Exclusive media export identity differs',code='conflict')
     return dict(source=selected['witness'],mime=mime,bytes=size,sha256=expected)

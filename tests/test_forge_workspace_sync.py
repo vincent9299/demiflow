@@ -6,6 +6,7 @@ import time
 import pytest
 
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs import manager as runs
 from demiflow.forge.platform import content_digest
 from demiflow.execution.run_journal import RunJournal
@@ -27,8 +28,8 @@ def test_change_hints_cover_controls_configs_and_wal_without_content_reads(isola
     run.transition({None}, 'starting')
     with ws.control_lock(root):
         marker = index.begin(root, 'run', run_id)
-        assert index.publish(root, marker) is None
-    baseline = ws.workspace_changes(root)
+        assert runs.publish_run_index(root, marker) is None
+    baseline = project_ops.workspace_changes(root)
     def forbidden(*args, **kwargs):
         raise AssertionError('Change hints must not read report/journal contents')
     read_control = ws.read_control
@@ -38,23 +39,23 @@ def test_change_hints_cover_controls_configs_and_wal_without_content_reads(isola
     monkeypatch.setattr(ws, 'read_control', bounded_control)
     monkeypatch.setattr(ws, 'load_report', forbidden)
     monkeypatch.setattr(RunJournal, 'execution_view', forbidden)
-    assert ws.workspace_changes(root) == baseline
+    assert project_ops.workspace_changes(root) == baseline
     for path, group in [('flows/model.yaml', 'sources'), ('flows/model.config', 'sources'), ('operators/new.py', 'sources'),
                         ('README.md', 'workspace_stamp'), ('tables/new.json', 'tables')]:
-        before = ws.workspace_changes(root)
+        before = project_ops.workspace_changes(root)
         (root / path).write_text('changed')
-        after = ws.workspace_changes(root)
+        after = project_ops.workspace_changes(root)
         # README is also an input to original-project discovery. The unchanged
         # platform baseline already invalidates that metadata alongside its text.
         expected={group,'discovery'} if path=='README.md' else {group}
         assert {key for key in after if after[key] != before[key]} == expected
-    before = ws.workspace_changes(root)
+    before = project_ops.workspace_changes(root)
     run.transition({'starting'}, 'running')
-    after = ws.workspace_changes(root)
+    after = project_ops.workspace_changes(root)
     assert after['runs'][run_id] != before['runs'][run_id]
     (directory / 'runtime/ignored.py').write_text('another version')
     (root / 'data/ignored').write_bytes(b'data')
-    assert ws.workspace_changes(root) == after
+    assert project_ops.workspace_changes(root) == after
 
 
 def test_change_inventory_reports_omissions_without_disabling_other_scopes(isolated):
@@ -63,16 +64,16 @@ def test_change_inventory_reports_omissions_without_disabling_other_scopes(isola
     link.symlink_to(root / 'data', target_is_directory=True)
     with pytest.raises(ValueError, match='Symlink'):
         ws.source_files(root, 'flows')
-    assert 'Symlink' in ws.workspace_changes(root)['source_diagnostics'][0]
+    assert 'Symlink' in project_ops.workspace_changes(root)['source_diagnostics'][0]
     link.unlink()
     for index in range(1025):
         (root / 'operators' / f'file{index}.py').touch()
     with pytest.raises(ValueError, match='budget'):
         ws.source_files(root, 'operators')
-    before = ws.workspace_changes(root)
+    before = project_ops.workspace_changes(root)
     assert any('operators' in item and 'budget' in item for item in before['source_diagnostics'])
     (root / 'flows/new.py').write_text('# discoverable source\n')
-    after = ws.workspace_changes(root)
+    after = project_ops.workspace_changes(root)
     assert after['sources'] != before['sources']
     assert after['source_diagnostics'] == before['source_diagnostics']
 
@@ -89,8 +90,8 @@ def test_run_page_at_capacity_reads_only_selected_outputs(isolated, monkeypatch)
         journal.initialize(manifest, attempts=True)
         journal.transition({None}, 'prepared')
         ids.append(run_id)
-    from demiflow.workbench.projects import index as catalog
-    catalog.rebuild(isolated)  # Explicit adoption of these native fixture records.
+    from demiflow.workbench import directory_operations
+    directory_operations.rebuild(isolated)  # Explicit adoption of these native fixture records.
     sql = []
     connect = sqlite3.connect
     def traced(*args, **kwargs):
@@ -98,19 +99,29 @@ def test_run_page_at_capacity_reads_only_selected_outputs(isolated, monkeypatch)
         db.set_trace_callback(sql.append)
         return db
     monkeypatch.setattr(sqlite3, 'connect', traced)
+    loaded = []
+    original_load = runs._load
+    def selected_load(root, run_id, **kwargs):
+        loaded.append((run_id, kwargs.get('detail'), kwargs.get('action_ids')))
+        return original_load(root, run_id, **kwargs)
+    monkeypatch.setattr(runs, '_load', selected_load)
     started = time.monotonic()
     page = runs.list_runs(isolated, limit=20)
     elapsed = time.monotonic() - started
     assert page['total'] == 128 and len(page['runs']) == 20
     assert page['runs'][0]['run_id'] == prepared['run_id']
     assert not any('node_observations' in query or 'FROM completion' in query for query in sql)
-    assert sum('SELECT sequence' in query for query in sql) == 20
-    assert all('action_id IN' in query for query in sql if 'SELECT sequence' in query)
+    # Verify the host's P4 requests, not a frozen reader's private SQL spelling.
+    selected = {item['run_id'] for item in page['runs']}
+    assert len(loaded) == 40 and {item[0] for item in loaded} == selected
+    assert sum(detail == 'identity' for _, detail, _ in loaded) == 20
+    actions = tuple(spec['action_id'] for spec in original['outputs'].values())
+    assert [(detail, ids) for _, detail, ids in loaded if detail != 'identity'] == [('summary', actions)] * 20
     assert not any(query.startswith(('INSERT', 'CREATE', 'UPDATE', 'DELETE')) for query in sql)
     print(f'128 runs: page=20 elapsed={elapsed:.3f}s queries={len(sql)}')
-    before = ws.workspace_changes(isolated)
+    before = project_ops.workspace_changes(isolated)
     runs.list_runs(isolated, offset=120, limit=20)
-    assert ws.workspace_changes(isolated) == before
+    assert project_ops.workspace_changes(isolated) == before
     # Page reads validate their original facts; off-page corruption is checked
     # when that page is requested or during an explicit directory rebuild.
     journal = RunJournal(runs.directory(isolated, ids[1]))
@@ -123,18 +134,23 @@ def test_run_page_at_capacity_reads_only_selected_outputs(isolated, monkeypatch)
 
 
 def test_read_projections_preserve_committed_output_facts(isolated):
-    prepared = runs.prepare(isolated, 'flows/questions.py:select', params='flows/select_a.json')
+    from test_workbench_native_submission import native_flow
+    from test_forge_runs import execute
+    from test_forge_resume import stopped
+    prepared = native_flow(isolated)
+    completed = execute(isolated, prepared)
+    assert completed['status'] == 'succeeded'
     run_id = prepared['run_id']
+    stopped(isolated, run_id)
     journal = RunJournal(runs.directory(isolated, run_id))
-    action = next(iter(journal.execution_view()['manifest']['outputs'].values()))['action_id']
-    journal.action_event(action, 'intent', {'started': True})
-    journal.action_event(action, 'receipt', {'status': 'committed', 'committed_version': 1})
-    journal.action_event(action, 'result', {'location_id': 'local', 'ref': {'lance_version': 1, 'row_count': 2}})
+    # Keep real publication evidence; a private terminal-state fault must not
+    # cause the read-only projection to promote the whole run to success.
+    journal.transition({'succeeded'}, 'interrupted', execution_stopped=True, cleanup='complete')
     full = runs.show(isolated, run_id)
     listed = runs.list_runs(isolated)['runs'][0]
     assert listed['outputs'] == full['outputs']
-    assert listed['status'] == 'prepared'  # A receipt never upgrades overall execution status.
-    assert listed['outputs'][0]['status'] == 'committed'
+    assert listed['status'] == 'interrupted'
+    assert all(output['status'] == 'committed' for output in listed['outputs'])
 
 
 def test_journal_projection_does_not_require_a_forge_manifest(tmp_path):

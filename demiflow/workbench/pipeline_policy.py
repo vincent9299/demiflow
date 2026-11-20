@@ -1,4 +1,4 @@
-"""Local run budget policy: deployment ceiling → workspace → run tightening.
+"""Pipeline budget policy: deployment ceiling → workspace → run tightening.
 
 Defaults describe a small experiment, not a permanent workload size limit.
 Native engine admission, available disk and process accounting still apply.

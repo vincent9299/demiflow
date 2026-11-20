@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs import manager as runs
 from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
@@ -12,7 +13,7 @@ from test_forge_runs import base, root, prepared, execute
 
 
 def scope(root, writes=None):
-    return ws.begin_change_scope(root, expected=content_digest(ws.load_workspace(root)[1]),
+    return project_ops.begin_change_scope(root, expected=content_digest(ws.load_workspace(root)[1]),
                                  writes=writes or [])['audit']['change_scope']
 
 
@@ -41,12 +42,28 @@ def test_start_rechecks_scope_and_cancel_remains_available(root):
     # This control-only fixture has never executed. Public resume must retain
     # the earlier history gate; it cannot invent an engine recovery contract.
     assert control.recovery_identity() is None
+    before = control.execution_status()
     with pytest.raises(ForgeError, match='没有统一恢复契约'):
         runs.resume(root, run['run_id'], expected=run['digest'], expected_attempt=1)
-    # Exercise the original scope gate at its internal control entry, without
-    # bypassing or weakening public historical admission in production.
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    with pytest.raises(RecoveryContractError, match='Unsupported or missing runtime identity format'):
+        runs._resume(root, run['run_id'], expected=run['digest'], expected_attempt=1)
+    assert control.execution_status() == before
+    assert control.recovery_identity() is None
+    # Supply a legitimate protocol for the scope-specific control fixture. This
+    # claim/release constructs no native execution, artifact or successful run.
+    import time
+    from demiflow.execution.runtime_limits import execution_limits
+    configuration = dict(format=1, stream_protocol='aligned-barrier-v2', run_id='4'*32,
+                         entry_identity=None, started_at=time.time(), limits_explicit=[],
+                         platform_revision='original-platform', limits=execution_limits(None))
+    control.claim_execution(configuration, 'f'+'1'*32)
+    control.release_execution('f'+'1'*32)
+    # The valid protocol must expose the original business scope rejection.
     with pytest.raises(ForgeError, match='outside'):
         runs._resume(root, run['run_id'], expected=run['digest'], expected_attempt=1)
+    assert control.execution_status() == before
+    assert control.recovery_identity() == configuration
     assert runs.show(root, run['run_id'])['attempt'] == 1
     assert len(control.list_attempts()) == 1
     assert all(not control.execution_commits(output['action_id']) for output in run['outputs'])

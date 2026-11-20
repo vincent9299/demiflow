@@ -1,0 +1,95 @@
+P12 实施映射与验收说明（固定候选验收交接）
+
+本候选基于 main/main-20261119-3 122edf4bd0c827338846abd0114f0b36cf8c1b6d，实施批准设计 4878c1e26d31373f640fb571bb9c3db5388ece32。当前实现的旧 Python 代理入口和 runs/limits.py 已删除；不保留 re-export、默认解析器或索引源读取后门。P12 v2.1 方向不变。2026-11-20 真人“你先自己review吧”的审阅安排及父协调/C交叉设计通过记录见共享 reviews/B-gpt-design-v1；当前代码没有 Fable 通过结论。
+
+四组实际交付：B1 89914372b163f2d96a79ff8cfcb4de96f0f717cd；B2 2aee0aaf246cfb83ce49ba7aec9305a07e144b4d 加夹具修正 f8c9b5f27b6e7073c311184b886c7d42e1410c7f；B3 7cae46814ed29b069eda907ef75bd0fe8cb4bb58；B4 53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b 加验收修正见最终 HANDOFF。所有内部提交只作为一次完整候选交付，不分拆合入。
+
+实际职责与边界
+
+projects 核心为 workspace/checks/discovery/definitions/documents/io/index 七模块；registry/watch/flow_arguments 三模块仍是应用模块，__init__ 无副作用。新增 workbench/project_operations、directory_operations、table_bindings、pipeline_policy；不宣称应用组合层或 runs 内部整体无环。七核心的可解析静态路径及冷导入均不能进入 runs、worker、api、两个应用操作模块或三项目应用模块；index 不读 workspace/P4。
+
+index 只管理 SQLite、pending generation、游标、临时库替换。所有者 run_index_entry/report_index_entry 生成真实摘要，publish_* 在同一异常边界内检查有效 deadline、求摘要并发布；普通失败和日志失败不撤销源成功，不把不可读/损坏/预算耗尽当 Missing。BaseException 传播并留下 pending。Missing 只收尾该 marker，不删除旧成员；generation 不符不能改新 marker。
+
+start 的 authority.require、development/preflight/history 检查及 authority/development guard 仍先于 begin。begin 在本次 fence/reserve/claim/starting 前执行；未获得 reservation 的异常不记 launch_failed。已有 execution.lock 内容为空时，_lease_owner 的 legacy adoption 原样保留；非空无效 owner 拒绝。本次 admission 的无变化承诺以这些真实前序维护完成后、begin 前为准，不是整个请求零写入。reserve replace 成功而 fsync 失败、Python reservation 尚未返回时，既有 durable slot/owner/fence 保留，reconcile 按原协议处理，之后 reserve 可惰性回收；不能声称失败时已释放容量。
+
+_prepare 的已持久 prepared 源发布与可回滚准备区分开；摘要/索引失败不再 rmtree 成功源。_resume 保留此前 register_results/clean_stopped，begin 拒绝不新增 attempt/status/usage；真实恢复登记不能回滚。refresh 在 begin 前耗尽不建 marker，在 begin 后耗尽留下 pending，使用当前请求和维护 deadline 的较早值。
+
+旧 test_r2_index_failure_before_spawn_is_terminal_and_releases_capacity 不再适用：它把派生 index.publish 异常当真正启动失败，与源事实拥有者契约冲突。由 test_publish_exception_does_not_turn_start_into_launch_failed 承接缓存隔离，test_r2_actual_launch_failure_before_spawn_is_terminal_and_releases_capacity 注入真正 worker_environment 启动失败承接 failed/launch_failed、完整 usage、停止证明和可复用容量。reserved/admitted/spawning hard-exit、lost Popen return、pending cleanup 原保护逐项保留，不能因缓存异常抹掉不确定 spawn 的 owner。
+
+十八个代理及 bind_audit_report/workspace_changes 归 project_operations；verify_run_basis 归 manager；attach_result 归应用组合。attach_table 的 DatasetRef 构造与 expected_ref/schema/rows/store/CAS/alias 数量核验保留 workspace 核心 helper，set_table_view 先核心验证登记 alias/展示配置再做 worker 元数据读取，提交仍由核心 CAS。P4 独立消费者名单、参数来源与反射点零增减。
+
+TableResolver 返回实际 control/DatasetRef/Path，工厂只捕获两个函数，不持有 workspace control。普通 alias 由项目所有者读取，run:id:output[:attempt] 由 run 所有者读取；显式 attempt 范围 1..32，省略沿当前选择语义。原 preview binding 由 workspace/URI/alias/location/ref 构成，不新增 attempt generation：选择到不同固定 ref 时旧 binding 拒绝，同一 ref 在后续 attempt 继承时仍沿原身份可读。worker 进程本地构造，wire 仍原 JSON。resolve_arguments、_inspect_flow、_report_status、_audit_check、checks.check/status 以及分析固定读取/版本/媒体前后核验均显式传递；每次复核重新加载控制，run 可读不赋予媒体授权或控制写权限。
+
+调用方包括 API/CLI/run CLI、watch、graph model/parameters/preview、worker、manager/admission/native_submission、六分析模块、Notebook data、全部实际 Python 测试及嵌入脚本。额外发现 examples/forge_inventory/create.py 也直接使用旧代理，与已计划两个 example 同批迁移。完整有限调用清单见 callers-*，动态字符串另用差异核对；不称任意 Python 调用图完备证明。
+
+变化提示应用组合层只读一次 index.status，把同对象传 run_change_hints 并作为返回 index；project_change_hints 内部原有 source_inventory→author_roots→index.status/page 的有界近期报告依赖读取保留。因此不是全调用链仅一条查询。仅 index_not_initialized 走 maximum=128 旧回退，index_unavailable 不全扫。P4 change_token 保持不透明提示，无启动/读取授权效力。纯 pipeline_policy 除模块说明外 AST 与原 limits 完全相同，部署→项目→run 收紧及真实 payload/累计预算不变。
+
+浏览器计划到实际映射
+
+旧 Case 结果导航/重试用例已经退出活跃产品路径，父协调同意不恢复界面；以当前 Notebook 字典和固定 binding 导航覆盖相同 P12 读取身份。新增真实 pending 拒绝→原 CLI --synchronize→UI 明确重试→真实成功 ref→现有保留为输入表→当前字典固定 binding/重开。真实 Notebook 编辑执行保存重开与旧 locator 拒绝重绑定、解析请求固定导航分别沿已发布入口验收；媒体权限由实际 worker 负例及声明撤销前后复核承接。旧 Case 用例不冒称执行。
+
+历史与回退
+
+源 .py 变化会改变 platform revision 和 Forge snapshot；不重签旧运行/报告/native proof，旧 seal 的 worker 路径不移动。基线只读导出 producer 与候选 reader 的私有历史探针逐文件比较原 run/report/platform/已保存 Notebook 字节；旧版本 report stale 和 resume 拒绝是既有合同，不承诺跨版本恢复。格式、authority、媒体权限和索引同步 HTTP API 均未扩展。
+
+本作者仅在专属树及私有 /tmp fixture 验证，解释器/Chromium/Notebook 环境只读复用。未改正式目录/integration/main/在线预览/业务或既有 Notebook；未安装依赖、调用模型、合流、推送或部署。集成管理者另做合入闸和固定 T 四线，任务选择集不冒称全仓通过。回退按正式规范以完整候选的隔离反向提交过闸；已产生运行仍保留其生产版本和源字节。
+
+首轮失败的处理原则与已定位夹具问题
+
+新生命周期故障探针初轮在普通 pytest 进程直接调用 worker 私有读取，被原 finite-allocation guard 拒绝；后改到真实有界子进程，复用原 prepare_native 线程/地址空间限制。一次缺 native 线程上限的探针由作者仅终止本人进程组，首轮未完成回执保留，不算通过。真实执行不能放在只读 metadata worker 的较小继承 hard limit 下；后来保持实际 execution 原管理路径，只将 _resume 维护故障注入放进有界子进程。
+
+将完整普通成功运行简单改状态并删登记并不建立其原 write receipt 当前头恢复条件；原 PublicationMismatch 守卫发生在 begin 前，未修改 P4 去绕过。I08 最终使用真实 native stage 成功产物，保留原 native proof，仅在私有夹具删 derived result 事件，原登记恢复后再由真实 pending 拒绝；证据与第一轮失败全部保留。
+
+现有 test_forge_resume 的三个负例从未执行的 prepared 人造 interrupted，缺少原 public resume 所需 recovery_identity，先被原历史守卫拒绝。对照 baseline 后，仅把负例起点换成真实 execute/stopped 的私有记录，再注入未知 accounting、耗尽预算或来源变动，原拒绝断言和 attempt=1 保留；不能通过补造恢复证书求绿。
+
+新输入全链路夹具起初把普通 FlowChecker 允许的终端写法交给 native capture，缺少其必需显式 schema，正确遭 UNSUPPORTED_CAPABILITY。最终 native inspect/plan preview 使用同一 fixed run ref 的独立、显式 schema native entry；普通参数编辑与 prepare 仍走原普通 consumer，不扩大产品能力。
+
+现有 plain-configuration 浏览器 cold-load .wb-node=3 断言，在候选和未修改 main@122edf4 导出均看到 HTTP graph=200、节点=0；原始失败保留，未修改产品或旧选择器掩盖它。它不是 P12 新回归的证据，也不计为通过，提交父协调裁定。
+
+验收范围澄清与基线对照
+
+TEST-PLAN.txt 中“省略 attempt 后旧 binding 必须变化”按父协调认可的现行身份合同落实为：固定 ref 不同才冲突；同一个 ref 的继承不新建 attempt 身份。“index.status 仅一次”限应用组合层；既有 source_inventory 的近期报告读取保持。浏览器旧 Case 两入口由当前 Notebook 字典导航/旧 locator 冲突覆盖；四 tab 冷图路径本轮已有另一旧选择器失败与基线同点，不以重启或重建旧 UI 解决。原始设计原件保留，以上是实际约束映射，不重写历史方案。
+
+G3/G6 的十个既有失败在未修改 main@122edf4 导出全部复现，见 baseline-existing-negatives/ 原始回执：三个 prepared 伪恢复记录缺 recovery_identity；分页测试依赖已变更的 P4 SQL 文本；投影测试伪 receipt 缺必需字段；一次性 isolated 子进程 sys.path 根少一级；三个 minimal launch 夹具缺 platform.files；resume deadline 夹具同样缺实际恢复身份。测试修正并未弱化产品拒绝：分页改为核实只对20个选中 run 各请求 identity/summary 及输出 action IDs、无 full 观测/完成读写；投影改用真实 native publication 后注入 private interrupted 状态，仍证明 receipt 不能升级总体状态；恢复负例和 commit 后耗尽均从真实执行/停止记录出发，不伪造 proof/identity。后者同时要求 attempt 2/prepared 和 pending 保留、attempt 1 原结果不变。启动边界仅补原 manifest platform 路径及函数 kwargs，原 reservation/fork/usage/owner 断言保持。
+
+所有首轮失败、作者中断、基线对照、针对性修正与执行次序都在最终 RESULTS.json 中分别列出；不把这些数据合成无失败的一轮，也不使用 flaky 标签。共享源码审计对冻结七件、P4名单/生成文档、merge_gate.py、封存 worker、publication_facts 逐字节比较，并核对四个关键原函数 source hash。测试后的留档提交只新增本目录文档，最终共享 HANDOFF 明列源码、受测测试及留档三个身份。
+
+新增 commit 后 deadline 探针第一次实际完成 begin_attempt，safe publisher 留下 pending，末尾 show 在冻结 RunReader 的 SQLite progress handler 处产生 OperationalError('interrupted')，而测试预设 ForgeError 故失败。父协调窄裁定见 tasks/B/RESUME-DEADLINE-ACCEPTANCE-NOTE.txt（SHA-256 e7411ebec3615e73fe3dbccb65c9774ee267e546e0b701a0bb18c600d535db65）。最终测试只接受真实 ready、code=resource_limit 的 ForgeError 或精确 SQLite interrupted；未知异常继续失败。随后实际公开 start 在同一过期预算下必须拒绝，无 unit-2/新容量，attempt2/prepared/pending保留，旧attempt按commit前（真实维护后）事实比较。未改变 P4/private读取异常转换，不把这种出口宣传成稳定HTTP错误协议。
+
+预算传输旧夹具除了导入根层级，还遗留已不存在的 _bind_parent；修正为现行 worker 实际使用的 bind_parent。新浏览器状态断言初次误写“成功”，已发布 run UI 实为“已完成”；实际同步重试后的私有run已succeeded，测试按产品已有文案修正并重验后续固定结果，不改UI。上述首轮失败均单列回执。
+
+预算复验两例已通过后，同批浏览器 fixture 在 Chromium 启动时报 FATAL Socket path too long；私有 /tmp 组名太长使 Unix SingletonSocket 路径超过限制，测试正文未执行。G6-G7-budget-and-browser-recheck 回执如实为2 passed/1 setup error（runner executed为JUnit报告case计数，不代表该浏览器正文已运行）。改用短组名 G7-final 的独占私有目录复验，同一源码918a46d和浏览器参数，不修改产品/环境/已保存原始回执；这是明确路径长度配置错误，不标为flaky。
+
+历史探针首轮 collector 收到SIGTERM（exit143），producer事实文件已保存但reader未开始，不能计通过；history/interrupted-receipt.json保留。确切信号发送者未建立，不推断产品故障或flaky。第二轮仅外部probe给producer/reader各自start_new_session并直接落盘日志；history-v2完成两进程正常返回，1554个受保护源文件hash相同，report stale/platform_changed，真实recovery_identity仍因平台变化conflict，attempt=1。探针没有改任何baseline导出/旧seal或身份。
+
+完整浏览器G7-final通过的服务仅启用字典而未启用Notebook内核，截图中如实显示未启用提示；真实内核编辑执行保存重开由G7-private-browser-notebook中独立已通过用例覆盖，不把两个服务冒充同一会话。固定结果为2行、Lance v1，完整ref/binding见p12-browser-receipt.json；服务关闭及所属运行进程停止均为true。
+
+最终验收回执索引
+
+受测测试提交 T=918a46dfc40e80022d041ab54c64a9a10a68673c；运行时源码始终为53207a61e6b8cfb054de48f388eb8fe7f8eb7c0b。留档提交 R 在仓库外 HANDOFF.json 记录，T→R 仅本目录新增证据文档。
+B1-policy @8991437: collected=44, executed=44, passed=44, failed=0, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+B2-index @2aee0aa: collected=114, executed=114, passed=110, failed=4, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+B2-index-recheck @f8c9b5f: collected=114, executed=114, passed=114, failed=0, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+B3-resolver @7cae468: collected=117, executed=117, passed=115, failed=2, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+B3-browser-baseline @122edf4: collected=1, executed=1, passed=0, failed=1, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+G1-boundaries @53207a6: collected=95, executed=95, passed=95, failed=0, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+G2-index-lifecycle @53207a6: collected=78, executed=78, passed=73, failed=5, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+G2-owner-bounded-recheck @541f4f4: collected=21, executed=0, passed=0, failed=0, error=0, skipped=0, timeout=0, not_run=21, deselected=0。
+G2-owner-native-recheck @c0766df: collected=21, executed=21, passed=20, failed=1, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+G2-resume-maintenance-recheck @a697311: collected=1, executed=1, passed=0, failed=1, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+G2-native-recovery-and-owner-validation @0f56e4f: collected=24, executed=24, passed=24, failed=0, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+G3-fixed-results @0f56e4f: collected=15, executed=15, passed=12, failed=3, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+G4-input-routes @0f56e4f: collected=10, executed=10, passed=9, failed=1, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+G5-analysis-notebook-media @0f56e4f: collected=34, executed=34, passed=34, failed=0, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+G6-refresh-budgets-history @0f56e4f: collected=62, executed=62, passed=55, failed=7, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+baseline-existing-negatives @122edf4: collected=10, executed=10, passed=0, failed=10, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+G3-G4-G6-real-fixture-recheck @0073632: collected=14, executed=14, passed=12, failed=2, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+G7-private-browser-notebook @0073632: collected=6, executed=6, passed=5, failed=1, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+G6-G7-budget-and-browser-recheck @918a46d: collected=3, executed=3, passed=2, failed=0, error=1, skipped=0, timeout=0, not_run=0, deselected=0。
+G7-final @918a46d: collected=1, executed=1, passed=1, failed=0, error=0, skipped=0, timeout=0, not_run=0, deselected=0。
+
+这些是分组、首次失败、修正及对照的原始次序，不是相加后的独立覆盖总数，也不是一次全绿验收。相同运行时源码的逐case最新证据汇总为 {'passed': 312, 'failed': 0, 'error': 0, 'skipped': 0}；完整选择清单/测试文件hash/环境/命令/原始失败均保留在 RESULTS.json 指向的回执。B3 cold graph旧浏览器断言与baseline同点，仍未计通过，交父协调差异裁定。
+
+历史探针结果见共享 history-v2/receipt.json：真实基线生产者的运行/报告/封存平台和已保存Notebook字节均保留，旧报告 stale，真实恢复身份仍因平台变化拒绝，不新attempt。所有产品/静态资源/依赖/配置保持T；最终合入闸回执随R在共享目录另存，不回写自引用提交。
+
+未完成范围：release standard/ray/historical/historical_ray full lanes (integration manager window); business pipeline tests and live business data; paid/model/coding loop calls; obsolete Case browser UI revival; legacy four-tabs browser case from original plan (replaced by current Notebook routes; separate cold graph baseline failure retained); Fable final code review; integration/main/formal worktree writes; push/release/preview service changes。当前作者交付仅供父协调固定代码终审，Fable没有代码通过结论；integration合入及全量四线仍由唯一集成管理者负责。

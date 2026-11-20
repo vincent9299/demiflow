@@ -30,6 +30,7 @@ from d19_fixtures import owned_fixture
 from test_forge_markdown_reading import browser
 
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.analysis import web_sources
 from demiflow.workbench.analysis.arrow_bridge import decoded_batches
 from demiflow.workbench.analysis.materialize import input_chunks
@@ -202,7 +203,7 @@ def test_ui_d19_fixed_version_chain(owned_fixture, browser):
     # -- 7. Case membership / media verify on the SAME version (F10/F16) ------
     target = dict(source=source['digest'], case_key='0', variant=None, field=None)
     assert web_sources.verify(root, locator=historical, source=source, target=target) == {'verified': True}
-    membership = ws.sample_table(root, alias, expected_binding=alias_binding,
+    membership = project_ops.sample_table(root, alias, expected_binding=alias_binding,
                                  version=1, version_binding=v1['binding'],
                                  columns=['case_id'], row_id=0)
     assert membership['binding']['digest'] == v1['binding']
@@ -243,7 +244,7 @@ def test_ui_d19_fixed_version_chain(owned_fixture, browser):
     # bytes afterwards so the read-chain hash invariant below stays meaningful.
     control_original = control_path.read_bytes()
     try:
-        rebound = ws.attach_table(root, alias, relative_uri=alias + '.lance', version=1,
+        rebound = project_ops.attach_table(root, alias, relative_uri=alias + '.lance', version=1,
                                   dataset_id=alias, schema_name=alias, schema_version='1',
                                   expected=content_digest(json.loads(control_original)))
         assert rebound['table']['ref']['lance_version'] == 1

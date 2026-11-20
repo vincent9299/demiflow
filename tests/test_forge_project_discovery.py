@@ -12,6 +12,7 @@ import pytest
 from demiflow.cli import main
 from demiflow.workbench.projects import registry as console
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.projects.discovery import discover
 from demiflow.forge.schema import ForgeError
 from test_forge_project_management import snapshot, cached_snapshot
@@ -69,7 +70,7 @@ def test_register_recognizes_original_without_execution_or_copies(original, tmp_
     assert result['coverage']['candidate_code_executed'] is False
     assert value['flows'] == []  # recognized legacy entry is not an executable native Flow
     assert any(d['code'] == 'unsupported_flow_protocol' for d in result['diagnostics'])
-    checked = ws.check_project(original)
+    checked = project_ops.check_project(original)
     assert checked['static_status'] == 'invalid'
     assert checked['coverage']['source_inspected'] == 1
     assert any(d.get('scope') == 'source_prerequisites' and 'initialization' in d['detail'] for d in checked['diagnostics'])
@@ -79,29 +80,35 @@ def test_register_recognizes_original_without_execution_or_copies(original, tmp_
 
 def test_partial_source_check_is_bound_to_originals_and_declarations(original):
     ws.init_workspace(original, existing=True)
-    result = ws.check_project(original)
+    result = project_ops.check_project(original)
     assert result['status'] == result['static_status'] == 'incomplete'
     assert result['coverage']['recognized_entries'] == result['coverage']['source_inspected'] == 1
     assert result['coverage']['declared'] == 0
     assert set(result['sources']) == {'dispatch.py', 'operators/clean.py'}
-    assert ws.project_check_status(original)['status'] == 'incomplete'
+    assert project_ops.project_check_status(original)['status'] == 'incomplete'
     operator = original / 'operators/clean.py'
     operator.write_text(operator.read_text() + '\n# modified\n')
-    assert 'source_changed:operators/clean.py' in ws.project_check_status(original)['changes']
-    ws.check_project(original)
+    assert 'source_changed:operators/clean.py' in project_ops.project_check_status(original)['changes']
+    project_ops.check_project(original)
     path, value = declarations(original)
     value['pipelines']['shipments']['standard'] = 'unsupported-version'
     path.write_text(json.dumps(value))
-    assert 'original_project_evidence_changed' in ws.project_check_status(original)['changes']
+    assert 'original_project_evidence_changed' in project_ops.project_check_status(original)['changes']
 
 
 def test_project_check_tracks_the_checker_revision(original, monkeypatch):
     from demiflow.workbench.projects import checks as project_check
+    from demiflow.workbench.runs import manager as runs
+    from demiflow.workbench.table_bindings import make_resolver
     ws.init_workspace(original, existing=True)
-    result = ws.check_project(original)
+    result = project_ops.check_project(original)
     assert result['checker_platform_digest']
     monkeypatch.setattr(ws, 'check_snapshot', lambda path: {'status': 'current', 'current_digest': '0'*64})
-    assert 'platform_changed' in project_check.status(original)['changes']
+    resolver = make_resolver(ws.table_binding, runs.result_table)
+    status = project_check.status(original, table_resolver=resolver)
+    assert 'platform_changed' not in status['changes']
+    assert status['platform_provenance']['current_digest'] == '0'*64
+    assert status['static_status'] == result['static_status']
 
 
 @pytest.mark.parametrize('change,code', [
@@ -218,7 +225,7 @@ def test_symlink_private_and_external_references_are_not_read(original, tmp_path
     assert 'secret' not in json.dumps(value)
     ws.init_workspace(original, existing=True)
     with pytest.raises(ForgeError):
-        ws.project_table(original, value['tables'][0]['id'], expected=value['digest'])
+        project_ops.project_table(original, value['tables'][0]['id'], expected=value['digest'])
 
 
 def test_configuration_budget_and_invalid_json_remain_visible(original):
@@ -243,30 +250,30 @@ def test_preview_fixes_version_and_rejects_changed_evidence(original):
     before = business_bytes(original)
     value = ws.discover_project(original)
     row = next(t for t in value['tables'] if t['version'] is None)
-    metadata = ws.project_table(original, row['id'], expected=value['digest'])
+    metadata = project_ops.project_table(original, row['id'], expected=value['digest'])
     assert metadata['row_count'] == 2 and metadata['version'] == 1
     args = dict(expected=value['digest'], version=1, binding=metadata['binding'])
-    page = ws.project_sample(original, row['id'], columns=['order'], limit=1, **args)
+    page = project_ops.project_sample(original, row['id'], columns=['order'], limit=1, **args)
     assert page['rows'][0]['order'] == 'alpha'
     assert business_bytes(original) == before
     lance.write_dataset(pa.table({'order': ['gamma'], 'amount': [99]}), str(original / 'records/orders.lance'), mode='append')
-    assert ws.project_sample(original, row['id'], **args)['row_count'] == 2
-    assert ws.project_table(original, row['id'], expected=value['digest'])['row_count'] == 3
+    assert project_ops.project_sample(original, row['id'], **args)['row_count'] == 2
+    assert project_ops.project_table(original, row['id'], expected=value['digest'])['row_count'] == 3
     fixed = next(t for t in value['tables'] if t['version'] == 1)
     with pytest.raises(ForgeError, match='declared fixed reference'):
-        ws.project_table(original, fixed['id'], expected=value['digest'], version=2)
+        project_ops.project_table(original, fixed['id'], expected=value['digest'], version=2)
     with pytest.raises(ForgeError, match='binding'):
-        ws.project_sample(original, row['id'], **{**args, 'binding': '0'*64})
+        project_ops.project_sample(original, row['id'], **{**args, 'binding': '0'*64})
     (original / 'README.md').write_text('changed')
     with pytest.raises(ForgeError, match='declarations changed'):
-        ws.project_sample(original, row['id'], **args)
+        project_ops.project_sample(original, row['id'], **args)
     assert not (original / 'tables').exists()
 
 
 def test_http_cli_and_change_observation_share_recognition(original, tmp_path):
     registry = tmp_path / 'console.json'
     registered = console.add(registry, original)
-    first = ws.workspace_changes(original)
+    first = project_ops.workspace_changes(original)
     with service(None, registry=registry, api_only=True) as app:
         prefix = '/api/workspaces/' + registered['workspace_id'] + '/'
         code, value = request(app, prefix + 'project-discovery')

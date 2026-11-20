@@ -188,10 +188,10 @@ def test_schema_redaction_failure_only_disables_that_material(no_execution):
 
 
 def test_index_missing_run_directory_and_missing_native_storage_remain_absent(tmp_path):
-    from demiflow.workbench.projects import index
+    from demiflow.workbench.runs import manager as runs
     run_id = 'r' + '1' * 24
-    assert index._source(tmp_path, 'run', run_id) is None
+    assert runs.run_index_entry(tmp_path, run_id) is None
     target = tmp_path / '.forge/runs' / run_id
     target.mkdir(parents=True)
-    assert index._source(tmp_path, 'run', run_id) is None
+    assert runs.run_index_entry(tmp_path, run_id) is None
     assert not list(target.iterdir())

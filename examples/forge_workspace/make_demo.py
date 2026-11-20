@@ -15,6 +15,7 @@ def create(root):
     import pyarrow as pa
     from PIL import Image, ImageDraw
     from demiflow.workbench.projects import workspace
+    from demiflow.workbench import project_operations as project_ops
 
     root = Path(root).absolute()
     workspace.init_workspace(root, name="question-experiments")
@@ -88,7 +89,7 @@ def create(root):
                 str(root / "data" / (alias + ".lance")),
                 mode="create" if index == 0 else "overwrite",
             )
-        workspace.attach_table(
+        project_ops.attach_table(
             root,
             alias,
             relative_uri=alias + ".lance",
@@ -101,7 +102,7 @@ def create(root):
         workspace.register_flow(root, 'flows/questions.py:select', params=f'flows/select_{variant}.json')
     reports = {}
     for variant in ("a", "b"):
-        report = workspace.inspect_flow(
+        report = project_ops.inspect_flow(
             root, "flows/questions.py:select", params=f"flows/select_{variant}.json"
         )
         if report["status"] != "checked":

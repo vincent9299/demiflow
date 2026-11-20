@@ -14,7 +14,7 @@ from demiflow.workbench.projects import workspace as ws
 FORMAT = 'demiflow_forge_native_inspection_v1'
 
 
-def inspect_submission(root, *, entry, parameters, limits):
+def inspect_submission(root, *, table_resolver, entry, parameters, limits):
     """Fixed disposable worker: original code construction is read-only."""
     from contextlib import redirect_stdout
     from demiflow.execution.host.inspection import capture_managed_pipeline, native_submission_view
@@ -29,7 +29,7 @@ def inspect_submission(root, *, entry, parameters, limits):
     source_root = _import_root(root, project)
     sources = _Sources(source_root)
     sources.read(target)
-    arguments, tables, targets, _ = ws.resolve_arguments(root, control, parameters)
+    arguments, tables, targets, _ = ws.resolve_arguments(root, control, parameters, table_resolver=table_resolver)
     if targets:
         raise ForgeError('Native admission cannot mix implicit and explicit output grants')
     sys.dont_write_bytecode = True
@@ -136,9 +136,12 @@ def verify_basis(root, manifest, report):
     root, workspace, platform = ws.load_workspace(root)
     audit.require_scope(ws._check_change_scope(root), expected_scope=manifest.get('change_scope'))
     binding = report['binding']
-    if (content_digest(workspace) != binding['workspace_digest']
-            or content_digest(platform) != binding['platform_digest']):
-        raise ForgeError('Native prepared project/platform basis changed', code='conflict')
+    original = manifest['workspace']
+    if content_digest(original) != binding['workspace_digest']:
+        raise ForgeError('Native original project basis digest differs', code='conflict')
+    if {k: v for k, v in workspace.items() if k != 'platform'} != {
+            k: v for k, v in original.items() if k != 'platform'}:
+        raise ForgeError('Native prepared project basis changed', code='conflict')
     base = Path(binding['source_root'])
     for name, digest in binding['sources'].items():
         if hashlib.sha256(read_bounded(ws.relative_path(base, name), 4 * 1024**2)).hexdigest() != digest:
