@@ -270,6 +270,15 @@ def admit_absent_create(journal, *, action_id, expected_attempt, expected_revisi
         return result
 
 
+def _validate_runtime_protocol(configuration):
+    """Only the persisted state protocol, never its producer's source version."""
+    if (type(configuration) is not dict or type(configuration.get('format')) is not int
+            or configuration['format'] != 1):
+        raise RecoveryContractError('Unsupported or missing runtime identity format')
+    if configuration.get('stream_protocol') != 'aligned-barrier-v2':
+        raise RecoveryContractError('Unsupported or missing runtime stream protocol')
+
+
 class RunContext:
     """Platform control scope. Pipeline/operator arguments never carry this."""
 
@@ -328,6 +337,7 @@ class RunContext:
         binding = journal.recovery_identity()
         if binding is None:
             raise RecoveryContractError("Run has no unified recovery contract; cannot resume history")
+        _validate_runtime_protocol(binding)
         if binding.get("run_id") != reference.run_id:
             raise RecoveryContractError("RunRef identity does not match its directory")
         context = cls(reference.directory, entry_identity=entry_identity, limits=limits, resume=True)
@@ -367,6 +377,7 @@ class RunContext:
             if not self.resuming and not self.external_control and self.journal.path.exists():
                 raise RecoveryContractError("Run already exists; resume its RunRef explicitly")
             if old is not None:
+                _validate_runtime_protocol(old)
                 if self.entry_identity is not None and old["entry_identity"] != self.entry_identity:
                     raise RecoveryContractError("Run entry identity changed")
                 if self.requested_limits is not None and execution_limits(self.requested_limits) != old["limits"]:

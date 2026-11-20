@@ -205,7 +205,7 @@ def make_journal(tmp_path, *, run_id=None, platform_revision=None):
     target.mkdir(parents=True, exist_ok=True)
     journal = RunJournal(target)
     journal.initialize(dict(run_id=run_id, object_locations=[]), attempts=True)
-    configuration = dict(run_id=run_id,
+    configuration = dict(run_id=run_id, format=1, stream_protocol="aligned-barrier-v2",
                          platform_revision=platform_revision if platform_revision is not None else platform_identity(),
                          limits=dict(max_control_bytes=8 * 1024 ** 2, max_commits=1024,
                                      admission_timeout_s=30))

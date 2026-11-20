@@ -18,8 +18,9 @@ def historical_platform(root):
     old.pop('digests');_seal(old)
     path='.forge/platform/'+old['digests']['snapshot']+'.json'
     write_snapshot(root/path,old)
+    expected=content_digest(control)
     control['platform']={'path':path,'digest':old['digests']['snapshot']}
-    ws.write_control(root/'workspace.json',control)
+    ws.write_control(root/'workspace.json',control,expected=expected)
 
 
 def test_platform_drift_allows_new_prepare_start_and_original_basis(root):
@@ -35,7 +36,8 @@ def test_platform_drift_allows_new_prepare_start_and_original_basis(root):
     ws.bind_platform(root,expected=old)
     runs.verify_run_basis(root,original)
     path=root/'flows/select_a.json'
-    parameters=ws.read_control(path);parameters['arguments']['source']['alias']='missing'
-    ws.write_control(path,parameters)
+    parameters=ws.read_control(path);expected=content_digest(parameters)
+    parameters['arguments']['source']['alias']='missing'
+    ws.write_control(path,parameters,expected=expected)
     with pytest.raises(ForgeError,match='basis is stale|parameters'):
         runs.verify_run_basis(root,original)

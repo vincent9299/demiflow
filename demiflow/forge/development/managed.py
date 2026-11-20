@@ -857,7 +857,7 @@ class ManagedTasks:
                       contract_digest=metadata['contract_digest'], assurance='gate_only',
                       run_policy='observe', development_state='incomplete', gates={}, violations=[],
                       accepted_fingerprint=acceptance.get('fingerprint'), ready=False,
-                      verification_source='live_tree_rechecked', changed=[], changed_total=0,
+                      verification_source=('accepted_business_rechecked' if runtime else 'live_tree_rechecked'), changed=[], changed_total=0,
                       truncated=False, feedback=[], execution_evidence={}, repairable=False, unchanged_checked=False,
                       pending_questions=visible_questions, pending_question_count=len(pending),
                       pending_questions_truncated=(len(visible_questions) != len(pending) or

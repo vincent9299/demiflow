@@ -126,3 +126,19 @@ def test_old_scope_read_is_bounded_and_text_only(queue,tmp_path,payload):
             db.execute('UPDATE runtime_commit_scopes SET declaration=? WHERE scope_id=?',(payload,scoped.action_id))
         with pytest.raises(RecoveryContractError,match='byte budget or is not text'):
             resolve_consumer_contract(src,body,action=parent('another'))
+
+
+@pytest.mark.parametrize('changes',[{'format':99},{'format':True},{'stream_protocol':'unknown'}])
+def test_resume_rejects_unknown_durable_protocol_before_attempt(tmp_path,changes):
+    from demiflow.execution.recovery_contract import RunRef
+    target=tmp_path/'run';target.mkdir();journal=RunJournal(target)
+    configuration=dict(format=1,stream_protocol='aligned-barrier-v2',run_id='r'+'1'*24,
+        platform_revision='unrelated',limits=dict(max_control_bytes=8*1024**2,max_commits=1024,admission_timeout_s=30))
+    configuration.update(changes)
+    journal.initialize(dict(run_id=configuration['run_id'],object_locations=[]),attempts=True)
+    journal.claim_execution(configuration,'f'+'1'*32)
+    before=journal.execution_status()
+    with pytest.raises(RecoveryContractError,match='Unsupported or missing runtime'):
+        RunContext.resume(RunRef(str(target),configuration['run_id']))
+    assert journal.execution_status()==before
+    assert journal.recovery_identity()==configuration
