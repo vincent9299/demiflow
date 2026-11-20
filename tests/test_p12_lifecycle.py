@@ -12,6 +12,7 @@ from demiflow.workbench.runs import manager as runs
 from demiflow.workbench.table_bindings import make_resolver
 from test_forge_runs import base, root, prepared, execute
 from test_forge_resume import stopped
+from _p12_bounded_test import bounded_test
 
 
 def unreadable(*a, **k):
@@ -20,6 +21,7 @@ def unreadable(*a, **k):
 
 @pytest.mark.parametrize('failure', ['summary', 'publish'])
 def test_prepared_source_is_durable_when_cache_publication_fails(root, monkeypatch, failure):
+    if bounded_test(test_prepared_source_is_durable_when_cache_publication_fails, root=root, failure=failure): return
     if failure == 'summary':
         monkeypatch.setattr(runs, 'run_index_entry', unreadable)
     else:
@@ -35,6 +37,7 @@ def test_prepared_source_is_durable_when_cache_publication_fails(root, monkeypat
 
 
 def test_report_bytes_and_digest_survive_summary_and_diagnostic_failure(root, monkeypatch):
+    if bounded_test(test_report_bytes_and_digest_survive_summary_and_diagnostic_failure, root=root): return
     import logging
     parameter_path = root / 'flows/select_a.json'
     parameters = json.loads(parameter_path.read_text()); parameters['arguments']['minimum'] = .55
@@ -52,6 +55,7 @@ def test_report_bytes_and_digest_survive_summary_and_diagnostic_failure(root, mo
 
 
 def test_prepare_begin_refusal_does_not_create_run_or_remove_prior_report(root):
+    if bounded_test(test_prepare_begin_refusal_does_not_create_run_or_remove_prior_report, root=root): return
     identity = 'r' + 'b' * 24
     with ws.control_lock(root):
         index.begin(root, 'run', identity)
@@ -64,6 +68,7 @@ def test_prepare_begin_refusal_does_not_create_run_or_remove_prior_report(root):
 
 
 def test_resume_pending_refusal_preserves_real_prior_recovery_without_new_attempt(root, monkeypatch):
+    if bounded_test(test_resume_pending_refusal_preserves_real_prior_recovery_without_new_attempt, root=root): return
     value = execute(root, prepared(root))
     assert value['status'] == 'succeeded'
     stopped(root, value['run_id'])

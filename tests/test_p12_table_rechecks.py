@@ -12,6 +12,7 @@ from demiflow.workbench.table_bindings import make_resolver
 from demiflow.workbench.analysis import catalog_versions, source_query, media_source_export, web_sources
 from test_forge_workspace import demo, isolated
 from test_forge_analysis_media_source_export import declared, fixed
+from _p12_bounded_test import bounded_test
 
 
 def changing_resolver(root):
@@ -29,6 +30,7 @@ def changing_resolver(root):
 
 
 def test_historical_version_rereads_alias_after_metadata(isolated):
+    if bounded_test(test_historical_version_rereads_alias_after_metadata, isolated=isolated): return
     from demiflow.lance.registry import Catalog
     root, control, _ = ws.load_workspace(isolated)
     table, ref, uri = ws.table_binding(root, control, 'candidates')
@@ -43,6 +45,7 @@ def test_historical_version_rereads_alias_after_metadata(isolated):
 
 
 def test_source_sample_cannot_return_rows_after_alias_rebind(isolated):
+    if bounded_test(test_source_sample_cannot_return_rows_after_alias_rebind, isolated=isolated): return
     description = project_operations.describe_table(isolated, 'candidates')
     locator = dict(kind='workspace_table', alias='candidates',
         binding=description['binding']['digest'], columns=['case_id'])
@@ -56,6 +59,7 @@ def test_source_sample_cannot_return_rows_after_alias_rebind(isolated):
 
 
 def test_media_recheck_observes_revoked_display_grant_even_when_table_binding_is_same(tmp_path):
+    if bounded_test(test_media_recheck_observes_revoked_display_grant_even_when_table_binding_is_same, tmp_path=tmp_path): return
     root, _ = declared(tmp_path); locator, source = fixed(root)
     resolver = make_resolver(ws.table_binding, runs.result_table)
     selected = media_source_export._selection(root, source_locator=locator, source_snapshot=source['digest'],

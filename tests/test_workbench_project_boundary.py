@@ -17,6 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECTS = 'demiflow.workbench.projects'
 CORE = {'workspace', 'checks', 'discovery', 'definitions', 'documents', 'io', 'index'}
 APPLICATION = {'registry', 'watch', 'flow_arguments'}
+RUN_MODULES = {'admission', 'authority', 'cli', 'context', 'domain', 'facts', 'manager',
+    'native_resources', 'native_stages', 'native_submission', 'operations', 'requests',
+    'storage', 'tools', 'view', 'worker'}
 FORBIDDEN = {PROJECTS + '.' + name for name in APPLICATION} | {
     'demiflow.workbench.worker', 'demiflow.workbench.api',
     'demiflow.workbench.project_operations', 'demiflow.workbench.directory_operations'}
@@ -59,6 +62,7 @@ def graph():
 def test_project_directory_has_seven_core_three_application_and_inert_initializer():
     files = {path.stem for path in (ROOT / 'demiflow/workbench/projects').glob('*.py')}
     assert files == CORE | APPLICATION | {'__init__'}
+    assert {path.stem for path in (ROOT / 'demiflow/workbench/runs').glob('*.py')} == RUN_MODULES | {'__init__'}
     tree = ast.parse((ROOT / 'demiflow/workbench/projects/__init__.py').read_text())
     assert all(isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
                and isinstance(node.value.value, str) for node in tree.body)
