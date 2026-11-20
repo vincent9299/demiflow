@@ -6,7 +6,7 @@
   "base_main_tag": "main-20261119-3",
   "approved_design_commit": "c6cdd9d076cbc9181279ecd81e88fdc201907315",
   "A1_preserved_ancestor": "0c1ff443cab9ecbc7a2e4cd45a70c5187e50643d",
-  "tested_commit": "73bb194d95456f6860cfe578939f8adcf205ae5d",
+  "tested_commit": "691dcd404acb76d967d18b36cdfa2fff5f506ada",
   "final_docs_candidate": "Recorded externally in HANDOFF.json; tests and actual reports retain tested_commit, no rewritten evidence",
   "branch": "gpt/test/public-imports-20261120",
   "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/test/public-imports-20261120",
@@ -18,7 +18,7 @@
     "tests/test_merge_gate.py",
     "docs/architecture-upgrade-20261120/A/DIAGNOSTICS-USAGE.txt"
   ],
-  "implementation_stat": "5 files, 1189 insertions, 0 deletions relative to fixed A1",
+  "implementation_stat": "5 files changed, 1241 insertions(+)",
   "validation_mapping": [
     {
       "design": "A2-V1/V6",
@@ -57,21 +57,26 @@
     },
     {
       "design": "A2-V13",
-      "actual": "Two related complete files 48 passed first time; one complete real merge gate with optional actual reports 217 primary+12 subtests passed,17files,zero fail/error/skip.",
+      "actual": "Final fixed source: two related complete files 52 passed; one complete real merge gate 218 primary+12 subtests passed,17 files,zero fail/error/skip with complete actual diagnostics. Initial source48/217 receipts preserved separately.",
       "receipt": "related-1-command.json; merge-gate-1-command.json; raw CLI/JUnit and source-bound observations"
+    },
+    {
+      "design": "A2 bounded invalid-argument error evidence",
+      "actual": "Static resource audit correction added actual CLI 70000-char SHA and5000-char paths plus gate pre-child bounds. Final three CLI failure outputs806/669/670 bytes,zero stderr; four added negative cases passed.",
+      "receipt": "resource-argument-audit-fix.json; verification-v2.json; related-2 raw children"
     }
   ],
   "actual_tests": {
     "related": {
-      "passed": 48,
+      "passed": 52,
       "failed": 0,
       "errors": 0,
       "skipped": 0,
-      "outer_seconds": 8.53392892330885,
-      "pytest_seconds": 7.37
+      "outer_seconds": 8.736870884895325,
+      "pytest_seconds": 7.616
     },
     "merge_gate": {
-      "passed": 217,
+      "passed": 218,
       "subtests_passed": 12,
       "guard_files": 17,
       "failed": 0,
@@ -81,41 +86,41 @@
       "frozen_differences": [],
       "missing_guards": [],
       "diagnostics_status": "complete",
-      "outer_seconds": 68.99674508720636,
-      "pytest_seconds": 59.68
+      "outer_seconds": 67.82652356475592,
+      "pytest_seconds": 58.764
     },
-    "outer_test_runs": 2,
+    "outer_test_runs": 4,
     "failed_outer_test_runs": 0,
     "test_reruns_after_failure": 0,
     "standalone_actual_generation": {
-      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/evidence/standalone-1-command.json",
-      "bytes": 1988,
-      "sha256": "f07531ec623e5ca80f0b4e618683c5d4ff8d26ca0112c3165421f72ddb117c17"
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/evidence/standalone-2-command.json",
+      "bytes": 2016,
+      "sha256": "49086815c9940a72b0a943a4cab3a557bc1f44c0a1aae17ed4b7e0ca4463dd3e"
     },
     "main_reports": [
       {
         "standalone": {
-          "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/standalone-1-reports/scc-membership.json",
+          "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/standalone-2-reports/scc-membership.json",
           "bytes": 1000945,
-          "sha256": "ae09664f78cf9333613089666629e1b009d79a49a02e9756fe349561844ffa80"
+          "sha256": "a49b9a71375b0eb17f77db06e2e557baf658dbc4d8c2507c7b672973a986a40d"
         },
         "gate": {
-          "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/merge-gate-1-reports/scc-membership.json",
+          "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/merge-gate-2-reports/scc-membership.json",
           "bytes": 1000945,
-          "sha256": "ae09664f78cf9333613089666629e1b009d79a49a02e9756fe349561844ffa80"
+          "sha256": "a49b9a71375b0eb17f77db06e2e557baf658dbc4d8c2507c7b672973a986a40d"
         },
         "byte_equal": true
       },
       {
         "standalone": {
-          "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/standalone-1-reports/declaration-upward-imports.json",
+          "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/standalone-2-reports/declaration-upward-imports.json",
           "bytes": 87436,
-          "sha256": "872151c091c557ea49b8f5239b00f8537572cb58edd4f14fe82fecd8d4f548b6"
+          "sha256": "e4968ca5b9a700377a29221f06bb2904ebebd255b95ae9fc72f1ae8b40e01c0a"
         },
         "gate": {
-          "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/merge-gate-1-reports/declaration-upward-imports.json",
+          "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/merge-gate-2-reports/declaration-upward-imports.json",
           "bytes": 87436,
-          "sha256": "872151c091c557ea49b8f5239b00f8537572cb58edd4f14fe82fecd8d4f548b6"
+          "sha256": "e4968ca5b9a700377a29221f06bb2904ebebd255b95ae9fc72f1ae8b40e01c0a"
         },
         "byte_equal": true
       }
@@ -143,13 +148,20 @@
       "complete Forge or business project snapshots",
       "Fable independent final review",
       "integration/main/tag/push/preview switch"
-    ]
+    ],
+    "initial_round": {
+      "code": "73bb194d95456f6860cfe578939f8adcf205ae5d",
+      "related_passed": 48,
+      "gate_primary_passed": 217,
+      "subtests_passed": 12,
+      "reason_for_final_revalidation": "static invalid-argument resource fix, no test failure"
+    }
   },
   "actual_reports_bind": {
     "base": "122edf4bd0c827338846abd0114f0b36cf8c1b6d",
-    "candidate": "73bb194d95456f6860cfe578939f8adcf205ae5d",
+    "candidate": "691dcd404acb76d967d18b36cdfa2fff5f506ada",
     "both_are_commits": true,
-    "candidate_tree_sha": "77208d2ffd0200297687a9e7fab30b8cae156615",
+    "candidate_tree_sha": "05806e780a543e8b1d8d42492fd8b9132e351df7",
     "report_input_not_rewritten_to_docs_candidate": true,
     "no_structural_change": true,
     "current_findings": {
@@ -210,12 +222,38 @@
         "bytes": 9039,
         "sha256": "7d791faa60eb807f6e49b7ff082887a1832d3a086c460d38c5cd1f7fe701da3d"
       }
-    ]
+    ],
+    "initial_static_receipt": "precommit-static.json retains first source hashes; final binding is final-source-binding-v2.json",
+    "final_A1_guards_frozen_and_original_meta_functions_equal": true
   },
   "limits_and_process_choice": "CLI itself is the one independent analysis process, with 60s software checks, 90s signal timer and 512MiB/60sCPU backups, at most one serial Git reader. Gate supervises owned group for 90s plus up to2s cleanup. Function API does not mutate caller OS limits. No analysis platform, product imports or new owners.",
   "deviations": "No substantive design deviation; current GPT authority replaces interrupted Fable workflow. Independent CLI process uses POSIX timer for outer backup and is additionally supervised by optional gate; resource limits apply only to CLI. Rows cap includes supplemental observations as a stricter bounded table.",
   "evidence_collection_correction": "One evidence-copy helper initially parsed a deliberately corrupted negative fixture as valid JSON. Original error retained; same original bytes re-indexed as opaque. No implementation change, test retry or report regeneration.",
   "cleanup": {
+    "at": "2026-11-20T01:22:58.688017+00:00",
+    "tested_commit": "691dcd404acb76d967d18b36cdfa2fff5f506ada",
+    "private_scratch": "/tmp/demiflow-a2-fix-20261120-76j3szrj",
+    "gate_scratch": "/tmp/demiflow-gate-fo7dxjld",
+    "gate_finally_cleanup_verified": true,
+    "fixture_json_files_preserved": 62,
+    "private_git_bundles_preserved": 2,
+    "all_launched_subprocesses_returned": true,
+    "private_scratch_removed": true
+  },
+  "evidence_root": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/evidence",
+  "human_decisions_needed": [],
+  "initial_successful_code": "73bb194d95456f6860cfe578939f8adcf205ae5d",
+  "initial_successful_docs_candidate": "437401fa6d49e83c641284a44d5e6645a712eb84",
+  "resource_argument_correction": {
+    "prior_successful_code": "73bb194d95456f6860cfe578939f8adcf205ae5d",
+    "prior_docs_candidate": "437401fa6d49e83c641284a44d5e6645a712eb84",
+    "finding": "Static final resource audit found arbitrary-length invalid SHA arguments copied into failed receipt, risking >64KiB stdout/receipt; invalid filesystem path resolution also moved inside bounded error handling.",
+    "change": "Summarize invalid SHA >64 chars; reject repository/output paths >4096 bytes before filesystem access; gate length admission and summarized failure metadata; valid SHA and source graph/report semantics unchanged.",
+    "added_tests": "Actual CLI long SHA, repository, output arguments plus pre-child gate rejection/bounded evidence.",
+    "test_failure_before_fix": "none; found by static audit after successful C1 verification. All C1 receipts/reports remain immutable.",
+    "new_private_scratch": "/tmp/demiflow-a2-fix-20261120-76j3szrj"
+  },
+  "cleanup_initial": {
     "at": "2026-11-20T01:08:59.278412+00:00",
     "tested_commit": "73bb194d95456f6860cfe578939f8adcf205ae5d",
     "private_scratch": "/tmp/demiflow-a2-20261120-o63cmxhd",
@@ -228,6 +266,6 @@
     "scope": "only own recorded private scratch; raw receipts, reports and key private Git objects persisted in this A2 stage",
     "private_scratch_removed": true
   },
-  "evidence_root": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/evidence",
-  "human_decisions_needed": []
+  "final_verification": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/evidence/verification-v2.json",
+  "legacy_full_component_reconciliation": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/A/implementation-a2-v1/evidence/all-components-reconciliation.json"
 }

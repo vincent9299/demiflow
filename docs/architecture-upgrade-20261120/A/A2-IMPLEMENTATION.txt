@@ -8,9 +8,9 @@
 
 基线 main-20261119-3：122edf4bd0c827338846abd0114f0b36cf8c1b6d。
 批准设计 c6cdd9d076cbc9181279ecd81e88fdc201907315，DESIGN 第4节 / CONTRACTS / VALIDATION；GPT 非原作者和父裁定已通过。
-已审 A1 独立祖先 0c1ff443cab9ecbc7a2e4cd45a70c5187e50643d 保留不重写；此次受测 A2 实现 T：73bb194d95456f6860cfe578939f8adcf205ae5d。
+已审 A1 独立祖先 0c1ff443cab9ecbc7a2e4cd45a70c5187e50643d 保留不重写；此次受测 A2 实现 T：691dcd404acb76d967d18b36cdfa2fff5f506ada。
 分支 gpt/test/public-imports-20261120，专属树 /yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/test/public-imports-20261120。
-实现相对 A1 为5文件+1189/-0：tools/architecture_diagnostics.py、tests/test_architecture_diagnostics.py、tests/merge_gate.py、
+实现相对 A1 为5文件+1241/-0（不含两件交付说明）：tools/architecture_diagnostics.py、tests/test_architecture_diagnostics.py、tests/merge_gate.py、
 tests/test_merge_gate.py、DIAGNOSTICS-USAGE.txt。本两件实际说明在测试后单独留档；最终候选与源码逐项绑定写共享 HANDOFF，不自引用。
 不将 T 的测试或主报告 input 改写成文档提交，后续合流对真实组合 staged tree 仍由唯一管理者按规范过闸。
 
@@ -44,24 +44,27 @@ A1 的 GUARDS/FROZEN、完整冷导入、fixture、原元测试 AST 和 skip 拒
 
 实际验证（均固定 T）
 
-工具+完整 gate 元测试：48 passed，0失败/异常/skip，pytest7.37s、wrapper8.53s，首次通过。
+工具+完整 gate 元测试：52 passed，0失败/异常/skip，pytest7.62s、wrapper8.74s，首次通过。
 覆盖实际私有Git合并/拆分/新增删除、位置移动、固定对象忽略脏工作树、真实no-commit merge tree→later commit、静态/typing/动态限度、
 非法SHA/type/语法/链接/缺树、八种小预算、先验body拒绝、1200节点非递归遍历、partial publication 清理及可选gate所有四种真假组合。
-独立真实 CLI 122edf4→T 报告 complete，约7.08s；完整真实 gate 后再次生成同输入报告，两个主报告逐字节相同。
-一次完整 gate：217 primary+12 subtests passed，17文件，0失败/异常/skip；tree_bound=True，missing/frozen空，diagnostics=complete。
-完整gate pytest59.68s、整体wrapper69.00s；时间仅本次观察，原cold子进程30s及本任务外层边界不放宽。
+独立真实 CLI 122edf4→T 报告 complete，约7.23s；完整真实 gate 后再次生成同输入报告，两个主报告逐字节相同。
+一次完整 gate：218 primary+12 subtests passed，17文件，0失败/异常/skip；tree_bound=True，missing/frozen空，diagnostics=complete。
+完整gate pytest58.76s、整体wrapper67.83s；时间仅本次观察，原cold子进程30s及本任务外层边界不放宽。
 实际导入断言、解释器3.11.16、依赖、全部命令/env/stdout/stderr/JUnit、文件展开/nodeids/receipt 均保存，固定SHA开始/结束clean，observer无错误。
 wrapper只在已完成subprocess返回前复制输出/JUnit，不改变原参数/结果/代码；CLI模式运行原 merge_gate.py __main__ 和 argv。
 
-以原 design-v1 的 graph 做独立 forward∩reverse 全成员及声明全位置/名字集合对账：底座297/工作台87、9组件、种子27/闭包42；
+以原 design-v1 的 graph 对每个未分配模块作独立 forward∩reverse，全部9个SCC完整成员与声明全位置/名字集合对账：底座297/工作台87、9组件、种子27/闭包42；
 三组语句3+9+6（name sites4+11+6）逐项一致。本任务产品包不变，所以两版快照和结构差异实际为零；工具不把这些数字锁成断言。
 主报告源 SHA 仍为 T，最终docs候选只由字节等价证明相关源码不变，不谎称已用新input SHA再生成或做发布四线。
 
-无实际测试失败或修订后复跑；预期负例的内部失败/skip不计外层失败。归档 helper 曾误解析故意损坏的负例JSON，原错和原字节保留，
-改为不解析损坏输入后重做同一份证据索引，没有改实现/测试、重跑pytest或重生成主报告。61件私有fixture JSON原件及两个关键Git bundle保留。
+初版与资源补修版各两轮要求范围均首次通过，共4轮外层测试。补修后按新固定源重验，没有失败后复跑或覆盖旧结果；预期负例内部失败/skip不计外层失败。归档 helper 曾误解析故意损坏的负例JSON，原错和原字节保留，
+改为不解析损坏输入后重做同一份证据索引，没有改实现/测试、重跑pytest或重生成主报告。初版61件和最终版62件私有fixture JSON原件及四个关键Git bundle保留；初版两bundle实际bare恢复，最终两bundle verify通过。
 未跑四线、Ray、业务/付费模型、浏览器/服务、真实OOM/CPU/90s硬杀压力、完整Forge快照、Fable终审或发布；原始A1/设计失败历史不覆盖。
 
 身份、保留、风险与恢复
+
+最终资源自查发现无效超长SHA会原样进入错误回执，可能超64KiB，现只留64字符前缀和原长度；路径先验4096字节，gate在子进程前拒绝过长参数。
+新增4项反例的真实CLI失败输出仅806/669/670字节、stderr零。初版73bb194/文档437401f及所有成功回执保留；当前代码/报告输入以691dcd4为准。
 
 所有1,445件产品包/36,545,366字节及真实磁盘路径与122edf4相同；包Git子树 d71f29fce5d314aa2ec0afb1a9f41daf4ccdff48 不变。
 原平台身份的1,125件.py/10,854,934字节不变，原算法复算 bedffb7dc807fc7a1127f588fa6a7d71b082f145a18596bf054d35c198c24b10。
