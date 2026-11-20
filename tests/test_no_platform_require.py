@@ -49,10 +49,10 @@ def test_runtime_supplemental_platform_provenance_keeps_business_checks(tmp_path
     provenance=task_module._runtime_context_provenance(project,sources,None)
     assert set(provenance)=={str(platform)}
     assert task_module.supplemental_context(sources,_original_provenance=provenance)==sorted(sources,key=lambda v:v['canonical_path'])
-    with pytest.raises(ForgeError,match='context changed'):
+    with pytest.raises(project_module.ForgeError,match='context changed'):
         task_module.supplemental_context(sources)
     business.write_text('changed business')
-    with pytest.raises(ForgeError,match='context changed'):
+    with pytest.raises(project_module.ForgeError,match='context changed'):
         task_module.supplemental_context(sources,_original_provenance=provenance)
 
 
@@ -69,9 +69,9 @@ def test_runtime_workspace_projection_requires_authenticated_business_bytes(tmp_
     project=SimpleNamespace(root=root);state={'managed':{}}
     assert task_module._runtime_workspace(project,state)==original
     (root/'workspace.json').write_text(json.dumps(dict(platform={'digest':'new'},locations={'data':'other'})))
-    with pytest.raises(ForgeError,match='business declaration changed'):
+    with pytest.raises(project_module.ForgeError,match='business declaration changed'):
         task_module._runtime_workspace(project,state)
     (root/'workspace.json').write_text(raw)
     original['after_sha256']='0'*64
-    with pytest.raises(ForgeError,match='business declaration changed'):
+    with pytest.raises(project_module.ForgeError,match='business declaration changed'):
         task_module._runtime_workspace(project,state)
