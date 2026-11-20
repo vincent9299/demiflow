@@ -167,15 +167,14 @@ def test_publication_obeys_encoded_byte_window_before_next_read(tmp_path, monkey
 def test_each_logical_edge_advances_checkpoint_trigger_without_depth_multiplication():
     from test_runtime_v3_checkpoint_progress import execution
     driver = execution({}, threshold=64)
-    driver._deliveries = {f'{edge}-{i}': (None, None) for edge in ('source-map', 'map-sink') for i in range(34)}
-    driver._delivery_edges = {delivery: delivery.rsplit('-', 1)[0] for delivery in driver._deliveries}
-    for delivery in tuple(driver._deliveries):
-        driver._ack(delivery)
-    assert driver._checkpoint_deliveries == 68
+    from test_runtime_v3_checkpoint_progress import acknowledge_rows
+    for edge in ('source-map', 'map-sink'):
+        acknowledge_rows(driver, edge, 34)
+    assert driver._exchange.snapshot_acks()[0] == 68
     assert driver._checkpoint_progress() == 34
     driver.pump(deadline_ms=1)
     assert not driver._checkpoint_requested
-    driver._edge_ack_frontiers['map-sink'] = 64
+    acknowledge_rows(driver, 'map-sink', 30)
     driver.pump(deadline_ms=1)
     assert driver._checkpoint_requested
 
@@ -269,12 +268,12 @@ def test_receipt_releases_only_the_sealed_progress_frontier():
     from test_runtime_v3_checkpoint_progress import execution
     driver = execution({('source', 'p0'): 6, ('map', 'p0'): 6}, source_rows=0)
     driver._publication_frontiers = (4, {'map': 4}, 4, {'edge': 4})
-    driver._checkpoint_deliveries = 6
-    driver._edge_ack_frontiers = {'edge': 6}
+    from test_runtime_v3_checkpoint_progress import acknowledge_rows
+    acknowledge_rows(driver, 'edge', 6)
     driver._cut = NS(cut_id='original-cut', final=False)
     driver._contributions = {'worker': object()}
     driver._phase_index, driver._phases = 0, [('phase',)]
     driver._finish_publication(NS(commit_id='original-ack'))
     assert driver._last_checkpoint_rows == 4 and driver._last_checkpoint_outputs == {'map': 4}
-    assert driver._checkpoint_deliveries == 2 and driver._checkpoint_progress() == 2
+    assert driver._exchange.snapshot_acks()[0] == 2 and driver._checkpoint_progress() == 2
     assert driver._last_edge_acks == {'edge': 4}

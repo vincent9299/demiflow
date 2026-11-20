@@ -9,7 +9,7 @@ from demiflow.execution.run_context import RunContext
 
 def collect_before_commit(dataset, directory, monkeypatch):
     """Run actual workers, observe their actual rows, interrupt before native commit."""
-    from demiflow.execution.dataflow import _OutputSubscription
+    from demiflow.execution.dataflow_terminals import TerminalSubscription
     from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
     from demiflow.execution.contracts.dataflow import thaw_record_value
 
@@ -20,7 +20,7 @@ def collect_before_commit(dataset, directory, monkeypatch):
     # ResultHandle uses read_admitted so its simultaneous output/workspace
     # admission is preserved. Observe the actual read path; patching only the
     # compatibility read() entry misses every row in the bounded collector.
-    read = _OutputSubscription.read_admitted
+    read = TerminalSubscription.read_admitted
 
     def observed(subscription, **kwargs):
         records = read(subscription, **kwargs)
@@ -36,7 +36,7 @@ def collect_before_commit(dataset, directory, monkeypatch):
         with RunContext.start(directory) as run, data.local_execution():
             reference = run.ref
             with monkeypatch.context() as fault:
-                fault.setattr(_OutputSubscription, 'read_admitted', observed)
+                fault.setattr(TerminalSubscription, 'read_admitted', observed)
                 fault.setattr(DataflowCheckpointCoordinator, 'commit', interrupted)
                 dataset.take_all()
     assert rows, 'the real worker must have produced a row before the injected interruption'

@@ -1371,3 +1371,27 @@ def test_d017(env):
 from demiflow.resources.contracts import ResourceProfile
 
 from demiflow.execution.contracts.dataflow_codec import compute_participant_id
+
+
+def test_only_owner_can_replace_or_abort_parked_cut(env):
+    physical = make_physical(ACTION, make_graph(), env.store, with_sources=True)
+    coordinator = ckpt.DataflowCheckpointCoordinator(env.action, physical, store=env.store)
+    try:
+        coordinator.observe_input_satisfied([split.split_id for split in physical.splits])
+        assert coordinator.inputs_complete() and not coordinator.sources_exhausted()
+        assert coordinator.satisfied_splits() == tuple(sorted(split.split_id for split in physical.splits))
+        cut = coordinator.begin(final=False, residency={'deliveries': {}})
+        same_fields = replace(cut)
+        assert same_fields == cut and same_fields is not cut
+        coordinator.abort_pending(same_fields, reason='stale owner')
+        _code_error(lambda: coordinator.update_residency(same_fields, {}), 'FENCED')
+        snapshot = {'deliveries': {'record': {'consumed': True}}}
+        coordinator.update_residency(cut, snapshot)
+        snapshot['deliveries'].clear()
+        assert coordinator._pending[cut.cut_id].residency['deliveries'] == {'record': {'consumed': True}}
+        coordinator.abort_pending(cut, reason='cancel')
+        coordinator.abort_pending(cut, reason='already cancelled')
+        _code_error(lambda: coordinator.update_residency(cut, {}), 'FENCED')
+        _code_error(lambda: coordinator.abort(cut.cut_id, reason='not pending'), 'INVALID_CONTRACT')
+    finally:
+        coordinator.close()

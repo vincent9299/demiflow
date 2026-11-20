@@ -5,10 +5,20 @@ import time
 import pytest
 
 from demiflow import data
+from demiflow.execution.exchange.deliveries import DeliveryExchange
 from demiflow.execution.dataflow import DataflowExecution
 from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
 from demiflow.execution.kernels import state_codec
 from demiflow.execution.run_context import RunContext
+
+
+def acknowledge_rows(driver, edge, count):
+    spec = NS(edge_id=edge, producer_partitions=('p',), consumer_partitions=('c',), mode='memory')
+    receiver = NS(send_business=lambda command: None)
+    for index in range(count):
+        payload = dict(delivery_id=str(index), edge_id=edge, producer_partition='p', target_partition='c')
+        driver._exchange.route(payload, spec, None, {'c': receiver}, parking=False, bounds=driver._bounds)
+        driver._exchange.acknowledge(str(index), receiver)
 
 
 def execution(metrics, *, previous=None, source_rows=0, threshold=10):
@@ -20,9 +30,7 @@ def execution(metrics, *, previous=None, source_rows=0, threshold=10):
     driver._checkpoint_source_rows_only = False
     driver._last_checkpoint_rows = source_rows
     driver._last_checkpoint_outputs = dict(previous or {})
-    driver._checkpoint_deliveries = 0
-    driver._delivery_edges = {}
-    driver._edge_ack_frontiers = {}
+    driver._exchange = DeliveryExchange()
     driver._last_edge_acks = {}
     driver._publication_future = driver._publication_thread = None
     driver._publication_resumed = driver._publication_stopping = False
@@ -66,7 +74,7 @@ def test_graph_source_cut_policy_does_not_count_broadcast_copies(trigger):
                         **{('router', f'p{i}'): 12 for i in range(6)},
                         ('terminal', 'p0'): 72}, threshold=60)
     driver._checkpoint_source_rows_only = True
-    driver._edge_ack_frontiers = {'broadcast': 72}
+    acknowledge_rows(driver, 'broadcast', 72)
     driver.pump(deadline_ms=1)
     assert driver._checkpoint_progress() == 12
     assert not driver._checkpoint_requested and driver.sent == []
@@ -121,11 +129,9 @@ def test_original_source_ack_and_timer_triggers_remain(trigger):
         driver._node_metrics.update({('source', 'p0'): {'rows_output': 4},
                                      ('source', 'p1'): {'rows_output': 6}})
     elif trigger == 'delivery_acks':
-        driver._deliveries = {str(i): (None, ()) for i in range(10)}
-        driver._delivery_edges = {str(i): 'logical-edge' for i in range(10)}
-        for delivery in tuple(driver._deliveries):
-            driver._ack(delivery)
-        assert driver._checkpoint_deliveries == 10 and not driver._deliveries
+        acknowledge_rows(driver, 'logical-edge', 10)
+        assert driver._exchange.snapshot_acks() == (10, {'logical-edge': 10})
+        assert driver._exchange.can_cut()
     else:
         driver._checkpoint_at -= 61
     driver.pump(deadline_ms=1)
@@ -135,7 +141,7 @@ def test_original_source_ack_and_timer_triggers_remain(trigger):
 def test_only_successful_commit_ack_advances_all_frontiers():
     driver = execution({('source', 'p0'): 8, ('join', 'p0'): 9},
                        previous={'join': 2}, source_rows=3)
-    driver._checkpoint_deliveries = 4
+    acknowledge_rows(driver, 'edge', 4)
     driver._cut = NS(cut_id='cut', participants=('participant',), final=False)
     driver._contributions = {'participant': object()}
     driver._acquisition = None
@@ -152,7 +158,7 @@ def test_only_successful_commit_ack_advances_all_frontiers():
     with pytest.raises(RuntimeError, match='no commit ACK'):
         driver._poll_publication()
     assert (driver._last_checkpoint_rows, driver._last_checkpoint_outputs) == (3, {'join': 2})
-    assert driver._checkpoint_deliveries == 4 and driver._checkpoint_at == old_time
+    assert driver._exchange.snapshot_acks()[0] == 4 and driver._checkpoint_at == old_time
     assert driver.sent == []
     image = NS(commit_id='acked-commit')
     driver._checkpoint.commit = lambda *args, **kwargs: image
@@ -160,7 +166,7 @@ def test_only_successful_commit_ack_advances_all_frontiers():
     driver._publication_thread.join(2)
     driver._poll_publication()
     assert (driver._last_checkpoint_rows, driver._last_checkpoint_outputs) == (8, {'join': 9})
-    assert driver._checkpoint_deliveries == 0 and driver._checkpoint_progress() == 0
+    assert driver._exchange.snapshot_acks()[0] == 0 and driver._checkpoint_progress() == 0
     assert driver.sent == [{'kind': 'receipt', 'cut_id': 'cut', 'commit_id': 'acked-commit'},
                            {'kind': 'resume', 'publishing': False, 'observation_rows': 0,
                             'source_credit': {'rows': 0, 'bytes': 0}}]
@@ -180,8 +186,8 @@ def test_finite_join_after_source_eoi_naturally_checkpoints_and_resumes(tmp_path
         delta = max((rows - driver._last_checkpoint_outputs.get(occ, 0)
                      for occ, rows in outputs.items()), default=0)
         if sources == driver._last_checkpoint_rows and delta >= driver._policy.checkpoint_rows:
-            observed.append({'outputs': delta, 'acks': driver._checkpoint_deliveries,
-                             'source_eoi': driver._checkpoint._sources_exhausted()})
+            observed.append({'outputs': delta, 'acks': driver._exchange.snapshot_acks()[0],
+                             'source_eoi': driver._checkpoint.sources_exhausted()})
         return original_request(driver)
 
     def committed(coordinator, *args, **kwargs):
