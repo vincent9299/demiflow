@@ -10,6 +10,7 @@ import pyarrow as pa
 import pytest
 
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.analysis import web_sources
 from demiflow.workbench.analysis.arrow_bridge import decoded_batches
 from demiflow.workbench.analysis.materialize import input_chunks
@@ -19,7 +20,7 @@ from test_forge_workspace import demo,isolated
 
 
 def source(root):
-    description=ws.describe_table(root,"candidates")
+    description=project_ops.describe_table(root,"candidates")
     locator=dict(kind="workspace_table",alias="candidates",binding=description["binding"]["digest"],columns=["case_id","question"])
     return locator,web_sources.resolve(root,locator)["source"]
 
@@ -35,7 +36,7 @@ def test_real_fixed_projected_export_roundtrip_retains_content_and_null_types(is
     decoded=pa.Table.from_batches(decoded_batches(input_chunks(output,config)))
     assert decoded.num_rows==snapshot["rows"]==result["rows"]
     assert decoded.schema.names==["case_id","question"]
-    original=ws.sample_table(isolated,"candidates",columns=locator["columns"],expected_binding=locator["binding"],limit=100)
+    original=project_ops.sample_table(isolated,"candidates",columns=locator["columns"],expected_binding=locator["binding"],limit=100)
     assert decoded.to_pylist()==[{key:row[key] for key in locator["columns"]} for row in original["rows"]]
     assert result["source_snapshot"]==snapshot["digest"] and output.stat().st_size==result["encoded_bytes"]
 

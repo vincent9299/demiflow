@@ -25,6 +25,7 @@ from urllib.parse import parse_qs
 from urllib.parse import urlsplit
 
 from demiflow.workbench.projects import workspace as api
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.projects import registry as console
 from demiflow.workbench.runs import operations as run_operations
 from demiflow.workbench.runs.authority import for_http as run_authority
@@ -750,7 +751,7 @@ class Handler(BaseHTTPRequestHandler):
                     from demiflow.workbench.runs.requests import read
                     value=read(root,query['request_id'])
                 elif url.path == '/api/project-status':
-                    value = api.project_check_status(root)
+                    value = project_ops.project_check_status(root)
                 elif url.path in {'/api/project-operators', '/api/operator-definition', '/api/operator-history'}:
                     from demiflow.workbench.projects import definitions
                     value = (definitions.catalog(root) if url.path == '/api/project-operators' else
@@ -768,10 +769,10 @@ class Handler(BaseHTTPRequestHandler):
                 elif url.path == '/api/project-document':
                     value = api.project_document(root, query['path'], expected=query['expected'])
                 elif url.path == '/api/project-table':
-                    value = api.project_table(root, query['id'], expected=query['expected'],
+                    value = project_ops.project_table(root, query['id'], expected=query['expected'],
                                               version=int(query['version']) if 'version' in query else None)
                 elif url.path == '/api/project-sample':
-                    value = api.project_sample(root, query['id'], expected=query['expected'],
+                    value = project_ops.project_sample(root, query['id'], expected=query['expected'],
                         version=int(query['version']), binding=query['binding'], columns=query.get('columns'),
                         offset=int(query.get('offset', 0)), limit=int(query.get('limit', 20)),
                         row_id=int(query['row_id']) if 'row_id' in query else None)
@@ -798,23 +799,23 @@ class Handler(BaseHTTPRequestHandler):
                 elif url.path == "/api/source":
                     value = api.source_text(root, query["path"], expected_sha256=query.get("expected_sha256"))
                 elif url.path == "/api/table":
-                    value = api.describe_table(root, query["alias"], expected_binding=query.get("expected_binding"),
+                    value = project_ops.describe_table(root, query["alias"], expected_binding=query.get("expected_binding"),
                                                version=int(query["version"]) if "version" in query else None,
                                                version_binding=query.get("version_binding"))
                 elif url.path == "/api/table-versions":
-                    value = api.table_versions(root, query["alias"], expected_binding=query.get("expected_binding"),
+                    value = project_ops.table_versions(root, query["alias"], expected_binding=query.get("expected_binding"),
                                                version=int(query["version"]) if "version" in query else None)
                 elif url.path=="/api/table-profile":
-                    value=api.profile_table(root,query["alias"],expected_binding=query["expected_binding"],columns=query["columns"],
+                    value=project_ops.profile_table(root,query["alias"],expected_binding=query["expected_binding"],columns=query["columns"],
                                             version=int(query["version"]) if "version" in query else None,
                                             version_binding=query.get("version_binding"))
                 elif url.path=="/api/project-table-profile":
-                    value=api.project_profile(root,query["id"],expected=query["expected"],version=int(query["version"]),binding=query["binding"],columns=query["columns"])
+                    value=project_ops.project_profile(root,query["id"],expected=query["expected"],version=int(query["version"]),binding=query["binding"],columns=query["columns"])
                 elif url.path == "/api/report":
-                    value = api.report_status(root, query["digest"])
+                    value = project_ops.report_status(root, query["digest"])
                 elif url.path == "/api/sample":
                     match = query["match"] if "match" in query else None
-                    value = api.sample_table(
+                    value = project_ops.sample_table(
                         root,
                         query["alias"],
                         columns=(
@@ -829,7 +830,7 @@ class Handler(BaseHTTPRequestHandler):
                         version_binding=query.get("version_binding"),
                     )
                 elif url.path in {"/api/media", '/api/table-evidence'}:
-                    value = (api.table_media if url.path == '/api/media' else api.table_evidence)(
+                    value = (project_ops.table_media if url.path == '/api/media' else project_ops.table_evidence)(
                         root,
                         alias=query["alias"],
                         row_id=int(query["row_id"]),
@@ -976,21 +977,21 @@ class Handler(BaseHTTPRequestHandler):
                     from demiflow.workbench.runs.requests import reconcile
                     value=reconcile(root,request['request_id'])
                 elif name == 'inspect':
-                    value = api.inspect_flow(root, **request)
+                    value = project_ops.inspect_flow(root, **request)
                 elif name == 'plan-preview':
                     from demiflow.workbench.graph.preview import preview
                     value = self.server.plan_snapshots.put(root, preview(root, **request))
                 elif name == 'project-check':
-                    value = api.check_project(root)
+                    value = project_ops.check_project(root)
                 elif name == 'audit-check':
-                    value = api.audit_check(root, kind=request['kind'], expected_policy=request['expected_policy'],
+                    value = project_ops.audit_check(root, kind=request['kind'], expected_policy=request['expected_policy'],
                                             report_digest=request.get('digest'))
                 else:
                     from demiflow.workbench.runs import manager as runs
                     if name == 'run-reconcile':
                         value = runs.reconcile(root, **request)
                     else:
-                        value = runs.attach_result(root, **request)
+                        value = project_ops.attach_result(root, **request)
             self._send(value)
         except Exception as exc:
             self._failure(exc)

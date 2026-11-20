@@ -37,21 +37,11 @@ MODERN_FORMATS = {FORMAT_V2, FORMAT_V3}
 README_BYTES = 1024**2
 
 
-
-
 def project_name(value):
     if (type(value) is not str or not value.strip() or value != value.strip()
             or len(value.encode('utf-8')) > 256 or any(ord(c) < 32 for c in value)):
         raise ForgeError('Project name requires 1..256 UTF-8 bytes without control characters', code='invalid_request')
     return value
-
-
-
-
-
-
-
-
 
 
 def init_workspace(root, *, name="workspace", modules=("demiflow.data",), existing=False, extras=()):
@@ -167,7 +157,6 @@ def load_workspace(root):
     return root, value, snapshot
 
 
-
 def _audit_workspace(root, expected):
     root, value, _ = load_workspace(root)
     if value['format'] != FORMAT_V3:
@@ -193,23 +182,6 @@ def enable_audit(root, *, expected):
         raise ForgeError('Audit requires an explicitly registered modern workspace')
     value['format'] = FORMAT_V3
     value.setdefault('audit', dict(reports=[], change_scope=None))
-    return _publish_audit_policy(root, value, expected)
-
-
-def bind_audit_report(root, digest, *, expected):
-    root, value = _audit_workspace(root, expected)
-    result = report_status(root, digest)
-    report = result['report']
-    binding = report['binding']
-    entry, params = binding['entry'], binding['parameter_path']
-    if result['status'] != 'checked' or not params or params not in value['entries'].get(entry, []):
-        raise ForgeError('Only a current checked registered entry/parameter report can be tracked')
-    pins = []
-    for old in value['audit']['reports']:
-        original = load_report(root, old)['binding']
-        if (original['entry'], original['parameter_path']) != (entry, params):
-            pins.append(old)
-    value['audit']['reports'] = pins + [digest]
     return _publish_audit_policy(root, value, expected)
 
 
@@ -300,19 +272,6 @@ def _store_scope(root, value, baseline, writes, expected):
         value['audit']['change_scope'] = dict(baseline=baseline['digest'], writes=allowed)
         write_control(root / 'workspace.json', value, expected=expected)
     return dict(status='updated', workspace_digest=content_digest(value), audit=value['audit'])
-
-
-def begin_change_scope(root, *, writes, expected, watch_roots=None, limits=None):
-    from demiflow.workbench.worker import operation
-    root, value = _audit_workspace(root, expected)
-    if value['audit']['change_scope'] is not None:
-        raise ForgeError('A change scope is already active', code='conflict')
-    names = author_roots(root, value) if watch_roots is None else watch_roots
-    if not names:
-        names = sorted({item['path'].split('/')[0] for item in writes if item['path'] != 'workspace.json'})
-    baseline = operation('audit_capture', root, watch_roots=names,
-                         expected=expected, limits=limits)
-    return _store_scope(root, value, baseline, writes, expected)
 
 
 def import_change_scope(root, baseline_path, *, writes, expected):
@@ -481,13 +440,13 @@ def audit_status(root):
                 watcher=dict(status='observed' if live else 'unavailable', heartbeat=heartbeat))
 
 
-def _audit_check(root, *, kind, report_digest=None, expected_policy):
+def _audit_check(root, *, table_resolver, kind, report_digest=None, expected_policy):
     root, value = _audit_workspace(root, expected_policy)
     if kind == 'scope' and report_digest is None:
         result = _check_change_scope(root)
         result.pop('scope', None)
     elif kind == 'report' and report_digest in value['audit']['reports']:
-        checked = _report_status(root, report_digest)
+        checked = _report_status(root, report_digest, table_resolver=table_resolver)
         result = dict(status=checked['status'] if checked['verification']['complete'] else 'unverifiable',
                       complete=checked['verification']['complete'], changes=checked['changes'][:256],
                       entry=checked['report']['binding']['entry'],
@@ -498,28 +457,6 @@ def _audit_check(root, *, kind, report_digest=None, expected_policy):
     if content_digest(read_control(root / 'workspace.json')) != expected_policy:
         raise ForgeError('Audit policy changed during verification', code='conflict')
     return result
-
-
-def audit_check(root, *, kind, report_digest=None, expected_policy, full_interval=300):
-    """Verify one object, then publish only a bounded derived observation."""
-    from demiflow.workbench.worker import operation
-    import time
-    root, value = _audit_workspace(root, expected_policy)
-    if (type(kind) is not str or kind not in {'scope', 'report'} or (kind == 'scope' and report_digest is not None)
-            or (kind == 'report' and report_digest not in value['audit']['reports'])
-            or type(full_interval) is not int or not 1 <= full_interval <= 3600):
-        raise ForgeError('Invalid audit target or interval', code='invalid_request')
-    with audit_lease(root, 'check'):
-        try:
-            result = operation('audit_check', root, kind=kind, report_digest=report_digest, expected_policy=expected_policy)
-        except ForgeError as exc:
-            result = dict(status='unverifiable', complete=False, error=dict(code=exc.code, message=str(exc)[:2048]))
-        stamp = time.time()
-        identity = 'scope' if kind == 'scope' else report_digest
-        observation = dict(kind=kind, identity=identity, result=result, verified_at=stamp,
-                           due_at=stamp + full_interval, pending=False)
-        _audit_publish(root, expected_policy, lambda cache: cache['observations'].__setitem__(identity, observation))
-    return observation
 
 
 def _audit_hint(root, *, expected_policy):
@@ -544,33 +481,6 @@ def _audit_hint(root, *, expected_policy):
     if content_digest(read_control(root / 'workspace.json')) != expected_policy:
         raise ForgeError('Audit policy changed during observation', code='conflict')
     return content_digest(dict(sources=source, controls=stamps, policy=expected_policy))
-
-
-def audit_observe(root, *, expected_policy, session, previous_hint=None):
-    """A cheap trigger cannot advance any completed-content timestamp."""
-    from demiflow.workbench.worker import operation
-    import time
-    root, _ = _audit_workspace(root, expected_policy)
-    if type(session) is not str or re.fullmatch('[0-9a-f]{32}', session) is None:
-        raise ForgeError('Invalid watcher session', code='invalid_request')
-    with audit_lease(root, 'check'):
-        try:
-            hint = operation('audit_hint', root, expected_policy=expected_policy)
-        except ForgeError:
-            def invalidate(cache):
-                for row in cache['observations'].values():
-                    row['pending'] = True
-            _audit_publish(root, expected_policy, invalidate)
-            raise
-        changed = hint != previous_hint
-        def update(cache):
-            cache['lightweight_observed_at'] = time.time()
-            cache['watcher'] = dict(session=session, heartbeat=time.time())
-            if changed:
-                for row in cache['observations'].values():
-                    row['pending'] = True
-        _audit_publish(root, expected_policy, update)
-    return dict(hint=hint, changed=changed)
 
 
 def set_budgets(root, limits, *, expected):
@@ -760,12 +670,6 @@ def table_files(root):
 def table_binding(root, value, alias):
     from demiflow.lance.refs import DatasetRef
 
-    if isinstance(alias, str) and alias.startswith("run:"):
-        from demiflow.workbench.runs.manager import result_table
-        parts = alias.split(":")
-        if len(parts) not in (3, 4) or len(parts) == 4 and not re.fullmatch(r"(?:[1-9]|[12][0-9]|3[0-2])", parts[3]):
-            raise ForgeError("Invalid run output reference")
-        return result_table(root, parts[1], parts[2], attempt=int(parts[3]) if len(parts) == 4 else None)
     identifier(alias)
     control = read_control(root / "tables" / f"{alias}.json", 16384)
     modern = control.get('format') == 'demiflow_forge_table_v2'
@@ -801,51 +705,11 @@ def preview_binding(root, control, uri):
     return {**value, "alias": control["alias"], "digest": content_digest(value)}
 
 
-def describe_table(root, alias, *, expected_binding=None, version=None, version_binding=None):
-    from demiflow.workbench.worker import operation
-
-    arguments = dict(alias=alias, expected_binding=expected_binding)
-    if version is not None or version_binding is not None:
-        arguments.update(version=version, version_binding=version_binding)
-    return operation("table", root, **arguments)
-
-
-def table_versions(root, alias, *, expected_binding=None, version=None):
-    from demiflow.workbench.worker import operation
-
-    return operation("table_versions", root, alias=alias, expected_binding=expected_binding, version=version)
-
-
-def attach_table(
-    root,
-    alias,
-    *,
-    relative_uri,
-    version,
-    location_id="local",
-    dataset_id=None,
-    schema_name=None,
-    schema_version=None,
-    expected=None,
-    expected_ref=None,
-):
-    from demiflow.workbench.worker import operation
+def _attach_table_control(root, alias, *, relative_uri, location_id, dataset_id,
+                          schema_name, schema_version, expected, expected_ref,
+                          description, existing):
+    """Validate actual metadata against a fixed reference and publish the control."""
     from demiflow.lance.refs import DatasetRef
-
-    root, value, _ = load_workspace(root)
-    identifier(alias)
-    if location_id not in value["locations"]:
-        raise ForgeError("Unknown location")
-    base = location_root(root, value["locations"][location_id])
-    uri = relative_path(base, relative_uri)
-    description = operation("describe", uri, version=version)
-    existing = operation(
-        "catalog",
-        base,
-        relative_uri=relative_uri,
-        version=description["version"],
-        dataset_id=dataset_id,
-    )
     if existing:
         ref = DatasetRef.from_dict(existing)
         if ref.store_id != location_id:
@@ -904,23 +768,18 @@ def detach_table(root, alias, *, expected):
     return {"status": "detached", "alias": alias, "data_deleted": False}
 
 
-def set_table_view(root, alias, *, display, provenance, expected):
-    """CAS edit of presentation only; never writes the table or invents a run."""
-    from demiflow.workbench.catalog import validate
-    from demiflow.workbench.catalog import validate_fields
-    from demiflow.workbench.worker import operation
-    root, value, _ = load_workspace(root)
-    identifier(alias)
-    control, ref, uri = table_binding(root, value, alias)
+def _set_table_view_control(root, alias, *, value, control, display, provenance, expected, fields):
+    """Validate presentation facts and atomically replace only its control."""
+    from demiflow.workbench.catalog import validate, validate_fields
     validate(display, provenance, value['locations'])
-    validate_fields(display, operation('describe', uri, version=ref.lance_version)['fields'])
+    validate_fields(display, fields)
     updated = {**control, 'format': 'demiflow_forge_table_v2', 'display': display, 'provenance': provenance}
     with control_lock(root):
         write_control(root / 'tables' / (alias + '.json'), updated, expected=expected)
     return {'status': 'updated', 'table': updated, 'digest': content_digest(updated)}
 
 
-def resolve_arguments(root, value, parameters):
+def resolve_arguments(root, value, parameters, *, table_resolver):
     from demiflow.lance.preview import describe_table
 
     if (
@@ -949,7 +808,7 @@ def resolve_arguments(root, value, parameters):
                 if set(item) != {"kind", "alias"}:
                     raise ForgeError("Invalid table argument")
                 alias = item["alias"]
-                control, ref, uri = table_binding(root, value, alias)
+                control, ref, uri = table_resolver(root, value, alias)
                 description = describe_table(uri, ref.lance_version)
                 if (
                     description["schema_hash"] != ref.schema_hash
@@ -995,80 +854,7 @@ def resolve_arguments(root, value, parameters):
     return args, tables, targets, controls
 
 
-def inspect_flow(root, entry, *, params, save=True, limits=None):
-    from demiflow.workbench.worker import operation
-
-    return operation(
-        "inspect", root, entry=entry, params=params, save=save, limits=limits
-    )
-
-
-def check_project(root):
-    from demiflow.workbench.worker import operation
-    return operation('project_check', root)
-
-
-def project_check_status(root):
-    from demiflow.workbench.worker import operation
-    return operation('project_status', root)
-
-
-def sample_table(
-    root, alias, *, columns=None, offset=0, limit=20, row_id=None, match=None,
-    expected_binding=None, version=None, version_binding=None,
-):
-    from demiflow.workbench.worker import operation
-
-    arguments = dict(
-        alias=alias,
-        columns=columns,
-        offset=offset,
-        limit=limit,
-        row_id=row_id,
-        match=match,
-        expected_binding=expected_binding,
-    )
-    if version is not None or version_binding is not None:
-        arguments.update(version=version, version_binding=version_binding)
-    return operation("sample", root, **arguments)
-
-
-def profile_table(root,alias,*,expected_binding,columns,version=None,version_binding=None):
-    from demiflow.workbench.worker import operation
-    arguments=dict(kind='workspace_table',alias=alias,expected_binding=expected_binding,columns=columns)
-    if version is not None or version_binding is not None:
-        arguments.update(version=version,version_binding=version_binding)
-    return operation('table_profile',root,**arguments)
-
-
-def project_profile(root,identity,*,expected,version,binding,columns):
-    from demiflow.workbench.worker import operation
-    return operation('table_profile',root,kind='project_table',identity=identity,expected=expected,version=version,binding=binding,columns=columns)
-
-
-def table_media(root, alias, *, row_id, field=None, field_path=None, expected_binding=None, version=None, version_binding=None):
-    from demiflow.workbench.worker import operation
-
-    if (field is None) == (field_path is None):
-        raise ForgeError('Media requires exactly one field or field_path', code='invalid_request')
-    arguments = dict(alias=alias, row_id=row_id,
-                     **({'field': field} if field is not None else {'field_path': field_path}),
-                     expected_binding=expected_binding)
-    if version is not None or version_binding is not None:
-        arguments.update(version=version, version_binding=version_binding)
-    return operation('media', root, **arguments)
-
-
-def table_evidence(root, alias, *, row_id, field_path, expected_binding=None, version=None, version_binding=None):
-    from demiflow.workbench.worker import operation
-
-    arguments = dict(alias=alias, row_id=row_id, field_path=field_path, expected_binding=expected_binding)
-    if version is not None or version_binding is not None:
-        arguments.update(version=version, version_binding=version_binding)
-    return operation('table_evidence', root, **arguments)
-
-
-def _inspect_flow(root, entry, *, params, save=True, limits=None):
+def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None):
     from demiflow.forge.flow_check import FlowChecker
 
     root, value, snapshot = load_workspace(root)
@@ -1081,7 +867,7 @@ def _inspect_flow(root, entry, *, params, save=True, limits=None):
         }
     path = validate_parameter_path(root, params) if isinstance(params, str) else None
     parameters_value = read_control(path) if path else params
-    args, tables, targets, controls = resolve_arguments(root, value, parameters_value)
+    args, tables, targets, controls = resolve_arguments(root, value, parameters_value, table_resolver=table_resolver)
     report = FlowChecker(
         root, snapshot["catalog"], tables, targets, limits=limits,
         resource_resolver=lambda tree, references, bindings: resolve_flow_resources(root, tree, references, bindings),
@@ -1354,13 +1140,7 @@ def workspace_policy(value, binding):
             'locations': {key: value['locations'].get(key) for key in sorted(used)}}
 
 
-def report_status(root, digest, *, platform_check=True):
-    from demiflow.workbench.worker import operation
-
-    return operation("status", root, digest=digest, platform_check=platform_check)
-
-
-def _report_status(root, digest, *, platform_check=True):
+def _report_status(root, digest, *, table_resolver, platform_check=True):
     from demiflow.errors import DemiflowError
     from demiflow.lance.preview import describe_table
 
@@ -1406,7 +1186,7 @@ def _report_status(root, digest, *, platform_check=True):
         check('table_binding', path, read_binding, sha, 'table_binding_changed:' + path)
     for alias, table in binding['tables'].items():
         def read_table(a=alias):
-            _, ref, uri = table_binding(root, value, a)
+            _, ref, uri = table_resolver(root, value, a)
             metadata = describe_table(uri, ref.lance_version)
             return [str(uri), metadata['schema_hash'], metadata['version']]
         check('table', alias, read_table, [table['uri'], table['schema_hash'], table['version']],
@@ -1758,27 +1538,3 @@ def project_document(root, path, *, expected):
     from demiflow.workbench.projects.discovery import document
     root, _, _ = load_workspace(root)
     return document(root, path, expected=expected)
-
-
-def project_table(root, identity, *, expected, version=None):
-    from demiflow.workbench.worker import operation
-    return operation('project_table', root, identity=identity, expected=expected, version=version)
-
-
-def project_sample(root, identity, *, expected, version, binding, columns=None, offset=0, limit=20, row_id=None):
-    from demiflow.workbench.worker import operation
-    return operation('project_table', root, identity=identity, expected=expected, version=version, binding=binding,
-                     sample=dict(columns=columns, offset=offset, limit=limit, row_id=row_id))
-
-
-def verify_run_basis(root, manifest):
-    from demiflow.forge import audit
-    root, project, _ = load_workspace(root)
-    if manifest['format'] == 'demiflow_forge_run_manifest_v3' and project['format'] == FORMAT_V3:
-        raise ForgeError('Workspace audit contract changed; prepare a new run', code='conflict')
-    audit.require_scope(_check_change_scope(root), expected_scope=manifest.get('change_scope'))
-    report = _report_status(root, manifest['report_digest'])
-    if report['status'] != 'checked' or not report['verification']['complete']:
-        raise ForgeError('Prepared basis is stale: ' + ', '.join(report.get('changes', [])), code='conflict')
-    if manifest['parameter_path'] and read_control(relative_path(root, manifest['parameter_path'])) != manifest['original_parameters']:
-        raise ForgeError('Prepared parameters changed', code='conflict')

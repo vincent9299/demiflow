@@ -37,7 +37,7 @@ def _import_root(root, project):
     return root
 
 
-def _parameters(root, control, entry, path):
+def _parameters(root, control, entry, path, *, table_resolver):
     if path is None:
         return {}, None
     target = ws.validate_parameter_path(root, path)
@@ -48,7 +48,7 @@ def _parameters(root, control, entry, path):
         raise ForgeError('解析配置需要 JSON arguments 对象；不会执行配置中的命令。', code='invalid_request')
     if document.get('format') in {'demiflow_forge_flow_parameters_v1', 'demiflow_forge_flow_parameters_v2'}:
         # Preserve the same declared resource binding as native run preparation.
-        arguments, _, _, _ = ws.resolve_arguments(root, control, document)
+        arguments, _, _, _ = ws.resolve_arguments(root, control, document, table_resolver=table_resolver)
     elif set(document) <= {'arguments', 'run_directory'}:
         arguments = document['arguments']
     else:
@@ -114,7 +114,7 @@ class _Discard(io.TextIOBase):
         return len(value)
 
 
-def _preview(root, *, entry, params=None):
+def _preview(root, *, table_resolver, entry, params=None):
     """Called only by the fixed one-shot workspace worker, never the server."""
     from contextlib import redirect_stdout
     from demiflow.execution.host.inspection import capture_pipeline, build_logical_plan_view
@@ -134,7 +134,7 @@ def _preview(root, *, entry, params=None):
     # (including local signal sockets), which cannot happen under the guard.
     # No row scan or output creation occurs in this resolver. Project imports
     # and all pipeline construction still run under the unchanged guard.
-    arguments, params_sha = _parameters(root, control, entry, params)
+    arguments, params_sha = _parameters(root, control, entry, params, table_resolver=table_resolver)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str(source_root))
     # A registered owner may use project-local imports as well as repository

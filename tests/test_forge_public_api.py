@@ -14,6 +14,7 @@ from demiflow.cli import main
 from demiflow.execution.run_journal import RunJournal
 from demiflow.workbench.runs import manager as runs
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.api import WorkspaceServer
@@ -101,18 +102,18 @@ def test_attach_preserves_exact_result_and_rejects_catalog_identity_changes(root
         output['name'], 'reviewed', '--attempt', '1', '--expected-result', output['result_digest'], '--json'])
     assert response.exit_code == 0, response.output
     assert json.loads(response.output)['table']['ref'] == output['result']['ref']
-    assert ws.describe_table(root, 'reviewed')['reference']['ref'] == output['result']['ref']
+    assert project_ops.describe_table(root, 'reviewed')['reference']['ref'] == output['result']['ref']
     with pytest.raises(ForgeError) as caught:
-        runs.attach_result(root, result['run_id'], output['name'], 'wrong', attempt=1, expected_result='0' * 64)
+        project_ops.attach_result(root, result['run_id'], output['name'], 'wrong', attempt=1, expected_result='0' * 64)
     assert caught.value.code == 'conflict' and not (root / 'tables/wrong.json').exists()
     with pytest.raises(ForgeError) as caught:
-        runs.attach_result(root, result['run_id'], output['name'], 'reviewed', attempt=1,
+        project_ops.attach_result(root, result['run_id'], output['name'], 'reviewed', attempt=1,
                            expected_result=output['result_digest'])
     assert caught.value.code == 'conflict'
     ref = DatasetRef.from_dict(output['result']['ref'])
     altered = DatasetRef.from_dict({**ref.to_dict(), 'schema_name': 'another_schema'})
     with pytest.raises(ForgeError) as caught:
-        ws.attach_table(root, 'catalog_changed', relative_uri=ref.relative_uri, version=ref.lance_version,
+        project_ops.attach_table(root, 'catalog_changed', relative_uri=ref.relative_uri, version=ref.lance_version,
             location_id=ref.store_id, dataset_id=ref.dataset_id, schema_name=ref.schema_name,
             schema_version=ref.schema_version, expected_ref=altered)
     assert caught.value.code == 'conflict' and not (root / 'tables/catalog_changed.json').exists()

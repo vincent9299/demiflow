@@ -21,6 +21,7 @@ from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules, LIMITS
 from demiflow.objects import LocalObjectStore
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs.manager import DEFAULT_LIMITS
 from runtime_v3_recovery_scenarios import _native_calls
 from test_document_embeddings import fixture_input
@@ -190,7 +191,7 @@ def test_workbench_prepare_start_uses_registered_objects_and_sealed_native_plan(
     path, args, report, _ = _fixture(root, catalog, server['model'].base_url, modality)
     assert report['status'] == 'checked', report['diagnostics']
     (root / 'tables').mkdir()
-    ws.attach_table(root, 'inputs', relative_uri='input.lance', version=1,
+    project_ops.attach_table(root, 'inputs', relative_uri='input.lance', version=1,
         location_id='local', dataset_id='embedding-inputs', schema_name='embedding-inputs', schema_version='1')
     path.write_text(path.read_text().replace('data.read_lance(source, version=1)',
         "data.read_lance(source['uri'], version=source['version'])").replace(

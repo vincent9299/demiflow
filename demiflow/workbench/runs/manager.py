@@ -330,7 +330,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
         raise ForgeError('new_outputs must be boolean')
     original = ws.read_control(parameter_path) if parameter_path else copy.deepcopy(params)
     # Existing resolver validates the closed parameter format before modifications.
-    ws.resolve_arguments(root, workspace, original)
+    ws.resolve_arguments(root, workspace, original, table_resolver=_table_resolver())
     effective = copy.deepcopy(original)
     if inputs is not None:
         if type(inputs) is not dict or len(inputs) > 32:
@@ -340,7 +340,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
             if type(alias) is not str or type(arg) is not dict or arg.get('kind') != 'table':
                 raise ForgeError('Input override must name an existing table argument')
             effective['arguments'][name] = {'kind': 'table', 'alias': alias}
-        ws.resolve_arguments(root, workspace, effective)
+        ws.resolve_arguments(root, workspace, effective, table_resolver=_table_resolver())
     run_id = reserved_run_id or 'r' + uuid.uuid4().hex[:24]
     directory(root, run_id)
     output_specs = {}
@@ -394,7 +394,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     else:
         if not output_specs or len(output_specs) > 32 or set(metadata) - set(output_specs):
             raise ForgeError('Run requires 1..32 declared outputs with matching metadata')
-        report = ws._inspect_flow(root, entry, params=effective, save=True)
+        report = ws._inspect_flow(root, entry, params=effective, save=True, table_resolver=_table_resolver())
         if report.get('status') != 'checked':
             raise ForgeError('Flow is not checked: ' + json.dumps(report.get('diagnostics', []), ensure_ascii=False)[:4096])
         from demiflow.workbench.runs import native_resources
@@ -556,7 +556,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
             if native_flow:
                 native_submission.verify_basis(root, manifest, report)
             else:
-                ws.verify_run_basis(root, manifest)
+                verify_run_basis(root, manifest)
             durable_tree(target)
             with authority.guard(root, 'run_submit'), development_admission.guard(root, entry=entry, expected=development_acceptance):
                 run = RunJournal(target)
@@ -887,7 +887,7 @@ def _check_basis(root, target, m, *, phase='preflight'):
         from demiflow.workbench.runs.native_submission import verify_basis
         verify_basis(root, m, _report(target, m))
     else:
-        ws.verify_run_basis(root, m)
+        verify_run_basis(root, m)
 
 
 def _output_metadata(uri, version):
@@ -1147,21 +1147,7 @@ def result_table(root, run_id, name, *, attempt=None):
             'location_id': ref.store_id, 'ref': ref.to_dict()}, ref, uri
 
 
-def attach_result(root, run_id, output, alias, *, attempt, expected_result):
-    """Name one observed, verified result without replacing an existing alias."""
-    if attempt is None:
-        _attempt(show(root, run_id)['attempt'], None)
-    elif type(attempt) is not int or not 1 <= attempt <= 32:
-        raise ForgeError('Attempt must be an integer in 1..32', code='invalid_request')
-    if type(expected_result) is not str or not re.fullmatch(r'[0-9a-f]{64}', expected_result):
-        raise ForgeError('Invalid fixed result digest', code='invalid_request')
-    _, ref, _ = result_table(root, run_id, output, attempt=attempt)
-    if content_digest(ref.to_dict()) != expected_result:
-        raise ForgeError('Fixed result differs from the observed reference', code='conflict')
-    return ws.attach_table(root, alias, relative_uri=ref.relative_uri, version=ref.lance_version,
-                           location_id=ref.store_id, dataset_id=ref.dataset_id,
-                           schema_name=ref.schema_name, schema_version=ref.schema_version,
-                           expected_ref=ref)
+
 
 
 def register_results(root, run_id, *, recover=False, attempt=None, maintenance_deadline=None):
@@ -1403,3 +1389,21 @@ def logs(root, run_id, *, offset=0, limit=65536, attempt=None):
     pending,_=decoder.getstate()
     return dict(text=text,next_offset=position-len(pending),
                 truncated=offset<base or skipped>0,base_offset=base)
+
+
+def _table_resolver():
+    from demiflow.workbench.table_bindings import make_resolver
+    return make_resolver(ws.table_binding, result_table)
+
+
+def verify_run_basis(root, manifest):
+    from demiflow.forge import audit
+    root, project, _ = ws.load_workspace(root)
+    if manifest['format'] == 'demiflow_forge_run_manifest_v3' and project['format'] == ws.FORMAT_V3:
+        raise ForgeError('Workspace audit contract changed; prepare a new run', code='conflict')
+    audit.require_scope(ws._check_change_scope(root), expected_scope=manifest.get('change_scope'))
+    report = ws._report_status(root, manifest['report_digest'], table_resolver=_table_resolver())
+    if report['status'] != 'checked' or not report['verification']['complete']:
+        raise ForgeError('Prepared basis is stale: ' + ', '.join(report.get('changes', [])), code='conflict')
+    if manifest['parameter_path'] and ws.read_control(ws.relative_path(root, manifest['parameter_path'])) != manifest['original_parameters']:
+        raise ForgeError('Prepared parameters changed', code='conflict')

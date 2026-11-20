@@ -15,6 +15,7 @@ def create(root):
     import pyarrow as pa
     from demiflow.workbench.runs import manager as runs
     from demiflow.workbench.projects import workspace
+    from demiflow.workbench import project_operations as project_ops
 
     root = Path(root).absolute()
     workspace.init_workspace(root, name='native-operator-demo')
@@ -36,7 +37,7 @@ def create(root):
         {'case_id': 'c02', 'text': '示例 case 二'},
         {'case_id': 'c03', 'text': '示例 case 三'},
     ], schema=schema), str(root / 'data/cases.lance'), mode='create')
-    workspace.attach_table(root, 'cases', relative_uri='cases.lance', version=1,
+    project_ops.attach_table(root, 'cases', relative_uri='cases.lance', version=1,
                            dataset_id='cases', schema_name='case', schema_version='1')
     prepared = runs.prepare(root, 'flows/expand.py:run', params='flows/demo.json')
     run = runs.start(root, prepared['run_id'], expected=prepared['digest'])
@@ -49,7 +50,7 @@ def create(root):
         run = runs.show(root, run['run_id'])
     if run['status'] != 'succeeded':
         raise RuntimeError(run['state'])
-    rows = workspace.sample_table(root, 'run:' + run['run_id'] + ':target')['rows']
+    rows = project_ops.sample_table(root, 'run:' + run['run_id'] + ':target')['rows']
     actual = sorted((row['case_id'], row['variant']) for row in rows)
     expected = [(identity, variant) for identity in ('c01', 'c02', 'c03') for variant in ('demo-A', 'demo-B')]
     if actual != expected:

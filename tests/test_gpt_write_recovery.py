@@ -378,6 +378,7 @@ def test_workbench_producer_requires_confirmed_absence(stopped_workbench):
 def test_workbench_cancel_resume_golden(stopped_workbench):
     from demiflow.workbench.runs import manager as runs, facts
     from demiflow.workbench.projects import workspace as ws
+    from demiflow.workbench import project_operations as project_ops
     import test_upgrade_business_acceptance as acc
     f = stopped_workbench
     root, prepared, aid = f['root'], f['prepared'], f['action_id']
@@ -388,7 +389,7 @@ def test_workbench_cancel_resume_golden(stopped_workbench):
     admission = journal.source_binding(aid + '-create-target-absent')
     assert admission is not None, 'absence proof was not persisted across attempts'
     assert result['status'] == 'succeeded', result['actions']
-    rows = ws.sample_table(root, 'run:' + rid + ':target', limit=10)['rows']
+    rows = project_ops.sample_table(root, 'run:' + rid + ':target', limit=10)['rows']
     rows = [{k: v for k, v in row.items() if k != '_rowid'} for row in rows]
     acc.assert_semantics_equal(f['expected'], rows, ordering='unordered')
     commits = journal.execution_commits(aid)

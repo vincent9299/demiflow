@@ -1,6 +1,7 @@
 """Declared presentation and per-entry drafts through real workspace endpoints."""
 from test_forge_panel_browser import panel, open_panel, demo, isolated
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 
 
 def test_each_registered_entry_keeps_its_own_unsent_inputs(panel):
@@ -32,8 +33,8 @@ def test_each_registered_entry_keeps_its_own_unsent_inputs(panel):
 
 def test_declared_case_text_and_historical_origin_are_visible(panel):
     root, app, page, errors = panel
-    table = ws.describe_table(root, 'candidates')
-    ws.set_table_view(root, 'candidates', expected=table['digest'],
+    table = project_ops.describe_table(root, 'candidates')
+    project_ops.set_table_view(root, 'candidates', expected=table['digest'],
         display={'title': '固定历史题目', 'fields': [{'path': ['question'], 'label': '题目正文', 'kind': 'text'}]},
         provenance={'kind': 'historical', 'note': '原结果只读接入，尚无新执行证据'})
     open_panel(app, page, dict(v=1, workspace=str(root), kind='table', alias='candidates', binding_digest=table['binding']['digest']))

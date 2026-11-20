@@ -7,6 +7,7 @@ from playwright.sync_api import expect
 
 from demiflow.workbench.projects import registry as console
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.graph import model
 from demiflow.workbench.graph import source_view
 from test_forge_project_discovery import original, business_bytes
@@ -44,7 +45,7 @@ def test_unadmitted_import_still_has_sha_bound_syntax_calls_without_compute_admi
     assert source['path']=='dispatch.py' and 'local_clean(cfg)' in source['text']
     assert source['kind']=='callsite' and source['reason']=='source_callsite_only'
     # The current checker keeps its original strict admission result.
-    checked=ws.check_project(original)
+    checked=project_ops.check_project(original)
     assert checked['status']!='checked' and any(d.get('code')=='OP-06' for d in checked['diagnostics'])
     assert not ws.workspace_context(original)['flows'] and business_bytes(original)==before
     (original/'dispatch.py').write_text((original/'dispatch.py').read_text()+'\n# source changed\n')

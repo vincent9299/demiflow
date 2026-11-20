@@ -353,12 +353,12 @@ from pathlib import Path
 from demiflow.workbench.runs import manager as runs
 from demiflow.forge.schema import ForgeError
 root = Path(sys.argv[1])
-original = runs.ws.verify_run_basis
+original = runs.verify_run_basis
 def change_after_seal(*args, **kwargs):
     result = original(*args, **kwargs)
     (root/'orders/rules.py').write_text('def keep(row): return False\\n')
     return result
-runs.ws.verify_run_basis = change_after_seal
+runs.verify_run_basis = change_after_seal
 try:
     runs._prepare(root, 'orders/flows/questions.py:select', params='orders/flows/select_a.json')
 except ForgeError as exc:

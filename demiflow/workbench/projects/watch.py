@@ -10,6 +10,7 @@ import uuid
 
 from demiflow.workbench.projects import registry as console
 from demiflow.workbench.projects import workspace as ws
+from demiflow.workbench import project_operations as project_ops
 from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
 
@@ -27,7 +28,7 @@ def _step(root, state, *, session, interval, full_interval):
     if now >= state['next_observe']:
         state['next_observe'] = now + interval
         try:
-            observed = ws.audit_observe(root, expected_policy=policy, session=session, previous_hint=state['hint'])
+            observed = project_ops.audit_observe(root, expected_policy=policy, session=session, previous_hint=state['hint'])
             state['hint'] = observed['hint']
         except ForgeError:
             # A failed hint must not starve full verification of other targets.
@@ -40,7 +41,7 @@ def _step(root, state, *, session, interval, full_interval):
         row = candidates[index]
         if row['freshness'] in {'unknown', 'pending', 'overdue'}:
             state['cursor'] = (index + 1) % len(candidates)
-            ws.audit_check(root, kind=row['kind'], report_digest=row['identity'] if row['kind'] == 'report' else None,
+            project_ops.audit_check(root, kind=row['kind'], report_digest=row['identity'] if row['kind'] == 'report' else None,
                            expected_policy=policy, full_interval=full_interval)
             return True
     return False
