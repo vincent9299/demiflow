@@ -58,6 +58,12 @@ class StreamResources:
         return q
 
     async def prepare(self):
+        from ..collect.operators import SearchWeb
+        if any(type(actor) is SearchWeb for actor in self.actors):
+            from .dataflow_search_runtime import SearchEffects
+            from .queue_producer import QueueProducer
+            from .run_context import current_action
+            producer = next((a for a in self.actors if type(a) is QueueProducer), None)
         gates={id(gate):gate for actor in self.actors
                if (gate:=getattr(getattr(actor,'_runtime',None),'request_gate',None)) is not None}
         for gate in gates.values():
@@ -71,7 +77,11 @@ class StreamResources:
                 checked = current()
                 completed = False
                 try:
-                    await begin()
+                    if type(actor) is SearchWeb:
+                        effects = SearchEffects.for_actor(current_action(), actor, actor.node_id, producer=producer)
+                        await begin(effects=effects)
+                    else:
+                        await begin()
                     completed = True
                 finally:
                     if checked is not None:

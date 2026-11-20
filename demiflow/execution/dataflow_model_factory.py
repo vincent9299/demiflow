@@ -122,7 +122,7 @@ def native_model_declaration(operation):
         from .dataflow_search import NativeSearchCall
         from .recovery_contract import identity
         search_facts(actor)
-        if actor.io is not None or actor._session_lease is not None:
+        if actor.started:
             raise ValueError('Native search requires an unstarted actor declaration')
         return CallableSpec.create(NativeSearchCall, fn_constructor_args=(identity(actor.recovery_identity()),))
     from .queue_producer import QueueProducer, producer_facts
