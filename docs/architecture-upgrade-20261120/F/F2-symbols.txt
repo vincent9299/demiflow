@@ -1,0 +1,734 @@
+F2 逐符号职责与契约（完整消费者和原方法签名见同名 JSON）
+固定源 122edf4bd0c827338846abd0114f0b36cf8c1b6d
+
+F2-01 demiflow.execution.adaptive_requests:AdaptiveRequestGate
+分类 neutral_runtime_service
+输入/输出 policy/failures/state_path -> AIMD RequestGate；begin_action/snapshot/result/enter
+错误/预算 有界策略max_concurrency<=1024、观察窗口；state_path可能写策略状态。prompt_facts目前精确type比较，不能换成任意假对象
+状态 构造它的actor/client/session；原物理资源只一个owner
+副作用 有限并发/排空/度量/进程线程或本地资源准入；不自动创建Pipeline run
+生命周期/并发 构造不偷启动远端服务；显式start/run/close；取消先排空或杀死并回收自己资源；实例按既有event-loop/锁使用，禁止活跃实例跨loop重绑；不新建全局池
+历史/身份 资源实例非业务语义状态；恢复保留原数据/请求事实，不复制计量
+建议 retain_original_scoped_service / retain; passive gate-facts only if G needs it
+目标导入 demiflow/operator_llm/flow_contract.py:257
+目标调用/引用 demiflow/operator_llm/flow_contract.py:263 reference
+
+F2-02 demiflow.execution.artifacts:digest
+分类 neutral_runtime_service
+输入/输出 bytes或JSON value -> 原encoded(value) SHA256 hex
+错误/预算 JSON编码为indent2+末尾换行；与Forge紧凑digest不同；当前未自行限JSON大小
+状态 调用方的文件/结果位置；helper只拥有本次fd/临时文件/缓存
+副作用 按实际符号只读、原子文件写或非阻塞文件锁；不代表Pipeline成功
+生命周期/并发 关闭自身fd/锁/临时文件；调用方给有限输入与目标；不访问未授权根；沿原单写者/唯一临时文件/缓存键；并发/超限错误原样传播
+历史/身份 文件编码、定位与发布顺序保持；目录命名不是新的运行事实
+建议 retain_original_neutral_service / retain
+目标导入 demiflow/lance/run.py:12, demiflow/operator_llm/recorded_json.py:7
+目标调用/引用 demiflow/lance/run.py:29 call, demiflow/lance/run.py:36 call, demiflow/operator_llm/recorded_json.py:27 call
+
+F2-03 demiflow.execution.artifacts:immutable
+分类 neutral_runtime_service
+输入/输出 path/value -> bool（本次新建true、已有相同false）；硬链接发布不可变JSON
+错误/预算 现存不同ValueError；OSError/JSON错误传播；原调用方持锁、线程用唯一tmp；原字节绝不更新
+状态 调用方的文件/结果位置；helper只拥有本次fd/临时文件/缓存
+副作用 按实际符号只读、原子文件写或非阻塞文件锁；不代表Pipeline成功
+生命周期/并发 关闭自身fd/锁/临时文件；调用方给有限输入与目标；不访问未授权根；沿原单写者/唯一临时文件/缓存键；并发/超限错误原样传播
+历史/身份 文件编码、定位与发布顺序保持；目录命名不是新的运行事实
+建议 retain_original_neutral_service / retain
+目标导入 demiflow/lance/maintenance.py:15, demiflow/operator_llm/recorded_json.py:7
+目标调用/引用 demiflow/lance/maintenance.py:56 call, demiflow/lance/maintenance.py:67 call, demiflow/lance/maintenance.py:73 call, demiflow/lance/maintenance.py:90 call, demiflow/lance/maintenance.py:95 call, demiflow/operator_llm/recorded_json.py:37 call, demiflow/operator_llm/recorded_json.py:42 call, demiflow/operator_llm/recorded_json.py:44 call
+
+F2-04 demiflow.execution.artifacts:read
+分类 neutral_runtime_service
+输入/输出 path -> resolve_local_artifact之后的JSON值
+错误/预算 原函数read_text无独立上界，调用方必须有文件规模；不是bounded读取证明
+状态 调用方的文件/结果位置；helper只拥有本次fd/临时文件/缓存
+副作用 按实际符号只读、原子文件写或非阻塞文件锁；不代表Pipeline成功
+生命周期/并发 关闭自身fd/锁/临时文件；调用方给有限输入与目标；不访问未授权根；沿原单写者/唯一临时文件/缓存键；并发/超限错误原样传播
+历史/身份 文件编码、定位与发布顺序保持；目录命名不是新的运行事实
+建议 retain_original_neutral_service / retain; bounded caller review only on affected slice
+目标导入 demiflow/lance/maintenance.py:15, demiflow/operator_llm/recorded_json.py:7, demiflow/services/manage.py:21
+目标调用/引用 demiflow/lance/maintenance.py:52 call, demiflow/lance/maintenance.py:69 call, demiflow/lance/maintenance.py:102 call, demiflow/operator_llm/recorded_json.py:29 call, demiflow/services/manage.py:54 call, demiflow/services/manage.py:155 call, demiflow/services/manage.py:161 call, demiflow/services/manage.py:207 call
+
+F2-05 demiflow.execution.artifacts:resolve_local_artifact
+分类 neutral_runtime_service
+输入/输出 显式原文件路径 -> exact relocation后的Path
+错误/预算 只解析上层_demiflow/artifact_locations.json精确键，无前缀/链查找；ValueError/IO；LRU16、>8MiB用IndexedLocations
+状态 调用方的文件/结果位置；helper只拥有本次fd/临时文件/缓存
+副作用 按实际符号只读、原子文件写或非阻塞文件锁；不代表Pipeline成功
+生命周期/并发 关闭自身fd/锁/临时文件；调用方给有限输入与目标；不访问未授权根；沿原单写者/唯一临时文件/缓存键；并发/超限错误原样传播
+历史/身份 文件编码、定位与发布顺序保持；目录命名不是新的运行事实
+建议 retain_original_neutral_service / retain; G location contract
+目标导入 demiflow/collect/document_library.py:110, demiflow/collect/document_library.py:148, demiflow/collect/image_library.py:80, demiflow/operator_llm/call_ref.py:6, demiflow/operator_llm/sqlite_journal.py:203, demiflow/operator_llm/sqlite_journal.py:1086, demiflow/operator_llm/sqlite_offline.py:10
+目标调用/引用 demiflow/collect/document_library.py:111 call, demiflow/collect/document_library.py:137 call, demiflow/collect/document_library.py:137 call, demiflow/collect/document_library.py:149 call, demiflow/collect/image_library.py:82 call, demiflow/collect/image_library.py:82 call, demiflow/operator_llm/call_ref.py:41 call, demiflow/operator_llm/call_ref.py:100 call, demiflow/operator_llm/call_ref.py:152 call, demiflow/operator_llm/sqlite_journal.py:204 call, demiflow/operator_llm/sqlite_journal.py:1087 call, demiflow/operator_llm/sqlite_offline.py:53 call
+
+F2-06 demiflow.execution.artifacts:run_lock
+分类 neutral_runtime_service
+输入/输出 directory -> contextmanager；mkdir/.lock与LOCK_NB，退出解锁
+错误/预算 RuntimeError忙、OSError；同名run只是目录锁，不是作业账本；services.manage/searxng实际用服务目录
+状态 调用方的文件/结果位置；helper只拥有本次fd/临时文件/缓存
+副作用 按实际符号只读、原子文件写或非阻塞文件锁；不代表Pipeline成功
+生命周期/并发 关闭自身fd/锁/临时文件；调用方给有限输入与目标；不访问未授权根；沿原单写者/唯一临时文件/缓存键；并发/超限错误原样传播
+历史/身份 文件编码、定位与发布顺序保持；目录命名不是新的运行事实
+建议 retain_original_neutral_service / retain
+目标导入 demiflow/services/manage.py:21, demiflow/services/searxng.py:41
+目标调用/引用 demiflow/services/manage.py:78 call, demiflow/services/manage.py:131 call, demiflow/services/manage.py:163 call, demiflow/services/searxng.py:53 call
+
+F2-07 demiflow.execution.block_sink:storage_usage
+分类 engine_state_to_inject
+输入/输出 context -> context.journal.storage_usage()投影
+错误/预算 不是扫描目录；原Journal异常；media._store_image当前拿到store.run，不能移交raw db给库
+状态 原RunJournal/action/fence/occurrence/commit和实际执行owner唯一
+副作用 读取或写原生预算/记录/状态/对象，库不能自己解释db或创建第二账本
+生命周期/并发 引擎在原bind_execution处给精确能力；随attempt/row作用域失效；取消排空后释放；原fence/事务/顺序/expected检查在原生所有者处；不得以Python duck typing作为授权
+历史/身份 继续全树精确拒绝/原版本恢复/历史只读；不改变封存表示或允许旧pickle跨路径加载
+建议 design_narrow_injected_capability_keep_original_until_reviewed / F2-IMAGE
+目标导入 demiflow/operator_llm/media.py:361
+目标调用/引用 demiflow/operator_llm/media.py:385 call
+
+F2-08 demiflow.execution.blocking_io:BlockingIOPool
+分类 neutral_runtime_service
+输入/输出 workers/name -> run(fn,*args)、drain/aclose；原结果或原异常
+错误/预算 先Semaphore再submit，线程数限制包含started jobs；caller等待载荷另控。重复取消先排空实际blocking工作才释放slot；close wait=True
+状态 构造它的actor/client/session；原物理资源只一个owner
+副作用 有限并发/排空/度量/进程线程或本地资源准入；不自动创建Pipeline run
+生命周期/并发 构造不偷启动远端服务；显式start/run/close；取消先排空或杀死并回收自己资源；实例按既有event-loop/锁使用，禁止活跃实例跨loop重绑；不新建全局池
+历史/身份 资源实例非业务语义状态；恢复保留原数据/请求事实，不复制计量
+建议 retain_original_scoped_service / retain
+目标导入 demiflow/collect/operators.py:41, demiflow/embeddings/runtime.py:13, demiflow/operator_llm/client.py:338, demiflow/operator_llm/diffusers_transport.py:4
+目标调用/引用 demiflow/collect/operators.py:45 call, demiflow/embeddings/runtime.py:113 call, demiflow/embeddings/runtime.py:114 call, demiflow/embeddings/runtime.py:115 call, demiflow/operator_llm/client.py:339 call, demiflow/operator_llm/client.py:340 call, demiflow/operator_llm/client.py:341 call, demiflow/operator_llm/diffusers_transport.py:12 call
+
+F2-09 demiflow.execution.capabilities:require_action
+分类 contract
+输入/输出 kind/arguments -> None或原能力拒绝
+错误/预算 RecoveryContractError；纯retired-checkpoint能力判断，不新增运行或另一套checkpoint
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain
+目标导入 demiflow/lance/checkpoint.py:71
+目标调用/引用 demiflow/lance/checkpoint.py:72 call
+
+F2-10 demiflow.execution.commit:CommitCoordinator
+分类 engine_state_to_inject
+输入/输出 原RunAction -> commit/recover/inspect_completed；已确认commit事实
+错误/预算 prepare/data/checkpoint/ACK顺序归原owner；UnresolvedCommit不重发搜索/外部请求
+状态 原RunJournal/action/fence/occurrence/commit和实际执行owner唯一
+副作用 读取或写原生预算/记录/状态/对象，库不能自己解释db或创建第二账本
+生命周期/并发 引擎在原bind_execution处给精确能力；随attempt/row作用域失效；取消排空后释放；原fence/事务/顺序/expected检查在原生所有者处；不得以Python duck typing作为授权
+历史/身份 继续全树精确拒绝/原版本恢复/历史只读；不改变封存表示或允许旧pickle跨路径加载
+建议 design_narrow_injected_capability_keep_original_until_reviewed / F2-SEARCH
+目标导入 demiflow/collect/operators.py:105
+目标调用/引用 demiflow/collect/operators.py:112 call
+
+F2-11 demiflow.execution.dataflow_images:RemoteImageStore
+分类 engine_state_to_inject
+输入/输出 journal/store/options -> store_image(bytes)->原image引用reply
+错误/预算 字节<=media max_image_bytes，先store.put再原journal stage_image；worker无发布权；原DataflowError/ValueError
+状态 原RunJournal/action/fence/occurrence/commit和实际执行owner唯一
+副作用 读取或写原生预算/记录/状态/对象，库不能自己解释db或创建第二账本
+生命周期/并发 引擎在原bind_execution处给精确能力；随attempt/row作用域失效；取消排空后释放；原fence/事务/顺序/expected检查在原生所有者处；不得以Python duck typing作为授权
+历史/身份 继续全树精确拒绝/原版本恢复/历史只读；不改变封存表示或允许旧pickle跨路径加载
+建议 design_narrow_injected_capability_keep_original_until_reviewed / F2-IMAGE
+目标导入 demiflow/operator_llm/media.py:344
+目标调用/引用 demiflow/operator_llm/media.py:345 reference
+
+F2-12 demiflow.execution.dataflow_managed_http:managed_http_digest
+分类 contract
+输入/输出 已声明ManagedHTTPService -> sealed passive declaration SHA256
+错误/预算 freeze_managed_http仅允许精确字段和有限类型，document<=_MAX_BYTES；不启动owner；DataflowError/contract拒绝保持
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain; G passive managed-service facts
+目标导入 demiflow/embeddings/flow_contract.py:24
+目标调用/引用 demiflow/embeddings/flow_contract.py:25 call
+
+F2-13 demiflow.execution.dataflow_model_journal:RemotePromptJournal
+分类 engine_state_to_inject
+输入/输出 WorkerJournalPort/NativeActionView/Bounds -> lookup/reserve/response/failed/references等具名方法
+错误/预算 必须原capability-verified action/occurrence/fence；writable/finite limit、store bytes和RPC上限；close只关本视图不释放driver owner
+状态 原RunJournal/action/fence/occurrence/commit和实际执行owner唯一
+副作用 读取或写原生预算/记录/状态/对象，库不能自己解释db或创建第二账本
+生命周期/并发 引擎在原bind_execution处给精确能力；随attempt/row作用域失效；取消排空后释放；原fence/事务/顺序/expected检查在原生所有者处；不得以Python duck typing作为授权
+历史/身份 继续全树精确拒绝/原版本恢复/历史只读；不改变封存表示或允许旧pickle跨路径加载
+建议 design_narrow_injected_capability_keep_original_until_reviewed / F2-PROMPT
+目标导入 demiflow/operator_llm/client.py:296, demiflow/operator_llm/client.py:310, demiflow/operator_llm/codex_exec.py:30, demiflow/operator_llm/runtime.py:379
+目标调用/引用 demiflow/operator_llm/client.py:297 reference, demiflow/operator_llm/client.py:311 reference, demiflow/operator_llm/codex_exec.py:32 reference, demiflow/operator_llm/runtime.py:381 reference
+
+F2-14 demiflow.execution.dataflow_offline:RemoteOfflinePromptClient
+分类 engine_state_to_inject
+输入/输出 model/options/verified journal -> lookup/execute -> OperatorLLMResponse
+错误/预算 仅一个offline_store/offline_dir；pending抛PromptResponsePending，unknown DataflowError；不开paid/provider/private ledger；aclose不关run port
+状态 原RunJournal/action/fence/occurrence/commit和实际执行owner唯一
+副作用 读取或写原生预算/记录/状态/对象，库不能自己解释db或创建第二账本
+生命周期/并发 引擎在原bind_execution处给精确能力；随attempt/row作用域失效；取消排空后释放；原fence/事务/顺序/expected检查在原生所有者处；不得以Python duck typing作为授权
+历史/身份 继续全树精确拒绝/原版本恢复/历史只读；不改变封存表示或允许旧pickle跨路径加载
+建议 design_narrow_injected_capability_keep_original_until_reviewed / F2-PROMPT
+目标导入 demiflow/operator_llm/client.py:850, demiflow/operator_llm/client.py:856
+目标调用/引用 demiflow/operator_llm/client.py:851 call, demiflow/operator_llm/client.py:857 call
+
+F2-15 demiflow.execution.dataflow_prompt_journal:RemotePrivatePromptJournal
+分类 engine_state_to_inject
+输入/输出 services/action/node/declaration/route/maximum -> 原remote journal专用变体
+错误/预算 继承RemotePromptJournal；declaration精确匹配、禁止private+native双写；reserve/retry预算在driver核验
+状态 原RunJournal/action/fence/occurrence/commit和实际执行owner唯一
+副作用 读取或写原生预算/记录/状态/对象，库不能自己解释db或创建第二账本
+生命周期/并发 引擎在原bind_execution处给精确能力；随attempt/row作用域失效；取消排空后释放；原fence/事务/顺序/expected检查在原生所有者处；不得以Python duck typing作为授权
+历史/身份 继续全树精确拒绝/原版本恢复/历史只读；不改变封存表示或允许旧pickle跨路径加载
+建议 design_narrow_injected_capability_keep_original_until_reviewed / F2-PROMPT
+目标导入 demiflow/operator_llm/client.py:277, demiflow/operator_llm/codex_exec.py:31
+目标调用/引用 demiflow/operator_llm/client.py:278 reference, demiflow/operator_llm/codex_exec.py:33 reference
+
+F2-16 demiflow.execution.dataflow_prompt_service:prompt_service_declaration
+分类 contract
+输入/输出 actor -> None或原passive managed service声明
+错误/预算 检查actor._runtime._service与_sealed_service_declaration digest；DataflowError INVALID_CONTRACT，不造新owner
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain; G inspect_prompt_model passive facts
+目标导入 demiflow/operator_llm/flow_contract.py:255
+目标调用/引用 demiflow/operator_llm/flow_contract.py:256 call
+
+F2-17 demiflow.execution.datafusion:DataFusionOptions
+分类 contract
+输入/输出 dataclass配置 -> 有限Query/worker资源配置值
+错误/预算 正整数/有限期限；memory_bytes < max_rss_bytes；不可把DataFusion pool当RSS硬隔离
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain independent query contract
+目标导入 demiflow/lance/index.py:13
+目标调用/引用 demiflow/lance/index.py:42 call
+
+F2-18 demiflow.execution.datafusion:DataFusionSession
+分类 neutral_runtime_service
+输入/输出 resource_directory/options/max_concurrent等 -> context session/query/borrow_resources 与受限Lance staging
+错误/预算 独立SQL/index不建Pipeline run；P4保留域。lance.index还调用_prepare_lance_index两处，不能称已经全公共接口
+状态 构造它的actor/client/session；原物理资源只一个owner
+副作用 有限并发/排空/度量/进程线程或本地资源准入；不自动创建Pipeline run
+生命周期/并发 构造不偷启动远端服务；显式start/run/close；取消先排空或杀死并回收自己资源；实例按既有event-loop/锁使用，禁止活跃实例跨loop重绑；不新建全局池
+历史/身份 资源实例非业务语义状态；恢复保留原数据/请求事实，不复制计量
+建议 retain_original_scoped_service / F2-INDEX optional local boundary
+目标导入 demiflow/lance/index.py:13
+目标调用/引用 demiflow/lance/index.py:178 call
+
+F2-19 demiflow.execution.datafusion:_save
+分类 neutral_runtime_service
+输入/输出 Path/value -> None；固定.tmp写JSON再replace
+错误/预算 私有工具，无fsync/独立字节上限/并发锁，不能换强弱不同写入后称等价；当前lance.index真实一处
+状态 调用方的文件/结果位置；helper只拥有本次fd/临时文件/缓存
+副作用 按实际符号只读、原子文件写或非阻塞文件锁；不代表Pipeline成功
+生命周期/并发 关闭自身fd/锁/临时文件；调用方给有限输入与目标；不访问未授权根；沿原单写者/唯一临时文件/缓存键；并发/超限错误原样传播
+历史/身份 文件编码、定位与发布顺序保持；目录命名不是新的运行事实
+建议 retain_original_neutral_service / defer; actual owner index record helper if INDEX slice approved
+目标导入 demiflow/lance/index.py:13
+目标调用/引用 demiflow/lance/index.py:185 call
+
+F2-20 demiflow.execution.inference_options:CALL_OPTION_DEFAULTS
+分类 contract
+输入/输出 共享默认dict -> io/prepare/response worker和keepalive等默认值
+错误/预算 实际是可变dict；消费者只读/合并不修改；collect_journal_totals含义保留
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain
+目标导入 demiflow/embeddings/config.py:4, demiflow/operator_llm/http_options.py:6
+目标调用/引用 demiflow/embeddings/config.py:10 reference, demiflow/operator_llm/http_options.py:9 reference
+
+F2-21 demiflow.execution.inference_options:normalize_call_options
+分类 contract
+输入/输出 protocol已验allowed keys的options -> 合并默认dict
+错误/预算 正整数worker/finite非负keepalive/bool totals；ValueError；它不负责拒绝协议未知键
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain
+目标导入 demiflow/embeddings/config.py:4, demiflow/operator_llm/http_options.py:6
+目标调用/引用 demiflow/embeddings/config.py:25 call, demiflow/operator_llm/http_options.py:26 call
+
+F2-22 demiflow.execution.isolated_pool:IsolatedWorkerPool
+分类 neutral_runtime_service
+输入/输出 named pure functions/workers/message/max_tasks -> async run(name,args,timeout)结果、metrics
+错误/预算 入场后序列化，64MiB默认frames/128 tasks；消息编码可能先分配后检查，不是RSS界。取消/超时killpg+reap，无自动重试
+状态 构造它的actor/client/session；原物理资源只一个owner
+副作用 有限并发/排空/度量/进程线程或本地资源准入；不自动创建Pipeline run
+生命周期/并发 构造不偷启动远端服务；显式start/run/close；取消先排空或杀死并回收自己资源；实例按既有event-loop/锁使用，禁止活跃实例跨loop重绑；不新建全局池
+历史/身份 资源实例非业务语义状态；恢复保留原数据/请求事实，不复制计量
+建议 retain_original_scoped_service / retain
+目标导入 demiflow/collect/reading.py:270
+目标调用/引用 demiflow/collect/reading.py:271 call
+
+F2-23 demiflow.execution.isolation:run_isolated
+分类 neutral_runtime_service
+输入/输出 module-level function/args/timeout -> 子进程原结果
+错误/预算 cloudpickle请求/回复当前无独立字节界；调用者只传固定表ref与小回执；timeout stop_owned并回收；未知副作用不得自动重放
+状态 构造它的actor/client/session；原物理资源只一个owner
+副作用 有限并发/排空/度量/进程线程或本地资源准入；不自动创建Pipeline run
+生命周期/并发 构造不偷启动远端服务；显式start/run/close；取消先排空或杀死并回收自己资源；实例按既有event-loop/锁使用，禁止活跃实例跨loop重绑；不新建全局池
+历史/身份 资源实例非业务语义状态；恢复保留原数据/请求事实，不复制计量
+建议 retain_original_scoped_service / retain
+目标导入 demiflow/collect/acquisition.py:11, demiflow/collect/session.py:277
+目标调用/引用 demiflow/collect/acquisition.py:74 reference, demiflow/collect/session.py:278 reference
+
+F2-24 demiflow.execution.lance_action:bind_lance_action
+分类 existing_native_adapter
+输入/输出 before_execute/max_rows_per_batch -> 进程内一次性binding context
+错误/预算 P1批准；嵌套拒绝，消费前先清绑定，回调早于源/worker启动，finally reset；不进ActionSpec/序列化
+状态 原生引擎Journal/RunContext拥有执行事实；库中的专用装配沿P1既定合同
+副作用 特定注册/确认/作用域装配；不能泛化为随意运行SDK或绕过准入
+生命周期/并发 原始锁/token/attempt顺序和finally，成功发布不因后续错误回滚；原生单写/fence/CAS与注册锁保留，不接管其他运行
+历史/身份 已有真实对象与原路径保留；P1明确保留依赖，不以导入清零替代身份设计
+建议 retain_approved_native_assembly / retain exact P1 7.6
+目标导入 demiflow/lance/registered_write.py:108
+目标调用/引用 demiflow/lance/registered_write.py:171 call
+
+F2-25 demiflow.execution.lance_sink:spec_from_identity
+分类 existing_native_adapter
+输入/输出 原identity document -> 原LanceWriteSpec（Arrow schema按原格式还原）
+错误/预算 只接受原type path，RecoveryContractError/Arrow错误；确认既有注册receipt时用，不新建结果/类型
+状态 原生引擎Journal/RunContext拥有执行事实；库中的专用装配沿P1既定合同
+副作用 特定注册/确认/作用域装配；不能泛化为随意运行SDK或绕过准入
+生命周期/并发 原始锁/token/attempt顺序和finally，成功发布不因后续错误回滚；原生单写/fence/CAS与注册锁保留，不接管其他运行
+历史/身份 已有真实对象与原路径保留；P1明确保留依赖，不以导入清零替代身份设计
+建议 retain_approved_native_assembly / retain
+目标导入 demiflow/lance/registered_write.py:78
+目标调用/引用 demiflow/lance/registered_write.py:82 call
+
+F2-26 demiflow.execution.local_storage:process_identity
+分类 neutral_runtime_service
+输入/输出 pid -> /proc非僵尸starttime str，进程不存在None
+错误/预算 FileNotFoundError转None，其它IO错误仍传播；调用services还核host；这不是boot+pidfd完整身份
+状态 调用方的文件/结果位置；helper只拥有本次fd/临时文件/缓存
+副作用 按实际符号只读、原子文件写或非阻塞文件锁；不代表Pipeline成功
+生命周期/并发 关闭自身fd/锁/临时文件；调用方给有限输入与目标；不访问未授权根；沿原单写者/唯一临时文件/缓存键；并发/超限错误原样传播
+历史/身份 文件编码、定位与发布顺序保持；目录命名不是新的运行事实
+建议 retain_original_neutral_service / retain
+目标导入 demiflow/services/manage.py:23
+目标调用/引用 demiflow/services/manage.py:45 call, demiflow/services/manage.py:100 call
+
+F2-27 demiflow.execution.location_index:IndexedLocations
+分类 neutral_runtime_service
+输入/输出 filename/source_identity/field/files|tables/content_digest -> get/get_readonly映射
+错误/预算 原manifest<=1GiB、流式JSON、缓存SQLite+文件锁/身份复核；get可构建派生cache，get_readonly拒绝/不重建区别保留
+状态 调用方的文件/结果位置；helper只拥有本次fd/临时文件/缓存
+副作用 按实际符号只读、原子文件写或非阻塞文件锁；不代表Pipeline成功
+生命周期/并发 关闭自身fd/锁/临时文件；调用方给有限输入与目标；不访问未授权根；沿原单写者/唯一临时文件/缓存键；并发/超限错误原样传播
+历史/身份 文件编码、定位与发布顺序保持；目录命名不是新的运行事实
+建议 retain_original_neutral_service / retain; G location contract
+目标导入 demiflow/lance/storage.py:54
+目标调用/引用 demiflow/lance/storage.py:55 call
+
+F2-28 demiflow.execution.location_index:recent_digest
+分类 neutral_runtime_service
+输入/输出 filename/stat -> 近2秒ctime文件的SHA或None
+错误/预算 扫描按size/time110秒界；身份变化ValueError；非语义运行状态、不保证所有旧cache永远无IO
+状态 调用方的文件/结果位置；helper只拥有本次fd/临时文件/缓存
+副作用 按实际符号只读、原子文件写或非阻塞文件锁；不代表Pipeline成功
+生命周期/并发 关闭自身fd/锁/临时文件；调用方给有限输入与目标；不访问未授权根；沿原单写者/唯一临时文件/缓存键；并发/超限错误原样传播
+历史/身份 文件编码、定位与发布顺序保持；目录命名不是新的运行事实
+建议 retain_original_neutral_service / retain; G location contract
+目标导入 demiflow/lance/storage.py:36
+目标调用/引用 demiflow/lance/storage.py:38 call
+
+F2-29 demiflow.execution.object_sink:check_image_replay
+分类 engine_state_to_inject
+输入/输出 action -> None；确认image请求水位或拒绝未定结果
+错误/预算 action局部_checked标记、context lock、Journal commits/budget；UnresolvedCommit不得当cache miss再生成
+状态 原RunJournal/action/fence/occurrence/commit和实际执行owner唯一
+副作用 读取或写原生预算/记录/状态/对象，库不能自己解释db或创建第二账本
+生命周期/并发 引擎在原bind_execution处给精确能力；随attempt/row作用域失效；取消排空后释放；原fence/事务/顺序/expected检查在原生所有者处；不得以Python duck typing作为授权
+历史/身份 继续全树精确拒绝/原版本恢复/历史只读；不改变封存表示或允许旧pickle跨路径加载
+建议 design_narrow_injected_capability_keep_original_until_reviewed / F2-IMAGE
+目标导入 demiflow/operator_llm/runtime.py:523
+目标调用/引用 demiflow/operator_llm/runtime.py:524 call
+
+F2-30 demiflow.execution.object_sink:image_request_budget
+分类 engine_state_to_inject
+输入/输出 action -> 基于action_id的原预算key
+错误/预算 不产生请求；key身份必须原样，不能让库伪造action_id或新分预算账本
+状态 原RunJournal/action/fence/occurrence/commit和实际执行owner唯一
+副作用 读取或写原生预算/记录/状态/对象，库不能自己解释db或创建第二账本
+生命周期/并发 引擎在原bind_execution处给精确能力；随attempt/row作用域失效；取消排空后释放；原fence/事务/顺序/expected检查在原生所有者处；不得以Python duck typing作为授权
+历史/身份 继续全树精确拒绝/原版本恢复/历史只读；不改变封存表示或允许旧pickle跨路径加载
+建议 design_narrow_injected_capability_keep_original_until_reviewed / F2-IMAGE
+目标导入 demiflow/operator_llm/runtime.py:523
+目标调用/引用 demiflow/operator_llm/runtime.py:525 call
+
+F2-31 demiflow.execution.payload_limits:arrow_batches
+分类 neutral_runtime_service
+输入/输出 借用Arrow batches+limits -> 懒生成有界RecordBatch
+错误/预算 先核native type和父buffer memory_bytes，再bounded_record_batches；retained parent不冒充logical bytes；RecoveryContractError
+状态 调用方的文件/结果位置；helper只拥有本次fd/临时文件/缓存
+副作用 按实际符号只读、原子文件写或非阻塞文件锁；不代表Pipeline成功
+生命周期/并发 关闭自身fd/锁/临时文件；调用方给有限输入与目标；不访问未授权根；沿原单写者/唯一临时文件/缓存键；并发/超限错误原样传播
+历史/身份 文件编码、定位与发布顺序保持；目录命名不是新的运行事实
+建议 retain_original_neutral_service / retain
+目标导入 demiflow/lance/write.py:63
+目标调用/引用 demiflow/lance/write.py:65 call
+
+F2-32 demiflow.execution.pipeline_sources:reachable_pipeline_sources
+分类 contract
+输入/输出 固定bundle_root/entrypoint -> tuple[Path]静态相对import闭包
+错误/预算 读项目源码/AST，不执行业务；helper本身无独立文件/字节总额，依赖封存包上界；路径/语法/OSError保持
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain with explicit caller package budget; G no semantic transplant
+目标导入 demiflow/operator_llm/parser.py:211
+目标调用/引用 demiflow/operator_llm/parser.py:215 call
+
+F2-33 demiflow.execution.queue_commit:producer_action
+分类 engine_state_to_inject
+输入/输出 parent/channel/producer/occurrence/contract/phase -> 原子作用域RunAction
+错误/预算 queue producer身份/fence/预算归原channel owner；Search不得自己拼另一种scope或扩大phase
+状态 原RunJournal/action/fence/occurrence/commit和实际执行owner唯一
+副作用 读取或写原生预算/记录/状态/对象，库不能自己解释db或创建第二账本
+生命周期/并发 引擎在原bind_execution处给精确能力；随attempt/row作用域失效；取消排空后释放；原fence/事务/顺序/expected检查在原生所有者处；不得以Python duck typing作为授权
+历史/身份 继续全树精确拒绝/原版本恢复/历史只读；不改变封存表示或允许旧pickle跨路径加载
+建议 design_narrow_injected_capability_keep_original_until_reviewed / F2-SEARCH
+目标导入 demiflow/collect/operators.py:92
+目标调用/引用 demiflow/collect/operators.py:95 call
+
+F2-34 demiflow.execution.raw_budget:budget_delta
+分类 engine_state_to_inject
+输入/输出 受保护db/name/delta/ceiling/owner -> 新消耗数值
+错误/预算 原native_budget_delta或同transaction fallback；ceiling不变/0<=value<=ceiling；RecoveryContractError；db不能出owner边界
+状态 原RunJournal/action/fence/occurrence/commit和实际执行owner唯一
+副作用 读取或写原生预算/记录/状态/对象，库不能自己解释db或创建第二账本
+生命周期/并发 引擎在原bind_execution处给精确能力；随attempt/row作用域失效；取消排空后释放；原fence/事务/顺序/expected检查在原生所有者处；不得以Python duck typing作为授权
+历史/身份 继续全树精确拒绝/原版本恢复/历史只读；不改变封存表示或允许旧pickle跨路径加载
+建议 design_narrow_injected_capability_keep_original_until_reviewed / F2-SEARCH
+目标导入 demiflow/collect/operators.py:70, demiflow/collect/operators.py:82
+目标调用/引用 demiflow/collect/operators.py:71 call, demiflow/collect/operators.py:85 call, demiflow/collect/operators.py:86 call
+
+F2-35 demiflow.execution.raw_budget:record_admission
+分类 engine_state_to_inject
+输入/输出 受保护db/ceiling -> None；reservation_records +1
+错误/预算 同预算事务，不能把record准入和实际HTTP计数拆开伪造成功
+状态 原RunJournal/action/fence/occurrence/commit和实际执行owner唯一
+副作用 读取或写原生预算/记录/状态/对象，库不能自己解释db或创建第二账本
+生命周期/并发 引擎在原bind_execution处给精确能力；随attempt/row作用域失效；取消排空后释放；原fence/事务/顺序/expected检查在原生所有者处；不得以Python duck typing作为授权
+历史/身份 继续全树精确拒绝/原版本恢复/历史只读；不改变封存表示或允许旧pickle跨路径加载
+建议 design_narrow_injected_capability_keep_original_until_reviewed / F2-SEARCH
+目标导入 demiflow/collect/operators.py:67
+目标调用/引用 demiflow/collect/operators.py:69 call
+
+F2-36 demiflow.execution.raw_fetch:RawFetch
+分类 existing_native_adapter
+输入/输出 fetch声明/request/output/store/policy/concurrency/queue_depth -> 原actor对象
+错误/预算 冻结raw_fetch.py；P1原生保留类，声明构造不当成纯预检；astart/stop/close/restore等保持原协议
+状态 原生引擎Journal/RunContext拥有执行事实；库中的专用装配沿P1既定合同
+副作用 特定注册/确认/作用域装配；不能泛化为随意运行SDK或绕过准入
+生命周期/并发 原始锁/token/attempt顺序和finally，成功发布不因后续错误回滚；原生单写/fence/CAS与注册锁保留，不接管其他运行
+历史/身份 已有真实对象与原路径保留；P1明确保留依赖，不以导入清零替代身份设计
+建议 retain_approved_native_assembly / retain frozen type and P1 exact consumers
+目标导入 demiflow/collect/fetch_flow.py:48, demiflow/collect/fetch_flow.py:80
+目标调用/引用 demiflow/collect/fetch_flow.py:49 call, demiflow/collect/fetch_flow.py:94 call
+
+F2-37 demiflow.execution.raw_fetch:raw_fetch_facts
+分类 contract
+输入/输出 原RawFetch actor -> 原fetch facts
+错误/预算 同冻结文件；不搬/重写helper为删依赖，不放宽capture/actor状态检查
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain frozen facts
+目标导入 demiflow/collect/fetch_flow.py:80
+目标调用/引用 demiflow/collect/fetch_flow.py:96 call
+
+F2-38 demiflow.execution.recovery_contract:RecoveryContractError
+分类 contract
+输入/输出 message -> 原RuntimeContractError子类异常
+错误/预算 类型身份参与catch/restore；不换成ForgeError/普通ValueError
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain
+目标导入 demiflow/collect/native_search/runtime.py:214, demiflow/collect/native_search/runtime.py:321, demiflow/collect/operators.py:15, demiflow/collect/operators.py:61, demiflow/collect/operators.py:104, demiflow/collect/raw_transport.py:16, demiflow/collect/search_contract.py:3, demiflow/embeddings/runtime.py:200, demiflow/embeddings/stream_recovery.py:13, demiflow/lance/registered_write.py:10, demiflow/lance/search.py:175, demiflow/operator_llm/media.py:362, demiflow/operator_llm/stream_recovery.py:19
+目标调用/引用 demiflow/collect/native_search/runtime.py:215 call, demiflow/collect/native_search/runtime.py:322 call, demiflow/collect/operators.py:16 call, demiflow/collect/operators.py:108 call, demiflow/collect/operators.py:110 call, demiflow/collect/operators.py:122 call, demiflow/collect/operators.py:126 call, demiflow/collect/raw_transport.py:73 call, demiflow/collect/raw_transport.py:80 call, demiflow/collect/raw_transport.py:146 call, demiflow/collect/search_contract.py:12 call, demiflow/collect/search_contract.py:14 call, demiflow/collect/search_contract.py:16 call, demiflow/collect/search_contract.py:18 call, demiflow/collect/search_contract.py:36 call, demiflow/collect/search_contract.py:38 call, demiflow/collect/search_contract.py:43 call, demiflow/collect/search_contract.py:59 call, demiflow/collect/search_contract.py:67 call, demiflow/embeddings/runtime.py:201 call, demiflow/embeddings/stream_recovery.py:22 call, demiflow/embeddings/stream_recovery.py:24 call, demiflow/embeddings/stream_recovery.py:41 call, demiflow/embeddings/stream_recovery.py:44 call, demiflow/embeddings/stream_recovery.py:51 call, demiflow/lance/registered_write.py:23 call, demiflow/lance/registered_write.py:27 call, demiflow/lance/registered_write.py:33 call, demiflow/lance/registered_write.py:37 call, demiflow/lance/registered_write.py:40 call, demiflow/lance/registered_write.py:42 call, demiflow/lance/registered_write.py:45 call, demiflow/lance/registered_write.py:48 call, demiflow/lance/registered_write.py:60 call, demiflow/lance/registered_write.py:64 call, demiflow/lance/registered_write.py:73 call, demiflow/lance/registered_write.py:77 call, demiflow/lance/registered_write.py:81 call, demiflow/lance/registered_write.py:84 call, demiflow/lance/registered_write.py:92 call, demiflow/lance/registered_write.py:94 call, demiflow/lance/registered_write.py:115 call, demiflow/lance/registered_write.py:141 call, demiflow/lance/registered_write.py:146 call, demiflow/lance/registered_write.py:152 call, demiflow/lance/registered_write.py:158 call, demiflow/lance/registered_write.py:160 call, demiflow/lance/registered_write.py:170 call, demiflow/lance/registered_write.py:177 call, demiflow/lance/search.py:177 call, demiflow/lance/search.py:180 call, demiflow/lance/search.py:185 call, demiflow/lance/search.py:189 call, demiflow/lance/search.py:195 call, demiflow/operator_llm/media.py:402 call, demiflow/operator_llm/stream_recovery.py:31 call, demiflow/operator_llm/stream_recovery.py:129 call, demiflow/operator_llm/stream_recovery.py:150 call, demiflow/operator_llm/stream_recovery.py:160 call, demiflow/operator_llm/stream_recovery.py:168 call, demiflow/operator_llm/stream_recovery.py:170 call, demiflow/operator_llm/stream_recovery.py:190 call, demiflow/operator_llm/stream_recovery.py:194 call, demiflow/operator_llm/stream_recovery.py:257 call, demiflow/operator_llm/stream_recovery.py:263 call, demiflow/operator_llm/stream_recovery.py:272 call
+
+F2-39 demiflow.execution.recovery_contract:RunRef
+分类 contract
+输入/输出 directory/run_id -> 原frozen dataclass
+错误/预算 记录引用不是执行权限；持久类型路径不能搬
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain
+目标导入 demiflow/lance/registered_write.py:10
+目标调用/引用 demiflow/lance/registered_write.py:138 call
+
+F2-40 demiflow.execution.recovery_contract:SourcePosition
+分类 contract
+输入/输出 source_id/next_ordinal -> frozen dataclass/to_dict
+错误/预算 identifier与ordinal>=0检验；固定source occurrence，不从业务row值推导
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain
+目标导入 demiflow/collect/operators.py:104
+目标调用/引用 demiflow/collect/operators.py:116 call, demiflow/collect/operators.py:145 call
+
+F2-41 demiflow.execution.recovery_contract:UnresolvedCommit
+分类 contract
+输入/输出 message -> 原RecoveryContractError子类
+错误/预算 未知外部提交结果；不能重解释成普通row失败/自动重试许可
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain
+目标导入 demiflow/collect/operators.py:76, demiflow/collect/operators.py:137, demiflow/collect/search_contract.py:3
+目标调用/引用 demiflow/collect/operators.py:78 call, demiflow/collect/operators.py:138 call, demiflow/collect/search_contract.py:70 call, demiflow/collect/search_contract.py:77 call, demiflow/collect/search_contract.py:83 call
+
+F2-42 demiflow.execution.recovery_contract:document
+分类 contract
+输入/输出 strict JSON value/maximum默认1MiB -> canonical bytes
+错误/预算 depth<=32/nodes<=65536、有限float/keys/count/encoding限制；异常原RecoveryContractError
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain exact encoding and bounds
+目标导入 demiflow/collect/operators.py:104, demiflow/collect/raw_contract.py:13, demiflow/collect/search_contract.py:3, demiflow/lance/registered_write.py:10
+目标调用/引用 demiflow/collect/operators.py:123 call, demiflow/collect/raw_contract.py:53 call, demiflow/collect/raw_contract.py:114 call, demiflow/collect/raw_contract.py:185 call, demiflow/collect/raw_contract.py:212 call, demiflow/collect/search_contract.py:27 call, demiflow/collect/search_contract.py:62 call, demiflow/collect/search_contract.py:68 call, demiflow/lance/registered_write.py:112 call, demiflow/lance/registered_write.py:168 call
+
+F2-43 demiflow.execution.recovery_contract:identifier
+分类 contract
+输入/输出 str -> 原str，1..128的[A-Za-z0-9_-]
+错误/预算 RecoveryContractError；不做别名/自动规范化
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain
+目标导入 demiflow/collect/raw_contract.py:13
+目标调用/引用 demiflow/collect/raw_contract.py:221 call
+
+F2-44 demiflow.execution.recovery_contract:identity
+分类 contract
+输入/输出 strict JSON value -> SHA256(document) hex
+错误/预算 原最大/编码必须相同；不能与Forge或artifacts digest互换
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain
+目标导入 demiflow/collect/operators.py:61, demiflow/collect/operators.py:89, demiflow/collect/search_contract.py:3, demiflow/embeddings/stream_recovery.py:13, demiflow/operator_llm/runtime.py:51, demiflow/operator_llm/stream_recovery.py:19
+目标调用/引用 demiflow/collect/operators.py:63 call, demiflow/collect/operators.py:94 call, demiflow/collect/operators.py:98 call, demiflow/collect/search_contract.py:63 call, demiflow/collect/search_contract.py:69 call, demiflow/embeddings/stream_recovery.py:52 call, demiflow/embeddings/stream_recovery.py:54 call, demiflow/embeddings/stream_recovery.py:61 call, demiflow/operator_llm/runtime.py:52 call, demiflow/operator_llm/stream_recovery.py:36 call, demiflow/operator_llm/stream_recovery.py:273 call
+
+F2-45 demiflow.execution.recovery_identity:describe
+分类 contract
+输入/输出 value/depth -> 原恢复身份JSON投影
+错误/预算 callable整source文件hash、class方法code/dataclass/type paths；可能只读源码/Arrow声明；不是无IO通用repr
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain sensitive identity owner; no smaller hash promise
+目标导入 demiflow/collect/operators.py:27, demiflow/collect/reading.py:255
+目标调用/引用 demiflow/collect/operators.py:30 call, demiflow/collect/reading.py:256 call
+
+F2-46 demiflow.execution.request_limits:LatencySummary
+分类 neutral_runtime_service
+输入/输出 seconds -> histogram/summary count,p50/p95上界
+错误/预算 0.25s桶，>1天overflow，共<=345602桶；无持久执行真值，不保证线程安全
+状态 构造它的actor/client/session；原物理资源只一个owner
+副作用 有限并发/排空/度量/进程线程或本地资源准入；不自动创建Pipeline run
+生命周期/并发 构造不偷启动远端服务；显式start/run/close；取消先排空或杀死并回收自己资源；实例按既有event-loop/锁使用，禁止活跃实例跨loop重绑；不新建全局池
+历史/身份 资源实例非业务语义状态；恢复保留原数据/请求事实，不复制计量
+建议 retain_original_scoped_service / retain
+目标导入 demiflow/collect/web.py:21
+目标调用/引用 demiflow/collect/web.py:199 call, demiflow/collect/web.py:294 call
+
+F2-47 demiflow.execution.request_limits:RequestGate
+分类 neutral_runtime_service
+输入/输出 concurrency/failures/interval -> reserve/enter permit、result/check
+错误/预算 并发/pace admission，取消预约不花attempt；ServiceStopped fatal不能转row verdict；active跨loop begin_action拒绝
+状态 构造它的actor/client/session；原物理资源只一个owner
+副作用 有限并发/排空/度量/进程线程或本地资源准入；不自动创建Pipeline run
+生命周期/并发 构造不偷启动远端服务；显式start/run/close；取消先排空或杀死并回收自己资源；实例按既有event-loop/锁使用，禁止活跃实例跨loop重绑；不新建全局池
+历史/身份 资源实例非业务语义状态；恢复保留原数据/请求事实，不复制计量
+建议 retain_original_scoped_service / retain original scoped resource
+目标导入 demiflow/collect/native_search/runtime.py:19, demiflow/collect/raw_transport.py:17, demiflow/collect/search_dispatch.py:16, demiflow/collect/search_routes.py:9, demiflow/collect/web.py:21, demiflow/embeddings/runtime.py:12
+目标调用/引用 demiflow/collect/native_search/runtime.py:184 call, demiflow/collect/native_search/runtime.py:185 call, demiflow/collect/native_search/runtime.py:323 call, demiflow/collect/native_search/runtime.py:408 call, demiflow/collect/raw_transport.py:147 call, demiflow/collect/search_dispatch.py:58 call, demiflow/collect/search_routes.py:76 call, demiflow/collect/search_routes.py:144 call, demiflow/collect/search_routes.py:151 call, demiflow/collect/web.py:148 call, demiflow/embeddings/runtime.py:66 reference, demiflow/embeddings/runtime.py:76 call
+
+F2-48 demiflow.execution.request_limits:ServiceStopped
+分类 contract
+输入/输出 reason -> 原RuntimeError子类服务终止信号
+错误/预算 停止dispatch，不是业务row判定；固定cooperative词汇决定排空，不任意异常授权drain
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain
+目标导入 demiflow/collect/search_dispatch.py:16, demiflow/collect/search_fallback.py:16, demiflow/collect/search_recovery.py:12, demiflow/collect/search_routes.py:9, demiflow/collect/search_sessions.py:20, demiflow/collect/web.py:21, demiflow/operator_llm/routed.py:8, demiflow/operator_llm/runtime.py:590
+目标调用/引用 demiflow/collect/search_dispatch.py:94 call, demiflow/collect/search_dispatch.py:120 reference, demiflow/collect/search_dispatch.py:128 call, demiflow/collect/search_dispatch.py:132 call, demiflow/collect/search_dispatch.py:168 call, demiflow/collect/search_dispatch.py:185 reference, demiflow/collect/search_fallback.py:171 call, demiflow/collect/search_fallback.py:216 call, demiflow/collect/search_fallback.py:223 call, demiflow/collect/search_fallback.py:231 reference, demiflow/collect/search_recovery.py:37 call, demiflow/collect/search_recovery.py:62 call, demiflow/collect/search_routes.py:382 call, demiflow/collect/search_routes.py:390 call, demiflow/collect/search_routes.py:415 call, demiflow/collect/search_routes.py:419 call, demiflow/collect/search_routes.py:537 reference, demiflow/collect/search_routes.py:563 reference, demiflow/collect/search_routes.py:621 call, demiflow/collect/search_routes.py:624 call, demiflow/collect/search_routes.py:627 reference, demiflow/collect/search_sessions.py:198 call, demiflow/collect/search_sessions.py:200 call, demiflow/collect/search_sessions.py:300 reference, demiflow/collect/search_sessions.py:307 call, demiflow/collect/search_sessions.py:368 call, demiflow/collect/search_sessions.py:392 call, demiflow/collect/web.py:323 reference, demiflow/operator_llm/routed.py:57 reference, demiflow/operator_llm/runtime.py:593 reference
+
+F2-49 demiflow.execution.request_limits:drain_on_service_stop
+分类 neutral_runtime_service
+输入/输出 awaitable/enabled -> 原结果或原CancelledError
+错误/预算 只为已准入且收到ServiceStopped取消信号的effect有限排空；普通cancel仍取消；deadline归effect owner
+状态 构造它的actor/client/session；原物理资源只一个owner
+副作用 有限并发/排空/度量/进程线程或本地资源准入；不自动创建Pipeline run
+生命周期/并发 构造不偷启动远端服务；显式start/run/close；取消先排空或杀死并回收自己资源；实例按既有event-loop/锁使用，禁止活跃实例跨loop重绑；不新建全局池
+历史/身份 资源实例非业务语义状态；恢复保留原数据/请求事实，不复制计量
+建议 retain_original_scoped_service / retain
+目标导入 demiflow/embeddings/runtime.py:12, demiflow/operator_llm/client.py:536, demiflow/operator_llm/client.py:540
+目标调用/引用 demiflow/embeddings/runtime.py:210 call, demiflow/embeddings/runtime.py:223 call, demiflow/embeddings/runtime.py:229 call, demiflow/operator_llm/client.py:537 call, demiflow/operator_llm/client.py:541 call
+
+F2-50 demiflow.execution.request_limits:is_cooperative_stop_error
+分类 contract
+输入/输出 error -> bool（类型+固定允许词汇）
+错误/预算 不因任意字符串或旧snapshot认定获准排空
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain
+目标导入 demiflow/operator_llm/routed.py:8
+目标调用/引用 demiflow/operator_llm/routed.py:61 call
+
+F2-51 demiflow.execution.resource_registry:register_stream_cleanup
+分类 legacy_scoped_compatibility
+输入/输出 name/callback -> None；覆盖原_cleanups[name]
+错误/预算 导入注册不是全局service发现；回调实现和跨进程清理不由registry保证
+状态 旧模块各自global资源；registry仅登记cleanup回调，不是新service locator
+副作用 导入时注册到现有字典；清理由原StreamResources调用
+生命周期/并发 本批保留；后续在有实际生命周期消费者替换后移除旧登记；当前同进程字典，无新并发/发现/动态插件保证
+历史/身份 不删除外部消费者未知的兼容路径；与P8逐符号处置协调
+建议 retain_until_scoped_retirement / retain no new use; coordinate P8
+目标导入 demiflow/collect/llm.py:174, demiflow/collect/net.py:470
+目标调用/引用 demiflow/collect/llm.py:175 call, demiflow/collect/net.py:471 call
+
+F2-52 demiflow.execution.row_scope:current_row_scope
+分类 engine_state_to_inject
+输入/输出 () -> RowScope|None（含occurrence/delivery）
+错误/预算 ContextVar只读当前实际侧车；不可从business row/token或新字段合成权限
+状态 原RunJournal/action/fence/occurrence/commit和实际执行owner唯一
+副作用 读取或写原生预算/记录/状态/对象，库不能自己解释db或创建第二账本
+生命周期/并发 引擎在原bind_execution处给精确能力；随attempt/row作用域失效；取消排空后释放；原fence/事务/顺序/expected检查在原生所有者处；不得以Python duck typing作为授权
+历史/身份 继续全树精确拒绝/原版本恢复/历史只读；不改变封存表示或允许旧pickle跨路径加载
+建议 design_narrow_injected_capability_keep_original_until_reviewed / F2-SEARCH/PROMPT
+目标导入 demiflow/collect/operators.py:103, demiflow/embeddings/stream_recovery.py:14, demiflow/operator_llm/stream_recovery.py:269
+目标调用/引用 demiflow/collect/operators.py:109 call, demiflow/embeddings/stream_recovery.py:49 call, demiflow/operator_llm/stream_recovery.py:270 call
+
+F2-53 demiflow.execution.run_context:RunAction
+分类 engine_state_to_inject
+输入/输出 context/action_id/declaration -> 原RunAction/record/complete
+错误/预算 绑定同Journal/fence；不可让SDK请求传RunAction；Search原child scope需原生owner供给
+状态 原RunJournal/action/fence/occurrence/commit和实际执行owner唯一
+副作用 读取或写原生预算/记录/状态/对象，库不能自己解释db或创建第二账本
+生命周期/并发 引擎在原bind_execution处给精确能力；随attempt/row作用域失效；取消排空后释放；原fence/事务/顺序/expected检查在原生所有者处；不得以Python duck typing作为授权
+历史/身份 继续全树精确拒绝/原版本恢复/历史只读；不改变封存表示或允许旧pickle跨路径加载
+建议 design_narrow_injected_capability_keep_original_until_reviewed / F2-SEARCH
+目标导入 demiflow/collect/operators.py:90
+目标调用/引用 demiflow/collect/operators.py:100 call
+
+F2-54 demiflow.execution.run_context:RunContext
+分类 existing_native_adapter
+输入/输出 start/resume/attach/original directory+limits -> 原执行scope
+错误/预算 注册写入是特定原生装配；代码/平台/环境/预算原严格校验；token/lease退出与未知保护保持
+状态 原生引擎Journal/RunContext拥有执行事实；库中的专用装配沿P1既定合同
+副作用 特定注册/确认/作用域装配；不能泛化为随意运行SDK或绕过准入
+生命周期/并发 原始锁/token/attempt顺序和finally，成功发布不因后续错误回滚；原生单写/fence/CAS与注册锁保留，不接管其他运行
+历史/身份 已有真实对象与原路径保留；P1明确保留依赖，不以导入清零替代身份设计
+建议 retain_approved_native_assembly / retain registered_write assembly
+目标导入 demiflow/lance/registered_write.py:11
+目标调用/引用 demiflow/lance/registered_write.py:144 call, demiflow/lance/registered_write.py:153 call
+
+F2-55 demiflow.execution.run_context:current_action
+分类 engine_state_to_inject
+输入/输出 () -> 当前RunAction|None
+错误/预算 ambient getter不授予调用者创建/接管owner；后续局部注入时不复制ContextVar
+状态 原RunJournal/action/fence/occurrence/commit和实际执行owner唯一
+副作用 读取或写原生预算/记录/状态/对象，库不能自己解释db或创建第二账本
+生命周期/并发 引擎在原bind_execution处给精确能力；随attempt/row作用域失效；取消排空后释放；原fence/事务/顺序/expected检查在原生所有者处；不得以Python duck typing作为授权
+历史/身份 继续全树精确拒绝/原版本恢复/历史只读；不改变封存表示或允许旧pickle跨路径加载
+建议 design_narrow_injected_capability_keep_original_until_reviewed / F2-SEARCH/PROMPT/IMAGE
+目标导入 demiflow/collect/operators.py:40, demiflow/operator_llm/runtime.py:516
+目标调用/引用 demiflow/collect/operators.py:42 call, demiflow/operator_llm/runtime.py:518 call
+
+F2-56 demiflow.execution.run_context:current_run
+分类 existing_native_adapter
+输入/输出 () -> 当前RunContext|None
+错误/预算 registered_write用于选择原owning run；不新建当前运行中心
+状态 原生引擎Journal/RunContext拥有执行事实；库中的专用装配沿P1既定合同
+副作用 特定注册/确认/作用域装配；不能泛化为随意运行SDK或绕过准入
+生命周期/并发 原始锁/token/attempt顺序和finally，成功发布不因后续错误回滚；原生单写/fence/CAS与注册锁保留，不接管其他运行
+历史/身份 已有真实对象与原路径保留；P1明确保留依赖，不以导入清零替代身份设计
+建议 retain_approved_native_assembly / retain P1 registered_write assembly
+目标导入 demiflow/lance/registered_write.py:11
+目标调用/引用 demiflow/lance/registered_write.py:124 call
+
+F2-57 demiflow.execution.run_journal:ExecutionBudgetExceeded
+分类 contract
+输入/输出 budget/message -> 原RecoveryContractError，含budget字段
+错误/预算 预算超限不是可自动重试错误；prompt journal沿原失败记录语义
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain
+目标导入 demiflow/operator_llm/stream_recovery.py:172
+目标调用/引用 demiflow/operator_llm/stream_recovery.py:175 reference
+
+F2-58 demiflow.execution.run_journal:ExecutionConflict
+分类 contract
+输入/输出 原demiflow.errors.ExecutionConflict类型，通过run_journal重导出
+错误/预算 本地AST无定义属真实re-export，不是缺失；错误路径/类型身份保持
+状态 被传入的不可变声明/值与原生合同定义；不拥有运行实例
+副作用 校验/编码/只读描述；具体文件读取与源码身份项另见逐符号覆盖
+生命周期/并发 调用期间临时值；不创建worker/Journal/lease，不扩大预算；纯值可并发；共享可变输入须由调用方保持不变
+历史/身份 保留原module/qualname、编码和对象类型；不搬声明、不重签历史
+建议 retain_original_contract / retain original object; do not duplicate class
+目标导入 demiflow/operator_llm/stream_recovery.py:139
+目标调用/引用 demiflow/operator_llm/stream_recovery.py:142 call
+
+F2-59 demiflow.execution.run_journal:RunJournal
+分类 existing_native_adapter
+输入/输出 directory/attempt -> 原Journal；注册确认/历史读取用受限原成员
+错误/预算 构造/conn可写；不是纯reader。库adapter需维持原注册锁与原运行事实，禁止扩展为随意db访问
+状态 原生引擎Journal/RunContext拥有执行事实；库中的专用装配沿P1既定合同
+副作用 特定注册/确认/作用域装配；不能泛化为随意运行SDK或绕过准入
+生命周期/并发 原始锁/token/attempt顺序和finally，成功发布不因后续错误回滚；原生单写/fence/CAS与注册锁保留，不接管其他运行
+历史/身份 已有真实对象与原路径保留；P1明确保留依赖，不以导入清零替代身份设计
+建议 retain_approved_native_assembly / retain specialized native storage adapter
+目标导入 demiflow/lance/registered_write.py:12, demiflow/lance/run.py:7
+目标调用/引用 demiflow/lance/registered_write.py:43 call, demiflow/lance/run.py:26 call
+
+F2-60 demiflow.execution.state_artifacts:atomic_bytes
+分类 neutral_runtime_service
+输入/输出 path/bytes -> None；独占.staging+fsync+replace+目录fsync
+错误/预算 原RecoveryContractError symlink/IO；同目标并发FileExistsError，调用方持注册锁且raw已有限；不能换成无fsync _save
+状态 调用方的文件/结果位置；helper只拥有本次fd/临时文件/缓存
+副作用 按实际符号只读、原子文件写或非阻塞文件锁；不代表Pipeline成功
+生命周期/并发 关闭自身fd/锁/临时文件；调用方给有限输入与目标；不访问未授权根；沿原单写者/唯一临时文件/缓存键；并发/超限错误原样传播
+历史/身份 文件编码、定位与发布顺序保持；目录命名不是新的运行事实
+建议 retain_original_neutral_service / retain
+目标导入 demiflow/lance/registered_write.py:13
+目标调用/引用 demiflow/lance/registered_write.py:168 call
+
+F2-61 demiflow.execution.stream_resources:CallMetrics
+分类 neutral_runtime_service
+输入/输出 reset/observe(call,error)/summary -> 原usage与latency观测
+错误/预算 仅本actor度量，reused不计重复tokens；histogram有界，结果不当准入/提交或可靠usage真值
+状态 构造它的actor/client/session；原物理资源只一个owner
+副作用 有限并发/排空/度量/进程线程或本地资源准入；不自动创建Pipeline run
+生命周期/并发 构造不偷启动远端服务；显式start/run/close；取消先排空或杀死并回收自己资源；实例按既有event-loop/锁使用，禁止活跃实例跨loop重绑；不新建全局池
+历史/身份 资源实例非业务语义状态；恢复保留原数据/请求事实，不复制计量
+建议 retain_original_scoped_service / retain
+目标导入 demiflow/embeddings/runtime.py:14, demiflow/operator_llm/runtime.py:560
+目标调用/引用 demiflow/operator_llm/runtime.py:561 call

@@ -1,0 +1,69 @@
+F 设计/后续切片验证矩阵 v1
+固定源 122edf4bd0c827338846abd0114f0b36cf8c1b6d；实现后项全部未执行。
+
+本阶段实际完成
+F-V0 开工：专属tree HEAD/main/integration相等、clean；当前AGENTS/授权/CONTEXT/评审流程完整阅读，原root/15叶/AR/全局架构/发版规则复用已完整阅读的固定原件。
+F-V1 scan_symbols.py：1838文件/18707852字节，F1=217（182 top/35 lazy，含5模块绑定）->23使用符号；F2=128（60 top/68 lazy）->61符号。
+F-V2 与原graph.py同基线的目标 (src,dst,line,kind,name) 集合逐项对账：F1/F2差集均空，不只比较数量。
+F-V3 build_tables.py：84目标键无缺无额外；每行有实际提供者及source SHA、静态消费者、I/O/错误/状态/副作用/资源/并发/历史/建议；
+     RunJournal重导出的ExecutionConflict解析到实际errors.py对象；模块绑定按真实属性用途展开。
+F-V4 有限现有源码守卫实跑（本树env/bin/python，显式导入本树，私有/tmp资源，不改环境）：
+     tests/test_package_dependency_ratchet.py + tests/test_p1_native_dependencies.py，14 passed/0 failed/error/skipped，4.87秒。
+     原负例仍在；不是新服务运行或外部调用验收。
+F-V5 package源码与base完全一致，七冻结件hash保持，文档JSON解析、git diff --check及材料SHA核对。
+命令/实际解释器/环境/私有路径/日志/JUnit/源SHA存 shared tasks/F/design-v1/evidence。
+第一次发现扫描和最终过滤无关行的成功扫描在回执分开说明；没有被覆盖的产品失败。
+
+扫描与完整性限度
+- 静态目标集合来自整个声明roots，不静默忽略lazy/typing/条件/字符串位置；0 literal引擎字符串不等于无动态依赖。
+- 5个库动态调用位置保留，search_sessions factory是配置/外部未知；不运行其factory求“证明”。
+- import消费者和可词法解析use分别列；赋值别名/反射/外部/运行时reachability未完备，不能把无use记录当可删除。
+- 旧graph输入来自同SHA的A原分析器结果，已证明当前源码和目标逐项一致；不宣称这是新产品guard。
+
+后续F1提取设计若被选择（目前推荐保留，不实施）
+F1-T1 每个被选符号全部源码消费者同批切换，域异常catch/HTTP错误code保持；不允许中立包反向导入Forge，不复制永久shim。
+F1-T2 JSON字节/排序/换行/NaN拒绝及默认预算逐字节反例，不能用schema.digest替换artifacts.digest/content_digest。
+F1-T3 no_symlinks和read_bounded：symlink/非regular/oversize/同大小替换/读取中变化，原错误与fd关闭；
+      read_json仅有原stat/read语义，不能无证据称race-proof，也不能提取时削弱稳定读取器。
+F1-T4 独占写既存/并发同值不同值，临时写/replace/fsync后失败和finally；已发布源不回滚，不残留本次临时文件。
+F1-T5 operation_budget当前不拆。若未来另设计必须验证同一ContextVar、nested取小、过期、invalid transport/parent/rebind拒绝、
+      常驻worker无transport no-op、环境清除/异常token reset；不能把软件检查说成整个finally硬时限。
+F1-T6 每个改源码对象的identity根差异、历史只读/原环境恢复/跨版本拒绝；不签旧seal或换异常对象身份消红。
+
+F2-PROMPT合同保留的关键反例（未来若触此路径才选对应范围）
+P-T1 原verified RemotePromptJournal、Private变体、Codex、offline_dir/offline_store在真实worker装配后调用原公开具名能力。
+P-T2 非真实类型/错误declaration/只读/无界limit/private+native双写拒绝，不能用Protocol/hasattr或自报verified绕过driver gate。
+P-T3 错node/occurrence/allocation/boot/fence/RPC budget拒绝；关闭本client不释放driver owner，不授予新执行权。
+P-T4 offline pending仍PromptResponsePending，unknown不能在线回退；retry不扩请求/paid额度；cooperative drain与普通cancel分别验证。
+候选现有文件：tests/test_runtime_v3_private_prompt_journal.py及受实际改动影响的model-journal/offline/client/Codex测试，
+不默认全跑所有模型/调用真实provider。
+
+F2-SEARCH前置与实施验收（尚未实施）
+S-P0 在隔离树固定native/queue producer/仍支持legacy generic bind的完整调用映射与基线；保留raw记录及未验证外部路径。
+     涉及原封存类/冻结/新兼容承诺则先退出具体项另审；普通源码全树hash变化仍用既有严格拒绝。
+S-T1 小合成搜索服务正常结果/when跳过/32请求与500候选边界、并发<=4、fixedrow字段/排序和原输出完全对照。
+S-T2 固定已确认response复用不再发HTTP；pending/unresolved、花费已记但响应未固定、queue producer phase和原occurrence key均保持。
+S-T3 额度准入与原记录同事务：请求/字节/control/reservation计数、ceil变化/超限拒绝，无db/任意name/delta暴露给库。
+S-T4 原source/action/SourcePosition/child identity与Journal intent/prepared/commit/ACK等内容精确差异清单；
+     元数据/typed对象的source/class code变动另列，不能忽略所有hash/id，只按shape比较。
+S-T5 同actor并行request的ContextVar正确，跨actor/旧attempt/fence拒绝；owner退出reset，不重复复制单例状态或actor账本。
+S-T6 session失败/取消/超时/astart部分失败：原HTTP与BlockingIO已准入工作先排空，唯一owned pool最后关闭；资源/slot/FD释放真实证据。
+S-T7 错误/晚到响应/提交后取证失败不补成功、不回滚源、不自动重试外部未知副作用；ServiceStopped不转业务row verdict。
+S-T8 dataflow_search._search_row改为owner proofs后，原_confirmed/worker lease/rowref/source-binding检查保持；
+     静态检查collect不再访问旧search的raw SQL/RunAction/CommitCoordinator，旧算法和反向actor._action路径同批删除。
+S-T9 native与仍支持legacy/queue都走同一协议实现；不得为验收只留native测试并静默断原公开/generic路径。
+S-T10 回退原代码可读取原历史；新候选不改旧seal/表/文件，未知consumer保留为缺口而非无调用删除依据。
+候选现有 tests/test_native_search_runtime.py、test_native_search_adapters.py 与实际关联queue/search replay/stop测试；
+相关真实owner路径需小合成provider/私有fixtures，缺证据列not-run，不跑真实业务/网络收费查询。
+
+F2-IMAGE/F2-INDEX后延切片（不作F2/G/P12前置）
+I-T1 image远端注入/本地能力输入bytes真实上限、原ObjectRef与policy/hash关联；假“已验证”/错owner/路径拒绝。
+I-T2 decode失败/cache命中淘汰/stop后已到bytes/额度/磁盘/清理失败；水位不一致UnresolvedCommit、不自动生成、不伪ACK。
+Q-T1 index固定version、另一writer竞争/prepare失败/commit未知/commit后verify失败；worker无发布权，原CAS/cleanup和槽归还。
+Q-T2 去_private入口若实施，所有真实consumer同批切换且旧入口删除；_save的编码/临时文件/fsync差异有具体裁决。
+候选现有 tests/test_lance_vector_index.py；需要外部重量级数据/模型的部分不在本设计期执行。
+
+未验证/不适用
+新服务实现不存在，所有未来切片的运行、取消、并发、历史反例未执行；F1归属策略尚待真人，F2/总控/Fable尚待审。
+未跑全仓四线、Ray/多机、真实业务/付费模型、浏览器、线上服务、身份v2新算法；不宣称C获批或G已能实施。
+文档候选不改产品交互，浏览器本阶段不适用；四线总闸只在最终版本由唯一集成管理者统一安排。
