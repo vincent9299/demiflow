@@ -1,0 +1,63 @@
+{
+  "status": "integrated_candidates_validated_release_not_approved",
+  "tested_commit": "a6ddb4a88af7a1525649aa31fe77210af3c97ce2",
+  "previous_main": "122edf4bd0c827338846abd0114f0b36cf8c1b6d",
+  "known_state": "docs/engine-known-state/a6ddb4a.json",
+  "evidence": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/platform-integration-v1",
+  "lanes": {
+    "standard": {
+      "collected": 4509,
+      "executed": 4274,
+      "outcomes": {
+        "error": 33,
+        "failed": 97,
+        "passed": 4095,
+        "skipped": 49
+      }
+    },
+    "historical": {
+      "collected": 1808,
+      "executed": 1790,
+      "outcomes": {
+        "failed": 103,
+        "passed": 1579,
+        "skipped": 108
+      }
+    },
+    "ray": {
+      "collected": 451,
+      "executed": 451,
+      "outcomes": {
+        "error": 1,
+        "failed": 10,
+        "passed": 440
+      }
+    },
+    "historical_ray": {
+      "collected": 13,
+      "executed": 13,
+      "outcomes": {
+        "passed": 13
+      }
+    }
+  },
+  "test_repairs": [
+    "26700ff1170c8daf77e38695bb28d3c74e542ada",
+    "c97d9b8c31dee6d8dd9b37ad716a745778fd467e",
+    "077f3dc108c875c63c9ed0d189ba6f1ddd289c87"
+  ],
+  "runtime_changes_after_T": false,
+  "main_changed": false,
+  "preview_changed": false,
+  "release_blockers": [
+    "Existing native image residency admission gap reproduced on previous main; not granted release exemption by this integration",
+    "Existing read-only image result recovery adapter lacks object_roots; reproduced on previous main; intact/damaged prepared/acked cases remain failing",
+    "Four legacy thread-mode crash fixtures self-kill the test interpreter; incomplete, not passing. Remaining 18 nodes were independently executed; counterexample migration still needed."
+  ],
+  "not_claimed": [
+    "No Fable final approval",
+    "No E2 production rejection",
+    "No S2/H1 or cross-version resume",
+    "No complete all-green product or release acceptance"
+  ]
+}
