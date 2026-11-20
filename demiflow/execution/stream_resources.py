@@ -58,8 +58,9 @@ class StreamResources:
         return q
 
     async def prepare(self):
-        from ..collect.operators import SearchWeb
-        if any(type(actor) is SearchWeb for actor in self.actors):
+        from ..collect.search_contract import is_native_search_actor
+        searches = {id(actor) for actor in self.actors if is_native_search_actor(actor)}
+        if searches:
             from .dataflow_search_runtime import SearchEffects
             from .queue_producer import QueueProducer
             from .run_context import current_action
@@ -77,11 +78,10 @@ class StreamResources:
                 checked = current()
                 completed = False
                 try:
-                    if type(actor) is SearchWeb:
+                    if id(actor) in searches:
                         effects = SearchEffects.for_actor(current_action(), actor, actor.node_id, producer=producer)
-                        await begin(effects=effects)
-                    else:
-                        await begin()
+                        actor.bind_search_effects(effects)
+                    await begin()
                     completed = True
                 finally:
                     if checked is not None:

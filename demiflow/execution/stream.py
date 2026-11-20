@@ -769,8 +769,9 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
         else:
             queues.append(make_queue(s.queue_depth))
     from .raw_fetch import RawFetch
-    from ..collect.operators import SearchWeb
-    raw_occurrences = any(type(getattr(s.fn, '__self__', s.fn)) in {RawFetch,SearchWeb} for s in stages)
+    from ..collect.search_contract import is_native_search_actor
+    owners = (getattr(stage.fn, '__self__', stage.fn) for stage in stages)
+    raw_occurrences = any(type(actor) is RawFetch or is_native_search_actor(actor) for actor in owners)
     track_occurrences = raw_occurrences or any(s.native_recovery is not None for s in stages)
     if raw_occurrences and any(s.max_batch is not None or s.grouping is not None or s.prefix is not None for s in stages):
         raise RuntimeContractError('Raw acquisition requires a row-local stream; materialize buffered transformations first')
