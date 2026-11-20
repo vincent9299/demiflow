@@ -2,7 +2,8 @@
 
 Only Git b4dd417's sealed_plan_facts.v1 / aligned-barrier-v2 native writer is
 generated here. Those are two carrier/protocol names, not two engine versions.
-Current-runtime continuation of this native plan remains explicitly unsupported.
+The current compatibility validator still lacks this carrier's recovery evidence;
+constructing the original RunRef context does not enter or execute that plan.
 """
 from __future__ import annotations
 
@@ -130,12 +131,12 @@ class OriginalCarrierReader:
 
 
 def original_native_history(root):
-    """Real old producer, current read/refusal, then old compatible continuation."""
+    """Real old producer, current read/admission/report, then old continuation."""
     import demiflow
     import lance
     from demiflow.execution.run_journal import RunJournal
     from demiflow.execution.run_context import RunContext
-    from demiflow.execution.recovery_contract import RunRef, RecoveryContractError
+    from demiflow.execution.recovery_contract import RunRef
     from demiflow.execution.recovery_identity import platform_identity
     from demiflow.execution.dataflow_history import load_execution_version, validate_resume_compatibility
     from demiflow.workbench.runs.facts import read_sealed_plan
@@ -160,6 +161,7 @@ def original_native_history(root):
                            stderr=subprocess.STDOUT, timeout=60, check=True)
         return command
 
+    current_revision = platform_identity()
     cases = {}
     for name, mode in (("completed", "complete"), ("interrupted", "interrupt")):
         directory = root / name
@@ -181,25 +183,28 @@ def original_native_history(root):
         assert receipt["input_rows"] == receipt["written_rows"] == 2
         dataset = lance.dataset(str(directory / "out.lance"), version=1)
         assert dataset.to_table().to_pylist() == [{"value": 2}, {"value": 3}]
-        report = validate_resume_compatibility(history, current_runtime=platform_identity(),
+        report = validate_resume_compatibility(history, current_runtime=current_revision,
                                                store=OriginalCarrierReader(directory / "run"))
         assert not report.supported
         assert any("journal-proven recovery image" in reason for reason in report.reasons)
         assert any("original engine environment" in reason for reason in report.reasons)
         reference = RunRef(**json.loads((directory / "run-ref.json").read_text()))
-        try:
-            RunContext.resume(reference)
-        except RecoveryContractError as error:
-            assert "requires the original engine revision" in str(error)
-            refusal = str(error)
-        else:
-            raise AssertionError("current runtime admitted incompatible original history")
+        assert original_binding["platform_revision"] != current_revision
+        # A known durable protocol admits the original reference across source
+        # versions. This creates a context only: __enter__ and pipeline execution
+        # are deliberately not invoked. The actual carrier compatibility report
+        # above must still reject missing recovery image/adapter evidence.
+        context = RunContext.resume(reference)
+        assert context.expected_run_id == reference.run_id
+        assert context.directory == Path(reference.directory)
+        admission = {"reference": asdict(reference), "context_entered": False,
+                     "platform_provenance_differs": True}
         after = _file_digests(directory)
-        assert before == after, "read-only/refused resume rewrote historical bytes"
+        assert before == after, "read-only/reference admission rewrote historical bytes"
         commits = journal.execution_commits("action-1")
         assert len(commits) == 1 and commits[0]["status"] == "acked"
         item = {"command": command, "history": asdict(history), "compatibility": asdict(report),
-                "current_refusal": refusal, "sealed": original_seal, "receipt": receipt,
+                "current_reference_admission": admission, "sealed": original_seal, "receipt": receipt,
                 "read_only_before": before, "read_only_after": after,
                 "original_recovery_contract": original_binding}
         if name == "interrupted":

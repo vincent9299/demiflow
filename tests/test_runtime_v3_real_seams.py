@@ -476,8 +476,11 @@ def test_resume_validation_reads_wire_plan_and_checks_platform_pin(tmp_path):
         assert "historical binding has no journal-proven recovery image" in same.reasons
         mismatch = "original platform code differs from the current runtime"
         assert mismatch not in same.reasons
-        assert mismatch in changed.reasons
+        assert mismatch not in changed.reasons
         assert not changed.supported
+        # Platform provenance and the legacy keyword cannot alter actual
+        # recovery-image, wire-plan or resource-profile validation.
+        assert changed == same == validate_resume_compatibility(binding, store=services.store)
 
 
 def test_real_join_kernel_uses_same_row_codec_on_write_and_read(tmp_path):
