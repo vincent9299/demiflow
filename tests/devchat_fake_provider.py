@@ -59,6 +59,9 @@ for line in sys.stdin:
                 flow.write_text("from flows.other import source\ndef run():\n    return source().materialize()\n")
             elif message.endswith('layout'):
                 flow.write_text("from demiflow.data import from_items\nfrom lib.normalize import normalize\ndef run():\n    return from_items([{'name': 'A'}]).map(normalize).materialize()\n")
+            elif message.endswith('misplaced'):
+                (project_root / 'prompts' / 'misplaced.py').write_text(
+                    "from demiflow.data import from_items\ndef run():\n    return from_items([{'id': 1}]).count()\n")
         if message.startswith('disconnect'): sys.exit(3)
         if message.startswith('hang'):
             subprocess.Popen([sys.executable,'-c','import os,time;os.setsid();time.sleep(90)'])

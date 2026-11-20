@@ -9,6 +9,21 @@ from test_forge_public_api import service
 from test_forge_web_redesign import opened, artifact
 
 
+def test_new_operator_and_prompt_appear_without_inspection_or_manual_refresh(project,browser):
+    with service(project) as app, opened(browser,app) as (page,_):
+        page.locator('.function-nav').get_by_role('button',name='算子',exact=True).click()
+        page.get_by_role('button',name='ƒ clean',exact=True).click()
+        (project/'operators/normalize.py').write_text('def normalize(value):\n    return value\n')
+        expect(page.get_by_role('button',name='ƒ normalize',exact=True)).to_be_visible(timeout=30000)
+        page.get_by_role('tab',name='Prompt 算子',exact=True).click()
+        (project/'prompts/summary.json').write_text(json.dumps({
+            'schema_version': 'demiflow_prompt_pack_v2',
+            'prompts': {'summarize': {'version': 'v1', 'template': 'Summarize {{ value }}'}},
+        }))
+        expect(page.get_by_role('button',name='P summarize',exact=True)).to_be_visible(timeout=30000)
+        expect(page.get_by_role('tab',name='Prompt 算子',exact=True)).to_have_attribute('aria-selected','true')
+
+
 def test_project_tree_prompt_flow_switch_arguments_reload(project,tmp_path,browser):
     for name, default in [('select',3),('evaluate',8)]:
         (project/f'flows/{name}.py').write_text(f'''from demiflow import data

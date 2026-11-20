@@ -27,6 +27,7 @@ def test_guidance_crosses_start_and_resume_without_a_parent_task(tmp_path, acp):
             assert 'task_id' not in manifest
             received = (service.root / session / 'received-context.txt').read_text()
             assert 'Dataset.map_prompt_async' in received and 'DF-02' in received
+            assert 'demiflow.data:range' in received and 'Dataset.count' in received
             assert manifest['requirement'] == user
             if acp:
                 assert received.count(user) == 1
@@ -42,7 +43,6 @@ def test_guided_browser_reports_independent_pipeline_checks(tmp_path, browser):
         from test_map_prompt_async import PACK
         (root / 'prompts/guided.yaml').write_text(
             PACK.replace('base_url_env: TEST_PROMPT_URL', 'base_url: http://127.0.0.1:9/v1'))
-        (root / 'flows/other.py').write_text("from demiflow.data import from_items\ndef source():\n    return from_items([{'id': 1}])\n")
         helper = root / 'lib'
         helper.mkdir()
         (helper / 'normalize.py').write_text(
@@ -54,9 +54,12 @@ def test_guided_browser_reports_independent_pipeline_checks(tmp_path, browser):
         page.get_by_role('button', name='开发', exact=True).click()
 
         for revision, (scenario, native, layout) in enumerate([
-                ('prompt', 'passed', 'passed'), ('manual', 'failed', 'passed'),
+                ('misplaced', 'passed', 'failed'), ('prompt', 'passed', 'passed'), ('manual', 'failed', 'passed'),
                 ('unproved', 'incomplete', 'passed'),
                 ('layout', 'passed', 'failed'), ('crossflow', 'passed', 'failed')], start=1):
+            if scenario == 'crossflow':
+                (root / 'flows/other.py').write_text(
+                    "from demiflow.data import from_items\ndef source():\n    return from_items([{'id': 1}])\n")
             page.get_by_label('开发要求').fill('guided fixture edit ' + scenario)
             with page.expect_response(lambda response: response.url.endswith('/dev-turn-start')) as submitted:
                 page.get_by_role('button', name='发送', exact=True).click()
@@ -68,6 +71,9 @@ def test_guided_browser_reports_independent_pipeline_checks(tmp_path, browser):
             checks = saved['pipeline_checks']
             assert checks['native_flow']['status'] == native, checks
             assert checks['project_layout']['status'] == layout, checks
+            if scenario == 'misplaced':
+                assert any(item['rule'] == 'DF-02' and item['path'] == 'prompts/misplaced.py'
+                           for item in checks['project_layout']['diagnostics']), checks
             assert checks['catalog_id'] == json.loads(done['context'])['coding_guidance']['catalog_id']
             page.get_by_text('项目目录检查', exact=True).nth(revision - 1).wait_for(state='attached')
             page.get_by_text('原生数据流检查', exact=True).nth(revision - 1).wait_for(state='attached')
@@ -76,6 +82,26 @@ def test_guided_browser_reports_independent_pipeline_checks(tmp_path, browser):
         assert (root / 'flows/guided.py').exists()
         page.close()
 
+
+def test_new_root_flow_is_reported_without_guessing_from_function_names(tmp_path):
+    from demiflow.forge.api_reference import build_reference
+    from demiflow.workbench.projects.workspace import inspect_coding_changes
+
+    (tmp_path / 'misplaced.py').write_text(
+        "from demiflow.data import from_items\ndef compute():\n    return from_items([{'id': 1}]).count()\n")
+    (tmp_path / 'helper.py').write_text('def run():\n    return 42\n')
+    (tmp_path / 'source.py').write_text(
+        "from demiflow.data import from_items\ndef build_source():\n    return from_items([{'id': 1}])\n")
+    report = inspect_coding_changes(tmp_path, [
+        dict(path=name, before=None, after=dict(sha256='fixture'))
+        for name in ('helper.py', 'source.py', 'misplaced.py')
+    ], build_reference())
+    assert report['native_flow']['status'] == 'passed', report
+    assert report['native_flow']['inspected_count'] == 1
+    assert report['project_layout']['status'] == 'failed'
+    assert [(item['rule'], item['path']) for item in report['project_layout']['diagnostics']] == [
+        ('DF-02', 'misplaced.py')
+    ]
 
 
 def test_old_development_database_is_refused_and_untouched(tmp_path):

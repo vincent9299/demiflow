@@ -11,11 +11,11 @@ MODULES = ('demiflow.data', 'demiflow.operator_llm', 'demiflow.objects', 'demifl
 REFERENCE_BYTES = 2 * 1024**2
 SDK_ROOT = Path(__file__).resolve().parents[1]
 DATASET = 'demiflow.data:Dataset.'
-ESSENTIAL = ('demiflow.data:read_lance', 'demiflow.data:from_items', *(
+ESSENTIAL = ('demiflow.data:read_lance', 'demiflow.data:from_items', 'demiflow.data:range', *(
     DATASET + method for method in (
         'map', 'map_async', 'filter', 'select_columns', 'join', 'union',
         'map_prompt', 'map_prompt_async', 'agentmap_async',
-        'materialize', 'take', 'write_lance',
+        'materialize', 'take', 'count', 'write_lance',
     )
 ))
 

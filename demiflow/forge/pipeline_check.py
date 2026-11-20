@@ -39,9 +39,9 @@ def check_changes(root, *, changed, variants, layout_diagnostics, coverage, cata
     """Check the same source and SDK basis as the coding turn, without execution."""
     deadline = time.monotonic() + CHECK_SECONDS
     diagnostics, inspected, sources = list(coverage), [], {}
-    operators, prompts = set(), set()
+    operators, prompts, misplaced_flows = set(), set(), set()
     layout_diagnostics = list(layout_diagnostics)
-    for index, (entry, load) in enumerate(variants):
+    for index, (entry, load, outside_flows) in enumerate(variants):
         available = int(deadline - time.monotonic())
         if index >= MAX_VARIANTS or available < 1:
             diagnostics.append(diagnostic('FL-10', '', '还有入口未检查，达到本轮检查预算。', status='incomplete'))
@@ -62,6 +62,12 @@ def check_changes(root, *, changed, variants, layout_diagnostics, coverage, cata
                     _record(sources, item['path'], item['sha256'])
             files = report['binding']['sources']
             entry_path = entry.partition(':')[0]
+            if outside_flows:
+                if not any(node['role'] in {'action', 'query'} or node['kind'] == 'materialize'
+                           for node in report['nodes']):
+                    continue
+                layout_diagnostics.append(diagnostic('DF-02', entry_path, '新 flow 应位于 flows/。'))
+                misplaced_flows.add(entry_path)
             cross_flows = {node['source'] for node in report['nodes']
                            if node['source'] != entry_path and node['source'].startswith('flows/')}
             for path in sorted(cross_flows):
@@ -86,9 +92,12 @@ def check_changes(root, *, changed, variants, layout_diagnostics, coverage, cata
             diagnostics.append(diagnostic('FL-10', path, str(exc), status='incomplete'))
             layout_diagnostics.append(diagnostic('DF-01', path, '此入口的引用文件角色未核实。', status='incomplete'))
 
+    if changed and not inspected and not diagnostics:
+        diagnostics.append(diagnostic('FL-10', '', '没有可核对的 flow 入口。', status='incomplete'))
     paths, violations = check_layout(changed=changed, operators=sorted(operators),
                                      prompts=sorted(prompts))
     layout_diagnostics.extend(violations)
+    paths.update(misplaced_flows)
     remaining = MAX_SOURCE_BYTES
     for path, digest in sources.items():
         try:

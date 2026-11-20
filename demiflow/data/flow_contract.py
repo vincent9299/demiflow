@@ -12,6 +12,7 @@ import json
 
 FORMAT = "demiflow_api_flow_v2"
 KINDS = {
+    "range",
     "read_table",
     "map",
     "filter",
@@ -132,7 +133,7 @@ def validate_semantics(value, parameters, *, historical=False):
             raise ValueError("Invalid native semantic handler identity")
     if value["kind"] in KINDS:
         kind = value["kind"]
-        arity = 0 if kind in {"read_table", "from_items"} else 2 if kind in {"join", "union"} else 1
+        arity = 0 if kind in {"range", "read_table", "from_items"} else 2 if kind in {"join", "union"} else 1
         if len(value["datasets"]) != arity or len(set(value["datasets"])) != arity:
             raise ValueError(
                 "Native flow dataset port arity conflicts with its semantics"
@@ -199,6 +200,8 @@ def normalize_stream_parameters(arguments, *, batch=False, effective=True):
 def normalize_arguments(kind, execution, arguments):
     """Pure native normalization; managed resource admission is separate."""
     result = dict(arguments)
+    if kind == 'range' and (type(result['n']) is not int or result['n'] < 0):
+        raise ValueError('range requires a non-negative integer row count')
     if kind in {'sort', 'repartition', 'shuffle', 'block_order', 'sample'}:
         from .flow_ordering import normalize_ordering
         return normalize_ordering(kind, result)
@@ -310,6 +313,9 @@ def analyze_fields(kind, execution, arguments, *, inputs, callables, resources):
             raise ValueError('Bounded summaries require JSON scalar/list/record fields')
         return {'fields': {}, 'value_type': {**scalar('list'), 'item': {**scalar('record'), 'fields': schema}},
                 'driver': 'pull', 'input_driver': 'pull', 'cardinality': 'bounded', 'order': 'preserved'}
+    if kind == 'range':
+        return {'fields': {'id': field(scalar('int'))}, 'driver': 'pull',
+                'cardinality': 'bounded', 'order': 'preserved'}
     if kind == 'from_items':
         declared = resources['value_types']['items']
         if declared['kind'] != 'list' or declared.get('nullable'):

@@ -866,7 +866,7 @@ def inspect_coding_changes(root, changes, reference, *, exclude=()):
     """Resolve development check inputs using local, existing project controls."""
     import ast
     from functools import partial
-    from demiflow.forge.pipeline_check import check_changes
+    from demiflow.forge.pipeline_check import MAX_VARIANTS, check_changes
     from demiflow.forge.project_rules import ROLE_DIRS, diagnostic
     from .discovery import coding_view
 
@@ -876,7 +876,8 @@ def inspect_coding_changes(root, changes, reference, *, exclude=()):
     entries = view['entries']
     declared = {entry.partition(':')[0] for entry in entries}
     registered_parameters = {path for paths in entries.values() for path in paths}
-    relevant, coverage, layout = set(), [], []
+    relevant, possible_flows, coverage, layout = set(), [], [], []
+    outside_candidates = 0
     for change in changes:
         path = change['path']
         file = Path(path)
@@ -889,25 +890,39 @@ def inspect_coding_changes(root, changes, reference, *, exclude=()):
                 layout.append(diagnostic('DF-02', path, '项目登记的 flow 文件被删除。'))
             elif top != 'flows':
                 layout.append(diagnostic('DF-02', path, '项目登记的 flow 应位于 flows/。'))
-        if path in declared or path not in view['roles']['flows']:
+        in_flows = path in view['roles']['flows']
+        new_python = (path in relevant and top != 'flows' and file.suffix == '.py'
+                      and change.get('before') is None and change['after'] is not None)
+        if path in declared or file.name == '__init__.py' or not (in_flows or new_python):
             continue
-        if Path(path).name == '__init__.py':
-            continue
+        if new_python:
+            outside_candidates += 1
+            if outside_candidates > MAX_VARIANTS:
+                if outside_candidates == MAX_VARIANTS + 1:
+                    detail = '本轮新 Python 文件超过入口发现预算。'
+                    coverage.append(diagnostic('FL-10', '', detail, status='incomplete'))
+                    layout.append(diagnostic('DF-01', '', detail, status='incomplete'))
+                continue
         try:
             tree = ast.parse(read_bounded(relative_path(root, path), 128 * 1024))
         except SyntaxError as exc:
-            layout.append(diagnostic('DF-02', path, '无法解析 flow 源码。', line=exc.lineno))
-            coverage.append(diagnostic('FL-01', path, '源码语法错误。'))
+            if in_flows:
+                layout.append(diagnostic('DF-02', path, '无法解析 flow 源码。', line=exc.lineno))
+                coverage.append(diagnostic('FL-01', path, '源码语法错误。'))
             continue
         public = [node.name for node in tree.body if isinstance(node, ast.FunctionDef)
                   and not node.name.startswith('_')]
         if len(public) != 1:
-            layout.append(diagnostic('DF-02', path, '新 flow 需要一个明确的公开入口。'))
-            coverage.append(diagnostic('FL-01', path, '缺少唯一的 flow 入口。', status='incomplete'))
+            if in_flows:
+                layout.append(diagnostic('DF-02', path, '新 flow 需要一个明确的公开入口。'))
+                coverage.append(diagnostic('FL-01', path, '缺少唯一的 flow 入口。', status='incomplete'))
             continue
         entry = path + ':' + public[0]
         validate_entry(root, entry)
-        entries[entry] = [None]
+        if in_flows:
+            entries[entry] = [None]
+        else:
+            possible_flows.append(entry)
 
     # Shared definitions can affect any registered flow. Never guess a
     # dependency from a model message or silently skip an unregistered caller.
@@ -917,9 +932,6 @@ def inspect_coding_changes(root, changes, reference, *, exclude=()):
         shared = any(c['path'] in relevant and c['after'] is None for c in changes)
     if shared and any(path not in flow_paths and Path(path).name != '__init__.py' for path in view['roles']['flows']):
         coverage.append(diagnostic('FL-10', '', '项目有尚未绑定的 flow，无法确认所有共享依赖。', status='incomplete'))
-    if relevant and not entries:
-        coverage.append(diagnostic('FL-10', '', '没有可核对的 flow 入口。', status='incomplete'))
-
     def load(params):
         path = validate_parameter_path(root, params) if params is not None else None
         value = read_control(path) if path else None
@@ -940,10 +952,15 @@ def inspect_coding_changes(root, changes, reference, *, exclude=()):
             return resolve_flow_resources(root, tree, references, bindings, control=control or {'locations': {}})
         return args, tables, targets, resources, recheck
 
-    variants = ((entry, partial(load, params)) for entry, parameters in entries.items()
-                for params in parameters if relevant and
-                (shared or entry.partition(':')[0] in relevant or params in relevant))
-    return check_changes(root, changed=relevant, variants=variants,
+    def variants():
+        for entry, parameters in entries.items():
+            for params in parameters:
+                if relevant and (shared or entry.partition(':')[0] in relevant or params in relevant):
+                    yield entry, partial(load, params), False
+        for entry in possible_flows:
+            yield entry, partial(load, None), True
+
+    return check_changes(root, changed=relevant, variants=variants(),
                          layout_diagnostics=layout, coverage=coverage,
                          catalog=reference['catalog'], catalog_id=reference['catalog_id'])
 
@@ -1396,7 +1413,7 @@ def source_files(root, name):
     return sorted(paths)
 
 
-def source_inventory(root, value):
+def source_inventory(root, value, project):
     """Best-effort browsing/refresh inventory, never inspection evidence.
 
     One oversized or unreadable subtree must not disable the whole console.
@@ -1406,8 +1423,10 @@ def source_inventory(root, value):
     try:
         names = author_roots(root, value)
     except (ForgeError, OSError, ValueError) as exc:
-        return [], [f'源码浏览范围未完成：{str(exc)[:1024]}；不能据此判断规范检查结果。']
-    for name in names:
+        names = ()
+        diagnostics.append(f'源码浏览范围未完成：{str(exc)[:1024]}；不能据此判断规范检查结果。')
+    definition_roots = {item['path'] for role in ('operators', 'prompts') for item in project[role]}
+    for name in sorted(set(names) | definition_roots):
         try:
             found = source_files(root, name)
         except (ForgeError, OSError, ValueError) as exc:
@@ -1485,10 +1504,11 @@ def project_change_hints(root):
         return content_digest(values)
 
     value = read_control(root / 'workspace.json')
-    source_paths, source_diagnostics = source_inventory(root, value)
     from demiflow.workbench.projects.discovery import discover
+    project = discover(root, value)
+    source_paths, source_diagnostics = source_inventory(root, value, project)
     return dict(workspace=str(root), workspace_id=workspace_id(root, value),
-                discovery=discover(root, value)['digest'],
+                discovery=project['digest'],
                 audit=stamp([root / '.forge/audit/status.json']),
                 project_check=stamp([root / '.forge/project-check.json']),
                 workspace_stamp=stamp([root / 'workspace.json', root / 'README.md']),
@@ -1503,7 +1523,8 @@ def workspace_context(root):
 
     root, value, snapshot = load_workspace(root)
     from demiflow.workbench.projects.discovery import discover
-    paths, source_diagnostics = source_inventory(root, value)
+    project = discover(root, value)
+    paths, source_diagnostics = source_inventory(root, value, project)
     source_paths = [str(path.relative_to(root)) for path in paths if path.suffix == '.py']
     if len(source_paths) > 256:
         source_diagnostics.append('源码列表只显示前 256 个 Python 文件；显示范围不代表规范检查覆盖范围。')
@@ -1581,7 +1602,7 @@ def workspace_context(root):
         "readme": readme,
         "source_files": sorted(source_paths),
         "source_diagnostics": source_diagnostics,
-        "project": discover(root, value),
+        "project": project,
         "locations": value["locations"],
         "platform": value["platform"],
         "tables": tables,
