@@ -75,6 +75,16 @@ def default_profile(operation: LogicalOp | None, *, bounds: Bounds, state="none"
         owners = concurrency if getattr(options, "callable_scope", None) == "worker" else 1
         working_set += bounds.max_state_bytes * owners
         minimum += bounds.max_state_bytes * owners
+    from ..execution.dataflow_native import collect_fixed_residency
+    fixed = collect_fixed_residency(operation, concurrency=concurrency)
+    if fixed > bounds.max_resident_bytes:
+        from ..execution.contracts.dataflow_errors import DataflowRecoveryError
+        raise DataflowRecoveryError("RESOURCE_INFEASIBLE",
+                                    "Stream fixed residency exceeds its run memory budget")
+    # Fixed decoder/object workspaces coexist with payload and state. They are
+    # part of both codec-window endpoints, never optional slack to redistribute.
+    working_set += fixed
+    minimum += fixed
     requests = {"cpu_millis": 1000, "memory_bytes": working_set}
     native = getattr(operation, "native_options", None) if operation is not None else None
     resources = getattr(native, "worker_resources", None) or {}

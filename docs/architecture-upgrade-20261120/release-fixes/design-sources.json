@@ -1,0 +1,111 @@
+{
+  "base": "122edf4bd0c827338846abd0114f0b36cf8c1b6d",
+  "integration_readonly": "b68bf815bee5c4e8ae27a0d0459e48c98db0e03c",
+  "sources": [
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/engine/architecture-release-fixes-20261120/demiflow/execution/dataflow_native.py",
+      "sha256": "4614cd99ce93a7dcb16f7e8ebb9e1a7ef6b3980d17b897e171e73f532b22cc9e",
+      "integration_sha256": "4614cd99ce93a7dcb16f7e8ebb9e1a7ef6b3980d17b897e171e73f532b22cc9e",
+      "equal_integration": true
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/engine/architecture-release-fixes-20261120/demiflow/planning/dataflow_budget.py",
+      "sha256": "c6120f291b9039a5ec217bf24c500dbe1b5a64b1d2574318c7444208cc02b83f",
+      "integration_sha256": "c6120f291b9039a5ec217bf24c500dbe1b5a64b1d2574318c7444208cc02b83f",
+      "equal_integration": true
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/engine/architecture-release-fixes-20261120/demiflow/execution/run_reader.py",
+      "sha256": "65d1faa3379f05fb3c9c36183ce931f7cf921199e06ce53b21ee59fd86fe559e",
+      "integration_sha256": "65d1faa3379f05fb3c9c36183ce931f7cf921199e06ce53b21ee59fd86fe559e",
+      "equal_integration": true
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/engine/architecture-release-fixes-20261120/demiflow/collect/flow_contract.py",
+      "sha256": "2511a2b96ad7c504580cb8cc9a089f248eaf4c651d862895b33ce638623a36ea",
+      "integration_sha256": "2511a2b96ad7c504580cb8cc9a089f248eaf4c651d862895b33ce638623a36ea",
+      "equal_integration": true
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/engine/architecture-release-fixes-20261120/demiflow/execution/object_sink.py",
+      "sha256": "d13f76c59ea07c2d452ec42667877da20404599f95e3351f1a701885a1ce7478",
+      "integration_sha256": "d13f76c59ea07c2d452ec42667877da20404599f95e3351f1a701885a1ce7478",
+      "equal_integration": true
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/engine/architecture-release-fixes-20261120/demiflow/execution/publication_facts.py",
+      "sha256": "9b67fd85e1ee7b7de47080f36f82ca3dce003057c1fce8e631c03f8f2ac54016",
+      "integration_sha256": "9b67fd85e1ee7b7de47080f36f82ca3dce003057c1fce8e631c03f8f2ac54016",
+      "equal_integration": true
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/engine/architecture-release-fixes-20261120/tests/test_collect_flow_contract.py",
+      "sha256": "12b5370a85264af587fc3ea8ec7d22efd0c4ac5230e61c6d821bb985095c7730",
+      "integration_sha256": "643b9b985e6a3d4353db8f492ae12dd354e3a13cfbe951fcc88fcd5d8115352a",
+      "equal_integration": false
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/engine/architecture-release-fixes-20261120/tests/test_managed_image_joint.py",
+      "sha256": "133bc85e7ff703be8f0e6afe1ff9019a5e7b9c766ce8acf11ff9094b3890b072",
+      "integration_sha256": "ca73408c40a839354ea4abfd55a7bda7da0eee858275151845f49ca1f8757b98",
+      "equal_integration": false
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/engine/architecture-release-fixes-20261120/tests/test_upgrade_business_acceptance.py",
+      "sha256": "83f10f30cd02e49b19808657f43c6fcf9197abd5d8157d7cc6b3d88a6d1b1f90",
+      "integration_sha256": "51428d39b246808eb7ecc2da96c439694eb9cf944201d5b641d8a96bff1a515e",
+      "equal_integration": false
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/engine/architecture-release-fixes-20261120/tests/test_run_reader.py",
+      "sha256": "3e5a013b89f148ed48d65129605ed32a9de46082a256bc76ac9dbc3bc7e6ffac",
+      "integration_sha256": "3e5a013b89f148ed48d65129605ed32a9de46082a256bc76ac9dbc3bc7e6ffac",
+      "equal_integration": true
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/engine/architecture-release-fixes-20261120/tests/merge_gate.py",
+      "sha256": "b17918c7066d9d4b4e70e2c440871a998bce3b4820fec83dd41c03dc0e11da38",
+      "integration_sha256": "6762d2d91365420cefad0b48a1e068ed534d0d80823dd9b7633041090ee26c3f",
+      "equal_integration": false
+    }
+  ],
+  "references": [
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/EXECUTION-BASIS.txt",
+      "sha256": "f1a825a449efe760bc63d6f102989c04cede719721bb6857c3f654038f66f987"
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/CURRENT.json",
+      "sha256": "f976367cd3b7224d09edd0fda58a33734784b79250a2458f52df48396f3908b6"
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/USER-AUTHORIZATION.txt",
+      "sha256": "e6e242d9d2dd69a5d673bf9b9cdd5b9c7055a9ee0bbb4759c19fcb52710de606"
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/CONTEXT.txt",
+      "sha256": "2b80c32624012b4515ef156b0e53c772e1b347cbe45dd7b603a12c5781bdcfc8"
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/REVIEW-HANDOFF.txt",
+      "sha256": "ab0e45ee3434aa94f966f978c8470995e1c7cfcd59598f3d13788de412bfd934"
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/tasks/release-fixes/REQUEST.txt",
+      "sha256": "76675a10b3508f9f9241396475c01b1a34b92426319120ba3e5ef459ec00d008"
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/integration-handoff-v1/PLATFORM-RECEIPT.json",
+      "sha256": "6ca904b55df2395f34d4805ac8dd5b2229a3b0f814525622731d88aad4ad6b32"
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/platform-integration-v1/difference-decisions.json",
+      "sha256": "9acbbb5ccd152e155918dbd86c50ad7ebd55bf8f0abd555384c36e8eca5f673a"
+    },
+    {
+      "path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/shared-review/architecture-upgrade-20261120/platform-integration-v1/receipt-and-coverage-audit.json",
+      "sha256": "27deb6c5cd1039beb6ab0c02305c39d91a6fdd7471874ca8f42320bcdf1b0554"
+    }
+  ],
+  "tests_run_this_design": false
+}

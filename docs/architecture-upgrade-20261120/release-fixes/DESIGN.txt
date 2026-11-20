@@ -1,0 +1,39 @@
+发布阻塞有限修复，原 B 作者，2026-11-20
+
+基线和权限
+实际最新 main = 122edf4bd0c827338846abd0114f0b36cf8c1b6d；新树
+/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt/engine/architecture-release-fixes-20261120
+同名分支。只读 integration b68bf815bee5c4e8ae27a0d0459e48c98db0e03c。
+旧 B1423d2b 与证据不改。当前依据 EXECUTION-BASIS.txt 最新真人取消平台门禁方向；该项由 C 独立实施，本任务不删除门禁。三项各一小提交，固定后立即交父审/总控，不等待长文整理。无四线重跑、无正式目录/服务/业务/共享环境修改。
+
+已有失败证据复用
+总控 a6ddb4a 首批四线及 main122edf4 基线对照原件见 design-sources.json。具体：
+/tmp/demiflow-a20basechecks/001/receipt.json：128MiB run 接受256MiB image worker（1真实失败）。
+/tmp/demiflow-a20basechecks/012/receipt.json：原 prepared/acked 图片恢复失败，缺 _ReadonlyJournal.object_roots。基线实际执行 prepared-False、acked-False、acked-True，不能称4项均已基线执行；修复验收补完整4组合。
+/tmp/demiflow-a20businessnodes/002..005/meta.json：unedited、edited[module_helper/closure/default_args]逐node执行均 returncode=-9，非通过。旧 graph 四项失败另有裁定，不混成这4项；不扩大此轮去修它们。
+
+RF1 已声明 collect 固定驻留进入统一编译预算
+改前：collect.flow_contract.collect_facts 已对四种 exact native actor 给出 reserved_bytes；旧 payload_scope 在 physical_dataflow=True 时正确退役折叠算法，统一 default_profile 却只计算 payload/state，漏掉该量。
+改后：execution/dataflow_native.py 增纯事实 helper collect_fixed_residency(operation)，只识别原生 actor 的实际类型；普通函数短路，不执行用户回调、actor构造或资源读写。复用 collect_facts 原公式；并发采用真实 operation 并发，避免 actor声明与调度并发不一致导致漏计/重复乘算。
+planning/dataflow_budget.py::default_profile 将不可压缩固定驻留加进 working_set 和 minimum。codec_window 原有 minimum/target 调用同一函数，缩减codec不能减掉固定量。显式worker memory低于新minimum拒绝；fixed单项超过run memory直接拒绝，保持 RecoveryContractError catch面和“Stream fixed residency exceeds”可诊断消息（DataflowRecoveryError/RESOURCE_INFEASIBLE）；其他整图/副本/host仍由现有统一allocator准入。不恢复旧stream算法，不扩大预算，不重写历史sealed profiles或格式。
+验证：原预算负例、原4种collect真实actor正例；新增并发/实际并发不一致、显式worker grant不足、固定量不可被codec缩减、普通函数不访问伪资源属性；原terminal预算/封存恢复profile不变负例。
+
+RF2 有界只读 adapter object_roots 协议
+改前：ObjectRowsSink.for_inspection 调 journal.object_roots，writer已有而_ReadonlyJournal没有。storage_snapshot 已有64根、每字段64/4096/4096/32字节、记录8192字节的SQL读取和身份核验能力。
+改后：run_reader.py 将已有SQL读取提取为模块私有 helper，供 storage_snapshot 与 _ReadonlyJournal.object_roots 复用。adapter通过自身 _connection（read_run、mode=ro、deadline、路径/文件身份）读取表和runtime_identity并复用 _checked_native_roots。表不存在返回[]，65根/超长/非TEXT/错误owner拒绝；不扫描对象store。最多64个小记录；短事务结束就关闭。原权限仍在host，adapter不颁发权限、不新增writer方法，不构造RunContext；publication_facts/object_sink原检查不改。
+验证：原prepared/acked × intact/damaged完整4项，保持intact不重发/固定Lance版本/预算不重复，damaged checksum拒绝且attempt1/no新请求；adapter直接64/65根、长字段/错误owner/缺表/readonly/超时/symlink/FD关闭及源文件字节不变；原run_reader/publication_facts/P4 storage observation相关测试。若显露另一个协议缺口，先给父协调精确消费点，不绕过检查。
+
+RF3 四个旧 crash 夹具隔离及当前v3事实映射
+改前：_chain_recovery.execute worker_mode='thread'，_crash_hook第5行 SIGKILL(os.getpid()) 杀掉pytest，旧 %-chain 子action假设亦非当前v3事实。
+改后：只在该chain夹具改为真实process worker，SIGKILL击中任务worker；marker记录被杀PID，校验非pytest。保留真实故障与已ACK前缀，若需同步让故障窗口确定在原native ACK之后，用现有native checkpoint完成通知同步，不能伪造commit。_chain_child_id 仅本场景用，映射当前action-1真实journal提交，不改引擎。
+四node完整执行：unedited exact8行、类型/顺序/重复多重性、连续唯一acked提交、原RunRef恢复；module_helper/closure/default_args更改均拒绝，未生成混合或9999结果、旧ACK保留。真实capacity归零在外部release helper之前断言；清理仅本任务worker/私有root。若暴露恢复产品问题单列，不删除断言/skip/把unknown effect当成功。保留总控原-9与所有修复中失败。
+
+冲突/依赖
+C作者已确认不编辑上述产品/测试文件；其run_context等平台准入修改独立。
+E作者已确认E2不修预算；其修改planning/dataflow_configuration、capture_graph/lower_action、dataflow_policy及历史调用点，与RF1拟改dataflow_budget/dataflow_native无同文件重叠。E1 integration只在capture_graph加4阶段报告。
+拟改产品三文件和collect原公式在main/integration字节相同。相关测试已有P12调用迁移：collect DEFAULT_LIMITS移pipeline_policy；managed_image的attach_table/inspect_flow移project_operations；upgrade的sample_table与DEFAULT_LIMITS迁移。该树保留main调用，合流让Git保留已入integration迁移，不从integration起步、不回写旧调用。每个候选交父核差异。
+7冻结件、P4 _surface、merge_gate GUARDS均不计划变更；无新公共API、持久字段或跨版本承诺。平台源码身份变化记录为来源，去门禁由C负责。已有历史不重签不变更。
+
+验收与交付
+只新树和/tmp/demiflow-release-fixes-*，现有Python/env与原依赖。运行入口进程断言demiflow.__file__为本树，显式cwd、私有resource/forge/cache与native线程帽；原始命令、环境、完整SHA、collect/JUnit/log/退出码和资源清理留本任务implementation-v1。三项小提交逐个回传，最后完整候选clean及范围hash。此次无UI/交互变化，浏览器不适用；managed image通过真实Forge worker/loopback媒体服务验证，不调用付费provider。四线和正式合流/发版仍由唯一总控负责，不声称本定向验收等同总闸。
+设计阶段仅静态源码和既有原始回执核对，未重新执行测试；父审消息到件后才改产品。
