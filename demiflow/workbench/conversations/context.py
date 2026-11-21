@@ -138,7 +138,9 @@ class BridgeServer:
                 or request['turn_id'] != self.input_access.tid or request['epoch'] != self.input_access.epoch):
             reject('Development control capability does not match this turn', 'not_found')
         self.input_access.require_active()
-        method, params = request['method'], request['params']
+        return self.dispatch(request['method'], request['params'])
+
+    def dispatch(self, method, params):
         if method == 'tools/list' and params == {}:
             return dict(tools=[INPUT_TOOL])
         if method == 'tools/call' and type(params) is dict and set(params) == {'name', 'arguments'} and params['name'] == INPUT_TOOL['name']:

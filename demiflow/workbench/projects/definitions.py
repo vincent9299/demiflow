@@ -113,25 +113,35 @@ def _files(root, declarations, kind):
     return sorted(result)
 
 
-def catalog(root, *, data_tools=False):
+PLATFORM_ROOT = Path(__file__).resolve().parents[3]
+
+
+def catalog(root, *, data_tools=False, include_platform=False):
     root, control, snapshot = ws.load_workspace(root)
     items, diagnostics, sources, total = [], [], {}, 0
     if data_tools:
-        groups = [('data_tool', [{'path': 'data_tools'}])]
+        groups = [(root, 'data_tool', [{'path': 'data_tools'}])]
+        if include_platform:
+            groups.append((PLATFORM_ROOT, 'data_tool', [{'path': 'demiflow/data_tools'}]))
     else:
         facts = discover(root, control)
-        groups = [('code', facts['operators']), ('prompt', facts['prompts'])]
-    for kind, paths in groups:
-        for path in _files(root, paths, kind):
+        groups = [(root, 'code', facts['operators']), (root, 'prompt', facts['prompts'])]
+    source_files = {}
+    for base, kind, paths in groups:
+        for path in _files(base, paths, kind):
             raw = read_bounded(path, MAX_SOURCE); total += len(raw)
             if total > 4 * 1024**2:
                 raise ForgeError('Definition source bytes exceeded', code='resource_limit')
-            relative = path.relative_to(root).as_posix()
+            relative = path.relative_to(base).as_posix()
+            source_files[relative] = path
             sources[relative] = hashlib.sha256(raw).hexdigest()
             try:
                 for item in _items(relative, raw, kind):
                     item.update(id=content_digest([relative, kind, item['symbol']]), path=relative,
                                 sha256=content_digest(item['source']), file_sha256=sources[relative])
+                    if data_tools:
+                        item.update(origin='platform' if relative.startswith('demiflow/data_tools/') else 'project',
+                                    module=_module_name(relative))
                     item.pop('source')
                     item.pop('module_summary', None)
                     # Large Prompt bodies belong to the selected detail, never the index.
@@ -143,7 +153,7 @@ def catalog(root, *, data_tools=False):
                 if isinstance(exc, ForgeError) and exc.code == 'resource_limit': raise
                 diagnostics.append(dict(path=relative, detail=str(exc)[:256]))
     for path, digest in sources.items():
-        if hashlib.sha256(read_bounded(ws.relative_path(root, path), MAX_SOURCE)).hexdigest() != digest:
+        if hashlib.sha256(read_bounded(source_files[path], MAX_SOURCE)).hexdigest() != digest:
             raise ForgeError('Definitions changed during reading', code='conflict')
     result = dict(format='demiflow.project_data_tools.v1' if data_tools else 'demiflow.project_definitions.v1',
                   definitions=items, diagnostics=diagnostics, sources=sources)
@@ -232,11 +242,13 @@ def _notebook_entry(root, item, definition, module):
     return entry
 
 
-def read(root, *, id, revision='current', data_tools=False):
+def read(root, *, id, revision='current', data_tools=False, include_platform=False):
     root = Path(root)
-    index = catalog(root, data_tools=data_tools)
+    index = catalog(root, data_tools=data_tools, include_platform=include_platform)
     item = next((i for i in index['definitions'] if i['id'] == id), None)
     if item is None: raise ForgeError('Unknown declared definition', code='not_found')
+    if item.get('origin') == 'platform':
+        root = PLATFORM_ROOT
     if revision == 'current':
         raw = read_bounded(ws.relative_path(root, item['path']), MAX_SOURCE)
         if hashlib.sha256(raw).hexdigest() != item['file_sha256']:
@@ -259,7 +271,7 @@ def read(root, *, id, revision='current', data_tools=False):
     result = dict(definition, id=id, path=item['path'], revision=revision, historical=revision != 'current',
                   sha256=content_digest(definition['source']), file_sha256=hashlib.sha256(raw).hexdigest())
     if data_tools:
-        result['module'] = _module_name(item['path'])
+        result.update(module=item['module'], origin=item['origin'])
         if result['module'] and definition['tool_kind'] in ('view', 'annotation'):
             result['notebook_entry'] = _notebook_entry(root, item, definition, result['module'])
     bounded_json(result, 1024**2)

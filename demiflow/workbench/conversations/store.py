@@ -311,7 +311,7 @@ class Store:
 
     def submit(self, workspace, sid, submission_id, expected_revision, message, identity, policy_hash, operation="message"):
         text(message); identifier(submission_id); integer(expected_revision, 0, 2**31)
-        if operation not in {'message','compact','notebook_cell'}:reject('Unknown conversation operation')
+        if operation not in {'message','compact','notebook_cell','notebook_cell_cli'}:reject('Unknown conversation operation')
         hashed = digest({'text': message, **({'operation':operation} if operation!='message' else {})})
         with self.connect(write=True) as db:
             session = self._session(db, workspace, sid)
@@ -389,7 +389,7 @@ class Store:
         if 'state' in changes or 'delivery' in changes:
             self._event(db, old['session'], tid, old['epoch'], 'turn.state', {k: v for k, v in changes.items() if k not in {'context', 'baseline', 'process'}}, control=True)
         if changes.get('cleanup') == 'complete':
-            db.execute("UPDATE pending SET status='expired' WHERE turn=? AND status IN ('waiting','responding')", (tid,))
+            db.execute("UPDATE pending SET status='expired' WHERE turn=? AND status IN ('waiting','claimed','responding')", (tid,))
 
     def claim_worker(self, tid, epoch, unit_identity, supervisor):
         """A worker must bind the inherited fence before any tool can execute."""
@@ -466,7 +466,7 @@ class Store:
         with self.connect(write=True) as db:
             turn = dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone())
             if turn['stop_at'] or turn['cleanup'] == 'complete': reject('Turn no longer accepts input', 'conflict')
-            if db.execute("SELECT count(*) FROM pending WHERE turn=? AND status IN ('waiting','responding')", (tid,)).fetchone()[0] >= 4:
+            if db.execute("SELECT count(*) FROM pending WHERE turn=? AND status IN ('waiting','claimed','responding')", (tid,)).fetchone()[0] >= 4:
                 reject('Too many pending requests', 'resource_limit')
             for previous in db.execute('SELECT request FROM pending WHERE turn=? LIMIT 32', (tid,)):
                 if json.loads(previous['request']).get('rpc_id') == request.get('rpc_id'):
@@ -490,6 +490,21 @@ class Store:
             send()
             return True
 
+    def claim_cell_command(self, workspace, sid, tid, pending_id, expected_digest):
+        """Only the first live notebook subscriber may apply a command."""
+        with self.connect(write=True) as db:
+            self._session(db, workspace, sid)
+            row = db.execute("""SELECT p.*,t.stop_at,t.cleanup,t.operation FROM pending p
+                JOIN turns t ON t.id=p.turn AND t.epoch=p.epoch
+                WHERE p.id=? AND p.turn=? AND t.session=?""", (identifier(pending_id), tid, sid)).fetchone()
+            if (not row or row['digest'] != expected_digest or row['operation'] != 'notebook_cell_cli'
+                    or json.loads(row['request']).get('method') != 'notebook/command'):
+                reject('Notebook command identity mismatch', 'conflict')
+            if row['stop_at'] or row['cleanup'] != 'pending' or row['expires'] <= time.time():
+                reject('Notebook command expired', 'conflict')
+            updated = db.execute("UPDATE pending SET status='claimed' WHERE id=? AND status='waiting'", (pending_id,))
+            return {'claimed': bool(updated.rowcount)}
+
     def respond(self, workspace, sid, tid, pending_id, expected_digest, answer):
         raw = wire(answer, 16384).decode()
         with self.connect(write=True) as db:
@@ -501,15 +516,19 @@ class Store:
             if row['answer'] is not None:
                 if row['answer'] != raw: reject('Input already has a different answer', 'conflict')
                 return dict(id=pending_id, status=row['status'])
-            if row['expires'] < time.time() or turn['stop_at'] or turn['cleanup'] == 'complete' or row['status'] != 'waiting':
+            if row['expires'] < time.time() or turn['stop_at'] or turn['cleanup'] == 'complete' or row['status'] not in {'waiting','claimed'}:
                 reject('Input request expired', 'conflict')
-            db.execute("UPDATE pending SET answer=?,status='responding' WHERE id=?", (raw, pending_id))
+            cell = json.loads(row['request']).get('method') == 'notebook/command'
+            if cell and row['status'] != 'claimed':
+                reject('Notebook command has not been claimed', 'conflict')
+            status = 'delivered' if cell else 'responding'
+            db.execute("UPDATE pending SET answer=?,status=? WHERE id=?", (raw, status, pending_id))
             db.execute('UPDATE sessions SET metadata_bytes=metadata_bytes+? WHERE id=?', (len(raw.encode()), sid))
-            return dict(id=pending_id, status='responding')
+            return dict(id=pending_id, status=status)
 
     def pending(self, tid):
         with self.connect() as db:
-            return [dict(row) for row in db.execute("SELECT * FROM pending WHERE turn=? AND status IN ('waiting','responding') LIMIT 4", (tid,))]
+            return [dict(row) for row in db.execute("SELECT * FROM pending WHERE turn=? AND status IN ('waiting','claimed','responding') LIMIT 4", (tid,))]
 
     def resolved(self, key):
         with self.connect(write=True) as db:

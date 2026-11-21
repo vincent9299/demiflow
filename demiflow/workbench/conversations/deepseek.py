@@ -94,6 +94,8 @@ class DeepSeek:
         env=dict(PATH=str(Path(config.get('node',config['executable'])).parent)+':/usr/bin:/bin',HOME=str(home),DSH_HOME=str(dsh_home),
                  TMPDIR=str(home/'tmp'),LANG='C.UTF-8',DSH_PERMISSION_MODE='danger-full-access',OMP_NUM_THREADS='2',OPENBLAS_NUM_THREADS='2')
         if config.get('credential_env'):env['DEEPSEEK_API_KEY']=os.environ[config['credential_env']]
+        if config.get('_cell_bin'):
+            env['PATH'] = config['_cell_bin'] + ':' + env['PATH']
         env.update(proxy_environment(config))
         if config.get('inherit_proxy'):
             env['NODE_USE_ENV_PROXY'] = '1'

@@ -46,7 +46,7 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
     read = [root, *[path for path in sources if path.is_file()]]
     openssl = Path('/etc/ssl/openssl.cnf')
     if openssl.is_file(): read.append(openssl)
-    readonly = turn.get('operation') in ('compact','notebook_cell')
+    readonly = turn.get('operation') in ('compact','notebook_cell','notebook_cell_cli')
     writes = [] if readonly else [root / name for name in project['writes']]
     protected = [root / name for name in ('.git', '.forge', 'AGENTS.md', 'workspace.json', 'PIPELINE_SPEC.md')]
     protected.extend(path for path in sources if path.name in {'AGENTS.md', 'PIPELINE_SPEC.md'})
@@ -96,7 +96,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
     store = Store(deployment.state, deployment.limits)
     turn = store.turn(tid); session = store.session(turn['session'])
     compact = turn.get('operation') == 'compact'
-    notebook = turn.get('operation') == 'notebook_cell'
+    cell_cli = turn.get('operation') == 'notebook_cell_cli'
+    notebook = cell_cli or turn.get('operation') == 'notebook_cell'
     with store.connect() as db:
         history_boundary = db.execute('SELECT min(sequence)-1 FROM events WHERE turn=?',(tid,)).fetchone()[0] or 0
     project = deployment.project(session['workspace'], json.loads(session['root'])['path'])
@@ -209,12 +210,15 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
             if deployment.mode != 'restricted':
                 reject('Notebook generation requires a read-only project scope')
             project = dict(project, writes=[])
-            prompt = ('你是当前 Notebook 的数据助手。根据用户意图和前文生成一格可以直接在当前 Python 内核运行的代码。'
-                      '查阅项目 data_tools 中已声明的函数、类和组件，按真实签名组合。需要交互时使用 ipywidgets，'
-                      '将筛选、联动和人工确认保存在控件内。数据和单元格内容是参考资料。不要编辑文件或运行用户的任务。'
-                      '对于写入解释保存目标，把写入放在显式确认回调中。信息不足时直接提问。'
-                      '简短回答，把完整单元格放在一个围栏标为 python 的代码块里。')
-            manifest = dict(operation='notebook_cell', sources=[], bytes=len(prompt.encode()))
+            if cell_cli:
+                from demiflow.workbench.notebooks.cell_commands import CellCommands
+                control_bridge = CellCommands(store, turn, deadline)
+                skill = Path(__file__).parents[1] / 'notebooks/skills/dataskill/SKILL.md'
+                prompt = skill.read_text(encoding='utf-8')
+            else:
+                prompt = ('根据要求、数据字典与已声明工具生成当前 cell 的完整源码。数据与源码仅供参考。'
+                          '只返回说明和一个 Python 代码块，不编辑项目或执行任务。写入操作由用户显式确认。')
+            manifest = dict(operation=turn['operation'], sources=[], bytes=len(prompt.encode()))
             store.update(tid, context=wire(manifest).decode(), delivery='prepared')
         else:
             if guided:
@@ -246,11 +250,16 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
             broker_home.mkdir(mode=0o700, parents=True, exist_ok=True)
         confined = sandbox_spec(deployment, project, session, turn, manifest, config, provider_home) if deployment.mode == 'restricted' else None
         if confined is not None:
+            if cell_cli:
+                from dataclasses import replace
+                confined = replace(confined, runtime_paths=(*confined.runtime_paths, str(control_bridge.bin)))
             from demiflow.workbench.conversations.sandbox import specification
             specification(confined, [sys.executable], {}, project['root'])
             from demiflow.workbench.conversations.model_broker import start_model_broker
             model_broker = start_model_broker(deployment, turn, session, broker_home)
             config = model_broker.child_config
+            if cell_cli:
+                config = {**config, '_cell_bin': str(control_bridge.bin)}
         process = launch_provider(mode=deployment.mode, adapter=adapter, config=config,
             home=provider_home, root=project['root'], lease_fd=lease_fd, sandbox_spec=confined,
             control_socket=control_bridge.path if control_bridge is not None else None,
@@ -329,6 +338,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                         transport.send(dict(id=data['rpc_id'], result=result))
                     else: emit(kind, data)
             for pending in store.pending(tid):
+                if cell_cli and json.loads(pending['request']).get('method') == 'notebook/command':
+                    continue
                 tick()
                 if requested: break
                 request = outstanding.get(pending['id'])

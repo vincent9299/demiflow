@@ -135,7 +135,8 @@ class Service:
 
     def start_project(self, workspace, root, session_id, submission_id, expected_revision, text, operation='message'):
         self._require_writable(workspace,root,session_id)
-        if operation == 'notebook_cell' and not self.capabilities(workspace,root).get('notebook_cells'):
+        cell_capability = {'notebook_cell':'notebook_cells', 'notebook_cell_cli':'notebook_cli'}.get(operation)
+        if cell_capability and not self.capabilities(workspace,root).get(cell_capability):
             reject('当前开发服务未提供只读的 Notebook 单元格生成。')
         return self.start(workspace,root,session_id,submission_id,expected_revision,text,operation=operation)
 
@@ -321,12 +322,21 @@ class Service:
                 pass  # Historical events remain readable if the grant is missing.
         return value
 
+    def claim_cell_command(self, workspace, root, session_id, turn_id, pending_request_id, expected_digest):
+        self.project(workspace, root)
+        return self.store.claim_cell_command(workspace, session_id, turn_id, pending_request_id, expected_digest)
+
     def input(self, workspace, root, session_id, turn_id, pending_request_id, expected_digest, answer):
         self.project(workspace, root)
         self.store.show(workspace, session_id)
         pending = next((p for p in self.store.pending(turn_id) if p['id'] == pending_request_id), None)
         if pending:
-            adapter_for(self.store.session(session_id)['provider']).answer(json.loads(pending['request']), answer)
+            request = json.loads(pending['request'])
+            if request.get('method') == 'notebook/command':
+                if type(answer) is not dict or set(answer) not in ({'value'}, {'error'}):
+                    reject('Invalid notebook command response', 'invalid_request')
+            else:
+                adapter_for(self.store.session(session_id)['provider']).answer(request, answer)
         return self.store.respond(workspace, session_id, turn_id, pending_request_id, expected_digest, answer)
 
     def cancel(self, workspace, root, session_id, turn_id, request_id):

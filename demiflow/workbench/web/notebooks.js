@@ -157,9 +157,9 @@
     const navigation=ForgeNavigation.header({title:'数据',searchLabel:'搜索数据字典',placeholder:'表名或已读取字段',onSearch:()=>filterLists()});
     const {search}=navigation;
     const list=node('div',undefined,'dictionary-list');
-    const panes={dictionary:list,analysis:node('div'),annotation:node('div')};
-    const labels={dictionary:'数据字典',analysis:'分析工具',annotation:'标注工具'};
-    const filters={dictionary:'',analysis:'',annotation:''};
+    const panes={dictionary:list,tools:node('div')};
+    const labels={dictionary:'数据字典',tools:'工具'};
+    const filters={dictionary:'',tools:''};
     let activeTab='dictionary',toolIndex=null,loadingTools=false;
     const tabs=ForgeNavigation.categoryTabs('数据分类',Object.entries(labels),key=>{
       filters[activeTab]=search.value;activeTab=key;search.value=filters[key];
@@ -200,11 +200,11 @@
         files.get(item.path).push(item);
       }
       for(const [path,entries] of files){
-        const file=node('details',undefined,'dictionary-table');file.open=!!query||files.size<4;
-        const heading=node('summary',path);heading.title=path;file.append(heading);
+        const file=node('details',undefined,'dictionary-table');file.open=!!query||files.size<5;
+        const heading=node('summary',entries[0].origin==='platform'?'内置 · '+entries[0].module:path);heading.title=path;file.append(heading);
         for(const item of entries){
           const button=node('button',undefined,'data-tool-leaf');button.type='button';
-          const type={analysis:'分析',view:'查看',annotation:'工具',annotation_component:'组件'}[item.tool_kind];
+          const type={analysis:'分析',tool:'工具',view:'查看',annotation:'标注',annotation_component:'组件'}[item.tool_kind];
           button.append(node('span',item.symbol),node('small',type));
           button.title=item.description||item.path;
           button.onclick=()=>cards?cards.ask(item):openTool(item);
@@ -230,6 +230,60 @@
       }finally{loadingTools=false;}
     }
     const tables=new Map();
+    let directory={tables:[],diagnostics:[]},scan=0,scanning;
+    async function scanDirectory(){
+      const epoch=++scan;
+      try{const result=await api('dictionary-sources');if(!alive()||epoch!==scan)return;directory=result;}
+      catch(error){if(!alive()||epoch!==scan)return;directory={tables:[],diagnostics:[error.message]};}
+      populate(context);
+    }
+    async function tableDetail(item){
+      const expected=item.expected||context.project?.digest;
+      const expectedBinding=request.alias===item.alias
+        ?(request.kind==='table_request'?request.expected_binding:request.binding_digest)||item.binding
+        :item.binding;
+      const result=item.original
+        ?await api('project-table',{id:item.original.id,expected,...(item.original.version?{version:item.original.version}:{})})
+        :await api('table',{alias:item.alias,...(expectedBinding?{expected_binding:expectedBinding}:{}),
+            ...(request.alias===item.alias&&request.version?{version:request.version,version_binding:request.binding_digest,expected_binding:request.alias_binding}:{})});
+      const fields=item.original?result.fields:result.metadata?.fields||{};
+      const fixedVersion=item.original?result.version:result.binding.reference.ref.lance_version;
+      const rows=item.original?result.row_count:result.binding.reference.ref.row_count;
+      const binding=item.original?result.binding:result.binding.digest;
+      const columns=Object.keys(fields).slice(0,16);
+      const encoded=JSON.stringify;
+      let code;
+      if(item.original){
+        code='from demiflow.workbench.notebooks.data import project_sample\n\ndf = project_sample('+encoded(item.original.id)+', expected='+encoded(expected)+', version='+fixedVersion+', binding='+encoded(binding)+', columns='+encoded(columns)+', limit=20)\ndf';
+      }else{
+        const historical=request.alias===item.alias&&!!request.version;
+        code='from demiflow.workbench.notebooks.data import sample\n\ndf = sample('+encoded(item.alias)+', binding='+encoded(historical?request.alias_binding:binding)+(historical?', version='+fixedVersion+', version_binding='+encoded(binding):'')+', columns='+encoded(columns)+', limit=20)\ndf';
+      }
+      return {fields,fixedVersion,rows,binding,code};
+    }
+    async function catalogCommand(command,args){
+      const dictionary=args.group==='dictionary';
+      if(dictionary)await scanning;
+      const tools=dictionary?[]:(await api('project-data-tools')).definitions;
+      if(command==='catalog.list'){
+        const values=dictionary?[...tables.values()].map(({item})=>({id:item.key,name:item.label,version:item.version})):
+          tools.map(item=>({id:item.id,name:item.symbol,module:item.module,origin:item.origin,kind:item.tool_kind}));
+        const offset=args.offset,items=values.slice(offset,offset+12);
+        return {items,next_offset:offset+items.length<values.length?offset+items.length:null};
+      }
+      if(dictionary){
+        const entry=tables.get(args.id);if(!entry)throw Error('数据目录已变化，请重新查询。');
+        const {fields,fixedVersion,rows,binding,code}=await tableDetail(entry.item);
+        const names=Object.keys(fields),offset=args.offset||0;
+        return {version:fixedVersion,rows,binding,read:code,fields:names.slice(offset,offset+12).map(name=>[name,fields[name]?.type?.kind||fields[name]?.type||'']),
+          next_offset:offset+12<names.length?offset+12:null};
+      }
+      const item=tools.find(i=>i.id===args.id);if(!item)throw Error('未找到此工具。');
+      const info=await api('data-tool-definition',{id:item.id});
+      return {symbol:info.symbol,module:info.module,origin:info.origin,kind:info.tool_kind,
+        signature:info.signature,description:(info.description||'').slice(0,2000),
+        import:info.module?'from '+info.module+' import '+info.symbol:null};
+    }
     function add(item) {
       if(tables.has(item.key))return;
       const row=node('details',undefined,'dictionary-table');row.dataset.table=item.key;
@@ -241,19 +295,8 @@
         if(!row.open||entry.loaded||entry.loading)return;
         entry.loading=true;content.replaceChildren(node('p','读取字段…','dictionary-meta'));
         try{
-          const expected=context.project?.digest;
-          const expectedBinding=request.alias===item.alias
-            ?(request.kind==='table_request'?request.expected_binding:request.binding_digest)||item.binding
-            :item.binding;
-          const result=item.original
-            ?await api('project-table',{id:item.original.id,expected,...(item.original.version?{version:item.original.version}:{})})
-            :await api('table',{alias:item.alias,...(expectedBinding?{expected_binding:expectedBinding}:{}),
-                ...(request.alias===item.alias&&request.version?{version:request.version,version_binding:request.binding_digest,expected_binding:request.alias_binding}:{})});
+          const {fields,fixedVersion,rows,binding,code}=await tableDetail(item);
           if(!alive()||tables.get(item.key)!==entry||!row.isConnected)return;
-          const fields=item.original?result.fields:result.metadata?.fields||{};
-          const fixedVersion=item.original?result.version:result.binding.reference.ref.lance_version;
-          const rows=item.original?result.row_count:result.binding.reference.ref.row_count;
-          const binding=item.original?result.binding:result.binding.digest;
           version.textContent='v'+fixedVersion;
           entry.fieldNames=Object.keys(fields);entry.loaded=true;content.replaceChildren();
           content.append(node('p',rows+' 行 · '+entry.fieldNames.length+' 字段','dictionary-meta'));
@@ -265,15 +308,6 @@
           insertButton.title='插入固定版本的读取代码，不自动运行';insertButton.disabled=!context.capabilities?.analysis_write;
           insertButton.onclick=async()=>{
             try{
-              const columns=entry.fieldNames.slice(0,16);
-              const encoded=JSON.stringify;
-              let code;
-              if(item.original){
-                code='from demiflow.workbench.notebooks.data import project_sample\n\ndf = project_sample('+encoded(item.original.id)+', expected='+encoded(expected)+', version='+fixedVersion+', binding='+encoded(binding)+', columns='+encoded(columns)+', limit=20)\ndf';
-              }else{
-                const historical=request.alias===item.alias&&!!request.version;
-                code='from demiflow.workbench.notebooks.data import sample\n\ndf = sample('+encoded(item.alias)+', binding='+encoded(historical?request.alias_binding:binding)+(historical?', version='+fixedVersion+', version_binding='+encoded(binding):'')+', columns='+encoded(columns)+', limit=20)\ndf';
-              }
               if(!session)throw Error('Jupyter 尚未连接。');
               await insert(session,code);
             }catch(error){const message=node('p',error.message,'dictionary-meta');content.append(message);setTimeout(()=>message.remove(),5000);}
@@ -291,8 +325,10 @@
       if(request.alias===item.alias||originalPath===item.original?.path)row.open=true;
     }
     function populate(fresh) {
+      const covered=new Set([...(fresh.tables||[]).map(t=>t.uri),...(fresh.project?.tables||[]).filter(t=>t.status==='available').map(t=>fresh.workspace+'/'+t.path)]);
       const entries=[...(fresh.tables||[]).map(table=>({key:'bound:'+table.alias,label:table.alias,alias:table.alias,binding:table.binding_digest,version:table.reference.ref.lance_version})),
-        ...(fresh.project?.tables||[]).filter(ref=>ref.status==='available').map(ref=>({key:'original:'+ref.id,label:ref.path,original:ref,version:ref.version,expected:fresh.project.digest}))];
+        ...(fresh.project?.tables||[]).filter(ref=>ref.status==='available').map(ref=>({key:'original:'+ref.id,label:ref.path,original:ref,version:ref.version,expected:fresh.project.digest})),
+        ...directory.tables.filter(ref=>!covered.has(ref.uri)).map(ref=>({key:'directory:'+ref.id,label:ref.path,original:ref,version:ref.version,expected:ref.expected}))];
       const current=new Map(entries.map(item=>[item.key,item]));
       for(const [key,entry] of tables){
         if(!current.has(key)||JSON.stringify(current.get(key))!==JSON.stringify(entry.item)){
@@ -300,11 +336,12 @@
         }
       }
       for(const item of entries)add(item);
-      list.querySelector('.dictionary-empty')?.remove();
+      list.querySelectorAll('.dictionary-empty,.dictionary-warning').forEach(n=>n.remove());
+      for(const issue of directory.diagnostics)list.append(node('p',issue,'dictionary-warning'));
       if(!tables.size)list.append(node('p','尚未登记数据表。其他输入文件可以直接在 Notebook 中读取。','dictionary-empty'));
       filterLists();
     }
-    populate(context);
+    populate(context);scanning=scanDirectory();
     function filterLists(){
       const value=search.value.trim().toLocaleLowerCase();
       if(activeTab==='dictionary'){
@@ -313,8 +350,7 @@
         const toolPane=panes[activeTab];
         if(toolPane.dataset.revision===toolIndex.revision&&toolPane.dataset.query===value)return;
         toolPane.dataset.revision=toolIndex.revision;toolPane.dataset.query=value;
-        const types=activeTab==='analysis'?['analysis','view']:['annotation','annotation_component'];
-        paintTools(toolPane,toolIndex.definitions.filter(item=>types.includes(item.tool_kind)),value);
+        paintTools(toolPane,toolIndex.definitions,value);
         if(!toolPane.childElementCount)toolPane.append(node('p',value?'没有匹配的结果。':'项目尚未声明'+labels[activeTab]+'。','dictionary-empty'));
         for(const issue of toolIndex.diagnostics)toolPane.append(node('p',issue.path+' · '+issue.detail,'op-error'));
       }
@@ -331,9 +367,9 @@
             cards=mountCards({desk,documentPane,panel,app:session.frame.contentWindow.jupyterapp,api,project,alive,
               permissions:()=>context.capabilities||{},tables:()=>[...tables.values()].map(({item,fieldNames})=>({
                 table:item.original?item.original.id:item.alias,version:item.version,binding:item.binding,
-                expected:item.original?context.project?.digest:undefined,fields:fieldNames,
+                expected:item.expected,fields:fieldNames,
                 reader:item.original?'demiflow.workbench.notebooks.data.project_sample':'demiflow.workbench.notebooks.data.sample'})),
-              layout:resize});
+              catalogCommand,layout:resize});
           }catch(error){fail(error);}
         };
         if(session.readyPanel)session.onPanel(session.readyPanel);
@@ -341,7 +377,7 @@
     }else{status.textContent='此服务尚未启用原生 Jupyter Notebook。';}
     return {
       canLeave:()=>true,
-      updateContext(fresh){if(alive()){context=fresh;populate(fresh);}},
+      updateContext(fresh){if(alive()){context=fresh;populate(fresh);scanning=scanDirectory();}},
       dispose(){if(disposed)return;disposed=true;if(toolsDialog?.open)toolsDialog.close();cards?.dispose();dictionaryNavigation.dispose();observer.disconnect();window.removeEventListener('resize',resize);window.removeEventListener('scroll',resize,true);if(session){session.onPanel=null;session.host=null;position(session);}parent.classList.remove('native-data-active');}
     };
   }

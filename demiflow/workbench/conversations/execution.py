@@ -70,6 +70,9 @@ it is not proof that hostile descendants stopped and cannot authorize L2.
         private = {key: value for key, value in config.items()
                    if key not in {'native_credentials', 'credential_env', 'inherit_proxy'}}
         command, environment = adapter.launch(private, home, root)
+        if config.get('_cell_bin') and adapter.name == 'codex':
+            wrapper = Path(__file__).parents[1] / 'notebooks/data_cli.py'
+            command = [sys.executable, '-IB', str(wrapper), '--provider', *command]
         process = launch_sandbox(command, spec=sandbox_spec, env=environment, cwd=root,
             lease_fd=lease_fd, control_socket=control_socket, model_socket=model_socket)
         return process
