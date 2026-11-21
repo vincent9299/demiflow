@@ -56,14 +56,33 @@ async function answer(api,sid,turn,after,active){
   throw Error('稍后可取回这次回复。');
 }
 
-export function notebookConversation({api,project,path,active}){
-  const key='demiflow.notebook-assistant.'+project+'.'+path;
+export function notebookConversation({api,project,path,cell,active}){
+  const key='demiflow.notebook-assistant.cell.'+JSON.stringify([project,path,cell]);
   let record={};
-  try{record=JSON.parse(sessionStorage.getItem(key)||'{}')||{};}catch{}
+  try{
+    const saved=sessionStorage.getItem(key);
+    if(saved)record=JSON.parse(saved)||{};
+    else{
+      // A previous version kept one pending turn per notebook. Finish it on
+      // its original cell, then start a dedicated session for future prompts.
+      const oldKey='demiflow.notebook-assistant.'+project+'.'+path;
+      const old=JSON.parse(sessionStorage.getItem(oldKey)||'{}');
+      if(old?.pending?.cell===cell){
+        record={...old,legacyPending:true};
+        sessionStorage.setItem(key,JSON.stringify(record));sessionStorage.removeItem(oldKey);
+      }
+    }
+  }catch{}
   const save=()=>{try{sessionStorage.setItem(key,JSON.stringify(record));}catch{}};
+  function finishTurn(){
+    if(record.legacyPending)record={};
+    else delete record.pending;
+    save();
+  }
   async function generate(request,context){
+    if(context.cell!==cell)throw Error('此对话属于另一张卡片。');
     let pending=record.pending;
-    if(pending&&pending.cell!==context.cell)throw Error('请先回到原卡片取回上一条回复。');
+    if(pending&&pending.cell!==cell)throw Error('该请求属于另一张卡片。');
     if(!pending?.turn){
       const caps=await api('dev-capabilities');
       const provider=caps.providers?.find(p=>p.available);
@@ -89,15 +108,15 @@ export function notebookConversation({api,project,path,active}){
         const turn=await api('dev-turn-start',{}, {session_id:record.sid,submission_id:pending.id,expected_revision:pending.revision,text:pending.prompt,operation:'notebook_cell'});
         pending.turn=turn.id;save();
       }catch(error){
-        if(['conflict','invalid_request','operation_rejected','resource_limit','busy','not_found','permission_denied'].includes(error.code)){delete record.pending;save();}
+        if(['conflict','invalid_request','operation_rejected','resource_limit','busy','not_found','permission_denied'].includes(error.code)){finishTurn();}
         throw error;
       }
     }
     try{
       const result=await answer(api,record.sid,pending.turn,pending.after,active);
-      delete record.pending;save();
+      finishTurn();
       return {...result,source:pending.source,request:pending.request,turn:pending.turn};
-    }catch(error){if(error.finished){delete record.pending;save();}throw error;}
+    }catch(error){if(error.finished){finishTurn();}throw error;}
   }
   return {generate,get pending(){return record.pending;},get sessionId(){return record.sid;}};
 }

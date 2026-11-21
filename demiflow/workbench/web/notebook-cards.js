@@ -28,15 +28,19 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
   const input=element(document,'textarea');input.rows=2;input.placeholder='描述你想做的分析或标注…';input.setAttribute('aria-label','卡片要求');
   const send=icon(document,'up','发送要求');send.type='submit';
   const messages=new Map(),drafts=new Map(),refs=new Map(),decorated=new Map();
-  let selectedId=null,busy=false,dead=false,classic=false,assistantOpen=false,paintFrame=0;
-  let path=panel.context.path,conversation;
+  const conversations=new Map(),inFlight=new Set();
+  let selectedId=null,dead=false,classic=false,assistantOpen=false,paintFrame=0;
+  let path=panel.context.path;
   const viewKey=()=>JSON.stringify(['demiflow.notebook.cards',project,path]);
   const valid=()=>!dead&&alive()&&!panel.isDisposed;
   const writable=()=>!!permissions().analysis_write&&!panel.model?.readOnly;
   const cells=()=>book.widgets;
   const selected=()=>book.activeCell?.model?.type==='code'?book.activeCell:null;
   const cellById=id=>cells().find(cell=>cell.model.id===id);
-  function newConversation(){return notebookConversation({api,project,path,active:valid});}
+  function assistantFor(id){
+    if(!conversations.has(id))conversations.set(id,notebookConversation({api,project,path,cell:id,active:valid}));
+    return conversations.get(id);
+  }
   function remember(){
     if(selectedId)drafts.set(selectedId,input.value);
     const recent=map=>[...map].slice(-16);
@@ -47,7 +51,6 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
       if(raw.length<=192000)sessionStorage.setItem(viewKey(),raw);
     }catch{}
   }
-  conversation=newConversation();
   let savedOpen=null;
   try{
     const state=JSON.parse(sessionStorage.getItem(viewKey())||'{}');
@@ -55,7 +58,7 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
     for(const [id,draft] of state.drafts||[])if(typeof draft==='string')drafts.set(id,draft);
     if(typeof state.open==='boolean')savedOpen=state.open;
   }catch{}
-  function rename(){path=panel.context.path;title.textContent=path.split('/').pop().replace(/\.ipynb$/,'');conversation=newConversation();}
+  function rename(){if(path!==panel.context.path)conversations.clear();path=panel.context.path;title.textContent=path.split('/').pop().replace(/\.ipynb$/,'');}
   function focusCell(cell){book.deselectAll();book.activeCellIndex=cells().indexOf(cell);}
   function newCell(source=''){
     if(!writable())return null;
@@ -103,7 +106,8 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
       const chip=element(document,'span','df-tool-chip',item.symbol);
       chip.append(icon(document,'close','取消引用 '+item.symbol,()=>{refs.set(id,items.filter(i=>i.id!==item.id));renderThread();}));reference.append(chip);
     }
-    const pending=conversation.pending;
+    const pending=id?assistantFor(id).pending:null;
+    const busy=inFlight.has(id);
     input.disabled=busy||!writable()||!id;send.disabled=input.disabled;
     if(!id){thread.append(element(document,'p','df-chat-status','选中一张代码卡片即可调整。'));return;}
     for(const row of messages.get(id)||[]){
@@ -134,26 +138,36 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
     else applied=newCell(row.code);
     if(!applied)return;
     applied.model.setMetadata('demiflow_card_title',row.request.slice(0,80));
-    applied.node.dataset.dfFolded='false';row.code=null;row.text||='已生成卡片。';
+    applied.model.setMetadata('demiflow_card_needs_run',true);
+    applied.node.dataset.dfFolded='false';
+    if(!win.matchMedia('(prefers-reduced-motion: reduce)').matches)applied.node.animate(
+      [{boxShadow:'0 0 0 2px #91a9ed'},{boxShadow:'0 0 0 2px transparent'}],{duration:850,easing:'ease-out'});
+    row.code=null;row.text||='已生成卡片。';
     schedulePaint();renderThread();remember();
   }
   async function submit(request){
-    const cell=selected();if(!cell||busy||!request.trim()||!writable())return;
+    const cell=selected();if(!cell||inFlight.has(cell.model.id)||!request.trim()||!writable())return;
     const id=cell.model.id,source=sourceOf(cell),index=book.activeCellIndex,initialPath=path;
     const context={path,cell:id,source,before:cells().slice(Math.max(0,index-3),index).filter(c=>c.model.type==='code').map(sourceOf).join('\n'),
       output:cell.outputArea?.node.innerText||'',tables:tables(),selected:refs.get(id)||[]};
-    busy=true;renderThread();
+    inFlight.add(id);schedulePaint();renderThread();
     try{
-      const result=await conversation.generate(request,context);
+      const result=await assistantFor(id).generate(request,context);
       if(!valid()||path!==initialPath)return;
       const row={request:result.request,source:result.source,code:result.code,text:result.message};
       drafts.delete(id);if(selectedId===id)input.value='';saveMessage(id,row);
-      if(row.code&&cellById(id)&&!sourceOf(cell).trim()&&sourceOf(cell)===row.source)applyCode(row,cell);
+      const target=cellById(id);
+      if(row.code&&target&&sourceOf(target)===row.source)applyCode(row,target);
     }catch(error){if(valid())saveMessage(id,{request,text:error.message});}
-    finally{busy=false;if(valid())renderThread();}
+    finally{inFlight.delete(id);if(valid()){schedulePaint();renderThread();}}
   }
   form.onsubmit=e=>{e.preventDefault();submit(input.value);};
   input.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();form.requestSubmit();}};
+  function onExecution(model,change){
+    if(change.name==='executionState'&&change.newValue==='running'&&model.getMetadata('demiflow_card_needs_run')){
+      model.deleteMetadata('demiflow_card_needs_run');schedulePaint();
+    }
+  }
   function decorate(){
     paintFrame=0;if(!valid())return;
     for(const [cell,bar] of decorated)if(cell.isDisposed){bar.remove();decorated.delete(cell);}
@@ -162,6 +176,7 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
       let bar=decorated.get(cell);
       if(!bar){
         bar=element(doc,'header','df-cell-tools');const name=element(doc,'span','df-cell-title');
+        const status=element(doc,'span','df-cell-status');status.setAttribute('role','status');
         const edit=icon(doc,'code','编辑代码',()=>{
           focusCell(cell);
           const fold=cell.model.outputs.length>0&&cell.node.dataset.dfFolded==='false';
@@ -187,13 +202,17 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
             }
           }finally{run.disabled=!permissions().analysis_execute;schedulePaint();}
         });
-        run.disabled=!permissions().analysis_execute;bar.append(name,edit,run);
+        run.disabled=!permissions().analysis_execute;bar.append(name,status,edit,run);
+        cell.model.stateChanged.connect(onExecution);
         cell.node.prepend(bar);decorated.set(cell,bar);
-        cell.node.dataset.dfFolded=String(cell.model.outputs.length>0);
+        cell.node.dataset.dfFolded=String(cell.model.outputs.length>0&&!cell.model.getMetadata('demiflow_card_needs_run'));
       }
       if(bar.parentNode!==cell.node)cell.node.prepend(bar);
       const expanded=cell.node.dataset.dfFolded==='false';
-      const edit=bar.children[1],label=expanded&&cell.model.outputs.length?'收起代码':'编辑代码';
+      const status=bar.children[1];
+      const state=inFlight.has(cell.model.id)?'正在更新…':cell.model.getMetadata('demiflow_card_needs_run')?'代码已更新 · 待运行':'';
+      if(status.textContent!==state)status.textContent=state;
+      const edit=bar.children[2],label=expanded&&cell.model.outputs.length?'收起代码':'编辑代码';
       edit.setAttribute('aria-expanded',String(expanded));edit.setAttribute('aria-label',label);edit.title=label;
       const source=sourceOf(cell);
       bar.firstChild.textContent=cell.model.getMetadata('demiflow_card_title')||(source.startsWith('# ')?source.slice(2,98).split('\n')[0]:'');
@@ -214,6 +233,6 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
   rename();setMode(false);showAssistant(savedOpen===true);trackSelection();decorate();
   return {ask,dispose(){
     remember();dead=true;outputObserver.disconnect();book.node.querySelectorAll('.df-dataframe-view').forEach(view=>view.remove());win.removeEventListener('pagehide',remember);observer.disconnect();win.cancelAnimationFrame(paintFrame);book.activeCellChanged.disconnect(trackSelection);panel.model?.contentChanged.disconnect(changed);panel.context.pathChanged.disconnect(rename);
-    divider.dispose();for(const bar of decorated.values())bar.remove();style.remove();doc.body.classList.remove('df-card-mode');aside.remove();top.remove();delete desk.dataset.assistant;
+    divider.dispose();for(const [cell,bar] of decorated){cell.model.stateChanged.disconnect(onExecution);bar.remove();}style.remove();doc.body.classList.remove('df-card-mode');aside.remove();top.remove();delete desk.dataset.assistant;
   }};
 }
