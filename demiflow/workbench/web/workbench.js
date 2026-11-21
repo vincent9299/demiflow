@@ -1332,7 +1332,7 @@
       const stale=settingsBasis!==settingsIdentity();
       const note=settings.querySelector('.wb-settings-stale');if(note)note.hidden=!stale;
       const register=settings.querySelector('[data-access=register]');
-      if(register)register.disabled=!configWrite()||graphHost.getAttribute('aria-busy')==='true'||register.dataset.pending==='true';
+      if(register)register.disabled=!configWrite()||previewBusy||graphHost.getAttribute('aria-busy')==='true'||register.dataset.pending==='true';
       // Keep the captured registry CAS base and the user's fields. A sync must
       // not silently rebase an unfinished permission edit onto another grant.
       if(stale)for(const b of settings.querySelectorAll('[data-access=permissions]'))b.disabled=true;
@@ -1354,7 +1354,7 @@
         settings.hidden=true;message('已登记 '+body.entry+'；正在读取入口与配置。');
         try{const fresh=await request('context');if(!current(ticket))return;ctx=fresh;onContext(fresh);await useWorking(binding.entry,binding.params);}
         catch(error){if(current(ticket)&&error.name!=='AbortError')message('入口已登记，读取视图暂未完成；请刷新后选择 '+body.entry+'。 '+error.message,'error-box',ticket);}
-      },form,{disabled:!configWrite()});register.dataset.access='register';settings.append(form);
+      },form);register.dataset.access='register';settings.append(form);guardSettings();
       const meta=projectSettings.get?.();
       if(!meta?.manage||!meta.project){settings.append($('p','当前项目权限由服务部署者配置。','wb-caption'));return;}
       const permissions=$('div',undefined,'wb-inline-form'),inputs=new Map(),configured=meta.project.configured_permissions||meta.project.permissions;
