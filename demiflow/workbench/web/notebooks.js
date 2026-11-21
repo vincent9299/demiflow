@@ -26,7 +26,7 @@
     frame.addEventListener('load',()=>{
       session.readyPanel=null;session.onPanel?.(null);
       const win=frame.contentWindow;
-      frame.inert=win.location.pathname.startsWith(session.base+'notebooks/');
+      frame.toggleAttribute('data-loading',win.location.pathname.startsWith(session.base+'notebooks/'));
       // Notebook's own File → Open/New actions remain in this native pane.
       // Every destination must remain under this project's proxy prefix.
       const follow=url=>{
@@ -62,6 +62,7 @@
         const panel=notebookPanel(session);
         if(!panel)return;
         await panel.context.ready;
+        await panel.sessionContext.ready;
         const remember=()=>{
           const path=panel.context.path.split('/').map(encodeURIComponent).join('/');
           const previous=session.url;session.url=session.base+'notebooks/'+path;
@@ -70,7 +71,11 @@
         };
         panel.context.pathChanged.connect(remember);remember();
         session.readyPanel=panel;session.onPanel?.(panel);
-      })().catch(()=>{}).finally(()=>{if(session.loadEpoch===epoch)frame.inert=false;});
+      })().catch(()=>{}).finally(()=>{
+        if(session.loadEpoch!==epoch)return;
+        frame.removeAttribute('data-loading');
+        session.onReady?.();
+      });
     });
   }
   function makeRoom(){
@@ -87,6 +92,7 @@
       const frame=node('iframe',undefined,'native-notebook-frame');
       frame.title='Jupyter Notebook';frame.referrerPolicy='same-origin';
       session={frame,project,base,url,host:null};prepareFrame(session);
+      frame.toggleAttribute('data-loading',url.startsWith(base+'notebooks/'));
       frame.src=url;frame.hidden=true;document.body.append(frame);sessions.add(session);
     }
     session.host=host;position(session);
@@ -385,7 +391,7 @@
     }
     function detach(){
       ++cardsEpoch;cards?.dispose();cards=null;
-      if(session){session.onPanel=null;session.onPath=null;session.host=null;position(session);session=null;}
+      if(session){session.onPanel=null;session.onPath=null;session.onReady=null;session.host=null;position(session);session=null;}
     }
     function activate(url,focus=false){
       if(cards?.pending()&&url!==session?.url)throw Error('当前卡片正在更新，请在更新完成后切换。');
@@ -393,7 +399,8 @@
         const next=attach(native,project,base,url);
         detach();session=next;
       }
-      notice.hidden=true;status.hidden=true;resize();
+      notice.hidden=true;status.textContent='正在打开 Notebook…';status.hidden=!session.frame.hasAttribute('data-loading');resize();
+      session.onReady=()=>{status.hidden=true;};
       session.onPath=(previous,current)=>{
         const old=pathFrom(previous),path=pathFrom(current);
         if(old!==path&&old)documents=documents.map(item=>item===old?path:item);

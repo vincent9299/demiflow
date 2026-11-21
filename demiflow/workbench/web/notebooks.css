@@ -22,6 +22,8 @@ main.native-data-active{padding:0!important;max-width:none!important;overflow:hi
 .native-notebook-host{min-width:0;height:100%;position:relative}
 .native-notebook-status{margin:32px;color:#8a91a1;font-size:13px;line-height:1.7}
 .native-notebook-frame{position:fixed;border:0;background:white;z-index:2}
+/* Keep provisional native editors and shortcuts out of reach during kernel startup. */
+.native-notebook-frame[data-loading]{visibility:hidden}
 .native-notebook-frame[hidden]{display:none!important}
 @media(max-width:760px){.native-data-workspace{grid-template-columns:var(--side-navigation-width,170px) minmax(0,1fr);height:calc(100dvh - 110px)}.data-dictionary{padding:12px 6px}.dictionary-field{font-size:11px}}
 @media(max-width:480px){.native-data-workspace{grid-template-columns:var(--side-navigation-width,150px) minmax(0,1fr)}.dictionary-table>summary{font-size:11px}.dictionary-fields{padding-left:12px}.dictionary-field{flex-wrap:wrap;gap:0}.dictionary-field small{width:100%}.dictionary-version{display:none}.native-notebook-status{margin:16px;font-size:12px}}

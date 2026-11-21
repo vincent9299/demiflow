@@ -728,6 +728,11 @@ def test_create_notebooks_from_collapsed_data_page(browser, native_project):
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
                 if os.environ.get('FORGE_ACCEPTANCE_DIR'):
                     page.screenshot(path=str(Path(os.environ['FORGE_ACCEPTANCE_DIR']) / f'notebook-tabs-{width}.png'))
+            new.click()
+            third = tabs.get_by_role('tab', name='分析 3', exact=True)
+            expect(third).to_have_attribute('aria-selected', 'true')
+            editor.fill('third_draft = 3', timeout=60000)
+            expect(frame.locator('.jp-Dialog')).to_have_count(0)
             assert not errors
         finally:
             page.close()
