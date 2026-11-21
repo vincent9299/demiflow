@@ -3,7 +3,7 @@ const utf8=new TextEncoder();
 const limited=(value,length)=>value.length<=length?value:value.slice(0,length)+'…';
 
 function promptFor(request,context,tools){
-  const parts=[request,'当前 Notebook：'+context.path,
+  const parts=[request,'当前 Notebook：'+context.path,'本轮运行许可：'+(context.allowRun?'允许':'仅编辑'),
     '要调整的单元格：\n'+limited(context.source,3000),
     '此前相邻代码：\n'+limited(context.before,2000),
     '当前卡片可见结果：'+limited(context.output,550),
@@ -19,7 +19,7 @@ function promptFor(request,context,tools){
   return text;
 }
 
-async function answer(api,sid,turn,after,active){
+async function answer(api,sid,turn,after,active,handleCommand){
   let item=null,epoch=null,content='',paged=false,incomplete=false,terminal=null,state;
   while(active()){
     const response=await api('dev-events',{session_id:sid,after_sequence:after,limit:50,wait_ms:1200});
@@ -27,6 +27,22 @@ async function answer(api,sid,turn,after,active){
     for(const event of response.events){
       if(event.turn_id!==turn||event.session_id!==sid)continue;
       const data=event.data;
+      if(event.type==='input.requested'&&data.request?.method==='notebook/command'&&handleCommand){
+        if(data.expires*1000<=Date.now())continue;
+        const binding={session_id:sid,turn_id:turn,pending_request_id:data.id,expected_digest:data.digest};
+        const {claimed}=await api('dev-notebook-claim',{},binding);
+        if(claimed){
+          let reply;
+          try{
+            if(!active())throw Error('Notebook 已关闭。');
+            const value=await handleCommand(data.request.command,data.request.arguments);
+            if(utf8.encode(JSON.stringify(value)).length>15000)throw Error('结果超出回执大小，请缩小范围。');
+            reply={value};
+          }catch(error){reply={error:error.message||String(error)};}
+          await api('dev-input',{}, {...binding,answer:reply});
+        }
+        continue;
+      }
       if(event.type==='turn.state'){
         if(data.state)state=data.state;
         if(data.cleanup==='complete'||data.cleanup==='unknown')terminal=data;
@@ -56,7 +72,7 @@ async function answer(api,sid,turn,after,active){
   throw Error('稍后可取回这次回复。');
 }
 
-export function notebookConversation({api,project,path,cell,active}){
+export function notebookConversation({api,project,path,cell,active,command}){
   const key='demiflow.notebook-assistant.cell.'+JSON.stringify([project,path,cell]);
   let record={};
   try{
@@ -87,11 +103,11 @@ export function notebookConversation({api,project,path,cell,active}){
       const caps=await api('dev-capabilities');
       const provider=caps.providers?.find(p=>p.available);
       if(!caps.enabled||!caps.start||!caps.notebook_cells||!provider)throw Error('本项目当前无法生成单元格。'+(caps.reason||''));
-      record.provider||=provider.id;
+      record.provider||=provider.id;record.cli=caps.notebook_cli===true;
     }
     if(!pending){
       const index=await api('project-data-tools');
-      pending={cell:context.cell,source:context.source,request,prompt:promptFor(request,context,index.definitions),id:crypto.randomUUID()};
+      pending={cell:context.cell,source:context.source,allowRun:context.allowRun===true,request,prompt:promptFor(request,context,index.definitions),id:crypto.randomUUID()};
       record.pending=pending;save();
     }
     if(!record.sid){
@@ -105,7 +121,7 @@ export function notebookConversation({api,project,path,cell,active}){
         pending.revision=session.revision;pending.after=session.sequence||0;save();
       }
       try{
-        const turn=await api('dev-turn-start',{}, {session_id:record.sid,submission_id:pending.id,expected_revision:pending.revision,text:pending.prompt,operation:'notebook_cell'});
+        const turn=await api('dev-turn-start',{}, {session_id:record.sid,submission_id:pending.id,expected_revision:pending.revision,text:pending.prompt,operation:record.cli?'notebook_cell_cli':'notebook_cell'});
         pending.turn=turn.id;save();
       }catch(error){
         if(['conflict','invalid_request','operation_rejected','resource_limit','busy','not_found','permission_denied'].includes(error.code)){finishTurn();}
@@ -113,7 +129,12 @@ export function notebookConversation({api,project,path,cell,active}){
       }
     }
     try{
-      const result=await answer(api,record.sid,pending.turn,pending.after,active);
+      const result=await answer(api,record.sid,pending.turn,pending.after,active,async(name,args)=>{
+        const value=await command(name,args,pending);
+        if(name==='cell.edit'){pending.edited=true;pending.current=args.source;save();}
+        return value;
+      });
+      if(pending.edited)result.code=null;
       finishTurn();
       return {...result,source:pending.source,request:pending.request,turn:pending.turn};
     }catch(error){if(error.finished){finishTurn();}throw error;}

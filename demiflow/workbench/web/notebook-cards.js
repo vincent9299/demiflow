@@ -11,7 +11,7 @@ function icon(doc,name,label,action){
   svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');path.setAttribute('d',icons[name]);svg.append(path);button.append(svg);button.onclick=action;return button;
 }
 
-export function mountCards({desk,documentPane,panel,app,api,project,alive,permissions,tables,layout}){
+export function mountCards({desk,documentPane,panel,app,api,project,alive,permissions,tables,catalogCommand,layout}){
   const book=panel.content,doc=book.node.ownerDocument,win=doc.defaultView;
   const style=element(doc,'link');style.rel='stylesheet';style.href='/notebook-cards.css';doc.head.append(style);
   const frameTables='.jp-RenderedHTMLCommon table.dataframe';
@@ -26,6 +26,8 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
   const thread=element(document,'div','df-card-thread');thread.setAttribute('aria-live','polite');
   const form=element(document,'form','df-card-composer'),reference=element(document,'div','df-reference');
   const input=element(document,'textarea');input.rows=2;input.placeholder='描述你想做的分析或标注…';input.setAttribute('aria-label','卡片要求');
+  const executionLabel=element(document,'label','df-run-consent','允许本轮运行');
+  const execution=element(document,'input');execution.type='checkbox';executionLabel.prepend(execution);
   const send=icon(document,'up','发送要求');send.type='submit';
   const messages=new Map(),drafts=new Map(),refs=new Map(),decorated=new Map();
   const conversations=new Map(),inFlight=new Set();
@@ -38,7 +40,12 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
   const selected=()=>book.activeCell?.model?.type==='code'?book.activeCell:null;
   const cellById=id=>cells().find(cell=>cell.model.id===id);
   function assistantFor(id){
-    if(!conversations.has(id))conversations.set(id,notebookConversation({api,project,path,cell:id,active:valid}));
+    if(!conversations.has(id)){
+      const boundPath=path;
+      conversations.set(id,notebookConversation({api,project,path:boundPath,cell:id,
+        active:()=>valid()&&panel.context.path===boundPath,
+        command:(name,args,pending)=>command(id,name,args,pending)}));
+    }
     return conversations.get(id);
   }
   function remember(){
@@ -80,7 +87,7 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
   const add=icon(document,'plus','新建卡片',()=>{const cell=newCell();cell?.editor?.focus();});
   const toggle=icon(document,'chat','卡片助手',()=>showAssistant(!assistantOpen));
   add.disabled=!writable();top.append(title,add,nativeMode,toggle);documentPane.prepend(top);
-  head.append(heading,targetName,icon(document,'close','关闭助手',()=>showAssistant(false)));form.append(reference,input,send);aside.append(head,thread,form);desk.append(aside);
+  head.append(heading,targetName,icon(document,'close','关闭助手',()=>showAssistant(false)));form.append(reference,input,executionLabel,send);aside.append(head,thread,form);desk.append(aside);
   const divider=ForgeNavigation.resizable({layout:desk,sidebar:aside,label:'卡片助手',right:true,active:false});
   function ask(item){
     let cell=selected();if(!cell)cell=newCell();
@@ -92,6 +99,7 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
   }
   function sourceOf(cell){return cell.model.sharedModel.getSource();}
   function trackSelection(){
+    execution.checked=false;
     if(selectedId)drafts.set(selectedId,input.value);
     selectedId=selected()?.model.id||null;input.value=drafts.get(selectedId)||'';
     if(assistantOpen)renderThread();
@@ -108,6 +116,7 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
     }
     const pending=id?assistantFor(id).pending:null;
     const busy=inFlight.has(id);
+    executionLabel.hidden=!permissions().analysis_execute;execution.disabled=busy;
     input.disabled=busy||!writable()||!id;send.disabled=input.disabled;
     if(!id){thread.append(element(document,'p','df-chat-status','选中一张代码卡片即可调整。'));return;}
     for(const row of messages.get(id)||[]){
@@ -145,12 +154,37 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
     row.code=null;row.text||='已生成卡片。';
     schedulePaint();renderThread();remember();
   }
+  async function command(id,name,args,pending){
+    if(!valid()||path!==panel.context.path)throw Error('目标 Notebook 已关闭或改名。');
+    if(name.startsWith('catalog.'))return catalogCommand(name,args);
+    const cell=cellById(id);
+    if(!cell||cell.isDisposed||cell.model.type!=='code')throw Error('目标 cell 已删除。');
+    const source=sourceOf(cell);
+    if(name==='cell.show')return {source,output:(cell.outputArea?.node.innerText||'').slice(0,1600),
+      allow_run:pending.allowRun&&!!permissions().analysis_execute};
+    if(source!==(pending.current??pending.source))throw Error('cell 已被手动修改，这条命令未应用。');
+    if(!writable())throw Error('当前文档只读。');
+    if(name==='cell.edit'){
+      applyCode({source,code:args.source,request:pending.request},cell);
+      return {state:'edited',cell:id};
+    }
+    if(name!=='cell.run'||!pending.allowRun||!permissions().analysis_execute)throw Error('本轮未获运行许可。');
+    await panel.sessionContext.ready;
+    if(!valid()||cell.isDisposed||sourceOf(cell)!==source||!writable()||!permissions().analysis_execute)
+      throw Error('cell 或运行权限已变更。');
+    if(!panel.sessionContext.session?.kernel)throw Error('当前 Notebook 内核未连接。');
+    const reply=await cell.constructor.execute(cell,panel.sessionContext);
+    if(!reply||reply.content.status!=='ok')throw Error([reply?.content?.ename,reply?.content?.evalue].filter(Boolean).join(': ')||'内核未成功执行。');
+    if(!cell.isDisposed&&cell.model.outputs.length)cell.node.dataset.dfFolded='true';
+    schedulePaint();
+    return {state:'executed',execution_count:reply.content.execution_count,output:(cell.outputArea?.node.innerText||'').slice(0,2400)};
+  }
   async function submit(request){
     const cell=selected();if(!cell||inFlight.has(cell.model.id)||!request.trim()||!writable())return;
     const id=cell.model.id,source=sourceOf(cell),index=book.activeCellIndex,initialPath=path;
-    const context={path,cell:id,source,before:cells().slice(Math.max(0,index-3),index).filter(c=>c.model.type==='code').map(sourceOf).join('\n'),
+    const context={path,cell:id,source,allowRun:execution.checked&&!!permissions().analysis_execute,before:cells().slice(Math.max(0,index-3),index).filter(c=>c.model.type==='code').map(sourceOf).join('\n'),
       output:cell.outputArea?.node.innerText||'',tables:tables(),selected:refs.get(id)||[]};
-    inFlight.add(id);schedulePaint();renderThread();
+    execution.checked=false;inFlight.add(id);schedulePaint();renderThread();
     try{
       const result=await assistantFor(id).generate(request,context);
       if(!valid()||path!==initialPath)return;

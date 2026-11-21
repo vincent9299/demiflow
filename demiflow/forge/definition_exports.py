@@ -26,8 +26,8 @@ def exports(tree, field):
         if field == DATA_TOOL_EXPORT and isinstance(value, ast.Dict):
             members = []
             for key, role in zip(value.keys, value.values):
-                if not isinstance(role, ast.Constant) or role.value not in ('analysis', 'view', 'annotation', 'annotation_component'):
-                    raise ValueError(f'{field} 的类别应为 analysis、view、annotation 或 annotation_component。')
+                if not isinstance(role, ast.Constant) or role.value not in ('tool', 'analysis', 'view', 'annotation', 'annotation_component'):
+                    raise ValueError(f'{field} 的类别应为 tool、analysis、view、annotation 或 annotation_component。')
                 members.append((key, role.value))
         elif isinstance(value, (ast.List, ast.Tuple)):
             members = [(entry, 'view' if field == DATA_TOOL_EXPORT else 'operator') for entry in value.elts]

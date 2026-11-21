@@ -50,6 +50,10 @@ class Codex:
             'features.auth_elicitation': False, 'check_for_update_on_startup': False,
             'mcp_servers': {}, 'plugins': {},
         }
+        if config.get('_cell_bin'):
+            shell = values['shell_environment_policy.set']
+            shell.update(PATH=config['_cell_bin'] + ':' + shell['PATH'],
+                         DEMIFLOW_CONTROL_ENDPOINT='__DEMIFLOW_CELL_ENDPOINT__')
         (home / 'tool-home').mkdir(mode=0o700, exist_ok=True)
         if config.get('base_url') or boundary:
             values['model_provider'] = 'devchat'

@@ -24,6 +24,7 @@ POST_FIELDS = {
     'dev-compact': ({'session_id','submission_id','expected_revision'},set()),
     'dev-session-create': ({'request_id', 'provider_id'}, {'new_conversation'}),
     'dev-turn-start': ({'session_id', 'submission_id', 'expected_revision', 'text'}, {'operation'}),
+    'dev-notebook-claim': ({'session_id','turn_id','pending_request_id','expected_digest'},set()),
     'dev-input': ({'session_id', 'turn_id', 'pending_request_id', 'expected_digest', 'answer'}, set()),
     'dev-cancel': ({'session_id', 'turn_id', 'request_id'}, set()),
     'dev-recover': ({'session_id', 'expected_revision'}, set()),
@@ -120,7 +121,7 @@ def get(server, workspace, root, name, query, *, consumer_closed=None):
 
 
 def post(server, workspace, root, name, request, *, consumer_closed=None):
-    if name == 'dev-turn-start' and request.get('operation', 'message') not in ('message', 'notebook_cell'):
+    if name == 'dev-turn-start' and request.get('operation', 'message') not in ('message', 'notebook_cell', 'notebook_cell_cli'):
         reject('Unsupported conversation operation', 'invalid_request')
     if name == 'dev-session-create' and 'new_conversation' in request and type(request['new_conversation']) is not bool:
         reject('new_conversation must be a boolean', 'invalid_request')
@@ -128,7 +129,7 @@ def post(server, workspace, root, name, request, *, consumer_closed=None):
     if service is None: reject('Project development is not enabled')
     if getattr(service, 'remote', False):
         return service.forward(workspace, root, name, request, mutation=True, consumer_closed=consumer_closed)
-    actions = {'dev-session-create': service.create_project, 'dev-turn-start': service.start_project, 'dev-compact': service.compact, 'dev-input': service.input,
+    actions = {'dev-session-create': service.create_project, 'dev-turn-start': service.start_project, 'dev-compact': service.compact, 'dev-input': service.input, 'dev-notebook-claim': service.claim_cell_command,
                'dev-cancel': service.cancel, 'dev-recover': service.recover}
     with service.lock:
         return actions[name](workspace, root, **request)

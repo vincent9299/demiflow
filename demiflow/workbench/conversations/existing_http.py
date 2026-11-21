@@ -286,7 +286,7 @@ class ExistingHTTP:
                 return False
             if self._slots.acquire(blocking=False):
                 return True
-            if request.name not in {'dev-cancel', 'dev-input', 'dev-recover'}:
+            if request.name not in {'dev-cancel', 'dev-input', 'dev-notebook-claim', 'dev-recover'}:
                 return False
             victim = next((row for row in self._active if not row.mutation), None)
             if victim is None:

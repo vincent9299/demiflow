@@ -97,8 +97,8 @@ function launchForm(body,detail,{project,canInsert,insert,dialog}){
 }
 
 export function showTool({root,item,api,mountText,disposeReaders,project,canInsert,insert,reference}){
-  const importOnly=['analysis','annotation_component'].includes(item.tool_kind);
-  const label={analysis:'分析工具',view:'查看工具',annotation:'标注工具',annotation_component:'标注组件'}[item.tool_kind];
+  const importOnly=['tool','analysis','annotation_component'].includes(item.tool_kind);
+  const label={tool:'工具',analysis:'分析工具',view:'查看工具',annotation:'标注工具',annotation_component:'标注组件'}[item.tool_kind];
   const dialog=el('dialog',undefined,'data-tools-dialog'),header=el('header');
   dialog.setAttribute('aria-label',label);
   const close=el('button','关闭'),body=el('section');close.onclick=()=>dialog.close();

@@ -79,3 +79,7 @@ main.native-data-active{padding:0!important;max-width:none!important;overflow:hi
 .notebook-document > .df-book-header > strong{font-size:15px;line-height:20px;font-weight:600;color:#20242b}
 
 @media(max-width:600px){.notebook-document > .df-book-header{padding-inline:10px}}
+
+.df-run-consent{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#626b7a;cursor:pointer}
+.df-run-consent[hidden]{display:none}
+.df-run-consent input{margin:0}

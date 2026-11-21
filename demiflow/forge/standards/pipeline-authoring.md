@@ -12,7 +12,7 @@
 
 在模块顶层用 `__demiflow_operators__ = ["normalize"]` 声明可复用的算子函数或可调用的 Actor。尚未接入 Flow 的算子也可声明。用 docstring 说明用途、输入和返回值。
 
-Notebook 使用的可复用代码放在 `data_tools/`。在模块顶层用 `__demiflow_data_tools__` 将本地函数或类名映射到用途。例如 `{"summarize": "analysis", "preview": "view", "review": "annotation", "sample_card": "annotation_component"}`。分析和查看函数返回值、图表或控件。标注入口组合组件，接受用户判断后，按稳定样本标识和数据版本保存结果。目录发现只读取静态声明。
+Notebook 使用的可复用代码放在 `data_tools/`。在模块顶层用 `__demiflow_data_tools__` 将本地函数或类名映射到用途。例如 `{"summarize": "analysis", "preview": "view", "review": "annotation", "sample_card": "annotation_component"}`。分析和查看函数返回值、图表或控件。标注入口组合组件，接受用户判断后，按稳定样本标识和数据版本保存结果。目录发现只读取静态声明。通用函数也可标为 `tool`。项目自写与引入的第三方模块同在工作台「工具」出现；平台发布的通用模块从 `demiflow.data_tools` 导入。
 
 ### DF-03
 

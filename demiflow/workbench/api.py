@@ -95,6 +95,7 @@ GET_FIELDS = {
     'project-markdown': ({'path'}, set()),
     'project-operators': (set(), set()),
     'project-data-tools': (set(), set()),
+    'dictionary-sources': (set(), set()),
     'data-tool-definition': ({'id'}, set()),
     'operator-definition': ({'id'}, {'revision'}),
     'operator-history': ({'id'}, set()),
@@ -758,10 +759,13 @@ class Handler(BaseHTTPRequestHandler):
                     value=read(root,query['request_id'])
                 elif url.path == '/api/project-status':
                     value = project_ops.project_check_status(root)
+                elif url.path == '/api/dictionary-sources':
+                    from .notebooks.dictionary import discover
+                    value = discover(root)
                 elif url.path in {'/api/project-data-tools', '/api/data-tool-definition'}:
                     from .projects import definitions
-                    value = (definitions.catalog(root, data_tools=True) if url.path == '/api/project-data-tools'
-                             else definitions.read(root, data_tools=True, **query))
+                    value = (definitions.catalog(root, data_tools=True, include_platform=True) if url.path == '/api/project-data-tools'
+                             else definitions.read(root, data_tools=True, include_platform=True, **query))
                 elif url.path in {'/api/project-operators', '/api/operator-definition', '/api/operator-history'}:
                     from demiflow.workbench.projects import definitions
                     value = (definitions.catalog(root) if url.path == '/api/project-operators' else

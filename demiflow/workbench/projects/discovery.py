@@ -297,15 +297,19 @@ def table(root, identity, *, expected, version=None, binding=None, sample=None):
     root = ws.no_symlinks(Path(root).absolute()).resolve(strict=True)
     if version is not None and (type(version) is not int or not 1 <= version < 2**64):
         raise ForgeError('Invalid table version', code='invalid_request')
-    value = discover(root)
-    if value['digest'] != expected:
-        raise ForgeError('Project declarations changed; refresh before preview', code='conflict')
-    row = next((t for t in value['tables'] if t['id'] == identity), None)
-    if row is None or row['status'] != 'available':
-        raise ForgeError('Table is not an accessible project declaration', code='operation_rejected')
-    if row['version'] is not None and version not in {None, row['version']}:
-        raise ForgeError('Version differs from the declared fixed reference', code='conflict')
-    uri = ws.relative_path(root, row['path'])
+    if identity.startswith('l'):
+        from demiflow.workbench.notebooks.dictionary import resolve
+        row, uri = resolve(root, identity, expected)
+    else:
+        value = discover(root)
+        if value['digest'] != expected:
+            raise ForgeError('Project declarations changed; refresh before preview', code='conflict')
+        row = next((t for t in value['tables'] if t['id'] == identity), None)
+        if row is None or row['status'] != 'available':
+            raise ForgeError('Table is not an accessible project declaration', code='operation_rejected')
+        if row['version'] is not None and version not in {None, row['version']}:
+            raise ForgeError('Version differs from the declared fixed reference', code='conflict')
+        uri = ws.relative_path(root, row['path'])
     description = preview.describe_table(uri, row['version'] if version is None else version)
     observed = dict(project=str(root), id=identity, path=row['path'], version=description['version'],
                     row_count=description['row_count'], schema_hash=description['schema_hash'], discovery=expected)
