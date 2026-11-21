@@ -60,7 +60,9 @@ def listing(root, path='', offset=0, limit=50, *, all_files=False):
 
 def read(root, path, *, project_text=False):
     target = _path(root, path)
-    if target.suffix.lower() not in MARKDOWN:
+    if project_text and target.suffix.lower() not in TEXT:
+        raise ForgeError('File type cannot be previewed', code='invalid_request')
+    if not project_text and target.suffix.lower() not in MARKDOWN:
         raise ForgeError('Only Markdown documents can be opened here', code='invalid_request')
     try:
         raw = read_bounded(target, DOCUMENT_BYTES)
