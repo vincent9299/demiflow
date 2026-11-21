@@ -11,12 +11,15 @@ from ..data import plan as ops
 from ..data.runtime_contract import RuntimeContractError
 
 
-def execution_instances(nodes, edges, actions, *, maximum=1024):
+def execution_instances(nodes, edges, actions, *, maximum=1024, value_edges=()):
     """Bounded preorder occurrences, retaining repeated inputs and action reuse."""
     by_id = {node['id']: node for node in nodes}
     parents = {identity: [] for identity in by_id}
     for edge in sorted(edges, key=lambda item: item['port']):
         parents[edge['to']].append(edge['from'])
+    for edge in value_edges:
+        if by_id[edge['from']].get('kind') == 'fit':
+            parents[edge['to']].append(edge['from'])
     instances = []
     for action in actions:
         counts, pending = {}, [(action, 0)]
@@ -25,6 +28,8 @@ def execution_instances(nodes, edges, actions, *, maximum=1024):
             if depth > 128 or len(instances) >= maximum:
                 raise ValueError('Execution observation reservation exceeds depth/count/byte budget')
             occurrence = counts.get(identity, 0)
+            if by_id[identity].get('kind') == 'fit' and occurrence:
+                continue
             counts[identity] = occurrence + 1
             reuse = identity != action and by_id[identity]['role'] == 'bridge'
             instances.append({'action_id': action, 'node_id': identity, 'occurrence': occurrence,
@@ -107,6 +112,8 @@ def operation_capability(operation):
     if kind is None:
         kind = "unknown"
     native = getattr(operation, "native_options", None) if type(operation) in kinds else None
+    if type(operation) is ops.PredictOp:
+        native = operation.fit.recipe.predictor.native_options
     stream = operation.stream_options if type(operation) in {ops.MapOp, ops.BoundMapOp} else None
     fact = {"kind": kind, "driver": "stream" if kind in {"async_map", "batch_map"} or stream is not None else "pull",
             "native_options": native is not None, "stream_options": stream is not None,
@@ -115,7 +122,7 @@ def operation_capability(operation):
         from ..data.native_options import resource_only_options
         try:
             fact['resource_declaration'] = resource_only_options(native,
-                family='batch_transform' if kind in {'map_batches', 'batch_map'} else 'row_transform')
+                family='batch_transform' if kind in {'map_batches', 'batch_map','predict'} else 'row_transform')
         except (ValueError, TypeError):
             # Retain the original unsupported-fact/error path for legacy
             # compute/ranges and unknown options. No declaration means no grant.

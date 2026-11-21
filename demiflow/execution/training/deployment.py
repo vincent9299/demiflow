@@ -1,6 +1,7 @@
 """Training services selected by the run's deployment, outside the sealed recipe."""
 from dataclasses import dataclass
 from importlib import import_module
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -33,10 +34,11 @@ def resolve_training_deployment(context):
     location = os.environ.get('DEMIFLOW_TRAINING_DEPLOYMENT')
     if not location:
         raise ValueError("The run needs a project training deployment")
-    return load_training_deployment(location, project_root=context.training_project_root)
+    return load_training_deployment(location, project_root=context.training_project_root,
+                                    expected_digest=os.environ.get('DEMIFLOW_TRAINING_DEPLOYMENT_SHA256'))
 
 
-def load_training_deployment(location, *, project_root=None):
+def _read_deployment(location, project_root, expected_digest=None):
     path = Path(location)
     if not path.is_absolute() or path.resolve(strict=True) != path:
         raise ValueError("Training deployment must be an absolute, direct file")
@@ -44,12 +46,28 @@ def load_training_deployment(location, *, project_root=None):
         raw = stream.read(65537)
     if len(raw) > 65536:
         raise ValueError("Training deployment exceeds 64 KiB")
+    digest = sha256(raw).hexdigest()
+    if expected_digest is not None and digest != expected_digest:
+        raise ValueError('Original training deployment file changed')
     value = json.loads(raw)
     document(value, 65536)
     if project_root is not None and value.get('project_root') != str(Path(project_root).resolve(strict=True)):
         raise ValueError("Training deployment does not authorize this project root")
     if set(value) - {'project_id', 'project_root', 'binding', 'provider_factory'}:
         raise ValueError("Unknown training deployment option")
+    return value, digest
+
+
+def training_deployment_reference(location, *, project_root):
+    """Capture ownership for a workbench plan without importing a provider."""
+    if Path(location).resolve().is_relative_to(Path(project_root).resolve()):
+        raise ValueError("Workbench training deployment must be outside the project")
+    value, digest = _read_deployment(location, project_root)
+    return {'path': location, 'sha256': digest, 'hosting': FitBinding.from_dict(value['binding']).hosting}
+
+
+def load_training_deployment(location, *, project_root=None, expected_digest=None):
+    value, _ = _read_deployment(location, project_root, expected_digest)
     binding = FitBinding.from_dict(value['binding'])
     provider = None
     if 'provider_factory' in value:

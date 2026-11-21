@@ -66,6 +66,7 @@ def _fit(capture, decl, path):
 
 def capture_predict(capture, operation, holdout, path):
     from .dataflow_compile import compile_kernel_spec, _plain, _callable_code_identity
+    from ..data.training_schema import prediction_columns
     job = _fit(capture, operation.fit, path + ("fit",))
     recipe = operation.fit.recipe
     predictor = recipe.predictor
@@ -80,7 +81,8 @@ def capture_predict(capture, operation, holdout, path):
     for step in operation.steps:
         facts = {"predict_step": step, "predict_inputs": _plain(operation.inputs),
                  "predict_parameters": _plain(operation.parameters),
-                 "predict_input_schema": {column: predictor.input_schema[name] for name, column in operation.inputs.items()}, "predict_model_format": recipe.model_format,
+                 "predict_input_schema": prediction_columns(operation.inputs, predictor.input_schema),
+                 "predict_model_format": recipe.model_format,
                  "predict_output_schema": _plain(predictor.output_schema)}
         member = replace(kernel, configuration={**kernel.configuration, **facts}, mergeable=False)
         index = capture._add_node("transform", member, _plain(member.configuration), {}, identity, None)

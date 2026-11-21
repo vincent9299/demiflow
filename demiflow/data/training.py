@@ -13,7 +13,7 @@ from .execution_contract import normalize_batch_format
 from .flow_contract import flow_api, field as flow_field, scalar, require_fields
 from .native_options import parse_native_options, validate_stream_native_options
 from .plan import FitDeclaration, PredictOp
-from .training_schema import validate_columns
+from .training_schema import prediction_columns, validate_columns
 
 
 def _freeze(value):
@@ -26,11 +26,11 @@ def _freeze(value):
     raise TypeError("recipe fields require finite JSON values")
 
 
-def _plain(value):
+def training_json(value):
     if isinstance(value, Mapping):
-        return {k: _plain(v) for k, v in value.items()}
+        return {k: training_json(v) for k, v in value.items()}
     if isinstance(value, tuple):
-        return [_plain(v) for v in value]
+        return [training_json(v) for v in value]
     return value
 
 
@@ -54,7 +54,7 @@ def _same_scope(left, right):
     return left_scope is not None and left_scope == getattr(right, "declaration_scope", None)
 
 
-def _steps(values):
+def training_steps(values):
     if (not isinstance(values, Sequence) or isinstance(values, (bytes, str)) or not 1 <= len(values) <= 1024
             or any(type(i) is not int or not 0 < i < 2**63 for i in values)
             or len(set(values)) != len(values)):
@@ -64,9 +64,9 @@ def _steps(values):
 
 def _parameters(arguments):
     declared = arguments.get("parameter_schema")
-    schema = compile_schema({"type": "object"} if declared is None else _plain(_mapping(declared, "parameter schema")))
+    schema = compile_schema({"type": "object"} if declared is None else training_json(_mapping(declared, "parameter schema")))
     values = _mapping(arguments["parameters"], "parameters")
-    validate_instance(_plain(values), schema, label="recipe parameters")
+    validate_instance(training_json(values), schema, label="recipe parameters")
     return {"parameter_schema": _freeze(schema), "parameters": values}
 
 
@@ -76,14 +76,16 @@ def predictor_values(arguments):
     fields = _schema(arguments["input_schema"], "predictor input schema")
     if set(fields) != set(arguments["inputs"]):
         raise ValueError("Every predictor input requires its declared Arrow type")
+    inputs = _schema(arguments["inputs"], "predictor inputs")
+    prediction_columns(inputs, fields)
     formats = tuple(arguments.get("model_formats", ()))
     if isinstance(arguments.get("model_formats"), str) or any(type(v) is not str or not v for v in formats):
         raise ValueError("model_formats requires a sequence of format names")
     options = arguments.get("native_options")
     if options is not None:
         options = _mapping(options, "native_options")
-        validate_stream_native_options(parse_native_options(_plain(options), family="batch_transform"))
-    return {**_parameters(arguments), "input_schema": fields, "model_formats": formats, "inputs": _schema(arguments["inputs"], "predictor inputs"),
+        validate_stream_native_options(parse_native_options(training_json(options), family="batch_transform"))
+    return {**_parameters(arguments), "input_schema": fields, "model_formats": formats, "inputs": inputs,
             "output_schema": _schema(arguments["output_schema"], "predictor outputs"),
             "batch_format": normalize_batch_format(arguments["batch_format"]), "native_options": options}
 
@@ -108,7 +110,7 @@ def recipe_values(arguments):
                 or any(type(name) is not str or name not in schemas[role] for name in fields)
                 or len(fields) != len(set(fields))):
             raise ValueError("media_fields requires distinct declared columns for each named dataset")
-    saved = _steps(arguments["save_steps"])
+    saved = training_steps(arguments["save_steps"])
     if tuple(sorted(saved)) != saved:
         raise ValueError("save_steps must be increasing")
     budget = _mapping(arguments["budget"], "budget")
@@ -127,8 +129,9 @@ def prediction_arguments(spec, inputs, parameters):
         if set(overrides) - bindings.keys():
             raise ValueError("unknown predictor input")
         bindings.update(overrides)
+    prediction_columns(bindings, spec["input_schema"])
     effective = {**spec["parameters"], **_mapping({} if parameters is None else parameters, "parameters")}
-    validate_instance(_plain(effective), _plain(spec["parameter_schema"]), label="prediction parameters")
+    validate_instance(training_json(effective), training_json(spec["parameter_schema"]), label="prediction parameters")
     return bindings, effective
 
 
@@ -141,18 +144,21 @@ def analyze_fit(arguments, *, inputs, callables, resources):
         raise ValueError("fit requires all named inputs")
     for columns, schema in zip(inputs, expected):
         require_fields(columns, tuple(schema))
-    return {"fields": {}, "driver": "pull", "cardinality": "one", "order": "unspecified"}
+    return {"fields": {}, "driver": "pull", "cardinality": "one", "order": "unspecified",
+            "topology": recipe["topology"]}
 
 
 def analyze_prediction(arguments, *, inputs, callables, resources):
     recipe = arguments["self"]["recipe"]
     spec = recipe["predictor"]
-    bound, _ = prediction_arguments(spec, arguments["inputs"], arguments["parameters"])
+    bound, effective = prediction_arguments(spec, arguments["inputs"], arguments["parameters"])
     require_fields(inputs[0], tuple(bound.values()))
     types = {"string": "str", "double": "float", "float64": "float", "float32": "float",
              "int64": "int", "int32": "int", "boolean": "bool", "binary": "bytes"}
     outputs = {key: flow_field(scalar(types.get(kind, kind))) for key, kind in spec["output_schema"].items()}
-    return {"fields": outputs, "driver": "pull", "cardinality": "zero_or_more", "order": "unspecified"}
+    return {"fields": outputs, "driver": "pull", "cardinality": "zero_or_more", "order": "unspecified",
+            "stream_arguments": {"steps": arguments["self"]["steps"], "inputs": bound,
+                                 "parameters": training_json(effective), "model_format": recipe["model_format"]}}
 
 
 @flow_api("predictor_spec", role="value")
@@ -214,7 +220,7 @@ class FitRef:
 
     @flow_api("select_model", role="value")
     def select(self, *, steps):
-        return ModelSelection(self.declaration, _steps(steps))
+        return ModelSelection(self.declaration, training_steps(steps))
 
 
 @dataclass(frozen=True)
@@ -257,5 +263,5 @@ def declare_fit(dataset, recipe, monitors, retrain_id, resume_from):
             raise ValueError("published parent requires manifest_digest and step")
         if not re.fullmatch("[0-9a-f]{64}", str(resume_from["manifest_digest"])):
             raise ValueError("invalid published parent digest")
-        _steps((resume_from["step"],))
+        training_steps((resume_from["step"],))
     return FitRef(FitDeclaration(tuple(sources), recipe, dataset._executor, retrain_id, resume_from))

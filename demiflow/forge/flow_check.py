@@ -614,11 +614,11 @@ class FlowChecker:
         if kind in {"training_recipe", "predictor_spec"}:
             return self._training_declaration(kind, values, node, module)
         if kind == "select_model":
-            from ..data.training import _steps
+            from ..data.training import training_steps
             fitted = values["self"]
             if not isinstance(fitted, DeclaredValue) or fitted.type != scalar("fit"):
                 self.fail("FL-04", "select requires the declared fit result", node, module)
-            return DeclaredValue({**fitted.value, "steps": list(_steps(values["steps"]))}, scalar("model_selection"))
+            return DeclaredValue({**fitted.value, "steps": list(training_steps(values["steps"]))}, scalar("model_selection"))
         from ..execution.capabilities import check_action
         capability = check_action(kind, values)
         if not capability['supported']:
@@ -709,13 +709,15 @@ class FlowChecker:
             self.fail('FL-08','Prepend prefix must be a finite synchronous Dataset without actors',node,module)
         stream = sem["execution"] == "stream" or any(ds.stream for ds in inputs)
         resource_declaration = None
-        if values.get("backend_options") is not None:
+        native_options = (values["self"].value["recipe"]["predictor"]["native_options"]
+                          if kind == 'predict' else values.get("backend_options"))
+        if native_options is not None:
             if sem['role'] != 'transform':
                 self.fail('FL-08', 'Managed native resources currently require an operator', node, module, incomplete=True)
             try:
                 from ..data.native_options import resource_only_options
-                resource_declaration = resource_only_options(values['backend_options'],
-                    family='batch_transform' if kind in {'map_batches', 'batch_map'} else 'row_transform')
+                resource_declaration = resource_only_options(native_options,
+                    family='batch_transform' if kind in {'map_batches', 'batch_map', 'predict'} else 'row_transform')
             except (ValueError, TypeError) as exc:
                 self.fail('FL-08', str(exc), node, module, incomplete=True)
         schema = {}
@@ -1248,7 +1250,7 @@ class FlowChecker:
             "kind": analysis.get('kind', "async_map" if kind == "map" and sem["execution"] == "stream" else kind),
             "driver": analysis["driver"],
             "bound": values.get("inputs") is not None,
-            "native_options": values.get("backend_options") is not None,
+            "native_options": native_options is not None,
             "stream_options": kind == "map" and sem["execution"] != "stream" and analysis["driver"] == "stream",
         }
         if resource_declaration is not None:
@@ -1331,7 +1333,7 @@ class FlowChecker:
 
     def _training_declaration(self, kind, values, node, module):
         """Bind source-level callable identities. No project code is imported or run."""
-        from ..data.training import _plain, predictor_values, recipe_values
+        from ..data.training import predictor_values, recipe_values, training_json
         key = "trainer" if kind == "training_recipe" else "factory"
         definition = values[key]
         if not isinstance(definition, Definition):
@@ -1361,7 +1363,7 @@ class FlowChecker:
             if not isinstance(predictor, DeclaredValue) or predictor.type != scalar("predictor_spec"):
                 self.fail("FL-06", "recipe requires an original PredictorSpec", node, module)
             normalized = recipe_values(values)
-        value = {**self._json_value(values), **_plain(normalized)}
+        value = {**self._json_value(values), **training_json(normalized)}
         bounded_json(value, 1024 * 1024)
         return DeclaredValue(value, scalar(kind))
 

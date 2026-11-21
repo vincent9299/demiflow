@@ -600,3 +600,30 @@ def test_stopped_candidate_before_election_does_not_acquire_or_dispatch(tmp_path
         deadline=time.monotonic()+5,confirm_stopped=lambda _:True,project_root=tmp_path,
         deployment=TrainingDeployment('project',binding,provider))
     assert result == {} and not provider.sends and TrainingIndex(binding).read(request.instance_id) is None
+
+
+def test_model_import_contention_honors_consumers_deadline(tmp_path):
+    import fcntl
+    import io
+    from demiflow.execution.training.store import ModelStore
+    _, binding = setup_request(tmp_path)
+    start = time.monotonic()
+
+    def check_stop():
+        if time.monotonic() - start > .1:
+            raise TimeoutError('model consumer deadline')
+
+    store = ModelStore(TrainingIndex(binding), check_stop=check_stop)
+    content = b'original'
+    digest = hashlib.sha256(content).hexdigest()
+    directory = store.objects / digest[:2]
+    directory.mkdir()
+    fd = os.open(directory, os.O_DIRECTORY | os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        with pytest.raises(TimeoutError, match='consumer deadline'):
+            store._put(io.BytesIO(content), digest, len(content))
+        assert time.monotonic() - start < 2
+        assert not list(directory.iterdir())
+    finally:
+        os.close(fd)

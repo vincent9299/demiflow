@@ -2,7 +2,8 @@
 
 SURFACE = {'constructor_keywords': {'RunJournal': ['directory', 'attempt'],
                           'demiflow.execution.host.control.RunJournal': ['directory', 'attempt']},
- 'exports': {'control': {'reconcile_stopped_fits': ['demiflow.execution.training.maintenance', 'reconcile_stopped_fits'],
+ 'exports': {'control': {'training_deployment_reference': ['demiflow.execution.training.deployment', 'training_deployment_reference'],
+                         'reconcile_stopped_fits': ['demiflow.execution.training.maintenance', 'reconcile_stopped_fits'],
                          'CheckedExecution': ['demiflow.execution.checked', 'CheckedExecution'],
                          'NativeExecution': ['demiflow.execution.managed_native', 'NativeExecution'],
                          'DEFAULT_LIMITS': ['demiflow.execution.runtime_limits', 'DEFAULT_LIMITS'],

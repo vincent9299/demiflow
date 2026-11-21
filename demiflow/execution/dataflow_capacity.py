@@ -17,8 +17,15 @@ from ..resources.capacity import inherited_envelope
 _DOMAIN = ContextVar('demiflow_local_capacity_domain', default=None)
 
 
+_DEVICE_INVENTORY = ContextVar('demiflow_local_device_inventory', default=None)
+
+
+def original_device_inventory():
+    return _DEVICE_INVENTORY.get()
+
+
 @contextmanager
-def local_capacity_domain(directory):
+def local_capacity_domain(directory, *, device_inventory=None):
     """Select a sealed host domain for maintenance without changing process env.
 
     This selects the existing allocator's directory, never an allocation or
@@ -31,9 +38,11 @@ def local_capacity_domain(directory):
     if not root.is_absolute() or str(root.resolve()) != directory:
         raise ValueError('Local capacity domain must be canonical and absolute')
     token = _DOMAIN.set(root)
+    inventory = _DEVICE_INVENTORY.set(device_inventory)
     try:
         yield root
     finally:
+        _DEVICE_INVENTORY.reset(inventory)
         _DOMAIN.reset(token)
 
 

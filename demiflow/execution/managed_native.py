@@ -53,13 +53,17 @@ def native_submission_view(captured):
             parameters.update(uri=output['uri'], mode=output.get('writer_mode', 'create'))
             if 'stage' in output:
                 parameters.update(stage=output['stage'], max_index_bytes=output['max_index_bytes'])
+        gpu = sum(device['count'] for device in n.kernel.profile.requests.get('accelerators', ())
+                  if device['type'] == 'gpu')
+        capabilities = {'capability_fact': {'resource_declaration': {'gpu': gpu}}} if gpu else {}
         nodes.append(dict(id=key, kind=kind, role='action' if n.occurrence_id in graph.terminals else 'source' if n.kind == 'source' else 'transform',
             parameters=parameters, normalized_parameters={'schema': {'identity': output['schema_identity']}} if output else {},
-            analysis={}, contract={}, source=None, operator=None, api=n.kernel.kind))
+            analysis={}, contract={}, source=None, operator=None, api=n.kernel.kind, **capabilities))
     edges = [dict(**{'from': keys[e.producer], 'to': keys[e.consumer]}, port=i) for i, e in enumerate(graph.edges)]
     for job in graph.jobs:
         nodes.append(dict(id=job.occurrence_id, kind="fit", role="value", parameters=thaw_record_value(job.configuration),
-                          normalized_parameters={}, analysis={}, contract={}, source=None, operator=None, api="fit"))
+                          normalized_parameters={}, analysis={"topology": thaw_record_value(job.configuration["semantics"]["topology"])},
+                          contract={}, source=None, operator=None, api="fit"))
     edges.extend(dict(**{'from': keys[e.producer], 'to': keys[e.consumer]}, port=e.input_port, kind=e.kind,
                       step=e.step) for e in graph.value_edges)
     return dict(nodes=nodes, edges=edges, actions=[action], operators=[],

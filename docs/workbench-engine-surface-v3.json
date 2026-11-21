@@ -66,6 +66,10 @@
       "stream_limits": [
         "demiflow.execution.payload_limits",
         "stream_limits"
+      ],
+      "training_deployment_reference": [
+        "demiflow.execution.training.deployment",
+        "training_deployment_reference"
       ]
     },
     "inspection": {

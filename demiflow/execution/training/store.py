@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import time
 from urllib.parse import urlsplit, unquote
 
 from ..contracts.training import FitResult, ProjectObject
@@ -50,10 +51,12 @@ def open_regular_file(path):
         os.close(parent)
 
 
-def _transfer(source, expected, size, output=None):
+def _transfer(source, expected, size, output=None, *, check_stop):
     digest = hashlib.sha256()
     length = 0
     while True:
+        if check_stop is not None:
+            check_stop()
         data = source.read(min(1024 * 1024, size - length + 1))
         if not data:
             break
@@ -68,7 +71,8 @@ def _transfer(source, expected, size, output=None):
 
 
 class ModelStore:
-    def __init__(self, index):
+    def __init__(self, index, *, check_stop=None):
+        self.check_stop = check_stop
         self.index = index
         self.root = local_path(index.binding.model_store_uri)
         if any(p.is_symlink() for p in (self.root, *self.root.parents)):
@@ -89,13 +93,15 @@ class ModelStore:
         if local_path(ref.uri) != path or ref.size_bytes > self.index.binding.max_model_bytes:
             raise RecoveryContractError("Object is outside this project's immutable model store")
         with open_regular_file(path) as stream:
-            _transfer(stream, ref.sha256, ref.size_bytes)
+            _transfer(stream, ref.sha256, ref.size_bytes, check_stop=self.check_stop)
 
     def _reap_imports(self, current_digest, current_fd):
         """Recover only unfinalized reservations from demonstrably dead importers."""
         cursor = ''
         while pending := self.index.pending_objects(str(self.root),cursor):
             for digest in pending:
+                if self.check_stop is not None:
+                    self.check_stop()
                 cursor = digest
                 own_partition = digest[:2] == current_digest[:2]
                 directory = current_fd if own_partition else os.open(
@@ -130,7 +136,16 @@ class ModelStore:
             # Same-prefix imports serialize. The deterministic staging file can
             # only be removed by a writer holding this lock; process death
             # releases it, while a confirmed immutable inode is never replaced.
-            fcntl.flock(directory, fcntl.LOCK_EX)
+            while True:
+                if self.check_stop is not None:
+                    self.check_stop()
+                try:
+                    fcntl.flock(directory, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if self.check_stop is None:
+                        raise FitConflict("Model import is busy")
+                    time.sleep(.02)
             ref = ProjectObject(str(target), digest, size)
             name = '.' + digest + '.importing'
             try:
@@ -142,14 +157,14 @@ class ModelStore:
                 if not self.index.reserve_object(str(self.root),digest,size):
                     raise FitConflict("Project model store exceeds file or byte quota")
             if os.path.lexists(target):
-                _transfer(stream, digest, size)
+                _transfer(stream, digest, size, check_stop=self.check_stop)
                 self.verify(ref)
                 self.index.complete_object(str(self.root),digest)
                 return ref
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
             try:
                 with os.fdopen(os.open(name, flags, 0o600, dir_fd=directory), 'wb') as tmp:
-                    _transfer(stream, digest, size, tmp)
+                    _transfer(stream, digest, size, tmp, check_stop=self.check_stop)
                     tmp.flush()
                     os.fchmod(tmp.fileno(), 0o400)
                     os.fsync(tmp.fileno())
@@ -196,7 +211,7 @@ class ModelStore:
             raise RecoveryContractError("Invalid project fit manifest")
         output = io.BytesIO()
         with open_regular_file(local_path(ref.uri)) as stream:
-            _transfer(stream, ref.sha256, ref.size_bytes, output)
+            _transfer(stream, ref.sha256, ref.size_bytes, output, check_stop=self.check_stop)
         result = FitResult.from_dict(json.loads(output.getvalue()))
         validate_result(result, request)
         seen = set()

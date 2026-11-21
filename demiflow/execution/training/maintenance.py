@@ -12,7 +12,7 @@ from .runtime import FitRuntime
 
 
 def reconcile_stopped_fits(journal, *, expected_attempt, expected_revision, deadline,
-                           confirm_stopped, project_root, deployment=None):
+                           confirm_stopped, project_root, deployment=None, deployment_ref=None):
     """A control command. Never creates an attempt, row action or training submission."""
     with read_run(journal.directory, deadline=deadline) as reader:
         routes = reader.fit_routes()
@@ -22,10 +22,11 @@ def reconcile_stopped_fits(journal, *, expected_attempt, expected_revision, dead
                                      deadline=deadline, confirm_stopped=confirm_stopped) as run:
         if deployment is None:
             from .deployment import load_training_deployment
-            location = os.environ.get('DEMIFLOW_TRAINING_DEPLOYMENT')
+            location = deployment_ref['path'] if deployment_ref else os.environ.get('DEMIFLOW_TRAINING_DEPLOYMENT')
             if not location:
                 raise FitConflict("Stopped fit requires its original project deployment")
-            deployment = load_training_deployment(location, project_root=project_root)
+            deployment = load_training_deployment(location, project_root=project_root,
+                        expected_digest=deployment_ref['sha256'] if deployment_ref else None)
         statuses = {}
         for route in routes:
             run.check_stop()

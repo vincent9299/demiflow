@@ -161,3 +161,20 @@ def test_v4_seal_rejects_a_forged_fit_identity():
         with pytest.raises(DataflowError, match="seal"):
             verify_fit_membership(marker, graph)
     verify_fit_membership({"schema": TRAINING_SEAL_SCHEMA, "fit_occurrences": [graph.jobs[0].occurrence_id]}, graph)
+
+
+def test_predictor_input_aliases_keep_all_type_constraints():
+    from dataclasses import replace
+    spec = recipe().predictor
+    duplicate = {'left':'x', 'right':'x'}
+    compatible = replace(spec, inputs=duplicate, input_schema={'left':'str', 'right':'string'})
+    assert dict(compatible.inputs) == duplicate
+    with pytest.raises(ValueError, match='Conflicting predictor types for column x'):
+        replace(compatible, input_schema={'left':'int64', 'right':'string'})
+    valid = replace(compatible, inputs={'left':'id', 'right':'x'},
+                    input_schema={'left':'int64', 'right':'string'})
+    owner = object()
+    rows = Dataset(ItemsSource(({'x':'yes','id':1},)), LogicalPlan(), owner)
+    selection = rows.fit(recipe=replace(recipe(), predictor=valid)).checkpoints.select(steps=[2])
+    with pytest.raises(ValueError, match='Conflicting predictor types for column x'):
+        selection.predict(on=rows, inputs={'left':'x'})

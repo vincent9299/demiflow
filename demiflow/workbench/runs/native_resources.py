@@ -132,10 +132,13 @@ def trusted_deployment(*, workspace):
                          device_inventory=inventory, virtual_address_bytes=int(ceiling)))
 
 
-def select(report, deployment, *, workspace):
+def select(report, deployment, *, workspace, training_deployment=None):
     """Bind declared GPU operators to the service's existing resource domain."""
     requested = any((n.get('capability_fact', {}).get('resource_declaration') or {}).get('gpu', 0)
                     for n in report['nodes'])
+    if training_deployment and training_deployment['hosting'] == 'EngineManaged':
+        requested |= any(node.get('analysis', {}).get('topology', {}).get('gpus_per_node', 0) > 0
+                         for node in report['nodes'] if node.get('kind') == 'fit')
     if not requested:
         return None
     if deployment is None:

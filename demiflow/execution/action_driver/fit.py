@@ -57,7 +57,7 @@ class FitDependencies:
             if budget['optimizer_updates'] > epochs * ((examples + batch - 1) // batch):
                 raise ValueError("Training update budget is unreachable for the fixed dataset")
         binding = self.deployment.binding
-        parent_snapshot = (read_parent(self.deployment.project_id, binding, **parent) if parent else None)
+        parent_snapshot = (read_parent(self.deployment.project_id, binding, **parent, check_stop=self.check_stop) if parent else None)
         semantics = {**thaw_record_value(conf['semantics']), 'trainer_digest': identity(self.pins[job.occurrence_id])}
         if binding.hosting == 'ProviderManaged':
             semantics.update(provider_scope=binding.provider_scope,

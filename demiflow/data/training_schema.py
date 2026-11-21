@@ -60,3 +60,13 @@ def validate_columns(schema, columns):
         actual = str(schema.field(name).type)
         if actual != expected and _canonical(actual) != _canonical(expected):
             raise ValueError(f"Training field {name} requires {expected}, found {actual}")
+
+def prediction_columns(bindings, fields):
+    """Map named predictor inputs to physical columns, preserving every type constraint."""
+    columns = {}
+    for name, column in bindings.items():
+        declared = fields[name]
+        previous = columns.setdefault(column, declared)
+        if previous != declared and _canonical(previous) != _canonical(declared):
+            raise ValueError(f"Conflicting predictor types for column {column}: {previous} and {declared}")
+    return columns

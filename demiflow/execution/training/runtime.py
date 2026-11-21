@@ -113,7 +113,7 @@ def read_consumed_fit(action, occurrence, project_id, binding):
     if manifest is None or manifest.to_dict() != source['manifest']:
         raise FitConflict("Final row checkpoint lacks confirmed model evidence")
     request = FitRequest.from_dict(json.loads(row['request']))
-    result = ModelStore(index).load(manifest,request)
+    result = ModelStore(index, check_stop=action.context.check_stop).load(manifest,request)
     return result, manifest
 
 
@@ -121,7 +121,7 @@ def consumed_model_digest(result, manifest, step, predictor_digest):
     return identity(_selection(result,step,predictor_digest,manifest.sha256))
 
 
-def read_parent(project_id, binding, manifest_digest, step, *, consumer_instance=None):
+def read_parent(project_id, binding, manifest_digest, step, *, consumer_instance=None, check_stop=None):
     """Resolve an explicit, confirmed parent within the same project authority."""
     index = TrainingIndex(binding, readonly=True)
     row = index.find_manifest(project_id, manifest_digest)
@@ -131,7 +131,7 @@ def read_parent(project_id, binding, manifest_digest, step, *, consumer_instance
     if not ref or ref.sha256 != manifest_digest:
         raise FitConflict("Parent manifest lacks the original producer's confirmation")
     request = FitRequest.from_dict(json.loads(row['request']))
-    result = ModelStore(index).load(ref, request)
+    result = ModelStore(index, check_stop=check_stop).load(ref, request)
     snapshot, = result.select((step,))
     if not snapshot.resume_files:
         raise FitConflict("Selected parent has no resumable optimizer state")
@@ -202,7 +202,7 @@ class FitRuntime:
             self._transport = ProviderCalls(provider,binding.provider_timeout_s)
         with self.run.journal.fit_guard(self.run.fence, self.action.action_id, occurrence):
             self.index = TrainingIndex(binding)
-            self.store = ModelStore(self.index)
+            self.store = ModelStore(self.index, check_stop=self.run.check_stop)
         self._completed = None
         self._copies = None
         self._capability_checked = False
@@ -348,7 +348,7 @@ class FitRuntime:
 
     def retain_parent(self, manifest_digest, step):
         return read_parent(self.request.project_id, self.binding, manifest_digest, step,
-                           consumer_instance=self.request.instance_id)
+                           consumer_instance=self.request.instance_id, check_stop=self.run.check_stop)
 
     def _permit(self, row, grant):
         # Cancellation commits under the same original publication lease.

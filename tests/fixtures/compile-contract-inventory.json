@@ -46,6 +46,7 @@
    "LanceSource",
    "MaterializedSource",
    "NativeOperation",
+   "PredictOp",
    "RangeSource",
    "SqlSource",
    "StreamPrependOp",
@@ -297,6 +298,9 @@
    "max_rows": [
     "execution/kernels/operator.py"
    ],
+   "monitor_schemas": [
+    "planning/dataflow_training.py"
+   ],
    "native_key": [
     "execution/dataflow_fetch.py",
     "execution/dataflow_search.py",
@@ -342,11 +346,23 @@
    "outputs": [
     "execution/kernels/operator.py"
    ],
+   "parent": [
+    "planning/dataflow_training.py"
+   ],
    "partition_id": [
     "execution/dataflow_sinks.py"
    ],
    "payload_columns": [
     "execution/kernels/lance_keys.py"
+   ],
+   "predict_input_schema": [
+    "planning/dataflow_training.py"
+   ],
+   "predict_step": [
+    "execution/dataflow_services.py",
+    "execution/seal/plan.py",
+    "planning/dataflow_place.py",
+    "planning/dataflow_training.py"
    ],
    "private_journal": [
     "execution/dataflow_embedding_journal.py",
@@ -388,6 +404,9 @@
    "seed": [
     "execution/kernels/dataflow.py"
    ],
+   "semantics": [
+    "planning/dataflow_training.py"
+   ],
    "shared_actor": [
     "execution/dataflow_shared.py",
     "execution/kernels/operator.py",
@@ -400,7 +419,10 @@
     "execution/kernels/operator.py"
    ],
    "sink_id": [
-    "execution/dataflow_sinks.py"
+    "execution/action_driver/dataflow.py",
+    "execution/dataflow_sinks.py",
+    "execution/worker/dataflow_graph_runner.py",
+    "planning/dataflow_training.py"
    ],
    "sort": [
     "execution/kernels/block_partition.py",
@@ -452,6 +474,9 @@
    "thread_attempt": [
     "execution/seal/plan.py",
     "planning/dataflow_place.py"
+   ],
+   "train_schema": [
+    "planning/dataflow_training.py"
    ]
   },
   "written": {
@@ -522,6 +547,9 @@
    "reducer_program": [
     "planning/dataflow_compile.py"
    ],
+   "sink_id": [
+    "planning/dataflow_training.py"
+   ],
    "streaming_map": [
     "planning/dataflow_compile.py"
    ],
@@ -547,6 +575,7 @@
    "RepartitionOp"
   ],
   "registered_operators_not_admitted_by_runtime": [
+   "PredictOp",
    "decode_document",
    "deduplicate",
    "encode_image",
@@ -710,7 +739,7 @@
  },
  "implicit_inputs": [
   "planning/dataflow_graph_adapter.py::graph_result: journal = execution.request.action.context.journal",
-  "planning/dataflow_graph_adapter.py::validate_graph_replay: bundle = load_sealed_plan(action.context.directory, action.action_id, version='v3')",
+  "planning/dataflow_graph_adapter.py::validate_graph_replay: bundle = load_sealed_plan(action.context.directory, action.action_id)",
   "planning/dataflow_graph_adapter.py::validate_graph_replay: if action.context.journal.source_binding(action.action_id + '-dataflow-sealed') is None:"
  ],
  "input_resolver": [
@@ -956,6 +985,22 @@
    "ordering_finish": false,
    "row_call": true,
    "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "PredictOp": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
    "sealable_without_program_as_transform": true,
    "stream_group": false,
    "task_scoped": false
@@ -2325,6 +2370,12 @@
     "remote_api",
     false
    ],
+   "PredictOp": [
+    "auto_json",
+    "pure",
+    "cpu",
+    false
+   ],
    "RandomSampleOp": [
     "none",
     "pure",
@@ -2514,6 +2565,13 @@
      "main"
     ],
     "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+   },
+   "PredictOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_training:capture_predict",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_batch"
    },
    "RandomSampleOp": {
     "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
