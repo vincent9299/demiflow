@@ -17,7 +17,6 @@
    "VectorSearchOp"
   ],
   "execution.plan_facts": [
-   "AgentMapOp",
    "AsyncMapOp",
    "BatchMapOp",
    "BoundMapOp",

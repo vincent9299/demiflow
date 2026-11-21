@@ -38,6 +38,22 @@ def test_native_dispatch_includes_only_called_type_predicates(monkeypatch):
     assert 'SearchWeb' not in inventory.class_dispatch()[key]
 
 
+def test_prompt_dispatch_is_derived_from_each_use_of_the_domain_predicate(monkeypatch):
+    original_source = inventory.source
+    def without_prompt_check(relative):
+        text = original_source(relative)
+        if relative in (inventory.NATIVE_DECLARATION, inventory.PLAN_FACTS):
+            return text.replace('is_native_prompt_actor(', 'unrelated_check(')
+        return text
+
+    owners = ('execution.native_model_declaration', 'execution.plan_facts')
+    before = inventory.class_dispatch()
+    assert all('PromptActor' in before[owner] for owner in owners)
+    monkeypatch.setattr(inventory, 'source', without_prompt_check)
+    after = inventory.class_dispatch()
+    assert all('PromptActor' not in after[owner] for owner in owners)
+
+
 def test_recorded_runtime_decisions_still_match_their_use_sites():
     assert inventory.missing_predicate_snippets() == [], (
         'A runtime use site changed. Revisit the decision recorded in compile_contract_inventory.PREDICATES.')

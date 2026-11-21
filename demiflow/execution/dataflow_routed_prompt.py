@@ -39,7 +39,7 @@ class _RoutedPromptJournal(RemotePromptJournal):
 
 def routed_declaration(actor, target):
     from ..operator_llm.routed import RoutedPromptActor
-    from ..operator_llm.runtime import PromptActor
+    from ..operator_llm.native_actor import is_native_prompt_actor
     from .dataflow_model_factory import native_model_declaration, RoutedPromptFactory
     if (getattr(target, '__func__', None) is not RoutedPromptActor.__call__
             or type(actor.actors) is not dict or not 1 <= len(actor.actors) <= 32
@@ -53,7 +53,7 @@ def routed_declaration(actor, target):
     for name, child in actor.actors.items():
         capacity = actor.limits[name]
         if (not isinstance(name, str) or not name or type(capacity) is not int
-                or not 1 <= capacity <= 256 or type(child) is not PromptActor
+                or not 1 <= capacity <= 256 or not is_native_prompt_actor(child)
                 or child._runtime.concurrency != capacity
                 or child._prompt.response_format == 'image'):
             raise DataflowError('INVALID_CONTRACT', 'Routed prompt child differs from its declared capacity/model')

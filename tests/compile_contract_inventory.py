@@ -317,7 +317,8 @@ def class_dispatch():
     return {
         'execution.native_model_declaration': _classes_tested(
             NATIVE_DECLARATION, {'native_model_declaration'}, follow_predicates=True),
-        'execution.plan_facts': _classes_tested(PLAN_FACTS, {'operation_facts', 'operation_capability'}),
+        'execution.plan_facts': _classes_tested(
+            PLAN_FACTS, {'operation_facts', 'operation_capability'}, follow_predicates=True),
         'planning.compiler': _classes_tested(COMPILER),
         'planning.legacy_traits': _classes_tested(LEGACY_TRAITS),
     }

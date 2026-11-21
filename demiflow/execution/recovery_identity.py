@@ -168,9 +168,9 @@ def describe(value, depth=0):
             return {'arrow_csv_options': type(value).__name__, 'fields': state}
     # Nested native prompts were previously unrepresentable (live runtime).
     # Reuse their guarded native facts; existing operation identities are unchanged.
-    from ..operator_llm.runtime import PromptActor
-    if type(value) is PromptActor:
-        from ..operator_llm.flow_contract import prompt_facts, agent_facts
+    from ..operator_llm.native_actor import is_native_prompt_actor
+    if is_native_prompt_actor(value):
+        from ..operator_llm.flow_contract import agent_facts, prompt_facts
         return {'native_prompt': prompt_facts(value) if value.environment is None
                 else agent_facts(value, value.environment)}
     if callable(value):

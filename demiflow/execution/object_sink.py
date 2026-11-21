@@ -311,13 +311,13 @@ class ObjectSink(Datasink):
 
 def image_object_specs(plan):
     """Native resource declarations; no clients or filesystem writes."""
-    from ..operator_llm.runtime import PromptActor
+    from ..operator_llm.native_actor import is_native_prompt_actor
     from ..operator_llm.media import media_limits
     specs={}
     for operation in plan.operations:
         target=getattr(getattr(operation,'callable',None),'target',None)
         target=getattr(target,'__self__',target)
-        if type(target) is PromptActor and target._prompt.response_format=='image':
+        if is_native_prompt_actor(target) and target._prompt.response_format == 'image':
             options=target._runtime.options
             root=options['object_store']
             specs[root]=max(specs.get(root,0),media_limits(options)['max_image_bytes'])
