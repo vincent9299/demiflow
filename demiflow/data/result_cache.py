@@ -40,7 +40,6 @@ def _state_policy(value):
     """Retain function bindings at the existing native function-state boundary."""
     from ..execution.operator_policy import classify_operator_state
     from ..execution.kernels.task_scope import function_residency_kind, snapshot_resident_function
-    from ..operator_llm.runtime import PromptActor
     owner = _state_owner(value)
     if owner is None:
         return owner, 'none', None
@@ -62,7 +61,8 @@ def _state_policy(value):
                                    call_kwargs=partial.keywords) != 'none':
             return owner, 'nonrecoverable', 'Cached partial actor has unadapted bound argument state'
         partial = partial.func
-    if type(owner) is PromptActor:
+    from ..operator_llm.flow_contract import is_native_prompt_actor
+    if is_native_prompt_actor(owner):
         return owner, 'none', None  # Rebound to the native journal in the worker.
     return owner, policy.mode, policy.reason
 

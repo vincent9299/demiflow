@@ -49,6 +49,18 @@ def test_model_factories_are_recognised_by_identity_only():
         assert native.model_variant(_declare(_lookalike(cls))) is None
 
 
+def test_native_prompt_admission_uses_only_the_actual_actor_class():
+    from demiflow.operator_llm.flow_contract import is_native_prompt_actor
+    from demiflow.operator_llm.runtime import PromptActor
+
+    actor = object.__new__(PromptActor)
+    assert is_native_prompt_actor(actor)
+    assert not is_native_prompt_actor(object.__new__(_subclass(PromptActor)))
+    assert not is_native_prompt_actor(_lookalike(PromptActor)())
+    assert not is_native_prompt_actor(actor.__call__)
+    assert not is_native_prompt_actor(lambda row: row)
+
+
 def test_service_declarations_and_the_configuration_they_add():
     from demiflow.execution.dataflow_acquisition_call import AcquisitionCall
     from demiflow.execution.dataflow_producer import ProducerCall
@@ -150,6 +162,8 @@ def test_importing_the_module_initialises_no_native_service():
         "import sys\n"
         "import demiflow.execution.dataflow_native as native\n"
         "native.model_variant(None); native.native_variant(None, None)\n"
+        "from demiflow.operator_llm.flow_contract import is_native_prompt_actor\n"
+        "assert not is_native_prompt_actor(lambda row: row)\n"
         "heavy = [name for name in ('demiflow.execution.dataflow_acquisition_call', 'demiflow.execution.dataflow_producer',\n"
         "    'demiflow.execution.dataflow_search', 'demiflow.execution.dataflow_stream_lance', 'demiflow.execution.dataflow_fetch',\n"
         "    'demiflow.execution.queue_source', 'demiflow.execution.queue_history', 'demiflow.execution.queue_sinks',\n"

@@ -152,9 +152,8 @@ def native_model_declaration(operation):
     if type(actor) is RoutedPromptActor:
         from .dataflow_routed_prompt import routed_declaration
         return routed_declaration(actor, target)
-    from ..operator_llm.runtime import PromptActor
-    if type(actor) is PromptActor:
-        from ..operator_llm.flow_contract import prompt_facts, agent_facts
+    from ..operator_llm.flow_contract import agent_facts, is_native_prompt_actor, prompt_facts
+    if is_native_prompt_actor(actor):
         if actor.environment is not None:
             agent_facts(actor, getattr(operation, 'environment', actor.environment))
         else:
