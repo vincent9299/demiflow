@@ -1230,7 +1230,11 @@
       }catch(error){if(valid()&&error.name!=='AbortError')panel.replaceChildren($('p',error.message,'error-box'));}
     }
     function paintResults(){
-      const fingerprint=json([comparison,run?.run_id,run?.attempt,run?.current_attempt,run?.outputs,can('attach'),can('run_submit')]);
+      // Run details and live snapshots carry different diagnostics for the same
+      // output. Its result digest identifies the complete fixed table reference.
+      const outputKeys=run?.outputs.map(o=>[o.name,o.action_id,o.uri,o.status,o.retained_from_attempt,
+        o.result?.location_id,o.result_digest]);
+      const fingerprint=json([comparison,run?.run_id,run?.attempt,run?.current_attempt,outputKeys,can('attach'),can('run_submit')]);
       if(fingerprint===outputFingerprint)return;outputFingerprint=fingerprint;
       results.replaceChildren($('h3',comparison?'两次运行对比':'本次输出'));
       if(comparison){
