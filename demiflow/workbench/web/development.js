@@ -441,7 +441,11 @@ SOFTWARE.
         if(state.disposed)return;
         input.value='';resizeInput();
         if(state.createdHere){await openSession(state.session.id);return;}
-        state.listAt=0;clearTimeout(state.timer);await refresh();
+        state.listAt=0;clearTimeout(state.timer);
+        // The message is already durable. Long polling must not keep the
+        // composer locked while the user types or promotes the next message.
+        if(submission.after)refresh();
+        else await refresh();
       }catch(err){
         if(err.operationStarted===false||['invalid_request','conflict','resource_limit','forbidden'].includes(err.code))state.submission=null;
         if(!state.disposed){error(body,err);await refresh().catch(()=>{});}
