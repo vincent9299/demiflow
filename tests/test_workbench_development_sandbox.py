@@ -1,5 +1,6 @@
 """Actual Linux adversarial fixtures. No accounts, business ACLs or models."""
 import dataclasses
+import io
 import json
 import os
 from pathlib import Path
@@ -393,3 +394,62 @@ time.sleep(30)
         if process.poll() is None:
             process.kill(); process.communicate(timeout=5)
     assert (secret / 'receipt').read_text() == 'authoritative-preserved'
+
+
+@pytest.fixture(scope='module')
+def observer():
+    # PID 1 normally runs as an isolated script with its own module search path.
+    with pytest.MonkeyPatch.context() as isolated:
+        isolated.setattr(sys, 'path', list(sys.path))
+        from demiflow.workbench.conversations import sandbox_child
+    return sandbox_child
+
+
+def test_fd_observer_rejects_live_process_with_inaccessible_descriptors(observer):
+    code = (
+        "import ctypes, sys; assert ctypes.CDLL(None).prctl(4, 0, 0, 0, 0) == 0; "
+        "print('ready', flush=True); sys.stdin.read(1)"
+    )
+    with subprocess.Popen([sys.executable, '-I', '-B', '-c', code], stdin=subprocess.PIPE,
+                          stdout=subprocess.PIPE) as child:
+        try:
+            assert child.stdout.readline() == b'ready\n'
+            try:
+                with os.scandir(f'/proc/{child.pid}/fd'):
+                    pytest.skip('privileged observer may inspect non-dumpable processes')
+            except PermissionError:
+                pass
+            with pytest.raises(PermissionError):
+                observer.sample(child.pid, 1, files=True, deadline=time.monotonic() + 1)
+            assert child.poll() is None
+        finally:
+            child.stdin.close()
+
+
+def test_fd_observer_confirms_zombie_or_gone_using_same_open_stat(monkeypatch, observer):
+    def denied(path):
+        raise PermissionError(path)
+
+    with subprocess.Popen([sys.executable, '-I', '-B', '-c', 'import sys; sys.stdin.read(1)'],
+                          stdin=subprocess.PIPE) as child:
+        with open(f'/proc/{child.pid}/stat', 'rb', buffering=0) as proc_stat:
+            monkeypatch.setattr(observer.os, 'scandir', denied)
+            child.stdin.close()
+            os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)
+            assert observer._open_process_fds(child.pid, proc_stat, time.monotonic() + 1) is None
+            assert child.wait() == 0
+            assert observer._open_process_fds(child.pid, proc_stat, time.monotonic() + 1) is None
+
+
+@pytest.mark.parametrize('state,threads', [('R', 1), ('Z', 2)])
+def test_fd_observer_rejects_unconfirmed_exit_and_live_thread_group(monkeypatch, observer, state, threads):
+    fields = ['0'] * 22
+    fields[0], fields[6], fields[17] = state, '4', str(threads)
+    proc_stat = io.BytesIO(('123 (worker) ' + ' '.join(fields)).encode())
+
+    def denied(path):
+        raise PermissionError(path)
+
+    monkeypatch.setattr(observer.os, 'scandir', denied)
+    with pytest.raises(PermissionError):
+        observer._open_process_fds(123, proc_stat, time.monotonic())

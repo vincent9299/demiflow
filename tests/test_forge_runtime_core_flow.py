@@ -203,7 +203,21 @@ def test_browser_onboard_submit_result_then_monitor_stop(unregistered, tmp_path,
         page.get_by_text('已保留固定版本引用：selected', exact=True).wait_for()
         page.get_by_role('button', name='查看固定结果', exact=True).click()
         page.get_by_text('c01', exact=True).first.wait_for()
-        navigate(page, '管道')
+        # Returning to the pipeline starts a real preview. Even settings opened
+        # mid-preview must defer registration until that read settles.
+        held_preview = []
+        page.route('**/plan-preview', lambda route: held_preview.append(route), times=1)
+        with page.expect_request('**/plan-preview'):
+            navigate(page, '管道')
+        if not settings.is_visible():
+            open_menu_action(page, '接入与权限')
+        registration = settings.get_by_role('button',name='登记原生流程',exact=True)
+        expect(registration).to_be_disabled()
+        assert sum(method=='POST' and urlsplit(url).path.endswith('/flow-register') for method,url in requests)==1
+        with page.expect_response('**/plan-preview') as preview:
+            held_preview[0].continue_()
+        assert preview.value.ok, preview.value.text()
+        expect(registration).to_be_enabled()
         register_from_page(page, 'flows/waiting.py:run', 'flows/waiting.json', evidence_dir=tmp_path/'evidence')
         open_menu_action(page, '整图配置')
         page.get_by_text('本次运行设置',exact=True).click()

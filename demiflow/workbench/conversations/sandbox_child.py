@@ -30,9 +30,37 @@ def close_except(keep):
                 pass
 
 
-def sample(owner, maximum, *, files=False):
+def _process_fields(proc_stat):
+    return bounded_contents(proc_stat).decode().rsplit(')', 1)[1].split()
+
+
+def _open_process_fds(pid, proc_stat, deadline):
+    try:
+        return os.scandir(f'/proc/{pid}/fd')
+    except PermissionError:
+        # During exit Linux may revoke fd access before reporting a zombie.
+        # The open stat file stays bound to this task even if its PID is reused.
+        while True:
+            try:
+                proc_stat.seek(0)
+                fields = _process_fields(proc_stat)
+            except (FileNotFoundError, ProcessLookupError):
+                return None
+            if int(fields[17]) != 1:
+                raise  # the thread group still has other members
+            if fields[0] in ('Z', 'X', 'x'):
+                return None
+            remaining = deadline - time.monotonic()
+            if not (int(fields[6]) & 0x4) or remaining <= 0:  # Linux PF_EXITING
+                raise
+            time.sleep(min(.005, remaining))
+
+
+def sample(owner, maximum, *, files, deadline):
     pending, seen, rss = [owner], set(), 0
     anonymous, seen_files, descriptors = 0, set(), 0
+    # One bounded exit observation window shared by all tasks in this sample.
+    exit_deadline = min(deadline, time.monotonic() + .1)
     while pending:
         if len(seen) > maximum or len(pending) > maximum:
             raise RuntimeError('Sandbox process budget exceeded')
@@ -41,11 +69,12 @@ def sample(owner, maximum, *, files=False):
             continue
         seen.add(pid)
         try:
-            raw = bounded_read(f'/proc/{pid}/stat')
-            fields = raw.decode().rsplit(')', 1)[1].split()
-            rss += int(fields[21]) * os.sysconf('SC_PAGE_SIZE')
-            if files:
-                with os.scandir(f'/proc/{pid}/fd') as entries:
+            with open(f'/proc/{pid}/stat', 'rb', buffering=0) as proc_stat:
+                fields = _process_fields(proc_stat)
+                rss += int(fields[21]) * os.sysconf('SC_PAGE_SIZE')
+                entries = _open_process_fds(pid, proc_stat, exit_deadline) if files else None
+            if entries is not None:
+                with entries:
                     for entry in entries:
                         descriptors += 1
                         if descriptors > 8192:
@@ -73,7 +102,11 @@ def sample(owner, maximum, *, files=False):
 
 def bounded_read(path):
     with open(path, 'rb') as stream:
-        raw = stream.read(32769)
+        return bounded_contents(stream)
+
+
+def bounded_contents(stream):
+    raw = stream.read(32769)
     if len(raw) > 32768:
         raise RuntimeError('Sandbox process observation exceeded byte budget')
     return raw
@@ -146,7 +179,7 @@ def main():
         if relay_failed.is_set():
             return 125
         check_disk = time.monotonic() - last_disk >= .2
-        rss, anonymous = sample(host_pid, spec['processes'], files=check_disk)
+        rss, anonymous = sample(host_pid, spec['processes'], files=check_disk, deadline=deadline)
         if rss > spec['rss_bytes']:
             return 125
         if check_disk:

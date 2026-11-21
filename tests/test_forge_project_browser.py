@@ -103,7 +103,7 @@ def test_existing_declared_project_check_and_violation(isolated, tmp_path):
                     assert attempt<2,'Check remained busy after bounded explicit retries'
                     refresh=page.get_by_role('button',name='刷新当前视图',exact=True)
                     refresh.click()
-                    playwright.expect(refresh).not_to_have_attribute('data-pending','true',timeout=65000)
+                    playwright.expect(refresh).to_be_enabled(timeout=65000)
                     continue
                 assert reply.status==200,value
                 assert value['status']==expected,value
@@ -143,7 +143,7 @@ def test_project_check_busy_is_unapplied_until_explicit_retry(isolated,tmp_path,
         project_info(page)
         page.evaluate('() => Object.defineProperty(document,"hidden",{configurable:true,get:()=>true})')
         refresh=page.get_by_role('button',name='刷新当前视图',exact=True);refresh.click()
-        playwright.expect(refresh).not_to_have_attribute('data-pending','true',timeout=65000)
+        playwright.expect(refresh).to_be_enabled(timeout=65000)
         with page.expect_response('**/project-check') as initial:
             page.get_by_role('button',name='检查当前项目',exact=True).click()
         assert initial.value.status==200 and initial.value.json()['status']=='checked'
