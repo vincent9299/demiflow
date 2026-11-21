@@ -13,12 +13,16 @@ from test_forge_runs import base, execute, root
 from test_training_domain import setup_request
 
 
-@pytest.mark.parametrize('native', [False, True], ids=['checked-output', 'native-capture'])
-def test_registered_native_training_run_seals_and_reports_model_evidence(root, tmp_path, monkeypatch, native):
+@pytest.mark.parametrize(('native', 'gpu'), [(False, 0), (True, 0), (False, 1), (True, 1)],
+                         ids=['checked-cpu', 'native-cpu', 'checked-gpu', 'native-gpu'])
+def test_registered_native_training_run_seals_and_reports_model_evidence(root, tmp_path, monkeypatch, native, gpu):
     (root / 'operators' / 'training.py').write_text('''from hashlib import sha256
 from demiflow.execution.contracts.training import FitResult, ProjectObject, TrainingSnapshotRef
 
 def managed_trainer(request, context):
+    import os
+    if request.semantics['topology']['gpus_per_node']:
+        assert os.environ['CUDA_VISIBLE_DEVICES'] == 'gpu-test'
     snapshots = []
     for step in request.semantics['save_steps']:
         path = context.model_dir / str(step)
@@ -52,6 +56,15 @@ def run(*, digest, target):
     scores = fitted.checkpoints.select(steps=[400,800]).predict(on=holdout)
     return scores.write_lance(target['uri'], mode='create', return_receipt=True)
 '''
+    if gpu:
+        from test_workbench_native_gpu import deployment as resource_deployment
+        resources = resource_deployment(tmp_path)
+        inventory = tmp_path / 'deployment-inventory.json'
+        inventory.write_text(json.dumps(resources['device_inventory']))
+        monkeypatch.setenv('DEMIFLOW_DEVICE_INVENTORY', str(inventory))
+        monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT', resources['resource_root'])
+        monkeypatch.setenv('DEMIFLOW_WORKBENCH_GPU_VIRTUAL_BYTES', str(resources['virtual_address_bytes']))
+        flow = flow.replace("'gpus_per_node':0", "'gpus_per_node':1")
     if native:
         flow = flow.replace('from demiflow import data', 'from demiflow import data\nimport pyarrow as pa').replace(
             "mode='create'", "mode='create', schema=pa.schema([('x', pa.int64()), ('step', pa.int64())])")
@@ -74,9 +87,18 @@ def run(*, digest, target):
         register_flow(root, entry, params=params)
     prepared = runs.prepare(root, entry, params=params)
     assert prepared['status'] == 'prepared'
+    # Start must use the already sealed deployment and inventory. The parent
+    # may have since been restarted with an entirely different environment.
+    monkeypatch.delenv('DEMIFLOW_TRAINING_DEPLOYMENT')
+    monkeypatch.delenv('DEMIFLOW_DEVICE_INVENTORY', raising=False)
     result = execute(root, prepared)
     run_id = prepared['run_id']
     assert result['status'] == 'succeeded', (result, runs.logs(root, run_id))
+    if gpu:
+        from pathlib import Path
+        records = [json.loads(p.read_bytes()) for p in
+                   (Path(resources['resource_root']) / 'devices' / 'allocations').glob('*.json')]
+        assert len(records) == 1 and records[0]['state'] == 'RELEASED'
     output, = result['outputs']
     _, ref, location = runs.result_table(root, run_id, output['name'], attempt=1)
     assert ref.row_count == 4
