@@ -46,24 +46,50 @@ def private_domain(tmp_path,monkeypatch):
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN',str(tmp_path/'runtime-domain'))
 
 
-def hold_next_response(page, endpoint):
-    """Deliver the next matching real HTTP response when released by the test."""
-    page.evaluate("""endpoint => {
+def hold_output_read(page, path, query):
+    """Pause delivery of the exact native fetch. Cancelled reads retain their normal abort."""
+    page.evaluate("""([path, query]) => {
         const native = window.fetch.bind(window);
-        window.releaseOutputRead = null;
+        const pending = new Set();
+        let closed = false;
+        window.heldOutputRead = {
+            evidence() {
+                if (pending.size > 1) throw new Error('Ambiguous live output read');
+                const [read] = pending;
+                return read ? read.evidence : false;
+            },
+            release() {
+                closed = true;
+                window.fetch = native;
+                for (const read of pending) read.done();
+            }
+        };
         window.fetch = async (...args) => {
-            if (!new URL(args[0], location.href).pathname.endsWith('/' + endpoint)) return native(...args);
-            window.fetch = native;
+            const url = new URL(args[0], location.href);
+            if (url.pathname !== path || !Object.entries(query).every(([k,v]) => url.searchParams.get(k) === v))
+                return native(...args);
             const response = await native(...args);
-            await new Promise(resolve => {window.releaseOutputRead = resolve;});
+            // Read the clone while this fetch owns it; deliver the original to the app.
+            const evidence = {ok: response.ok, body: await response.clone().json()};
+            const signal = args[1]?.signal;
+            if (!closed && !signal?.aborted) await new Promise(resolve => {
+                const read = {evidence, done() {
+                    signal?.removeEventListener('abort', read.done);
+                    pending.delete(read);
+                    resolve();
+                }};
+                pending.add(read);
+                signal?.addEventListener('abort', read.done, {once: true});
+            });
             return response;
         };
-    }""", endpoint)
+    }""", [path, query])
 
 
-def release_response(page):
-    page.wait_for_function("typeof window.releaseOutputRead === 'function'")
-    page.evaluate("() => window.releaseOutputRead()")
+def held_body(page):
+    evidence = page.wait_for_function('() => window.heldOutputRead.evidence()').json_value()
+    assert evidence['ok'], evidence['body']
+    return evidence['body']
 
 
 def test_management_runs_filters_and_opens_real_result(root,browser,tmp_path):
@@ -96,9 +122,9 @@ def test_management_runs_filters_and_opens_real_result(root,browser,tmp_path):
         search.fill(run_id)
         expect(record).to_be_visible()
         # Let the compact run arrive before its first real observation snapshot.
-        hold_next_response(page, 'run-snapshot')
-        with page.expect_response('**/run-snapshot?*') as snapshot:
-            record.click()
+        prefix = f'/api/workspaces/{project}/'
+        hold_output_read(page, prefix + 'run-snapshot', {'run_id': run_id, 'attempt': '1', 'revision': None})
+        record.click()
         expect(record).to_have_attribute('aria-pressed', 'true')
         assert page.evaluate('ForgeView.decodeView(location.hash).run_id') == run_id
         expect(page.locator('.wb-run-bar')).to_contain_text(run_id[-10:])
@@ -109,9 +135,10 @@ def test_management_runs_filters_and_opens_real_result(root,browser,tmp_path):
         expect(preview).to_contain_text('c02')
         original_panel = preview.element_handle()
         bar_title = page.locator('.wb-run-bar > :first-child').element_handle()
-        assert snapshot.value.ok
-        assert snapshot.value.json()['outputs'][0]['result_digest'] == value['outputs'][0]['result_digest']
-        release_response(page)
+        snapshot = held_body(page)
+        assert (snapshot['run_id'], snapshot['attempt']) == (run_id, 1)
+        assert snapshot['outputs'][0]['result_digest'] == value['outputs'][0]['result_digest']
+        page.evaluate('() => window.heldOutputRead.release()')
         page.wait_for_function('title => !title.isConnected', arg=bar_title)
         assert original_panel.evaluate('panel => panel.isConnected')
         expect(preview).to_contain_text('c02')
@@ -121,14 +148,14 @@ def test_management_runs_filters_and_opens_real_result(root,browser,tmp_path):
         read_result = page.get_by_role('button', name='查看固定结果', exact=True)
         read_result.click()
         expect(preview).to_have_count(0)
-        hold_next_response(page, 'sample')
-        with page.expect_response('**/sample?*') as sample:
-            read_result.click()
-        assert sample.value.ok and len(sample.value.json()['rows']) == 2
+        hold_output_read(page, prefix + 'sample', {'alias': f'run:{run_id}:target:1'})
+        read_result.click()
+        sample = held_body(page)
+        assert len(sample['rows']) == 2 and sample['version'] == value['outputs'][0]['result']['ref']['lance_version']
         registry.set_permissions(projects, project, expected=content_digest(registry.load_registry(projects)),
                                  run_submit=True, run_control=True, attach=False)
         page.get_by_role('button', name='刷新当前视图', exact=True).click()
         expect(page.get_by_role('button', name='保留为输入表', exact=True)).to_be_disabled()
         expect(preview).to_have_count(0)
-        release_response(page)
+        page.evaluate('() => window.heldOutputRead.release()')
         expect(preview).to_have_count(0)
