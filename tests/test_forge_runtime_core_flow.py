@@ -86,7 +86,8 @@ def test_http_registration_permissions_cas_and_no_execution(unregistered, tmp_pa
         (unregistered/'flows/never.py').write_text('raise RuntimeError("must not import")\ndef run():\n    pass\n')
         assert request(app, prefix+'flow-register', {**body, 'entry': 'flows/never.py:run'})[0] == 422
         assert (unregistered/'workspace.json').read_bytes() == before
-        assert request(app, prefix+'flow-register', body)[1]['status'] == 'registered'
+        status, registered = request(app, prefix+'flow-register', body)
+        assert status == 200 and registered['status'] == 'registered', registered
         assert request(app, prefix+'flow-register', body)[1]['status'] == 'unchanged'
         (unregistered/'flows/total.py').write_text('from demiflow import data\ndef run():\n    return data.range(2).count()\n')
         status, registered = request(app, prefix+'flow-register', {'entry': 'flows/total.py:run'})

@@ -6,6 +6,7 @@ from demiflow.forge.platform import bounded_json
 from demiflow.forge.platform import content_digest
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.schema import ForgeError
+from demiflow.forge.platform_snapshot import compare_snapshots, snapshot_complete
 
 FORMAT = 'demiflow_workbench_project_static_check_v3'
 
@@ -14,13 +15,14 @@ def check(root, *, table_resolver):
     from demiflow.workbench.projects import workspace as ws
     from demiflow.forge.api_reference import sdk_identity
     from demiflow.forge.pipeline_check import check_project, verify_check_inputs
-    from demiflow.forge.platform_snapshot import compare_snapshots
     root, control, snapshot = ws.load_workspace(root)
     destination = root / '.forge/project-check.json'
     previous = content_digest(ws.read_control(destination, 2*1024**2)) if destination.exists() else None
     before = content_digest(control)
     saved_snapshot = snapshot
     snapshot = ws.current_platform_snapshot(saved_snapshot)
+    if not snapshot_complete(snapshot):
+        raise ForgeError('Cannot check a project with incomplete SDK evidence', code='inspection_incomplete')
     platform = compare_snapshots(saved_snapshot, snapshot)
     catalog = snapshot['catalog']
     reference = dict(catalog=catalog, catalog_id=content_digest(catalog), sdk_revision=sdk_identity(catalog))
@@ -61,7 +63,8 @@ def check(root, *, table_resolver):
 
 def status(root, *, table_resolver):
     from demiflow.workbench.projects import workspace as ws
-    root, control, _ = ws.load_workspace(root)
+    from demiflow.forge.project_rules import RULES_ID
+    root, control, saved_snapshot = ws.load_workspace(root)
     path = root / '.forge/project-check.json'
     workspace_id = ws.workspace_id(root, control)
     if not path.exists():
@@ -78,7 +81,26 @@ def status(root, *, table_resolver):
     reasons = []
     if result['control_digest'] != content_digest(control):
         reasons.append('project_declarations_changed')
-    platform = ws.check_snapshot(root / control['platform']['path'])
+    if result['basis']['rules_id'] != RULES_ID:
+        reasons.append('authoring_rules_changed')
+    try:
+        current = ws.current_platform_snapshot(saved_snapshot)
+    except (OSError, ValueError, RuntimeError, TypeError, ImportError) as exc:
+        current = None
+        reasons.append('checker_platform_unverifiable: ' + str(exc)[:256])
+    complete = current is not None and snapshot_complete(current)
+    if current is not None:
+        if not complete:
+            reasons.append('checker_platform_incomplete')
+        elif result['checker_platform_digest'] != current['digests']['snapshot']:
+            reasons.append('checker_platform_changed')
+
+    # A legacy project's snapshot compares in its original protocol. The current
+    # checker identity above always uses the protocol that produced this report.
+    if current is not None and current['format'] == saved_snapshot['format']:
+        platform = compare_snapshots(saved_snapshot, current)
+    else:
+        platform = ws.check_snapshot(root / control['platform']['path'])
     for item in result['entries']:
         try:
             if item['digest'] and ws._report_status(root, item['digest'], platform_check=False, table_resolver=table_resolver)['status'] != item['status']:
@@ -86,7 +108,7 @@ def status(root, *, table_resolver):
         except (ForgeError, OSError, ValueError):
             reasons.append('inspection_unverifiable:' + item['entry'])
     total = 0
-    evidence = dict(result['sources'])
+    evidence = {**result['sources'], 'workspace.json': result['basis']['manifest_sha256']}
     evidence.update(result['basis']['controls'])
     evidence.update(result['basis']['parameter_digests'])
     for path, expected in evidence.items():
@@ -97,5 +119,6 @@ def status(root, *, table_resolver):
                 reasons.append('source_changed:' + path)
         except (ValueError, OSError):
             reasons.append('source_unverifiable:' + path)
-    return {**result, 'status': 'stale' if reasons else result['status'], 'changes': reasons,
+    status = result['status'] if not reasons else 'stale' if complete else 'incomplete'
+    return {**result, 'status': status, 'changes': reasons,
             'platform_provenance': platform}

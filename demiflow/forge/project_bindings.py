@@ -129,10 +129,8 @@ def resolve_flow_resources(root, tree, references, bindings, *, control=None):
             if set(reference)-{'access'} != {'kind', 'parameter', 'root', 'relocations', 'layout'}:
                 raise ForgeError('Invalid object location reference')
             reference=dict(reference)
-            from demiflow.objects import _local_path
-            value=str(reference['root'])
-            logical=_local_path(value) if value.startswith('file:') else Path(value)
-            reference['root']=str(logical if logical.is_absolute() else Path(root)/logical)
+            from demiflow.objects import local_object_directory
+            reference['root'] = str(local_object_directory(reference['root'], base=root))
             workspace = control if control is not None else load_project(root)[1]
             matches = [key for key, location in workspace['locations'].items()
                        if str(location_root(root, location)) == reference['root']]

@@ -56,11 +56,8 @@ def _items(path, raw, kind):
             raise ForgeError('Expected a native Prompt or Agent document', code='invalid_request')
         agent = value.get('schema_version') == 'demiflow_agent_v2'
         if agent:
-            from demiflow.agent import inspect_agent_config_document
-            try:
-                names, _ = inspect_agent_config_document(value)
-            except TypeError as exc:
-                raise ForgeError(str(exc), code='invalid_request') from exc
+            from demiflow.forge.project import inspect_prompt_source
+            _, names, _ = inspect_prompt_source(text)
             tasks = value['tasks']
         elif value.get('schema_version') == 'demiflow_prompt_pack_v2' and type(value.get('prompts')) is dict:
             tasks = value['prompts']

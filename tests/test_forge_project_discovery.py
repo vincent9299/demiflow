@@ -74,19 +74,44 @@ def test_register_recognizes_original_without_execution_or_copies(original, tmp_
     assert not (original / 'tables').exists() and not (original / 'flows').exists()
 
 
-def test_project_check_tracks_the_checker_revision(original, monkeypatch):
+def test_project_check_tracks_the_checker_revision(tmp_path, monkeypatch):
+    from demiflow.forge import project_rules
+    from demiflow.forge.project import register_flow
     from demiflow.workbench.projects import checks as project_check
     from demiflow.workbench.runs import manager as runs
     from demiflow.workbench.table_bindings import make_resolver
-    initialize_project(original, existing=True)
-    result = project_ops.check_project(original)
-    assert result['checker_platform_digest']
-    monkeypatch.setattr(ws, 'check_snapshot', lambda path: {'status': 'current', 'current_digest': '0'*64})
+    initialize_project(tmp_path)
+    (tmp_path / 'flows').mkdir()
+    (tmp_path / 'flows/counts.py').write_text('from demiflow import data\ndef run():\n    return data.range(2).count()\n')
+    register_flow(tmp_path, 'flows/counts.py:run')
+    report = project_ops.check_project(tmp_path)
+    assert report['status'] == 'checked'
+    saved = ws.load_workspace(tmp_path)[2]
+    current = ws.current_platform_snapshot(saved)
     resolver = make_resolver(ws.table_binding, runs.result_table)
-    status = project_check.status(original, table_resolver=resolver)
-    assert 'platform_changed' not in status['changes']
-    assert status['platform_provenance']['current_digest'] == '0'*64
-    assert status['status'] == result['status']
+    def status():
+        return project_check.status(tmp_path, table_resolver=resolver)
+    assert status()['status'] == 'checked'
+    with monkeypatch.context() as m:
+        m.setattr(ws, 'current_platform_snapshot', lambda _: {
+            **current, 'digests': {**current['digests'], 'snapshot': '0'*64}})
+        result = status()
+        assert result['status'] == 'stale' and 'checker_platform_changed' in result['changes']
+        assert result['platform_provenance']['status'] == 'stale'
+    with monkeypatch.context() as m:
+        m.setattr(ws, 'current_platform_snapshot', lambda _: {
+            **current, 'catalog': {**current['catalog'], 'inspection_complete': False}})
+        result = status()
+        assert result['status'] == 'incomplete' and 'checker_platform_incomplete' in result['changes']
+    with monkeypatch.context() as m:
+        m.setattr(project_rules, 'RULES_ID', 'other-revision')
+        result = status()
+        assert result['status'] == 'stale' and 'authoring_rules_changed' in result['changes']
+    # Reformatting a bound document changes the raw bytes recorded by the check.
+    manifest = tmp_path / 'workspace.json'
+    manifest.write_bytes(manifest.read_bytes() + b'\n')
+    result = status()
+    assert result['status'] == 'stale' and 'source_changed:workspace.json' in result['changes']
 
 
 def test_config_reference_budget_is_visible_without_hiding_the_project(original):
