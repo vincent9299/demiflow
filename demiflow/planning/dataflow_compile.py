@@ -132,7 +132,7 @@ def _operation_semantic_facts(operation: LogicalOp) -> Mapping[str, Any]:
             fact = operation_facts(operation)
         except (RuntimeError, ValueError, TypeError):
             fact = {}
-        if fact.get('native') is not None or type(operation).__name__ == 'OperatorLLMMapOp':
+        if fact.get('native') is not None or type(operation) is ops.OperatorLLMMapOp:
             return operation_identity(operation)
         return {
             "type": type(operation).__module__ + "." + type(operation).__qualname__,
@@ -185,7 +185,7 @@ def _source_semantic_facts(source: SourcePlan) -> Mapping[str, Any]:
                 "output": source.output}
     if isinstance(source, UnionSource):
         return {"kind": "union", "inputs": len(source.inputs)}
-    if type(source).__name__ == "_LiteralEmptySource":
+    if type(source) is _LiteralEmptySource:
         return {"kind": "literal_empty"}
     raise _error("INVALID_CONTRACT", "unknown source plan: " + type(source).__name__)
 
@@ -212,7 +212,7 @@ def _source_kind(source: SourcePlan) -> str:
     if isinstance(source, DatasourceSource):
         from ..execution.dataflow_native import datasource_kind
         return datasource_kind(source.datasource)
-    if type(source).__name__ == "_LiteralEmptySource":
+    if type(source) is _LiteralEmptySource:
         return "literal_empty"
     raise _error("INVALID_CONTRACT", "unknown source plan: " + type(source).__name__)
 

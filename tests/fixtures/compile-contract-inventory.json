@@ -47,6 +47,7 @@
    "LanceSource",
    "MaterializedSource",
    "NativeOperation",
+   "OperatorLLMMapOp",
    "RangeSource",
    "SqlSource",
    "StreamPrependOp",
