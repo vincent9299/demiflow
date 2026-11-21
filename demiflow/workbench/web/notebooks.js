@@ -145,6 +145,7 @@
     }else{
       const index=Math.max(0,notebook.activeCellIndex+1);
       model.insertCell(index,{id:crypto.randomUUID(),cell_type:'code',source,metadata:{},outputs:[],execution_count:null});
+      notebook.deselectAll();
       notebook.activeCellIndex=index;
     }
     notebook.activeCell?.editor?.focus();
