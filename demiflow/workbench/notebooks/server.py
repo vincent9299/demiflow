@@ -93,6 +93,7 @@ def main():
         'headers': {'Content-Security-Policy': "frame-ancestors 'self'"},
         'page_config_hook': lambda handler, value: {
             **value, 'token': '', 'allow_hidden': False,
+            'notebookStartsKernel': json.loads((config_path.parent/'grants.json').read_text())['execute'],
             'disabledExtensions': list(value.get('disabledExtensions', [])) + [
                 '@jupyter-notebook/lab-extension:interface-switcher',
                 '@jupyterlab/lsp-extension',
