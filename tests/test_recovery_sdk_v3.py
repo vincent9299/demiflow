@@ -96,3 +96,24 @@ print(json.dumps([describe(data.Dataset)["methods"]["join"], identity(code_recor
     out = subprocess.check_output([sys.executable, '-OO', '-B', '-c', probe], text=True)
     actual, expected = json.loads(out)
     assert actual == expected
+
+
+def test_sdk_created_nested_function_is_checked_before_and_after_pickle(tmp_path):
+    import cloudpickle
+
+    def predicate(output):
+        rows = data.from_items([{'id': 1, 'k': 'z'}])
+        return rows.deduplicate('k', path=tmp_path / 'seen', key='id',
+                                output=output)._plan.operations[-1].callable.target
+
+    with data.local_execution():
+        live = predicate('dedup')
+        different_closure = predicate('second')
+    historical_file = '1ba0e80f1ed0853948a97792dc65125fdaec17504bc3396b5f53ffb593da7e88'
+    assert describe(live)['source_hash'] == historical_file
+    decoded = cloudpickle.loads(cloudpickle.dumps(live))
+    assert decoded.__globals__ is not live.__globals__
+    assert describe(decoded) == describe(live)
+    assert describe(different_closure) != describe(live)
+    decoded.__globals__['undeclared'] = 123
+    assert describe(decoded)['source_hash'] == sha256(_source(decoded)).hexdigest()

@@ -6,6 +6,7 @@ file identity after verifying both the actual module binding and the live code
 against the measured source. Business source hashes and program artifact
 digests are verified independently. An unrecognised revision uses its own pin.
 """
+import builtins
 from dis import get_instructions
 from functools import lru_cache
 import sys
@@ -47,20 +48,58 @@ def _declared_codes(source):
     return functions
 
 
-def _canonical_function(fn, module):
-    if fn.__globals__ is not vars(module):
-        return False
-    names = fn.__qualname__.split('.')
+def _owners(module, qualname):
+    names = qualname.split('.')
     owner = vars(module).get(names[0])
     if len(names) == 2 and isinstance(owner, type):
         owner = vars(owner).get(names[1])
     elif len(names) != 1:
-        return False
+        return ()
     if isinstance(owner, (staticmethod, classmethod)):
         owner = owner.__func__
     if isinstance(owner, property):
-        return fn is owner.fget or fn is owner.fset or fn is owner.fdel
-    return fn is owner or type(owner) is FunctionType and fn is vars(owner).get('__wrapped__')
+        return owner.fget, owner.fset, owner.fdel
+    if type(owner) is FunctionType:
+        return owner, vars(owner).get('__wrapped__')
+    return ()
+
+
+def _children(code):
+    for item in code.co_consts:
+        if isinstance(item, CodeType):
+            yield item
+            yield from _children(item)
+
+
+def _matches_definition(fn, module, compiled, root_name, code):
+    live_globals = fn.__globals__ is vars(module)
+    # Cloudpickle restores SDK-created closures by value. Only a closed body
+    # with no global names can use this route. Its original closure/defaults
+    # remain independently bound by describe; no supplied global is trusted.
+    restored = (not live_globals and not fn.__code__.co_names and fn.__code__.co_qualname == fn.__qualname__
+                and fn.__builtins__ is vars(builtins)
+                and set(fn.__globals__) == {'__name__', '__package__', '__file__', '__builtins__'}
+                and fn.__globals__['__name__'] == module.__name__
+                and fn.__globals__['__package__'] == module.__package__
+                and fn.__globals__['__file__'] == module.__file__)
+    for root in _owners(module, root_name):
+        if type(root) is not FunctionType or root.__globals__ is not vars(module):
+            continue
+        if fn is root:
+            return code == identity(code_record(compiled))
+        if root_name == fn.__qualname__ or not (live_globals or restored):
+            continue
+        if identity(code_record(root.__code__)) != identity(code_record(compiled)):
+            continue
+        for child in _children(root.__code__):
+            if child.co_qualname != fn.__qualname__:
+                continue
+            if live_globals and fn.__code__ is child:
+                return True
+            if restored and code == identity(code_record(child)):
+                # Inspect the full code tree before accepting a restored scope.
+                return not any(descendant.co_names for descendant in _children(child))
+    return False
 
 
 def _method_pin(fn, code):
@@ -89,13 +128,14 @@ def function_pin(fn, source, source_hash, code):
     if revision is None or source_hash != revision[0]:
         return source_hash, code
     module = sys.modules.get(fn.__module__)
-    if module is None or not _canonical_function(fn, module):
+    if module is None:
         return source_hash, code
-    if fn.__module__ == 'demiflow.data.result_cache' and fn.__qualname__ == '_state_policy':
+    root_name = fn.__qualname__.partition('.<locals>.')[0]
+    if fn.__module__ == 'demiflow.data.result_cache' and root_name == '_state_policy':
         # Its runtime type test changed; the function itself keeps its new pin.
         return source_hash, code
-    compiled = _declared_codes(source).get(fn.__qualname__)
-    if compiled is None or identity(code_record(compiled)) != code:
+    compiled = _declared_codes(source).get(root_name)
+    if compiled is None or not _matches_definition(fn, module, compiled, root_name, code):
         return source_hash, code
     return revision[1], _method_pin(fn, code)
 
@@ -108,6 +148,6 @@ def class_method_pins(cls, methods):
         return methods
     for name in _RELATIONAL_METHODS:
         fn = vars(cls).get(name)
-        if type(fn) is FunctionType and _canonical_function(fn, module):
+        if type(fn) is FunctionType and fn.__globals__ is vars(module):
             methods[name] = _method_pin(fn, methods[name])
     return methods
