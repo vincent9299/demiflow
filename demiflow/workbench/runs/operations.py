@@ -188,7 +188,7 @@ def worker_arguments(name, arguments):
     if type(arguments) is not dict:
         raise ForgeError('Worker run arguments must be an object', code='invalid_request')
     if name == 'run_prepare':
-        internal = {k: v for k, v in arguments.items() if k in {'reserved_run_id', 'prepare_request_id', 'native_deployment', 'capacity_domain', 'environment_names', 'executable_dirs'}}
+        internal = {k: v for k, v in arguments.items() if k in {'reserved_run_id', 'prepare_request_id', 'native_deployment', 'training_location', 'capacity_domain', 'environment_names', 'executable_dirs'}}
         public = {k: v for k, v in arguments.items() if k not in internal}
         # request_id belongs to the parent receipt wrapper, not _prepare.
         if 'request_id' in public:
@@ -198,6 +198,11 @@ def worker_arguments(name, arguments):
             if key == 'native_deployment':
                 from demiflow.workbench.runs.native_resources import validate
                 validate(value)
+            elif key == 'training_location':
+                from pathlib import Path
+                if (type(value) is not str or not 1 <= len(value.encode()) <= 4096
+                        or not Path(value).is_absolute() or str(Path(value).resolve()) != value):
+                    raise ForgeError('Training deployment requires a canonical absolute file path')
             elif key == 'executable_dirs':
                 from demiflow.workbench.runs.native_resources import executable_directories
                 executable_directories(value)
