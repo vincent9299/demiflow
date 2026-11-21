@@ -151,6 +151,9 @@
     const reader=globalThis.ForgeReading.createTextReader({text, compactSource, continuousSource, defaultMode:sourceOnly?'source':defaultMode,
       identity:{epoch:viewEpoch, selection:selectionEpoch}, resolveLink, offline:!!offline});
     if(sourceOnly)reader.element.querySelector('.reading-toolbar').hidden=true;
+    return attachReader(parent,reader);
+  }
+  function attachReader(parent,reader){
     readers.add(reader);parent.append(reader.element);return reader;
   }
   function closeProjectPicker({restoreFocus=false}={}) {
@@ -666,18 +669,19 @@
       finally{delete host.dataset.loading;}
     }
     const catalog=$('div',undefined,'document-tree');directory.append(catalog);folder(catalog);
-    const intro=panel(documentPath,viewer);intro.id='project-readme';intro.tabIndex=-1;
+    const intro=panel(null,viewer);intro.id='project-readme';intro.tabIndex=-1;
     let text=context.readme;
-    if(reference.document){try{const doc=await api('project-markdown',{path:documentPath});if(!current())return;text=doc.text;}catch(err){if(current())error(intro,err);return;}}
-    if(!text){intro.append($('p',reference.document?'此文档为空。':'尚无 README.md。可在开发中补充项目说明。','notice'));if(!reference.document)button('进入开发',()=>navigate('development'),intro);}
-    else if(!reference.document&&text.startsWith('项目说明无法读取：'))intro.append($('p',text,'error-box'));
-    else mountText(intro,text,{resolveLink:href=>{
+    if(reference.document){try{const doc=await api('project-markdown',{path:documentPath});if(!current())return;text=doc.text;}catch(err){if(current()){intro.append($('h2',documentPath));error(intro,err);}return;}}
+    if(!text){intro.append($('h2',documentPath));intro.append($('p',reference.document?'此文档为空。':'尚无 README.md。可在开发中补充项目说明。','notice'));if(!reference.document)button('进入开发',()=>navigate('development'),intro);}
+    else if(!reference.document&&text.startsWith('项目说明无法读取：'))intro.append($('h2',documentPath),$('p',text,'error-box'));
+    else attachReader(intro,ForgeReading.createTextReader({text,documentTitle:documentPath,compactSource:true,continuousSource:true,
+      identity:{epoch,project,documentPath},offline:!!offline,resolveLink:href=>{
       if(!current()||/^(?:[a-z][a-z0-9+.-]*:|\/|#)/i.test(href))return null;
       let path;try{path=decodeURIComponent(new URL(href,'https://project.invalid/'+documentPath).pathname.slice(1));}catch{return null;}
       if(/\.(?:md|markdown)$/i.test(path)){try{V.validateView(target('overview',{document:path}));}catch{return null;}
         return {label:'打开文档 · '+path,open:()=>navigateDocument(path)};}
       return resolveProjectLink(path);
-    }});
+    }}));
     const info=$('details');info.append($('summary','项目内容、能力与依据'));viewer.append(info);
     info.append($('p',context.flows.length+' 个登记流程 · '+context.tables.length+' 个固定数据引用 · '+context.report_total+' 份报告；报告数量不代表全部通过。','muted small'));
     button('查看管道与检查',()=>navigate('flows'),info);button('查看数据',()=>navigate('tables'),info);

@@ -93,3 +93,20 @@
   padding: 2px 6px;
 }
 .forge-reader .reading-link-reason { margin-left: 4px; }
+
+/* The document title and editor actions share one line above the reading column. */
+.document-workspace .document-viewer{margin:0;max-width:none;padding:16px clamp(14px,2.4vw,36px)}
+.document-viewer #project-readme{padding:0;margin:0;border:0;border-radius:0}
+.document-reader .reading-toolbar{gap:4px;margin:0 0 18px;padding:0 0 8px;border-bottom:1px solid var(--line)}
+.document-reader .reading-toolbar h2{flex:1 1 12ch;min-width:0;margin:0;font-size:14px;font-weight:550;overflow-wrap:anywhere}
+.document-reader .reading-toolbar button{display:inline-grid;place-items:center;width:30px;height:30px;padding:0;background:transparent;border:0;border-radius:4px;color:var(--muted)}
+.document-reader .reading-toolbar button:hover:not(:disabled){background:#f0f2f6;color:var(--text)}
+.document-reader .reading-toolbar button[hidden]{display:none}
+.document-reader .reading-toolbar svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round}
+.document-reader .reading-source-nav{margin:0;gap:2px;font-variant-numeric:tabular-nums}
+.document-reader .reading-status:empty{display:none}
+.document-reader .reading-preview{max-width:none}
+.document-reader .reading-preview > :is(p,ul,ol,blockquote){max-width:85ch}
+.document-reader .md-table-wrap table{width:100%;min-width:min(36rem,100%)}
+.document-reader .reading-source-page{white-space:pre-wrap;overflow-wrap:anywhere;max-height:none;border:0;border-radius:0;background:transparent;padding:0}
+@media(pointer:coarse){.document-reader .reading-toolbar button{min-width:40px;min-height:40px}}

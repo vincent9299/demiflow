@@ -101,7 +101,7 @@ print("never executed")
         reader=page.locator('#project-readme .forge-reader')
         reader.get_by_role('heading',name='Shipping guide',exact=True).wait_for()
         assert reader.locator('ol,blockquote,table,pre code').count()==4
-        assert reader.locator('script,img,iframe,svg').count()==0
+        assert reader.locator('.reading-content script,.reading-content img,.reading-content iframe,.reading-content svg').count()==0
         assert reader.locator('a').count()==1
         assert not page.evaluate('globalThis.compromised===true')
         assert not any('example.org' in url for _,url in requests)
@@ -120,7 +120,7 @@ print("never executed")
             page.set_viewport_size({'width':width,'height':1000})
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),width
             artifact(page,f'readme-{width}')
-        reader.get_by_role('button',name='原文',exact=True).click()
+        reader.get_by_role('button',name='查看源码',exact=True).click()
         assert ''.join(reader.locator('.reading-source-chunk').all_text_contents())==text
         artifact(page,'readme-source')
         assert not any(method=='POST' for method,_ in requests)

@@ -228,7 +228,7 @@ def test_browser_onboard_submit_result_then_monitor_stop(unregistered, tmp_path,
                 "prior => {const v=ForgeView.decodeView(location.hash);return v.run_id && v.run_id!==prior;}",
                 arg=first)
             active = current_run(page)
-            expect(page.locator('.wb-run-record.selected')).to_have_attribute('data-run', active)
+            expect(page.get_by_label('运行记录',exact=True)).to_have_value(active)
             page.get_by_text('部分输出已提交', exact=False).first.wait_for()
             page.get_by_text('性能趋势 · 整次运行', exact=True).click()
             page.get_by_role('img', name='整次运行的 CPU 核数趋势').wait_for()

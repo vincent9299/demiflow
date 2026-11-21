@@ -52,6 +52,14 @@ def test_long_readme_pages_reconstruct_original_through_http(original, tmp_path,
     path = tmp_path / 'registry.json'; registry.add(path, original)
     with service(None, registry=path) as app, opened(browser, app) as (page, requests):
         reader = page.locator('#project-readme .forge-reader')
+        expect(reader.locator('.reading-preview')).to_contain_text('END-OF-ORIGINAL-README')
+        expect(reader.get_by_role('heading',name='原项目完整说明')).to_be_visible()
+        toolbar = reader.get_by_role('group',name='文本显示方式')
+        expect(toolbar.get_by_role('button')).to_have_count(1)
+        toggle = toolbar.get_by_role('button',name='查看源码')
+        expect(toggle.locator('svg')).to_be_visible()
+        assert toggle.inner_text() == ''
+        toggle.click()
         expect(reader.locator('.reading-source-chunk').first).to_be_visible()
         portions = []
         while True:
@@ -64,6 +72,9 @@ def test_long_readme_pages_reconstruct_original_through_http(original, tmp_path,
                 break
             next_page.click()
         assert len(portions) > 1 and ''.join(portions) == text
+        toolbar.get_by_role('button',name='查看预览').click()
+        expect(reader.locator('.reading-preview')).to_contain_text('END-OF-ORIGINAL-README')
+        expect(toolbar.get_by_role('button')).to_have_count(1)
         assert not page.locator('#project-readme .error-box').count()
         assert not any(method == 'POST' for method, _ in requests)
     assert (original / 'README.md').read_text(encoding='utf-8') == text

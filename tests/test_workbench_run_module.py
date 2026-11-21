@@ -41,7 +41,7 @@ def test_submit_history_snapshot_and_result(root, browser):
         assert len(records) == 1
         result = runs.show(root, records[0]['run_id'], include_report=True)
         assert result['status'] == 'succeeded', result
-        expect(page.locator('.wb-run-record')).to_have_count(1)
+        expect(page.get_by_label('运行记录', exact=True).locator('option')).to_have_count(1)
         expect(page.locator('.wb-history')).to_be_visible()
         page.get_by_role('button', name='本次参数与版本', exact=True).click()
         expect(page.get_by_label('封存业务参数')).to_contain_text('0.8')
@@ -87,8 +87,8 @@ def test_history_recovers_when_its_first_read_is_not_dispatched(root, browser):
 
         page.route('**/runs?*', read_history)
         page.locator('.function-nav').get_by_role('button', name='运行', exact=True).click()
-        record = page.locator(f'.wb-run-record[data-run="{value["run_id"]}"]')
-        expect(record).to_be_visible()
+        record = page.get_by_role('combobox',name='运行记录')
+        expect(record).to_have_value(value['run_id'])
         assert attempts[:2] == [503, 'retry']
         assert runs.show(root, value['run_id'])['status'] == 'prepared'
         assert not errors
@@ -116,7 +116,7 @@ def run(*, source, target, other):
     with service(root, enable_runs=True) as app, page_for(browser, app) as (page, errors):
         try:
             page.locator('.function-nav').get_by_role('button', name='运行', exact=True).click()
-            page.locator('.wb-run-record').click()
+            expect(page.get_by_label('运行记录', exact=True)).to_have_value(run_id)
             page.get_by_role('button', name='开始这次运行', exact=True).click()
             deadline = time.monotonic() + 60
             while time.monotonic() < deadline:
@@ -146,8 +146,8 @@ def run(*, source, target, other):
             page.get_by_label('运行尝试', exact=True).select_option('1')
             expect(page.locator('.wb-run-bar')).to_contain_text('历史尝试 · 只读')
             # Selecting an old attempt must not replace the latest run summary.
-            expect(page.locator('.wb-run-record')).to_contain_text('已完成')
-            expect(page.locator('.wb-run-record')).not_to_contain_text('已停止')
+            expect(page.get_by_label('运行记录', exact=True).locator('option')).to_contain_text('已完成')
+            expect(page.get_by_label('运行记录', exact=True).locator('option')).not_to_contain_text('已停止')
             expect(page.locator('.wb-inspector')).not_to_be_visible()
             expect(page.locator('.wb-run-bar').get_by_role('button', name='停止', exact=True)).to_have_count(0)
             expect(page.get_by_role('button', name='恢复运行', exact=True)).to_have_count(0)
@@ -184,7 +184,7 @@ def test_late_parameter_response_does_not_replace_selected_run(root, browser):
     assert a['status'] == b['status'] == 'succeeded'
     with service(root, enable_runs=True) as app, page_for(browser, app) as (page, errors):
         page.locator('.function-nav').get_by_role('button', name='运行', exact=True).click()
-        page.locator('.wb-run-record[data-run="'+a['run_id']+'"]').click()
+        page.get_by_label('运行记录',exact=True).select_option(a['run_id'])
         held = []
         page.route('**/run?*', lambda route: held.append(route) if 'report=1' in route.request.url
                    and a['run_id'] in route.request.url else route.continue_())
@@ -194,7 +194,7 @@ def test_late_parameter_response_does_not_replace_selected_run(root, browser):
         while not held and time.monotonic()<deadline:
             page.wait_for_timeout(50)
         assert held
-        page.locator('.wb-run-record[data-run="'+b['run_id']+'"]').click()
+        page.get_by_label('运行记录',exact=True).select_option(b['run_id'])
         page.get_by_role('button', name='本次参数与版本', exact=True).click()
         expect(page.get_by_label('封存业务参数')).to_contain_text('0.9')
         # Deliver the real old response late; never fabricate execution facts.
@@ -203,9 +203,9 @@ def test_late_parameter_response_does_not_replace_selected_run(root, browser):
         for route in held:
             route.fulfill(status=200, content_type='application/json', body=json.dumps(response))
         expect(page.get_by_label('封存业务参数')).to_contain_text('0.9')
-        expect(page.locator('.wb-run-record.selected')).to_have_attribute('data-run', b['run_id'])
+        expect(page.get_by_label('运行记录',exact=True)).to_have_value(b['run_id'])
         page.reload()
-        expect(page.locator('.wb-run-record.selected')).to_have_attribute('data-run', b['run_id'])
+        expect(page.get_by_label('运行记录',exact=True)).to_have_value(b['run_id'])
         assert not errors, errors
 
 

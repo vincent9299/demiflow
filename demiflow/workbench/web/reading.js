@@ -9,11 +9,15 @@
     parseMs: 500, startupMs: 2000, sourceChunkBytes: 16384,
     sourceChunks: 4, sourceBytes: 65536
   });
+  // Project Markdown files use the server's 1 MiB read bound. The worker,
+  // deadline, nesting, DOM and message caps still apply to the full document.
+  const documentBytes = 1024 * 1024, documentTokens = 8192;
   const tags = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul',
     'ol', 'li', 'blockquote', 'em', 'strong', 's', 'table', 'thead',
     'tbody', 'tr', 'th', 'td']);
   const leafTags = new Set(['br', 'hr', 'code', 'pre', 'image-note', 'table-wrap', 'link']);
   const reasons = Object.freeze({
+    documentBytes: '文档超过 1 MiB 预览上限', documentTokens: '文档结构超过 8192 token 预览上限',
     bytes: '内容超过 64 KiB 预览预算', lines: '内容超过 4096 行预览预算',
     nesting: 'Markdown 达到解析嵌套边界', tokens: 'Markdown 超过 6000 token 预算',
     depth: '预览树超过 24 层深度预算', nodes: '预览超过 8000 个 DOM 节点预算',
@@ -43,10 +47,11 @@
     }
     return size;
   }
-  function admit(text) {
+  function admit(text, documentView = false) {
     // No full-size encode/split allocation, including for a rejected large value.
     if (typeof text !== 'string') fail('structure');
-    if (text.length > limits.bytes || byteLength(text, limits.bytes) > limits.bytes) fail('bytes');
+    const cap = documentView ? documentBytes : limits.bytes;
+    if (text.length > cap || byteLength(text, cap) > cap) fail(documentView ? 'documentBytes' : 'bytes');
     let lines = 1;
     for (let i = 0; i < text.length; i++) {
       if (text[i] === '\r') { if (text[i + 1] === '\n') i++; lines++; }
@@ -82,8 +87,8 @@
     };
   }
   let parser;
-  function parseTree(text) {
-    admit(text);
+  function parseTree(text, documentView = false) {
+    admit(text, documentView);
     if (!parser) {
       if (typeof globalThis.markdownit !== 'function') fail('parser');
       parser = globalThis.markdownit('default', {
@@ -95,7 +100,7 @@
     function inspect(items, depth) {
       if (depth > limits.depth) fail('depth');
       for (const token of items) {
-        if (++tokenCount > limits.tokens) fail('tokens');
+        if (++tokenCount > (documentView ? documentTokens : limits.tokens)) fail(documentView ? 'documentTokens' : 'tokens');
         // markdown-it stops recognizing block syntax at maxNesting. Decline a
         // saturated result instead of presenting a partly literal deep preview.
         if (token.level + (token.nesting === 1 ? 1 : 0) >= limits.nesting) fail('nesting');
@@ -178,9 +183,9 @@
     // Only markdown-worker.js imports this branch. No state/identity is cloned.
     globalThis.onmessage = event => {
       const message = event.data;
-      if (!message || message.type !== 'parse' || !Number.isSafeInteger(message.id)) return;
+      if (!message || !['parse','parse-document'].includes(message.type) || !Number.isSafeInteger(message.id)) return;
       try {
-        const result = parseTree(message.text);
+        const result = parseTree(message.text, message.type === 'parse-document');
         // parseTree has already charged every expanded string/node plus the
         // packet envelope. Only this bounded result may be stringified/encoded.
         const bytes = new TextEncoder().encode(JSON.stringify({type: 'result', id: message.id, ...result}));
@@ -235,7 +240,7 @@
           if (data.type !== 'ready') { finish(run, 'worker'); return; }
           clearTimeout(run.timer); run.phase = 'parse'; run.began = performance.now();
           run.timer = setTimeout(() => finish(run, 'timeout'), limits.parseMs);
-          run.worker.postMessage({type: 'parse', id: job.id, text: job.text});
+          run.worker.postMessage({type: job.documentView ? 'parse-document' : 'parse', id: job.id, text: job.text});
           return;
         }
         // A delayed event loop cannot publish a result past the elapsed budget.
@@ -252,8 +257,8 @@
       };
     } catch { finish(run, 'worker'); }
   }
-  function schedule(text, owner, deliver) {
-    const job = {text, owner, deliver, id: ++serial};
+  function schedule(text, owner, deliver, documentView = false) {
+    const job = {text, owner, deliver, documentView, id: ++serial};
     if (!active) start(job);
     else {
       const obsolete = pending; pending = job;
@@ -530,11 +535,23 @@
     element.setAttribute('aria-label', '文本阅读');
     const toolbar = make('div', undefined, 'reading-toolbar'); toolbar.setAttribute('role', 'group');
     toolbar.setAttribute('aria-label', '文本显示方式');
-    const preview = make('button', '预览'), raw = make('button', '原文');
-    preview.type = raw.type = 'button'; toolbar.append(preview, raw);
+    const documentView = typeof options.documentTitle === 'string';
+    const preview = make('button', '预览'), raw = documentView ? preview : make('button', '原文');
+    preview.type = raw.type = 'button';
+    if (documentView) {
+      element.classList.add('document-reader');
+      toolbar.append(make('h2', options.documentTitle), preview);
+    } else toolbar.append(preview, raw);
     const status = make('p', '', 'reading-status'); status.setAttribute('role', 'status');
     const content = make('div', undefined, 'reading-content');
     element.append(toolbar, status, content);
+    function iconAction(button, label, path) {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+      const mark = document.createElementNS(svg.namespaceURI, 'path');
+      mark.setAttribute('d', path); svg.append(mark);
+      button.replaceChildren(svg); button.title = label; button.setAttribute('aria-label', label);
+    }
     function listen(node, event, callback, bucket = renderListeners) {
       node.addEventListener(event, callback);
       bucket.push(() => node.removeEventListener(event, callback));
@@ -543,6 +560,7 @@
       if (cancel) { const stop = cancel; cancel = null; stop(); }
       for (const remove of renderListeners) remove();
       renderListeners = []; content.replaceChildren();
+      if (documentView) toolbar.querySelector('.reading-source-nav')?.remove();
     }
     function report(value) { if (!disposed) status.textContent = value; }
     // Deterministic UTF-16 boundaries allow O(1) previous/next page selection,
@@ -566,9 +584,14 @@
       for (const button of [before, after, copy]) button.type = 'button';
       before.disabled = pageIndex === 0; after.disabled = pageIndex === pages - 1;
       const coordinates=`第 ${pageIndex + 1} / ${pages} 页 · UTF-16 字符位置 [${from}, ${to}) / ${source.length}`;
-      const position = make('span', compact?`第 ${pageIndex + 1} / ${pages} 页`:coordinates);position.title=coordinates;
-      if(compact&&pages===1)before.hidden=after.hidden=position.hidden=true;
-      nav.append(before, position, after, copy); content.append(nav);
+      const position = make('span', compact||documentView?`第 ${pageIndex + 1} / ${pages} 页`:coordinates);position.title=coordinates;
+      if((compact||documentView)&&pages===1)before.hidden=after.hidden=position.hidden=true;
+      nav.append(before, position, after, copy);
+      if (documentView) {
+        iconAction(before,'上一页原文','m14 6-6 6 6 6'); iconAction(after,'下一页原文','m10 6 6 6-6 6');
+        iconAction(copy,pages===1?'复制原文':'复制本页原文','M9 8h11v13H9z M15 5V3H5v13h1');
+        toolbar.insertBefore(nav, preview);
+      } else content.append(nav);
       // Preserve the same per-page/per-chunk budgets and exact text boundaries,
       // but allow source-file readers to display the chunks as one code block.
       const continuous=compact&&options.continuousSource===true;
@@ -583,7 +606,8 @@
         block.dataset.from = String(start); block.dataset.to = String(end);
         block.append(document.createTextNode(part)); (sourcePage||content).append(block);
       }
-      if(compact){
+      if(documentView)report(prefix ? prefix+'，已显示原文。' : '');
+      else if(compact){
         report((prefix?prefix+'；':'')+(pages===1?'源码完整显示。':'源码按页显示，共 '+pages+' 页。')+(offline?' 离线本地原文。':''));
       }else report((prefix ? prefix + '；已显示完整原文的当前页。' : '原文按页完整保留，可逐页查看与复制。') +
         ` 本页 ${mounted} UTF-8 字节。` + (offline ? ' 离线预览没有在线 worker 的 500 ms 超时保证。' : ''));
@@ -596,7 +620,7 @@
         const current = generation;
         try {
           await navigator.clipboard.writeText(source.slice(from, to));
-          if (!disposed && generation === current) report(compact?'已复制本页代码。':`已准确复制原文字符 [${from}, ${to})。`);
+          if (!disposed && generation === current) report(documentView?'已复制。':compact?'已复制本页代码。':`已准确复制原文字符 [${from}, ${to})。`);
         } catch { if (!disposed && generation === current) report('复制未完成，请直接选择本页原文复制。'); }
       });
     }
@@ -604,15 +628,20 @@
       clearRender(); mode = 'source'; selectMode(); showSource(reasons[reason] || reasons.structure);completeInitial();
     }
     function selectMode() {
-      preview.setAttribute('aria-pressed', String(mode === 'preview'));
-      raw.setAttribute('aria-pressed', String(mode === 'source'));
+      if (documentView) {
+        if (mode === 'preview') iconAction(preview,'查看源码','m8 6-6 6 6 6 M16 6l6 6-6 6 M14 3l-4 18');
+        else iconAction(preview,'查看预览','M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z');
+      } else {
+        preview.setAttribute('aria-pressed', String(mode === 'preview'));
+        raw.setAttribute('aria-pressed', String(mode === 'source'));
+      }
       element.dataset.mode = mode;
     }
     function choose(next) {
       if (disposed || mode === next) return;
       generation++; clearRender(); mode = next; selectMode();
       if (mode === 'source') { showSource();completeInitial(); return; }
-      try { admit(source); } catch (error) { fallback(reasonOf(error)); return; }
+      try { admit(source, documentView); } catch (error) { fallback(reasonOf(error)); return; }
       const current = generation, expectedOwner = owner;
       const deliver = (error, tree) => {
         if (disposed || generation !== current || owner !== expectedOwner || mode !== 'preview') return;
@@ -624,16 +653,16 @@
           };
           const dom = buildDOM(tree, resolver, listen, boundReport);
           content.replaceChildren(dom);
-          report(offline ? '离线本地预览；没有在线 worker 的 500 ms 超时保证，可切换原文核对。' : 'Markdown 预览；可随时切换原文核对。');completeInitial();
+          report(documentView ? '' : offline ? '离线本地预览；没有在线 worker 的 500 ms 超时保证，可切换原文核对。' : 'Markdown 预览；可随时切换原文核对。');completeInitial();
         } catch (failure) { fallback(reasonOf(failure)); }
       };
       report(offline ? '正在本地预览；离线解析没有在线超时保证。' : '正在预览…');
       if (offline) {
-        try { deliver(null, parseTree(source).tree); } catch (error) { deliver(reasonOf(error)); }
-      } else cancel = schedule(source, owner, deliver);
+        try { deliver(null, parseTree(source, documentView).tree); } catch (error) { deliver(reasonOf(error)); }
+      } else cancel = schedule(source, owner, deliver, documentView);
     }
-    listen(preview, 'click', () => choose('preview'), uiListeners);
-    listen(raw, 'click', () => choose('source'), uiListeners);
+    listen(preview, 'click', () => choose(documentView && mode === 'preview' ? 'source' : 'preview'), uiListeners);
+    if (!documentView) listen(raw, 'click', () => choose('source'), uiListeners);
     choose(options.defaultMode || 'preview');
     function dispose() {
       if (disposed) return;

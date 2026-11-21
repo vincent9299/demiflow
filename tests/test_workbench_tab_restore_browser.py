@@ -79,7 +79,7 @@ def test_tabs_restore_exact_run_version_and_project_despite_late_response(owned_
         # The current run module owns sealed-run navigation. Current pipeline
         # configuration no longer doubles as the historical monitoring page.
         tab(page,'运行')
-        page.locator('.wb-run-record[data-run="'+run_id+'"]').click()
+        page.get_by_label('运行记录',exact=True).select_option(run_id)
         page.locator('.wb-node').first.click()
         run_ref=reference(page)
         assert run_ref['run_id']==run_id and run_ref['attempt']==fx.run_facts['attempt']
