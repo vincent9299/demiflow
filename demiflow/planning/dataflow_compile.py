@@ -727,8 +727,8 @@ class _Capture:
                 index = self.alias_op[op_key]
                 continue
             if type(operation) is ops.PredictOp:
-                expand = _lowering(operator_registry()["PredictOp"].compiler_symbol)
-                index = expand(self, operation, index, path)
+                from .dataflow_training import capture_predict
+                index = capture_predict(self, operation, index, path)
                 if self.report is not None:
                     self._bind_report(index, self.report.operation(operation))
                 self.alias_op[op_key] = index

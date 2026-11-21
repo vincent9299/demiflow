@@ -2570,7 +2570,7 @@
     "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
    },
    "PredictOp": {
-    "compiler_symbol": "demiflow.planning.dataflow_training:capture_predict",
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
     "inputs": [
      "main"
     ],

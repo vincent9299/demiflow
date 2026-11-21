@@ -13,7 +13,7 @@ from demiflow.execution.contracts.dataflow import (
 from demiflow.execution.contracts.dataflow_codec import decode_wire, encode_wire
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.lance.model import LanceScanSpec
-from demiflow.planning.dataflow_compile import capture_graph
+from demiflow.planning.dataflow_compile import capture_graph, compile_kernel_spec
 from demiflow.planning.dataflow_place import compile_physical_dataflow, validate_physical_dataflow
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 
@@ -60,6 +60,11 @@ def test_training_ports_and_finite_predict_branches(direct):
     training = Dataset(source, LogicalPlan(), owner)
     holdout = Dataset(ItemsSource(({"x": "test"},)), LogicalPlan(), owner)
     scores = training.fit(recipe=recipe()).checkpoints.select(steps=[4, 2]).predict(on=holdout)
+    # A model dependency and its fit job belong to graph capture. The ordinary
+    # kernel compiler cannot represent that dependency in a standalone KernelSpec.
+    with pytest.raises(DataflowError, match='prediction requires graph capture'):
+        compile_kernel_spec(scores._plan.operations[-1], program_ref=None,
+                            bounds=resolve_runtime_policy({}, {}, provider="local")[1])
     compiled = capture(scores)
     graph = compiled.graph
     assert len(graph.jobs) == 1
