@@ -20,7 +20,8 @@ def main():
     listing.add_argument('--offset', type=int, default=0)
     detail = catalog.add_parser('show')
     detail.add_argument('kind', choices=['dictionary', 'tools'])
-    detail.add_argument('id')
+    detail.add_argument('id', metavar='NAME')
+    detail.add_argument('--version', type=int, help='Select a dictionary table version')
     detail.add_argument('--offset', type=int, default=0)
     cell = groups.add_parser('cell').add_subparsers(dest='action', required=True)
     cell.add_parser('show')
@@ -35,6 +36,8 @@ def main():
         return call('', token, turn, epoch, method, params)
     if args.group == 'catalog':
         params = {'group': args.kind, **({'offset': args.offset} if args.action == 'list' else {'id': args.id, 'offset':args.offset})}
+        if args.action == 'show' and args.version is not None:
+            params['version'] = args.version
     elif args.action == 'edit':
         raw = sys.stdin.buffer.read(12001)
         if len(raw) > 12000:

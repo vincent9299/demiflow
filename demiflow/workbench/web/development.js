@@ -242,11 +242,12 @@ SOFTWARE.
         const row=state.session?.id===saved.id?{...saved,...state.session}:saved;
         const button=el('button',undefined,'development-session');button.type='button';button.dataset.sessionId=row.id;
         button.setAttribute('aria-current',state.session?.id===row.id?'page':'false');
-        const title=row.title||'未命名会话',readonly=sessionReadonly(row),turn=row.turn;
-        const progress=running(row)&&turn.cleanup==='complete'?'处理中':turn?(labels[turn.state]||turn.state):row.revision?'已有记录':'尚无消息';
-        const stateText=(readonly?'只读历史 · ':'')+progress;
-        button.append(el('span',title,'development-session-title'),el('span',stateText,'development-session-state'));button.title=title+' · '+stateText;
-        button.hidden=!(title+' '+stateText).toLocaleLowerCase().includes(navigation.search.value.trim().toLocaleLowerCase());
+        const title=row.title||'未命名会话',turn=row.turn;
+        button.title=title;button.append(el('span',title,'development-session-title'));
+        const activeState=running(row)&&['preparing','starting','running','waiting_input','waiting_approval','stopping'].includes(turn.state)
+          ?labels[turn.state]:'';
+        if(activeState)button.append(el('span',activeState,'development-session-state'));
+        button.hidden=!(title+' '+activeState).toLocaleLowerCase().includes(navigation.search.value.trim().toLocaleLowerCase());
         button.onclick=()=>{if(row.id!==state.session?.id||state.historyOnly)openSession(row.id);};sessionList.append(button);
       }
       const pageButton=(label,offset)=>{const button=el('button',label);button.type='button';button.disabled=!!state.listing;button.onclick=()=>{state.listOffset=offset;loadConversations(true).catch(e=>error(body,e));};sessionPages.append(button);};

@@ -94,6 +94,9 @@ def test_new_conversations_have_independent_cli_contexts_drafts_and_writer(tmp_p
         expect(page.get_by_label('开发要求')).to_have_value('')
         assert server.development.store.list(workspace)['sessions'] == []
         first = send(page, 'First independent conversation')
+        settled = page.locator('.development-session[data-session-id="' + first + '"]')
+        expect(settled).to_have_text('First independent conversation')
+        expect(settled.locator('.development-session-state')).to_have_count(0)
         first_provider = server.development.store.session(first)['provider_session']
         assert first_provider
         page.get_by_label('开发要求').fill('First draft stays here')

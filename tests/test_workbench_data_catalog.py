@@ -129,10 +129,11 @@ def test_assistant_cli_edits_runs_and_reads_native_output(browser,native_project
                         assert '运行许可' in cli('cell','run',success=False)
                     else:
                         tools=cli('catalog','list','tools')['items']
-                        profile=next(i['id'] for i in tools if i['name']=='column_profile')
+                        profile=next(i['name'] for i in tools if i['name'].endswith('.column_profile'))
                         tool=cli('catalog','show','tools',profile)
                         table=next(i for i in cli('catalog','list','dictionary')['items'] if i['name']=='samples')
-                        fixed=cli('catalog','show','dictionary',table['id'])
+                        fixed=cli('catalog','show','dictionary',table['name'])
+                        assert 'binding=' not in fixed['read'] and 'version=1' in fixed['read']
                         assert dict(fixed['fields']).keys()=={'name','score'}
                         cmd=tool['import']+'\n'+fixed['read']+'\nprint("count=",column_profile(df).loc["score","present"])'
                         assert cli('cell','edit',source=cmd)['state']=='edited'
@@ -196,3 +197,40 @@ def test_assistant_cli_edits_runs_and_reads_native_output(browser,native_project
             expect(page.locator('.dfc-bubble')).to_have_count(0)
         finally:
             page.close()
+
+
+def test_generated_readers_use_dictionary_paths_and_upgrade_only_matching_source(native_project, tmp_path, monkeypatch):
+    import lance
+    import pyarrow as pa
+    from demiflow.workbench.notebooks.data import sample
+    from demiflow.workbench.notebooks.table_code import migrate_readers
+    project, _, _ = native_project
+    monkeypatch.setenv('DEMIFLOW_NOTEBOOK_ROOT',str(project))
+    external = tmp_path/'shared'
+    external.mkdir()
+    workspace.add_location(project,'shared',external)
+    for directory, value in [(project,11),(external,22)]:
+        lance.write_dataset(pa.table({'n':[value]}),directory/'每月 样本.lance')
+    visible = {row['path']:row for row in dictionary.discover(project)['tables']}
+    assert sample('每月 样本.lance',version=1).n.tolist()==[11]
+    assert sample('shared/每月 样本.lance',version=1).n.tolist()==[22]
+    assert sample('samples',version=1,limit=1).name.tolist()==['alpha']
+    old=visible['每月 样本.lance']
+    directory=project/'notebooks';directory.mkdir()
+    source=('from demiflow.workbench.notebooks.data import project_sample\n\n'
+            f'df = project_sample("{old["id"]}", expected="{old["expected"]}", version=1, '
+            f'binding="{"f"*64}", columns=["n"], limit=20)\ndf')
+    output={'output_type':'stream','name':'stdout','text':['unchanged\n']}
+    cells=[{'id':'first','cell_type':'code','source':source.splitlines(True),'execution_count':1,'outputs':[output]},
+           {'id':'note','cell_type':'markdown','source':[source]}]
+    doc=directory/'分析.ipynb'
+    doc.write_text(json.dumps({'cells':cells,'metadata':{},'nbformat':4,'nbformat_minor':5}))
+    migrate_readers(project,directory,[doc.name])
+    migrated=json.loads(doc.read_bytes())['cells']
+    code=''.join(migrated[0]['source'])
+    assert '"每月 样本.lance", version=1' in code and old['id'] not in code and 'binding=' not in code
+    exec(code,{'__name__':'__main__'})
+    assert migrated[0]['outputs']==[output] and migrated[0]['execution_count']==1 and migrated[1]==cells[1]
+    unchanged=doc.stat().st_mtime_ns
+    migrate_readers(project,directory,[doc.name])
+    assert doc.stat().st_mtime_ns==unchanged

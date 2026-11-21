@@ -49,6 +49,20 @@ def main():
                     raise HTTPError(403, 'Notebook symlinks are not supported')
             return result
 
+        def delete_file(self, path):
+            # A tab owns one top-level notebook. Keep the saved document in
+            # project-local trash, including any already committed cell outputs.
+            source = Path(self._get_os_path(path))
+            if source.parent != Path(self.root_dir) or source.suffix != '.ipynb' or not source.is_file():
+                return super().delete_file(path)
+            from demiflow.forge.io import directory_handle
+            import uuid
+            with directory_handle(source.parent) as parent, directory_handle(
+                    source.parent/'.demiflow-trash'/source.name, create=True) as trash:
+                os.rename(source.name, uuid.uuid4().hex+'.ipynb', src_dir_fd=parent, dst_dir_fd=trash)
+                os.fsync(parent)
+                os.fsync(trash)
+
         def get(self, path, content=True, type=None, format=None, **kwargs):
             target = Path(self._get_os_path(path))
             if content and target.is_file() and target.stat().st_size > 16 * 1024**2:
@@ -58,7 +72,17 @@ def main():
                     for index, _ in enumerate(entries):
                         if index >= 512:
                             raise HTTPError(413, 'Directory exceeds 512 entries')
-            return super().get(path, content=content, type=type, format=format, **kwargs)
+            model = super().get(path, content=content, type=type, format=format, **kwargs)
+            if content and model['type'] == 'notebook':
+                book = model['content']
+                if book.nbformat == 4 and book.nbformat_minor < 5:
+                    # Older notebooks lack cell IDs. Both the editor and single-cell
+                    # commit endpoint need the same IDs before the first write.
+                    import uuid
+                    for index, cell in enumerate(book.cells):
+                        cell.setdefault('id', uuid.uuid5(uuid.NAMESPACE_URL, f'{path}#{index}').hex)
+                    book.nbformat_minor = 5
+            return model
 
     kernel_limit = 2
 
@@ -86,6 +110,7 @@ def main():
     config.ServerApp.terminals_enabled = False
     config.ServerApp.allow_remote_access = False
     config.ServerApp.contents_manager_class = ProjectContents
+    config.ServerApp.extra_services = ['demiflow.workbench.notebooks.card_store']
     config.ServerApp.kernel_manager_class = ProjectKernels
     config.ServerApp.max_body_size = 16 * 1024**2
     config.ServerApp.max_buffer_size = 16 * 1024**2

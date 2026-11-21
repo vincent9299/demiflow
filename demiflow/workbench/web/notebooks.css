@@ -101,3 +101,10 @@ main.native-data-active{padding:0!important;max-width:none!important;overflow:hi
 .df-card-original pre{white-space:pre-wrap;overflow-wrap:anywhere}.df-card-thread .dfc-chat{min-width:0}
 
 .df-assistant-head .df-card-provider{width:auto;max-width:9em;margin:0;padding:2px 4px;font:inherit;font-size:12px}
+
+.df-book-tabs .df-delete-book{display:grid;place-items:center;width:24px;height:26px;padding:4px;color:#818998;border:0;border-radius:4px}
+.df-delete-book svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.df-book-tabs .df-delete-book:is(:hover,:focus-visible),.df-book-confirm .df-confirm-delete{color:#a83d3c}
+.df-book-confirm{display:flex;align-items:center;gap:8px;padding:6px 14px;border-bottom:1px solid #e1e5ea;font-size:13px}
+.df-book-confirm[hidden]{display:none}
+.df-book-confirm button{background:transparent;border:0;box-shadow:none;font:inherit;padding:3px 6px}

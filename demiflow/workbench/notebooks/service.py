@@ -110,7 +110,11 @@ class Notebooks:
             if not directory.is_dir():
                 raise ForgeError('Project notebooks path is not a directory', code='conflict')
             self._import_legacy(project, directory, permissions)
-            if initialize and permissions['analysis_write'] and not self.documents(directory):
+            if permissions['analysis_write']:
+                from .table_code import migrate_readers
+                migrate_readers(root, directory, self.documents(directory))
+            if (initialize and permissions['analysis_write'] and not self.documents(directory)
+                    and not (directory/'.demiflow-trash').exists()):
                 self.new_document(directory)
             state = Path(self.temp.name) / (project + '-' + secrets.token_hex(4))
             state.mkdir(mode=0o700, exist_ok=True)
@@ -130,6 +134,9 @@ class Notebooks:
             preferences = state / 'settings/@jupyterlab/notebook-extension'
             preferences.mkdir(parents=True, mode=0o700, exist_ok=True)
             self._create(preferences/'tracker.jupyterlab-settings', {'autoStartDefaultKernel': permissions['analysis_execute']})
+            doc_settings = state / 'settings/@jupyterlab/docmanager-extension'
+            doc_settings.mkdir(parents=True, exist_ok=True)
+            self._create(doc_settings/'plugin.jupyterlab-settings', {'autosave': False})
             # Native kernel imports the same reviewed platform and works at the
             # project root. This is a trusted Python environment, not a sandbox.
             kernelspec = state / 'data/kernels/python3'
@@ -223,7 +230,7 @@ class Notebooks:
         documents = service.call(project, 'documents', {'kind': 'notebook', 'limit': 32})
         for item in documents['items']:
             destination = directory / ('历史-' + item['id'] + '.ipynb')
-            if destination.exists():
+            if destination.exists() or (directory/'.demiflow-trash'/destination.name).is_dir():
                 continue
             cells, offset, title = [], 0, item.get('title') or 'Notebook'
             while True:

@@ -786,3 +786,95 @@ def test_enable_notebook_execution_after_saving_only(browser, native_project):
             expect(frame.locator('.jp-Dialog')).to_have_count(0)
         finally:
             page.close()
+
+
+def test_cell_saves_are_independent_and_analysis_tab_deletes_its_document(browser, native_project):
+    root, registry_path, project = native_project
+    directory = root / 'notebooks'
+    directory.mkdir()
+    def document(sources):
+        return dict(nbformat=4, nbformat_minor=5, metadata={}, cells=[
+            dict(id=f'cell-{i}', cell_type='code', source=source, metadata={}, execution_count=None, outputs=[])
+            for i, source in enumerate(sources)])
+    first, second = directory/'分析.ipynb', directory/'分析 2.ipynb'
+    first.write_text(json.dumps(document(['a = 1', 'b = 2'])))
+    second.write_text(json.dumps(document(['other = 3'])))
+    with service(None, registry=registry_path, notebook_python=PYTHON) as app:
+        page = browser.new_page()
+        view = quote(json.dumps(dict(v=2, workspace=project, kind='tables')))
+        page.goto(app.origin+'/#token='+app.token+'&view='+view)
+        tabs = page.get_by_role('tablist', name='Notebook', exact=True)
+        tabs.get_by_role('tab', name='分析', exact=True).click(timeout=60000)
+        frame = page.frame_locator('iframe.native-notebook-frame:not([hidden])')
+        cells = frame.locator('.jp-CodeCell')
+        save = cells.first.get_by_role('button', name='保存这张卡片', exact=True)
+        expect(save).to_be_enabled(timeout=60000)
+        kernel = page.locator('iframe:not([hidden])').evaluate(
+            'f=>f.contentWindow.jupyterapp.shell.currentWidget.sessionContext.session.kernel.id')
+        cells.first.locator('.cm-content').fill('a = 41\nprint(a)')
+        cells.nth(1).locator('.cm-content').fill('b = 42')
+        cells.first.get_by_role('button',name='运行卡片',exact=True).click()
+        expect(cells.first.locator('.jp-OutputArea-output')).to_contain_text('41')
+        save.click()
+        expect(cells.first.locator('.df-save-state')).to_have_text('已保存')
+        expect(cells.nth(1).locator('.df-save-state')).to_have_text('草稿')
+        def sources():
+            return [''.join(c['source']) for c in json.loads(first.read_text())['cells']]
+        assert sources() == ['a = 41\nprint(a)','b = 2']
+        assert '41' in str(json.loads(first.read_text())['cells'][0]['outputs'])
+        assert page.locator('iframe:not([hidden])').evaluate(
+            'f=>f.contentWindow.jupyterapp.shell.currentWidget.sessionContext.session.kernel.id') == kernel
+        # A native autosave would commit the second cell at its next timer tick.
+        assert not page.locator('iframe:not([hidden])').evaluate(
+            "f=>f.contentWindow.jupyterapp.commands.isToggled('docmanager:toggle-autosave')")
+        page.reload()
+        expect(cells.nth(1).locator('.cm-content')).to_have_text('b = 42', timeout=60000)
+        assert sources() == ['a = 41\nprint(a)','b = 2']
+        cells.nth(1).locator('.cm-content').press('Control+s')
+        expect(cells.nth(1).locator('.df-save-state')).to_have_text('已保存')
+        assert sources() == ['a = 41\nprint(a)','b = 42']
+        tab = tabs.get_by_role('tab',name='分析 2',exact=True)
+        tab.click()
+        expect(cells.first.get_by_role('button',name='保存这张卡片')).to_be_enabled(timeout=60000)
+        remove = page.get_by_role('button',name='删除「分析 2」',exact=True)
+        remove.click()
+        page.get_by_role('button',name='取消',exact=True).click()
+        assert second.is_file()
+        remove.click()
+        page.get_by_role('button',name='确认删除',exact=True).click()
+        expect(tab).to_have_count(0,timeout=30000)
+        assert not second.exists() and sources() == ['a = 41\nprint(a)','b = 42']
+        page.get_by_role('button',name='删除「分析」',exact=True).click()
+        page.get_by_role('button',name='确认删除',exact=True).click()
+        expect(tabs.get_by_role('tab')).to_have_count(0)
+        page.reload()
+        expect(page.get_by_text('点击上方 ＋ 新建第一份 Notebook。')).to_be_visible(timeout=30000)
+        assert not first.exists()
+        page.close()
+
+
+def test_two_editors_commit_only_their_cell_and_detect_stale_saves(native_project):
+    root, registry_path, project = native_project
+    directory = root/'notebooks'
+    directory.mkdir()
+    def cell(key, source):
+        return dict(id=key, source=source, cell_type='code', metadata={}, execution_count=None, outputs=[])
+    path = directory/'analysis.ipynb'
+    path.write_text(json.dumps(dict(nbformat=4,nbformat_minor=5,metadata={},cells=[cell('a','a=1'),cell('b','b=2')])))
+    grants(registry_path,project,analysis_execute=False)
+    with service(None, registry=registry_path, notebook_python=PYTHON) as app:
+        _, headers, _ = call(app,'POST','/api/workspaces/'+project+'/notebook-open',{},token=True)
+        cookie=headers['Set-Cookie'].split(';')[0]
+        endpoint='/jupyter/'+project+'/api/demiflow/cards/analysis.ipynb'
+        status, _, revisions=call(app,'GET',endpoint,cookie=cookie)
+        assert status==200
+        def save(key, source, before=None):
+            return call(app,'POST',endpoint,dict(id=key,expected=revisions['cells'][key],cell=cell(key,source),before=before),cookie=cookie)[0]
+        assert save('a','a=3','b')==200
+        assert save('b','b=4')==200
+        assert save('a','a=3','b')==200  # retry after a lost acknowledgement
+        assert save('a','a=5','b')==409
+        assert [''.join(c['source']) for c in json.loads(path.read_text())['cells']]==['a=3','b=4']
+        assert call(app,'GET','/jupyter/'+project+'/api/kernels',cookie=cookie)[2]==[]
+        grants(registry_path,project,analysis_write=False)
+        assert save('a','a=6','b')==403
