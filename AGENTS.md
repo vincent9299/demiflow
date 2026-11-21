@@ -2,6 +2,8 @@
 
 **必须遵循 [DemiFlow 发版规范](docs/repository-rules.md)**：隔离开发、integration 合入闸、四线总闸、main 定版、正式目录落位、推送及归档均按该规范执行。它覆盖下文历史工作位置/发版描述；最新真人指令优先。
 
+Dataset 引擎的设计和代码评审须按[引擎项目架构规约](docs/dataset-engine-architecture.md)逐项核对受影响的模块职责、调用时序和依赖方向。
+
 ## Forge / 工作台的工作位置与修改范围
 
 **2026-11-19 真人更新**：新任务从 `main` 建隔离分支；固定集成线 `integration` 由管理者合入并验证，再快进 `main`。原 `fix/prompt-replay-delivery-20261118` 是工作分支，不再充当集成权威。主仓现有 checkout、dirty/staging 和运行预览分别核验，不能因移动引用而改写或重启它们。以下候选路径要求作为历史保留，最新工作流见 `docs/repository-rules.md`。

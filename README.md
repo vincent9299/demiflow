@@ -4,6 +4,8 @@
 
 声明式数据管线引擎（自 [Demiurge](https://github.com/vincent9299/Demiurge) 独立化，2026-09-04 起独立维护）。
 
+引擎模块职责、调用时序与依赖方向按 [Dataset 引擎架构评审规约](docs/dataset-engine-architecture.md) 核对。
+
 新增、修改和评审代码须遵守 [开发约束：有限资源](AGENTS.md)。预算必须贯穿读取、转换、并发、临时结果和写入，不能默认输入字段很小；资源保证以各接口实际覆盖的分配范围为准。
 
 普通行变换的本地流式并发使用 [`Dataset.map` 调度策略](docs/streaming-map.md)：
