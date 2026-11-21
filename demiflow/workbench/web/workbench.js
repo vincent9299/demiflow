@@ -14,7 +14,7 @@
   const recoveryText={checkpoint:'检查点恢复',final_commit:'最终提交恢复',delivery_only:'仅交付恢复',attempt_only:'仅本次尝试（不可恢复）'};
   const restrictionText={INCOMPATIBLE_HISTORY:'历史封存与当前运行时不兼容，不能恢复；请新建运行。',UNKNOWN_EFFECT:'存在未知效果的执行，恢复准入待服务端核对。',CAPACITY_PENDING:'容量待满足，尚未执行完成；不会自动新建或重复提交。'};
   async function mount(options) {
-    const {main,api,workspaceId:project,view={},mountText,disposeReaders,onContext=()=>{},rememberView:saveView=()=>{},onPageChange=()=>{},
+    const {main,api,icon,workspaceId:project,view={},mountText,disposeReaders,onContext=()=>{},rememberView:saveView=()=>{},onPageChange=()=>{},
       openResult=async()=>{},navigate=async()=>{},projectSettings={}}=options;
     const presentation=globalThis.ForgeWorkbenchPresentation;
     if(!presentation||typeof presentation.chooseGraphView!=='function'||typeof presentation.buildGraphModel!=='function'||typeof presentation.buildNodeDetails!=='function')
@@ -108,9 +108,19 @@
       for(const row of runList.children)row.hidden=!row.title.toLocaleLowerCase().includes(term);
     }
     const runHeaderMain=$('header',undefined,'wb-run-context'),runTitle=$('h2'),runPicker=select('运行记录',[],null);
-    const pickerLabel=field('运行记录',runPicker,runHeaderMain);
-    runHeaderMain.prepend(runTitle);root.insertBefore(runHeaderMain,toolbar);
-    const olderRuns=button('更早记录',()=>listRuns({more:true}),runHeaderMain,{cls:'quiet'});
+    const runUtilities=$('div',undefined,'wb-run-utilities'),runContextLine=$('div',undefined,'wb-run-context-line');
+    runHeaderMain.append(runTitle,runUtilities,runContextLine);root.insertBefore(runHeaderMain,toolbar);
+    function utility(label,path,action){
+      const control=button(label,action,runUtilities);
+      control.setAttribute('aria-label',label);control.title=label;control.replaceChildren(icon([path]));
+    }
+    utility('刷新状态','M20 4v6h-6 M19.5 9A8 8 0 1 0 20 15',()=>observer.refresh());
+    utility('回到管道','M14 4h6v6 M20 4l-9 9 M10 5H5v14h14v-5',()=>showPage('flows'));
+    const pickerLabel=$('label',undefined,'wb-record-picker'),pickerCaption=$('span');
+    pickerLabel.append(icon(['M3 12a9 9 0 1 0 2.5-6.2L3 8 M3 3v5h5 M12 7v5l3 2']),
+      pickerCaption,icon(['m7 10 5 5 5-5']),runPicker);
+    runContextLine.append(pickerLabel);
+    const olderRuns=button('更早记录',()=>listRuns({more:true}),runContextLine,{cls:'quiet'});
     runPicker.onchange=()=>openRun(runPicker.value).catch(error=>message(error.message,'error-box'));
     button('检查问题',()=>changeMode('checks'),moreBody);
     const outputMenu=button('输出结果',()=>changeMode('results'),moreBody);
@@ -123,8 +133,9 @@
     const runEmpty=$('section',undefined,'wb-run-empty');runEmpty.hidden=true;root.append(runEmpty);
     const emptyTitle=$('p',undefined,'wb-caption');runEmpty.append(emptyTitle);
     const viewFlow=button('查看管道',()=>showPage('flows'),runEmpty,{cls:'quiet'});
-    const runBar=$('div',undefined,'wb-run-bar');runBar.hidden=true;root.append(runBar);
-    const runFacts=$('div',undefined,'wb-run-facts');runFacts.hidden=true;root.append(runFacts);
+    const runBar=$('div',undefined,'wb-run-bar');runBar.hidden=true;runContextLine.append(runBar);
+    const runFacts=$('div',undefined,'wb-run-facts');runFacts.hidden=true;
+    const runAlerts=$('div',undefined,'wb-run-alerts');root.append(runAlerts);
     const operators=$('section',undefined,'wb-operators');operators.hidden=true;operators.setAttribute('aria-label','算子目录');root.append(operators);
     const operatorBrowser=DemiFlowOperators.mount({host:operators,request,mountText,disposeReaders,project});
     let definitionSource=null;
@@ -206,7 +217,7 @@
     documents.addEventListener('toggle',()=>{if(documents.open&&!projectInfoRendered)refreshProjectInfo();});
     button('在开发中查看与修正',()=>navigate('development'),documents);
     function graphLoading(loading){graphHost.inert=inspector.inert=checks.inert=loading;if(loading){graphHost.setAttribute('aria-busy','true');basisLabel.textContent='正在读取图…';disposeReaders(sourceBody);sourceBody.replaceChildren($('p','正在读取绑定来源…','wb-caption'));}else graphHost.removeAttribute('aria-busy');updateActions();}
-    function transition(patch){detailOpen=false;runDefinition=null;definitionSequence++;runDefinitionPanel.hidden=true;runDefinitionPanel.replaceChildren();runConfirmation.hidden=true;clearPlanPreview();notice.hidden=true;notice.textContent='';delete notice.dataset.observationError;observer.stop();controller.abort();controller=new AbortController();snapshot=null;sourceSequence++;nodeSequence++;graphSequence++;scopeNode=null;nodeOffset=0;graphModel=null;actionExplicit=false;logOffset=0;logBody='';eventCursor=null;eventRows=[];lastMetricAt=lastEventAt=0;observationCursor=null;observationPages=[];lastObservationRevision=null;trend.hidden=true;trendPlot.replaceChildren();runFacts.hidden=results.hidden=runDetail.hidden=true;runFacts.replaceChildren();results.replaceChildren();runDetailBody.replaceChildren();outputFingerprint=null;graphLoading(true);const ticket=state.transition(patch);updateActions();return ticket;}
+    function transition(patch){detailOpen=false;runDefinition=null;definitionSequence++;runDefinitionPanel.hidden=true;runDefinitionPanel.replaceChildren();runConfirmation.hidden=true;clearPlanPreview();notice.hidden=true;notice.textContent='';delete notice.dataset.observationError;observer.stop();controller.abort();controller=new AbortController();snapshot=null;sourceSequence++;nodeSequence++;graphSequence++;scopeNode=null;nodeOffset=0;graphModel=null;actionExplicit=false;logOffset=0;logBody='';eventCursor=null;eventRows=[];lastMetricAt=lastEventAt=0;observationCursor=null;observationPages=[];lastObservationRevision=null;trend.hidden=true;trendPlot.replaceChildren();runFacts.hidden=results.hidden=runDetail.hidden=true;runFacts.replaceChildren();runSeal.textContent='';runAlerts.replaceChildren();results.replaceChildren();runDetailBody.replaceChildren();outputFingerprint=null;graphLoading(true);const ticket=state.transition(patch);updateActions();return ticket;}
     function registered(){return !!working&&ctx.flows.some(f=>f.entry===working.entry&&(f.parameters||[]).includes(working.params));}
     function declaredEntry(entry=working?.entry){return ctx.project?.entries?.find(e=>e.entry===entry);}
     function requiredPreviewArguments(){return declaredEntry()?.required_arguments||[];}
@@ -249,7 +260,10 @@
       historyButton.hidden=monitoring;
       runHeaderMain.hidden=!monitoring||!!comparison;
       body.hidden=resultsActive||definitionActive||operatorsActive||argumentEditor.visible()||(monitoring&&!hasRun);operators.hidden=!operatorsActive;checks.hidden=!checksActive;
-      runFacts.hidden=trend.hidden=!monitoring||!hasRun||resultsActive||definitionActive;
+      performanceToggle.hidden=!monitoring||!hasRun||resultsActive||definitionActive;
+      trend.hidden=performanceToggle.hidden||performanceToggle.getAttribute('aria-expanded')!=='true';
+      runFacts.hidden=trend.hidden;runAlerts.hidden=!monitoring||!hasRun;
+      runUtilities.hidden=!monitoring||!hasRun;
       runDetail.hidden=!monitoring||!hasRun||resultsActive||definitionActive||runInspector==='definition';
       runDefinitionPanel.hidden=!monitoring||!hasRun||!definitionActive;
       runEmpty.hidden=!monitoring||hasRun||!!comparison;
@@ -1010,7 +1024,6 @@
       choice.onchange=()=>openRun(run.run_id,Number(choice.value),data().mode).catch(error=>message(error.message,'error-box'));if(attempts.length>1)runBar.append(choice);
       const historical=run.current_attempt!==run.attempt;
       if(historical)runBar.append($('span','历史尝试 · 只读','wb-caption'));
-      runBar.append($('span',undefined,'wb-caption wb-run-seal'));
       const target=Object.freeze({run_id:run.run_id,attempt:run.attempt,digest:run.digest});
       const control=async action=>{const ticket=state.capture();await action(target);if(current(ticket))await observer.refresh();};
       if(!historical&&run.status==='prepared')button('开始这次运行',async()=>{
@@ -1022,7 +1035,6 @@
         const ticket=state.capture(),value=await commands.resume(target);
         if(current(ticket)){await openRun(value.run_id,value.attempt);message('已恢复原运行；可切换执行经历查看之前的记录。');}
       }),runBar,{disabled:!can('run_submit')||run.state.usage_complete!==true||run.state.cleanup!=='complete'});
-      button('刷新状态',()=>observer.refresh(),runBar);button('回到管道',()=>showPage('flows'),runBar);
       if(run.state.cancel_requested_at)runBar.append($('span','停止：'+({requested:'等待执行端确认',terminating:'正在请求所属进程退出',killing:'正在终止未退出进程',confirmed:'所属执行已停止',unconfirmed:'尚未确认全部停止'}[run.state.stop_phase]||'等待确认'),'wb-caption'));
       if(run.state.cleanup==='pending')runBar.append($('span','临时资源清理待确认 · 容量保留','wb-caption'));
       const entry=(data().graph?.logical?.actions||[]).find(a=>a.action_id===data().actionId);
@@ -1035,7 +1047,7 @@
       paintRunSeal();
     }
     function paintRunSeal(){
-      const node=runBar.querySelector('.wb-run-seal');if(!node||!run)return;
+      if(!run)return;
       const parts=[],graph=data().graph;
       const bound=graph?.binding?.basis_kind==='run'&&graph.binding.run_id===run.run_id&&graph.binding.attempt===run.attempt;
       if(bound&&graph.completeness.display==='complete'){
@@ -1044,10 +1056,10 @@
         if(names.length)parts.push('封存输入 '+names.slice(0,4).join(' / ')+(names.length>4?' 等'+names.length+'个':''));
       }else if(bound)parts.push('图已裁剪，输入摘要从略');
       if(typeof run.limits?.timeout_s==='number')parts.push('预算 '+run.limits.timeout_s+' 秒累计'+(typeof run.state?.usage?.elapsed_ms==='number'?'，已用 '+Math.round(run.state.usage.elapsed_ms/1000)+' 秒':''));
-      node.textContent=parts.join(' · ');
+      runSeal.textContent=parts.join(' · ');
     }
     function paintRunFacts(freshness=run?.freshness){
-      if(!run)return;runFacts.replaceChildren();
+      if(!run)return;runFacts.replaceChildren();runAlerts.replaceChildren();
       const sample=snapshot?.telemetry?.sample||{},age=freshness?.telemetry_age_s;
       for(const[label,value]of [['整次运行 CPU',sample.cpu_cores==null?'未测量':sample.cpu_cores.toFixed(2)+' 核'],['进程树 RSS',unit(sample.rss_bytes)],
         ['动作吞吐',sample.throughput?.rows_per_s==null?'未测量':sample.throughput.rows_per_s.toFixed(1)+' 行/秒'],['运行时间',run.state.started_at?Math.max(0,Math.round((run.state.finished_at||Date.now()/1000)-run.state.started_at))+' 秒':'尚未开始']]){
@@ -1057,10 +1069,10 @@
       if(run.state.error){
         const failure=run.state.error,box=$('div',undefined,'error-box wb-run-error');
         const summary=typeof failure==='string'?failure:typeof failure.message==='string'&&failure.message.trim()?failure.message:typeof failure.type==='string'?failure.type:'运行错误';
-        box.append($('strong',summary));if(typeof failure!=='string')raw('错误详情',failure,box);runFacts.append(box);
+        box.append($('strong',summary));if(typeof failure!=='string')raw('错误详情',failure,box);runAlerts.append(box);
       }
-      if(run.supervisor_alive===false&&active(run.status))runFacts.append($('div','监督进程不可用，运行可能中断；停止与提交结果待核对。','error-box'));
-      if(run.outputs.some(o=>o.status==='committed')&&run.status!=='succeeded')runFacts.append($('div','部分输出已提交；整次运行尚未成功。','wb-partial'));
+      if(run.supervisor_alive===false&&active(run.status))runAlerts.append($('div','监督进程不可用，运行可能中断；停止与提交结果待核对。','error-box'));
+      if(run.outputs.some(o=>o.status==='committed')&&run.status!=='succeeded')runAlerts.append($('div','部分输出已提交；整次运行尚未成功。','wb-partial'));
     }
     async function openRun(id,attempt=null,mode='monitor'){
       activePage=mode==='operators'?'operators':mode==='config'?'flows':'monitor';detailOpen=false;
@@ -1205,7 +1217,7 @@
         runList.replaceChildren();
         for(const entry of entries){
           const name=runUI.flowName(ctx,entry);
-          const row=button(name,()=>selectRunFlow(entry),runList,{cls:'wb-run-flow'});
+          const row=button(name,()=>{runCollapse.closeOnNarrow();return selectRunFlow(entry);},runList,{cls:'wb-run-flow'});
           row.dataset.entry=entry;row.title=name+' · '+entry;
         }
       }
@@ -1229,6 +1241,9 @@
         const option=new Option(label,item.run_id);option.title=item.run_id;runPicker.append(option);
       }
       runPicker.value=data().run||records?.latest||'';
+      const picked=options.find(item=>item.run_id===runPicker.value);
+      pickerCaption.textContent=picked?timeText(picked.created_at)+':'+String(new Date(picked.created_at*1000).getSeconds()).padStart(2,'0'):'选择运行';
+      pickerLabel.title=runPicker.selectedOptions[0]?.textContent||'选择运行记录';
       pickerLabel.hidden=!options.length;
       olderRuns.hidden=!records?.cursor&&!records?.offset;
       emptyTitle.textContent=data().run?'正在读取运行详情…':!records?'正在读取运行记录…':
@@ -1467,22 +1482,30 @@
         },box);
       }
     }
-    const trend=details('性能趋势 · 整次运行',root),trendPlot=$('div',undefined,'wb-trend');trend.append(trendPlot);trend.hidden=true;
+    const trend=$('section',undefined,'wb-performance-panel'),trendPlot=$('div',undefined,'wb-trend');
+    const runSeal=$('p',undefined,'wb-caption wb-run-seal');
+    const performanceToggle=button('性能',()=>{
+      performanceToggle.setAttribute('aria-expanded',String(trend.hidden));
+      updateActions();if(!trend.hidden)return refreshTrend(true);
+    },null,{cls:'wb-performance-toggle'});
+    performanceToggle.title='性能趋势 · 整次运行';performanceToggle.setAttribute('aria-label',performanceToggle.title);
+    performanceToggle.setAttribute('aria-expanded','false');trend.id='wb-run-performance';
+    performanceToggle.setAttribute('aria-controls',trend.id);trend.setAttribute('aria-label','运行性能');
+    performanceToggle.prepend(icon(['M2 13h5l3-8 4 14 3-8h5']));actions.prepend(performanceToggle);
+    trend.append(runFacts,trendPlot,runSeal);trend.hidden=true;
     root.insertBefore(trend,body);
     const layout=$('div',undefined,'wb-workspace-layout'),runMain=$('div',undefined,'wb-workspace-main');
     root.prepend(layout);layout.append(flowNavigation,historyPanel,runMain);
     for(const element of [...root.children])if(element!==layout)runMain.append(element);
     flowCollapse=ForgeNavigation.collapsible({layout,sidebar:flowNavigation,header:flowHeader,label:'管道目录',active:activePage==='flows'});
-    runCollapse=ForgeNavigation.collapsible({layout,sidebar:historyPanel,header:runHeader,label:'运行目录',active:activePage==='monitor'});
-    // Runtime facts remain one compact strip; trend and diagnostics are optional.
+    runCollapse=ForgeNavigation.collapsible({layout,sidebar:historyPanel,header:runHeader,label:'运行目录',narrowQuery:'(max-width:680px)',active:activePage==='monitor'});
     let metricSequence=0,lastObservationRevision=null;
     async function refreshTrend(force=false){
-      if(!run||!trend.open||(!force&&Date.now()-lastMetricAt<5000))return;
+      if(!run||trend.hidden||(!force&&Date.now()-lastMetricAt<5000))return;
       const ticket=state.capture(),sequence=++metricSequence,target={run_id:run.run_id,attempt:run.attempt};lastMetricAt=Date.now();
       const value=await request('run-metrics',{...target,points:300});
       if(current(ticket)&&sequence===metricSequence)ForgeWorkbenchGraph.cpuChart(trendPlot,value.points||[]);
     }
-    trend.ontoggle=()=>{if(trend.open)refreshTrend(true).catch(error=>message(error.message,'error-box'));};
     const observer=ForgeWorkbenchObserver.create({project,api,
       isCurrent:target=>current(target.ticket)&&data().run===target.run_id&&data().attempt===target.attempt,
       onSnapshot:async(value,target)=>{

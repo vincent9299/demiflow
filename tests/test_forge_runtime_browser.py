@@ -61,7 +61,7 @@ def test_rm19_real_runtime_metrics_stop_and_responsive_tabs(
         page.get_by_role("button",name="运行记录",exact=True).click()
         page.locator('.wb-run-record[data-run="'+value["run_id"]+'"]').click()
         page.locator(".wb-run-bar > strong").wait_for()
-        page.get_by_text("性能趋势 · 整次运行", exact=True).click()
+        page.get_by_role("button",name="性能趋势 · 整次运行",exact=True).click()
         page.get_by_text("控制事件", exact=True).click()
         deadline = time.monotonic() + 15
         while (

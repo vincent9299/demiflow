@@ -76,8 +76,9 @@
     const observer=new ResizeObserver(sync);observer.observe(layout);observer.observe(sidebar);sync();
     return {setActive(value){active=value;if(!active)finish();else if(width===null)layout.style.removeProperty('--side-navigation-width');sync();},dispose(){disposed=true;finish();observer.disconnect();handle.remove();}};
   }
-  function collapsibleNavigation({layout,sidebar,header,label,initialOpen=true,active=true}) {
-    let open=initialOpen;
+  function collapsibleNavigation({layout,sidebar,header,label,initialOpen=true,active=true,narrowQuery=null}) {
+    const narrow=narrowQuery&&window.matchMedia(narrowQuery);
+    let wideOpen=initialOpen,open=wideOpen&&!narrow?.matches;
     const reopen=$('div',undefined,'side-navigation-reopen'),toggle=$('button',undefined,'side-navigation-toggle');toggle.type='button';
     if(!sidebar.id)sidebar.id='side-navigation-'+(++navigationSequence);
     toggle.setAttribute('aria-label',label);toggle.setAttribute('aria-controls',sidebar.id);toggle.append(icon(['M3 4h18v16H3zM9 4v16']));
@@ -90,8 +91,12 @@
       layout.classList.toggle('side-navigation-closed',!!layout.querySelector(':scope > .side-navigation-reopen:not([hidden])'));
       resize.setActive(active&&open);
     }
-    toggle.onclick=()=>{open=!open;render();toggle.focus();};render();
-    return {setActive(value){active=value;render();},dispose(){resize.dispose();}};
+    const resized=()=>{open=wideOpen&&!narrow.matches;render();};
+    narrow?.addEventListener('change',resized);
+    toggle.onclick=()=>{open=!open;if(!narrow?.matches)wideOpen=open;render();toggle.focus();};render();
+    return {setActive(value){active=value;render();},
+      closeOnNarrow(){if(narrow?.matches&&open){open=false;render();toggle.focus();}},
+      dispose(){narrow?.removeEventListener('change',resized);resize.dispose();}};
   }
   globalThis.ForgeNavigation=Object.freeze({header:navigationHeader,collapsible:collapsibleNavigation,resizable:resizableNavigation});
   const json = value => JSON.stringify(value, null, 2);
@@ -768,7 +773,7 @@
     if(workbenchContract!=='demiflow_workbench_graph_v1')throw new Error('当前服务尚未提供图工作台契约');
     const id=workspaceId,epoch=viewEpoch;let reference=request,mountedHandle=null,checkVersion=0,checksPending=0;
     const isCurrent=()=>epoch===viewEpoch&&workspaceId===id;
-    const handle=await ForgeWorkbench.mount({main,api,context,workspaceId:id,view:request,mountText,disposeReaders,openResult,navigate,
+    const handle=await ForgeWorkbench.mount({main,api,icon,context,workspaceId:id,view:request,mountText,disposeReaders,openResult,navigate,
       register:handle=>{mountedHandle=handle;if(isCurrent())workbenchView=handle;else handle.dispose();},
       projectCheckState:()=>({version:checkVersion,active:checksPending>0}),
       continueInput,

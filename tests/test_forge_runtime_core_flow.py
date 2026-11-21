@@ -230,7 +230,7 @@ def test_browser_onboard_submit_result_then_monitor_stop(unregistered, tmp_path,
             active = current_run(page)
             expect(page.get_by_label('运行记录',exact=True)).to_have_value(active)
             page.get_by_text('部分输出已提交', exact=False).first.wait_for()
-            page.get_by_text('性能趋势 · 整次运行', exact=True).click()
+            page.get_by_role('button',name='性能趋势 · 整次运行',exact=True).click()
             page.get_by_role('img', name='整次运行的 CPU 核数趋势').wait_for()
             artifact(page, 'core-running-320')
             page.get_by_role('button', name='停止', exact=True).click()

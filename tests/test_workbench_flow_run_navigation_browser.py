@@ -161,6 +161,13 @@ def test_pipeline_run_picker_latest_older_sparse_history_and_empty(root, browser
         expect(picker).to_have_value(latest['run_id'])
         expect(page.locator('.wb-run-bar')).to_contain_text(latest['run_id'][-10:])
         expect(picker.locator('option').first).to_contain_text('最新')
+        header=page.locator('.wb-run-context')
+        expect(header.get_by_role('button',name='刷新状态')).to_be_visible()
+        expect(header.get_by_role('button',name='回到管道')).to_be_visible()
+        expect(header.locator('.wb-run-bar > .wb-tag')).to_have_text('待启动')
+        expect(page.get_by_role('button',name='性能趋势 · 整次运行')).to_have_attribute('aria-expanded','false')
+        expect(page.locator('.wb-run-facts')).to_be_hidden()
+
         expect(nav.locator('select,.wb-run-record')).to_have_count(0)
         expect(nav.locator('.wb-run-flow')).to_have_count(2)
         before_fold = len(requests)
@@ -216,6 +223,13 @@ def test_pipeline_run_picker_latest_older_sparse_history_and_empty(root, browser
             page.set_viewport_size({'width':width,'height':920})
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
         screenshot(page,'run-picker-mobile')
+        expect(nav).to_be_hidden()
+        page.get_by_role('button',name='运行目录').click()
+        expect(nav).to_be_visible()
+        first.click()
+        expect(nav).to_be_hidden()
+        page.set_viewport_size({'width':1440,'height':1000})
+        expect(nav).to_be_visible()
         # The selected run remains accessible when the bounded older window
         # moves past it. A fresh flow selection resets to the latest page.
         rows[:] = [latest_row]+[dict(old_row,run_id='deep-'+str(i),created_at=1699999999-i)
