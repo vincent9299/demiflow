@@ -292,7 +292,10 @@ def test_native_interrupt_restart_drafts_project_switch_and_rename(browser,nativ
             assert (root/'notebooks/验证.ipynb').is_file()
             for width in (1440,390):
                 page.set_viewport_size({'width':width,'height':900})
-                expect(page.get_by_role('complementary',name='数据字典')).to_be_visible()
+                data_nav=page.get_by_role('complementary',name='数据导航',exact=True)
+                expect(data_nav).to_be_visible()
+                expect(data_nav.get_by_role('tab',name='数据字典',exact=True)).to_have_attribute('aria-selected','true')
+                expect(data_nav.get_by_role('tabpanel',name='数据字典',exact=True)).to_be_visible()
                 assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
                 page.screenshot(path=str(tmp_path/('native-'+str(width)+'.png')))
             assert not errors,errors
