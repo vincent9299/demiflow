@@ -1,8 +1,9 @@
 """Public use cases: headless operation, exact identities and transport parity."""
 import json
 import os
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
+import socket
 import threading
 import urllib.error
 import urllib.request
@@ -143,6 +144,33 @@ def request(app, endpoint, body=None, *, headers=None):
     with response:
         raw = response.read()
         return response.status, json.loads(raw) if 'application/json' in response.headers.get('Content-Type', '') else raw
+
+
+def test_page_asset_served_after_short_connection_burst(root, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from time import monotonic
+
+    with service(root) as app, ExitStack() as connections:
+        # Hold ten real connections before sending their HTTP request lines.
+        held = [connections.enter_context(socket.create_connection(app.server_address, timeout=4))
+                for _ in range(10)]
+        started = monotonic()
+        assert request(app, '/operator-browser.js') == (503, {
+            'code': 'busy', 'error': 'Request capacity exceeded', 'operation_started': False})
+        assert monotonic() - started < 4
+
+        accepted = threading.Event()
+        process_request = app.process_request
+        def notify_accept(client, address):
+            accepted.set()
+            return process_request(client, address)
+        monkeypatch.setattr(app, 'process_request', notify_accept)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(request, app, '/operator-browser.js')
+            assert accepted.wait(4)
+            held[0].close()
+            status, script = pending.result(timeout=4)
+        assert status == 200 and b'DemiFlowOperators' in script
 
 
 def test_api_only_token_and_closed_protocol(root, tmp_path):
