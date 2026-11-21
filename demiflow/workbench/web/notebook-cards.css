@@ -20,3 +20,5 @@
 .df-cell-tools button{opacity:0}
 .jp-CodeCell:is(:hover,:focus-within,.jp-mod-active) .df-cell-tools button{opacity:1}
 @media(hover:none){.df-cell-tools button{opacity:1}}
+
+.df-run-error{margin:4px 0;color:#9f3131;font-size:13px}

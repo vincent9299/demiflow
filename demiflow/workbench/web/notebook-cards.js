@@ -159,9 +159,20 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
         const edit=icon(doc,'code','编辑代码',()=>{focusCell(cell);cell.node.dataset.dfFolded='false';book.mode='edit';cell.editor?.focus();});
         const run=icon(doc,'run','运行卡片',async()=>{
           if(!permissions().analysis_execute)return;
-          focusCell(cell);run.disabled=true;
-          try{await app.commands.execute('notebook:run-cell');if(!cell.isDisposed&&cell.model.outputs.length)cell.node.dataset.dfFolded='true';}
-          finally{run.disabled=!permissions().analysis_execute;}
+          run.disabled=true;cell.node.querySelector('.df-run-error')?.remove();
+          try{
+            await panel.sessionContext.ready;
+            if(!valid()||cell.isDisposed)return;
+            focusCell(cell);
+            const ok=await app.commands.execute('notebook:run-cell',{widgetId:panel.id,activate:false});
+            if(ok===undefined)throw Error('未能定位到这张卡片所在的 Notebook。');
+            if(!cell.isDisposed&&cell.model.outputs.length)cell.node.dataset.dfFolded='true';
+          }catch(error){
+            if(!cell.isDisposed){
+              const warning=element(doc,'p','df-run-error',error.message||'运行失败');
+              warning.setAttribute('role','status');cell.node.querySelector('.df-run-error')?.remove();bar.after(warning);
+            }
+          }finally{run.disabled=!permissions().analysis_execute;}
         });
         run.disabled=!permissions().analysis_execute;bar.append(name,edit,run);
         cell.node.prepend(bar);decorated.set(cell,bar);
