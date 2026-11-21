@@ -6,7 +6,6 @@ file identity after verifying both the actual module binding and the live code
 against the measured source. Business source hashes and program artifact
 digests are verified independently. An unrecognised revision uses its own pin.
 """
-import builtins
 from dis import get_instructions
 from functools import lru_cache
 from os.path import samefile
@@ -91,44 +90,47 @@ def _restored_source(fn, module, source):
     filename = fn.__code__.co_filename
     if not _same_module_file(recorded, filename):
         return False
-    if _same_module_file(filename, module.__file__):
+    if module is None:
+        # A cold worker can unpickle a closed SDK lambda without importing
+        # its parent module. Resolve only the already allowlisted SDK source.
+        installed = Path(__file__).parents[1].joinpath(*fn.__module__.split('.')[1:]).with_suffix('.py')
+    else:
+        installed = module.__file__
+    if _same_module_file(filename, str(installed)):
         return True
     try:
-        with Path(module.__file__).open('rb') as stream:
+        with Path(installed).open('rb') as stream:
             return stream.read(len(source) + 1) == source
     except (OSError, ValueError, TypeError):
         return False
 
 
 def _matches_definition(fn, module, compiled, root_name, code, source):
-    live_globals = fn.__globals__ is vars(module)
-    # Cloudpickle restores SDK-created closures by value. Only a closed body
-    # with no global names can use this route. Its original closure/defaults
-    # remain independently bound by describe; no supplied global is trusted.
-    restored = (not live_globals and not fn.__code__.co_names and fn.__code__.co_qualname == fn.__qualname__
-                and fn.__builtins__ is vars(builtins)
-                and fn.__globals__.keys() == {'__name__', '__package__', '__file__', '__builtins__'}
-                and fn.__globals__['__name__'] == module.__name__
-                and fn.__globals__['__package__'] == module.__package__
-                and _restored_source(fn, module, source))
-    for root in _owners(module, root_name):
-        if type(root) is not FunctionType or root.__globals__ is not vars(module):
-            continue
-        if fn is root:
-            return code == identity(code_record(compiled))
-        if root_name == fn.__qualname__ or not (live_globals or restored):
-            continue
-        if identity(code_record(root.__code__)) != identity(code_record(compiled)):
-            continue
-        for child in _children(root.__code__):
-            if child.co_qualname != fn.__qualname__:
+    roots = _owners(module, root_name) if module is not None else ()
+    if module is not None and fn.__globals__ is vars(module):
+        for root in roots:
+            if type(root) is not FunctionType or root.__globals__ is not vars(module):
                 continue
-            if live_globals and fn.__code__ is child:
-                return True
-            if restored and code == identity(code_record(child)):
-                # Inspect the full code tree before accepting a restored scope.
-                return not any(descendant.co_names for descendant in _children(child))
-    return False
+            if fn is root:
+                return code == identity(code_record(compiled))
+            if root_name != fn.__qualname__ and any(child is fn.__code__ for child in _children(root.__code__)):
+                return identity(code_record(root.__code__)) == identity(code_record(compiled))
+        return False
+
+    # A by-value closure has its own globals. Only a body with no global
+    # names can be recognized from the audited parent in the installed source;
+    # unrelated globals cannot affect it. Closure/defaults are pinned normally.
+    if (root_name == fn.__qualname__ or fn.__code__.co_qualname != fn.__qualname__
+            or fn.__code__.co_names or fn.__globals__.get('__name__') != fn.__module__
+            or fn.__globals__.get('__package__') != fn.__module__.rpartition('.')[0]
+            or not _restored_source(fn, module, source)):
+        return False
+    if module is not None and not any(
+            type(root) is FunctionType and root.__globals__ is vars(module)
+            and identity(code_record(root.__code__)) == identity(code_record(compiled)) for root in roots):
+        return False
+    return any(child.co_qualname == fn.__qualname__ and identity(code_record(child)) == code
+               and not any(nested.co_names for nested in _children(child)) for child in _children(compiled))
 
 
 def _method_pin(fn, code):
@@ -157,8 +159,6 @@ def function_pin(fn, source, source_hash, code):
     if revision is None or source_hash != revision[0]:
         return source_hash, code
     module = sys.modules.get(fn.__module__)
-    if module is None:
-        return source_hash, code
     root_name = fn.__qualname__.partition('.<locals>.')[0]
     if fn.__module__ == 'demiflow.data.result_cache' and root_name == '_state_policy':
         # Its runtime type test changed; the function itself keeps its new pin.

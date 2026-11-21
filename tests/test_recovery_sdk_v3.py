@@ -132,5 +132,7 @@ def test_sdk_created_nested_function_is_checked_before_and_after_pickle(tmp_path
     assert describe(decoded)['source_hash'] == sha256(_source(decoded)).hexdigest()
     decoded.__code__ = saved
     decoded.__globals__['__file__'] = str(same_file)
-    decoded.__globals__['undeclared'] = 123
+    decoded.__globals__['unused'] = 123
+    assert describe(decoded) == describe(live)
+    decoded.__globals__['__package__'] = 'unrelated'
     assert describe(decoded)['source_hash'] == sha256(_source(decoded)).hexdigest()
