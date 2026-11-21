@@ -66,6 +66,7 @@ STATIC_ASSETS = {
     "/style.css": ("style.css", "text/css; charset=utf-8"),
     "/reading.css": ("reading.css", "text/css; charset=utf-8"),
     "/reading.js": ("reading.js", "text/javascript; charset=utf-8"),
+    "/data-tools.js": ("data-tools.js", "text/javascript; charset=utf-8"),
     "/python-syntax.js": ("python-syntax.js", "text/javascript; charset=utf-8"),
     "/markdown-worker.js": ("markdown-worker.js", "text/javascript; charset=utf-8"),
     "/markdown-it.min.js": ("markdown-it.min.js", "text/javascript; charset=utf-8"),

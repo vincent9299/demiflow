@@ -159,3 +159,15 @@ def test_data_tool_authoring_checks_exports_without_a_flow(project):
     assert valid['project_layout']['status']=='passed'
     source.write_text('__demiflow_data_tools__ = ["typo"]\n')
     assert check()['project_layout']['status']=='failed'
+
+
+def test_malformed_presets_do_not_hide_the_annotation_tool(project):
+    directory=project/'data_tools'
+    directory.mkdir()
+    (directory/'review.py').write_text('__demiflow_data_tools__={"review":"annotation"}\ndef review(batch="first"):\n    return batch\n')
+    presets=directory/'review.presets.json'
+    presets.write_text('{"review":{"broken":{"unknown":true}}}')
+    item=definitions.catalog(project,data_tools=True)['definitions'][0]
+    detail=definitions.read(project,data_tools=True,id=item['id'])
+    assert detail['notebook_entry']['presets']=={} and 'review.presets.json' in detail['notebook_entry']['preset_error']
+    assert detail['source'].startswith('def review')

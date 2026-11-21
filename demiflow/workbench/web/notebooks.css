@@ -31,3 +31,10 @@ main.native-data-active{padding:0!important;max-width:none!important;overflow:hi
 .data-tools-dialog>header select{min-width:0;max-width:100%;flex:1}
 .data-tools-dialog>header button{margin-left:auto}
 .data-tools-dialog .reading-toolbar{display:none}
+.dictionary-tools{display:flex;gap:4px}.dictionary-tools .dictionary-tool-button{width:auto;flex:1;text-align:center;font-size:12px}
+.tool-launch{display:grid;justify-items:start;gap:10px;margin-block:14px}
+.tool-launch label{display:grid;gap:4px;color:#495468;font-size:13px;min-width:0}
+.tool-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr));gap:8px 12px;width:100%}
+.tool-launch input,.tool-launch select{max-width:100%;box-sizing:border-box}
+.tool-launch details{font-size:12px}.tool-launch details input{margin-right:6px}
+.tool-launch p:empty{display:none}

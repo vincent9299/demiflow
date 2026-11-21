@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
+import keyword
 import os
 from pathlib import Path
 import re
@@ -174,6 +176,46 @@ def history(root, *, id):
     return dict(versions=versions, available=True, scope='当前文件最近 16 次提交；版本内容按所选定义读取。')
 
 
+
+def _notebook_entry(root, item, definition):
+    path = Path(item['path'])
+    parts = path.with_suffix('').parts
+    if parts[-1] == '__init__':
+        parts = parts[:-1]
+    if not all(part.isidentifier() and not keyword.iskeyword(part) for part in parts):
+        return None
+    node = _safe_tree(definition['source']).body[0]
+    if isinstance(node, ast.ClassDef):
+        init = next((n for n in node.body if isinstance(n, ast.FunctionDef) and n.name == '__init__'), None)
+        if not init and node.bases:
+            return None
+        parameters = signature(init) if init else []
+    else:
+        parameters = signature(node)
+    if any(p['positional_only'] for p in parameters):
+        return None
+    preset_path = ws.relative_path(root, path.with_suffix('.presets.json').as_posix())
+    entry = dict(module='.'.join(parts), symbol=item['symbol'], parameters=parameters,
+                 asynchronous=isinstance(node, ast.AsyncFunctionDef), presets={})
+    if not preset_path.exists():
+        return entry
+    try:
+        by_symbol = json.loads(read_bounded(preset_path, 64 * 1024))
+        if type(by_symbol) is not dict:
+            raise ForgeError('工具预设文件需要按入口名称组织。', code='invalid_request')
+        presets = by_symbol.get(item['symbol'], {})
+        allowed = {p['name'] for p in parameters}
+        if (type(presets) is not dict or len(presets) > 32 or
+                any(not label.strip() or len(label) > 96 or type(args) is not dict
+                    or not set(args) <= allowed for label, args in presets.items())):
+            raise ForgeError('工具预设的名称或参数与所选入口不匹配。', code='invalid_request')
+        bounded_json(presets, 64 * 1024)
+        entry['presets'] = presets
+    except (ValueError, UnicodeError, OSError, RecursionError) as exc:
+        entry['preset_error'] = f'{preset_path.name} · {str(exc)[:200]}'
+    return entry
+
+
 def read(root, *, id, revision='current', data_tools=False):
     root = Path(root)
     index = catalog(root, data_tools=data_tools)
@@ -200,5 +242,7 @@ def read(root, *, id, revision='current', data_tools=False):
         raise ForgeError('所选版本中尚无此定义。', code='not_found')
     result = dict(definition, id=id, path=item['path'], revision=revision, historical=revision != 'current',
                   sha256=content_digest(definition['source']), file_sha256=hashlib.sha256(raw).hexdigest())
+    if data_tools:
+        result['notebook_entry'] = _notebook_entry(root, item, definition)
     bounded_json(result, 1024**2)
     return result

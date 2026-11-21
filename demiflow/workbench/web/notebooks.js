@@ -134,7 +134,7 @@
     }
   }
   async function insert(session, source) {
-    const panel=notebookPanel(session);
+    const panel=session&&notebookPanel(session);
     if(!panel)throw Error('请先在右侧打开一个 Notebook。');
     const notebook=panel.content,model=notebook.model.sharedModel;
     const active=notebook.activeCell;
@@ -153,8 +153,7 @@
     const dictionary=node('aside',undefined,'data-dictionary');dictionary.setAttribute('aria-label','数据字典');
     const navigation=ForgeNavigation.header({title:'数据字典',searchLabel:'搜索数据字典',placeholder:'表名或已读取字段',onSearch:()=>filterTables()});
     const {search}=navigation;dictionary.append(navigation.element);
-    const toolsButton=node('button','数据工具','dictionary-tool-button');
-    toolsButton.type='button';dictionary.append(toolsButton);
+    const toolActions=node('div',undefined,'dictionary-tools');dictionary.append(toolActions);
     const list=node('div',undefined,'dictionary-list');dictionary.append(list);
     const native=node('div',undefined,'native-notebook-host');native.setAttribute('aria-label','Notebook 工作区');
     const status=node('p','正在连接 Jupyter…','native-notebook-status');native.append(status);root.append(dictionary,native);
@@ -165,48 +164,18 @@
     const observer=new ResizeObserver(resize);observer.observe(native);window.addEventListener('resize',resize);window.addEventListener('scroll',resize,true);
     const fail=error=>{if(alive()){status.textContent=error.message||String(error);status.classList.add('error-box');}};
     let toolsDialog;
-    toolsButton.onclick=async()=>{
-      if(toolsDialog?.open)return;
-      const dialog=node('dialog',undefined,'data-tools-dialog');
-      dialog.setAttribute('aria-label','项目数据工具');
-      toolsDialog=dialog;
-      const header=node('header'),close=node('button','关闭'),select=node('select');
-      select.setAttribute('aria-label','选择数据工具');select.hidden=true;
-      close.onclick=()=>dialog.close();header.append(node('strong','数据工具'),select,close);
-      const body=node('section'),issues=node('div');
-      dialog.append(header,issues,body);root.append(dialog);
-      dialog.addEventListener('close',()=>{disposeReaders(dialog);dialog.remove();},{once:true});
-      dialog.showModal();body.textContent='正在读取数据工具…';
-      const current=()=>alive()&&dialog.open;
-      async function read(){
-        const id=select.value;
-        disposeReaders(body);body.textContent='读取定义…';
+    for(const [kind,label] of [['annotation','标注工具'],['view','查看工具']]){
+      const button=node('button',label,'dictionary-tool-button');
+      button.type='button';toolActions.append(button);
+      button.onclick=async()=>{
         try{
-          const detail=await api('data-tool-definition',{id});
-          if(!current()||id!==select.value)return;
-          const source=node('div');
-          body.replaceChildren(node('p',detail.tool_kind==='annotation'?'数据标注工具':'数据查看工具','op-eyebrow'),node('h3',detail.symbol),node('p',detail.path+' · L'+detail.line,'op-location'));
-          if(detail.description||detail.module_summary)
-            body.append(node('p',detail.description||'模块说明 · '+detail.module_summary,'op-description'));
-          body.append(source);
-          DemiFlowDefinition.render(source,detail,{mountText,mode:'source'});
-        }catch(error){if(current()&&id===select.value)body.textContent=error.message;}
-      }
-      try{
-        const index=await api('project-data-tools');
-        if(!current())return;
-        for(const issue of index.diagnostics)issues.append(node('p',issue.path+' · '+issue.detail,'op-error'));
-        for(const [kind,label] of [['annotation','数据标注工具'],['view','数据查看工具']]){
-          const group=node('optgroup');group.label=label;
-          for(const item of index.definitions.filter(d=>d.tool_kind===kind)){
-            const option=node('option',item.symbol+' · '+item.path);option.value=item.id;group.append(option);
-          }
-          if(group.childElementCount)select.append(group);
-        }
-        if(!select.length){body.textContent='尚未声明数据工具。在 data_tools/ 模块中用 __demiflow_data_tools__ 列出可复用的定义。';return;}
-        select.hidden=false;select.onchange=read;await read();
-      }catch(error){if(current())body.textContent=error.message;}
-    };
+          const {showTools}=await import('./data-tools.js');
+          if(alive()&&!toolsDialog?.open)toolsDialog=showTools({root,kind,api,mountText,disposeReaders,project,
+            canInsert:!!context.native_notebook&&!!context.capabilities?.analysis_write,
+            insert:code=>insert(session,code)});
+        }catch(error){fail(error);}
+      };
+    }
     const tables=new Map();
     function add(item) {
       if(tables.has(item.key))return;

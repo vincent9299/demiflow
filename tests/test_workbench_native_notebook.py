@@ -395,3 +395,50 @@ def test_dictionary_resolved_request_stays_fixed_across_rebind_and_navigation(br
             assert page.evaluate('ForgeView.decodeView(location.hash).binding_digest')==original
             assert not page.get_by_role('button',name='插入读取代码').count()
         finally:context.close()
+
+
+def test_reuse_annotation_tool_preset_in_native_notebook(browser,native_project):
+    root,path,key=native_project
+    folder=root/'data_tools'
+    folder.mkdir()
+    (folder/'ratings.py').write_text(
+        '__demiflow_data_tools__={"review_images":"annotation"}\n'
+        'def review_images(batch, labels, *, page_size=5):\n'
+        '    """按批次和标签打开候选图审核。"""\n'
+        '    return f"{batch}: {labels[0]} ({page_size})"\n')
+    (folder/'ratings.presets.json').write_text(json.dumps(
+        {'review_images':{'候选图质检':{'batch':'batch-12','labels':['通过','退回'],'page_size':20}}},ensure_ascii=False))
+    with service(None,registry=path,notebook_python=PYTHON) as app:
+        page=browser.new_page(viewport={'width':1440,'height':950})
+        try:
+            view=quote(json.dumps(dict(v=2,workspace=key,kind='tables')))
+            page.goto(app.origin+'/#token='+app.token+'&view='+view)
+            frame=page.frame_locator('iframe.native-notebook-frame')
+            expect(frame.locator('.jp-Notebook')).to_be_visible(timeout=60000)
+            frame.locator('body').evaluate('async()=>{const a=window.jupyterapp;await a.restored;const p=a.shell.currentWidget;await p.context.ready;await p.sessionContext.ready;}')
+            frame.locator('.jp-CodeCell .cm-content').first.fill('original_draft = 1')
+            page.get_by_role('button',name='标注工具',exact=True).click()
+            dialog=page.get_by_role('dialog',name='标注工具')
+            dialog.get_by_label('工具预设').select_option(label='候选图质检')
+            expect(dialog.get_by_label('batch',exact=True)).to_have_value('batch-12')
+            dialog.get_by_label('batch',exact=True).fill('batch-13')
+            dialog.get_by_text('另存参数预设').click()
+            dialog.get_by_label('新预设名称').fill('下一批')
+            dialog.get_by_role('button',name='保存到此浏览器').click()
+            expect(dialog.get_by_role('status')).to_have_text('预设已保存。')
+            dialog.get_by_role('button',name='插入 Notebook').click()
+            expect(dialog).to_have_count(0)
+            cells=frame.locator('.jp-CodeCell')
+            expect(cells.first).to_contain_text('original_draft')
+            expect(cells.nth(1)).to_contain_text('from data_tools.ratings import review_images')
+            expect(cells.nth(1).locator('.jp-OutputArea-output')).to_have_count(0)
+            frame.locator('body').evaluate("()=>window.jupyterapp.commands.execute('notebook:run-cell')")
+            expect(cells.nth(1).locator('.jp-OutputArea-output')).to_contain_text('batch-13: 通过 (20)',timeout=30000)
+            page.get_by_role('button',name='标注工具',exact=True).click()
+            dialog.get_by_label('工具预设').select_option(label='下一批')
+            expect(dialog.get_by_label('page_size',exact=True)).to_have_value('20')
+            folder=os.environ.get('FORGE_ACCEPTANCE_DIR')
+            if folder:page.screenshot(path=str(Path(folder)/'annotation-tool-preset.png'))
+            dialog.get_by_role('button',name='关闭').click()
+        finally:
+            page.close()
