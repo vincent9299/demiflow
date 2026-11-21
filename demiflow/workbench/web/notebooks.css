@@ -53,7 +53,7 @@ main.native-data-active{padding:0!important;max-width:none!important;overflow:hi
 .notebook-document{min-width:0;min-height:0;display:flex;flex-direction:column}
 .notebook-document .native-notebook-host{min-height:0;flex:1;height:auto}
 .df-book-header,.df-assistant-head{height:44px;flex:none;display:flex;align-items:center;gap:6px;padding:0 12px;border-bottom:1px solid #eceef2;background:#fff}
-.df-book-header>strong,.df-assistant-head>strong{font-size:13px;font-weight:550;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.df-assistant-head>strong{font-size:13px;font-weight:550;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .notebook-desk .df-card-icon{display:inline-grid;place-items:center;padding:4px;width:28px;height:28px;border:0;background:transparent;color:#697484;box-shadow:none;border-radius:5px}
 .df-card-icon svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
 .notebook-desk .df-card-icon:is(:hover,:focus-visible){background:#eff1f5;color:#273344}
@@ -76,7 +76,23 @@ main.native-data-active{padding:0!important;max-width:none!important;overflow:hi
 @media(max-width:850px){.notebook-desk[data-assistant=open]{grid-template-columns:minmax(0,1fr)}.notebook-desk[data-assistant=open]>.notebook-document,.notebook-desk>.side-navigation-resizer{display:none}.df-card-assistant{border:0}}
 @media(max-width:600px){.native-data-workspace:has(.notebook-desk[data-assistant=open]){grid-template-columns:minmax(0,1fr)}.native-data-workspace:has(.notebook-desk[data-assistant=open])>:is(.data-dictionary,.side-navigation-resizer,.side-navigation-reopen){display:none}}
 .notebook-document > .df-book-header{height:36px;padding:0 16px;box-sizing:border-box}
-.notebook-document > .df-book-header > strong{font-size:15px;line-height:20px;font-weight:600;color:#20242b}
+.df-book-strip,.df-book-tabs,.df-book-controls{display:flex;align-items:center;min-width:0}
+.df-book-strip{flex:1;gap:3px}
+.df-book-tabs{overflow-x:auto;scrollbar-width:none;height:36px}
+.df-book-tabs::-webkit-scrollbar{display:none}
+.df-book-tabs button,.df-new-book{border:0;box-shadow:none;border-radius:0;background:transparent;color:#677184;flex:none}
+.df-book-tabs button{height:100%;max-width:12rem;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;border-bottom:2px solid transparent;padding:1px 9px 0;font-size:13px}
+.df-book-tabs button[aria-selected=true]{color:#303c52;border-bottom-color:#506cc4;font-weight:600}
+.df-book-strip .df-new-book{font-size:19px;line-height:24px;width:28px;padding:0;border-radius:5px}
+.df-book-strip button:is(:hover,:focus-visible){background:#eff1f5}
+.df-book-controls{flex:none}
+.df-book-notice{margin:4px 12px;font-size:12px;color:#92542d}
+.df-notebook-access{border:1px solid #dce1e8;border-radius:10px;padding:18px;max-width:90vw}
+.df-notebook-access h3{margin:0 0 10px}.df-notebook-access p,.df-notebook-access label{font-size:13px}
+.df-notebook-access label{display:flex;align-items:center;gap:5px}
+.df-notebook-access form>div{display:flex;justify-content:flex-end;gap:8px;margin-top:15px}
+@media(max-width:700px){.notebook-document > .df-book-header{height:auto;min-height:36px;flex-wrap:wrap;gap:0 4px}.df-book-strip{flex:1 0 min(8rem,90%)}.df-book-controls{margin-left:auto}}
+
 
 @media(max-width:600px){.notebook-document > .df-book-header{padding-inline:10px}}
 

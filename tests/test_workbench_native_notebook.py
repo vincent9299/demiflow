@@ -435,6 +435,8 @@ def test_reuse_annotation_tool_preset_in_native_notebook(browser,native_project)
             kernel=frame.locator('body').evaluate('()=>window.jupyterapp.shell.currentWidget.sessionContext.session.kernel.id')
             frame.locator('.jp-CodeCell .cm-content').first.fill('original_draft = 1')
             page.get_by_role('tab',name='工具',exact=True).click()
+            expect(page.get_by_role('button',name='card 组件',exact=True)).to_be_hidden()
+            page.get_by_text('data_tools/ratings.py',exact=True).click()
             expect(page.get_by_role('button',name='card 组件',exact=True)).to_be_visible()
             folder=os.environ.get('FORGE_ACCEPTANCE_DIR')
             if folder:page.screenshot(path=str(Path(folder)/'annotation-library.png'))
@@ -579,6 +581,7 @@ def test_card_assistant_generates_editable_notebook_widgets(browser,native_proje
             expect(cells.first).to_have_css('border-left','1px solid rgb(188, 188, 188)')
             expect(cells.first).to_have_css('border-radius','8px')
             page.get_by_role('button',name='新建卡片',exact=True).click()
+            page.get_by_text('data_tools/scores.py',exact=True).click()
             page.get_by_role('button',name='mean_score 分析').click()
             pane=page.get_by_role('complementary',name='卡片助手')
             separator=page.get_by_role('separator',name='调整卡片助手宽度')
@@ -648,3 +651,83 @@ def test_card_assistant_generates_editable_notebook_widgets(browser,native_proje
             expect(cells.last).to_be_in_viewport()
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
         finally:page.close()
+
+
+def test_create_notebooks_from_collapsed_data_page(browser, native_project):
+    root, registry_path, project = native_project
+    grants(registry_path, project, analysis_write=False, analysis_execute=False, config_write=True)
+    folder = root / 'data_tools'
+    folder.mkdir()
+    (folder / 'metrics.py').write_text('__demiflow_data_tools__={"total":"analysis"}\ndef total(values):\n    return sum(values)\n')
+    with service(None, registry=registry_path, notebook_python=PYTHON) as app:
+        page = browser.new_page(viewport={'width': 1440, 'height': 900})
+        errors, detail_reads = [], []
+        page.on('pageerror', lambda error: errors.append(str(error)))
+        page.on('request', lambda req: detail_reads.append(req.url)
+                if urlsplit(req.url).path.endswith(('/table', '/project-table')) else None)
+        try:
+            view = quote(json.dumps(dict(v=2, workspace=project, kind='tables')))
+            page.goto(app.origin + '/#token=' + app.token + '&view=' + view)
+            new = page.get_by_role('button', name='新建 Notebook', exact=True)
+            expect(new).to_be_enabled(timeout=30000)
+            expect(page.get_by_text('点击上方 ＋ 新建第一份 Notebook。')).to_be_visible()
+            expect(page.locator('summary').filter(has_text='samples').first).to_be_visible()
+            expect(page.locator('.dictionary-table[open]')).to_have_count(0)
+            assert not detail_reads
+            route = '/api/workspaces/' + project + '/notebook-open'
+            assert call(app, 'POST', route, {'create': True}, token=True)[0] == 403
+            assert call(app, 'POST', route, {'create': 'yes'}, token=True)[0] == 400
+            page.get_by_role('tab', name='工具', exact=True).click()
+            group = page.get_by_text('data_tools/metrics.py', exact=True)
+            expect(group).to_be_visible()
+            expect(page.locator('.dictionary-table[open]')).to_have_count(0)
+            group.click()
+            expect(page.get_by_role('button', name='total 分析')).to_be_visible()
+            new.click()
+            dialog = page.get_by_role('dialog')
+            dialog.get_by_role('button', name='取消').click()
+            assert not (root / 'notebooks').exists()
+            new.click()
+            dialog.get_by_role('button', name='允许并新建').click()
+            tabs = page.get_by_role('tablist', name='Notebook', exact=True)
+            first = tabs.get_by_role('tab', name='分析', exact=True)
+            expect(first).to_have_attribute('aria-selected', 'true', timeout=60000)
+            visible = 'iframe.native-notebook-frame:not([hidden])'
+            frame = page.frame_locator(visible)
+            editor = frame.locator('.jp-CodeCell .cm-content').first
+            expect(editor).to_be_visible(timeout=60000)
+            expect(page.get_by_role('button', name='新建卡片')).to_be_enabled(timeout=20000)
+            ready = 'async f=>{const panel=f.contentWindow.jupyterapp.shell.currentWidget;await panel.context.ready;await panel.sessionContext.ready;}'
+            page.locator(visible).evaluate(ready)
+            editor.fill('first_draft = 41')
+            page.wait_for_function('''() => document.querySelector('iframe:not([hidden])').contentWindow.jupyterapp.shell.currentWidget
+                .content.widgets[0].model.sharedModel.getSource()==='first_draft = 41' ''')
+            assert sorted(p.name for p in (root / 'notebooks').glob('*.ipynb')) == ['分析.ipynb']
+            new.click()
+            second = tabs.get_by_role('tab', name='分析 2', exact=True)
+            expect(second).to_have_attribute('aria-selected', 'true', timeout=30000)
+            expect(tabs.get_by_role('tab')).to_have_text(['分析', '分析 2'])
+            expect(editor).to_be_visible(timeout=60000)
+            expect(editor).to_be_empty()
+            editor.fill('print(7 * 6)')
+            editor.press('Shift+Enter')
+            expect(frame.locator('.jp-OutputArea-output')).to_contain_text('42', timeout=30000)
+            first.click()
+            expect(first).to_have_attribute('aria-selected', 'true')
+            assert page.locator('iframe.native-notebook-frame').count() == 2
+            expect(editor).to_contain_text('first_draft = 41')
+            first.press('ArrowRight')
+            expect(second).to_be_focused()
+            expect(frame.locator('.jp-OutputArea-output')).to_contain_text('42')
+            perms = json.loads(registry_path.read_text())['projects'][project]['permissions']
+            assert perms['analysis_write'] and perms['analysis_execute'] and perms['config_write']
+            assert not perms['case_annotate']
+            for width in (1440, 390):
+                page.set_viewport_size({'width': width, 'height': 850})
+                expect(new).to_be_in_viewport()
+                assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
+                if os.environ.get('FORGE_ACCEPTANCE_DIR'):
+                    page.screenshot(path=str(Path(os.environ['FORGE_ACCEPTANCE_DIR']) / f'notebook-tabs-{width}.png'))
+            assert not errors
+        finally:
+            page.close()
