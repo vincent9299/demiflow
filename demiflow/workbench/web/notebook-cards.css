@@ -1,0 +1,22 @@
+/* The cells, editors, outputs and widget events belong to Notebook 7. */
+.df-cell-tools{display:none}
+.df-card-mode #top-panel-wrapper,.df-card-mode #menu-panel-wrapper,.df-card-mode .jp-NotebookPanel-toolbar{display:none!important}
+.df-card-mode #main-panel{position:absolute;inset:0!important;width:100%;height:100%!important}
+.df-card-mode .jp-NotebookPanel-notebook{top:0!important;height:100%!important}
+.df-card-mode :is(#main,.jp-WindowedPanel-outer,.jp-WindowedPanel-inner,.jp-WindowedPanel-viewport){background:#fff;box-shadow:none!important;border:0}
+.df-card-mode .jp-WindowedPanel-inner{margin:0 auto!important}.df-card-mode .jp-WindowedPanel-viewport{padding-block:0!important}
+.df-card-mode .jp-Notebook{background:#fff;padding:18px clamp(8px,3vw,44px) 56px}
+.df-card-mode .jp-CodeCell{position:relative;box-sizing:border-box;background:#fff;margin:2px auto 14px;max-width:960px;padding:8px 10px 10px;border:1px solid #e7e9ee;border-radius:12px}
+.df-card-mode .jp-CodeCell.jp-mod-active{border-color:#b9caed}
+.df-card-mode .jp-CodeCell::before{display:none!important}
+.df-card-mode .jp-InputArea-editor{background:#f8f9fb;border:0;border-radius:6px}
+.df-card-mode .jp-CodeCell[data-df-folded=true]>.jp-Cell-inputWrapper{display:none}
+.df-card-mode :is(.jp-InputPrompt,.jp-OutputPrompt,.jp-Collapser){display:none}
+.df-card-mode .df-cell-tools{display:flex;align-items:center;gap:2px;min-height:22px;margin-bottom:3px}
+.df-cell-title{min-width:0;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#353e4f;font:500 13px/20px system-ui,sans-serif}
+.df-card-icon{display:inline-grid;place-items:center;width:27px;height:27px;border:0;background:transparent;padding:4px;box-shadow:none;border-radius:5px;color:#647083;cursor:pointer}
+.df-card-icon svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.df-card-icon:hover,.df-card-icon:focus-visible{background:#eef1f5;color:#172235}
+.df-cell-tools button{opacity:0}
+.jp-CodeCell:is(:hover,:focus-within,.jp-mod-active) .df-cell-tools button{opacity:1}
+@media(hover:none){.df-cell-tools button{opacity:1}}

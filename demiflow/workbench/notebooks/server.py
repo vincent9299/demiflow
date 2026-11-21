@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from importlib import metadata
 import json
 import os
 from pathlib import Path
@@ -109,7 +110,25 @@ def main():
     config.JupyterNotebookApp.user_settings_dir = str(config_path.parent / 'settings')
     config.JupyterNotebookApp.custom_css = True
     config.JupyterNotebookApp.default_url = '/tree'
-    config.LabServerApp.extra_labextensions_path = []
+    # A Notebook environment can inherit ipywidgets from another Python
+    # installation. Notebook's default data paths only cover its own prefix.
+    from jupyter_core.paths import jupyter_path
+    manager = Path('@jupyter-widgets/jupyterlab-manager')
+    if not any((Path(parent) / manager / 'package.json').is_file() for parent in jupyter_path('labextensions')):
+        try:
+            package = metadata.distribution('jupyterlab_widgets')
+        except metadata.PackageNotFoundError:
+            package = None
+        if package:
+            manifest = next((package.locate_file(f) for f in (package.files or ())
+                             if Path(f).parts[-4:] == ('labextensions', *manager.parts, 'package.json')), None)
+            if manifest and manifest.is_file():
+                extensions = config_path.parent / 'widget-extensions'
+                link = extensions / manager
+                link.parent.mkdir(parents=True, exist_ok=True)
+                if not link.is_symlink():
+                    link.symlink_to(manifest.resolve().parent, target_is_directory=True)
+                config.LabServerApp.extra_labextensions_path = [str(extensions)]
     config.KernelSpecManager.allowed_kernelspecs = {'python3'}
     config.FileContentsManager.delete_to_trash = False
     config.Application.log_level = 'WARN'

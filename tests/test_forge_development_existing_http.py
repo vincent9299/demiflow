@@ -70,7 +70,7 @@ def configuration(tmp_path, origin, *, mode='existing_grants', identity=None, re
     root=tmp_path/'project';root.mkdir();(root/'code.py').write_text('# fixture only\n')
     source=tmp_path/'original-policy.json'
     value=dict(format='demiflow_development_deployment_v1',mode='trusted_local',state_root=str(tmp_path/'original-state'),
-        projects={WORKSPACE:dict(root=str(root),kind='unregistered',phase='implementation',writes=['code.py'],
+        projects={WORKSPACE:dict(root=str(root),kind='platform',phase='implementation',writes=['code.py'],
             watch=['code.py'],sources=[],non_goals=['No model/business turns'],authorization='Explicit private transport fixture')},
         providers={'codex':dict(executable=sys.executable,version='0.164.0',model='fixture')},
         host_budget=dict(memory_bytes=8*1024**3,run_memory_bytes=0,other_memory_bytes=1024**3,
@@ -122,6 +122,9 @@ def test_factory_and_existing_grants_preserve_every_public_route_ids_and_revisio
             for name,args in writes.items():client.forward(WORKSPACE,root,name,args,mutation=True)
             posts=[row for row in upstream['calls'] if row['method']=='POST']
             assert [row['body'] for row in posts]==list(writes.values())
+            generation=dict(writes['dev-turn-start'],operation='notebook_cell',submission_id='original-cell-id')
+            client.forward(WORKSPACE,root,'dev-turn-start',generation,mutation=True)
+            assert upstream['calls'][-1]['body']==generation
             assert all(row['headers'].get('X-Forge-Token')==TOKEN for row in upstream['calls'])
             assert all('Cookie' not in row['headers'] and 'Authorization' not in row['headers'] for row in upstream['calls'])
             assert all(row['headers']['Origin']==upstream['origin'] for row in upstream['calls'])

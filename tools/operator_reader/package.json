@@ -1,0 +1,12 @@
+{
+  "dependencies": {
+    "@lezer/highlight": "1.2.3",
+    "@lezer/python": "1.1.18",
+    "esbuild": "0.25.11"
+  },
+  "name": "demiflow-python-reader",
+  "private": true,
+  "scripts": {
+    "build": "esbuild python.js --bundle --format=esm --minify --legal-comments=none --outfile=../../demiflow/workbench/web/python-syntax.js"
+  }
+}

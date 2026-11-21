@@ -44,6 +44,9 @@ STATIC_ASSETS = {
     "/workbench-runs.css": ("workbench-runs.css", "text/css; charset=utf-8"),
     '/operator-browser.js': ('operator-browser.js', 'text/javascript; charset=utf-8'),
     '/definition-reader.js': ('definition-reader.js', 'text/javascript; charset=utf-8'),
+    '/notebook-cards.js': ('notebook-cards.js', 'text/javascript; charset=utf-8'),
+    '/notebook-assistant.js': ('notebook-assistant.js', 'text/javascript; charset=utf-8'),
+    '/notebook-cards.css': ('notebook-cards.css', 'text/css; charset=utf-8'),
     '/flow-arguments.js': ('flow-arguments.js', 'text/javascript; charset=utf-8'),
     '/workbench-modern.css': ('workbench-modern.css', 'text/css; charset=utf-8'),
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -70,6 +73,8 @@ STATIC_ASSETS = {
     "/style.css": ("style.css", "text/css; charset=utf-8"),
     "/reading.css": ("reading.css", "text/css; charset=utf-8"),
     "/reading.js": ("reading.js", "text/javascript; charset=utf-8"),
+    "/data-tools.js": ("data-tools.js", "text/javascript; charset=utf-8"),
+    "/python-syntax.js": ("python-syntax.js", "text/javascript; charset=utf-8"),
     "/markdown-worker.js": ("markdown-worker.js", "text/javascript; charset=utf-8"),
     "/markdown-it.min.js": ("markdown-it.min.js", "text/javascript; charset=utf-8"),
     "/markdown-it.LICENSE.txt": ("markdown-it.LICENSE.txt", "text/plain; charset=utf-8"),
@@ -86,6 +91,8 @@ GET_FIELDS = {
     'project-documents': (set(), {'path', 'offset', 'limit'}),
     'project-markdown': ({'path'}, set()),
     'project-operators': (set(), set()),
+    'project-data-tools': (set(), set()),
+    'data-tool-definition': ({'id'}, set()),
     'operator-definition': ({'id'}, {'revision'}),
     'operator-history': ({'id'}, set()),
     'flow-arguments': ({'entry'}, set()),
@@ -698,7 +705,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:self._send(value)
                 return
             with self._work(control=url.path in {'/api/run-snapshot','/api/run-events'},
-                            project=name in {'project-operators','operator-definition','operator-history','flow-arguments','project-file-text','project-files','project-documents','project-markdown'}):
+                            project=name in {'project-data-tools','data-tool-definition','project-operators','operator-definition','operator-history','flow-arguments','project-file-text','project-files','project-documents','project-markdown'}):
                 if url.path == "/api/context":
                     value = api.workspace_context(root)
                     value['runs_enabled'] = permissions['run_submit']
@@ -748,6 +755,10 @@ class Handler(BaseHTTPRequestHandler):
                     value=read(root,query['request_id'])
                 elif url.path == '/api/project-status':
                     value = project_ops.project_check_status(root)
+                elif url.path in {'/api/project-data-tools', '/api/data-tool-definition'}:
+                    from .projects import definitions
+                    value = (definitions.catalog(root, data_tools=True) if url.path == '/api/project-data-tools'
+                             else definitions.read(root, data_tools=True, **query))
                 elif url.path in {'/api/project-operators', '/api/operator-definition', '/api/operator-history'}:
                     from demiflow.workbench.projects import definitions
                     value = (definitions.catalog(root) if url.path == '/api/project-operators' else

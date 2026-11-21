@@ -521,7 +521,7 @@
   function createTextReader(options = {}) {
     if (typeof options.text !== 'string') throw new TypeError('ForgeReading text must be a string');
     if (options.defaultMode !== undefined && !['preview', 'source'].includes(options.defaultMode)) throw new TypeError('Invalid reading mode');
-    let source = options.text, resolver = options.resolveLink;
+    let source = options.text, resolver = options.resolveLink, pythonTokens;
     let owner = {identity: options.identity}, disposed = false, generation = 0;
     let completeInitial;const ready=new Promise(resolve=>{completeInitial=resolve;});
     const offline = options.offline === true;
@@ -554,6 +554,40 @@
         source.charCodeAt(n - 1) <= 0xdbff && source.charCodeAt(n) >= 0xdc00 &&
         source.charCodeAt(n) <= 0xdfff ? n - 1 : n;
     }
+    function pythonPage(pre, from, to) {
+      const frame = make('div', undefined, 'python-editor');
+      frame.tabIndex = 0;
+      frame.setAttribute('role', 'region');
+      frame.setAttribute('aria-label', 'Python 源码');
+      const gutter = make('pre', undefined, 'python-lines');
+      gutter.setAttribute('aria-hidden', 'true');
+      // A page can start partway through a line. Its number is still the file line.
+      let line = options.pythonLine;
+      for (let i = 0; i < from; i++) if (source[i] === '\n') line++;
+      const numbers = [line];
+      for (let i = from; i < to - 1; i++) if (source[i] === '\n') numbers.push(++line);
+      gutter.textContent = numbers.join('\n');
+      frame.append(gutter, pre);
+      content.append(frame);
+      // Source is immediately selectable, including during lazy grammar loading.
+      import('./python-syntax.js').then(grammar => {
+        if (disposed || !content.contains(frame)) return;
+        pythonTokens ??= grammar.pythonTokens(source);
+        for (const chunk of pre.children) {
+          const start = Number(chunk.dataset.from), end = Number(chunk.dataset.to);
+          const painted = document.createDocumentFragment();
+          let at = start;
+          pythonTokens(start, end, (a, b, classes) => {
+            a = Math.max(start, a); b = Math.min(end, b);
+            if (a > at) painted.append(source.slice(at, a));
+            painted.append(make('span', source.slice(a, b), classes));
+            at = b;
+          });
+          painted.append(source.slice(at, end));
+          chunk.replaceChildren(painted);
+        }
+      }).catch(() => {}); // Keep the exact plain text available if syntax loading fails.
+    }
     function showSource(prefix = '') {
       const chunks = Math.max(1, Math.ceil(source.length / 4096));
       const pages = Math.ceil(chunks / limits.sourceChunks);
@@ -573,7 +607,10 @@
       // but allow source-file readers to display the chunks as one code block.
       const continuous=compact&&options.continuousSource===true;
       const sourcePage=continuous?make('pre',undefined,'reading-source-page'):null;
-      if(sourcePage)content.append(sourcePage);
+      if (sourcePage) {
+        if (Number.isInteger(options.pythonLine)) pythonPage(sourcePage, from, to);
+        else content.append(sourcePage);
+      }
       let mounted = 0;
       for (let i = pageIndex * limits.sourceChunks; i < Math.min(chunks, (pageIndex + 1) * limits.sourceChunks); i++) {
         const start = boundary(i * 4096), end = boundary((i + 1) * 4096);
@@ -639,7 +676,7 @@
       if (disposed) return;
       disposed = true; generation++; clearRender();completeInitial();
       for (const remove of uiListeners) remove();
-      uiListeners = []; source = null; resolver = null; owner = null;
+      uiListeners = []; pythonTokens = null; source = null; resolver = null; owner = null;
       element.replaceChildren();
     }
     return {element, dispose,ready};

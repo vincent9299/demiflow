@@ -3,17 +3,21 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
+import keyword
 import os
 from pathlib import Path
 import re
 import subprocess
 import yaml
 
+from demiflow.forge.definition_exports import DATA_TOOL_EXPORT, OPERATOR_EXPORT, exports
 from demiflow.forge.platform import bounded_json, content_digest
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.schema import ForgeError
 from . import workspace as ws
 from .discovery import discover
+from ..operator_references import direct_references
 
 from ..definition_contracts import signature, code_definition, prompt_definition
 
@@ -30,16 +34,24 @@ def _safe_tree(raw):
 
 def _items(path, raw, kind):
     text = raw.decode('utf-8')
-    if kind == 'code':
+    if kind in ('code', 'data_tool'):
         tree = _safe_tree(text)
+        public = exports(tree, DATA_TOOL_EXPORT if kind == 'data_tool' else OPERATOR_EXPORT)
         lines = text.splitlines(keepends=True)
+        module_summary = (ast.get_docstring(tree) or '').partition('\n\n')[0][:512]
         for node in tree.body:
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) or node.name.startswith('_'):
                 continue
+            if kind == 'data_tool' and node.name not in (public or ()):
+                continue
             start = min([node.lineno, *(d.lineno for d in node.decorator_list)])
             body = ''.join(lines[start - 1:node.end_lineno])
-            yield dict(code_definition(node, body), label=node.name,
-                       line=start, end_line=node.end_lineno)
+            yield dict(code_definition(node, body, kind=kind), label=node.name,
+                       export_status=('legacy' if public is None else 'declared' if node.name in public else 'internal'),
+                       definition_type=('class' if isinstance(node, ast.ClassDef) else
+                                        'async_function' if isinstance(node, ast.AsyncFunctionDef) else 'function'),
+                       **({'tool_kind': public[node.name]} if kind == 'data_tool' else {}),
+                       module_summary=module_summary, line=start, end_line=node.end_lineno)
     else:
         value = yaml.safe_load(text)
         # Reject recursion/alias expansion before serialization or traversal.
@@ -77,7 +89,7 @@ def _items(path, raw, kind):
 
 def _files(root, declarations, kind):
     count = 0; result = set()
-    suffixes = {'.py'} if kind == 'code' else {'.yaml', '.yml', '.json'}
+    suffixes = {'.py'} if kind in ('code', 'data_tool') else {'.yaml', '.yml', '.json'}
     for declaration in declarations:
         path = ws.relative_path(root, declaration['path'])
         candidates = [path] if path.is_file() else ()
@@ -101,12 +113,16 @@ def _files(root, declarations, kind):
     return sorted(result)
 
 
-def catalog(root):
-    root, control, _ = ws.load_workspace(root)
-    facts = discover(root, control)
+def catalog(root, *, data_tools=False):
+    root, control, snapshot = ws.load_workspace(root)
     items, diagnostics, sources, total = [], [], {}, 0
-    for role, kind in (('operators', 'code'), ('prompts', 'prompt')):
-        for path in _files(root, facts.get(role, []), kind):
+    if data_tools:
+        groups = [('data_tool', [{'path': 'data_tools'}])]
+    else:
+        facts = discover(root, control)
+        groups = [('code', facts['operators']), ('prompt', facts['prompts'])]
+    for kind, paths in groups:
+        for path in _files(root, paths, kind):
             raw = read_bounded(path, MAX_SOURCE); total += len(raw)
             if total > 4 * 1024**2:
                 raise ForgeError('Definition source bytes exceeded', code='resource_limit')
@@ -117,6 +133,7 @@ def catalog(root):
                     item.update(id=content_digest([relative, kind, item['symbol']]), path=relative,
                                 sha256=content_digest(item['source']), file_sha256=sources[relative])
                     item.pop('source')
+                    item.pop('module_summary', None)
                     # Large Prompt bodies belong to the selected detail, never the index.
                     for field in ('template', 'messages', 'model', 'output_schema', 'input_variables', 'defaults'): item.pop(field, None)
                     items.append(item)
@@ -128,8 +145,14 @@ def catalog(root):
     for path, digest in sources.items():
         if hashlib.sha256(read_bounded(ws.relative_path(root, path), MAX_SOURCE)).hexdigest() != digest:
             raise ForgeError('Definitions changed during reading', code='conflict')
-    result = dict(format='demiflow.project_definitions.v1', definitions=items, diagnostics=diagnostics,
-                  discovery=facts['digest'], sources=sources, usage_coverage='declared_sources_only')
+    result = dict(format='demiflow.project_data_tools.v1' if data_tools else 'demiflow.project_definitions.v1',
+                  definitions=items, diagnostics=diagnostics, sources=sources)
+    if not data_tools:
+        uses = direct_references(root, facts['entries'], items, snapshot)
+        for item in items:
+            if item['kind'] == 'code':
+                item['flow_references'] = uses.get(item['id'], [])
+        result.update(discovery=facts['digest'], usage_coverage='direct_registered_flow_callsites')
     result['revision'] = content_digest(result)
     bounded_json(result, 1024**2)
     return result
@@ -165,9 +188,53 @@ def history(root, *, id):
     return dict(versions=versions, available=True, scope='当前文件最近 16 次提交；版本内容按所选定义读取。')
 
 
-def read(root, *, id, revision='current'):
+
+def _module_name(path):
+    parts = Path(path).with_suffix('').parts
+    if parts[-1] == '__init__':
+        parts = parts[:-1]
+    if all(part.isidentifier() and not keyword.iskeyword(part) for part in parts):
+        return '.'.join(parts)
+    return None
+
+
+def _notebook_entry(root, item, definition, module):
+    path = Path(item['path'])
+    node = _safe_tree(definition['source']).body[0]
+    if isinstance(node, ast.ClassDef):
+        init = next((n for n in node.body if isinstance(n, ast.FunctionDef) and n.name == '__init__'), None)
+        if not init and node.bases:
+            return None
+        parameters = signature(init) if init else []
+    else:
+        parameters = signature(node)
+    if any(p['positional_only'] for p in parameters):
+        return None
+    preset_path = ws.relative_path(root, path.with_suffix('.presets.json').as_posix())
+    entry = dict(module=module, symbol=item['symbol'], parameters=parameters,
+                 asynchronous=isinstance(node, ast.AsyncFunctionDef), presets={})
+    if not preset_path.exists():
+        return entry
+    try:
+        by_symbol = json.loads(read_bounded(preset_path, 64 * 1024))
+        if type(by_symbol) is not dict:
+            raise ForgeError('工具预设文件需要按入口名称组织。', code='invalid_request')
+        presets = by_symbol.get(item['symbol'], {})
+        allowed = {p['name'] for p in parameters}
+        if (type(presets) is not dict or len(presets) > 32 or
+                any(not label.strip() or len(label) > 96 or type(args) is not dict
+                    or not set(args) <= allowed for label, args in presets.items())):
+            raise ForgeError('工具预设的名称或参数与所选入口不匹配。', code='invalid_request')
+        bounded_json(presets, 64 * 1024)
+        entry['presets'] = presets
+    except (ValueError, UnicodeError, OSError, RecursionError) as exc:
+        entry['preset_error'] = f'{preset_path.name} · {str(exc)[:200]}'
+    return entry
+
+
+def read(root, *, id, revision='current', data_tools=False):
     root = Path(root)
-    index = catalog(root)
+    index = catalog(root, data_tools=data_tools)
     item = next((i for i in index['definitions'] if i['id'] == id), None)
     if item is None: raise ForgeError('Unknown declared definition', code='not_found')
     if revision == 'current':
@@ -191,5 +258,9 @@ def read(root, *, id, revision='current'):
         raise ForgeError('所选版本中尚无此定义。', code='not_found')
     result = dict(definition, id=id, path=item['path'], revision=revision, historical=revision != 'current',
                   sha256=content_digest(definition['source']), file_sha256=hashlib.sha256(raw).hexdigest())
+    if data_tools:
+        result['module'] = _module_name(item['path'])
+        if result['module'] and definition['tool_kind'] in ('view', 'annotation'):
+            result['notebook_entry'] = _notebook_entry(root, item, definition, result['module'])
     bounded_json(result, 1024**2)
     return result

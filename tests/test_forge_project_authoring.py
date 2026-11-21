@@ -143,3 +143,5 @@ def test_actor_skeleton_uses_a_valid_class_name(candidate, name):
     tree = ast.parse((candidate / result['path']).read_text())
     assert isinstance(tree.body[0], ast.ClassDef)
     assert tree.body[0].name == result['symbol'] == name.title() + 'Actor'
+    from demiflow.forge.definition_exports import OPERATOR_EXPORT, exports
+    assert exports(tree, OPERATOR_EXPORT) == {result['symbol']: 'operator'}

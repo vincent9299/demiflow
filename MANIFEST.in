@@ -3,6 +3,7 @@ include BASELINE.json
 recursive-include docs *.md *.json *.csv
 recursive-include tests *.py *.json
 recursive-include tools *.py
+include tools/operator_reader/python.js tools/operator_reader/package.json tools/operator_reader/package-lock.json
 recursive-include examples *.py *.json *.md
 recursive-include integrations *.md
 recursive-include demiflow/forge/standards *.json *.md

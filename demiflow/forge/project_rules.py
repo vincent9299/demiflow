@@ -8,7 +8,7 @@ from .platform_environment import read_bounded
 from .schema import ForgeError
 
 
-ROLE_DIRS = ('flows', 'operators', 'prompts')
+ROLE_DIRS = ('flows', 'operators', 'prompts', 'data_tools')
 TOPICS = ('flow', 'operator', 'prompt')
 GUIDE_RESOURCE = 'standards/pipeline-authoring.md'
 
