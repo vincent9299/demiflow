@@ -286,7 +286,9 @@ def test_turn_rail_history_and_project_files_share_the_conversation(tmp_path):
             page.locator('.dfc-think>summary').last.click()
             process = page.locator('.dfc-step-process>.dfc-disclosure-body').last
             expect(process).to_contain_text('展开的思考段落')
-            assert process.evaluate('n=>n.scrollHeight>800 && n.scrollHeight<=n.clientHeight+1')
+            expect(process.locator('.dfc-markdown p').first).to_be_visible()
+            metrics = process.evaluate('n=>[n.scrollHeight,n.clientHeight,n.innerText.length]')
+            assert metrics[0] > 800 and metrics[0] <= metrics[1]+1, metrics
             timeline = page.locator('.development-timeline')
             process.evaluate("n=>n.scrollIntoView({block:'start'})")
             viewport = timeline.bounding_box()
