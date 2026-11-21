@@ -235,6 +235,7 @@ def _definition(root, path, deadline, exclude, sources):
 
 
 def check_project(root, *, paths=(), entry=None, params=None, reference=None, table_resolver=None,
+                  table_describer=describe_fixed_table,
                   exclude=(), publish=None, max_variants=MAX_VARIANTS, seconds=CHECK_SECONDS,
                   max_bytes=MAX_SOURCE_BYTES):
     """Check without importing candidate code. A product may publish each exact inspected report."""
@@ -256,11 +257,11 @@ def check_project(root, *, paths=(), entry=None, params=None, reference=None, ta
         if content_digest(reference['catalog']) != reference['catalog_id']:
             raise ForgeError('SDK catalogue differs from its supplied identity', code='inputs_changed')
         view = discover_project_sources(root, exclude=exclude, include_roles=bool(paths))
-        return _check(root, view, paths, entry, params, reference, table_resolver,
+        return _check(root, view, paths, entry, params, reference, table_resolver, table_describer,
                       exclude, deadline, publish, max_variants, max_bytes)
 
 
-def _check(root, view, paths, entry, params, reference, table_resolver, exclude, deadline, publish, max_variants, max_bytes):
+def _check(root, view, paths, entry, params, reference, table_resolver, table_describer, exclude, deadline, publish, max_variants, max_bytes):
     native, layout, checked, rows, definitions = [], [], [], [], []
     sources, parameter_digests, table_files = {}, {}, {}
     layout_paths = set()
@@ -311,7 +312,7 @@ def _check(root, view, paths, entry, params, reference, table_resolver, exclude,
                 parameters = decode_control(raw)
             report = inspect_variant(root, control, candidate, parameters, reference['catalog'],
                                      table_resolver=resolve, limits={'seconds': seconds},
-                                     exclude=exclude, table_describer=describe_fixed_table if table_resolver is None else None)
+                                     exclude=exclude, table_describer=table_describer)
             binding = report['binding']
             dependencies = _binding_files(root, binding, sources, table_files)
             # Shared changes require probing potential consumers. An unrelated complete
