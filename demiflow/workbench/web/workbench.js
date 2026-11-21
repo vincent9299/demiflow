@@ -7,7 +7,7 @@
   const json=value=>JSON.stringify(value,null,2);
   const safe=value=>value==null?'未测量':String(value);
   const unit=value=>value==null?'未测量':(value/1024**2).toFixed(1)+' MiB';
-  const timeText=value=>{const d=new Date(value*1000),p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());};
+  const timeText=value=>{const d=new Date(value*1000),p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());};
   const inputText=field=>field.value_type==='str'?String(field.value):json(field.value);
   const identityKey=execution=>execution==null?null:json([execution.project,execution.basisDigest,execution.runId,execution.attempt,execution.actionId,execution.dagId,execution.planId,execution.planRevision,execution.format]);
   const basisText={compile:'引擎编译',report:'检查报告',source:'源码观察',sealed:'封存计划',observation:'运行观测'};
@@ -1062,7 +1062,7 @@
       if(!run)return;runFacts.replaceChildren();runAlerts.replaceChildren();
       const sample=snapshot?.telemetry?.sample||{},age=freshness?.telemetry_age_s;
       for(const[label,value]of [['整次运行 CPU',sample.cpu_cores==null?'未测量':sample.cpu_cores.toFixed(2)+' 核'],['进程树 RSS',unit(sample.rss_bytes)],
-        ['动作吞吐',sample.throughput?.rows_per_s==null?'未测量':sample.throughput.rows_per_s.toFixed(1)+' 行/秒'],['运行时间',run.state.started_at?Math.max(0,Math.round((run.state.finished_at||Date.now()/1000)-run.state.started_at))+' 秒':'尚未开始']]){
+        ['动作吞吐',sample.throughput?.rows_per_s==null?'未测量':sample.throughput.rows_per_s.toFixed(1)+' 行/秒']]){
         const card=$('div');card.append($('small',label),$('strong',value));runFacts.append(card);
       }
       const note=$('div',age==null?'暂无可用遥测':(age>5?'观测已陈旧 · ':'最近采样 · ')+Math.round(age)+' 秒前','wb-caption');runFacts.append(note);
@@ -1235,14 +1235,13 @@
       runPicker.replaceChildren();
       for(const item of options){
         const status=runUI.labels[item.status]||item.status;
-        const date=new Date(item.created_at*1000);
-        const timestamp=timeText(item.created_at)+':'+String(date.getSeconds()).padStart(2,'0');
+        const timestamp=timeText(item.created_at);
         const label=timestamp+' · '+status+(item.run_id===records?.latest?' · 最新':'')+' · '+item.run_id.slice(-6);
         const option=new Option(label,item.run_id);option.title=item.run_id;runPicker.append(option);
       }
       runPicker.value=data().run||records?.latest||'';
       const picked=options.find(item=>item.run_id===runPicker.value);
-      pickerCaption.textContent=picked?timeText(picked.created_at)+':'+String(new Date(picked.created_at*1000).getSeconds()).padStart(2,'0'):'选择运行';
+      pickerCaption.textContent=picked?timeText(picked.created_at):'选择运行';
       pickerLabel.title=runPicker.selectedOptions[0]?.textContent||'选择运行记录';
       pickerLabel.hidden=!options.length;
       olderRuns.hidden=!records?.cursor&&!records?.offset;

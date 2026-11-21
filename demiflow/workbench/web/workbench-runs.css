@@ -56,7 +56,7 @@
 .workbench .wb-run-utilities button{display:grid;place-items:center;width:30px;height:30px;padding:0;color:#647184;border:0;background:transparent;box-shadow:none;border-radius:5px}
 .workbench .wb-run-utilities button:hover{color:var(--op-ink);background:#edf0f5}
 .workbench .wb-run-context-line>.quiet,.workbench .wb-run-empty button{background:transparent;border:0;box-shadow:none;padding:4px 0;color:var(--op-accent)}
-.workbench[data-page=monitor] .wb-source-header>strong{display:none}
+.workbench[data-page=monitor] .wb-run-detail>.wb-source-header>strong{display:none}
 .workbench[data-page=monitor] .wb-node-panel .wb-run-detail>.wb-source-header{padding:0 0 7px;border:0;margin:0}
 .workbench[data-page=monitor] .wb-node-panel .wb-source-header>.wb-source-tabs{gap:4px;flex-wrap:wrap}
 .workbench[data-page=monitor] .wb-node-panel .wb-source-header>.wb-source-tabs button{margin:0;padding:4px 7px;border:0;border-radius:4px;font-size:11px}
