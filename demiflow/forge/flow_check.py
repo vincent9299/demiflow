@@ -71,8 +71,8 @@ class Construction:
 
 
 class FlowChecker:
-    def __init__(self, root, catalog, tables, targets, *, limits=None, resource_resolver=None):
-        self.tree = SourceTree(root, limits)
+    def __init__(self, root, catalog, tables, targets, *, limits=None, resource_resolver=None, exclude=()):
+        self.tree = SourceTree(root, limits, exclude=exclude)
         self.operators = OperatorChecker(self.tree)
         self.catalog, self.tables, self.targets = catalog, tables, targets
         self.symbols, self.methods = {}, {}

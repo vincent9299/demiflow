@@ -53,9 +53,9 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/absolute/isolated/demiflow \
 模型部署文档是上述两个键组成的对象。配置就绪后，在示例的隔离副本内登记入口。
 
 ```bash
-demiflow workbench init "$PWD" --existing
-demiflow workbench flow register "$PWD" flows/reference.py:run --params settings/reference.json
-demiflow workbench flow register "$PWD" flows/quality.py:run --params settings/quality.json
+demiflow forge init --root "$PWD" --existing
+demiflow forge add flow --root "$PWD" --register --entry flows/reference.py:run --params settings/reference.json
+demiflow forge add flow --root "$PWD" --register --entry flows/quality.py:run --params settings/quality.json
 ```
 实际执行环境设置公开模拟值
 `REFGEN_FIXTURE_KEY=synthetic-fixture-only`；它不是服务密钥，禁止改用真实业务 token。

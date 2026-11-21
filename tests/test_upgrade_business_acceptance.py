@@ -29,6 +29,7 @@ No Ray, no paid model, no full business data. L2 plan-driven / identity-bridge
 acceptance that depends on B/C/D merged implementation is reported separately as
 pending integration, never faked green here.
 """
+from _forge_project_fixtures import declare_existing_flow
 import asyncio
 import importlib
 import importlib.util
@@ -627,7 +628,7 @@ def _prompt_setup(root, count):
     from demiflow.data.flow_contract import arrow_fields
     from demiflow.forge.flow_check import FlowChecker
     from demiflow.forge.platform import LIMITS as PLATFORM_LIMITS, inspect_modules
-    from demiflow.workbench.projects.workspace import resolve_flow_resources
+    from demiflow.forge.project_bindings import resolve_flow_resources
     (root / 'flows').mkdir()
     (root / 'operators').mkdir()
     (root / 'flows/prompt.yaml').write_text(PACK.replace(
@@ -821,7 +822,7 @@ def test_workbench_cancel_releases_resources(tmp_path, pidfds):
         'arguments': {'candidates': {'kind': 'table', 'alias': 'candidates'},
                       'target': {'kind': 'output', 'location_id': 'local',
                                  'relative_uri': 'slow_out.lance'}}}))
-    ws.register_flow(root, 'flows/slow.py:run', params='flows/slow.json')
+    declare_existing_flow(root, 'flows/slow.py:run', params='flows/slow.json')
     prepared = runs.prepare(root, 'flows/slow.py:run', params='flows/slow.json')
     run_id = prepared['run_id']
     runs.start(root, run_id, expected=prepared['digest'])

@@ -10,7 +10,7 @@ from demiflow.execution.checked import CheckedExecution
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.workbench.runs.manager import DEFAULT_LIMITS
 from demiflow.forge.schema import ForgeError
-from demiflow.workbench.projects.workspace import resolve_flow_resources
+from demiflow.forge.project_bindings import resolve_flow_resources
 
 
 def test_materialization_spill_budget_preserves_other_live_handles(tmp_path, monkeypatch):

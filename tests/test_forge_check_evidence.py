@@ -1,5 +1,7 @@
 """Read evidence survives failed inspection through the real public workers."""
 
+from demiflow.forge.project import initialize_project
+from _forge_project_fixtures import declare_existing_flow
 import hashlib
 import json
 import shutil
@@ -17,7 +19,7 @@ from demiflow.forge.source import InspectionError, SOURCE_LIMITS, SourceTree
 @pytest.fixture(scope="module")
 def empty_workspace(tmp_path_factory):
     root = tmp_path_factory.mktemp("evidence-platform") / "workspace"
-    ws.init_workspace(root, name="evidence-fixture")
+    initialize_project(root, name="evidence-fixture")
     return root
 
 
@@ -40,7 +42,7 @@ def project(tmp_path, empty_workspace):
         (root / "params.json").write_text(json.dumps(
             {"format": "demiflow_forge_flow_parameters_v2", "arguments": {}}
         ))
-        ws.register_flow(root, "recipe.py:build", params="params.json")
+        declare_existing_flow(root, "recipe.py:build", params="params.json")
         return root, source
 
     return create
@@ -50,14 +52,15 @@ def project(tmp_path, empty_workspace):
 def test_syntax_failure_is_bound_and_repair_stales_old_reports(project, dependency):
     root, source = project(dependency=dependency)
     checked = project_ops.check_project(root)
-    assert checked["status"] == "incomplete", checked
+    assert checked["native_flow"]["status"] == "incomplete", checked
+    assert checked["project_layout"]["status"] == "failed" and checked["status"] == "invalid"
     assert set(checked["sources"]) == {"recipe.py", dependency}
     assert checked["sources"][dependency] == hashlib.sha256(source.read_bytes()).hexdigest()
     diagnostic = next(d for d in checked["diagnostics"] if d["rule"] == "FL-01")
     assert diagnostic["status"] == "incomplete" and diagnostic["path"] == dependency
     assert diagnostic["line"] == 1
     current = project_ops.project_check_status(root)
-    assert current["status"] == "incomplete" and current["changes"] == []
+    assert current["status"] == "invalid" and current["changes"] == []
     record = root / ".forge/project-check.json"
     saved = record.read_bytes()
     digest = checked["entries"][0]["digest"]
@@ -78,7 +81,8 @@ def test_ast_budget_failure_is_bound_before_repair(project):
     text = "VALUES = [" + "0," * SOURCE_LIMITS["file_nodes"] + "]\ndef clean(value): return value\n"
     root, source = project(text=text)
     checked = project_ops.check_project(root)
-    assert checked["status"] == "incomplete", checked
+    assert checked["native_flow"]["status"] == "incomplete", checked
+    assert checked["project_layout"]["status"] == "failed" and checked["status"] == "invalid"
     assert checked["sources"]["processing.py"] == hashlib.sha256(source.read_bytes()).hexdigest()
     diagnostic = next(d for d in checked["diagnostics"] if d["rule"] == "FL-10")
     assert diagnostic["path"] == "processing.py" and "AST budget" in diagnostic["detail"]
@@ -152,6 +156,6 @@ def test_documented_check_commands_reach_the_real_worker_without_json_option(pro
         result = CliRunner().invoke(main, ["workbench", command, str(root)])
         assert result.exit_code == 1, result.output  # Non-native flow, with the command accepted.
         value = json.loads(result.output)
-        assert value["format"] == "demiflow_workbench_project_static_check_v2"
+        assert value["format"] == "demiflow_workbench_project_static_check_v3"
         assert value["status"] == "invalid"
         assert set(value["sources"]) == {"recipe.py", "processing.py"}

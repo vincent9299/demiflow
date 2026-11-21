@@ -15,6 +15,7 @@ from demiflow.workbench.projects import registry as console
 from demiflow.workbench.runs import manager as runs
 from demiflow.workbench.projects import workspace as ws
 from demiflow.forge.platform import content_digest
+from _forge_project_fixtures import grant_config_write
 from test_forge_runs import base, root, wait
 from test_forge_public_api import request, service
 from test_forge_markdown_reading import browser
@@ -67,13 +68,15 @@ def test_http_registration_permissions_cas_and_no_execution(unregistered, tmp_pa
             assert request(app, '/api/project-permissions', grant)[0] == 403
             assert request(app, prefix+'flow-register', body)[0] == 403
             assert registry.read_bytes() == original
-    with service(None, registry=registry, enable_runs=True) as app:
+    with service(None, registry=registry, enable_runs=True, enable_config_write=True) as app:
         assert request(app, prefix+'flow-register', body)[0] == 403
         assert request(app, '/api/project-permissions', grant, headers={'X-Forge-Token': 'bad'})[0] == 403
         assert request(app, '/api/project-permissions', {**grant, 'run_submit': 1})[0] == 400
         assert request(app, '/api/project-permissions', {**grant, 'expected': '0'*64})[0] == 409
         assert request(app, '/api/project-permissions', grant)[0] == 200
         assert request(app, '/api/project-permissions', grant)[0] == 409
+        assert request(app, prefix+'flow-register', body)[0] == 403
+        grant_config_write(registry, key)
         before = (unregistered/'workspace.json').read_bytes()
         for invalid in ({**body, 'entry': '../outside.py:run'}, {**body, 'params': '../bad.json'},
                         {**body, 'entry': 'flows/questions.py:missing'}, {**body, 'extra': True}):
@@ -81,7 +84,8 @@ def test_http_registration_permissions_cas_and_no_execution(unregistered, tmp_pa
             assert (unregistered/'workspace.json').read_bytes() == before
         # AST registration must never import or execute the user module.
         (unregistered/'flows/never.py').write_text('raise RuntimeError("must not import")\ndef run():\n    pass\n')
-        assert request(app, prefix+'flow-register', {**body, 'entry': 'flows/never.py:run'})[0] == 200
+        assert request(app, prefix+'flow-register', {**body, 'entry': 'flows/never.py:run'})[0] == 422
+        assert (unregistered/'workspace.json').read_bytes() == before
         assert request(app, prefix+'flow-register', body)[1]['status'] == 'registered'
         assert request(app, prefix+'flow-register', body)[1]['status'] == 'unchanged'
         assert request(app, prefix+'context')[1]['run_permissions'] == dict(run_submit=True, run_control=True, attach=False)
@@ -130,11 +134,11 @@ def assert_single_run(root, run_id):
 
 def test_browser_onboard_submit_result_then_monitor_stop(unregistered, tmp_path, browser):
     registry = tmp_path / 'registry.json'
-    registry.write_text(json.dumps(dict(format=console.FORMAT, projects={})))
+    registry.write_text(json.dumps(dict(format=console.FORMAT_V3, projects={})))
     author_files = {str(p): hashlib.sha256(p.read_bytes()).hexdigest()
                     for folder in ('flows', 'operators') for p in (unregistered/folder).iterdir() if p.is_file()}
     active = None
-    with service(None, registry=registry, enable_runs=True) as app, opened(browser, app) as (page, requests):
+    with service(None, registry=registry, enable_runs=True, enable_config_write=True) as app, opened(browser, app) as (page, requests):
         page.set_default_timeout(65000)
         page.get_by_role('button', name='注册已有项目', exact=True).click()
         dialog = page.get_by_role('dialog')
@@ -147,6 +151,9 @@ def test_browser_onboard_submit_result_then_monitor_stop(unregistered, tmp_path,
             settings.get_by_label(name, exact=True).check()
         settings.get_by_role('button', name='保存运行权限', exact=True).click()
         expect(page.locator('.wb-notice')).to_contain_text('运行权限已更新')
+        settings.get_by_label('保存图上配置', exact=True).check()
+        settings.get_by_role('button', name='保存配置写入权限', exact=True).click()
+        expect(page.locator('.wb-notice')).to_contain_text('配置写入权限已更新')
         register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json', evidence_dir=tmp_path/'evidence')
         for width in (1440, 390, 320):
             page.set_viewport_size({'width': width, 'height': 1000})
@@ -197,7 +204,7 @@ def test_browser_onboard_submit_result_then_monitor_stop(unregistered, tmp_path,
 
 
 def test_lost_prepare_and_start_responses_keep_one_run(unregistered, browser, tmp_path):
-    with service(unregistered, enable_runs=True) as app, opened(browser, app) as (page, _):
+    with service(unregistered, enable_runs=True, enable_config_write=True, workspace_config_write=True) as app, opened(browser, app) as (page, _):
         page.set_default_timeout(65000)
         navigate(page, '管道')
         register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json', evidence_dir=tmp_path/'evidence')
@@ -232,11 +239,13 @@ def test_lost_prepare_and_start_responses_keep_one_run(unregistered, browser, tm
 
 
 def test_failed_prepare_can_be_read_closed_and_corrected(unregistered, browser, tmp_path):
-    with service(unregistered, enable_runs=True) as app, opened(browser, app) as (page, _):
+    with service(unregistered, enable_runs=True, enable_config_write=True, workspace_config_write=True) as app, opened(browser, app) as (page, _):
         page.set_default_timeout(65000)
         navigate(page, '管道')
-        # The file exists, but its arguments do not match this Flow signature.
-        register_from_page(page, 'flows/questions.py:select', 'flows/waiting.json', evidence_dir=tmp_path/'evidence')
+        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json', evidence_dir=tmp_path/'evidence')
+        config = unregistered/'flows/select_a.json'
+        original = config.read_bytes()
+        config.write_bytes((unregistered/'flows/waiting.json').read_bytes())
         page.get_by_role('button', name='运行', exact=True).click()
         page.locator('.error-box').last.wait_for()
         saved = page.evaluate("JSON.parse(sessionStorage.getItem('demiflow-workbench-run-intents-v1'))")
@@ -247,6 +256,7 @@ def test_failed_prepare_can_be_read_closed_and_corrected(unregistered, browser, 
         page.get_by_role('button', name='结束此失败请求', exact=True).click()
         assert page.evaluate("JSON.parse(sessionStorage.getItem('demiflow-workbench-run-intents-v1'))") == []
         assert not list((unregistered/'.forge/runs').glob('*'))
+        config.write_bytes(original)
         register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json', evidence_dir=tmp_path/'evidence')
         expect(page.get_by_label('配置', exact=True)).to_have_value('flows/select_a.json')
         page.get_by_role('button', name='运行', exact=True).click()
@@ -257,7 +267,7 @@ def test_failed_prepare_can_be_read_closed_and_corrected(unregistered, browser, 
 
 
 def test_reload_during_start(unregistered, browser, tmp_path):
-    with service(unregistered, enable_runs=True) as app, opened(browser, app) as (page, _):
+    with service(unregistered, enable_runs=True, enable_config_write=True, workspace_config_write=True) as app, opened(browser, app) as (page, _):
         page.set_default_timeout(65000)
         navigate(page, '管道')
         register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json', evidence_dir=tmp_path/'evidence')

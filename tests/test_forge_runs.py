@@ -1,4 +1,5 @@
 """Stage 3 acceptance: real native outputs and explicit failure windows."""
+from _forge_project_fixtures import declare_existing_flow
 import copy
 import importlib.util
 import json
@@ -75,7 +76,7 @@ def custom(root, body, *, operators='', arguments=None, limits=None):
         'source': {'kind': 'table', 'alias': 'candidates'},
         'target': {'kind': 'output', 'location_id': 'local', 'relative_uri': 'custom.lance'}}}
     (root / 'flows/custom.json').write_text(json.dumps(params))
-    ws.register_flow(root, 'flows/custom.py:run', params='flows/custom.json')
+    declare_existing_flow(root, 'flows/custom.py:run', params='flows/custom.json')
     return runs.prepare(root, 'flows/custom.py:run', params='flows/custom.json', limits=limits)
 
 

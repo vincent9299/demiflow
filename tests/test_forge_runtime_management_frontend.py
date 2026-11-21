@@ -1,4 +1,5 @@
 """The platform run entry works before integration and drives real owned runs."""
+from demiflow.forge.project import initialize_project
 import pytest
 from playwright.sync_api import expect
 
@@ -14,7 +15,7 @@ def test_empty_project_shows_capability_without_grant_or_execution(tmp_path, bro
     project = tmp_path / 'unintegrated-project'
     project.mkdir()
     (project / 'README.md').write_text('An existing project; integration comes later.')
-    ws.init_workspace(project, existing=True)
+    initialize_project(project, existing=True)
     original = (project / 'workspace.json').read_bytes()
     with service(project, enable_runs=False) as app, opened(browser, app) as (page, requests):
         navigate(page, '管道')

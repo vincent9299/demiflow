@@ -396,15 +396,17 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                                              if process is not None else 'not_started')
             if (coding is not None and changes and drained and completed and final == 'completed'
                     and not saved['stop_at'] and saved['dispatch'] == saved['delivery'] == 'acknowledged'):
-                from demiflow.forge.pipeline_check import result as check_result
+                from demiflow.forge.pipeline_check import check_project, result as check_result
                 from demiflow.forge.project_rules import diagnostic
-                from demiflow.workbench.projects.workspace import inspect_coding_changes
                 try:
-                    report = inspect_coding_changes(project['root'], changes, coding, exclude=excluded)
+                    report = check_project(project['root'], paths=[change['path'] for change in changes],
+                                           reference=coding, exclude=excluded)
                     if (sdk_identity(coding['catalog']) != coding['sdk_revision']
                             or capture(project['root'], watched, exclude=excluded) != after):
                         reject('SDK or project source changed before checks could be reported', 'conflict')
-                    result['pipeline_checks'] = report
+                    result['pipeline_checks'] = {key: report[key] for key in (
+                        'status', 'native_flow', 'project_layout', 'catalog_id', 'rules_id', 'source_digest',
+                        'source_count', 'check_digest')}
                 except (ValueError, OSError, KeyError, RecursionError) as exc:
                     incomplete = check_result([diagnostic('DF-01', '', str(exc), status='incomplete')], ())
                     result['pipeline_checks'] = dict(native_flow=incomplete, project_layout=incomplete)

@@ -57,9 +57,10 @@ class Definition:
 
 
 class SourceTree:
-    def __init__(self, root, limits=None):
+    def __init__(self, root, limits=None, *, exclude=()):
         self.root = Path(root).absolute()
         no_symlinks(self.root)
+        self.excluded = frozenset(Path(path) for path in exclude)
         self.limits = dict(SOURCE_LIMITS)
         for key, value in (limits or {}).items():
             if (
@@ -91,6 +92,11 @@ class SourceTree:
             status="incomplete" if incomplete else "invalid",
             cause=cause or ("unknown" if incomplete else "source"),
         )
+
+    def require_visible(self, relative):
+        path = Path(relative)
+        if self.excluded.intersection((path, *path.parents)):
+            self.fail("FL-10", "Source is outside the visible scope", incomplete=True)
 
     def load(self, module):
         import sys
@@ -126,6 +132,7 @@ class SourceTree:
             if not path.exists():
                 path = self.root.joinpath(*parts) / "__init__.py"
             relative = str(path.relative_to(self.root))
+            self.require_visible(relative)
             if len(self.files) >= self.limits["files"]:
                 self.fail("FL-10", "Source file budget exceeded", path=relative, incomplete=True)
             try:

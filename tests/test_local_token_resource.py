@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from demiflow.forge.source import SourceTree
-from demiflow.workbench.projects.workspace import resolve_flow_resources
+from demiflow.forge.project_bindings import resolve_flow_resources
 from demiflow.objects import read_local_object
 from demiflow.operator_llm.tokens import budget_declaration, input_budget
 

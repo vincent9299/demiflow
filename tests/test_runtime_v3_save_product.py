@@ -1,4 +1,5 @@
 """Real checked workspace SaveLance: native ACKs, fixed results and CAS."""
+from _forge_project_fixtures import declare_existing_flow
 import json
 import sqlite3
 import time
@@ -29,7 +30,7 @@ def prepare(root, *, body=BODY, stage=None):
         'stage': stage or {'kind':'output','location_id':'local','relative_uri':'stage.lance','mode':'create','expected_version':None},
         'target':{'kind':'output','location_id':'local','relative_uri':'final.lance','mode':'create','expected_version':None}}}
     (root/'flows/saved.json').write_text(json.dumps(parameters))
-    ws.register_flow(root,'flows/saved.py:run',params='flows/saved.json')
+    declare_existing_flow(root,'flows/saved.py:run',params='flows/saved.json')
     return runs.prepare(root,'flows/saved.py:run',params='flows/saved.json')
 
 

@@ -3,6 +3,7 @@
 Defaults describe a small experiment, not a permanent workload size limit.
 Native engine admission, available disk and process accounting still apply.
 """
+from demiflow.forge.project import validate_budget_declaration
 from demiflow.forge.schema import ForgeError
 
 from demiflow.execution.host.control import DEFAULT_LIMITS
@@ -17,9 +18,8 @@ DEPLOYMENT_LIMITS = dict(timeout_s=7 * 86400, admission_timeout_s=600, cancel_gr
 def _overlay(values, base, ceiling, label):
     if values is None:
         return dict(base)
-    if type(values) is not dict or values.keys() - base.keys():
-        raise ForgeError('Unknown ' + label + ' budget')
-    if any(type(v) is not int or not 0 < v <= ceiling[k] for k, v in values.items()):
+    validate_budget_declaration(values, label=label)
+    if any(v > ceiling[k] for k, v in values.items()):
         raise ForgeError(label + ' budgets must be positive integers within their admitted ceiling')
     return {**base, **values}
 

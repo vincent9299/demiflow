@@ -2,6 +2,8 @@
 
 All HTTP is bounded loopback synthetic PNG/JSON. No provider or GPU is used.
 """
+from demiflow.forge.project import initialize_project
+from _forge_project_fixtures import declare_existing_flow
 import base64
 import contextlib
 import hashlib
@@ -91,7 +93,7 @@ def joint_http():
 @pytest.fixture(scope='module')
 def image_workspace_base(tmp_path_factory):
     root = tmp_path_factory.mktemp('joint-base')/'workspace'
-    ws.init_workspace(root)
+    initialize_project(root)
     for name in ('flows','operators','tables','data'):(root/name).mkdir()
     control = ws.read_control(root/'workspace.json');expected = ws.content_digest(control)
     control['locations']['local'] = dict(root='data',writable=True)
@@ -165,7 +167,7 @@ def bundle(row: Input) -> Output:
     params = dict(format='demiflow_forge_flow_parameters_v1',arguments=dict(target=dict(kind='output',location_id='local',relative_uri='joint.lance')))
     if fixed_input:params['arguments']['source']=dict(kind='table',alias='input')
     (root/'flows/params.json').write_text(json.dumps(params))
-    ws.register_flow(root,'flows/image.py:run',params='flows/params.json')
+    declare_existing_flow(root,'flows/image.py:run',params='flows/params.json')
     report = project_ops.inspect_flow(root,'flows/image.py:run',params='flows/params.json')
     assert report['status'] == 'checked',report['diagnostics']
     limit = dict(timeout_s=480,memory_bytes=160*1024**2,max_scratch_bytes=32*1024**2,max_output_bytes=2*1024**2,

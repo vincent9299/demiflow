@@ -1,4 +1,6 @@
 """Registered objects → native embedding HTTP → original Lance/ACK/plan bridge."""
+from demiflow.forge.project import initialize_project
+from _forge_project_fixtures import declare_existing_flow
 import base64
 import hashlib
 import importlib.util
@@ -20,6 +22,7 @@ from demiflow.execution.run_context import RunContext
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules, LIMITS
 from demiflow.objects import LocalObjectStore
+from demiflow.forge.project_bindings import resolve_flow_resources
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs.manager import DEFAULT_LIMITS
@@ -88,7 +91,7 @@ def _nonnullable(typ):
 
 
 def _fixture(root, catalog, endpoint, modality, *, registration=True, binding=True):
-    ws.init_workspace(root, modules=('demiflow.data', 'demiflow.embeddings'), extras=('embeddings',))
+    initialize_project(root, modules=('demiflow.data', 'demiflow.embeddings'), extras=('embeddings',))
     objects = root / 'objects'; objects.mkdir()
     if registration:
         ws.add_location(root, 'objects', objects)
@@ -122,7 +125,7 @@ def _fixture(root, catalog, endpoint, modality, *, registration=True, binding=Tr
     report = FlowChecker(root, catalog,
         {'input': {'uri': str(source), 'version': 1, 'fields': arrow_fields(table.schema)}},
         [str(target)], resource_resolver=lambda tree, refs, bindings:
-        ws.resolve_flow_resources(root, tree, refs, bindings)).inspect('flows/object_embedding.py:run', args)
+        resolve_flow_resources(root, tree, refs, bindings)).inspect('flows/object_embedding.py:run', args)
     return path, args, report, expected
 
 
@@ -201,7 +204,7 @@ def test_workbench_prepare_start_uses_registered_objects_and_sealed_native_plan(
         'target': {'kind': 'output', 'location_id': 'local', 'relative_uri': 'output.lance'},
         'endpoint': args['endpoint']}}
     (root / 'flows/objects.json').write_text(json.dumps(parameters))
-    ws.register_flow(root, 'flows/object_embedding.py:run', params='flows/objects.json')
+    declare_existing_flow(root, 'flows/object_embedding.py:run', params='flows/objects.json')
     prepared = runs.prepare(root, 'flows/object_embedding.py:run', params='flows/objects.json')
     assert prepared['status'] == 'prepared' and not server['bodies']
     if corrupt:

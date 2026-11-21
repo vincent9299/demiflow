@@ -7,7 +7,7 @@ from typing import Any
 
 
 class ForgeError(ValueError):
-    CODES = frozenset({'invalid_request', 'not_found', 'conflict', 'busy',
+    CODES = frozenset({'invalid_request', 'not_found', 'conflict', 'inputs_changed', 'inspection_incomplete', 'busy',
                        'resource_limit', 'operation_rejected', 'operation_failed'})
 
     def __init__(self, message, *, code='operation_rejected'):

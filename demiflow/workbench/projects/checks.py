@@ -7,74 +7,54 @@ from demiflow.forge.platform import content_digest
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.schema import ForgeError
 
-FORMAT = 'demiflow_workbench_project_static_check_v2'
-MAX_VARIANTS = 32
+FORMAT = 'demiflow_workbench_project_static_check_v3'
 
 
 def check(root, *, table_resolver):
     from demiflow.workbench.projects import workspace as ws
-    root, control, _ = ws.load_workspace(root)
+    from demiflow.forge.api_reference import sdk_identity
+    from demiflow.forge.pipeline_check import check_project, verify_check_inputs
+    from demiflow.forge.platform_snapshot import compare_snapshots
+    root, control, snapshot = ws.load_workspace(root)
     destination = root / '.forge/project-check.json'
     previous = content_digest(ws.read_control(destination, 2*1024**2)) if destination.exists() else None
-    started, before = time.monotonic(), content_digest(control)
-    platform = ws.check_snapshot(root / control['platform']['path'])
-    if not platform.get('current_digest'):
-        raise ForgeError('Current checker platform cannot be verified', code='operation_rejected')
-    variants = [(e, p) for e, paths in control.get('entries', {}).items() for p in paths]
-    results, diagnostics, sources = [], [], {}
-    if not variants:
-        diagnostics.append(dict(rule='FL-01', status='incomplete', path='',
-            detail='没有已登记的原生流程与参数配置。'))
-    for entry, params in variants[:MAX_VARIANTS]:
-        if time.monotonic() - started > 35:
-            break
-        try:
-            report = ws._inspect_flow(root, entry, params=params, save=True, table_resolver=table_resolver)
-            results.append(dict(entry=entry, params=params, status=report['status'], digest=report.get('digest')))
-            for name, sha in report.get('binding', {}).get('sources', {}).items():
-                if name in sources and sources[name] != sha:
-                    raise ForgeError('Source changed between inspections', code='conflict')
-                sources[name] = sha
-            diagnostics.extend({**d, 'entry': entry, 'params': params} for d in report.get('diagnostics', [])[:32])
-        except (ForgeError, OSError, ValueError) as exc:
-            # Conflict is not a candidate violation, and must not publish mixed evidence.
-            if isinstance(exc, ForgeError) and exc.code == 'conflict':
-                raise
-            results.append(dict(entry=entry, params=params, status='incomplete', digest=None))
-            diagnostics.append(dict(rule='FL-01', status='incomplete', path=entry.split(':')[0],
-                entry=entry, params=params, detail=str(exc)[:2048]))
-    if len(results) != len(variants):
-        diagnostics.append(dict(rule='FL-10', status='incomplete', path='',
-            detail='Inspection budget exhausted; remaining entries are not passes.'))
-    if ws.check_snapshot(root / control['platform']['path']).get('current_digest') != platform['current_digest']:
+    before = content_digest(control)
+    saved_snapshot = snapshot
+    snapshot = ws.current_platform_snapshot(saved_snapshot)
+    platform = compare_snapshots(saved_snapshot, snapshot)
+    catalog = snapshot['catalog']
+    reference = dict(catalog=catalog, catalog_id=content_digest(catalog), sdk_revision=sdk_identity(catalog))
+
+    digests = {}
+    def publish(report):
+        saved = ws._publish_inspection(root, control, snapshot, report)
+        if saved['status'] == 'stale':
+            raise ForgeError('Checker platform changed during project inspection', code='conflict')
+        digests[(report['entry'], report['binding']['parameter_path'])] = saved['digest']
+
+    report = check_project(root, reference=reference, table_resolver=table_resolver, publish=publish,
+                           max_variants=32, seconds=35, max_bytes=32*1024**2)
+    if ws.current_platform_snapshot(saved_snapshot)['digests']['snapshot'] != snapshot['digests']['snapshot']:
         raise ForgeError('Checker platform changed during project inspection', code='conflict')
-    if content_digest(ws.read_control(root / 'workspace.json')) != before:
-        raise ForgeError('Project declarations changed during inspection', code='conflict')
+    results = [{**item, 'digest': digests.get((item['entry'], item['params']))} for item in report['entries']]
     for item in results:
         if item['digest'] and ws._report_status(root, item['digest'], platform_check=False, table_resolver=table_resolver)['status'] != item['status']:
             raise ForgeError('Inspection inputs changed before project publication', code='conflict')
-    total = 0
-    for path, expected in sources.items():
-        raw = read_bounded(ws.relative_path(root, path), min(1024**2, 32*1024**2 - total))
-        total += len(raw)
-        if hashlib.sha256(raw).hexdigest() != expected:
-            raise ForgeError('Source changed during inspection', code='conflict')
-    if any(item['status'] == 'invalid' for item in results):
-        outcome = 'invalid'
-    elif not variants or len(results) != len(variants) or not all(item['status'] == 'checked' for item in results):
-        outcome = 'incomplete'
-    else:
-        outcome = 'checked'
+    statuses = {'failed': 'invalid', 'incomplete': 'incomplete', 'not_applicable': 'incomplete', 'passed': 'checked'}
+    diagnostics = list(report['diagnostics'])
+    if report['status'] == 'not_applicable':
+        diagnostics.append(dict(rule='FL-01', status='incomplete', path='', detail='没有已登记的可运行入口。'))
     result = dict(format=FORMAT, workspace_id=ws.workspace_id(root, control), control_digest=before,
-        status=outcome, coverage=dict(declared=len(variants), inspected=len(results)),
+        status=statuses[report['status']], coverage=dict(declared=report['coverage']['requested_variants'], inspected=len(results)),
         checker_platform_digest=platform['current_digest'], workspace_platform_status=platform['status'],
-        entries=results, sources=sources, diagnostics=diagnostics[:256],
-        diagnostic_count=len(diagnostics), created_at=time.time())
+        native_flow=report['native_flow'], project_layout=report['project_layout'], check_digest=report['check_digest'],
+        authoring_status=report['status'], basis=report['basis'],
+        entries=results, sources=report['basis']['sources'], diagnostics=diagnostics,
+        diagnostic_count=report['diagnostic_count'] + len(diagnostics) - len(report['diagnostics']), created_at=time.time())
     result['digest'] = content_digest(result)
     bounded_json(result, 2*1024**2)
     with ws.control_lock(root):
-        if content_digest(ws.read_control(root / 'workspace.json')) != before:
-            raise ForgeError('Declarations changed before publication', code='conflict')
+        verify_check_inputs(root, report['basis'], max_bytes=32*1024**2)
         ws.write_control(destination, result, expected=previous, create=previous is None)
     return result
 
@@ -106,9 +86,12 @@ def status(root, *, table_resolver):
         except (ForgeError, OSError, ValueError):
             reasons.append('inspection_unverifiable:' + item['entry'])
     total = 0
-    for path, expected in result.get('sources', {}).items():
+    evidence = dict(result['sources'])
+    evidence.update(result['basis']['controls'])
+    evidence.update(result['basis']['parameter_digests'])
+    for path, expected in evidence.items():
         try:
-            raw = read_bounded(ws.relative_path(root, path), min(1024**2, 32*1024**2 - total))
+            raw = read_bounded(ws.relative_path(root, path), 32*1024**2 - total)
             total += len(raw)
             if hashlib.sha256(raw).hexdigest() != expected:
                 reasons.append('source_changed:' + path)

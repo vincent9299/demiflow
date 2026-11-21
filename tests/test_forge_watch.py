@@ -1,4 +1,5 @@
 """Independent observation, content expiry, cache recovery, and API parity."""
+from demiflow.forge.project import initialize_project
 import json
 import subprocess
 import sys
@@ -20,7 +21,7 @@ from test_forge_public_api import service, request
 @pytest.fixture
 def root(tmp_path):
     root = tmp_path / 'workspace'
-    ws.init_workspace(root)
+    initialize_project(root)
     for directory in ('flows', 'operators', 'tables', 'data'):
         (root / directory).mkdir()
     ws.add_location(root, 'local', root / 'data', writable=True)

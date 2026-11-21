@@ -1,4 +1,5 @@
 """Real-browser E2 logical view: explicit absence, report projection, sealed runs, multi-action."""
+from _forge_project_fixtures import declare_existing_flow
 import json
 
 import pytest
@@ -68,7 +69,7 @@ def two_action_workspace(root):
                       'target': {'kind': 'output', 'location_id': 'local', 'relative_uri': 'two_a.lance'},
                       'marked_target': {'kind': 'output', 'location_id': 'local', 'relative_uri': 'two_marked.lance'},
                       'minimum': 0.8}}))
-    ws.register_flow(root, TWO_ENTRY, params=TWO_PARAMS)
+    declare_existing_flow(root, TWO_ENTRY, params=TWO_PARAMS)
     report = project_ops.inspect_flow(root, TWO_ENTRY, params=TWO_PARAMS)
     assert report['status'] == 'checked', report.get('diagnostics')
     return report

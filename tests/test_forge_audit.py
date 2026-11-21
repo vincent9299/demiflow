@@ -1,5 +1,6 @@
 """Change constraints preserve original bytes and never manufacture a pass."""
 
+from demiflow.forge.project import initialize_project
 import json
 import os
 from pathlib import Path
@@ -112,7 +113,7 @@ def test_complete_notebook_and_missing_root_are_inventoried(tmp_path):
 
 def test_scope_lifecycle_uses_original_baseline_and_cas(tmp_path):
     root = tmp_path / 'workspace'
-    ws.init_workspace(root)
+    initialize_project(root)
     for directory in ('flows', 'operators', 'tables', 'data'):
         (root / directory).mkdir()
     ws.add_location(root, 'local', root / 'data', writable=True)
@@ -166,7 +167,7 @@ def test_data_roots_and_insufficient_baseline_storage_fail_closed(tmp_path, monk
     import shutil
     from types import SimpleNamespace
     root = tmp_path / 'workspace'
-    ws.init_workspace(root)
+    initialize_project(root)
     for directory in ('flows', 'operators', 'tables', 'data'):
         (root / directory).mkdir()
     ws.add_location(root, 'local', root / 'data', writable=True)

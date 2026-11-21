@@ -181,13 +181,13 @@ def test_atomic_publication_never_overwrites_or_leaves_temporary(small_platform,
     assert path.read_bytes() == original
     with pytest.raises(ForgeError, match="outside"):
         snapshots.write_snapshot(root / "self.json", value)
-    def fail(*args):
+    def fail(*args, **kwargs):
         raise OSError("disk full")
     monkeypatch.setattr(os, "link", fail)
     with pytest.raises(OSError, match="disk full"):
         snapshots.write_snapshot(tmp_path / "failed.json", value)
     assert not (tmp_path / "failed.json").exists()
-    assert not list(tmp_path.glob(".forge-platform-*"))
+    assert not list(tmp_path.glob(".forge-write-*"))
 
 
 def test_cli_scope_exit_codes_and_paginated_diffs(small_platform, tmp_path, monkeypatch):

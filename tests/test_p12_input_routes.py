@@ -1,4 +1,5 @@
 """Real fixed run products traverse inspection, graph, analysis and worker routes."""
+from _forge_project_fixtures import declare_existing_flow
 import json
 from pathlib import Path
 
@@ -54,7 +55,7 @@ def run(*, source, target):
     (root / path).write_text(json.dumps(dict(format='demiflow_forge_flow_parameters_v1', arguments={
         'source': dict(kind='table', alias=explicit),
         'target': dict(kind='output', location_id='local', relative_uri='consumer.lance')})))
-    ws.register_flow(root, entry, params=path)
+    declare_existing_flow(root, entry, params=path)
     report = project_ops.inspect_flow(root, entry, params=path)
     assert report['status'] == 'checked'
     assert report['binding']['tables'][explicit]['reference']['ref'] == output['result']['ref']
@@ -76,7 +77,7 @@ def run(*, source, target):
     native_parameters = dict(format='demiflow_forge_flow_parameters_v1', arguments={
         'source': dict(kind='table', alias=explicit), 'target': {'uri': str(native_target)}})
     (root / native_path).write_text(json.dumps(native_parameters))
-    ws.register_flow(root, native_entry, params=native_path)
+    declare_existing_flow(root, native_entry, params=native_path)
     native = operation('native_submission_inspect', root, entry=native_entry,
         limits=runs.limits_with(), parameters=native_parameters)
     assert native['status'] == 'compiled'

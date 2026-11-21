@@ -128,6 +128,14 @@ def set_table_view(root, alias, *, display, provenance, expected):
         display=display, provenance=provenance, expected=expected, fields=description['fields'])
 
 
+def register_flow(root, entry, *, params, authorize):
+    """Register an authored flow with this deployment's fixed table references."""
+    from demiflow.forge.project import register_flow as register
+    from demiflow.workbench.table_bindings import make_resolver
+    return register(root, entry, params=params, authorize=authorize,
+                    table_resolver=make_resolver(ws.table_binding, runs.result_table))
+
+
 def inspect_flow(root, entry, *, params, save=True, limits=None):
     from demiflow.workbench.worker import operation
 

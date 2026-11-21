@@ -20,7 +20,7 @@ from demiflow.execution.recovery_contract import RunRef
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules, LIMITS
 from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
-from demiflow.workbench.projects.workspace import resolve_flow_resources
+from demiflow.forge.project_bindings import resolve_flow_resources
 from test_map_prompt_async import PACK, server
 
 

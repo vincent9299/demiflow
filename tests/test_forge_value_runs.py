@@ -1,4 +1,5 @@
 """Query/guard facts survive the sealed worker and durable run journal."""
+from _forge_project_fixtures import declare_existing_flow
 import pytest
 import json
 import sqlite3
@@ -40,7 +41,7 @@ def test_stable_output_uses_explicit_permission_and_never_redirects(root):
         'source': {'kind': 'table', 'alias': 'candidates'},
         'target': {'kind': 'output', 'location_id': 'stable', 'relative_uri': 'candidates.lance', 'mode': 'overwrite', 'expected_version': 3}}}
     (root / 'flows/update.json').write_text(json.dumps(parameters))
-    ws.register_flow(root, 'flows/update.py:run', params='flows/update.json')
+    declare_existing_flow(root, 'flows/update.py:run', params='flows/update.json')
     prepared = runs.prepare(root, 'flows/update.py:run', params='flows/update.json')
     assert prepared['outputs'][0]['uri'] == str(root / 'data/candidates.lance')
     result = execute(root, prepared)
@@ -70,7 +71,7 @@ def run(*, source, stage, target, minimum):
         'stage': {'kind': 'output', 'location_id': 'stages', 'relative_uri': 'cases.lance', 'mode': 'create', 'expected_version': None},
         'target': {'kind': 'output', 'location_id': 'local', 'relative_uri': 'complete.lance', 'mode': 'create', 'expected_version': None}}}
     (root / 'flows/staged.json').write_text(json.dumps(parameters))
-    ws.register_flow(root, 'flows/staged.py:run', params='flows/staged.json')
+    declare_existing_flow(root, 'flows/staged.py:run', params='flows/staged.json')
     prepared = runs.prepare(root, 'flows/staged.py:run', params='flows/staged.json')
     result = execute(root, prepared)
     assert result['status'] == ('succeeded' if minimum == 1 else 'failed'), result

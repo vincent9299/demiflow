@@ -43,43 +43,6 @@ def _json(raw):
     return json.loads(raw, object_pairs_hook=unique, parse_constant=invalid, parse_float=number)
 
 
-def coding_view(root, *, exclude=()):
-    """Select only local flow entries and role paths for a development turn."""
-    from demiflow.forge.io import no_symlinks
-    from demiflow.forge.project_rules import ROLE_DIRS
-    from .workspace import load_workspace_control
-
-    root = no_symlinks(Path(root).absolute())
-    control_path = root / 'workspace.json'
-    no_symlinks(control_path)
-    control = load_workspace_control(root)[1] if control_path.exists() else None
-    roles = {role: [] for role in ROLE_DIRS}
-    excluded = set(exclude)
-    seen = 0
-    for role in ROLE_DIRS:
-        suffixes = {'.yaml', '.yml', '.json'} if role == 'prompts' else {'.py'}
-        pending = [no_symlinks(root / role)]
-        while pending:
-            directory = pending.pop()
-            if directory.relative_to(root).as_posix() in excluded or not directory.exists():
-                continue
-            with os.scandir(no_symlinks(directory)) as children:
-                for entry in children:
-                    seen += 1
-                    if seen > 2048:
-                        raise ForgeError('Project coding discovery exceeds entry budget', code='resource_limit')
-                    path = Path(entry.path)
-                    relative = path.relative_to(root).as_posix()
-                    if entry.name.startswith('.') or entry.name == '__pycache__' or relative in excluded:
-                        continue
-                    if entry.is_dir(follow_symlinks=False):
-                        pending.append(path)
-                    elif Path(entry.name).suffix in suffixes and entry.is_file(follow_symlinks=False):
-                        roles[role].append(relative)
-        roles[role].sort()
-    return dict(control=control, roles=roles, entries=dict((control or {}).get('entries', {})))
-
-
 def discover(root, control=None):
     from demiflow.workbench.projects import workspace as ws
     root = ws.no_symlinks(Path(root).absolute()).resolve(strict=True)

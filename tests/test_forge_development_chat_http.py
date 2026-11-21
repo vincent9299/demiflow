@@ -18,8 +18,8 @@ from test_forge_development_chat import configuration
 def app(tmp_path, *, acp=False, guided=False):
     root,path,value=configuration(tmp_path)
     if guided:
-        from demiflow.workbench.projects.workspace import init_workspace
-        init_workspace(root, name='Guided project', existing=True)
+        from demiflow.forge.project import initialize_project
+        initialize_project(root, name='Guided project', existing=True)
         (root / 'flows').mkdir()
         (root / 'prompts').mkdir()
         value['projects']['wfixture'].update(kind='pipeline', writes=['flows', 'prompts'],

@@ -1,4 +1,5 @@
 """Declared presentation and per-entry drafts through real workspace endpoints."""
+from _forge_project_fixtures import declare_existing_flow
 from test_forge_panel_browser import panel, open_panel, demo, isolated
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench import project_operations as project_ops
@@ -7,7 +8,7 @@ from demiflow.workbench import project_operations as project_ops
 def test_each_registered_entry_keeps_its_own_unsent_inputs(panel):
     root, app, page, errors = panel
     (root / 'flows/alternate.py').write_text((root / 'flows/questions.py').read_text().replace('def select(', 'def other('))
-    ws.register_flow(root, 'flows/alternate.py:other', params='flows/select_b.json')
+    declare_existing_flow(root, 'flows/alternate.py:other', params='flows/select_b.json')
     open_panel(app, page, dict(v=1, workspace=str(root), kind='flows', entry='flows/questions.py:select', params='flows/select_a.json'))
     page.get_by_role('button',name='整图配置',exact=True).click()
     page.get_by_text('本次运行设置', exact=True).click()

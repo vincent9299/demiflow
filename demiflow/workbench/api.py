@@ -145,7 +145,7 @@ POST_FIELDS.update(development_http.POST_FIELDS)
 GET_FIELDS.update(analysis_http.GET_FIELDS)
 POST_FIELDS.update(analysis_http.POST_FIELDS)
 
-ERROR_STATUS = {'invalid_request': 400, 'not_found': 404, 'conflict': 409,
+ERROR_STATUS = {'invalid_request': 400, 'not_found': 404, 'conflict': 409, 'inputs_changed': 409, 'inspection_incomplete': 422,
                 'busy': 503, 'resource_limit': 413, 'operation_rejected': 422,
                 'operation_failed': 500}
 
@@ -925,7 +925,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(analysis_http.post(self.server,key,root,name,self._body(name),consumer_closed=self._consumer_closed))
                 return
             permission=(run_operations.HTTP_POST[name].permission if name in run_operations.HTTP_POST else
-                        'config_write' if name in {'parameter-preview','parameters-update','flow-arguments-save'} else
+                        'config_write' if name in {'flow-register','parameter-preview','parameters-update','flow-arguments-save'} else
                         'run_control' if name in {'run-cancel','run-reconcile','run-request-reconcile'} else
                         'attach' if name=='run-attach' else 'run_submit')
             if name not in {'inspect','plan-preview','plan-node-detail','plan-pipeline-source','audit-check','project-check','run-admission'} and not permissions[permission]:
@@ -940,28 +940,26 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(self.server.plan_snapshots.read(root, **request))
                 return
             with self._work(control=name=='run-cancel', project=name=='flow-arguments-save'):
-                if name == 'flow-arguments-save':
-                    from demiflow.workbench.projects.flow_arguments import save
+                if name in {'flow-register', 'flow-arguments-save', 'parameter-preview', 'parameters-update'}:
                     def authorize():
                         _, current_root, current_permissions = self.server.resolve(self.path)
                         if current_root != root or not current_permissions['config_write']:
                             raise PermissionError('Project membership or config-write grant changed')
-                    value = save(root, authorize=authorize, **request)
-                elif name in {'parameter-preview','parameters-update'}:
-                    from demiflow.workbench.graph import parameters
-                    def authorize():
-                        _,current_root,current_permissions=self.server.resolve(self.path)
-                        if current_root!=root or not current_permissions['config_write']:
-                            raise PermissionError('Project membership or config-write grant changed')
-                    authorize()
-                    value=(parameters.preview(root,**request) if name=='parameter-preview'
-                           else parameters.update(root,authorize=authorize,**request))
+
+                    if name == 'flow-register':
+                        value = project_ops.register_flow(root, authorize=authorize, **request)
+                    elif name == 'flow-arguments-save':
+                        from demiflow.workbench.projects.flow_arguments import save
+                        value = save(root, authorize=authorize, **request)
+                    else:
+                        from demiflow.workbench.graph import parameters
+                        authorize()
+                        value = (parameters.preview(root, **request) if name == 'parameter-preview'
+                                 else parameters.update(root, authorize=authorize, **request))
                 elif name in run_operations.HTTP_POST:
                     spec = run_operations.HTTP_POST[name]
                     value = run_operations.perform(spec.name, root,
                         authority=run_authority(self.server, self.path, root, spec.permission), **request)
-                elif name == 'flow-register':
-                    value = api.register_flow(root, **request)
                 elif name == 'run-admission':
                     from demiflow.workbench.runs.admission import describe
                     value=describe(root,**request)

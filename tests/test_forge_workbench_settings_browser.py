@@ -1,4 +1,5 @@
 """An in-flight context read cannot replace edited onboarding/permission fields."""
+from _forge_project_fixtures import declare_existing_flow, grant_config_write
 import json
 
 from playwright.sync_api import expect
@@ -12,10 +13,10 @@ from test_forge_workbench_browser import page_for,pipeline
 
 
 def registered_project(tmp_path,root):
-    ws.register_flow(root,'flows/questions.py:select',params='flows/select_a.json')
+    declare_existing_flow(root,'flows/questions.py:select',params='flows/select_a.json')
     registry=tmp_path/'registry.json'
     key=console.add(registry,root,allow_runs=True)['workspace_id']
-    console.migrate(registry,expected=content_digest(console.load_registry(registry)))
+    grant_config_write(registry, key)
     return registry,key
 
 
@@ -80,6 +81,7 @@ def test_context_revocation_keeps_fields_but_invalidates_permission_cas(unregist
         held,form=edit_while_context_is_held(page)
         old=console.load_registry(registry)
         console.set_permissions(registry,key,expected=content_digest(old),run_submit=False,run_control=False,attach=False)
+        console.set_capabilities(registry,key,expected=content_digest(console.load_registry(registry)),capabilities={k:False for k in console.CAPABILITIES})
         finish_context(page,held)
         assert_drafts(form)
         expect(form.locator('.wb-settings-stale')).to_be_visible()
@@ -100,7 +102,7 @@ def test_context_revocation_keeps_fields_but_invalidates_permission_cas(unregist
 def test_registration_waits_for_initial_graph_and_keeps_edited_target(unregistered,tmp_path,browser,monkeypatch):
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN',str(tmp_path/'domain'))
     registry,key=registered_project(tmp_path,unregistered)
-    with service(None,registry=registry,enable_runs=True) as app,page_for(browser,app) as (page,errors):
+    with service(None,registry=registry,enable_runs=True,enable_config_write=True) as app,page_for(browser,app) as (page,errors):
         page.evaluate('''() => {
           const native=fetch.bind(window);window.__heldGraph=false;
           window.fetch=async(...args)=>{
@@ -133,7 +135,7 @@ def test_registration_waits_for_initial_graph_and_keeps_edited_target(unregister
 def test_busy_registration_is_unapplied_and_retries_only_on_explicit_click(unregistered,tmp_path,browser,monkeypatch):
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN',str(tmp_path/'domain'))
     registry,key=registered_project(tmp_path,unregistered)
-    with service(None,registry=registry,enable_runs=True) as app,page_for(browser,app) as (page,errors):
+    with service(None,registry=registry,enable_runs=True,enable_config_write=True) as app,page_for(browser,app) as (page,errors):
         pipeline(page)
         page.get_by_role('button',name='接入与权限',exact=True).click()
         form=page.locator('.wb-settings')

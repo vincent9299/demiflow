@@ -1,4 +1,5 @@
 """Real-browser workbench checks against native owned workspaces and runs."""
+from _forge_project_fixtures import declare_existing_flow
 from pathlib import Path
 import json
 import os
@@ -224,7 +225,7 @@ def test_large_source_graph_has_bounded_index_and_local_navigation(isolated,brow
     from demiflow.workbench.graph import model
     (isolated/'flows/unexpanded.py').write_text('def run():\n'+''.join('    unknown()\n' for _ in range(260)))
     (isolated/'flows/unexpanded.json').write_text(json.dumps(dict(format='demiflow_forge_flow_parameters_v1',arguments={})))
-    ws.register_flow(isolated,'flows/unexpanded.py:run',params='flows/unexpanded.json')
+    declare_existing_flow(isolated,'flows/unexpanded.py:run',params='flows/unexpanded.json')
     with service(isolated) as app,page_for(browser,app) as (page,errors):
         pipeline(page)
         page.get_by_label('流程',exact=True).select_option('flows/unexpanded.py:run')
@@ -254,7 +255,7 @@ def test_hidden_report_node_deep_link_and_large_offline_export_are_bounded(isola
     (isolated/'flows/many.py').write_text("from demiflow import data\ndef run(*,source,target):\n    d=data.read_lance(source['uri'],version=source['version'])\n"+'    d=d.limit(1)\n'*130+"    return d.write_lance(target['uri'],mode='create',return_receipt=True)\n")
     (isolated/'flows/many.json').write_text(json.dumps(dict(format='demiflow_forge_flow_parameters_v1',arguments={
         'source':{'kind':'table','alias':'candidates'},'target':{'kind':'output','location_id':'local','relative_uri':'many.lance'}})))
-    ws.register_flow(isolated,'flows/many.py:run',params='flows/many.json')
+    declare_existing_flow(isolated,'flows/many.py:run',params='flows/many.json')
     report=project_ops.inspect_flow(isolated,'flows/many.py:run',params='flows/many.json')
     assert report['status']=='checked',report['diagnostics']
     assert len(report['nodes'])>128

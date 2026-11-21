@@ -1,4 +1,7 @@
 """Explicit project inventory and request-local routing, with real controls."""
+from demiflow.forge import project
+from demiflow.forge.project import initialize_project, register_flow
+from _forge_project_fixtures import declare_existing_flow
 import json
 from pathlib import Path
 import shutil
@@ -24,27 +27,27 @@ def test_existing_init_preserves_sources_and_rolls_back_only_owned_files(demo, t
     (root / 'flows/user.py').write_text('raise RuntimeError("must never execute")')
     (root / 'README.md').write_text('User documentation')
     snapshot = ws.load_workspace(demo[0])[2]
-    monkeypatch.setattr(ws, 'build_snapshot', lambda modules, **kwargs: snapshot)
-    write = ws.write_control
-    monkeypatch.setattr(ws, 'write_control', lambda *a, **kw: (_ for _ in ()).throw(OSError('fixture commit failure')))
+    monkeypatch.setattr(project, 'build_snapshot', lambda modules, **kwargs: snapshot)
+    write = project.write_control
+    monkeypatch.setattr(project, 'write_control', lambda *a, **kw: (_ for _ in ()).throw(OSError('fixture commit failure')))
     with pytest.raises(OSError, match='commit failure'):
-        ws.init_workspace(root, existing=True)
+        initialize_project(root, existing=True)
     assert (root / 'README.md').read_text() == 'User documentation'
     assert (root / 'flows/user.py').read_text().startswith('raise')
-    assert not (root / '.forge').exists()
-    monkeypatch.setattr(ws, 'write_control', write)
-    result = ws.init_workspace(root, existing=True)
-    assert ws.load_workspace(root)[1]['id'] == result['id']
+    assert not (root / 'workspace.json').exists()
+    monkeypatch.setattr(project, 'write_control', write)
+    result = initialize_project(root, existing=True)
+    assert ws.load_workspace(root)[1]['id'] == result['project_id']
     assert (root / 'README.md').read_text() == 'User documentation'
-    with pytest.raises(ForgeError, match='already exist'):
-        ws.init_workspace(root, existing=True)
+    again = initialize_project(root, existing=True)
+    assert again['project_id'] == result['project_id'] and again['created_paths'] == []
 
 
 def test_nonempty_initialization_requires_explicit_mode_and_rejects_conflicts(tmp_path):
     (tmp_path / 'flows').write_text('existing user file')
     with pytest.raises(ForgeError, match='empty'):
-        ws.init_workspace(tmp_path)
-    ws.init_workspace(tmp_path, existing=True)
+        initialize_project(tmp_path)
+    initialize_project(tmp_path, existing=True)
     assert (tmp_path / 'flows').read_text() == 'existing user file'
 
 
@@ -52,11 +55,12 @@ def test_registration_is_explicit_and_helper_is_not_a_flow(isolated):
     context = ws.workspace_context(isolated)
     assert [f['entry'] for f in context['flows']] == ['flows/questions.py:select']
     assert context['flows'][0]['parameters'] == ['flows/select_a.json', 'flows/select_b.json']
-    with pytest.raises(ForgeError, match='missing'):
-        ws.register_flow(isolated, 'flows/questions.py:nonexistent', params='flows/select_a.json')
-    ws.register_flow(isolated, 'operators/question_rules.py:keep_selected', params='flows/select_a.json')
-    assert project_ops.inspect_flow(isolated, 'operators/question_rules.py:keep_selected', params='flows/select_a.json')['status'] != 'checked'
-    assert ws.register_flow(isolated, 'flows/questions.py:select', params='flows/select_a.json')['status'] == 'unchanged'
+    with pytest.raises(ForgeError):
+        register_flow(isolated, 'flows/questions.py:nonexistent', params='flows/select_a.json')
+    with pytest.raises(ForgeError):
+        register_flow(isolated, 'operators/question_rules.py:keep_selected', params='flows/select_a.json')
+    assert 'operators/question_rules.py:keep_selected' not in ws.read_control(isolated / 'workspace.json')['entries']
+    assert register_flow(isolated, 'flows/questions.py:select', params='flows/select_a.json')['status'] == 'unchanged'
     path = isolated / 'flows/questions.py'
     path.write_text(path.read_text().replace('def select(', 'def renamed('))
     assert ws.workspace_context(isolated)['flows'][0]['diagnostic'] == 'Registered function is missing'
@@ -66,7 +70,7 @@ def test_report_binds_only_used_workspace_policy(isolated):
     result = project_ops.inspect_flow(isolated, 'flows/questions.py:select', params='flows/select_a.json')
     assert result['status'] == 'checked', result
     (isolated / 'flows/other.py').write_text('def independent():\n    pass\n')
-    ws.register_flow(isolated, 'flows/other.py:independent', params='flows/select_b.json')
+    declare_existing_flow(isolated, 'flows/other.py:independent', params='flows/select_b.json')
     control = ws.read_control(isolated / 'workspace.json')
     control['name'] = 'renamed'
     (isolated / 'workspace.json').write_text(json.dumps(control))

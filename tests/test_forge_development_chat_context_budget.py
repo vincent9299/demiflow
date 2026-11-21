@@ -12,20 +12,22 @@ def test_large_local_guidance_requires_explicit_budget_and_is_delivered_whole(tm
     project = repository / 'pipeline'
     project.mkdir(parents=True)
     guidance = ('Keep original data and notebook output.\n' * 8000)
-    specification = '# Pipeline specification\nUse the existing operators.\n'
+    specification = '# Project brief\nUse the existing operators.\n'
     (project / 'AGENTS.md').write_text(guidance)
-    (project / 'PIPELINE_SPEC.md').write_text(specification)
+    (project / 'brief.md').write_text(specification)
+    (project / 'PIPELINE_SPEC.md').write_text('RETIRED_PROJECT_RULE')
     (project / 'README.md').write_text('Original pipeline.\n')
     grant = dict(root=str(project), kind='pipeline', phase='implementation',
-                 writes=['code.py'], watch=['code.py'], sources=['README.md'],
+                 writes=['code.py'], watch=['code.py'], sources=['README.md', 'brief.md'],
                  non_goals=['production execution'], authorization='Explicit fixture development')
     with pytest.raises(ForgeError, match='context exceeds'):
         assemble(grant, 'Implement only the requested fixture.', Limits())
     limits = Limits.parse({'context_bytes': 512 * 1024})
     manifest, prompt = assemble(grant, 'Implement only the requested fixture.', limits)
     assert guidance in prompt and specification in prompt
+    assert 'RETIRED_PROJECT_RULE' not in prompt
     assert len(prompt.encode()) <= limits.context_bytes <= limits.context_total
-    for name in ('AGENTS.md', 'PIPELINE_SPEC.md'):
+    for name in ('AGENTS.md', 'brief.md'):
         path = project / name
         rows = [row for row in manifest['sources'] if row['canonical_path'] == str(path)]
         assert len(rows) == 1

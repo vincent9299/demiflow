@@ -405,7 +405,7 @@ def test_report_tamper_and_atomic_disk_failure(isolated, monkeypatch):
         api.load_report(root, digest)
     target = root / "tables/failed.json"
 
-    def fail(*args):
+    def fail(*args, **kwargs):
         raise OSError("disk full")
 
     monkeypatch.setattr(api.os, "link", fail)

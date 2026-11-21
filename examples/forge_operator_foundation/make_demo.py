@@ -3,6 +3,7 @@
 Usage: python examples/forge_operator_foundation/make_demo.py /tmp/my-forge-demo
 No model, network, shared environment or production data is used.
 """
+from demiflow.forge.project import initialize_project
 import json
 from pathlib import Path
 import shutil
@@ -18,7 +19,7 @@ def create(root):
     from demiflow.workbench import project_operations as project_ops
 
     root = Path(root).absolute()
-    workspace.init_workspace(root, name='native-operator-demo')
+    initialize_project(root, name='native-operator-demo')
     for directory in ('flows', 'operators', 'tables', 'data'):
         (root / directory).mkdir()
     control = workspace.read_control(root / 'workspace.json')

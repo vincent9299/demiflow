@@ -1,4 +1,5 @@
 """Create an isolated example using only public workspace APIs; never executes it."""
+from demiflow.forge.project import initialize_project
 import argparse
 import json
 from pathlib import Path
@@ -12,11 +13,13 @@ from demiflow.workbench import project_operations as project_ops
 
 def create(root):
     root = Path(root)
-    ws.init_workspace(root, name='inventory-reconciliation')
+    initialize_project(root, name='inventory-reconciliation')
     for directory in ('flows', 'operators', 'tables', 'data'):
         (root / directory).mkdir()
     control = ws.read_control(root / 'workspace.json')
     expected = ws.content_digest(control)
+    # Import the two published configurations of this comparison fixture.
+    control['entries'] = {'flows/inventory.py:run': ['flows/strict.json', 'flows/tolerant.json']}
     control['locations']['local'] = {'root': 'data', 'writable': True}
     ws.write_control(root / 'workspace.json', control, expected=expected)
     source = Path(__file__).resolve().parent
@@ -41,7 +44,6 @@ def create(root):
             'tolerance':tolerance}}
         path = 'flows/' + name + '.json'
         (root / path).write_text(json.dumps(params, ensure_ascii=False, indent=2) + '\n')
-        ws.register_flow(root, 'flows/inventory.py:run', params=path)
     (root / 'README.md').write_text('库存交付核对：固定订单 + 多批发货，按订单汇总后给出 matched/short/excess。\n'
         '同一接线有 strict/tolerant 两份配置；详情和状态计数分别交付。所有数据是明确隔离的验收夹具，无模型或网络。\n')
     return root

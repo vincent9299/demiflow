@@ -2,6 +2,7 @@
 
 Only private fixtures; no persistent capture, isolated codec, Runtime or B1.
 """
+from demiflow.forge.project import initialize_project
 import hashlib
 import os
 from pathlib import Path
@@ -25,7 +26,7 @@ from test_forge_outputs_media import image_bytes
 
 
 def declared(tmp_path,row_path='picture.png'):
-    root=tmp_path/'project';ws.init_workspace(root,name='owned-media-export');(root/'data').mkdir();(root/'tables').mkdir()
+    root=tmp_path/'project';initialize_project(root,name='owned-media-export');(root/'data').mkdir();(root/'tables').mkdir()
     control=ws.read_control(root/'workspace.json');expected=content_digest(control)
     control['locations']['local']=dict(root='data',writable=False)
     ws.write_control(root/'workspace.json',control,expected=expected)

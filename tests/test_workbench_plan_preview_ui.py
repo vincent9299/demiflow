@@ -3,6 +3,8 @@
 Only lifecycle/rejection tests inject preview transport; parameter edits use the
 real HTTP API, and the first browser test also uses the real native compiler.
 """
+from demiflow.forge.project import initialize_project
+from _forge_project_fixtures import declare_existing_flow
 import copy
 import json
 
@@ -33,8 +35,8 @@ def run_pipeline(*, stage: str):
 ''')
     (original / 'settings/small.json').write_text(json.dumps({
         'format': 'demiflow_forge_flow_parameters_v1', 'arguments': {'stage': 'plain'}}))
-    ws.init_workspace(original, existing=True)
-    ws.register_flow(original, 'dispatch.py:run_pipeline', params='settings/small.json')
+    initialize_project(original, existing=True)
+    declare_existing_flow(original, 'dispatch.py:run_pipeline', params='settings/small.json')
     registry.add(registry_path, original)
     if writable:
         registry.migrate(registry_path, expected=content_digest(registry.load_registry(registry_path)))
@@ -49,7 +51,7 @@ def test_sidebar_and_graph_text_copy_preserves_navigation(original, tmp_path, br
     register_preview_project(original, registry_path)
     (original / 'other.py').write_bytes((original / 'dispatch.py').read_bytes())
     (original / 'settings/other.json').write_bytes((original / 'settings/small.json').read_bytes())
-    ws.register_flow(original, 'other.py:run_pipeline', params='settings/other.json')
+    declare_existing_flow(original, 'other.py:run_pipeline', params='settings/other.json')
     with service(None, registry=registry_path) as app, opened(browser, app) as (page, _):
         page.context.grant_permissions(['clipboard-read', 'clipboard-write'], origin=app.origin)
         page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()

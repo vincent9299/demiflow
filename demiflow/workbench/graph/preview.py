@@ -12,6 +12,7 @@ import json
 import os
 import sys
 
+from demiflow.forge.project_bindings import resolve_arguments
 from demiflow.forge.schema import ForgeError
 from demiflow.forge.platform import bounded_json, content_digest
 from demiflow.forge.platform_environment import read_bounded
@@ -29,7 +30,7 @@ def _parameters(root, control, entry, path, *, table_resolver):
         raise ForgeError('解析配置需要 JSON arguments 对象；不会执行配置中的命令。', code='invalid_request')
     if document.get('format') in {'demiflow_forge_flow_parameters_v1', 'demiflow_forge_flow_parameters_v2'}:
         # Preserve the same declared resource binding as native run preparation.
-        arguments, _, _, _ = ws.resolve_arguments(root, control, document, table_resolver=table_resolver)
+        arguments, _, _, _ = resolve_arguments(root, control, document, table_resolver=table_resolver)
     elif set(document) <= {'arguments', 'run_directory'}:
         arguments = document['arguments']
     else:

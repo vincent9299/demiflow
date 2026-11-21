@@ -4,6 +4,7 @@ The pagination test supplies named synthetic list rows around one real prepared
 record. It tests browser paging, never represents those rows as executed jobs.
 No pipeline rows or models are executed by these tests.
 """
+from _forge_project_fixtures import declare_existing_flow
 import json
 from urllib.parse import parse_qs, urlsplit
 
@@ -33,7 +34,7 @@ def two_flows(root):
         '    return data.from_items([{ "minimum": minimum }]).take_all()\n')
     (root / 'flows/navigation.json').write_text(json.dumps({
         'format': 'demiflow_forge_flow_parameters_v1', 'arguments': {'minimum': 0.3}}))
-    ws.register_flow(root, SECOND, params='flows/navigation.json')
+    declare_existing_flow(root, SECOND, params='flows/navigation.json')
 
 
 def tab(page, name):

@@ -1,4 +1,5 @@
 """Checked native image execution with real loopback HTTP and synthetic pixels."""
+from demiflow.forge.project import initialize_project
 import importlib.util
 import json
 import os
@@ -18,6 +19,7 @@ from demiflow.execution.run_context import RunContext
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules,LIMITS
 from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
+from demiflow.forge.project_bindings import resolve_flow_resources
 from demiflow.workbench.projects import workspace as ws
 from demiflow.objects import ObjectRef
 from demiflow.operator_llm.parser import parse_prompt_pack
@@ -35,7 +37,7 @@ SOURCE=Path(demiflow.__file__).resolve().parent.parent
 
 
 def setup(root,server,api='images_json',*,direct=False,vision=False,edit=False):
-    ws.init_workspace(root)
+    initialize_project(root)
     for name in ('flows','operators','data'):(root/name).mkdir()
     control=ws.read_control(root/'workspace.json');expected=ws.content_digest(control)
     control['locations']['objects']={'root':'data','writable':True}
@@ -97,7 +99,7 @@ def bundle(row: Input) -> Output:
     target=str(root/'out.lance')
     catalog=inspect_modules(['demiflow.data'],SOURCE/'demiflow',LIMITS)
     report=FlowChecker(root,catalog,{},[target],resource_resolver=lambda tree,refs,bindings:
-        ws.resolve_flow_resources(root,tree,refs,bindings)).inspect('flows/image.py:run',{'target':target})
+        resolve_flow_resources(root,tree,refs,bindings)).inspect('flows/image.py:run',{'target':target})
     return report,target
 
 

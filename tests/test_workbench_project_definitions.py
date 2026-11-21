@@ -1,4 +1,6 @@
 """Project definitions are independent from executions; current flow inputs are unique."""
+from demiflow.forge.project import initialize_project
+from _forge_project_fixtures import declare_existing_flow
 import json
 import subprocess
 from pathlib import Path
@@ -17,8 +19,8 @@ def project(original):
         (original / f'settings/{name}.json').write_text(json.dumps({'format':'demiflow_forge_flow_parameters_v1','arguments':{'limit':default}}))
     (original / 'prompts').mkdir()
     (original / 'prompts/review.yaml').write_text('schema_version: demiflow_prompt_pack_v2\nprompts:\n  review:\n    version: v1\n    template: "Review {{ value }}"\n    response_schema: {type: object}\n')
-    ws.init_workspace(original, existing=True)
-    for name in ('select','evaluate'): ws.register_flow(original, f'flows/{name}.py:run', params=f'settings/{name}.json')
+    initialize_project(original, existing=True)
+    for name in ('select','evaluate'): declare_existing_flow(original, f'flows/{name}.py:run', params=f'settings/{name}.json')
     return original
 
 
@@ -60,7 +62,7 @@ def test_current_arguments_are_per_flow_defaults_and_cas(project):
     assert flow_arguments.read(project,entry='flows/evaluate.py:run')['arguments']=={'limit':8}
     with pytest.raises(ForgeError,match='已变化'):flow_arguments.save(project,entry=entry,revision=current['revision'],source_sha256=current['source_sha256'],arguments={'limit':6},authorize=lambda:None)
     with pytest.raises(ForgeError,match='类型'):flow_arguments.save(project,entry=entry,revision=result['revision'],source_sha256=result['source_sha256'],arguments={'limit':True},authorize=lambda:None)
-    ws.register_flow(project,entry,params='settings/evaluate.json')
+    declare_existing_flow(project,entry,params='settings/evaluate.json')
     with pytest.raises(ForgeError,match='多份参数'):flow_arguments.read(project,entry=entry)
 
 
