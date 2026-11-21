@@ -5,4 +5,6 @@ import sys
 def is_native_prompt_actor(value: object) -> bool:
     """Recognize only the canonical actor, without loading a model for ordinary callables."""
     runtime = sys.modules.get("demiflow.operator_llm.runtime")
-    return runtime is not None and type(value) is vars(runtime).get("PromptActor")
+    if runtime is None or "PromptActor" not in vars(runtime):
+        return False
+    return type(value) is runtime.PromptActor
