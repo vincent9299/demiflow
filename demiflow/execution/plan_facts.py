@@ -257,7 +257,7 @@ def operation_facts(operation):
     if type(operation) is ops.AsyncMapOp:
         from .stream_lookup import LanceLookup
         from ..lance.flow_contract import lookup_facts
-        from ..operator_llm.flow_contract import is_native_prompt_actor, prompt_facts
+        from ..operator_llm.native_actor import is_native_prompt_actor
         target = operation.callable.target
         target = target.__self__ if inspect.ismethod(target) else target
         from .raw_fetch import RawFetch, raw_fetch_facts
@@ -272,6 +272,7 @@ def operation_facts(operation):
         elif type(target) is LanceLookup:
             domain = {'native': lookup_facts(target), 'reserved_bytes': 8 * 1024**2 + 2 * target.max_bytes}
         elif is_native_prompt_actor(target):
+            from ..operator_llm.flow_contract import prompt_facts
             native = prompt_facts(target)
             options = native['options'] or {}
             token_bytes = 0

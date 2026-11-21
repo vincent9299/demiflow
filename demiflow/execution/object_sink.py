@@ -311,7 +311,7 @@ class ObjectSink(Datasink):
 
 def image_object_specs(plan):
     """Native resource declarations; no clients or filesystem writes."""
-    from ..operator_llm.flow_contract import is_native_prompt_actor
+    from ..operator_llm.native_actor import is_native_prompt_actor
     from ..operator_llm.media import media_limits
     specs={}
     for operation in plan.operations:

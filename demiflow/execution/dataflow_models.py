@@ -379,7 +379,7 @@ def bind_cached_map(spec: KernelSpec, *, services: RuntimeServices) -> Kernel:
 
 def bind_cached_model_services(fn, *, services: RuntimeServices, node_id: str) -> None:
     """Bind the cached callable to the effect journal for this worker occurrence."""
-    from ..operator_llm.flow_contract import is_native_prompt_actor
+    from ..operator_llm.native_actor import is_native_prompt_actor
     if is_native_prompt_actor(fn):
         from .dataflow_model_journal import bind_agent_adapter, bind_prompt_adapter
         if fn.environment is None:

@@ -39,7 +39,7 @@ class _RoutedPromptJournal(RemotePromptJournal):
 
 def routed_declaration(actor, target):
     from ..operator_llm.routed import RoutedPromptActor
-    from ..operator_llm.flow_contract import is_native_prompt_actor
+    from ..operator_llm.native_actor import is_native_prompt_actor
     from .dataflow_model_factory import native_model_declaration, RoutedPromptFactory
     if (getattr(target, '__func__', None) is not RoutedPromptActor.__call__
             or type(actor.actors) is not dict or not 1 <= len(actor.actors) <= 32

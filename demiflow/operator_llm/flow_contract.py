@@ -2,7 +2,6 @@
 
 No file, environment, network, service or candidate callback is read here.
 """
-import sys
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from enum import Enum
@@ -10,12 +9,6 @@ from urllib.parse import urlsplit
 
 from ..data.flow_contract import scalar, field, union_type, require_fields
 from .parser import parse_prompt_pack, resolve_prompt
-
-
-def is_native_prompt_actor(value: object) -> bool:
-    """Recognize only the canonical actor, without loading a model for ordinary callables."""
-    runtime = sys.modules.get("demiflow.operator_llm.runtime")
-    return runtime is not None and type(value) is vars(runtime).get("PromptActor")
 
 
 def _value(value):

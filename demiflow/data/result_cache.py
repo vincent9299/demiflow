@@ -61,7 +61,7 @@ def _state_policy(value):
                                    call_kwargs=partial.keywords) != 'none':
             return owner, 'nonrecoverable', 'Cached partial actor has unadapted bound argument state'
         partial = partial.func
-    from ..operator_llm.flow_contract import is_native_prompt_actor
+    from ..operator_llm.native_actor import is_native_prompt_actor
     if is_native_prompt_actor(owner):
         return owner, 'none', None  # Rebound to the native journal in the worker.
     return owner, policy.mode, policy.reason
