@@ -40,6 +40,12 @@ def test_document_pages_and_read_are_bounded_and_project_scoped(docs, tmp_path, 
         if page['next_offset'] is None:break
         offset=page['next_offset']
     assert entries == ['docs', 'notes.MD', 'README.md']
+    files = documents.listing(root, all_files=True)['entries']
+    assert [row['path'] for row in files] == ['docs', 'notes.MD', 'README.md', 'script.py', 'workspace.json']
+    assert documents.read(root, 'script.py', project_text=True)['text'].startswith('raise RuntimeError')
+    for hidden in ('.private/secret.md', 'external.md', '../outside.md'):
+        with pytest.raises(ForgeError):
+            documents.read(root, hidden, project_text=True)
     assert documents.read(root,'docs/guide.md')['text'].startswith('# User guide')
     for path in ['../outside.md','/etc/passwd','.private/secret.md','external.md','external/outside.md','script.py','docs\\guide.md']:
         with pytest.raises(ForgeError):documents.read(root,path)

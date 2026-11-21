@@ -27,22 +27,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-  function latestCompletedParagraphFirstLine(text) {
-    let summary = '';
-    let paragraphStart = 0;
-    const separator = /\r?\n(?:[\t ]*\r?\n)+/g;
-    while (true) {
-      const nextParagraph = separator.exec(text);
-      const paragraphEnd = nextParagraph === null ? text.length : nextParagraph.index + nextParagraph[0].indexOf('\n');
-      const newline = text.indexOf('\n', paragraphStart);
-      if (newline !== -1 && newline <= paragraphEnd) {
-        const candidate = text.slice(paragraphStart, newline).trim();
-        if (candidate !== '') summary = candidate;
-      }
-      if (nextParagraph === null) return summary;
-      paragraphStart = nextParagraph.index + nextParagraph[0].length;
-    }
-  }
   function scrollMetrics(element) {
   	const height = element.clientHeight;
   	return {
@@ -222,11 +206,11 @@ SOFTWARE.
   const labels={preparing:'准备开发依据',starting:'正在连接',running:'正在开发',waiting_input:'等待回答',waiting_approval:'等待许可',stopping:'已请求停止，正在清理',completed:'本轮已完成',failed:'本轮失败',interrupted:'连接中断',cancelled:'已停止'};
   const uid=()=>crypto.randomUUID();
   const iconButton=(label,path,viewBox='0 0 24 24',filled=false)=>{const b=el('button',undefined,'development-icon');b.type='button';b.title=label;b.setAttribute('aria-label',label);const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',viewBox);svg.setAttribute('aria-hidden','true');if(filled)svg.classList.add('development-filled-icon');const p=document.createElementNS(svg.namespaceURI,typeof path==='string'?'path':'rect');for(const [key,value]of Object.entries(typeof path==='string'?{d:path}:path))p.setAttribute(key,value);svg.append(p);b.append(svg);return b;};
-  async function mount({main,api,workspaceId,view,mountText,disposeReaders,openSession,openNew,error,register}) {
-    const state={disposed:false,initializing:true,timer:null,session:null,sequence:0,items:new Map(),pending:new Set(),submission:null,dialogs:new Set(),stats:null,statsAt:0,newDraft:view?.kind==='development_new',listOffset:0,listAt:0,writerBusy:false,activeSession:null};
+  async function mount({main,api,workspaceId,view,disposeReaders,openSession,openNew,error,register}) {
+    const state={disposed:false,navigationEpoch:0,initializing:true,timer:null,session:null,sequence:0,items:new Map(),pending:new Set(),submission:null,dialogs:new Set(),stats:null,statsAt:0,newDraft:view?.kind==='development_new',listOffset:0,listAt:0,writerBusy:false,activeSession:null};
     const layout=el('section',undefined,'development-layout'),body=el('div',undefined,'development-conversation');
     layout.append(body);main.append(layout);main.classList.add('development-main');active.add(state);
-    const handle={get sessionId(){return state.session?.id;},dispose(){if(state.disposed)return;state.disposed=true;clearTimeout(state.timer);state.observer?.disconnect();state.releaseViewport?.();state.navigationResize?.dispose();state.releaseMenus?.();state.composer?.dispose();state.chat?.dispose();active.delete(state);main.classList.remove('development-main');disposeReaders(layout);for(const dialog of state.dialogs)dialog.remove();state.dialogs.clear();}};register(handle);
+    const handle={get sessionId(){return state.session?.id;},dispose(){if(state.disposed)return;state.disposed=true;clearTimeout(state.timer);state.observer?.disconnect();state.releaseViewport?.();state.navigationResize?.dispose();state.rail?.dispose();state.files?.dispose();state.composer?.dispose();state.chat?.dispose();active.delete(state);main.classList.remove('development-main');disposeReaders(layout);for(const dialog of state.dialogs)dialog.remove();state.dialogs.clear();}};register(handle);
     const sidebar=el('aside',undefined,'development-session-sidebar'),sideHeading=el('div',undefined,'development-session-heading');
     const createNew=el('button',undefined,'development-new-conversation');createNew.type='button';createNew.append(el('span','＋'),el('span','新会话'));createNew.disabled=true;
     const navigation=ForgeNavigation.header({title:'会话',searchLabel:'搜索会话',placeholder:'筛选当前页会话',onSearch:()=>{if(!state.initializing)renderConversations();}});
@@ -242,22 +226,11 @@ SOFTWARE.
     sidebar.onkeydown=event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();closeSidebar();}};
     let narrowViewport=matchMedia('(max-width:900px)').matches;sidebarOpen(!narrowViewport);
     createNew.onclick=()=>{if(!createNew.disabled&&typeof openNew==='function')openNew();};
-    const archive=el('button','归档历史','development-archive');archive.type='button';archive.disabled=true;archive.title='压缩较早的上下文，保留原始消息';
-    const more=el('details',undefined,'development-more'),moreToggle=el('summary','···'),moreMenu=el('div',undefined,'development-menu');
-    moreToggle.setAttribute('aria-label','更多对话操作');more.append(moreToggle,moreMenu);head.append(more);body.append(head);
-    const mode=el('details',undefined,'development-mode'),modeLabel=el('summary','显示模式 · Standard'),modeMenu=el('div',undefined,'development-mode-options');
-    modeLabel.setAttribute('aria-label','对话显示模式');mode.append(modeLabel,modeMenu);
-    for(const [value,label,description] of [['compact','Compact mode','只保留回复，过程可展开'],['standard','Standard mode','显示最近一轮的紧凑过程'],['detailed','Detailed mode','展开过程组及详细信息']]){
-      const option=el('button',label);option.type='button';option.title=description;
-      option.onclick=()=>{state.chat?.setMode(value);modeLabel.textContent='显示模式 · '+label.replace(' mode','');mode.open=false;more.open=false;};modeMenu.append(option);
-    }
-    const trajectoryToggle=el('button','查看轨迹'),history=el('details',undefined,'development-history-panel'),historyLabel=el('summary','历史消息定位');history.append(historyLabel);
-    const info=el('details',undefined,'development-info'),infoToggle=el('summary','对话信息'),infoBody=el('div',undefined,'development-info-body');
-    const reason=el('p','正在读取开发能力…');infoBody.append(reason);info.append(infoToggle,infoBody);moreMenu.append(mode,trajectoryToggle,history,info,archive);
+    const filesToggle=iconButton('打开项目根目录','M3 4h18v16H3zM15 4v16');
+    head.append(filesToggle);body.append(head);
+    state.files=DevelopmentNavigation.filePanel({layout,toggle:filesToggle,api,iconButton});
     const status=el('p','正在读取开发能力…','development-status');status.setAttribute('role','status');status.setAttribute('aria-live','polite');
     let capabilities=await api('dev-capabilities');state.capabilitiesAt=Date.now();if(state.disposed||!layout.isConnected)return handle;
-    const messages=el('nav',undefined,'development-message-rail'),versions=el('nav',undefined,'development-version-rail');
-    messages.setAttribute('aria-label','历史消息定位');versions.setAttribute('aria-label','版本时间线');history.append(messages);
     const running=value=>!!(value?.turn&&value.turn.cleanup!=='complete');
     const sessionReadonly=value=>!!value&&(value.writable===false||value.writable!==true&&(capabilities.multiple_conversations===true||!state.createdHere&&value.id!==state.primaryId));
     function renderConversations(){
@@ -294,58 +267,26 @@ SOFTWARE.
       })();
       try{await state.listing;}finally{state.listing=null;if(!state.disposed){renderConversations();availability();}}
     }
-    let turnOffset=0,versionOffset=0,listing=false;
-    const stamp=value=>new Date(value*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
-    async function sessions(reset=false,offset=turnOffset,versionsAt=versionOffset){
-      if(!capabilities.enabled||!state.session||listing||(!history.open&&trajectory.hidden))return;
-      listing=true;
-      try{
-        const requested=reset?0:offset,requestedVersions=reset?0:versionsAt;
-        const scoped=capabilities.multiple_conversations?{session_id:state.session.id}:{};
-        const [result,versionResult]=await Promise.all([api('dev-project-turns',{...scoped,offset:requested,limit:20}),api('dev-project-turns',{...scoped,offset:requestedVersions,limit:20,kind:'timeline'})]);if(state.disposed)return;
-        turnOffset=requested;versionOffset=requestedVersions;messages.replaceChildren(el('span','消息','development-rail-caption'));versions.replaceChildren(el('span','迭代记录','development-rail-caption'));
-        const nav=(host,label,direction,next)=>{const b=el('button',direction,'development-rail-page');b.title=label;b.setAttribute('aria-label',label);b.onclick=()=>sessions(false,host===messages?next:turnOffset,host===versions?next:versionOffset).catch(e=>error(body,e));host.append(b);};
-        if(requested>0)nav(messages,'较新的消息','↑',Math.max(0,requested-20));
-        if(requestedVersions>0)nav(versions,'较新的迭代','↑',Math.max(0,requestedVersions-20));
-        let count=0;
-        for(const row of result.turns.filter(row=>!state.session||row.session===state.session.id)){
-          if(row.operation==='message'){
-            const b=el('button',undefined,'development-message-mark');b.setAttribute('aria-label','定位消息：'+row.title);b.title=row.title;
-            b.append(el('span',row.title,'development-rail-preview'));b.onclick=()=>jump(row).catch(e=>error(body,e));messages.append(b);
-          }
-        }
-        for(const row of versionResult.turns.filter(row=>!state.session||row.session===state.session.id)){
-          count++;
-          const compact=row.operation==='compact',done=row.compaction?.status==='compacted';
-          const name=compact?(done?'历史已归档':row.compaction?.status==='noop'?'暂无需归档':row.cleanup!=='complete'?'正在归档…':'归档未完成'):
-            row.changed_files?'代码变更 · '+(row.revision?.after?.slice(0,7)||'已记录'):'检查记录';
-          const b=el('button',undefined,'development-version-node');b.dataset.kind=compact?'archive':row.changed_files?'change':'check';b.title=name+' · '+stamp(row.created);b.setAttribute('aria-label',b.title);
-          b.append(el('span',undefined,'development-version-dot'),el('span',name,'development-version-label'),el('time',stamp(row.created),'development-version-time'));
-          b.onclick=()=>{
-            const d=el('dialog',undefined,'development-version-detail'),close=el('button','关闭'),go=el('button','查看对应消息');close.onclick=()=>d.close();
-            d.append(el('h2',name),el('p',stamp(row.created),'muted'));
-            if(compact)d.append(el('p',done?'较早上下文已由 CLI 压缩为摘要，原始消息仍可查看。':row.compaction?.status==='noop'?'当前没有可安全压缩的较早上下文。':'归档尚未确认完成，原始记录保留。'));
-            else d.append(el('p',row.changed_files?row.changed_files+' 个文件发生变化；这是观察到的项目快照，检查结果单独记录。':'本轮产生了检查记录，具体结果见对应消息。'));
-            if(row.revision)d.append(el('p','快照 '+row.revision.before.slice(0,12)+' → '+row.revision.after.slice(0,12)));
-            if(row.compaction?.shadowed_items)d.append(el('p','压缩了 '+row.compaction.shadowed_items+' 条 CLI 上下文记录'));
-            if(row.compaction?.history_through_sequence)d.append(el('p','归档前的应用消息记录：1–'+row.compaction.history_through_sequence));
-            go.onclick=()=>{d.close();jump(row).catch(e=>error(body,e));};d.append(go,close);document.body.append(d);trackDialog(d);d.showModal();
-          };versions.append(b);
-        }
-        if(!count)versions.append(el('span','变更和归档将在这里留下记录','development-rail-empty'));
-        if(result.next_offset!==null)nav(messages,'更早的消息','↓',result.next_offset);
-        if(versionResult.next_offset!==null)nav(versions,'更早的迭代','↓',versionResult.next_offset);
-      }finally{listing=false;}
-    }
-    const tools=el('div',undefined,'toolbar'),basis=el('button','查看开发依据'),recover=el('button','核对连接状态');tools.append(basis,recover);infoBody.append(tools);
     const stage=el('div',undefined,'development-stage'),hero=el('div',undefined,'development-hero');hero.append(el('h2','今天想做些什么？'));body.append(stage);
     const historyNav=el('div',undefined,'development-history-nav'),earlier=el('button','加载更早的记录'),latest=el('button','回到最新记录');earlier.hidden=true;latest.hidden=true;historyNav.append(earlier,latest);stage.append(historyNav);
-    const timeline=el('div',undefined,'development-timeline');timeline.setAttribute('aria-label','开发对话记录');stage.append(timeline,hero);const flow=el('div',undefined,'development-flow');timeline.append(flow);const follow=new ScrollFollow(true,60);timeline.onscroll=()=>{follow.sample(scrollMetrics(timeline));newContent.hidden=follow.active;};
-    const trajectory=el('section',undefined,'development-trajectory'),trajectoryLog=el('div',undefined,'development-trajectory-log');trajectory.hidden=true;trajectory.setAttribute('aria-label','对话轨迹');trajectory.append(versions,trajectoryLog);stage.append(trajectory);
-    function selectTab(showTrajectory){trajectory.hidden=!showTrajectory;timeline.hidden=showTrajectory;hero.hidden=showTrajectory||!!state.items.size;layout.classList.toggle('development-empty',!state.items.size&&!showTrajectory);newContent.hidden=showTrajectory||follow.active;historyNav.hidden=showTrajectory;trajectoryToggle.textContent=showTrajectory?'返回对话':'查看轨迹';if(showTrajectory)sessions(true).catch(e=>error(body,e));}
-    trajectoryToggle.onclick=()=>{selectTab(trajectory.hidden);more.open=false;};history.ontoggle=()=>{if(history.open)sessions(true).catch(e=>error(body,e));};
+    const scrollArea=el('div',undefined,'development-scroll-area');
+    const timeline=el('div',undefined,'development-timeline');
+    timeline.setAttribute('aria-label','开发对话记录');timeline.tabIndex=0;
+    const flow=el('div',undefined,'development-flow');
+    timeline.append(flow);scrollArea.append(timeline);stage.append(scrollArea,hero);
+    const follow=new ScrollFollow(true,60);
+    const rail=state.rail=DevelopmentNavigation.turnRail({host:scrollArea,timeline,flow,navigate:row=>{
+      const turn=[...flow.children].find(section=>section.dataset.turnId===row.id);
+      if(turn && turn.querySelector('.dfc-user')) {
+        state.navigationEpoch++;
+        follow.jump(timeline,scrollMetrics(timeline),timeline.scrollTop+turn.getBoundingClientRect().top-timeline.getBoundingClientRect().top-8);
+        rail.update();
+      } else loadWindow(row.session,row.sequence-1).catch(e=>error(body,e));
+    }});
+    head.insertBefore(rail.picker,filesToggle);
+    timeline.onscroll=()=>{follow.sample(scrollMetrics(timeline));newContent.hidden=follow.active;rail.update();};
     const newContent=iconButton('有新内容，滚动到底部','M6 9l6 6 6-6');newContent.classList.add('development-scroll-bottom');newContent.hidden=true;stage.append(newContent);newContent.onclick=()=>{follow.toBottom(timeline,scrollMetrics(timeline),'instant');newContent.hidden=true;};
-    state.observer=new ResizeObserver(()=>{if(state.disposed)return;sizeViewport();if(state.composer)stage.style.setProperty('--development-composer-height',state.composer.form.getBoundingClientRect().height+'px');if(follow.active)follow.toBottom(timeline,scrollMetrics(timeline),'instant');});state.observer.observe(flow);state.observer.observe(timeline);
+    state.observer=new ResizeObserver(()=>{if(state.disposed)return;rail.update();sizeViewport();if(state.composer)stage.style.setProperty('--development-composer-height',state.composer.form.getBoundingClientRect().height+'px');if(follow.active)follow.toBottom(timeline,scrollMetrics(timeline),'instant');});state.observer.observe(flow);state.observer.observe(timeline);
     const pendingHost=el('div',undefined,'development-pending');stage.append(pendingHost);
     function addReference(){
       const dialog=el('dialog',undefined,'development-reference-dialog'),field=el('input'),add=el('button','添加引用'),close=el('button','取消');
@@ -363,13 +304,8 @@ SOFTWARE.
     stage.append(busyNotice,form,status);state.observer.observe(form);
     const sizeViewport=()=>{layout.style.setProperty('--development-top',Math.max(0,main.getBoundingClientRect().top)+'px');const narrow=matchMedia('(max-width:900px)').matches;if(narrow&&!narrowViewport)sidebarOpen(false);narrowViewport=narrow;};
     window.addEventListener('resize',sizeViewport);sizeViewport();state.releaseViewport=()=>window.removeEventListener('resize',sizeViewport);
-    const menus=[more];
-    const closeMenus=e=>{for(const menu of menus)if(menu.open&&!menu.contains(e.target))menu.open=false;};
-    const escapeMenus=e=>{if(e.key!=='Escape')return;for(const menu of menus)if(menu.open){menu.open=false;menu.querySelector('summary').focus();e.stopPropagation();}};
-    document.addEventListener('pointerdown',closeMenus);head.addEventListener('keydown',escapeMenus);
-    state.releaseMenus=()=>{document.removeEventListener('pointerdown',closeMenus);head.removeEventListener('keydown',escapeMenus);};
     const chat=globalThis.ForgeDevelopmentChat.create({flow,onRaw:output,
-      onChange:()=>{if(state.disposed||!state.chat)return;hero.hidden=!!state.chat.items.size||!trajectory.hidden;layout.classList.toggle('development-empty',!state.chat.items.size&&trajectory.hidden);},
+      onChange:()=>{if(state.disposed||!state.chat)return;rail.update();hero.hidden=!!state.chat.items.size;layout.classList.toggle('development-empty',!state.chat.items.size);},
       onTrim:()=>{earlier.hidden=false;}});
     state.chat=chat;state.items=chat.items;
     let draftKey=workspaceId+':new';input.value='';
@@ -379,20 +315,16 @@ SOFTWARE.
     input.addEventListener('compositionstart',()=>{composing=true;});input.addEventListener('compositionend',()=>{composing=false;composingUntil=Date.now()+10;});
     input.onkeydown=e=>{if(composing||Date.now()<composingUntil||e.isComposing||e.keyCode===229)return;if(e.key==='Enter'&&!e.shiftKey&&!e.altKey){e.preventDefault();if(!e.repeat)form.requestSubmit();}if(e.key==='Escape'&&!stop.disabled)stop.click();};
     function availability(){
-      const t=state.session?.turn,busy=t&&t.cleanup!=='complete';
+      const t=state.session?.turn;
       const provider=(capabilities.providers||[]).find(p=>p.id===(state.session?.provider||providers.value));
       const unsupportedNew=state.newDraft&&capabilities.multiple_conversations!==true;
       const readonly=capabilities.read_only===true||sessionReadonly(state.session)||unsupportedNew;
       const otherBusy=state.writerBusy&&(!state.activeSession||state.activeSession!==state.session?.id);
       composer.update({capabilities:otherBusy?{...capabilities,start:false}:capabilities,session:state.session,readonly,historyOnly:!!state.historyOnly,sending:!!state.sending||state.initializing,creation:!!state.creation,stats:state.displaySession&&state.displaySession!==state.session?.id?null:state.stats});
-      archive.disabled=readonly||otherBusy||!capabilities.start||!provider?.available||!!busy||!!state.sending||!!state.historyOnly||!state.session?.revision;
-      basis.disabled=!t;recover.disabled=readonly||!capabilities.enabled||!state.session;
-
-      hero.hidden=!!state.items.size||!trajectory.hidden;layout.classList.toggle('development-empty',!state.items.size&&trajectory.hidden);
+      hero.hidden=!!state.items.size;layout.classList.toggle('development-empty',!state.items.size);
       busyNotice.hidden=!otherBusy||readonly||!!state.historyOnly;busyText.textContent='另一个会话正在使用此项目，可以继续编辑草稿，完成后再发送。';busyJump.hidden=!state.activeSession;
       status.textContent=unsupportedNew?'当前开发服务不支持新建独立会话，请从左侧打开已有会话。':readonly||state.historyOnly?'历史会话 · 只读，不能继续发送':t?(t.operation==='compact'?(t.cleanup!=='complete'?'正在归档历史…':t.state==='completed'?'归档处理完成':'归档未完成'):(labels[t.state]||t.state))+(t.dispatch==='unknown'?' · 发送结果未知，请先核对':''):
         readonly?'已有开发历史 · 只读':provider?.available?'':ForgeDevelopmentComposer.connectionStatus(capabilities).label;
-      reason.textContent=capabilities.reason+(provider?.reason?' '+provider.reason:'')+(provider?.input_requests==='unsupported'?' 此代理不支持轮内补充输入；停止后可继续。':'')+(provider?.history_replay==='unsupported'?' 恢复时仅展示本应用已保存的历史。':'');
     }
     providers.onchange=availability;
     function trackDialog(dialog){state.dialogs.add(dialog);dialog.addEventListener('close',()=>{state.dialogs.delete(dialog);dialog.remove();},{once:true});}
@@ -413,17 +345,9 @@ SOFTWARE.
       }catch(e){error(d,e);}finally{next.disabled=false;}}
       next.onclick=load;d.showModal();load();
     }
-    let trajectoryBytes=0;
     function project(event){
       if(event.type==='compaction.completed'&&event.data.status==='compacted'&&!state.historyOnly){clearTimeline();earlier.hidden=false;}
       chat.project(event);
-      const raw=JSON.stringify(event.data,null,2),size=bytes(raw);
-      if(size<=65536){
-        while(trajectoryLog.childElementCount>=100||trajectoryBytes+size>1024*1024){const first=trajectoryLog.firstElementChild;if(!first)break;trajectoryBytes-=Number(first.dataset.bytes||0);first.remove();}
-        const row=el('details',undefined,'development-trajectory-record'),summary=el('summary');row.dataset.bytes=String(size);trajectoryBytes+=size;
-        summary.append(el('span',event.type),el('time',stamp(event.observed_at)));row.append(summary);
-        row.ontoggle=()=>{if(row.open&&!row.querySelector('pre'))row.append(el('pre',raw));};trajectoryLog.append(row);
-      }
       if(follow.active)follow.toBottom(timeline,scrollMetrics(timeline),'instant');else if(event.type==='message.delta'||event.type==='message.user')newContent.hidden=false;
     }
     function pending(request){
@@ -452,7 +376,7 @@ SOFTWARE.
           }
           await loadConversations();if(state.disposed)return;
           if(!state.session){availability();return;}
-          const current=await api('dev-session',{session_id:state.session.id});if(state.disposed)return;state.session=current;chat.updateSession(current);renderConversations();availability();const revisionKey=current.revision+':'+current.turn?.cleanup;if(state.railRevision!==revisionKey){state.railRevision=revisionKey;await sessions(true);}
+          const current=await api('dev-session',{session_id:state.session.id});if(state.disposed)return;state.session=current;chat.updateSession(current);renderConversations();availability();const revisionKey=current.revision+':'+current.turn?.cleanup;if(state.railRevision!==revisionKey){state.railRevision=revisionKey;rail.load(api,current.id,capabilities.multiple_conversations).catch(()=>{state.railRevision=null;});}
           if(capabilities.enabled&&!capabilities.read_only&&!sessionReadonly(current)&&!state.historyOnly)for(const request of current.pending||[])pending(request);
           for(const node of pendingHost.children)if(state.historyOnly||capabilities.read_only||sessionReadonly(current)||!(current.pending||[]).some(p=>p.id===node.dataset.request))node.remove();
           if(!state.historyOnly){
@@ -471,32 +395,24 @@ SOFTWARE.
     form.onsubmit=async e=>{e.preventDefault();if(send.disabled||!input.reportValidity()||!input.value.trim())return;send.disabled=true;
       const message=input.value,sentDraftRevision=draftRevisions.get(draftKey)||0,submission=state.submission||{text:message,id:uid()};if(submission.text!==message){error(body,new Error('上次发送结果未确认，请先核对记录后再编辑要求。'));return;}state.submission=submission;
       state.sending=true;availability();
-      try{if(!state.session){state.creation||={request_id:uid(),provider_id:providers.value,...(state.newDraft?{new_conversation:true}:{})};state.session=await api('dev-session-create',{},state.creation);state.createdHere=true;}if(state.disposed)return;await api('dev-turn-start',{}, {session_id:state.session.id,submission_id:submission.id,expected_revision:state.session.revision,text:message});state.submission=null;if(drafts.get(draftKey)===message&&(draftRevisions.get(draftKey)||0)===sentDraftRevision){drafts.delete(draftKey);draftRevisions.delete(draftKey);saveDrafts();}if(state.disposed)return;input.value='';resizeInput();if(state.createdHere){await openSession(state.session.id);return;}state.listAt=0;clearTimeout(state.timer);await refresh();await sessions(true);}
-      catch(err){if(!state.disposed){error(body,err);await refresh().catch(()=>{});await sessions(true).catch(()=>{});}}
-      finally{state.sending=false;if(!state.disposed)availability();}
-    };
-    archive.onclick=async()=>{
-      if(archive.disabled)return;more.open=false;
-      state.sending=true;availability();
-      state.archiveSubmission||=uid();
-      try{await api('dev-compact',{}, {session_id:state.session.id,submission_id:state.archiveSubmission,expected_revision:state.session.revision});state.archiveSubmission=null;await refresh();}
-      catch(e){error(body,e);await refresh().catch(()=>{});}
+      try{if(!state.session){state.creation||={request_id:uid(),provider_id:providers.value,...(state.newDraft?{new_conversation:true}:{})};state.session=await api('dev-session-create',{},state.creation);state.createdHere=true;}if(state.disposed)return;await api('dev-turn-start',{}, {session_id:state.session.id,submission_id:submission.id,expected_revision:state.session.revision,text:message});state.submission=null;if(drafts.get(draftKey)===message&&(draftRevisions.get(draftKey)||0)===sentDraftRevision){drafts.delete(draftKey);draftRevisions.delete(draftKey);saveDrafts();}if(state.disposed)return;input.value='';resizeInput();if(state.createdHere){await openSession(state.session.id);return;}state.listAt=0;clearTimeout(state.timer);await refresh();}
+      catch(err){if(!state.disposed){error(body,err);await refresh().catch(()=>{});}}
       finally{state.sending=false;if(!state.disposed)availability();}
     };
     stop.onclick=async()=>{stop.disabled=true;try{await api('dev-cancel',{}, {session_id:state.session.id,turn_id:state.session.turn.id,request_id:uid()});status.textContent='已请求停止，等待所属工具清理。';}catch(e){error(body,e);stop.disabled=false;}};
-    recover.onclick=async()=>{try{const value=await api('dev-recover',{}, {session_id:state.session.id,expected_revision:state.session.revision});status.textContent=value.recovery.can_continue?'连接状态已核对，可继续。':'清理归属尚未确认，保留写租约。';}catch(e){error(body,e);}};
-    basis.onclick=async()=>{try{const value=await api('dev-context',{session_id:state.session.id,turn_id:state.session.turn.id});if(state.disposed)return;const d=el('dialog'),close=el('button','关闭');close.onclick=()=>d.close();d.append(el('h2','本轮开发依据'),close,el('pre',JSON.stringify(value.context,null,2)));document.body.append(d);trackDialog(d);d.showModal();}catch(e){error(body,e);}};
-    function clearTimeline(){state.feedEpoch=(state.feedEpoch||0)+1;chat.reset();trajectoryLog.replaceChildren();trajectoryBytes=0;newContent.hidden=true;}
+    function clearTimeline(){state.feedEpoch=(state.feedEpoch||0)+1;chat.reset();newContent.hidden=true;}
     async function loadWindow(sid,after){
-      state.historyOnly=true;state.displaySession=sid;pendingHost.replaceChildren();state.pending.clear();follow.setFollowing(false);clearTimeline();
-      const epoch=state.feedEpoch;state.windowStart=after;earlier.hidden=after===0;latest.hidden=false;availability();
+      const request=++state.navigationEpoch;
       const page=await api('dev-events',{session_id:sid,after_sequence:after,limit:50});
-      if(state.disposed||state.feedEpoch!==epoch)return;
-      for(const event of page.events)project(event);selectTab(false);timeline.scrollTop=0;
+      if(state.disposed||state.navigationEpoch!==request)return;
+      state.historyOnly=true;state.displaySession=sid;pendingHost.replaceChildren();state.pending.clear();
+      follow.setFollowing(false);clearTimeline();
+      state.windowStart=after;earlier.hidden=after===0;latest.hidden=false;availability();
+      for(const event of page.events)project(event);
+      timeline.scrollTop=0;rail.update();
     }
-    async function jump(row){more.open=false;history.open=false;await loadWindow(row.session,Math.max(0,(row.sequence||1)-1));}
     earlier.onclick=()=>loadWindow(state.displaySession||state.session.id,Math.max(0,(state.windowStart||0)-50)).catch(e=>error(body,e));
-    latest.onclick=async()=>{follow.setFollowing(true);clearTimeline();state.historyOnly=false;state.displaySession=null;state.sequence=Math.max(0,state.session.sequence-50,(state.session.archive_sequence||0)-1);state.windowStart=state.sequence;earlier.hidden=state.sequence===0;latest.hidden=true;clearTimeout(state.timer);await refresh();};
+    latest.onclick=async()=>{state.navigationEpoch++;follow.setFollowing(true);clearTimeline();state.historyOnly=false;state.displaySession=null;state.sequence=Math.max(0,state.session.sequence-50,(state.session.archive_sequence||0)-1);state.windowStart=state.sequence;earlier.hidden=state.sequence===0;latest.hidden=true;clearTimeout(state.timer);await refresh();};
     if(capabilities.enabled){
       const primary=(await api('dev-conversation')).session;if(state.disposed)return handle;state.primaryId=primary?.id||null;
       if(view?.session_id)state.session=await api('dev-session',{session_id:view.session_id});

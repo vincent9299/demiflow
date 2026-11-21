@@ -101,7 +101,6 @@ def test_standard_turn_process_tool_rows_markdown_and_copy(tmp_path):
         tool.locator(':scope>summary').click()
         shots=Path(os.environ.get('FORGE_ACCEPTANCE_DIR',str(tmp_path/'screenshots')));shots.mkdir(parents=True,exist_ok=True)
         page.screenshot(path=str(shots/'deepseek-chat-standard.png'),full_page=True)
-        page.evaluate("chat.setMode('detailed')")
         page.locator('.dfc-answer').get_by_role('button',name='View original').click()
         assert page.evaluate('raw.at(-1)')==dict(item_id='answer',turn_id='first',provider_epoch='epoch-1',from_sequence=12,through_sequence=12)
         assert not errors,errors
@@ -133,14 +132,10 @@ def test_streaming_legacy_ids_epochs_and_disclosure_choices():
         assert not page.locator('.dfc-turn-process').first.evaluate('(node)=>node.open')
         push(page,[event(13,'message.completed',dict(item_id='acp-interval:client-3:answer',text='Second answer.'),turn='second',epoch='epoch-2'),
             event(14,'turn.state',dict(state='completed',cleanup='complete'),turn='second',epoch='epoch-2')])
-        page.evaluate("chat.setMode('compact')")
-        assert not page.locator('.dfc-turn-process').last.evaluate('(node)=>node.open')
-        page.evaluate("chat.setMode('standard')")
         assert page.locator('.dfc-turn-process').last.evaluate('(node)=>node.open')
         assert think.evaluate('(node)=>node.open')
-        # Manual choices survive later mode changes and event updates.
+        # Manual disclosure remains available for each step.
         page.locator('.dfc-step-process').last.locator(':scope>summary').click()
-        page.evaluate("chat.setMode('detailed')")
         assert not page.locator('.dfc-step-process').last.evaluate('(node)=>node.open')
         page.locator('.dfc-answers>.dfc-answer').last.get_by_role('button',name='View original').click()
         assert page.evaluate('raw.at(-1).turn_id')=='second'
