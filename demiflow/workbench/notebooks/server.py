@@ -91,17 +91,22 @@ def main():
     config.ServerApp.max_buffer_size = 16 * 1024**2
     config.ServerApp.websocket_ping_interval = 20
     config.ServerApp.websocket_ping_timeout = 20
+    def page_config(handler, value):
+        can_start = (json.loads((config_path.parent / 'grants.json').read_text())['execute']
+                     and len(handler.kernel_manager.list_kernel_ids()) < kernel_limit)
+        disabled = [*value.get('disabledExtensions', []),
+                    '@jupyter-notebook/lab-extension:interface-switcher', '@jupyterlab/lsp-extension']
+        widgets = '@jupyter-widgets/jupyterlab-manager'
+        # The widget manager needs an attached kernel to register its comm targets.
+        defer_widgets = not can_start and not any(item.split(':')[0] == widgets for item in disabled)
+        if defer_widgets:
+            disabled.append(widgets)
+        return {**value, 'token': '', 'allow_hidden': False, 'notebookStartsKernel': can_start,
+                'disabledExtensions': disabled, 'demiflowDeferredWidgets': defer_widgets}
+
     config.ServerApp.tornado_settings = {
         'headers': {'Content-Security-Policy': "frame-ancestors 'self'"},
-        'page_config_hook': lambda handler, value: {
-            **value, 'token': '', 'allow_hidden': False,
-            'notebookStartsKernel': (json.loads((config_path.parent/'grants.json').read_text())['execute']
-                                     and len(handler.kernel_manager.list_kernel_ids()) < kernel_limit),
-            'disabledExtensions': list(value.get('disabledExtensions', [])) + [
-                '@jupyter-notebook/lab-extension:interface-switcher',
-                '@jupyterlab/lsp-extension',
-            ],
-        },
+        'page_config_hook': page_config,
     }
     config.IdentityProvider.token = settings['token']
     config.MappingKernelManager.cull_idle_timeout = 1800
