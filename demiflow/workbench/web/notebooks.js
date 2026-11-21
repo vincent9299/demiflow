@@ -184,8 +184,8 @@
         try{
           const detail=await api('data-tool-definition',{id});
           if(!current()||id!==select.value)return;
-          const source=node('div',undefined,'definition-source');
-          body.replaceChildren(node('h3',detail.symbol),node('p',detail.path+' · L'+detail.line,'op-location'));
+          const source=node('div');
+          body.replaceChildren(node('p',detail.tool_kind==='annotation'?'数据标注工具':'数据查看工具','op-eyebrow'),node('h3',detail.symbol),node('p',detail.path+' · L'+detail.line,'op-location'));
           if(detail.description||detail.module_summary)
             body.append(node('p',detail.description||'模块说明 · '+detail.module_summary,'op-description'));
           body.append(source);
@@ -196,8 +196,12 @@
         const index=await api('project-data-tools');
         if(!current())return;
         for(const issue of index.diagnostics)issues.append(node('p',issue.path+' · '+issue.detail,'op-error'));
-        for(const item of index.definitions){
-          const option=node('option',item.symbol+' · '+item.path);option.value=item.id;select.append(option);
+        for(const [kind,label] of [['annotation','数据标注工具'],['view','数据查看工具']]){
+          const group=node('optgroup');group.label=label;
+          for(const item of index.definitions.filter(d=>d.tool_kind===kind)){
+            const option=node('option',item.symbol+' · '+item.path);option.value=item.id;group.append(option);
+          }
+          if(group.childElementCount)select.append(group);
         }
         if(!select.length){body.textContent='尚未声明数据工具。在 data_tools/ 模块中用 __demiflow_data_tools__ 列出可复用的定义。';return;}
         select.hidden=false;select.onchange=read;await read();

@@ -20,17 +20,27 @@ def exports(tree, field):
         targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
         if not any(isinstance(t, ast.Name) and t.id == field for t in targets):
             continue
-        if (names is not None or len(targets) != 1 or isinstance(statement, ast.AugAssign)
-                or not isinstance(statement.value, (ast.List, ast.Tuple))):
-            raise ValueError(f'{field} 需要一次性声明为公开名称的列表或元组。')
-        names = set()
-        for entry in statement.value.elts:
+        if names is not None or len(targets) != 1 or isinstance(statement, ast.AugAssign):
+            raise ValueError(f'{field} 必须在模块顶层一次性声明。')
+        value = statement.value
+        if field == DATA_TOOL_EXPORT and isinstance(value, ast.Dict):
+            members = []
+            for key, role in zip(value.keys, value.values):
+                if not isinstance(role, ast.Constant) or role.value not in ('annotation', 'view'):
+                    raise ValueError(f'{field} 的类别应为 annotation 或 view。')
+                members.append((key, role.value))
+        elif isinstance(value, (ast.List, ast.Tuple)):
+            members = [(entry, 'view' if field == DATA_TOOL_EXPORT else 'operator') for entry in value.elts]
+        else:
+            raise ValueError(f'{field} 需要使用静态声明列出公开名称。')
+        names = {}
+        for entry, kind in members:
             if not isinstance(entry, ast.Constant) or type(entry.value) is not str:
                 raise ValueError(f'{field} 的成员需要是名称字符串。')
             name = entry.value
             if not name.isidentifier() or name.startswith('_') or name in names:
                 raise ValueError(f'{field} 的名称无效或重复：{name[:80]}')
-            names.add(name)
+            names[name] = kind
     for name in sorted(names or ()):
         if len(symbols.get(name, [])) != 1:
             raise ValueError(f'{field} 找不到唯一本地函数或类：{name}')

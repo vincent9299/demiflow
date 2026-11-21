@@ -139,7 +139,7 @@ def test_unwired_operator_editor_and_data_tools_in_their_own_pages(project,brows
     path.write_text('# second revision\n'+path.read_text())
     data_tools=project/'data_tools'
     data_tools.mkdir()
-    (data_tools/'review.py').write_text('__demiflow_data_tools__ = ["ReviewPage"]\n'
+    (data_tools/'review.py').write_text('__demiflow_data_tools__ = {"ReviewPage": "annotation"}\n'
         'class ReviewPage:\n    """分页浏览候选图。"""\n    pass\n')
     with service(project) as app,opened(browser,app) as (page,_):
         nav=page.locator('.function-nav')
@@ -171,6 +171,7 @@ def test_unwired_operator_editor_and_data_tools_in_their_own_pages(project,brows
         expect(dialog.get_by_role('heading',name='ReviewPage')).to_be_visible()
         expect(dialog.locator('.tok-keyword').first).to_have_text('class')
         expect(dialog).to_contain_text('分页浏览候选图')
+        expect(dialog.locator('.op-eyebrow')).to_have_text('数据标注工具')
         artifact(page,'project-data-tools')
         dialog.get_by_role('button',name='关闭').click()
         expect(page.locator('.native-notebook-host')).to_be_visible()

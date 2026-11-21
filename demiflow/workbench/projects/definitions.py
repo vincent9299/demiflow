@@ -48,6 +48,7 @@ def _items(path, raw, kind):
                        export_status=('legacy' if public is None else 'declared' if node.name in public else 'internal'),
                        definition_type=('class' if isinstance(node, ast.ClassDef) else
                                         'async_function' if isinstance(node, ast.AsyncFunctionDef) else 'function'),
+                       **({'tool_kind': public[node.name]} if kind == 'data_tool' else {}),
                        module_summary=module_summary, line=start, end_line=node.end_lineno)
     else:
         import yaml
