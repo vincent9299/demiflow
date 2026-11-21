@@ -99,13 +99,22 @@ class TrainingIndex:
             return dict(row) if row else None
 
     @staticmethod
-    def request_key(instance, launch, scope):
-        return identity([instance,launch,scope])
+    def request_key(instance, launch, scope, run_id):
+        return identity(['training-submission', run_id, instance, launch, scope])
+
+    def _recorded_key(self, row, launch):
+        make_key = self.request_key
+        # Preserve the exact original request namespace for in-flight v1 rows.
+        if row['request_key'] == identity([row['instance'], row['launch'], row['provider_scope']]):
+            return identity([row['instance'], launch, row['provider_scope']])
+        if row['request_key'] != make_key(row['instance'], row['launch'], row['provider_scope'], row['run_id']):
+            raise FitConflict("Training launch key differs from the recorded producer")
+        return make_key(row['instance'], launch, row['provider_scope'], row['run_id'])
 
     def request_keys(self, row):
         if not 0 <= row['launch'] <= self.binding.max_resumes:
             raise FitConflict("Training launch history exceeds its declared restart limit")
-        return tuple(self.request_key(row['instance'],i,row['provider_scope']) for i in range(row['launch']+1))
+        return tuple(self._recorded_key(row, i) for i in range(row['launch']+1))
 
     def claim_or_get(self, request: FitRequest, *, run_id, run_dir, action, occurrence, attempt):
         """Only the owner of the original run may take over its instance."""
@@ -116,7 +125,7 @@ class TrainingIndex:
             if row is None:
                 if db.execute('SELECT count(*) FROM fit_instances').fetchone()[0] >= self.binding.max_instances:
                     raise FitConflict("Project training instance quota exceeded")
-                request_key = self.request_key(instance, 0, scope)
+                request_key = self.request_key(instance, 0, scope, run_id)
                 db.execute('''INSERT INTO fit_instances
                     (instance,project,fit_key,run_id,run_dir,action,occurrence,attempt,epoch,
                      provider_scope,launch,request_key,state,request) VALUES (?,?,?,?,?,?,?,?,1,?,0,?,'claimed',?)''',
@@ -252,7 +261,7 @@ class TrainingIndex:
             if row['state'] != 'claimed' or row['launch'] >= self.binding.max_resumes:
                 raise FitConflict("Training cannot restart within its recovery budget")
             launch = row['launch'] + 1
-            new_key = self.request_key(instance,launch,row['provider_scope'])
+            new_key = self._recorded_key(row, launch)
             db.execute('UPDATE fit_instances SET launch=?,request_key=?,job=NULL,snapshot=? WHERE instance=?',
                        (launch,new_key,document(snapshot.to_dict()).decode(),instance))
 

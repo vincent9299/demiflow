@@ -16,6 +16,7 @@ from test_training_domain import setup_request
 @pytest.mark.parametrize(('native', 'gpu'), [(False, 0), (True, 0), (False, 1), (True, 1)],
                          ids=['checked-cpu', 'native-cpu', 'checked-gpu', 'native-gpu'])
 def test_registered_native_training_run_seals_and_reports_model_evidence(root, tmp_path, monkeypatch, native, gpu):
+    monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT', str(tmp_path / 'private-resources'))
     (root / 'operators' / 'training.py').write_text('''from hashlib import sha256
 from demiflow.execution.contracts.training import FitResult, ProjectObject, TrainingSnapshotRef
 
