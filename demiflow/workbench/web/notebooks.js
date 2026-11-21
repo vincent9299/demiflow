@@ -150,11 +150,26 @@
   async function mount({parent,api,project,context,request,originalPath,onBinding,mountText,disposeReaders}) {
     parent.classList.add('native-data-active');
     const root=node('div',undefined,'native-data-workspace');parent.append(root);
-    const dictionary=node('aside',undefined,'data-dictionary');dictionary.setAttribute('aria-label','数据字典');
-    const navigation=ForgeNavigation.header({title:'数据字典',searchLabel:'搜索数据字典',placeholder:'表名或已读取字段',onSearch:()=>filterTables()});
-    const {search}=navigation;dictionary.append(navigation.element);
-    const toolActions=node('div',undefined,'dictionary-tools');dictionary.append(toolActions);
-    const list=node('div',undefined,'dictionary-list');dictionary.append(list);
+    const dictionary=node('aside',undefined,'data-dictionary');dictionary.setAttribute('aria-label','数据导航');
+    const navigation=ForgeNavigation.header({title:'数据',searchLabel:'搜索数据字典',placeholder:'表名或已读取字段',onSearch:()=>filterLists()});
+    const {search}=navigation;
+    const list=node('div',undefined,'dictionary-list');
+    const panes={dictionary:list,analysis:node('div'),annotation:node('div')};
+    const labels={dictionary:'数据字典',analysis:'分析工具',annotation:'标注工具'};
+    const filters={dictionary:'',analysis:'',annotation:''};
+    let activeTab='dictionary',toolIndex=null,loadingTools=false;
+    const tabs=ForgeNavigation.categoryTabs('数据分类',Object.entries(labels),key=>{
+      filters[activeTab]=search.value;activeTab=key;search.value=filters[key];
+      navigation.searchScope('搜索'+labels[key],key==='dictionary'?'表名或已读取字段':'名称、说明或文件名');
+      for(const [name,pane] of Object.entries(panes))pane.hidden=name!==key;
+      filterLists();if(key!=='dictionary')loadTools();
+    });
+    for(const tab of tabs.element.children){
+      const key=tab.dataset.kind,pane=panes[key];tab.id='data-tab-'+key;pane.id='data-pane-'+key;
+      pane.setAttribute('role','tabpanel');pane.setAttribute('aria-labelledby',tab.id);
+      tab.setAttribute('aria-controls',pane.id);pane.hidden=key!==activeTab;
+    }
+    dictionary.append(navigation.element,tabs.element,...Object.values(panes));
     const native=node('div',undefined,'native-notebook-host');native.setAttribute('aria-label','Notebook 工作区');
     const status=node('p','正在连接 Jupyter…','native-notebook-status');native.append(status);root.append(dictionary,native);
     const dictionaryNavigation=ForgeNavigation.collapsible({layout:root,sidebar:dictionary,header:navigation,label:'数据字典目录'});
@@ -164,17 +179,46 @@
     const observer=new ResizeObserver(resize);observer.observe(native);window.addEventListener('resize',resize);window.addEventListener('scroll',resize,true);
     const fail=error=>{if(alive()){status.textContent=error.message||String(error);status.classList.add('error-box');}};
     let toolsDialog;
-    for(const [kind,label] of [['annotation','标注工具'],['view','查看工具']]){
-      const button=node('button',label,'dictionary-tool-button');
-      button.type='button';toolActions.append(button);
-      button.onclick=async()=>{
-        try{
-          const {showTools}=await import('./data-tools.js');
-          if(alive()&&!toolsDialog?.open)toolsDialog=showTools({root,kind,api,mountText,disposeReaders,project,
-            canInsert:!!context.native_notebook&&!!context.capabilities?.analysis_write,
-            insert:code=>insert(session,code)});
-        }catch(error){fail(error);}
-      };
+    async function openTool(item){
+      try{
+        const {showTool}=await import('./data-tools.js');
+        if(alive()&&!toolsDialog?.open)toolsDialog=showTool({root,item,api,mountText,disposeReaders,project,
+          canInsert:!!context.native_notebook&&!!context.capabilities?.analysis_write,insert:code=>insert(session,code)});
+      }catch(error){fail(error);}
+    }
+    function paintTools(host,items,query){
+      host.replaceChildren();
+      const files=new Map();
+      for(const item of items){
+        if(![item.symbol,item.path,item.description].join(' ').toLocaleLowerCase().includes(query))continue;
+        if(!files.has(item.path))files.set(item.path,[]);
+        files.get(item.path).push(item);
+      }
+      for(const [path,entries] of files){
+        const file=node('details',undefined,'dictionary-table');file.open=!!query||files.size<4;
+        const heading=node('summary',path);heading.title=path;file.append(heading);
+        for(const item of entries){
+          const button=node('button',undefined,'data-tool-leaf');button.type='button';
+          const type={analysis:'分析',view:'查看',annotation:'工具',annotation_component:'组件'}[item.tool_kind];
+          button.append(node('span',item.symbol),node('small',type));
+          button.title=item.description||item.path;button.onclick=()=>openTool(item);file.append(button);
+        }
+        host.append(file);
+      }
+    }
+    async function loadTools(){
+      if(!toolIndex)panes[activeTab].textContent='正在读取'+labels[activeTab]+'…';
+      if(loadingTools)return;
+      loadingTools=true;
+      try{
+        const index=await api('project-data-tools');
+        if(!alive())return;
+        toolIndex=index;filterLists();
+      }catch(error){
+        if(alive()&&activeTab!=='dictionary'){
+          const pane=panes[activeTab];pane.replaceChildren(node('p',error.message,'op-error'));delete pane.dataset.revision;
+        }
+      }finally{loadingTools=false;}
     }
     const tables=new Map();
     function add(item) {
@@ -233,7 +277,7 @@
             request=resolved;onBinding?.(resolved);
           }
         }catch(error){if(alive())content.replaceChildren(node('p',error.message,'dictionary-meta'));}
-        finally{entry.loading=false;if(alive())filterTables();}
+        finally{entry.loading=false;if(alive())filterLists();}
       });
       if(request.alias===item.alias||originalPath===item.original?.path)row.open=true;
     }
@@ -249,12 +293,22 @@
       for(const item of entries)add(item);
       list.querySelector('.dictionary-empty')?.remove();
       if(!tables.size)list.append(node('p','尚未登记数据表。其他输入文件可以直接在 Notebook 中读取。','dictionary-empty'));
-      filterTables();
+      filterLists();
     }
     populate(context);
-    function filterTables(){
+    function filterLists(){
       const value=search.value.trim().toLocaleLowerCase();
-      for(const {row,item,fieldNames} of tables.values())row.hidden=![item.label,...fieldNames].some(name=>name.toLocaleLowerCase().includes(value));
+      if(activeTab==='dictionary'){
+        for(const {row,item,fieldNames} of tables.values())row.hidden=![item.label,...fieldNames].some(name=>name.toLocaleLowerCase().includes(value));
+      }else if(toolIndex){
+        const toolPane=panes[activeTab];
+        if(toolPane.dataset.revision===toolIndex.revision&&toolPane.dataset.query===value)return;
+        toolPane.dataset.revision=toolIndex.revision;toolPane.dataset.query=value;
+        const types=activeTab==='analysis'?['analysis','view']:['annotation','annotation_component'];
+        paintTools(toolPane,toolIndex.definitions.filter(item=>types.includes(item.tool_kind)),value);
+        if(!toolPane.childElementCount)toolPane.append(node('p',value?'没有匹配的结果。':'项目尚未声明'+labels[activeTab]+'。','dictionary-empty'));
+        for(const issue of toolIndex.diagnostics)toolPane.append(node('p',issue.path+' · '+issue.detail,'op-error'));
+      }
     }
     if(context.native_notebook){
       attach(native,project,api,alive).then(value=>{if(!alive())return;session=value;status.hidden=!!value;resize();}).catch(fail);

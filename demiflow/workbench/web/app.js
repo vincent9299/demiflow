@@ -32,7 +32,32 @@
     toggle.onclick=()=>{if(!field.hidden){close();return;}field.hidden=false;toggle.setAttribute('aria-expanded','true');search.focus();};
     field.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();}};
     field.append(search);element.append(heading,field);
-    return {element,actions,search};
+    function searchScope(label,placeholder){
+      toggle.title=label;toggle.setAttribute('aria-label',label);
+      search.setAttribute('aria-label',label);search.placeholder=placeholder;
+    }
+    return {element,actions,search,searchScope};
+  }
+  function categoryTabs(label,items,onSelect){
+    const element=$('div',undefined,'op-category-tabs');
+    element.setAttribute('role','tablist');element.setAttribute('aria-label',label);
+    function select(key){
+      for(const tab of element.children){
+        tab.setAttribute('aria-selected',String(tab.dataset.kind===key));
+        tab.tabIndex=tab.dataset.kind===key?0:-1;
+      }
+    }
+    for(const [index,[key,name]] of items.entries()){
+      const tab=$('button',name);tab.type='button';tab.dataset.kind=key;tab.setAttribute('role','tab');
+      tab.onclick=()=>{select(key);onSelect(key);};
+      tab.onkeydown=event=>{
+        const next=({Home:0,End:items.length-1,ArrowLeft:(index+items.length-1)%items.length,ArrowRight:(index+1)%items.length})[event.key];
+        if(next===undefined)return;
+        event.preventDefault();element.children[next].click();element.children[next].focus();
+      };
+      element.append(tab);
+    }
+    select(items[0][0]);return {element,select};
   }
   let navigationSequence=0;
   function resizableNavigation({layout,sidebar,label,active=true}) {
@@ -93,7 +118,7 @@
     toggle.onclick=()=>{open=!open;render();toggle.focus();};render();
     return {setActive(value){active=value;render();},dispose(){resize.dispose();}};
   }
-  globalThis.ForgeNavigation=Object.freeze({header:navigationHeader,collapsible:collapsibleNavigation,resizable:resizableNavigation});
+  globalThis.ForgeNavigation=Object.freeze({header:navigationHeader,categoryTabs,collapsible:collapsibleNavigation,resizable:resizableNavigation});
   const json = value => JSON.stringify(value, null, 2);
   const offline = window.FORGE_EXPORT;
   const V = window.ForgeView;

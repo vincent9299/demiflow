@@ -177,13 +177,17 @@ def history(root, *, id):
 
 
 
-def _notebook_entry(root, item, definition):
-    path = Path(item['path'])
-    parts = path.with_suffix('').parts
+def _module_name(path):
+    parts = Path(path).with_suffix('').parts
     if parts[-1] == '__init__':
         parts = parts[:-1]
-    if not all(part.isidentifier() and not keyword.iskeyword(part) for part in parts):
-        return None
+    if all(part.isidentifier() and not keyword.iskeyword(part) for part in parts):
+        return '.'.join(parts)
+    return None
+
+
+def _notebook_entry(root, item, definition, module):
+    path = Path(item['path'])
     node = _safe_tree(definition['source']).body[0]
     if isinstance(node, ast.ClassDef):
         init = next((n for n in node.body if isinstance(n, ast.FunctionDef) and n.name == '__init__'), None)
@@ -195,7 +199,7 @@ def _notebook_entry(root, item, definition):
     if any(p['positional_only'] for p in parameters):
         return None
     preset_path = ws.relative_path(root, path.with_suffix('.presets.json').as_posix())
-    entry = dict(module='.'.join(parts), symbol=item['symbol'], parameters=parameters,
+    entry = dict(module=module, symbol=item['symbol'], parameters=parameters,
                  asynchronous=isinstance(node, ast.AsyncFunctionDef), presets={})
     if not preset_path.exists():
         return entry
@@ -243,6 +247,8 @@ def read(root, *, id, revision='current', data_tools=False):
     result = dict(definition, id=id, path=item['path'], revision=revision, historical=revision != 'current',
                   sha256=content_digest(definition['source']), file_sha256=hashlib.sha256(raw).hexdigest())
     if data_tools:
-        result['notebook_entry'] = _notebook_entry(root, item, definition)
+        result['module'] = _module_name(item['path'])
+        if result['module'] and definition['tool_kind'] in ('view', 'annotation'):
+            result['notebook_entry'] = _notebook_entry(root, item, definition, result['module'])
     bounded_json(result, 1024**2)
     return result

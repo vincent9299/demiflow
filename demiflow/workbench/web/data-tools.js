@@ -96,38 +96,33 @@ function launchForm(body,detail,{project,canInsert,insert,dialog}){
   form.append(launch,note);body.append(form);
 }
 
-export function showTools({root,kind,api,mountText,disposeReaders,project,canInsert,insert}){
-  const label=kind==='annotation'?'标注工具':'查看工具';
+export function showTool({root,item,api,mountText,disposeReaders,project,canInsert,insert}){
+  const importOnly=['analysis','annotation_component'].includes(item.tool_kind);
+  const label={analysis:'分析工具',view:'查看工具',annotation:'标注工具',annotation_component:'标注组件'}[item.tool_kind];
   const dialog=el('dialog',undefined,'data-tools-dialog'),header=el('header');
   dialog.setAttribute('aria-label',label);
-  const close=el('button','关闭'),select=el('select'),body=el('section'),issues=el('div');
-  select.setAttribute('aria-label','选择'+label);select.hidden=true;close.onclick=()=>dialog.close();
-  header.append(el('strong',label),select,close);dialog.append(header,issues,body);root.append(dialog);
-  dialog.addEventListener('close',()=>{disposeReaders(dialog);dialog.remove();},{once:true});dialog.showModal();
-  body.textContent='正在读取'+label+'…';
-  let generation=0;
-  async function read(){
-    const ticket=++generation;
-    disposeReaders(body);body.textContent='读取定义…';
-    try{
-      const detail=await api('data-tool-definition',{id:select.value});
-      if(!dialog.open||generation!==ticket)return;
-      body.replaceChildren(el('h3',detail.symbol),el('p',detail.path+' · L'+detail.line,'op-location'));
-      if(detail.description||detail.module_summary)
-        body.append(el('p',detail.description||'模块说明 · '+detail.module_summary,'op-description'));
-      launchForm(body,detail,{project,canInsert,insert,dialog});
-      const source=el('details'),content=el('div');source.append(el('summary','查看源码'),content);body.append(source);
-      source.ontoggle=()=>{if(source.open && !content.childElementCount)DemiFlowDefinition.render(content,detail,{mountText,mode:'source'});};
-    }catch(error){if(dialog.open&&generation===ticket)body.textContent=error.message;}
-  }
-  api('project-data-tools').then(async index=>{
+  const close=el('button','关闭'),body=el('section');close.onclick=()=>dialog.close();
+  header.append(el('strong',label),close);dialog.append(header,body);root.append(dialog);
+  dialog.addEventListener('close',()=>{disposeReaders(dialog);dialog.remove();},{once:true});
+  dialog.showModal();body.textContent='读取定义…';
+  api('data-tool-definition',{id:item.id}).then(detail=>{
     if(!dialog.open)return;
-    for(const issue of index.diagnostics)issues.append(el('p',issue.path+' · '+issue.detail,'op-error'));
-    for(const item of index.definitions.filter(d=>d.tool_kind===kind)){
-      const option=el('option',item.symbol+' · '+item.path);option.value=item.id;select.append(option);
+    body.replaceChildren(el('h3',detail.symbol),el('p',detail.path+' · L'+detail.line,'op-location'));
+    if(detail.description||detail.module_summary)
+      body.append(el('p',detail.description||'模块说明 · '+detail.module_summary,'op-description'));
+    if(!importOnly)launchForm(body,detail,{project,canInsert,insert,dialog});
+    else if(detail.module){
+      const code='from '+detail.module+' import '+detail.symbol;
+      body.append(el('pre',code,'definition-signature'));
+      const button=el('button','插入导入语句'),status=el('p');
+      button.disabled=!canInsert;button.onclick=async()=>{
+        try{await insert(code);dialog.close();}catch(error){status.textContent=error.message;}
+      };
+      body.append(button,status);
     }
-    if(!select.length){body.textContent='此项目尚未在 data_tools/ 中声明'+label+'。';return;}
-    select.hidden=false;select.onchange=read;await read();
+    const source=el('details'),content=el('div');source.append(el('summary','查看源码'),content);body.append(source);
+    source.ontoggle=()=>{if(source.open && !content.childElementCount)DemiFlowDefinition.render(content,detail,{mountText,mode:'source'});};
+    source.open=importOnly;
   }).catch(error=>{if(dialog.open)body.textContent=error.message;});
   return dialog;
 }

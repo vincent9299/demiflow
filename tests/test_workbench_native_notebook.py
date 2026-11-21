@@ -402,10 +402,20 @@ def test_reuse_annotation_tool_preset_in_native_notebook(browser,native_project)
     folder=root/'data_tools'
     folder.mkdir()
     (folder/'ratings.py').write_text(
-        '__demiflow_data_tools__={"review_images":"annotation"}\n'
+        '__demiflow_data_tools__={"review_images":"annotation","card":"annotation_component","count_accepted":"analysis"}\n'
+        'def count_accepted(decisions):\n    """统计已接受样本数。"""\n    return decisions.count("通过")\n'
+        'def card(row):\n    """展示一条候选。"""\n    return row\n'
         'def review_images(batch, labels, *, page_size=5):\n'
         '    """按批次和标签打开候选图审核。"""\n'
-        '    return f"{batch}: {labels[0]} ({page_size})"\n')
+        '    import ipywidgets as widgets\n'
+        '    from pathlib import Path\n'
+        '    button=widgets.Button(description=labels[0])\n'
+        '    status=widgets.Label(value=f"{batch}: {labels[0]} ({page_size})")\n'
+        '    def mark(_):\n'
+        '        Path("sample-review.txt").write_text(f"{batch}/sample-1 {labels[0]}")\n'
+        '        status.value="已记录 sample-1"\n'
+        '    button.on_click(mark)\n'
+        '    return widgets.VBox([status,button])\n')
     (folder/'ratings.presets.json').write_text(json.dumps(
         {'review_images':{'候选图质检':{'batch':'batch-12','labels':['通过','退回'],'page_size':20}}},ensure_ascii=False))
     with service(None,registry=path,notebook_python=PYTHON) as app:
@@ -416,8 +426,21 @@ def test_reuse_annotation_tool_preset_in_native_notebook(browser,native_project)
             frame=page.frame_locator('iframe.native-notebook-frame')
             expect(frame.locator('.jp-Notebook')).to_be_visible(timeout=60000)
             frame.locator('body').evaluate('async()=>{const a=window.jupyterapp;await a.restored;const p=a.shell.currentWidget;await p.context.ready;await p.sessionContext.ready;}')
+            dataTabs=page.get_by_role('tablist',name='数据分类')
+            expect(dataTabs.get_by_role('tab')).to_have_text(['数据字典','分析工具','标注工具'])
+            expect(dataTabs.get_by_role('tab',name='数据字典')).to_have_attribute('aria-selected','true')
+            kernel=frame.locator('body').evaluate('()=>window.jupyterapp.shell.currentWidget.sessionContext.session.kernel.id')
             frame.locator('.jp-CodeCell .cm-content').first.fill('original_draft = 1')
-            page.get_by_role('button',name='标注工具',exact=True).click()
+            page.get_by_role('tab',name='标注工具',exact=True).click()
+            expect(page.get_by_role('button',name='card 组件',exact=True)).to_be_visible()
+            folder=os.environ.get('FORGE_ACCEPTANCE_DIR')
+            if folder:page.screenshot(path=str(Path(folder)/'annotation-library.png'))
+            page.set_viewport_size({'width':390,'height':844})
+            for tab in dataTabs.get_by_role('tab').all():expect(tab).to_be_in_viewport()
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+            if folder:page.screenshot(path=str(Path(folder)/'annotation-library-mobile.png'))
+            page.set_viewport_size({'width':1440,'height':950})
+            page.get_by_role('button',name='review_images 工具',exact=True).click()
             dialog=page.get_by_role('dialog',name='标注工具')
             dialog.get_by_label('工具预设').select_option(label='候选图质检')
             expect(dialog.get_by_label('batch',exact=True)).to_have_value('batch-12')
@@ -432,13 +455,46 @@ def test_reuse_annotation_tool_preset_in_native_notebook(browser,native_project)
             expect(cells.first).to_contain_text('original_draft')
             expect(cells.nth(1)).to_contain_text('from data_tools.ratings import review_images')
             expect(cells.nth(1).locator('.jp-OutputArea-output')).to_have_count(0)
-            frame.locator('body').evaluate("()=>window.jupyterapp.commands.execute('notebook:run-cell')")
+            frame.locator('body').evaluate("()=>{void window.jupyterapp.commands.execute('notebook:run-cell')}")
             expect(cells.nth(1).locator('.jp-OutputArea-output')).to_contain_text('batch-13: 通过 (20)',timeout=30000)
-            page.get_by_role('button',name='标注工具',exact=True).click()
+            assert not (root/'sample-review.txt').exists()
+            cells.nth(1).get_by_role('button',name='通过',exact=True).click()
+            expect(cells.nth(1).locator('.jp-OutputArea-output')).to_contain_text('已记录 sample-1')
+            assert (root/'sample-review.txt').read_text()=='batch-13/sample-1 通过'
+            page.get_by_role('tab',name='标注工具',exact=True).click()
+            page.get_by_role('button',name='review_images 工具',exact=True).click()
             dialog.get_by_label('工具预设').select_option(label='下一批')
             expect(dialog.get_by_label('page_size',exact=True)).to_have_value('20')
-            folder=os.environ.get('FORGE_ACCEPTANCE_DIR')
             if folder:page.screenshot(path=str(Path(folder)/'annotation-tool-preset.png'))
             dialog.get_by_role('button',name='关闭').click()
+            page.get_by_role('button',name='card 组件',exact=True).click()
+            component=page.get_by_role('dialog',name='标注组件')
+            expect(component).to_contain_text('from data_tools.ratings import card')
+            expect(component.locator('.tok-keyword').first).to_have_text('def')
+            expect(component.get_by_role('button',name='插入 Notebook')).to_have_count(0)
+            component.get_by_role('button',name='插入导入语句').click()
+            expect(cells.last).to_contain_text('from data_tools.ratings import card')
+            page.get_by_role('button',name='搜索标注工具').click()
+            page.get_by_role('searchbox',name='搜索标注工具').fill('card')
+            expect(page.get_by_role('button',name='review_images 工具',exact=True)).to_have_count(0)
+            page.keyboard.press('Escape')
+            expect(page.get_by_role('button',name='review_images 工具',exact=True)).to_be_visible()
+            dataTabs.get_by_role('tab',name='标注工具').focus()
+            page.keyboard.press('ArrowLeft')
+            expect(dataTabs.get_by_role('tab',name='分析工具')).to_be_focused()
+            expect(page.get_by_role('button',name='card 组件',exact=True)).to_have_count(0)
+            page.get_by_role('button',name='count_accepted 分析',exact=True).click()
+            analysis=page.get_by_role('dialog',name='分析工具')
+            expect(analysis).to_contain_text('统计已接受样本数')
+            analysis.get_by_role('button',name='插入导入语句').click()
+            editor=cells.last.locator('.cm-content')
+            expect(editor).to_contain_text('from data_tools.ratings import count_accepted')
+            editor.fill('from data_tools.ratings import count_accepted\ncount_accepted(["通过", "退回", "通过"])')
+            frame.locator('body').evaluate("()=>{void window.jupyterapp.commands.execute('notebook:run-cell')}")
+            expect(cells.last.locator('.jp-OutputArea-output')).to_have_text('2',timeout=30000)
+            dataTabs.get_by_role('tab',name='数据字典').click()
+            expect(page.locator('.dictionary-table[data-table]').first).to_be_visible()
+            assert frame.locator('body').evaluate('()=>window.jupyterapp.shell.currentWidget.sessionContext.session.kernel.id')==kernel
+            expect(cells.first).to_contain_text('original_draft')
         finally:
             page.close()

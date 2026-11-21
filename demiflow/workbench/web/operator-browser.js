@@ -7,21 +7,15 @@
     const root=el('div',null,'op-browser'),tree=el('nav',null,'op-tree'),viewer=el('section',null,'op-viewer');
     tree.setAttribute('aria-label','项目算子目录');viewer.setAttribute('aria-label','算子定义');
     const navigation=ForgeNavigation.header({title:'算子',searchLabel:'查找算子',onSearch:()=>paintTree()});
-    const categories=el('div',null,'op-category-tabs');categories.setAttribute('role','tablist');categories.setAttribute('aria-label','算子分类');
-    for(const [kind,label] of [['code','代码算子'],['prompt','Prompt 算子']]){
-      const tab=el('button',label);tab.type='button';tab.setAttribute('role','tab');tab.dataset.kind=kind;
-      tab.onclick=()=>{
-        activeKind=kind;
-        const first=firstDefinition(kind);
-        if(first && (detail?.kind!==kind || selected!==detail?.id)) open(first.id).catch(showError);
-        else {paintTree();if(!first)emptyDetail();}
-      };
-      tab.onkeydown=event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const index=event.key==='Home'?0:event.key==='End'?1:kind==='code'?1:0;categories.children[index].click();categories.children[index].focus();}};
-      categories.append(tab);
-    }
+    const tabs=ForgeNavigation.categoryTabs('算子分类',[['code','代码算子'],['prompt','Prompt 算子']],kind=>{
+      activeKind=kind;
+      const first=firstDefinition(kind);
+      if(first && (detail?.kind!==kind || selected!==detail?.id)) open(first.id).catch(showError);
+      else {paintTree();if(!first)emptyDetail();}
+    });
     const {search}=navigation,list=el('div',null,'op-tree-items');
     list.setAttribute('role','tabpanel');list.setAttribute('aria-label','代码算子');
-    tree.append(navigation.element,categories,list);root.append(tree,viewer);host.replaceChildren(root);
+    tree.append(navigation.element,tabs.element,list);root.append(tree,viewer);host.replaceChildren(root);
     const treeNavigation=ForgeNavigation.collapsible({layout:root,sidebar:tree,header:navigation,label:'算子目录'});
     const visible = item => item.kind === 'prompt' || item.export_status === 'declared' ||
       (item.export_status === 'legacy' && item.flow_references?.length) || item.id === planSelection;
@@ -38,7 +32,7 @@
     }
     function showError(error){if(!disposed){const n=el('p',error.message,'op-error');n.setAttribute('role','alert');viewer.replaceChildren(n);}}
     function paintTree(){
-      for(const tab of categories.children){const active=tab.dataset.kind===activeKind;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;}
+      tabs.select(activeKind);
       list.setAttribute('aria-label',activeKind==='code'?'代码算子':'Prompt 算子');
       list.replaceChildren();const term=search.value.trim().toLocaleLowerCase();
       const kind=activeKind;
