@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 
-from ...resources.process_group import spawn_command
+from ...resources.process_group import spawn_command, supervise_unit
 from ...resources.process_observation import inherited_unit
 from ..contracts.dataflow import Bounds
 from ..contracts.dataflow_codec import decode_wire_document
@@ -91,13 +91,19 @@ class ManagedFitContext:
                 process.wait()
 
 
-def main(location, expected):
+def main(location, expected, phase=None):
     if not inherited_unit():
         raise ValueError("Managed training bootstrap needs a real process unit")
     raw = read_metadata(Path(location), 1024 * 1024)
     if hashlib.sha256(raw).hexdigest() != expected:
         raise ValueError("Training launch differs from the resource allocation")
     launch = json.loads(raw)
+    if phase is None:
+        return supervise_unit([sys.executable, '-B', '-m', __spec__.name, location, expected, 'worker'],
+                              deadline_unix=launch['deadline_unix'], max_rss_bytes=launch['max_rss_bytes'],
+                              shutdown_timeout_s=launch['cancel_grace_s'])
+    if phase != 'worker':
+        raise ValueError('Unknown managed training phase')
     bounds = Bounds(**launch['bounds'])
     sealed = decode_wire_document(launch['sealed'], type_name='SealedExecution', bounds=bounds)
     request = FitRequest.from_dict(launch['request'])
@@ -154,4 +160,4 @@ def main(location, expected):
 
 
 if __name__ == '__main__':
-    main(*sys.argv[1:])
+    raise SystemExit(main(*sys.argv[1:]))

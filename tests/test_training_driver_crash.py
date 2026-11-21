@@ -95,3 +95,38 @@ def test_original_lance_create_adopts_running_fit_without_row_cut(tmp_path, stop
     launch, = (tmp_path / 'run' / 'training').iterdir()
     assert launch.name == started.read_text()
     assert journal.execution_status()['attempt'] == 2
+
+
+def test_job_guardian_enforces_time_after_driver_exit(tmp_path):
+    """An uncooperative numerical worker cannot outlive the original job limit."""
+    import fcntl
+    from demiflow.resources.process_observation import UNIT_ENV, unit_stopped
+    from demiflow.resources.process_unit import birth_start
+    fd = os.open(tmp_path / 'unit.lock', os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        until = time.time() + 4
+        command = [sys.executable, '-B', '-c', '''
+from demiflow.resources.process_group import supervise_unit
+from pathlib import Path
+import sys
+raise SystemExit(supervise_unit([sys.executable, '-c',
+    "from pathlib import Path; import os,signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); "
+    "Path(__import__('sys').argv[1]).write_text(str(os.getpid())); time.sleep(300)", sys.argv[1]],
+    deadline_unix=float(sys.argv[2]), max_rss_bytes=1024**3, shutdown_timeout_s=.2))
+''', str(tmp_path / 'child'), str(until)]
+        env = dict(os.environ, PYTHONPATH=os.pathsep.join(p for p in sys.path if p))
+        with subprocess.Popen(command, env={**env, UNIT_ENV: str(fd)}, pass_fds=(fd,)) as process:
+            os.close(fd)
+            fd = None
+            while not (tmp_path / 'child').exists():
+                assert process.poll() is None and time.time() < until
+                time.sleep(.03)
+            child = int((tmp_path / 'child').read_text())
+            born = birth_start(child)
+            assert born is not None and not unit_stopped(tmp_path / 'unit.lock')
+            assert process.wait(timeout=7) != 0
+            assert birth_start(child) != born and unit_stopped(tmp_path / 'unit.lock')
+    finally:
+        if fd is not None:
+            os.close(fd)

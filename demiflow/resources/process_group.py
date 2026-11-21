@@ -45,20 +45,36 @@ def main(raw):
     if not unit:
         raise RuntimeError('Managed service has no inherited unit ownership')
     parent, expected = declaration['parent'], declaration['birth']
+    return _supervise(declaration, unit, owner=(parent, expected))
+
+
+def supervise_unit(command, *, deadline_unix, max_rss_bytes, shutdown_timeout_s):
+    """Own a complete job group independently of its submitting driver."""
+    unit = inherited_unit()
+    if not unit:
+        raise RuntimeError('Job supervision requires an inherited process unit')
+    return _supervise(dict(command=command, deadline_unix=deadline_unix,
+                      max_rss_bytes=max_rss_bytes, shutdown_timeout_s=shutdown_timeout_s), unit)
+
+
+def _supervise(declaration, unit, *, owner=None):
     stopping = [False]
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stopping.__setitem__(0, True))
     libc = ctypes.CDLL(None, use_errno=True)
-    if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
-        raise RuntimeError('Managed service subreaper unavailable')
-    if libc.prctl(1, signal.SIGTERM, 0, 0, 0) != 0:  # PR_SET_PDEATHSIG
+    if libc.prctl(36, 1, 0, 0, 0) != 0:
+        raise RuntimeError('Managed process subreaper unavailable')
+    if owner is not None and libc.prctl(1, signal.SIGTERM, 0, 0, 0) != 0:
         raise RuntimeError('Managed service parent-death supervision unavailable')
 
     def parent_alive():
-        return os.getppid() == parent and birth_start(parent) == expected
+        return owner is None or (os.getppid() == owner[0] and birth_start(owner[0]) == owner[1])
 
     if stopping[0] or not parent_alive():
-        return 1  # Original unit FD was already held throughout startup.
+        return 1
+    deadline = None
+    if 'deadline_unix' in declaration:
+        deadline = time.monotonic() + max(0, declaration['deadline_unix'] - time.time())
     child = None
     try:
         child = subprocess.Popen(declaration['command'], stdin=subprocess.DEVNULL,
@@ -66,14 +82,14 @@ def main(raw):
         if not parent_alive():
             stopping[0] = True
         while not stopping[0] and child.poll() is None:
-            if not parent_alive():
+            if not parent_alive() or (deadline is not None and time.monotonic() >= deadline):
                 break
             # Bounded original descendant traversal also rejects runaway trees.
             descendants(os.getpid())
             if 'max_rss_bytes' in declaration:
                 # One admitted worker + guardian + service tree, no second
                 # reservation. This sampled ceiling is not an OS hard cap.
-                tree = descendants(parent, include_owner=True)
+                tree = descendants(owner[0] if owner else os.getpid(), include_owner=True)
                 if sum(row['rss_bytes'] for row in tree.values()) > declaration['max_rss_bytes']:
                     raise RuntimeError('Managed model worker/service tree exceeds its original max_rss_bytes grant')
             time.sleep(.02)

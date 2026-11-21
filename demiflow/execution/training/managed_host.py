@@ -94,6 +94,7 @@ class ManagedFitHost:
         location = root / 'launch.json'
         launch = dict(work_dir=str(root), action=self.action.action_id, occurrence=self.occurrence,
                       request_key=request_key, request=request.to_dict(), binding=binding.to_dict(),
+                      max_rss_bytes=self.run.limits['max_rss_bytes'], cancel_grace_s=self.run.limits['cancel_grace_s'],
                       bounds=asdict(self.services.bounds), store_root=str(self.services.store.root),
                       sealed=json.loads(encode_wire(self.sealed, type_name='SealedExecution', bounds=self.services.bounds)))
         if inspect_source:
@@ -105,7 +106,7 @@ class ManagedFitHost:
             if launch != previous:
                 raise ValueError("Original managed launch changed")
         else:
-            launch['deadline_unix'] = time.time() + self.services.bounds.timeout_ms / 1000
+            launch['deadline_unix'] = min(self.run.deadline, time.time() + self.services.bounds.timeout_ms / 1000)
             raw = document(launch)
             atomic_bytes(location, raw)
         digest = hashlib.sha256(raw).hexdigest()
