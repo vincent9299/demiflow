@@ -33,6 +33,14 @@ for line in sys.stdin:
         event('item/completed',{'threadId':thread,'turnId':turn,'item':{'id':'compact','type':'contextCompaction'}})
         event('turn/completed',{'threadId':thread,'turn':{'id':turn,'status':'completed'}})
         continue
+    elif method=='turn/steer':
+        assert params['threadId']==thread and params['expectedTurnId']==turn
+        message = params['input'][0]['text']
+        send({'id':value['id'],'result':{'turnId':turn}})
+        if message=='继续汇总':
+            event('item/completed',{'threadId':thread,'turnId':turn,'item':{'id':'answer','type':'agentMessage','text':message}})
+            event('turn/completed',{'threadId':thread,'turn':{'id':turn,'status':'completed'}})
+        continue
     elif method=='turn/start':
         send({'id':value['id'],'result':{'turn':{'id':turn}}})
         event('turn/started',{'threadId':thread,'turn':{'id':turn}})

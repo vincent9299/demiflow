@@ -114,6 +114,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
     stop_started = None
     last_sample, peaks = 0, {'rss_bytes': 0, 'private_bytes': 0, 'processes': 0}
     outstanding = {}
+    steering = steer_rpc = None
     input_access = None
     control_bridge = None
     model_broker = None
@@ -315,6 +316,10 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                         if not provider.acknowledged:
                             provider.acknowledged = True
                             store.update(tid, delivery='not_applicable' if compact else 'acknowledged', dispatch='acknowledged')
+                    elif kind == 'steer.result':
+                        if steering and data['submission']==steering:
+                            store.finish_steer(tid,steering,data['status'])
+                            steering=None
                     elif kind == 'done':
                         final = data['status']; completed = True
                         if data.get('error'): reason = str(data['error'])[:2048]
@@ -359,6 +364,20 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                 outcome = provider.completion(response)
                 final, completed = outcome['status'], True
                 store.update(tid, delivery='not_applicable' if compact else 'acknowledged', dispatch='acknowledged')
+            if steer_rpc and steer_rpc in transport.responses:
+                try:
+                    reply = transport.take(steer_rpc)
+                    accepted = reply.get('turnId')==provider.turn
+                except ValueError:
+                    accepted = False
+                store.finish_steer(tid,steering,'accepted' if accepted else 'missed')
+                steering = steer_rpc = None
+            if (not steering and not completed and not requested and current['has_steer']
+                    and (not acp or provider.acknowledged or provider.metrics_sequence>=0)):
+                pending_steer = store.claim_steer(tid,turn['epoch'])
+                if pending_steer:
+                    steering, message = pending_steer
+                    steer_rpc = provider.steer(message,steering)
             if transport.closed and not completed: raise ConnectionError('Provider connection lost')
             # Interrupt has its own RPC result; it is not proof of child cleanup.
             for key in list(transport.responses):

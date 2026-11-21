@@ -56,6 +56,10 @@ class Service:
         self.store = Store(self.root, self.deployment.limits, initialize=True)
         self.lock, self.workers, self.closed = threading.RLock(), {}, False
         self.worker_targets = {}
+        self.queue_readers = set()
+        self.queue_shutdown = threading.Event()
+        with self.store.connect(write=True) as db:
+            db.execute("UPDATE followups SET error='服务已重启，排队已暂停。' WHERE error=''")
         self.coding_catalog = None
         self.policy_hash, self.config_path = self.seal_policy(self.deployment)
         for t in self.store.unresolved():
@@ -105,7 +109,7 @@ class Service:
     def capabilities(self, workspace, root):
         deployment, _, _ = self.binding(workspace, root)
         caps=deployment.capabilities(workspace, root)
-        return dict(caps, service_configured=True, project_authorized=caps['enabled'])
+        return dict(caps, message_queue=True, message_steering=True, service_configured=True, project_authorized=caps['enabled'])
 
     def create(self, workspace, root, request_id, provider_id):
         self.project(workspace, root)
@@ -145,6 +149,59 @@ class Service:
         if cell_capability and not self.capabilities(workspace,root).get(cell_capability):
             reject('当前开发服务未提供只读的 Notebook 单元格生成。')
         return self.start(workspace,root,session_id,submission_id,expected_revision,text,operation=operation)
+
+    def steer(self, workspace, root, session_id, turn_id, submission_id, text, from_queue=False):
+        with self.lock:
+            self._require_writable(workspace, root, session_id)
+            if self.closed or not self.capabilities(workspace,root)['start']:
+                reject('当前开发服务无法发送消息。','busy')
+            self.store.steer(workspace, session_id, turn_id, submission_id, text, from_queue=from_queue)
+            return {'accepted': True}
+
+    def enqueue(self, workspace, root, session_id, turn_id, submission_id, text):
+        with self.lock:
+            self._require_writable(workspace, root, session_id)
+            if self.closed or not self.capabilities(workspace, root)['start']:
+                reject('当前开发服务无法发送消息。', 'busy')
+            self.store.enqueue(workspace, session_id, turn_id, submission_id, text)
+            self._watch_queue(workspace, root, session_id)
+            return {'accepted': True}
+
+    def change_queue(self, workspace, root, session_id, submission_id, action):
+        with self.lock:
+            self._require_writable(workspace, root, session_id)
+            self.store.change_queue(workspace, session_id, submission_id, action)
+            if action == 'resume':
+                self._watch_queue(workspace, root, session_id)
+            return {'accepted': True}
+
+    def _watch_queue(self, workspace, root, sid):
+        if self.closed or sid in self.queue_readers:
+            return
+        self.queue_readers.add(sid)
+        def drain():
+            while not self.queue_shutdown.is_set():
+                with self.lock:
+                    try:
+                        if self.closed:
+                            break
+                        self._reap()
+                        session = self.store.show(workspace, sid)
+                        queue = session['queued_messages']
+                        if not queue or queue[0]['error']:
+                            self.queue_readers.discard(sid)
+                            return
+                        if session['turn']['cleanup'] == 'complete':
+                            head = queue[0]
+                            self.start_project(workspace, root, sid, head['submission'], session['revision'], head['text'])
+                    except (OSError, ValueError) as exc:
+                        self.queue_readers.discard(sid)
+                        self.store.hold_queue(sid, str(exc))
+                        return
+                self.queue_shutdown.wait(.35)
+            with self.lock:
+                self.queue_readers.discard(sid)
+        threading.Thread(target=drain, daemon=True, name='development-followups').start()
 
     def _require_writable(self, workspace, root, session_id):
         self.project(workspace,root)
@@ -388,6 +445,7 @@ class Service:
             if self.closed:
                 return
             self.closed = True
+            self.queue_shutdown.set()
             for tid, (_, life) in self.workers.items():
                 try:
                     t = self.store.turn(tid); s = self.store.session(t['session'])

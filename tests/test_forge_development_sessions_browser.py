@@ -332,3 +332,72 @@ def test_turn_rail_history_and_project_files_share_the_conversation(tmp_path):
                 page.get_by_role('button',name='关闭项目目录').click()
                 expect(page.get_by_label('开发要求')).to_have_value('草稿')
             assert page.locator('.development-more,.development-trajectory,[role=tablist]').count()==0
+
+
+def test_append_messages_while_busy_survives_reload_and_drains_in_order(tmp_path):
+    import time
+    with conversation_app(tmp_path) as (server, workspace, root):
+        with browser_page(server) as (page, expect):
+            field = page.get_by_label('开发要求')
+            field.fill('input for queue test')
+            field.press('Enter')
+            expect(page.locator('.development-status')).to_contain_text('等待回答')
+            sid = current_session(page)
+            start = server.development.show(workspace, sid)
+            stop = page.get_by_role('button', name='停止', exact=True)
+            expect(stop).to_be_visible()
+            for index, message in enumerate(('先核对输入', '临时补充', '再汇总输出'), 1):
+                field.fill(message)
+                expect(page.get_by_role('button', name='追加消息')).to_be_enabled()
+                if index == 2:
+                    page.get_by_role('button', name='追加消息').click()
+                else:
+                    field.press('Enter')
+                expect(page.locator('.dc-queue-row')).to_have_count(index)
+            page.reload()
+            rows = page.locator('.dc-queue-row')
+            expect(rows).to_have_count(3)
+            rows.filter(has_text='临时补充').get_by_role('button', name='撤回').click()
+            expect(rows).to_have_count(2)
+            expect(stop).to_be_visible()
+            assert server.development.store.show(workspace,sid)['revision'] == 1
+        # The browser has closed. Only the server owns accepted messages.
+        prompt = server.development.store.pending(start['turn']['id'])[0]
+        server.development.input(workspace, root, sid, start['turn']['id'], prompt['id'],prompt['digest'],{'q1':'yes'})
+        until = time.monotonic()+15
+        while time.monotonic()<until:
+            final = server.development.show(workspace,sid)
+            if final['revision']==3 and final['turn']['cleanup']=='complete':
+                break
+            time.sleep(.1)
+        assert final['revision']==3 and final['turn']['state']=='completed' and not final['queued_messages'], final
+        page = server.development.store.events(workspace,sid,limit=50)
+        messages = [e['data']['text'] for e in page['events'] if e['type']=='message.user']
+        assert messages == ['input for queue test','先核对输入','再汇总输出']
+
+
+def test_command_control_enter_steer_existing_turn_and_promote_queue(tmp_path):
+    with conversation_app(tmp_path) as (server, workspace, root), browser_page(server) as (page, expect):
+        field = page.get_by_label('开发要求')
+        field.fill('hang for steering')
+        field.press('Enter')
+        expect(page.locator('.development-status')).to_contain_text('正在开发')
+        sid = current_session(page)
+        tid = server.development.show(workspace,sid)['turn']['id']
+        for combo, message in [('Meta+Enter','先看输入表'),('Control+Enter','再核对版本')]:
+            field.fill(message)
+            field.press(combo)
+            expect(page.locator('.dfc-user').filter(has_text=message)).to_contain_text('本轮已接收')
+        field.fill('继续汇总')
+        field.press('Enter')
+        expect(page.locator('.dc-queue-row')).to_have_count(1)
+        field.press('Meta+Enter')
+        expect(page.locator('.development-status')).to_have_text('本轮已完成')
+        expect(page.locator('.dc-queue-row')).to_have_count(0)
+        expect(page.locator('.dfc-answer')).to_contain_text('继续汇总')
+        page.reload()
+        expect(page.locator('.dfc-user')).to_have_count(4)
+        assert server.development.show(workspace,sid)['revision']==1
+        events = server.development.store.events(workspace,sid)['events']
+        assert {event['turn_id'] for event in events}=={tid}
+        assert [event['data']['text'] for event in events if event['type']=='message.steer']==['先看输入表','再核对版本','继续汇总']

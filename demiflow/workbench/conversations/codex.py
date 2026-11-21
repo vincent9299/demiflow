@@ -132,6 +132,10 @@ class Codex:
             input=[dict(type='text', text=message)], clientUserMessageId=submission,
             effort=self.config.get('effort', 'xhigh'), model=self.config['model']))
 
+    def steer(self, message, submission):
+        return self.transport.request('turn/steer', dict(threadId=self.thread,expectedTurnId=self.turn,
+            input=[dict(type='text',text=message)],clientUserMessageId=submission))
+
     def started(self, response):
         self.turn = response['turn']['id']
         return self.turn

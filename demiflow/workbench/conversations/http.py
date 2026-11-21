@@ -21,6 +21,9 @@ GET_FIELDS = {
     'dev-output': ({'session_id', 'item_id'}, {'after_sequence', 'turn_id', 'provider_epoch', 'from_sequence', 'through_sequence'}),
 }
 POST_FIELDS = {
+    'dev-steer': ({'session_id','turn_id','submission_id','text'}, {'from_queue'}),
+    'dev-enqueue': ({'session_id','turn_id','submission_id','text'}, set()),
+    'dev-queue-change': ({'session_id','submission_id','action'}, set()),
     'dev-compact': ({'session_id','submission_id','expected_revision'},set()),
     'dev-session-create': ({'request_id', 'provider_id'}, {'new_conversation', 'session_kind'}),
     'dev-turn-start': ({'session_id', 'submission_id', 'expected_revision', 'text'}, {'operation'}),
@@ -129,7 +132,7 @@ def post(server, workspace, root, name, request, *, consumer_closed=None):
     if service is None: reject('Project development is not enabled')
     if getattr(service, 'remote', False):
         return service.forward(workspace, root, name, request, mutation=True, consumer_closed=consumer_closed)
-    actions = {'dev-session-create': service.create_project, 'dev-turn-start': service.start_project, 'dev-compact': service.compact, 'dev-input': service.input, 'dev-notebook-claim': service.claim_cell_command,
+    actions = {'dev-steer': service.steer, 'dev-enqueue': service.enqueue, 'dev-queue-change': service.change_queue, 'dev-session-create': service.create_project, 'dev-turn-start': service.start_project, 'dev-compact': service.compact, 'dev-input': service.input, 'dev-notebook-claim': service.claim_cell_command,
                'dev-cancel': service.cancel, 'dev-recover': service.recover}
     with service.lock:
         return actions[name](workspace, root, **request)
