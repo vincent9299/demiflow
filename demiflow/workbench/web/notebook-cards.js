@@ -1,3 +1,4 @@
+import {presentDataFrame} from './notebook-dataframe.js';
 import {notebookConversation} from './notebook-assistant.js';
 
 const icons={plus:'M12 5v14M5 12h14',chat:'M5 4h14a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H9l-5 4V5a1 1 0 0 1 1-1Z',close:'m6 6 12 12M6 18 18 6',run:'m8 5 11 7-11 7z',code:'m8 7-5 5 5 5m8-10 5 5-5 5',up:'M12 19V5m-6 6 6-6 6 6'};
@@ -13,6 +14,11 @@ function icon(doc,name,label,action){
 export function mountCards({desk,documentPane,panel,app,api,project,alive,permissions,tables,layout}){
   const book=panel.content,doc=book.node.ownerDocument,win=doc.defaultView;
   const style=element(doc,'link');style.rel='stylesheet';style.href='/notebook-cards.css';doc.head.append(style);
+  const frameTables='.jp-RenderedHTMLCommon table.dataframe';
+  const renderTables=node=>{
+    if(node.matches?.(frameTables))presentDataFrame(node);
+    node.querySelectorAll?.(frameTables).forEach(presentDataFrame);
+  };
   const top=element(document,'header','df-book-header'),title=element(document,'strong');
   const nativeMode=element(document,'button','df-view-switch','完整 Notebook');nativeMode.type='button';
   const aside=element(document,'aside','df-card-assistant');aside.setAttribute('aria-label','卡片助手');
@@ -156,7 +162,14 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
       let bar=decorated.get(cell);
       if(!bar){
         bar=element(doc,'header','df-cell-tools');const name=element(doc,'span','df-cell-title');
-        const edit=icon(doc,'code','编辑代码',()=>{focusCell(cell);cell.node.dataset.dfFolded='false';book.mode='edit';cell.editor?.focus();});
+        const edit=icon(doc,'code','编辑代码',()=>{
+          focusCell(cell);
+          const fold=cell.model.outputs.length>0&&cell.node.dataset.dfFolded==='false';
+          cell.node.dataset.dfFolded=String(fold);
+          book.mode=fold?'command':'edit';
+          if(!fold)cell.editor?.focus();
+          schedulePaint();
+        });
         const run=icon(doc,'run','运行卡片',async()=>{
           if(!permissions().analysis_execute)return;
           run.disabled=true;cell.node.querySelector('.df-run-error')?.remove();
@@ -172,13 +185,16 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
               const warning=element(doc,'p','df-run-error',error.message||'运行失败');
               warning.setAttribute('role','status');cell.node.querySelector('.df-run-error')?.remove();bar.after(warning);
             }
-          }finally{run.disabled=!permissions().analysis_execute;}
+          }finally{run.disabled=!permissions().analysis_execute;schedulePaint();}
         });
         run.disabled=!permissions().analysis_execute;bar.append(name,edit,run);
         cell.node.prepend(bar);decorated.set(cell,bar);
         cell.node.dataset.dfFolded=String(cell.model.outputs.length>0);
       }
       if(bar.parentNode!==cell.node)cell.node.prepend(bar);
+      const expanded=cell.node.dataset.dfFolded==='false';
+      const edit=bar.children[1],label=expanded&&cell.model.outputs.length?'收起代码':'编辑代码';
+      edit.setAttribute('aria-expanded',String(expanded));edit.setAttribute('aria-label',label);edit.title=label;
       const source=sourceOf(cell);
       bar.firstChild.textContent=cell.model.getMetadata('demiflow_card_title')||(source.startsWith('# ')?source.slice(2,98).split('\n')[0]:'');
     }
@@ -187,12 +203,17 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
   const observer=new win.MutationObserver(records=>{
     if(records.some(r=>[...r.addedNodes].some(n=>n.nodeType===1&&(n.matches('.jp-CodeCell')||n.querySelector('.jp-CodeCell')))))schedulePaint();
   });
+  const outputObserver=new win.MutationObserver(records=>{
+    for(const record of records)for(const node of record.addedNodes)
+      if(node.nodeType===1)renderTables(node);
+  });
+  outputObserver.observe(book.node,{subtree:true,childList:true});renderTables(book.node);
   observer.observe(book.node,{subtree:true,childList:true});
   book.activeCellChanged.connect(trackSelection);panel.model.contentChanged.connect(changed);panel.context.pathChanged.connect(rename);nativeMode.onclick=()=>setMode(!classic);
   input.maxLength=8192;input.onchange=remember;win.addEventListener('pagehide',remember);
   rename();setMode(false);showAssistant(savedOpen===true);trackSelection();decorate();
   return {ask,dispose(){
-    remember();dead=true;win.removeEventListener('pagehide',remember);observer.disconnect();win.cancelAnimationFrame(paintFrame);book.activeCellChanged.disconnect(trackSelection);panel.model?.contentChanged.disconnect(changed);panel.context.pathChanged.disconnect(rename);
+    remember();dead=true;outputObserver.disconnect();book.node.querySelectorAll('.df-dataframe-view').forEach(view=>view.remove());win.removeEventListener('pagehide',remember);observer.disconnect();win.cancelAnimationFrame(paintFrame);book.activeCellChanged.disconnect(trackSelection);panel.model?.contentChanged.disconnect(changed);panel.context.pathChanged.disconnect(rename);
     divider.dispose();for(const bar of decorated.values())bar.remove();style.remove();doc.body.classList.remove('df-card-mode');aside.remove();top.remove();delete desk.dataset.assistant;
   }};
 }

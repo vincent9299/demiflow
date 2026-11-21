@@ -75,3 +75,5 @@ main.native-data-active{padding:0!important;max-width:none!important;overflow:hi
 .df-reference{flex-wrap:wrap}.df-tool-chip{display:inline-flex;align-items:center}.df-tool-chip .df-card-icon{width:18px;height:18px}
 @media(max-width:850px){.notebook-desk[data-assistant=open]{grid-template-columns:minmax(0,1fr)}.notebook-desk[data-assistant=open]>.notebook-document,.notebook-desk>.side-navigation-resizer{display:none}.df-card-assistant{border:0}}
 @media(max-width:600px){.native-data-workspace:has(.notebook-desk[data-assistant=open]){grid-template-columns:minmax(0,1fr)}.native-data-workspace:has(.notebook-desk[data-assistant=open])>:is(.data-dictionary,.side-navigation-resizer,.side-navigation-reopen){display:none}}
+.notebook-document > .df-book-header{height:auto;min-height:56px;padding:6px clamp(12px,2.2vw,32px);box-sizing:border-box}
+.notebook-document > .df-book-header > strong{font-size:clamp(16px,1.4vw,22px);line-height:1.3;font-weight:600;color:#20242b}
