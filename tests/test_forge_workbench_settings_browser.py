@@ -9,7 +9,15 @@ from demiflow.workbench.projects import workspace as ws
 from demiflow.forge.platform import content_digest
 from test_forge_runtime_core_flow import unregistered,root,base,browser
 from test_forge_public_api import service
-from test_forge_workbench_browser import page_for,pipeline
+from test_forge_workbench_browser import page_for
+
+
+def open_settings(page):
+    form = page.locator('.wb-settings')
+    if not form.is_visible():
+        page.locator('.wb-more > summary').click()
+        page.get_by_role('button', name='接入与权限', exact=True).click()
+    expect(form).to_be_visible()
 
 
 def registered_project(tmp_path,root):
@@ -29,7 +37,7 @@ def edit_while_context_is_held(page):
     form.get_by_label('登记流程入口',exact=True).fill('flows/waiting.py:run')
     form.get_by_label('登记参数文件',exact=True).fill('flows/waiting.json')
     form.get_by_label('保留结果为输入',exact=True).uncheck()
-    form.get_by_label('保存图上配置',exact=True).check()
+    form.get_by_label('保存图上配置',exact=True).uncheck()
     return held,form
 
 
@@ -44,15 +52,16 @@ def assert_drafts(form):
     expect(form.get_by_label('登记流程入口',exact=True)).to_have_value('flows/waiting.py:run')
     expect(form.get_by_label('登记参数文件',exact=True)).to_have_value('flows/waiting.json')
     expect(form.get_by_label('保留结果为输入',exact=True)).not_to_be_checked()
-    expect(form.get_by_label('保存图上配置',exact=True)).to_be_checked()
+    expect(form.get_by_label('保存图上配置',exact=True)).not_to_be_checked()
 
 
 def test_delayed_context_preserves_drafts_and_registers_the_edited_target(unregistered,tmp_path,browser,monkeypatch):
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN',str(tmp_path/'domain'))
     registry,key=registered_project(tmp_path,unregistered)
     with service(None,registry=registry,enable_runs=True,enable_config_write=True) as app,page_for(browser,app) as (page,errors):
-        pipeline(page)
-        page.get_by_role('button',name='接入与权限',exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        expect(page.locator('.wb-graph')).not_to_have_attribute('aria-busy', 'true')
+        open_settings(page)
         held,form=edit_while_context_is_held(page)
         finish_context(page,held)
         assert_drafts(form)
@@ -67,7 +76,7 @@ def test_delayed_context_preserves_drafts_and_registers_the_edited_target(unregi
         # Registration must not implicitly save either permission draft.
         item=console.load_registry(registry)['projects'][key]
         assert console.permissions(item)['attach'] is True
-        assert console.capabilities(item)['config_write'] is False
+        assert console.capabilities(item)['config_write'] is True
         assert not (unregistered/'.forge/runs').exists()
         assert not errors,errors
 
@@ -76,8 +85,9 @@ def test_context_revocation_keeps_fields_but_invalidates_permission_cas(unregist
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN',str(tmp_path/'domain'))
     registry,key=registered_project(tmp_path,unregistered)
     with service(None,registry=registry,enable_runs=True,enable_config_write=True) as app,page_for(browser,app) as (page,errors):
-        pipeline(page)
-        page.get_by_role('button',name='接入与权限',exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        expect(page.locator('.wb-graph')).not_to_have_attribute('aria-busy', 'true')
+        open_settings(page)
         held,form=edit_while_context_is_held(page)
         old=console.load_registry(registry)
         console.set_permissions(registry,key,expected=content_digest(old),run_submit=False,run_control=False,attach=False)
@@ -114,7 +124,7 @@ def test_registration_waits_for_initial_graph_and_keeps_edited_target(unregister
         }''')
         page.get_by_role('button',name='管道',exact=True).click()
         page.wait_for_function('() => typeof window.__releaseGraph==="function"')
-        page.get_by_role('button',name='接入与权限',exact=True).click()
+        open_settings(page)
         form=page.locator('.wb-settings')
         form.get_by_label('登记流程入口',exact=True).fill('flows/waiting.py:run')
         form.get_by_label('登记参数文件',exact=True).fill('flows/waiting.json')
@@ -136,8 +146,9 @@ def test_busy_registration_is_unapplied_and_retries_only_on_explicit_click(unreg
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN',str(tmp_path/'domain'))
     registry,key=registered_project(tmp_path,unregistered)
     with service(None,registry=registry,enable_runs=True,enable_config_write=True) as app,page_for(browser,app) as (page,errors):
-        pipeline(page)
-        page.get_by_role('button',name='接入与权限',exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        expect(page.locator('.wb-graph')).not_to_have_attribute('aria-busy', 'true')
+        open_settings(page)
         form=page.locator('.wb-settings')
         form.get_by_label('登记流程入口',exact=True).fill('flows/waiting.py:run')
         form.get_by_label('登记参数文件',exact=True).fill('flows/waiting.json')
