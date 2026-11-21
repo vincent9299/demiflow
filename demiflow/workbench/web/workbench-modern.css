@@ -27,7 +27,7 @@
 .op-heading h2{font-size:24px;font-weight:550;letter-spacing:-.025em;line-height:1.4;margin:3px 0 7px;overflow-wrap:anywhere}.op-eyebrow{font-size:11px;font-weight:500;letter-spacing:.07em;color:#8b97ac}.op-location{font:12px/1.6 ui-monospace,monospace;color:#8995a8;overflow-wrap:anywhere}
 .op-browser .op-text-button,.flow-arguments .op-text-button{border:0;box-shadow:none;background:transparent;border-radius:5px;padding:6px 9px;color:#708098;font-size:12px;white-space:nowrap}
 .op-browser .op-text-button:hover{background:var(--op-soft);color:var(--op-accent)}
-.op-description{font-size:13px;line-height:1.7;color:#6c788b;max-width:72ch}.op-tabs{display:flex;gap:22px;margin:24px 0 18px;border-bottom:1px solid var(--op-line)}
+.op-description{font-size:13px;line-height:1.7;color:#6c788b;max-width:72ch}.op-tabs{display:flex;flex-wrap:wrap;gap:0 22px;margin:24px 0 18px;border-bottom:1px solid var(--op-line)}
 .op-tabs .op-text-button{border-radius:0;padding:8px 0;font-size:13px}.op-tabs .op-text-button[aria-pressed=true]{color:var(--op-accent);box-shadow:inset 0 -2px var(--op-accent)}
 .op-content{min-width:0}.op-content pre,.op-contract-source{font:13px/1.9 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:#fafbfe;border:0;border-radius:8px;padding:20px;color:#36455f}
 .op-content .source-view,.op-content .reading-shell{border:0;box-shadow:none}.op-muted{color:var(--op-muted);font-size:12px;line-height:1.7}.op-error{font-size:13px;color:#ad4f57;overflow-wrap:anywhere}.op-empty{color:var(--op-muted);padding:60px 10px;text-align:center}
