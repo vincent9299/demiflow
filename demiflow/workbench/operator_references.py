@@ -5,7 +5,7 @@ from pathlib import Path
 
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.schema import ForgeError
-from .projects.io import relative_path
+from demiflow.forge.project_io import relative_path
 
 
 def _api(snapshot):
