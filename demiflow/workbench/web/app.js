@@ -32,11 +32,37 @@
     toggle.onclick=()=>{if(!field.hidden){close();return;}field.hidden=false;toggle.setAttribute('aria-expanded','true');search.focus();};
     field.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();}};
     field.append(search);element.append(heading,field);
-    return {element,actions,search};
+    function searchScope(label,placeholder){
+      toggle.title=label;toggle.setAttribute('aria-label',label);
+      search.setAttribute('aria-label',label);search.placeholder=placeholder;
+    }
+    return {element,actions,search,searchScope};
+  }
+  function categoryTabs(label,items,onSelect){
+    const element=$('div',undefined,'op-category-tabs');
+    element.setAttribute('role','tablist');element.setAttribute('aria-label',label);
+    function select(key){
+      for(const tab of element.children){
+        tab.setAttribute('aria-selected',String(tab.dataset.kind===key));
+        tab.tabIndex=tab.dataset.kind===key?0:-1;
+      }
+    }
+    for(const [index,[key,name]] of items.entries()){
+      const tab=$('button',name);tab.type='button';tab.dataset.kind=key;tab.setAttribute('role','tab');
+      tab.onclick=()=>{select(key);onSelect(key);};
+      tab.onkeydown=event=>{
+        const next=({Home:0,End:items.length-1,ArrowLeft:(index+items.length-1)%items.length,ArrowRight:(index+1)%items.length})[event.key];
+        if(next===undefined)return;
+        event.preventDefault();element.children[next].click();element.children[next].focus();
+      };
+      element.append(tab);
+    }
+    select(items[0][0]);return {element,select};
   }
   let navigationSequence=0;
-  function resizableNavigation({layout,sidebar,label,active=true}) {
+  function resizableNavigation({layout,sidebar,label,active=true,right=false}) {
     const handle=$('div',undefined,'side-navigation-resizer'),key='demiflow.navigation-width.'+label;
+    const direction=right?-1:1;
     let width=null,drag=null,shield=null,disposed=false;
     try{const saved=Number(sessionStorage.getItem(key));if(saved>=140&&saved<=560)width=saved;}catch{}
     if(!sidebar.id)sidebar.id='side-navigation-'+(++navigationSequence);
@@ -50,7 +76,7 @@
       const {min,max}=bounds();
       if(width!==null)layout.style.setProperty('--side-navigation-width',Math.max(min,Math.min(max,width))+'px');
       const rect=sidebar.getBoundingClientRect(),parent=layout.getBoundingClientRect();
-      handle.style.left=(rect.right-parent.left-4)+'px';
+      handle.style.left=((right?rect.left:rect.right)-parent.left-4)+'px';
       handle.setAttribute('aria-valuemin',min);handle.setAttribute('aria-valuemax',max);handle.setAttribute('aria-valuenow',Math.round(rect.width));
     }
     function setWidth(value){const {min,max}=bounds();width=Math.max(min,Math.min(max,value));sync();}
@@ -65,13 +91,13 @@
       // Native Notebook is an iframe: keep the gesture in the shell while crossing it.
       shield=$('div',undefined,'side-navigation-drag-shield');document.body.append(shield);
     };
-    handle.onpointermove=event=>{if(drag?.id===event.pointerId)setWidth(drag.width+event.clientX-drag.x);};
+    handle.onpointermove=event=>{if(drag?.id===event.pointerId)setWidth(drag.width+direction*(event.clientX-drag.x));};
     handle.onpointerup=finish;handle.onpointercancel=finish;handle.onlostpointercapture=finish;
     handle.ondblclick=()=>{width=null;layout.style.removeProperty('--side-navigation-width');save();sync();};
     handle.onkeydown=event=>{
       if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
       event.preventDefault();const {min,max}=bounds(),now=sidebar.getBoundingClientRect().width;
-      setWidth(event.key==='Home'?min:event.key==='End'?max:now+(event.key==='ArrowRight'?1:-1)*(event.shiftKey?40:10));save();
+      setWidth(event.key==='Home'?min:event.key==='End'?max:now+direction*(event.key==='ArrowRight'?1:-1)*(event.shiftKey?40:10));save();
     };
     const observer=new ResizeObserver(sync);observer.observe(layout);observer.observe(sidebar);sync();
     return {setActive(value){active=value;if(!active)finish();else if(width===null)layout.style.removeProperty('--side-navigation-width');sync();},dispose(){disposed=true;finish();observer.disconnect();handle.remove();}};
@@ -93,7 +119,7 @@
     toggle.onclick=()=>{open=!open;render();toggle.focus();};render();
     return {setActive(value){active=value;render();},dispose(){resize.dispose();}};
   }
-  globalThis.ForgeNavigation=Object.freeze({header:navigationHeader,collapsible:collapsibleNavigation,resizable:resizableNavigation});
+  globalThis.ForgeNavigation=Object.freeze({header:navigationHeader,categoryTabs,collapsible:collapsibleNavigation,resizable:resizableNavigation});
   const json = value => JSON.stringify(value, null, 2);
   const offline = window.FORGE_EXPORT;
   const V = window.ForgeView;
@@ -147,8 +173,8 @@
     if (!root) { disposeViewHandles(); developmentView?.dispose(); developmentView = null; workbenchView?.dispose(); workbenchView=null; notebooksView?.dispose();notebooksView=null; }
     for (const reader of readers) if (!root || root.contains(reader.element)) {reader.dispose(); readers.delete(reader);}
   }
-  function mountText(parent, text, {sourceOnly=false, compactSource=false, continuousSource=false, resolveLink, defaultMode='preview'}={}) {
-    const reader=globalThis.ForgeReading.createTextReader({text, compactSource, continuousSource, defaultMode:sourceOnly?'source':defaultMode,
+  function mountText(parent, text, {sourceOnly=false, compactSource=false, continuousSource=false, pythonLine, resolveLink, defaultMode='preview'}={}) {
+    const reader=globalThis.ForgeReading.createTextReader({text, compactSource, continuousSource, pythonLine, defaultMode:sourceOnly?'source':defaultMode,
       identity:{epoch:viewEpoch, selection:selectionEpoch}, resolveLink, offline:!!offline});
     if(sourceOnly)reader.element.querySelector('.reading-toolbar').hidden=true;
     readers.add(reader);parent.append(reader.element);return reader;
@@ -284,7 +310,7 @@
         // Keep transient admission contention inside the original project read.
         // Result-source selection and all writes retain their explicit recovery.
         const projectRead=err.operationStarted===false&&(
-          !body&&['projects','capabilities','context','changes','runs','graph','graph-source','table','sample','project-operators','operator-definition','operator-history','flow-arguments','project-documents','project-markdown'].includes(path)
+          !body&&['projects','capabilities','context','changes','runs','graph','graph-source','table','sample','project-data-tools','data-tool-definition','project-operators','operator-definition','operator-history','flow-arguments','project-file-text','project-files','project-documents','project-markdown'].includes(path)
           ||!!body&&['plan-preview','plan-node-detail','plan-pipeline-source'].includes(path));
         if(projectRead&&!write&&!cleanup&&err.code==='busy'&&!signal.aborted&&attempts<12&&Date.now()-started<20000){
           const wait=Math.min(2000,100*2**Math.min(attempts++,5));
@@ -747,7 +773,7 @@
     const project=workspaceId,epoch=viewEpoch;
     const localApi=(path,query,body)=>{if(epoch!==viewEpoch)throw staleRequest();return api(path,query,body,project);};
     const originalPath=pendingOriginalPath;pendingOriginalPath=null;
-    const mounted=await ForgeNotebooks.mount({parent:main,api:localApi,project,context,request,originalPath,onBinding});
+    const mounted=await ForgeNotebooks.mount({parent:main,api:localApi,project,context,request,originalPath,onBinding,mountText,disposeReaders});
     if(epoch!==viewEpoch){mounted.dispose();throw staleRequest();}
     notebooksView=mounted;
     updates.context=fresh=>mounted.updateContext(fresh);

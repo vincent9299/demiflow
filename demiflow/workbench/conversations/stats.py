@@ -171,7 +171,7 @@ class _Cache:
                 totals.sequence = row['sequence']
             totals.rows += rows; totals.bytes += used
             complete = totals.sequence == session['sequence']
-            count = sum(operation == 'message' for operation in turns.values())
+            count = sum(operation != 'compact' for operation in turns.values())
             captured = len(totals.captured_turns)
             metric_complete = (captured == count and len(totals.native_sequences) == len(totals.epochs)
                                and totals.usages == totals.models + totals.attempts and totals.timed_models == totals.models and not totals.invalid)

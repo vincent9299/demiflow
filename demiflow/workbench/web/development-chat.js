@@ -26,7 +26,6 @@
 (() => {
   'use strict';
   const LIMITS=Object.freeze({items:100,itemBytes:65536,textBytes:1048576,summary:256});
-  const MODES=new Set(['compact','standard','detailed']);
   const encoder=new TextEncoder(),decoder=new TextDecoder();
   const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;};
   const paths={copy:'M8 7V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2M5 7h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z',check:'m5 12 4 4L19 6',chevron:'m6 9 6 6 6-6',bash:'m4 6 6 6-6 6m10 0h6',file:'M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 13h8M8 17h5',notice:'M12 8v5m0 4h.01M12 3 2 21h20Z'};
@@ -61,9 +60,9 @@
   function create({flow,onRaw=()=>{},onChange=()=>{},onTrim=()=>{}}={}){
     if(!(flow instanceof Element))throw new TypeError('A chat flow element is required');
     const items=new Map(),turns=new Map(),textItems=new Map(),toolItems=new Map(),seen=new Map();
-    let mode='standard',textBytes=0,trimmed=0,disposed=false,lastText=null,pagedText=null,latestTurn=null,renderTimer=null;
-    flow.classList.add('dfc-chat');flow.dataset.mode=mode;
-    const stats=()=>({items:items.size,turns:turns.size,textBytes,trimmed,mode});
+    let textBytes=0,trimmed=0,disposed=false,lastText=null,pagedText=null,latestTurn=null,renderTimer=null;
+    flow.classList.add('dfc-chat');
+    const stats=()=>({items:items.size,turns:turns.size,textBytes,trimmed});
     const changed=()=>{if(!disposed)onChange(stats());};
     function disclosure(label,className,onToggle){
       const node=el('details',undefined,className),heading=el('summary'),leading=el('span',undefined,'dfc-leading'),name=el('span',label,'dfc-label'),body=el('div',undefined,'dfc-disclosure-body');
@@ -80,8 +79,8 @@
       turn.process.node.hidden=!turn.processCount;
       turn.step.label.textContent=turn.toolCount?(turn.commandCount?(turn.done?'Ran commands':'Running commands'):(turn.done?'Used tools':'Using tools')):(turn.done?'Thought for a while':'Thinking');
       turn.process.node.dataset.running=String(live);turn.step.node.dataset.running=String(live);
-      showDefault(turn.process,mode==='detailed'||mode==='standard'&&(live||turn===latestTurn));
-      showDefault(turn.step,mode!=='compact'&&(mode==='detailed'||live||turn===latestTurn));
+      showDefault(turn.process,live||turn===latestTurn);
+      showDefault(turn.step,live||turn===latestTurn);
     }
     function newTurn(event){
       const key=turnKey(event);let turn=turns.get(key);if(turn)return turn;
@@ -139,7 +138,7 @@
     function renderVisible(){
       renderTimer=null;if(disposed)return;
       for(const item of items.values()){
-        item.source.hidden=!item.sourceRef||!(item.truncated||mode==='detailed'||item.row?.node.open);
+        item.source.hidden=!item.sourceRef||!(item.truncated||item.kind==='answer'||item.row?.node.open);
         if(item.kind==='user')continue;
         if(!visible(item)){item.view?.dispose();item.view=null;item.dirty=true;continue;}
         if(!item.dirty)continue;item.dirty=false;
@@ -230,11 +229,10 @@
       // duration is invented when the terminal event is outside that window.
       if(value.cleanup==='complete')turn.done=true;paintTurn(turn);queueRender();changed();
     }
-    function setMode(next){if(!MODES.has(next))throw new TypeError('Unknown chat presentation mode');if(disposed)return;mode=next;flow.dataset.mode=mode;for(const turn of turns.values())paintTurn(turn);queueRender();changed();}
     function reset(){clearTimeout(renderTimer);renderTimer=null;for(const item of items.values())item.view?.dispose();items.clear();turns.clear();textItems.clear();toolItems.clear();seen.clear();flow.replaceChildren();textBytes=0;lastText=pagedText=latestTurn=null;changed();}
     const timer=setInterval(()=>{if(!disposed)for(const turn of turns.values())if(!turn.done)paintTurn(turn);},1000);
-    function dispose(){if(disposed)return;disposed=true;clearInterval(timer);reset();flow.classList.remove('dfc-chat');delete flow.dataset.mode;}
-    return {project,updateSession,setMode,reset,dispose,items,get textBytes(){return textBytes;},get stats(){return stats();}};
+    function dispose(){if(disposed)return;disposed=true;clearInterval(timer);reset();flow.classList.remove('dfc-chat');}
+    return {project,updateSession,reset,dispose,items,get textBytes(){return textBytes;},get stats(){return stats();}};
   }
   globalThis.ForgeDevelopmentChat=Object.freeze({create,limits:LIMITS});
 })();

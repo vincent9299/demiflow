@@ -10,6 +10,10 @@
 
 每条 Flow 在 `flows/` 定义一个明确入口。共享代码算子放在 `operators/`，版本化的 Prompt 或 Agent 定义放在 `prompts/`。源码目录中的文件和项目声明中已登记的入口分别计数。准备交付的入口显式绑定实际使用的参数。
 
+在模块顶层用 `__demiflow_operators__ = ["normalize"]` 声明可复用的算子函数或可调用的 Actor。尚未接入 Flow 的算子也可声明。用 docstring 说明用途、输入和返回值。
+
+Notebook 使用的可复用代码放在 `data_tools/`。在模块顶层用 `__demiflow_data_tools__` 将本地函数或类名映射到用途。例如 `{"summarize": "analysis", "preview": "view", "review": "annotation", "sample_card": "annotation_component"}`。分析和查看函数返回值、图表或控件。标注入口组合组件，接受用户判断后，按稳定样本标识和数据版本保存结果。目录发现只读取静态声明。
+
 ### DF-03
 
 在 Flow 内用原生 Dataset API 串联数据的来源、转换、模型节点和输出。普通函数或 Actor 只承担本地业务逻辑。模型调用和表写入在入口显式编排。跨 Flow 共用逻辑提取为算子，独立入口之间用明确的持久交付引用衔接。

@@ -333,7 +333,7 @@ def create_role_file(root, role, name, *, content=None, actor=False):
             source = f'class {symbol}:\n    def __call__(self, row):\n        raise NotImplementedError\n'
         else:
             source = f'def {name}(row):\n    raise NotImplementedError\n'
-        raw = source.encode()
+        raw = (source + f'\n\n__demiflow_operators__ = ["{symbol}"]\n').encode()
         result = dict(symbol=symbol)
     ensure_directory(target.parent)
     publish_bytes(target, raw)

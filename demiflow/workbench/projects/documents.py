@@ -11,6 +11,8 @@ from demiflow.forge.project_io import relative_path
 DIRECTORY_ENTRIES = 4096
 DIRECTORY_BYTES = 512 * 1024
 DOCUMENT_BYTES = 1024 * 1024
+MARKDOWN = {'.md', '.markdown'}
+TEXT = MARKDOWN | {'.py', '.js', '.ts', '.css', '.html', '.sh', '.json', '.yaml', '.yml', '.toml', '.txt', '.csv'}
 SKIP = {'node_modules', '__pycache__', 'venv', 'env'}
 
 
@@ -26,7 +28,7 @@ def _path(root, value, *, directory=False):
     return relative_path(root, value)
 
 
-def listing(root, path='', offset=0, limit=50):
+def listing(root, path='', offset=0, limit=50, *, all_files=False):
     if type(offset) is not int or not 0 <= offset <= DIRECTORY_ENTRIES or type(limit) is not int or not 1 <= limit <= 50:
         raise ForgeError('Invalid document page', code='invalid_request')
     directory = _path(root, path, directory=True)
@@ -43,7 +45,9 @@ def listing(root, path='', offset=0, limit=50):
                 if len(item.encode('utf-8')) > 1024 or len(item.split('/')) > 24 or '\\' in item:
                     continue
                 kind = ('directory' if entry.is_dir(follow_symlinks=False) else
-                        'markdown' if Path(entry.name).suffix.lower() in {'.md', '.markdown'} and entry.is_file(follow_symlinks=False) else None)
+                        'markdown' if Path(entry.name).suffix.lower() in MARKDOWN and entry.is_file(follow_symlinks=False) else None)
+                if all_files and kind is None and entry.is_file(follow_symlinks=False):
+                    kind = 'text' if Path(entry.name).suffix.lower() in TEXT else 'file'
                 if kind:
                     rows.append(dict(name=entry.name, path=item, kind=kind))
         rows.sort(key=lambda row: (row['kind'] != 'directory', row['name'].casefold(), row['name']))
@@ -55,9 +59,11 @@ def listing(root, path='', offset=0, limit=50):
         raise ForgeError('Document directory cannot be read', code='invalid_request') from exc
 
 
-def read(root, path):
+def read(root, path, *, project_text=False):
     target = _path(root, path)
-    if target.suffix.lower() not in {'.md', '.markdown'}:
+    if project_text and target.suffix.lower() not in TEXT:
+        raise ForgeError('File type cannot be previewed', code='invalid_request')
+    if not project_text and target.suffix.lower() not in MARKDOWN:
         raise ForgeError('Only Markdown documents can be opened here', code='invalid_request')
     try:
         raw = read_bounded(target, DOCUMENT_BYTES)

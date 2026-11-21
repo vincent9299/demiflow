@@ -837,7 +837,7 @@
     function readDefinition(host,definition,value){
       const definitionDigest=definition.file_sha256||value.sha256;
       DemiFlowDefinition.render(host,{...definition,
-        source:definition.source||value.text,template:definition.template??(definition.kind==='prompt'?value.text:undefined),
+        line:definition.line||value.start_line, source:definition.source||value.text,template:definition.template??(definition.kind==='prompt'?value.text:undefined),
         basis:(value.source_basis==='compiled_snapshot'?'计划绑定版本':value.source_basis==='sealed'?'运行封存版本':'')+(definitionDigest?' · '+definitionDigest.slice(0,8):''),
         truncated:value.truncated},{mountText});
     }

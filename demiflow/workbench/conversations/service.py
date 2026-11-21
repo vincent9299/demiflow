@@ -133,9 +133,11 @@ class Service:
         return self.store.list(workspace, offset, limit, identity=root_identity(root),
                                policy_hash=self.current_hash(workspace,root), providers=self.binding(workspace,root)[0].providers)
 
-    def start_project(self, workspace, root, session_id, submission_id, expected_revision, text):
+    def start_project(self, workspace, root, session_id, submission_id, expected_revision, text, operation='message'):
         self._require_writable(workspace,root,session_id)
-        return self.start(workspace,root,session_id,submission_id,expected_revision,text)
+        if operation == 'notebook_cell' and not self.capabilities(workspace,root).get('notebook_cells'):
+            reject('当前开发服务未提供只读的 Notebook 单元格生成。')
+        return self.start(workspace,root,session_id,submission_id,expected_revision,text,operation=operation)
 
     def _require_writable(self, workspace, root, session_id):
         self.project(workspace,root)
@@ -195,7 +197,7 @@ class Service:
             try:
                 coding_fd = None
                 project = policy.project(workspace, json.loads(session['root'])['path'])
-                if value.get('operation') != 'compact' and project['kind'] == 'pipeline':
+                if value.get('operation') == 'message' and project['kind'] == 'pipeline':
                     if self.coding_catalog is None:
                         from demiflow.forge.api_reference import REFERENCE_BYTES, build_reference
                         raw = wire(build_reference(), REFERENCE_BYTES)

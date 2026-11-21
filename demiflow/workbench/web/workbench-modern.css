@@ -96,5 +96,19 @@
 @media(max-width:760px){.wb-workspace-main{padding:10px 12px}}
 
 .op-category-tabs{display:flex;flex:none;gap:2px;margin:0 4px 8px;padding:2px;border-radius:6px;background:#eceff4}
-.workbench .op-category-tabs button{flex:1;min-width:0;white-space:nowrap;padding:4px 2px;border:0;border-radius:4px;background:transparent;color:#7d8799;font-size:12px;line-height:20px;box-shadow:none}
-.workbench .op-category-tabs button[aria-selected=true]{background:#fff;color:#394252;font-weight:600;box-shadow:0 1px 3px #202c4310}
+:is(.workbench,.data-dictionary) .op-category-tabs button{flex:1;min-width:0;white-space:nowrap;padding:4px 2px;border:0;border-radius:4px;background:transparent;color:#7d8799;font-size:12px;line-height:20px;box-shadow:none}
+:is(.workbench,.data-dictionary) .op-category-tabs button[aria-selected=true]{background:#fff;color:#394252;font-weight:600;box-shadow:0 1px 3px #202c4310}
+
+.definition-source .python-editor{display:grid;grid-template-columns:max-content minmax(max-content,1fr);max-width:100%;overflow:auto;border:1px solid #dfe4eb;border-radius:8px;background:#fbfcfe}
+.definition-source .python-editor:focus-visible{outline:2px solid #547be0;outline-offset:-2px}
+.definition-source .python-editor pre{box-sizing:border-box;margin:0;max-width:none;padding:12px 16px;border-radius:0;background:transparent;color:#23344c;font:13px/22px ui-monospace,SFMono-Regular,Consolas,monospace;tab-size:4;overflow:visible}
+.definition-source .python-editor .python-lines{position:sticky;left:0;padding-inline:12px;text-align:right;border-right:1px solid #e0e5ed;background:#f3f5f8;color:#637086;user-select:none}
+.definition-source .python-editor .reading-source-page,.definition-source .python-editor .reading-source-chunk{white-space:pre!important;overflow-wrap:normal}
+.definition-source .python-editor .reading-source-chunk{padding:0;font:inherit;background:transparent}
+.python-editor .tok-keyword,.python-editor .tok-bool,.python-editor .tok-null{color:#7841a2}
+.python-editor .tok-string,.python-editor .tok-string2{color:#216944}
+.python-editor .tok-number,.python-editor .tok-atom{color:#96500f}
+.python-editor .tok-comment{color:#627482;font-style:italic}
+.python-editor .tok-definition,.python-editor .tok-typeName,.python-editor .tok-className{color:#145c96}
+.op-flow-references{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0 16px;color:#52637b;font-size:12px}
+.op-tree-group>.op-legacy-heading{padding:6px 8px;color:#67758c;font-size:12px;cursor:pointer}

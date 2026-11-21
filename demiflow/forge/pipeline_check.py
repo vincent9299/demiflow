@@ -9,6 +9,7 @@ import time
 from demiflow.errors import DemiflowError
 from . import operation_budget
 from .api_reference import build_reference, sdk_identity
+from .definition_exports import EXPORT_FIELDS, exports
 from .flow_check import FlowChecker
 from .operator_check import OperatorChecker
 from .platform import content_digest
@@ -88,6 +89,33 @@ def _visible(path, exclude):
     return not any(value.is_relative_to(parent) for parent in exclude)
 
 
+def _declared_exports(root, paths, sources, layout, deadline, max_bytes):
+    """Validate published symbols even when no native flow consumes the module."""
+    declared = {}
+    for path in paths:
+        file = Path(path)
+        field = EXPORT_FIELDS.get(file.parts[0])
+        if not field or file.suffix != '.py':
+            continue
+        operation_budget.check(deadline)
+        try:
+            raw = read_bounded(relative_path(root, path), min(512 * 1024, max_bytes))
+            max_bytes -= len(raw)
+            _record(sources, path, sha256(raw).hexdigest())
+            names = exports(ast.parse(raw, filename=path), field)
+            if names is not None:
+                declared[path] = names
+        except FileNotFoundError:
+            continue
+        except ForgeError as exc:
+            if exc.code in {'conflict', 'inputs_changed', 'resource_limit'}:
+                raise
+            layout.append(diagnostic('DF-02', path, str(exc)))
+        except (SyntaxError, ValueError, RecursionError, OSError) as exc:
+            layout.append(diagnostic('DF-02', path, str(exc), line=getattr(exc, 'lineno', None)))
+    return declared
+
+
 def _candidates(root, view, paths, entry, params, sources, native, layout):
     """Select explicit variants, or conservatively resolve all possible shared consumers."""
     entries = (view['control'] or {}).get('entries', {})
@@ -114,7 +142,7 @@ def _candidates(root, view, paths, entry, params, sources, native, layout):
             if path in declared or path in parameters:
                 layout.append(diagnostic('DF-02', path, '登记的入口或参数文件已删除。'))
             continue
-        if path in declared or file.suffix != '.py' or file.name == '__init__.py':
+        if path in declared or file.parts[0] == 'data_tools' or file.suffix != '.py' or file.name == '__init__.py':
             continue
         # A misplaced terminal pipeline is detectable from its wiring, never from its name.
         raw = read_bounded(physical, 128 * 1024)
@@ -135,7 +163,7 @@ def _candidates(root, view, paths, entry, params, sources, native, layout):
             drafts.add(path)
         direct.append((path + ':' + public[0], None, not is_flow))
 
-    shared = bool(relevant - declared - parameters - drafts)
+    shared = any(Path(p).parts[0] != 'data_tools' for p in relevant - declared - parameters - drafts)
     if shared and any(path not in declared | drafts and Path(path).name != '__init__.py'
                       for path in view['roles']['flows']):
         native.append(diagnostic('FL-10', '', '存在未登记 Flow，其共享依赖尚未确定。', status='incomplete'))
@@ -198,7 +226,7 @@ def _check_agent_tools(root, references, *, deadline, exclude, sources):
             _record(sources, path, digest)
 
 
-def _definition(root, path, deadline, exclude, sources):
+def _definition(root, path, deadline, exclude, sources, published):
     """A detached definition proves its own syntax and shape, not a call-site binding."""
     relative = Path(path)
     if relative.parts[0] == 'prompts' and relative.suffix in {'.yaml', '.yml', '.json'}:
@@ -208,6 +236,10 @@ def _definition(root, path, deadline, exclude, sources):
         if tools:
             _check_agent_tools(root, tools, deadline=deadline, exclude=exclude, sources=sources)
         return dict(path=path, format=format_name, symbols=list(names), scope='definition')
+    if relative.parts[0] == 'data_tools':
+        if published:
+            return dict(path=path, symbols=list(published), roles=published, scope='definition')
+        return None
     if relative.parts[0] == 'operators' and relative.suffix == '.py' and relative.name != '__init__.py':
         module = path[:-3].replace('/', '.')
         tree = SourceTree(root, {'seconds': max(1, int(deadline - time.monotonic()))}, exclude=exclude)
@@ -216,6 +248,8 @@ def _definition(root, path, deadline, exclude, sources):
             checker = OperatorChecker(tree)
             names = []
             for name, item in namespace.items():
+                if published is not None and name not in published:
+                    continue
                 if name.startswith('_') or not isinstance(item, Definition) or item.module != module:
                     continue
                 if isinstance(item.node, ast.ClassDef) and not any(
@@ -228,7 +262,7 @@ def _definition(root, path, deadline, exclude, sources):
         finally:
             for filename, value in tree.files.items():
                 _record(sources, filename, value)
-        if not names:
+        if not names and published != {}:
             raise InspectionError('OP-01', '没有可独立确认的公开算子定义。', path=path, status='incomplete')
         return dict(path=path, symbols=names, scope='definition')
     return None
@@ -288,6 +322,7 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
         return local_resolver(root, current, alias)
 
     variants, relevant = _candidates(root, view, paths, entry, params, sources, native, layout)
+    declarations = _declared_exports(root, sorted(relevant), sources, layout, deadline, max_bytes)
     visible = [item for item in variants if _visible(item[0].partition(':')[0], exclude)
                and (item[1] is None or _visible(item[1], exclude))]
     if len(visible) != len(variants):
@@ -351,11 +386,13 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
 
     for path in sorted(agent_configs | (relevant - visited_sources)):
         if not (root / path).exists():
+            if Path(path).parts[0] == 'data_tools':
+                continue
             native.append(diagnostic('FL-01', path, '变更的文件已删除，无法验证其定义。', status='incomplete'))
             continue
         try:
             operation_budget.check(deadline)
-            definition = _definition(root, path, deadline, exclude, sources)
+            definition = _definition(root, path, deadline, exclude, sources, declarations.get(path))
             if definition:
                 definitions.append(definition)
         except InspectionError as exc:
@@ -364,7 +401,8 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
             invalid = not isinstance(exc, (OSError, RecursionError)) and getattr(exc,'code',None) != 'resource_limit'
             native.append(diagnostic('DF-05' if Path(path).parts[0] == 'prompts' else 'OP-01',
                                      path, str(exc), status='invalid' if invalid else 'incomplete'))
-    if relevant and not checked and not definitions and not native:
+    pipeline_paths = [p for p in relevant if Path(p).parts[0] != 'data_tools']
+    if pipeline_paths and not checked and not definitions and not native:
         native.append(diagnostic('FL-10', '', '未定位到可核对的原生流程或独立定义。', status='incomplete'))
     basis = dict(sdk_revision=reference['sdk_revision'], catalog_id=reference['catalog_id'], rules_id=RULES_ID,
                  manifest_sha256=manifest_hash, sources=sources, parameter_digests=parameter_digests, controls=table_files)
