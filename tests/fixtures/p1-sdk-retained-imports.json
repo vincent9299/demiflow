@@ -141,29 +141,14 @@
       "QueueProducer"
     ],
     [
-      "Dataset.exclude_keys",
-      "demiflow.execution.local_kernel",
-      "PlanInput"
-    ],
-    [
       "Dataset.fetch",
       "demiflow.execution.raw_fetch",
       "RawFetch"
     ],
     [
       "Dataset.group_batches",
-      "demiflow.execution.local_kernel",
-      "PlanInput"
-    ],
-    [
-      "Dataset.group_batches",
       "demiflow.execution.stream_grouping",
       "pack_group"
-    ],
-    [
-      "Dataset.join",
-      "demiflow.execution.local_kernel",
-      "PlanInput"
     ],
     [
       "Dataset.lookup_lance",
@@ -196,11 +181,6 @@
       "private_prompt_declaration"
     ],
     [
-      "Dataset.reduce_by_key",
-      "demiflow.execution.local_kernel",
-      "PlanInput"
-    ],
-    [
       "Dataset.run_stream",
       "demiflow.execution.capabilities",
       "validate_stream_plan"
@@ -214,11 +194,6 @@
       "Dataset.save_lance",
       "demiflow.execution.stream_lance",
       "StreamLanceSink"
-    ],
-    [
-      "Dataset.union",
-      "demiflow.execution.local_kernel",
-      "PlanInput"
     ],
     [
       "Dataset.write_datasink",

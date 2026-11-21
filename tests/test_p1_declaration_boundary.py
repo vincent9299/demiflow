@@ -23,8 +23,7 @@ import json
 import sys
 from demiflow.data.execution_contract import InputSpec
 from demiflow.data.plan import LogicalPlan
-from demiflow.data.sources import ItemsSource
-from demiflow.execution.local_kernel import PlanInput, KeyedSource, UnionSource
+from demiflow.data.sources import ItemsSource, KeyedSource, PlanInput, UnionSource
 from demiflow.planning.dataflow_declaration import validate_native_operation, validate_relational_inputs
 assert validate_native_operation('fetch', {'uri': 'synthetic'}, bindings={}) is None
 left = PlanInput(ItemsSource([{'id': 1}]), LogicalPlan(), None)
@@ -32,7 +31,7 @@ right = PlanInput(ItemsSource([{'id': 1}]), LogicalPlan(), None)
 source = KeyedSource('join', left, ('id',), right, ('id',))
 assert validate_relational_inputs(source, expected_inputs=2) is None
 forbidden = (
-    'demiflow.execution.run_context', 'demiflow.execution.checked',
+    'demiflow.execution.local_kernel', 'demiflow.execution.run_context', 'demiflow.execution.checked',
     'demiflow.execution.action_driver.dataflow', 'demiflow.execution.executors',
     'demiflow.execution.package_loader', 'demiflow.execution.dataflow_api',
     'demiflow.execution.dataflow_models',
@@ -139,8 +138,7 @@ def test_preflight_returns_none_and_real_factory_keeps_its_original_target(kind)
 
 def test_relational_preflight_retains_original_port_multiplicity_refusal():
     from demiflow.data.plan import LogicalPlan
-    from demiflow.data.sources import ItemsSource
-    from demiflow.execution.local_kernel import PlanInput, KeyedSource
+    from demiflow.data.sources import ItemsSource, KeyedSource, PlanInput
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.planning.dataflow_declaration import validate_relational_inputs
 

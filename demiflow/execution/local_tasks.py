@@ -27,12 +27,11 @@ from pathlib import Path
 from typing import Mapping
 
 from ..data import plan as ops
-from ..data.sources import LanceSource, RangeSource
+from ..data.sources import KeyedSource, LanceSource, RangeSource, UnionSource
 from ..data.local_relational import (
     key_of, _write_records, _read_records, _merge_records, sorted_rows,
     _right_index, _matched_rows, _merge_row,
 )
-from .local_kernel import KeyedSource, UnionSource
 
 
 @dataclass(frozen=True)

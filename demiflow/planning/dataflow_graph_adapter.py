@@ -9,7 +9,7 @@ import re
 import time
 
 from ..data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
-from ..execution.local_kernel import PlanInput, UnionSource
+from ..data.sources import PlanInput, UnionSource
 from ..execution.contracts.dataflow_errors import DataflowError
 
 

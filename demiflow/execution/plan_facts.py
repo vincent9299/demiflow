@@ -35,11 +35,9 @@ def execution_instances(nodes, edges, actions, *, maximum=1024):
 
 
 def source_facts(source):
-    from ..data.sources import LanceSource, MaterializedSource
+    from ..data.sources import DatasourceSource, KeyedSource, LanceSource, MaterializedSource, UnionSource
     from ..lance.model import LanceScanSpec
-    from .local_kernel import KeyedSource, UnionSource
 
-    from ..data.sources import DatasourceSource
     from .queue_source import QueueDatasource
     from .queue_history import QueueHistoryDatasource
     if type(source) is DatasourceSource and type(source.datasource) is QueueHistoryDatasource:

@@ -20,7 +20,7 @@ from .plan_interpreter import PlanContractError, interpret_physical_plan
 from .sealed_plans import (
     load_sealed_plan, load_execution_bindings, seal_execution_bindings,
 )
-from .local_kernel import PlanInput
+from ..data.sources import PlanInput
 
 
 def _locate_subprogram(source, plan, input_path):

@@ -17,9 +17,10 @@ from pathlib import Path
 
 from ..data import plan as ops
 from ..data.local_relational import key_of, _merge_row
-from ..data.sources import IterableSource, LanceSource, FileSource
+from ..data.sources import (
+    FileSource, IterableSource, KeyedSource, LanceSource, PlanInput, UnionSource,
+)
 from ..data.stats import ExecutionMetadata, StageStats
-from .local_kernel import KeyedSource, UnionSource, PlanInput
 
 
 SORT_STAGE_ROWS = 1_000_000
