@@ -60,21 +60,26 @@ def inherited_unit():
     return (fd,)
 
 
-def unit_stopped(path, identity=None):
-    """Missing ownership evidence is unknown, never proof of stopped execution."""
+def unit_lock_status(path, identity=None):
+    """Observe the lock and its recorded inode on the same open descriptor."""
     fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
     try:
         if identity is not None:
             info = os.fstat(fd)
             if identity != {"device": info.st_dev, "inode": info.st_ino}:
-                return False
+                return "unknown"
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            return False
-        return True
+            return "held"
+        return "released"
     finally:
         os.close(fd)
+
+
+def unit_stopped(path, identity=None):
+    """Missing ownership evidence is unknown, never proof of stopped execution."""
+    return unit_lock_status(path, identity) == "released"
 
 
 def _read(path, maximum=32768):

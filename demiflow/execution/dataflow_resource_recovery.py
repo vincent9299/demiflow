@@ -181,8 +181,11 @@ def retained_process_units(journal, *, expected_attempt):
             original = allocation['observation'].get('identity')
             if original is not None and physical != original:
                 raise ResourceError('ARTIFACT_MISMATCH', 'original job birth identity differs')
-            from ..resources.process_observation import unit_stopped
-            if not unit_stopped(directory / 'unit.lock', physical['unit']):
+            from ..resources.process_observation import unit_lock_status
+            lock = unit_lock_status(directory / 'unit.lock', physical['unit'])
+            if lock == 'unknown':
+                raise ResourceError('CLEANUP_UNCONFIRMED', 'original job unit lock identity changed')
+            if lock == 'held':
                 retained.append(physical)
             if len(retained) > 128:
                 raise ResourceError('QUOTA_EXCEEDED', 'too many retained process units')
