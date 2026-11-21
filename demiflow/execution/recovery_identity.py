@@ -8,6 +8,7 @@ from contextvars import ContextVar
 
 from .artifacts import code_record
 from .recovery_contract import identity, document, RecoveryContractError, MAX_DOCUMENT_BYTES
+from .recovery_sdk_v3 import class_method_pins, function_pin
 
 _SOURCE_WALK = ContextVar('demiflow_source_identity_walk', default=None)
 
@@ -99,13 +100,17 @@ def describe(value, depth=0):
                 item = None
             closure.append(describe(item, depth + 1))
         filename = inspect.getsourcefile(value)
+        source = None
         source_hash = None
         if filename and Path(filename).is_file():
             if Path(filename).stat().st_size > 8 * 1024**2:
                 raise RecoveryContractError("Callable source exceeds identity byte budget")
-            source_hash = hashlib.sha256(Path(filename).read_bytes()).hexdigest()
+            source = Path(filename).read_bytes()
+            source_hash = hashlib.sha256(source).hexdigest()
+        code = identity(code_record(value.__code__))
+        source_hash, code = function_pin(value, source, source_hash, code)
         return dict(module=_persistent_module(value), name=value.__qualname__, source_hash=source_hash,
-                    code=identity(code_record(value.__code__)),
+                    code=code,
                     defaults=describe(value.__defaults__, depth + 1),
                     kwdefaults=describe(value.__kwdefaults__, depth + 1), closure=closure)
     if inspect.isclass(value):
@@ -113,7 +118,8 @@ def describe(value, depth=0):
         for name, method in vars(value).items():
             if inspect.isfunction(method):
                 methods[name] = identity(code_record(method.__code__))
-        return dict(module=_persistent_module(value), name=value.__qualname__, methods=methods)
+        return dict(module=_persistent_module(value), name=value.__qualname__,
+                    methods=class_method_pins(value, methods))
     from ..data.sources import PlanInput
     if isinstance(value, PlanInput):
         return plan_identity('input', value.source, value.plan)

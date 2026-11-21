@@ -51,7 +51,7 @@ from .plan import (
     validate_bound_signature,
     is_stream_operation,
 )
-from .sources import MaterializedSource, PlanInput, SourcePlan
+from .sources import MaterializedSource, SourcePlan
 from .native_options import parse_native_options
 from . import execution_contract as _actions
 from .execution_contract import normalize_batch_format as _batch_format
@@ -119,6 +119,7 @@ class Dataset:
         order is unspecified; no final global sort is added. ``chunk_bytes`` remains accepted for
         compatibility; it does not set the native process memory budget.
         """
+        from ..data.sources import PlanInput
         from .relational_declaration import compose_keyed_source
         source = compose_keyed_source(
             PlanInput(self._source, self._plan, self._executor), 'join', on,
@@ -141,6 +142,7 @@ class Dataset:
         data codec's supported values; later column operations still require
         mapping rows. False, zero and empty containers are valid outputs.
         """
+        from ..data.sources import PlanInput
         from .relational_declaration import compose_keyed_source
         source = compose_keyed_source(
             PlanInput(self._source, self._plan, self._executor), 'reduce', on,
@@ -161,6 +163,7 @@ class Dataset:
         from .sources import LanceSource
         from ..lance.model import LanceScanSpec
         from .relational_declaration import keys, compose_keyed_source
+        from ..data.sources import PlanInput
         if (not isinstance(self._source,LanceSource) or not isinstance(self._source.query,LanceScanSpec)
                 or self._plan.operations or self._source.query.projection or self._source.native_options is not None):
             raise ValueError('exclude_keys requires an untransformed read_lance scan without projection/native options')
@@ -210,6 +213,7 @@ class Dataset:
             return Dataset(self._source, self._plan.append(StreamGroupBatchesOp(**vars(operation),
                 on=keys, output=output, chunk_bytes=chunk_bytes, max_groups=max_groups, buffer_bytes=buffer_bytes)),
                 self._executor, self._stages)
+        from ..data.sources import PlanInput
         from .relational_declaration import compose_keyed_source
         source = compose_keyed_source(
             PlanInput(self._source, self._plan, self._executor), 'groups', on,
@@ -280,6 +284,7 @@ class Dataset:
         """
         if not all(isinstance(ds, Dataset) for ds in others):
             raise TypeError('union requires Datasets')
+        from ..data.sources import PlanInput
         from .relational_declaration import compose_union_sources
         source = compose_union_sources(tuple(
             PlanInput(ds._source, ds._plan) for ds in (self, *others)
