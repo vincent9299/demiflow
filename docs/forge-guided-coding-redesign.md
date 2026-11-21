@@ -84,3 +84,37 @@ AI 在首次写代码前收到本次实际使用的 DemiFlow 公共 API、项目
 整项目检查和开发对话的写后检查共享同一个 `FlowChecker`。项目检查枚举注册入口及参数并保留源码证据，展示单一静态结果。写后检查按实际改动选择范围，再独立检查目录职责。退役的 review/behavior 汇总字段、无参数的旧入口后备、特殊检查进程启动路径和旧登记样例已移除。运行准入和封存继续使用各自的权威记录。
 
 写前资料包含 `data.range` 和 `Dataset.count`。静态检查读取 SDK 对 `range` 的原生声明及整型 `id` 字段。执行仍使用同一数据源实现。新建在其他目录的单入口 Python 文件，经同一检查器确认包含原生终端动作后，目录检查提示移到 `flows/`。单独构造 Dataset 的辅助函数不触发这条规则。
+
+## 项目算子与数据工具的公开定义
+
+一个 Python 模块可以同时容纳公开入口与实现细节。作者在模块顶层列出可复用的本地定义，工作台直接读取静态源码。声明与流程接线独立，尚未接线的公开算子同样进入「算子」目录。
+
+| 用途 | 项目内位置 | 模块声明 | 工作台入口 |
+| --- | --- | --- | --- |
+| 处理一行或一批数据的函数、异步函数或可调用 Actor | `operators/*.py`，支持子目录 | `__demiflow_operators__` | 算子 → 代码算子 |
+| 数据浏览、抽样、比较、可视化、人工审核与标注工具 | `data_tools/*.py`，支持子目录 | `__demiflow_data_tools__` | 数据 → 数据工具 |
+
+声明只需一份字符串列表或元组，成员必须是本模块中唯一的公开定义。允许声明空列表。导入其他工具或定义本地辅助函数时无需将其加入列表。每个公开入口用 docstring 写清业务用途、输入粒度与输出；有写入时说明写到哪里、何时发生。函数签名承载参数与默认值，Actor 遵循现有调用与生命周期协议。
+
+```python
+# operators/quality.py
+__demiflow_operators__ = ("has_review",)
+
+def has_review(row: dict) -> bool:
+    """判断一条候选记录是否已有人工审核决定。"""
+    return bool(row.get("review_decision"))
+```
+
+```python
+# data_tools/review.py
+__demiflow_data_tools__ = ("review_page",)
+
+def review_page(rows, offset=0, limit=20):
+    """返回本页候选的图片标识与审核结论，供 Notebook 查看。"""
+    return [(row["image_id"], row.get("review_decision"))
+            for row in rows[offset:offset + limit]]
+```
+
+Notebook 可显式导入 `from data_tools.review import review_page`。工作台浏览源码不会触发工具的查询或写入。对分页媒体、人工审核等工具，分别提供有界查看入口和显式保存入口，由调用方传入数据版本、分页范围或标注目标。
+
+旧模块暂未声明时，工作台在兼容视图标明登记流程源码中可直接定位的 Dataset 回调。这个引用只能说明该位置使用了定义，覆盖范围不包含动态组装。作者添加声明后，以声明为准。完整源码仍可在开发页的项目目录中查看。

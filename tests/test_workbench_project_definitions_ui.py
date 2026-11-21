@@ -10,10 +10,11 @@ from test_forge_web_redesign import opened, artifact
 
 
 def test_new_operator_and_prompt_appear_without_inspection_or_manual_refresh(project,browser):
+    (project/'operators/clean.py').write_text('__demiflow_operators__ = ["clean"]\ndef clean(row):\n    return row\n')
     with service(project) as app, opened(browser,app) as (page,_):
         page.locator('.function-nav').get_by_role('button',name='算子',exact=True).click()
         page.get_by_role('button',name='ƒ clean',exact=True).click()
-        (project/'operators/normalize.py').write_text('def normalize(value):\n    return value\n')
+        (project/'operators/normalize.py').write_text('__demiflow_operators__ = ["normalize"]\ndef normalize(value):\n    return value\n')
         expect(page.get_by_role('button',name='ƒ normalize',exact=True)).to_be_visible(timeout=30000)
         page.get_by_role('tab',name='Prompt 算子',exact=True).click()
         (project/'prompts/summary.json').write_text(json.dumps({
@@ -124,3 +125,70 @@ def run(*, limit: int = {default}, label: str = "demo", note: str | None = "defa
         assert rejected
     assert json.loads(parameters.read_text())['arguments']=={'limit':5,'label':'','note':None}
     assert json.loads((project/'settings/evaluate.json').read_text())['arguments']['limit']==8
+
+
+def test_unwired_operator_editor_and_data_tools_in_their_own_pages(project,browser):
+    import subprocess
+    code=('def ready(row):\n    """读取一条记录的审核状态。"""\n'
+          '    # 旧数据可以缺少审核状态。\n    return row.get("status", "<script>")\n')
+    path=project/'operators/quality.py'
+    path.write_text('__demiflow_operators__ = ["ready"]\n\n'+code+'\ndef card(row):\n    return str(row)\n')
+    subprocess.run(['git','init','-q',str(project)],check=True)
+    subprocess.run(['git','-C',str(project),'add','operators/quality.py'],check=True)
+    subprocess.run(['git','-C',str(project),'-c','user.name=fixture','-c','user.email=test@example.invalid','commit','-qm','fixture'],check=True)
+    path.write_text('# second revision\n'+path.read_text())
+    data_tools=project/'data_tools'
+    data_tools.mkdir()
+    (data_tools/'review.py').write_text('__demiflow_data_tools__ = ["ReviewPage"]\n'
+        'class ReviewPage:\n    """分页浏览候选图。"""\n    pass\n')
+    with service(project) as app,opened(browser,app) as (page,_):
+        nav=page.locator('.function-nav')
+        nav.get_by_role('button',name='算子',exact=True).click()
+        page.get_by_role('button',name='ƒ ready',exact=True).click()
+        expect(page.locator('.op-eyebrow')).to_contain_text('已声明算子')
+        expect(page.get_by_text('未发现直接流程引用',exact=True)).to_be_visible()
+        expect(page.locator('.op-tree')).not_to_contain_text('card')
+        expect(page.locator('.op-tree')).not_to_contain_text('ReviewPage')
+        editor=page.get_by_role('region',name='Python 源码')
+        expect(editor.locator('.tok-keyword').first).to_have_text('def')
+        expect(editor.locator('.tok-comment')).to_contain_text('旧数据')
+        assert editor.locator('.python-lines').text_content()=='4\n5\n6\n7'
+        assert editor.locator('.reading-source-page').text_content()==code
+        assert not editor.locator('script').count()
+        page.evaluate("Object.defineProperty(navigator, 'clipboard', {value:{writeText:async text=>window.copied=text}})")
+        page.get_by_role('button',name='复制代码').click()
+        assert page.evaluate('window.copied')==code
+        artifact(page,'declared-operator')
+        page.get_by_role('button',name='版本历史').click()
+        page.locator('.op-version').last.click()
+        expect(page.locator('.op-history-notice')).to_be_visible()
+        expect(editor.locator('.python-lines')).to_have_text('3\n4\n5\n6',use_inner_text=False)
+        page.set_viewport_size({'width':390,'height':800})
+        assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+        nav.get_by_role('button',name='数据',exact=True).click()
+        page.get_by_role('button',name='数据工具',exact=True).click()
+        dialog=page.get_by_role('dialog',name='项目数据工具')
+        expect(dialog.get_by_role('heading',name='ReviewPage')).to_be_visible()
+        expect(dialog.locator('.tok-keyword').first).to_have_text('class')
+        expect(dialog).to_contain_text('分页浏览候选图')
+        artifact(page,'project-data-tools')
+        dialog.get_by_role('button',name='关闭').click()
+        expect(page.locator('.native-notebook-host')).to_be_visible()
+
+
+def test_python_editor_paging_keeps_multiline_syntax_and_exact_source(project,browser):
+    # Put a page cut inside a multiline string, with a non-BMP character near the cut.
+    source='def inspect_row(row):\n    return """'+('a'*16344)+'😀\n'+('z'*256)+'"""\n'
+    (project/'operators/page.py').write_text('__demiflow_operators__=["inspect_row"]\n'+source)
+    with service(project) as app,opened(browser,app,width=500) as (page,_):
+        page.locator('.function-nav').get_by_role('button',name='算子',exact=True).click()
+        editor=page.get_by_role('region',name='Python 源码')
+        expect(editor.locator('.tok-string').first).to_be_visible()
+        first=editor.locator('.reading-source-page').text_content()
+        assert editor.evaluate('n=>n.scrollWidth>n.clientWidth')
+        assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+        page.get_by_role('button',name='下一页原文').click()
+        expect(editor.locator('.tok-string').first).to_be_visible()
+        second=editor.locator('.reading-source-page').text_content()
+        assert first+second==source
+        assert editor.locator('.python-lines').text_content().splitlines()[0]==str(2+first.count('\n'))

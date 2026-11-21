@@ -3,10 +3,11 @@ from pathlib import Path
 from .platform import content_digest
 
 
-ROLE_DIRS = ('flows', 'operators', 'prompts')
+ROLE_DIRS = ('flows', 'operators', 'prompts', 'data_tools')
 RULES = (
     ('DF-02', '每条 flow 在 flows/ 中定义一个明确入口。共用代码算子放 operators/，'
-              '原生 Prompt 和 Agent 配置放 prompts/。只创建需要的目录。'),
+              '原生 Prompt 和 Agent 配置放 prompts/。operators/ 里的公开算子用 __demiflow_operators__ 列出，尚未接线也可发布。'
+              '可复用的数据浏览、审核和标注工具放 data_tools/，用 __demiflow_data_tools__ 列出。公开入口用 docstring 说明用途、输入和输出。'),
     ('DF-03', '在 flow 内用原生 Dataset API 串联算子、模型和 I/O。业务函数或 Actor 只负责其本地逻辑。'
               '不要把子流程、模型调用或写入藏在普通算子中，也不要从一个 flow 导入另一个 flow 的入口。'),
     ('DF-05', '在版本化的 Prompt 或 Agent 文件内保留原生模型、输入和输出声明。'

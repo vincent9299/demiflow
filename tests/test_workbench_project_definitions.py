@@ -94,3 +94,68 @@ def test_parameter_write_is_denied_without_project_permission(project):
         status,detail=request(app,'/api/flow-arguments-save',dict(entry=value['entry'],revision=value['revision'],source_sha256=value['source_sha256'],arguments={'limit':9}))
         assert status==403,detail
     assert flow_arguments.read(project,entry=value['entry'])['arguments']=={'limit':3}
+
+
+def test_explicit_exports_do_not_depend_on_wiring_and_legacy_evidence_is_scoped(project):
+    (project/'operators/review.py').write_text(
+        '__demiflow_operators__ = ("ready",)\n'
+        'def ready(row):\n    """Return review status."""\n    return row["ok"]\n'
+        'def card(row):\n    return str(row)\n')
+    (project/'operators/legacy.py').write_text(
+        'class AllPoolReview:\n    pass\n'
+        'def normalize(row):\n    return row\n')
+    (project/'flows/select.py').write_text(
+        'from demiflow import data as d\nfrom operators import legacy as old, review\n'
+        'def run(*, limit=3):\n'
+        '    old.AllPoolReview()\n'
+        '    return d.from_items([]).map(old.normalize).map(review.card).limit(limit)\n')
+    items={i['symbol']:i for i in definitions.catalog(project)['definitions']}
+    assert items['ready']['export_status']=='declared' and not items['ready']['flow_references']
+    assert items['card']['export_status']=='internal' and items['card']['flow_references']
+    assert items['AllPoolReview']['export_status']=='legacy' and not items['AllPoolReview']['flow_references']
+    assert items['normalize']['flow_references']==[dict(entry='flows/select.py:run',line=5,api='map',port='fn')]
+
+
+def test_data_tools_have_an_independent_catalog_and_do_not_execute(project):
+    folder=project/'data_tools'
+    folder.mkdir()
+    file=folder/'review.py'
+    file.write_text('__demiflow_data_tools__ = ["AllPoolReview"]\n'
+        'raise RuntimeError("never import")\nclass AllPoolReview:\n    """Review a page."""\n    pass\n'
+        'def card():\n    pass\n')
+    data=definitions.catalog(project,data_tools=True)
+    assert [i['symbol'] for i in data['definitions']]==['AllPoolReview']
+    item=data['definitions'][0]
+    assert item['kind']=='data_tool' and item['definition_type']=='class'
+    actual=definitions.read(project,data_tools=True,id=item['id'])
+    assert actual['source'].startswith('class AllPoolReview:') and actual['line']==3
+    with pytest.raises(ForgeError):
+        definitions.read(project,id=item['id'])
+    file.write_text('__demiflow_data_tools__=["missing"]\n')
+    invalid=definitions.catalog(project,data_tools=True)
+    assert not invalid['definitions'] and invalid['diagnostics'][0]['path']=='data_tools/review.py'
+
+
+@pytest.mark.parametrize('declaration', ['["ready","ready"]', '["typo"]', 'create()', '["_private"]'])
+def test_invalid_operator_exports_report_the_module(project,declaration):
+    (project/'operators/bad.py').write_text(f'__demiflow_operators__={declaration}\ndef ready(row):\n    return row\n')
+    index=definitions.catalog(project)
+    assert any(d['path']=='operators/bad.py' for d in index['diagnostics'])
+    assert not any(d['symbol']=='ready' for d in index['definitions'])
+
+
+def test_data_tool_authoring_checks_exports_without_a_flow(project):
+    from demiflow.forge.pipeline_check import check_changes
+    directory=project/'data_tools'
+    directory.mkdir()
+    source=directory/'review.py'
+    path=source.relative_to(project).as_posix()
+    def check():
+        return check_changes(project,changed={path},variants=[],layout_diagnostics=[],
+                             coverage=[],catalog={},catalog_id='fixture')
+    source.write_text('__demiflow_data_tools__ = ["review"]\ndef review():\n    pass\n')
+    valid=check()
+    assert valid['native_flow']['status']=='not_applicable'
+    assert valid['project_layout']['status']=='passed'
+    source.write_text('__demiflow_data_tools__ = ["typo"]\n')
+    assert check()['project_layout']['status']=='failed'

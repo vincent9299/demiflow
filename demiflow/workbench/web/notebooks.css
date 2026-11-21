@@ -25,3 +25,9 @@ main.native-data-active{padding:0!important;max-width:none!important;overflow:hi
 .native-notebook-frame[hidden]{display:none!important}
 @media(max-width:760px){.native-data-workspace{grid-template-columns:var(--side-navigation-width,170px) minmax(0,1fr);height:calc(100dvh - 110px)}.data-dictionary{padding:12px 6px}.dictionary-field{font-size:11px}}
 @media(max-width:480px){.native-data-workspace{grid-template-columns:var(--side-navigation-width,150px) minmax(0,1fr)}.dictionary-table>summary{font-size:11px}.dictionary-fields{padding-left:12px}.dictionary-field{flex-wrap:wrap;gap:0}.dictionary-field small{width:100%}.dictionary-version{display:none}.native-notebook-status{margin:16px;font-size:12px}}
+.data-dictionary .dictionary-tool-button{display:block;width:100%;margin:4px 0 12px;text-align:left}
+.data-tools-dialog{width:min(54rem,94vw);max-height:86dvh;box-sizing:border-box;padding:18px;overflow:auto;border:1px solid #dce1e8;border-radius:12px}
+.data-tools-dialog>header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.data-tools-dialog>header select{min-width:0;max-width:100%;flex:1}
+.data-tools-dialog>header button{margin-left:auto}
+.data-tools-dialog .reading-toolbar{display:none}

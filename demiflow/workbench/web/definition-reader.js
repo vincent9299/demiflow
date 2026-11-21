@@ -39,7 +39,8 @@
     }
     const source=value.kind==='prompt'?(value.template??(value.messages?json(value.messages):value.source)):value.source;
     if(typeof source==='string'){
-      const body=el('div',null,'definition-source');root.append(body);mountText(body,source,{sourceOnly:true,compactSource:true,continuousSource:true});
+      const body=el('div',null,'definition-source');root.append(body);mountText(body,source,{sourceOnly:true,compactSource:true,continuousSource:true,
+        pythonLine:['code','data_tool'].includes(value.kind)?(value.line||1):undefined});
       const status=body.querySelector('.reading-status');if(status?.textContent==='源码完整显示。')status.hidden=true;
     }else root.append(el('p','这份绑定版本没有可读取的定义正文。','definition-note'));
     if(value.truncated)root.append(el('p','正文超过展示预算，当前为有界片段。','definition-note'));

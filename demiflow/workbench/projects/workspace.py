@@ -891,7 +891,7 @@ def inspect_coding_changes(root, changes, reference, *, exclude=()):
             elif top != 'flows':
                 layout.append(diagnostic('DF-02', path, '项目登记的 flow 应位于 flows/。'))
         in_flows = path in view['roles']['flows']
-        new_python = (path in relevant and top != 'flows' and file.suffix == '.py'
+        new_python = (path in relevant and top not in {'flows','data_tools'} and file.suffix == '.py'
                       and change.get('before') is None and change['after'] is not None)
         if path in declared or file.name == '__init__.py' or not (in_flows or new_python):
             continue
@@ -927,9 +927,10 @@ def inspect_coding_changes(root, changes, reference, *, exclude=()):
     # Shared definitions can affect any registered flow. Never guess a
     # dependency from a model message or silently skip an unregistered caller.
     flow_paths = {entry.partition(':')[0] for entry in entries}
-    shared = bool(relevant - flow_paths - registered_parameters)
-    if not shared and relevant:
-        shared = any(c['path'] in relevant and c['after'] is None for c in changes)
+    pipeline_changes = {path for path in relevant if Path(path).parts[0] != 'data_tools'}
+    shared = bool(pipeline_changes - flow_paths - registered_parameters)
+    if not shared and pipeline_changes:
+        shared = any(c['path'] in pipeline_changes and c['after'] is None for c in changes)
     if shared and any(path not in flow_paths and Path(path).name != '__init__.py' for path in view['roles']['flows']):
         coverage.append(diagnostic('FL-10', '', '项目有尚未绑定的 flow，无法确认所有共享依赖。', status='incomplete'))
     def load(params):

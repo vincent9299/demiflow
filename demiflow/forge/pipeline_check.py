@@ -1,8 +1,10 @@
 """Static checks for code changed through the workbench or another caller."""
+import ast
 from hashlib import sha256
 from pathlib import Path
 import time
 
+from .definition_exports import EXPORT_FIELDS, exports
 from .flow_check import FlowChecker
 from .platform import content_digest
 from .platform_environment import read_bounded
@@ -92,12 +94,30 @@ def check_changes(root, *, changed, variants, layout_diagnostics, coverage, cata
             diagnostics.append(diagnostic('FL-10', path, str(exc), status='incomplete'))
             layout_diagnostics.append(diagnostic('DF-01', path, '此入口的引用文件角色未核实。', status='incomplete'))
 
-    if changed and not inspected and not diagnostics:
+    if any(Path(p).parts[0] != 'data_tools' for p in changed) and not inspected and not diagnostics:
         diagnostics.append(diagnostic('FL-10', '', '没有可核对的 flow 入口。', status='incomplete'))
     paths, violations = check_layout(changed=changed, operators=sorted(operators),
                                      prompts=sorted(prompts))
     layout_diagnostics.extend(violations)
     paths.update(misplaced_flows)
+    export_budget = MAX_SOURCE_BYTES
+    for path in sorted(paths.intersection(changed)):
+        file = Path(path)
+        field = EXPORT_FIELDS.get(file.parts[0])
+        if not field or file.suffix != '.py':
+            continue
+        if '..' in file.parts:
+            layout_diagnostics.append(diagnostic('DF-02', path, '源码路径必须位于本项目目录内。'))
+            continue
+        try:
+            raw = read_bounded(Path(root) / file, min(export_budget, 512 * 1024))
+            export_budget -= len(raw)
+            _record(sources, path, sha256(raw).hexdigest())
+            exports(ast.parse(raw), field)
+        except FileNotFoundError:
+            continue
+        except (ValueError, SyntaxError, RecursionError, OSError) as exc:
+            layout_diagnostics.append(diagnostic('DF-02', path, str(exc)))
     remaining = MAX_SOURCE_BYTES
     for path, digest in sources.items():
         try:
