@@ -18,12 +18,13 @@ body:not(.df-card-mode) .df-dataframe-view { display: none !important; }
 .df-card-mode :is(#main, .jp-WindowedPanel-outer, .jp-WindowedPanel-inner, .jp-WindowedPanel-viewport) {
   background: white; box-shadow: none !important; border: 0;
 }
+body.df-card-mode #main-panel .jp-Notebook .jp-WindowedPanel-outer { padding: 0 !important; }
 .df-card-mode .jp-WindowedPanel-inner { margin: 0 auto !important; }
-.df-card-mode .jp-WindowedPanel-viewport { padding-block: 0 !important; }
-.df-card-mode .jp-Notebook { background: white; padding: 12px clamp(12px, 4vw, 56px) 56px; }
+.df-card-mode .jp-WindowedPanel-viewport { padding: 0 !important; }
+.df-card-mode .jp-Notebook { background: white; padding: 8px 16px 48px; }
 .df-card-mode .jp-CodeCell {
-  position: relative; box-sizing: border-box; max-width: 880px;
-  margin: 6px auto 16px; padding: 12px 16px 14px;
+  position: relative; box-sizing: border-box; max-width: none;
+  margin: 4px auto 14px; padding: 12px 16px 14px;
 }
 .df-card-mode .jp-CodeCell::before { display: none !important; }
 .df-card-mode .jp-InputArea-editor {
@@ -34,6 +35,8 @@ body:not(.df-card-mode) .df-dataframe-view { display: none !important; }
 .df-card-mode .df-cell-tools {
   display: flex !important; align-items: center; gap: 2px; position: relative; min-height: 28px; margin-bottom: 8px;
 }
+.df-cell-status { color: var(--df-accent); font: 12px/1.4 var(--sans-serif); }
+.df-cell-status:empty { display: none; }
 .df-cell-title { min-width: 0; flex: 1; color: var(--df-ink); font: 600 16px/1.4 var(--sans-serif); overflow-wrap: anywhere; }
 .df-card-icon {
   display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 4px;
@@ -82,7 +85,7 @@ body:not(.df-card-mode) .df-dataframe-view { display: none !important; }
 .df-card-mode .widget-vbox > .widget-label { margin: 7px 0 0; color: var(--df-ink); font-size: 18px; font-weight: 550; }
 .df-run-error { margin: 4px 0; color: #9f3131; font-size: 13px; }
 @media (max-width: 480px) {
-  .df-card-mode .jp-Notebook { padding-inline: 14px; }
+  .df-card-mode .jp-Notebook { padding-inline: 10px; }
   .df-card-mode .jp-CodeCell { margin-bottom: 12px; padding: 10px; }
   .df-card-mode .df-dataframe-view :is(td, th) { padding-inline: 7px; }
 }

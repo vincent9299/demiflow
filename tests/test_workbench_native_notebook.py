@@ -529,15 +529,21 @@ def test_card_assistant_generates_editable_notebook_widgets(browser,native_proje
         capabilities=development.capabilities
         monkeypatch.setattr(development,'capabilities',lambda *args:dict(capabilities(*args),notebook_cells=True))
         submitted=[]
+        assistant_sessions=[]
         editing,edited=threading.Event(),threading.Event()
+        updating,finish_update=threading.Event(),threading.Event()
         def respond(turn,session):
             assert turn['operation']=='notebook_cell'
             submitted.append(turn['text'])
+            assistant_sessions.append(turn['session'])
+            if len(submitted)==3:
+                updating.set()
+                assert finish_update.wait(20)
             if len(submitted)==2:
                 editing.set()
                 assert edited.wait(15)
             store=development.store
-            code=source if len(submitted)==1 else 'print("保留手动修改")'
+            code={1:source,2:'print("保留手动修改")',3:'print("当前卡片的新代码")',4:'print("另一张卡片")'}[len(submitted)]
             store.event(turn['id'],'message.completed',dict(item_id='answer',text='切换分组可以查看这批样本的平均分。\n```python\n'+code+'\n```'))
             store.update(turn['id'],state='completed',cleanup='complete',dispatch='acknowledged')
             return store.public_turn(store.turn(turn['id']))
@@ -583,12 +589,20 @@ def test_card_assistant_generates_editable_notebook_widgets(browser,native_proje
             expect(card.locator('.cm-content')).to_contain_text('from data_tools.scores import mean_score',timeout=30000)
             assert all(term in submitted[0] for term in ('mean_score','samples','scores ='))
             expect(card.locator('.jp-OutputArea-output')).to_have_count(0)
+            expect(card.locator('.df-cell-status')).to_have_text('代码已更新 · 待运行')
             card.get_by_role('button',name='运行卡片').click()
             output=card.locator('.jp-OutputArea-output')
             expect(output.locator('select')).to_be_visible(timeout=30000)
+            expect(card.locator('.df-cell-status')).to_be_empty()
             output.locator('select').select_option(label='B')
             expect(output).to_contain_text('平均分 4.0',timeout=10000)
             shots=os.environ.get('FORGE_ACCEPTANCE_DIR')
+            for width in (1920,1440):
+                page.set_viewport_size({'width':width,'height':950})
+                expect(page.locator('.df-book-header')).to_have_css('height','36px')
+                frame.locator('body').evaluate('''() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))''')
+                margins=card.evaluate('''c=>{const r=c.getBoundingClientRect();return [r.left,innerWidth-r.right]}''')
+                assert all(8 <= margin <= 17 for margin in margins), margins
             if shots:page.screenshot(path=str(Path(shots)/'notebook-cards-assistant.png'))
             card.get_by_role('button',name='编辑代码').click()
             editor=card.locator('.cm-content')
@@ -606,6 +620,26 @@ def test_card_assistant_generates_editable_notebook_widgets(browser,native_proje
             expect(cells).to_have_count(3)
             expect(card).to_contain_text('manual_draft = 2')
             expect(cells.last).to_contain_text('print("保留手动修改")')
+
+            # Keep the target and its model session even when the user changes cells mid-turn.
+            card.locator('.df-cell-title').click()
+            pane.get_by_role('textbox',name='卡片要求').fill('更新当前卡片')
+            pane.get_by_role('button',name='发送要求').click()
+            assert updating.wait(15)
+            expect(card.locator('.df-cell-status')).to_have_text('正在更新…')
+            if shots:page.screenshot(path=str(Path(shots)/'notebook-cell-generating.png'))
+            cells.last.locator('.df-cell-title').click()
+            expect(pane.locator('.df-card-request')).to_have_count(0)
+            finish_update.set()
+            expect(card.locator('.cm-content')).to_contain_text('当前卡片的新代码')
+            expect(card.locator('.df-cell-status')).to_have_text('代码已更新 · 待运行')
+            expect(cells.last.locator('.cm-content')).to_contain_text('print("保留手动修改")')
+            expect(pane.locator('.df-card-request')).to_have_count(0)
+            pane.get_by_role('textbox',name='卡片要求').fill('改这一格')
+            pane.get_by_role('button',name='发送要求').click()
+            expect(cells.last.locator('.cm-content')).to_contain_text('另一张卡片')
+            assert len(set(assistant_sessions[:3]))==1 and assistant_sessions[3]!=assistant_sessions[0]
+            if shots:page.screenshot(path=str(Path(shots)/'notebook-cell-updated.png'))
             page.set_viewport_size({'width':390,'height':844})
             expect(pane).to_be_visible()
             pane.get_by_role('button',name='关闭助手').click()
