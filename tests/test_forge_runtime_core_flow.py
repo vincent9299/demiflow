@@ -115,7 +115,14 @@ def choose_flow(page, entry):
     expect(page.get_by_role('button', name=entry, exact=True)).to_have_attribute('aria-current', 'page')
 
 
-def register_from_page(page, entry, params, *, evidence_dir):
+def not_admitted(response):
+    if response.status != 503:
+        return False
+    error = response.json()
+    return error.get('code') == 'busy' and error.get('operation_started') is False
+
+
+def register_from_page(page, entry, params, *, evidence_dir, project_root=None):
     settings=page.locator('.wb-settings')
     if not settings.is_visible():
         open_menu_action(page, '接入与权限')
@@ -126,9 +133,21 @@ def register_from_page(page, entry, params, *, evidence_dir):
         query = parse_qs(url.query)
         return (url.path.endswith('/graph') and query.get('basis_kind') == ['source']
                 and query.get('entry') == [entry] and query.get('params') == [params])
+    control = project_root / 'workspace.json' if project_root else None
+    before = control.read_bytes() if control else None
+    register = settings.get_by_role('button', name='登记原生流程', exact=True)
     with page.expect_response(registered_graph) as graph:
         with page.expect_response('**/flow-register') as registered:
-            settings.get_by_role('button',name='登记原生流程',exact=True).click()
+            register.click()
+        if not_admitted(registered.value):
+            expect(page.locator('.wb-notice')).to_contain_text('登记尚未开始')
+            expect(settings.get_by_label('登记流程入口',exact=True)).to_have_value(entry)
+            expect(settings.get_by_label('登记参数文件',exact=True)).to_have_value(params)
+            if control:
+                assert control.read_bytes() == before
+            # An explicit second click is allowed only for a confirmed pre-dispatch refusal.
+            with page.expect_response('**/flow-register') as registered:
+                register.click()
         assert registered.value.ok,registered.value.text()
     assert graph.value.ok,graph.value.text()
     expect(page.locator('.wb-graph')).not_to_have_attribute('aria-busy','true')
@@ -214,10 +233,19 @@ def test_browser_onboard_submit_result_then_monitor_stop(unregistered, tmp_path,
         registration = settings.get_by_role('button',name='登记原生流程',exact=True)
         expect(registration).to_be_disabled()
         assert sum(method=='POST' and urlsplit(url).path.endswith('/flow-register') for method,url in requests)==1
-        with page.expect_response('**/plan-preview') as preview:
+        previews = []
+        def record_preview(response):
+            if urlsplit(response.url).path.endswith('/plan-preview'):
+                previews.append(response)
+        page.on('response', record_preview)
+        try:
             held_preview[0].continue_()
-        assert preview.value.ok, preview.value.text()
-        expect(registration).to_be_enabled()
+            expect(registration).to_be_enabled(timeout=65000)
+        finally:
+            page.remove_listener('response', record_preview)
+        # The UI can retry a read when the server explicitly declined to start it.
+        assert previews and previews[-1].ok, [r.text() for r in previews]
+        assert all(not_admitted(response) for response in previews[:-1])
         register_from_page(page, 'flows/waiting.py:run', 'flows/waiting.json', evidence_dir=tmp_path/'evidence')
         open_menu_action(page, '整图配置')
         page.get_by_text('本次运行设置',exact=True).click()
@@ -291,7 +319,7 @@ def test_failed_prepare_can_be_read_closed_and_corrected(unregistered, browser, 
     with service(unregistered, enable_runs=True, enable_config_write=True, workspace_config_write=True) as app, opened(browser, app) as (page, _):
         page.set_default_timeout(65000)
         navigate(page, '管道')
-        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json', evidence_dir=tmp_path/'evidence')
+        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json', evidence_dir=tmp_path/'evidence', project_root=unregistered)
         config = unregistered/'flows/select_a.json'
         original = config.read_bytes()
         config.write_bytes((unregistered/'flows/waiting.json').read_bytes())
@@ -306,7 +334,7 @@ def test_failed_prepare_can_be_read_closed_and_corrected(unregistered, browser, 
         assert page.evaluate("JSON.parse(sessionStorage.getItem('demiflow-workbench-run-intents-v1'))") == []
         assert not list((unregistered/'.forge/runs').glob('*'))
         config.write_bytes(original)
-        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json', evidence_dir=tmp_path/'evidence')
+        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json', evidence_dir=tmp_path/'evidence', project_root=unregistered)
         assert page.evaluate('ForgeView.decodeView(location.hash).params') == 'flows/select_a.json'
         submit_run(page)
         finished(page)
