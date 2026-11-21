@@ -8,7 +8,6 @@ import pytest
 from demiflow.workbench.projects import registry as console
 from test_forge_public_api import service
 from test_forge_web_redesign import project_info
-from test_forge_project_checks import project
 from test_forge_workspace import demo, isolated
 
 
@@ -63,7 +62,8 @@ def test_create_register_and_check_in_browser(tmp_path):
         browser.close()
 
 
-def test_existing_declared_project_check_and_violation(project, tmp_path):
+def test_existing_declared_project_check_and_violation(isolated, tmp_path):
+    project = isolated
     playwright=pytest.importorskip('playwright.sync_api')
     executable=Path(os.environ.get('FORGE_CHROMIUM',''))
     if not executable.is_file():
@@ -111,7 +111,7 @@ def test_existing_declared_project_check_and_violation(project, tmp_path):
         checked_click('checked')
         page.get_by_text('静态检查：通过',exact=True).wait_for()
         page.screenshot(path=str(artifact/'static-check-passed.png'))
-        source=project/'processing.py';source.write_text('import subprocess\n'+source.read_text())
+        source=project/'operators/question_rules.py';source.write_text('import subprocess\n'+source.read_text())
         before=source.read_bytes()
         checked_click('invalid')
         page.get_by_text('静态检查：不符合规范',exact=True).wait_for()
@@ -122,9 +122,10 @@ def test_existing_declared_project_check_and_violation(project, tmp_path):
 
 
 @pytest.mark.parametrize('pre_dispatch',[True,False])
-def test_project_check_busy_is_unapplied_until_explicit_retry(project,tmp_path,pre_dispatch):
+def test_project_check_busy_is_unapplied_until_explicit_retry(isolated,tmp_path,pre_dispatch):
+    project = isolated
     from contextlib import contextmanager
-    from demiflow.workbench.projects import workspace as ws
+    from demiflow.forge.project_io import control_lock
     playwright=pytest.importorskip('playwright.sync_api')
     executable=Path(os.environ.get('FORGE_CHROMIUM',''))
     if not executable.is_file():pytest.skip('FORGE_CHROMIUM must point to an installed browser')
@@ -147,7 +148,7 @@ def test_project_check_busy_is_unapplied_until_explicit_retry(project,tmp_path,p
             page.get_by_role('button',name='检查当前项目',exact=True).click()
         assert initial.value.status==200 and initial.value.json()['status']=='checked'
         page.get_by_text('静态检查：通过',exact=True).wait_for()
-        source=project/'processing.py';source.write_text('import subprocess\n'+source.read_text())
+        source=project/'operators/question_rules.py';source.write_text('import subprocess\n'+source.read_text())
         check=project/'.forge/project-check.json';assert check.stat().st_size<=2*1024**2
         before=check.read_bytes()
         @contextmanager
@@ -157,7 +158,7 @@ def test_project_check_busy_is_unapplied_until_explicit_retry(project,tmp_path,p
                 try:yield
                 finally:app.workers.release()
             else:
-                with ws.control_lock(project):yield
+                with control_lock(project):yield
         with occupied():
             with page.expect_response('**/project-check') as refused:
                 page.get_by_role('button',name='检查当前项目',exact=True).click()
