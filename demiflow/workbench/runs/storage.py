@@ -208,7 +208,7 @@ def remove_attempt_work(work, *, deadline):
         os.close(parent)
 
 
-def clean_stopped(run, *, expected_revision=None, confirm_stopped, deadline):
+def clean_stopped(run, *, expected_revision=None, confirm_stopped, deadline, preserve_jobs=False):
     """Delegate native ownership and GC exclusively to their original owner."""
     from demiflow.execution.host.control import clean_stopped_execution
     from demiflow.execution.host.control import local_capacity_domain
@@ -219,4 +219,5 @@ def clean_stopped(run, *, expected_revision=None, confirm_stopped, deadline):
     domain = manifest.get('capacity_domain')
     with local_capacity_domain(domain) if domain is not None else nullcontext():
         return clean_stopped_execution(run, expected_attempt=run.attempt,
-            expected_revision=expected_revision, confirm_stopped=confirm_stopped, deadline=deadline)
+            expected_revision=expected_revision, confirm_stopped=confirm_stopped, deadline=deadline,
+            preserve_jobs=preserve_jobs)

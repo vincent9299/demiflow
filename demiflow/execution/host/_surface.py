@@ -2,7 +2,8 @@
 
 SURFACE = {'constructor_keywords': {'RunJournal': ['directory', 'attempt'],
                           'demiflow.execution.host.control.RunJournal': ['directory', 'attempt']},
- 'exports': {'control': {'CheckedExecution': ['demiflow.execution.checked', 'CheckedExecution'],
+ 'exports': {'control': {'reconcile_stopped_fits': ['demiflow.execution.training.maintenance', 'reconcile_stopped_fits'],
+                         'CheckedExecution': ['demiflow.execution.checked', 'CheckedExecution'],
                          'NativeExecution': ['demiflow.execution.managed_native', 'NativeExecution'],
                          'DEFAULT_LIMITS': ['demiflow.execution.runtime_limits', 'DEFAULT_LIMITS'],
                          'RunContext': ['demiflow.execution.run_context', 'RunContext'],
@@ -326,7 +327,8 @@ SURFACE = {'constructor_keywords': {'RunJournal': ['directory', 'attempt'],
                             'recovery_identity',
                             'finish',
                             'observe_nodes'],
-             'RunReader': ['state',
+             'RunReader': ['training_provenance', 'training_outputs',
+                           'state',
                            'attempt_state',
                            'execution_view',
                            'list_attempts',
@@ -454,7 +456,11 @@ SURFACE = {'constructor_keywords': {'RunJournal': ['directory', 'attempt'],
                     'demiflow.operator_llm.call_ref.PromptRecordRef': 'PromptRecordRef',
                     'demiflow.workbench.runs.manager._verified_output': 'record:VerifiedPublication',
                     'demiflow.workbench.runs.view._reading': 'tuple:unknown,RunReader'},
- 'return_contracts': {'RunReader.execution_view': {'result': {'actions': 'dict[action_id, '
+ 'return_contracts': {'RunReader.training_provenance': {'signature': 'training_provenance(attempt, action_id, occurrence)',
+                                                        'result': 'One recorded scoring-table version, model/weight/base and training/evaluation source facts, at most 1 MiB'},
+                      'RunReader.training_outputs': {'signature': 'training_outputs(attempt, action_id)',
+                                                    'result': 'None or at most eight immutable table/model facts for this attempt, with has_more'},
+                      'RunReader.execution_view': {'result': {'actions': 'dict[action_id, '
                                                                          'dict[kind,JsonValue]], '
                                                                          'full compatibility '
                                                                          'diagnostics assembled '

@@ -144,7 +144,7 @@ def _load_sealed_v3(directory, action_id, marker, *, _reader=None, _max_carrier_
     store, bounds = _v3_read_store(directory, store_id=ref.store_id)
     graph, physical, sealed = load_dataflow(Path(directory), action_id, store=store, bounds=bounds, _reader=_reader,
                                              _max_carrier_bytes=_max_carrier_bytes, _deadline=_deadline)
-    return {"version": "v3", "facts": marker, "graph": graph,
+    return {"version": "v4" if marker["schema"] == "demiflow.dataflow_seal.v4" else "v3", "facts": marker, "graph": graph,
             "physical": physical, "sealed": sealed}
 
 
@@ -159,17 +159,20 @@ def load_sealed_plan(directory, action_id, *, version=None, _reader=None, _max_c
     the other format, even when both carriers belong to the same action.
     """
     _check_action_id(action_id)
-    if version not in (None, 'v2', 'v3'):
+    if version not in (None, 'v2', 'v3', 'v4'):
         raise PlanContractError('invalid_contract', 'Unknown sealed plan version')
     journal = RunJournal(directory) if _reader is None else _reader
     if not journal.path.is_file():
         raise PlanContractError("missing_plan", "run journal is absent")
     v3_marker = journal.source_binding(action_id + "-dataflow-sealed")
     if version != 'v2' and v3_marker is not None:
+        generation = {'demiflow.dataflow_seal.v3': 'v3', 'demiflow.dataflow_seal.v4': 'v4'}.get(v3_marker.get('schema'))
+        if generation is None or version is not None and version != generation:
+            raise PlanContractError('invalid_contract', 'Requested native seal generation differs')
         return _load_sealed_v3(directory, action_id, v3_marker, _reader=_reader,
                                _max_carrier_bytes=_max_carrier_bytes, _deadline=_deadline)
-    if version == 'v3':
-        raise PlanContractError('missing_plan', 'action has no v3 sealed plan')
+    if version in ('v3','v4'):
+        raise PlanContractError('missing_plan', 'action has no native sealed plan')
     facts = journal.source_binding(action_id + _SEALED_PLAN_KEY)
     if facts is None:
         raise PlanContractError("missing_plan", "action has no sealed plan facts")
@@ -220,13 +223,13 @@ def _load_bindings_v3(directory, action_id, sealed_plan):
                  "identity_mismatch", "v3 bindings plan_id differs from the sealed plan")
     _require("worker_groups" not in doc and "driver" not in doc,
              "unsupported_layout", "v3 bindings must not carry v2 driver/worker placement")
-    return {"ref": _ref_json(ref), "document": doc, "version": "v3"}
+    return {"ref": _ref_json(ref), "document": doc, "version": sealed_plan["version"]}
 
 
 def load_execution_bindings(directory, action_id, *, sealed_plan) -> dict:
     """Read execution bindings and bind them to the same sealed run/action/dag/plan."""
     _check_action_id(action_id)
-    if type(sealed_plan) is dict and sealed_plan.get("version") == "v3":
+    if type(sealed_plan) is dict and sealed_plan.get("version") in ("v3","v4"):
         return _load_bindings_v3(directory, action_id, sealed_plan)
     _require(type(sealed_plan) is dict and set(sealed_plan) == {"facts", "logical_dag", "physical_plan"},
              "invalid_contract", "sealed_plan must be the {facts, logical_dag, physical_plan} bundle")

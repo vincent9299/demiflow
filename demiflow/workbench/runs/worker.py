@@ -134,7 +134,7 @@ def _execute(root, run_id, run, attempt=None):
             batch_rows=limits['batch_rows'], threads=2, partitions=1,
             timeout_s=min(3600, limits['timeout_s']), admission_timeout_s=limits['admission_timeout_s'])
         # Use the unified bounded host default; the manifest still owns all resource ceilings.
-        with RunContext.attach(run, entry_identity=manifest.get('source_digest'),
+        with RunContext.attach(run, entry_identity=manifest.get('source_digest'), training_project_root=root,
                 limits=manifest['limits'], check_stop=check_stop), local_execution(
                 worker_mode=(manifest.get('native_execution') or {}).get('worker_mode', 'thread'), partitions=1,
                 batch_rows=limits['batch_rows'], memory_bytes=limits['memory_bytes'],
@@ -499,7 +499,8 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
                         and snapshot['supervisor'] == supervisor_identity
                         and snapshot['unit_identity'] == value['state'].get('unit_identity'))
 
-                clean_stopped(run, confirm_stopped=stopped_snapshot, deadline=maintenance_deadline)
+                clean_stopped(run, confirm_stopped=stopped_snapshot, deadline=maintenance_deadline,
+                              preserve_jobs=final_status == 'interrupted')
                 remove_attempt_work(work, deadline=maintenance_deadline)
                 cleanup = 'complete'
         except Exception as exc:

@@ -1009,6 +1009,11 @@ def _resume(root, run_id, *, expected, expected_attempt, authority=None):
                                           deadline=operation_budget.current_deadline())
             if facts['recovery_restricted']:
                 raise ForgeError('该执行的资源 actor 未声明状态恢复钩子，不能从中断处恢复；请新建运行。')
+        from demiflow.execution.host.control import reconcile_stopped_fits
+        from demiflow.workbench.runs.storage import cleanup_deadline
+        reconcile_stopped_fits(RunJournal(target, attempt=expected_attempt), expected_attempt=expected_attempt,
+            expected_revision=state['revision'], deadline=cleanup_deadline(), project_root=root,
+            confirm_stopped=lambda snapshot: execution_stopped(target, snapshot))
         _check_basis(root, target, manifest, phase='resume')
         from demiflow.workbench.runs.storage import cleanup_deadline, clean_stopped
         deadline = cleanup_deadline()
@@ -1016,7 +1021,7 @@ def _resume(root, run_id, *, expected, expected_attempt, authority=None):
         if errors:
             raise ForgeError('Resume reconciliation failed: ' + '; '.join(errors))
         _, value = _load(root, run_id)
-        clean_stopped(RunJournal(target, attempt=expected_attempt),
+        clean_stopped(RunJournal(target, attempt=expected_attempt), preserve_jobs=True,
             expected_revision=value['state']['revision'], deadline=deadline,
             confirm_stopped=lambda snapshot: execution_stopped(target, snapshot))
         _, value = _load(root, run_id)
@@ -1067,6 +1072,8 @@ def worker_environment(target, limits=None, credential_names=(), *, native_execu
         TOKIO_WORKER_THREADS='2', LANCE_CPU_THREADS='2', CUDA_VISIBLE_DEVICES='',
         LANCE_MEM_POOL_SIZE=str(limits['memory_bytes']), LANCE_MAX_TEMP_DIRECTORY_SIZE=str(limits['max_scratch_bytes']))
     from demiflow.workbench.runs.native_resources import environment, executable_directories
+    if 'DEMIFLOW_TRAINING_DEPLOYMENT' in os.environ:
+        result['DEMIFLOW_TRAINING_DEPLOYMENT'] = os.environ['DEMIFLOW_TRAINING_DEPLOYMENT']
     paths = executable_directories(list(executable_dirs))
     result['PATH'] = os.pathsep.join([os.path.dirname(sys.executable), *paths, '/usr/bin', '/bin'])
     result.update(environment(target, native_execution))
@@ -1264,7 +1271,10 @@ def _reconcile(root, run_id, *, expected_attempt):
         try:
             errors = register_results(root, run_id, recover=True, maintenance_deadline=deadline)
             current = run.execution_status()
-            clean_stopped(run, expected_revision=current['revision'],
+            from demiflow.execution.host.control import reconcile_stopped_fits
+            reconcile_stopped_fits(run, expected_attempt=expected_attempt, expected_revision=current['revision'],
+                                   deadline=deadline, confirm_stopped=stopped, project_root=root)
+            clean_stopped(run, preserve_jobs=current['status'] != 'cancelled', expected_revision=current['revision'],
                           confirm_stopped=stopped, deadline=deadline)
             if not completed:
                 remove_attempt_work(work, deadline=deadline)

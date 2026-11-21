@@ -14,6 +14,7 @@ from ..operator_llm.parser import load_prompt_pack
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from .flow_contract import flow_api as _flow_api
+from .training import analyze_fit as _analyze_fit
 from . import flow_grouping as _flow_grouping
 from ..embeddings import authoring as _embedding_authoring
 from ..operator_llm.flow_contract import normalize_prompt as _normalize_prompt, prompt_resources as _prompt_resources, analyze_prompt as _analyze_prompt
@@ -107,6 +108,12 @@ class Dataset:
     def replace_plan(self, source: SourcePlan, plan: LogicalPlan) -> "Dataset":
         """Replace a checked plan view without starting execution or copying rows."""
         return Dataset(source, plan, self._executor, self._stages)
+
+    @_flow_api("fit", datasets=("self",), role="value", analyze=_analyze_fit)
+    def fit(self, *, recipe, monitors=None, retrain_id=None, resume_from=None):
+        """Declare training. A downstream Dataset action submits the captured job."""
+        from .training import declare_fit
+        return declare_fit(self, recipe, monitors, retrain_id, resume_from)
 
     @_flow_api("join", datasets=("self", "other"))
     def join(self, other, *, on, right_on=None, how="inner", suffix="_right", chunk_bytes=32*1024*1024):

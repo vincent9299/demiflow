@@ -216,7 +216,7 @@ class DataflowWorkerExecutor:
             self._state = "loaded"
 
     def _validate_assignment(self, assignment):
-        if assignment.schema != "demiflow.dataflow_assignment.v3":
+        if assignment.schema not in ("demiflow.dataflow_assignment.v3", "demiflow.dataflow_assignment.v4"):
             raise _dataflow_error("INVALID_CONTRACT", "unsupported assignment schema")
         if not assignment.stages:
             raise _dataflow_error("INVALID_CONTRACT", "assignment has no stages")
@@ -235,6 +235,8 @@ class DataflowWorkerExecutor:
                                   context={"resident_bytes": resident})
 
     def _prepare_factories(self, assignment, graph, physical):
+        if bool(graph.jobs) != (assignment.model_bindings is not None):
+            raise _dataflow_error("INVALID_CONTRACT", "worker assignment version differs from sealed graph")
         assigned = set()
         for stage in assignment.stages:
             assigned.update(stage.occurrences)

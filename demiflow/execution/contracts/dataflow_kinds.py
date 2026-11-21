@@ -99,6 +99,7 @@ _RECORDS = (
     # -- registered operators, in registry order ---------------------------------
     _kind("MapOp", TYPED, ("unary", "instance", "task", "keeps_layout"), (_COMPILE, _UNARY, ("main",)), ("none", "pure", "cpu", True)),
     _kind("FlatMapOp", TYPED, ("unary", "instance", "task", "keeps_layout"), (_COMPILE, _UNARY, ("main",)), ("none", "pure", "cpu", True)),
+    _kind("PredictOp", TYPED, (), ("demiflow.planning.dataflow_training:capture_predict", _BATCH, ("main",)), ("auto_json", "pure", "cpu", False)),
     _kind("MapBatchesOp", TYPED, ("batch", "instance", "batch_instance", "keeps_layout"), (_COMPILE, _BATCH, ("main",)), ("auto_json", "pure", "cpu", False)),
     _kind("BoundMapOp", TYPED, ("unary", "instance", "task", "keeps_layout"), (_COMPILE, _UNARY, ("main",)), ("none", "pure", "cpu", True)),
     _kind("OperatorLLMMapOp", TYPED, ("model", "instance", "finite_complete"), (_MODEL_COMPILE, _MODEL_KERNEL, ("main",)), ("adapter", "journaled", "remote_api", False)),

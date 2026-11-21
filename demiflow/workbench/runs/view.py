@@ -173,12 +173,14 @@ def snapshot(root, run_id, *, attempt=None, revision=None):
             status = ('committed' if projection['committed'] else
                       ('writing' if state['status'] in runs.ACTIVE and not projection['failed'] else 'unknown')
                       if projection['has_intent'] else 'not_started')
+            training = reader.training_outputs(attempt, spec['action_id'])
             ref = projection['result_ref']
             outputs.append(
                 dict(
                     name=name,
                     **spec,
                     status=status,
+                    **({'training': training} if training else {}),
                     retained_from_attempt=retained,
                     result=(
                         {"ref": ref, "location_id": spec["location_id"]}

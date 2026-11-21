@@ -383,7 +383,29 @@ class DataflowCheckpointCoordinator:
                  self._physical.bounds.max_state_bytes)
 
     # -- D004 -------------------------------------------------------------
-    def commit(self, cut_id: str, *, sinks, native_queue_state=None) -> RecoveryImage:
+    def _verify_model_bindings(self, bindings, contributions):
+        """A cut authenticates the value identity of each participating model consumer."""
+        if not self._physical.jobs:
+            if bindings is not None:
+                raise DataflowError('CORRUPT_ARTIFACT', 'Row-only cut has unexpected model bindings')
+            return
+        from ..contracts.dataflow_codec import compute_participant_id
+        from ..recovery_contract import identity
+        consumers = {e.consumer for e in self._physical.value_edges if e.input_port == 'model'}
+        observed = {c.participant_id for c in contributions}
+        required = {o for s in self._physical.stages if s.stage_id in consumers and
+                    any(compute_participant_id(s.stage_id, p) in observed for p in s.partitions)
+                    for o in s.occurrences}
+        if type(bindings) is not dict or required != set(bindings):
+            raise DataflowError('CORRUPT_ARTIFACT', 'Cut model membership differs from its contributing stages')
+        for occurrence, digest in bindings.items():
+            expected = self._action.context.journal.source_binding(
+                identity(['prediction', self._action.action_id, occurrence]))
+            if (type(digest) is not str or len(digest) != 64 or set(digest) - set('0123456789abcdef')
+                    or expected != {'model_digest': digest}):
+                raise DataflowError('CORRUPT_ARTIFACT', 'Cut model digest differs from original action binding')
+
+    def commit(self, cut_id: str, *, sinks, native_queue_state=None, model_bindings=None) -> RecoveryImage:
         from ..dataflow_sinks import ack_source_claims, combine_prepared_sinks
         with self._lock:
             self._check_open()
@@ -413,6 +435,7 @@ class DataflowCheckpointCoordinator:
                                 and cursor.split_id in {s.split_id for s in self._physical.splits}):
                             raise DataflowError("INVALID_CONTRACT",
                                                 "final cut committed without full source EOI")
+            self._verify_model_bindings(model_bindings, contributions)
             source_vector = self._merge_source_vector(contributions)
             image = RecoveryImage(commit_id="0" * 64, cut=request, contributions=contributions,
                                   confirmed_sinks={}, source_vector=source_vector)
@@ -423,13 +446,17 @@ class DataflowCheckpointCoordinator:
                 "cut": _cut_json(request),
                 "contributions": [_contribution_json(c) for c in contributions],
             }}
+            if self._physical.jobs:
+                if type(model_bindings) is not dict:
+                    raise DataflowError('INVALID_CONTRACT', 'A job plan requires its prediction binding identities')
+                states[_CUT_STATE_KEY]["model_bindings"] = model_bindings
             if pending.residency is not None:
                 states[_CUT_STATE_KEY]["residency"] = pending.residency
             if native_queue_state is not None:
                 states[_CUT_STATE_KEY]["native_queue"] = native_queue_state
             outputs = {}
             for sink_id, sink in sinks.items():
-                sink_contributions = (contributions if pending.residency is not None and
+                sink_contributions = (contributions if self._physical.jobs or pending.residency is not None and
                     pending.residency.get('schema') in ('demiflow.durable_residency.v1', 'demiflow.durable_residency.v2') else fresh)
                 refs = tuple(c.sinks[sink_id] for c in sink_contributions if sink_id in c.sinks)
                 manifest = combine_prepared_sinks(refs, sink_id=sink_id, services=self._driver_services())
@@ -456,7 +483,7 @@ class DataflowCheckpointCoordinator:
                     confirmed[sink_id] = _artifact_from_json(prepared_sink["ref"])
             image = RecoveryImage(commit_id=fact["commit_id"], cut=request,
                                   contributions=contributions, confirmed_sinks=confirmed,
-                                  source_vector=source_vector)
+                                  source_vector=source_vector, model_bindings=model_bindings)
             # Queue settlement is the native finalize fact; only verify it, never re-ACK.
             ack_source_claims(image, action=self._action)
             self._record_eoi(contributions)
@@ -536,6 +563,8 @@ class DataflowCheckpointCoordinator:
             contributions = tuple(_contribution_from_json(c) for c in carrier["contributions"])
             vector = tuple(_cursor_from_json(c) for c in carrier[SOURCE_VECTOR_KEY])
             residency = carrier.get("residency")
+            model_bindings = carrier.get("model_bindings")
+            self._verify_model_bindings(model_bindings, contributions)
             self.native_queue_state = carrier.get("native_queue")
             if residency is None:
                 if set(c.participant_id for c in contributions) != set(self._participants):
@@ -562,7 +591,7 @@ class DataflowCheckpointCoordinator:
                     confirmed[sink_id] = _artifact_from_json(prepared_sink["ref"])
             image = RecoveryImage(commit_id=fact["commit_id"], cut=cut,
                                   contributions=contributions, confirmed_sinks=confirmed,
-                                  source_vector=vector)
+                                  source_vector=vector, model_bindings=model_bindings)
             source_vector_position(image, action_id=self._action.action_id)
             ack_source_claims(image, action=self._action)
             self._record_eoi(contributions)

@@ -174,14 +174,14 @@ def _stopped_maintenance(journal, expected_attempt, expected_revision, deadline)
 
 
 @contextmanager
-def _maintenance_owner(journal, configuration, *, recover_resources=False):
+def _maintenance_owner(journal, configuration, *, recover_resources=False, preserve_jobs=False):
     """Claim can fail after committing its owner: protect the claim itself."""
     fence = uuid.uuid4().hex
     claimed = False
     failure = None
     try:
         if recover_resources:
-            journal.claim_execution(configuration, fence, recover_resources=True)
+            journal.claim_execution(configuration, fence, recover_resources=True, preserve_jobs=preserve_jobs)
         else:
             journal.claim_execution(configuration, fence)
         claimed = True
@@ -211,14 +211,41 @@ def _maintenance_owner(journal, configuration, *, recover_resources=False):
                 failure.add_note('Maintenance owner release also failed: ' + str(cleanup))
 
 
+@contextmanager
+def stopped_publication_context(journal, *, expected_attempt, expected_revision, deadline, confirm_stopped):
+    """Bind native commit operations to the original stopped owner's lease and fence.
+
+    This context can settle admitted effects. It does not enter the active
+    Dataset context, start an attempt or grant action/worker admission.
+    """
+    with _stopped_maintenance(journal, expected_attempt, expected_revision, deadline) as native:
+        state, config, _, _ = _maintenance_snapshot(native, expected_attempt, expected_revision,
+                                                    confirm_stopped, terminal=True)
+        if config is None:
+            raise RecoveryContractError("Stopped publication requires an original run identity")
+        with _maintenance_owner(native, config) as fence:
+            run = RunContext(native.directory, journal=native)
+            run.ref = RunRef(str(native.directory), config['run_id'])
+            run.fence, run.attempt, run.limits = fence, state['attempt'], config['limits']
+            run.started = time.monotonic()
+            run.deadline = time.time() + max(0, deadline-run.started)
+            run.active = True
+            run.stopped_publication = True
+            try:
+                with run.persist_admitted_effect():
+                    yield run
+            finally:
+                run.active = False
+
+
 def clean_stopped_execution(journal, *, expected_attempt, confirm_stopped, deadline,
-                            expected_revision=None):
+                            expected_revision=None, preserve_jobs=False):
     """Clean a proven stopped native execution without changing host lifecycle."""
     with _stopped_maintenance(journal, expected_attempt, expected_revision, deadline) as maintenance:
         state, configuration, _, _ = _maintenance_snapshot(maintenance, expected_attempt,
             expected_revision, confirm_stopped)
         if configuration is not None:
-            with _maintenance_owner(maintenance, configuration, recover_resources=True) as fence:
+            with _maintenance_owner(maintenance, configuration, recover_resources=True, preserve_jobs=preserve_jobs) as fence:
                 maintenance.clean_orphans(fence)
         return dict(attempt=expected_attempt, revision=state['revision'], native_work=configuration is not None)
 
@@ -283,7 +310,7 @@ class RunContext:
     """Platform control scope. Pipeline/operator arguments never carry this."""
 
     def __init__(self, directory, *, entry_identity=None, limits=None, resume=False,
-                 journal=None, check_stop=None):
+                 journal=None, check_stop=None, training=None):
         from .plan_capture import current_capture
         if current_capture() is not None:
             from .contracts.dataflow_errors import DataflowError
@@ -296,6 +323,8 @@ class RunContext:
         self.entry_identity = entry_identity
         self.requested_limits = limits
         self.resuming = resume
+        self.training_project_root = None
+        self.training = training
         self.external_control = journal is not None
         self.journal = journal or RunJournal(raw)
         self.check_stop_callback = check_stop
@@ -324,12 +353,12 @@ class RunContext:
         _validate_runtime_protocol(configuration)
 
     @classmethod
-    def start(cls, directory=None, *, entry_identity=None, limits=None):
+    def start(cls, directory=None, *, entry_identity=None, limits=None, training=None):
         directory = directory or Path(tempfile.gettempdir()) / "demiflow-runs" / uuid.uuid4().hex
-        return cls(directory, entry_identity=entry_identity, limits=limits)
+        return cls(directory, entry_identity=entry_identity, limits=limits, training=training)
 
     @classmethod
-    def resume(cls, reference, *, entry_identity=None, limits=None):
+    def resume(cls, reference, *, entry_identity=None, limits=None, training=None):
         if not isinstance(reference, RunRef):
             raise TypeError("Resume requires the original platform RunRef")
         # Unified history admission before any business start: the run must carry a
@@ -345,7 +374,7 @@ class RunContext:
         _validate_runtime_protocol(binding)
         if binding.get("run_id") != reference.run_id:
             raise RecoveryContractError("RunRef identity does not match its directory")
-        context = cls(reference.directory, entry_identity=entry_identity, limits=limits, resume=True)
+        context = cls(reference.directory, entry_identity=entry_identity, limits=limits, resume=True, training=training)
         context.expected_run_id = reference.run_id
         return context
 
@@ -359,12 +388,13 @@ class RunContext:
         return journal.transition({'running', 'starting'}, 'stopping')
 
     @classmethod
-    def attach(cls, journal, *, entry_identity=None, limits=None, check_stop=None):
+    def attach(cls, journal, *, entry_identity=None, limits=None, check_stop=None, training_project_root=None):
         """Adopt a supervisor's existing run/attempt; do not invent another run."""
         state = journal.execution_status()
         resuming = state is not None and state['attempt'] > 1
         context = cls(journal.directory, journal=journal, entry_identity=entry_identity,
                       limits=limits, check_stop=check_stop, resume=resuming)
+        context.training_project_root = training_project_root
         if resuming:
             binding = journal.recovery_identity()
             context.expected_run_id = binding['run_id'] if binding is not None else None
@@ -417,7 +447,8 @@ class RunContext:
                     self.journal.begin_attempt(expected_attempt=state["attempt"],
                                                expected_revision=state["revision"])
                 self.journal.transition({"prepared"}, "running")
-            self.attempt = self.journal.claim_execution(configuration, self.fence, recover_resources=True)
+            self.attempt = self.journal.claim_execution(configuration, self.fence, recover_resources=True,
+                                                        preserve_jobs=True)
             self.journal = RunJournal(self.directory, attempt=self.attempt)
             self._journal_connections.enter_context(self.journal.connection_scope())
             self.journal.clean_orphans(self.fence)
@@ -524,7 +555,7 @@ class RunContext:
     def persist_admitted_effect(self):
         """Finish received bytes during cooperative stop, under the same fence.
 
-        The native model adapter alone uses this around local result storage.
+        Used for local result storage and reconciling admitted model jobs.
         It cannot dispatch a request or publish a row. Resource/time admission,
         journal fencing and the enclosing driver's drain deadline still apply.
         """
@@ -537,6 +568,8 @@ class RunContext:
     @contextmanager
     def action(self, declaration, *, action_id=None):
         self.check_stop()
+        if getattr(self, 'stopped_publication', False):
+            raise RecoveryContractError("Stopped publication cannot start a Dataset action")
         if current_action() is not None:
             raise RecoveryContractError("Nested Dataset actions need an explicit completed data boundary")
         self.position += 1
@@ -564,7 +597,7 @@ class RunContext:
             and self.journal.source_binding(action_id + '-dataflow-sealed') is not None)
         sealed_stream = self.journal.source_binding(action_id + '-dataflow-sealed')
         checkpointed_stream = (declaration.get('kind') == 'run_stream'
-            and type(sealed_stream) is dict and sealed_stream.get('schema') == 'demiflow.dataflow_seal.v3'
+            and type(sealed_stream) is dict and sealed_stream.get('schema') in {'demiflow.dataflow_seal.v3', 'demiflow.dataflow_seal.v4'}
             and bool(self.journal.execution_commits(action_id)))
         # This admits the action to the original-contract recovery verifier. It is
         # not proof of success/recoverability: code, sources, actor state, effects

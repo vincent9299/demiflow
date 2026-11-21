@@ -244,6 +244,8 @@ def compile_kernel_spec(
     operation: LogicalOp, *, program_ref: ArtifactRef | None, bounds: Bounds
 ) -> KernelSpec:
     """Translate a real operation into a KernelSpec without instantiating it."""
+    if type(operation) is ops.PredictOp:
+        raise _error("INVALID_CONTRACT", "prediction requires graph capture of its training dependency")
     registry = operator_registry()
     if type(operation) is NativeOperation:
         kind = operation.kind
@@ -425,11 +427,11 @@ def bind_occurrences(
 
 def validate_graph(graph: DataflowGraph, *, bounds: Bounds) -> None:
     """Validate DAG structure, ports, reachability and recomputable identity."""
-    if graph.schema != _SCHEMA:
+    if graph.schema not in {_SCHEMA, "demiflow.dataflow_graph.v4"}:
         raise _error("INVALID_CONTRACT", "unexpected graph schema")
-    if len(graph.nodes) > bounds.max_nodes:
+    if len(graph.nodes) + len(graph.jobs) > bounds.max_nodes:
         raise _error("BUDGET_EXCEEDED", "graph exceeds node budget")
-    if len(graph.edges) > bounds.max_edges:
+    if len(graph.edges) + len(graph.value_edges) > bounds.max_edges:
         raise _error("BUDGET_EXCEEDED", "graph exceeds edge budget")
     if not graph.sources:
         raise _error("INVALID_CONTRACT", "graph has no source")
@@ -470,10 +472,19 @@ def validate_graph(graph: DataflowGraph, *, bounds: Bounds) -> None:
             raise _error("INVALID_CONTRACT", "edge targets an undeclared input port")
         if node.kind != "source" and len(used) != len(ports):
             raise _error("INVALID_CONTRACT", "node has an unconnected input port")
+    if graph.jobs:
+        from .dataflow_training import validate_values
+        validate_values(graph, by_id)
+        for job in graph.jobs:
+            incoming[job.occurrence_id] = []
+            outgoing[job.occurrence_id] = []
+        for edge in graph.value_edges:
+            incoming[edge.consumer].append(edge)
+            outgoing[edge.producer].append(edge)
     # Acyclicity and depth via Kahn topological order, checked at the frontier.
-    indegree = {nid: len(incoming[nid]) for nid in by_id}
+    indegree = {nid: len(edges) for nid, edges in incoming.items()}
     ready = [nid for nid, degree in indegree.items() if degree == 0]
-    depth = {nid: 0 for nid in by_id}
+    depth = {nid: 0 for nid in incoming}
     visited = 0
     while ready:
         nid = ready.pop()
@@ -486,11 +497,21 @@ def validate_graph(graph: DataflowGraph, *, bounds: Bounds) -> None:
             indegree[child] -= 1
             if indegree[child] == 0:
                 ready.append(child)
-    if visited != len(by_id):
+    if visited != len(incoming):
         raise _error("INVALID_CONTRACT", "graph contains a cycle")
     for terminal in graph.terminals:
         if not _reachable(terminal, graph.sources, incoming):
             raise _error("INVALID_CONTRACT", "terminal is not reachable from a source")
+    if graph.jobs:
+        reachable = set(graph.terminals)
+        frontier = list(reachable)
+        while frontier:
+            for edge in incoming[frontier.pop()]:
+                if edge.producer not in reachable:
+                    reachable.add(edge.producer)
+                    frontier.append(edge.producer)
+        if reachable != incoming.keys():
+            raise _error("INVALID_CONTRACT", "training graph contains work outside the requested action")
     if compute_graph_digest(graph) != graph.dag_id:
         raise _error("INVALID_CONTRACT", "graph digest is not recomputable")
 
@@ -527,6 +548,11 @@ class _Capture:
         # executor defaults and the report bindings (execution.dataflow_compile_inputs).
         self.defaults = inputs.defaults
         self.report = inputs.report
+        self.jobs = []
+        self.value_edges = []
+        self.fit_ids = {}
+        self.active_fits = set()
+        self.fixed_inputs = {}
         self.nodes: list[GraphNode] = []
         self.edges: list[tuple[int, str, int, str]] = []
         self.declarations: list[tuple[int, ProgramDeclaration]] = []
@@ -556,11 +582,11 @@ class _Capture:
         self.report_bindings.append((index, key[1], key[2], "reuse" if reused else "execute"))
 
     def _check_node_budget(self) -> None:
-        if len(self.nodes) >= self.bounds.max_nodes:
+        if len(self.nodes) + len(self.jobs) >= self.bounds.max_nodes:
             raise _error("BUDGET_EXCEEDED", "capture exceeds node budget")
 
     def _check_edge_budget(self) -> None:
-        if len(self.edges) >= self.bounds.max_edges:
+        if len(self.edges) + len(self.value_edges) >= self.bounds.max_edges:
             raise _error("BUDGET_EXCEEDED", "capture exceeds edge budget")
 
     def _add_node(self, kind: str, kernel: KernelSpec, semantic: Mapping[str, Any],
@@ -697,6 +723,13 @@ class _Capture:
             op_key = (root, id(operation))
             if op_key in self.alias_op:
                 index = self.alias_op[op_key]
+                continue
+            if type(operation) is ops.PredictOp:
+                expand = _lowering(operator_registry()["PredictOp"].compiler_symbol)
+                index = expand(self, operation, index, path)
+                if self.report is not None:
+                    self._bind_report(index, self.report.operation(operation))
+                self.alias_op[op_key] = index
                 continue
             kernel = compile_kernel_spec(operation, program_ref=None, bounds=self.bounds)
             semantic = _operation_semantic_facts(operation)
@@ -876,15 +909,16 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None, on_com
     sources = tuple(node.occurrence_id for node in bound_nodes if node.kind == "source")
     terminals = (bound_nodes[terminal].occurrence_id,)
     graph = DataflowGraph(
-        schema=_SCHEMA, action_id=request.action.action_id, dag_id="0" * 64,
+        schema="demiflow.dataflow_graph.v4" if capture.jobs else _SCHEMA,
+        jobs=tuple(capture.jobs), value_edges=tuple(capture.value_edges),
+        action_id=request.action.action_id, dag_id="0" * 64,
         nodes=bound_nodes, edges=edges, terminals=terminals, sources=sources,
     )
-    graph = DataflowGraph(
-        schema=graph.schema, action_id=graph.action_id,
-        dag_id=compute_graph_digest(graph), nodes=graph.nodes, edges=graph.edges,
-        terminals=graph.terminals, sources=graph.sources,
-    )
+    graph = replace(graph, dag_id=compute_graph_digest(graph))
     validate_graph(graph, bounds=bounds)
+    if graph.jobs:
+        from .dataflow_training import validate_training_inputs
+        validate_training_inputs(graph, None, bounds=bounds)
     # History/probes only report; new compilation enforces the qualified rules.
     report_configuration_stage(graph.nodes, ((edge.producer, edge.consumer) for edge in graph.edges),
         action_id=graph.action_id, stage='final', edge_count=len(graph.edges), _purpose=_configuration_purpose)

@@ -90,7 +90,7 @@ def operation_capability(operation):
                 "stream_options": False, "bound": False, "native": True}
     kinds = {
         ops.MapOp: "map", ops.BoundMapOp: "map", ops.FilterOp: "filter",
-        ops.FlatMapOp: "flat_map", ops.MapBatchesOp: "map_batches",
+        ops.FlatMapOp: "flat_map", ops.MapBatchesOp: "map_batches", ops.PredictOp: "predict",
         ops.AsyncMapOp: "async_map", ops.BatchMapOp: "batch_map",
         ops.LimitOp: "limit", ops.SelectColumnsOp: "project", ops.DropColumnsOp: "drop",
         ops.RenameColumnsOp: "rename", ops.AddColumnOp: "add_column",
@@ -194,6 +194,9 @@ def operation_facts(operation):
         arguments["cols"] = list(operation.columns)
     elif kind == "rename":
         arguments["names"] = operation.names
+    elif kind == "predict":
+        arguments.update(steps=list(operation.steps), inputs=_thaw_json(operation.inputs),
+                         parameters=_thaw_json(operation.parameters), model_format=operation.fit.recipe.model_format)
     elif kind == "map_batches":
         arguments.update(batch_size=operation.batch_size, batch_format=operation.batch_format,
                          zero_copy_batch=operation.zero_copy_batch)

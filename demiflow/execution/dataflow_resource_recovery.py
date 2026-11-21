@@ -64,11 +64,11 @@ class _OriginalLocalExit:
         remaining = min(terminate_deadline_ms, _remaining(self.deadline))
         scope, allocation = exact_identity['scope_id'], exact_identity['allocation_id']
         row = self.state.read_cleanup_allocation(scope, allocation)
-        if row['effective'].get('accelerators'):
+        if row['effective'].get('accelerators') and 'job_authority' not in self.binding:
             raise ResourceError('UNSUPPORTED_CAPABILITY', 'original device cleanup binding is unavailable')
         if self.binding.get('provider') != 'local':
             raise ResourceError('UNSUPPORTED_CAPABILITY', 'original provider is unavailable for stopped cleanup')
-        if set(self.binding) - {'provider', 'worker_mode', 'capacity_root'}:
+        if set(self.binding) - {'provider', 'worker_mode', 'capacity_root', 'job_authority'}:
             raise ResourceError('INVALID_SPEC', 'unknown original resource binding')
         modern = 'worker_mode' in self.binding and 'capacity_root' in self.binding
         if ('worker_mode' in self.binding) != ('capacity_root' in self.binding):
@@ -126,11 +126,17 @@ class _OriginalLocalExit:
             return provider.ensure_absent(exact_identity, min(remaining, _remaining(self.deadline)))
         from ..resources.local import LocalResourceProvider
         from ..resources.process_unit import ManagedProcessUnit
-        provider = LocalResourceProvider(pool, ManagedProcessUnit(self.root / 'units'))
+        devices = None
+        if row['effective'].get('accelerators'):
+            from .dataflow_devices import device_configuration
+            devices, _ = device_configuration('local')
+            if devices is None or devices.reservation_view(allocation) is None:
+                raise ResourceError('CLEANUP_UNCONFIRMED', 'original job device reservation cannot be verified')
+        provider = LocalResourceProvider(pool, ManagedProcessUnit(self.root / 'units'), device_pool=devices)
         return provider.ensure_absent(exact_identity, min(remaining, _remaining(self.deadline)))
 
 
-def recover_execution_resources(journal, configuration, fence):
+def recover_execution_resources(journal, configuration, fence, *, preserve_jobs=False):
     """Called only by an owner claim made while holding the original run lease."""
     reader = RunResourceState(journal)
     scopes = reader.unfinished_scopes(configuration['run_id'])
@@ -146,6 +152,25 @@ def recover_execution_resources(journal, configuration, fence):
             original = scope['document']
             if original.get('run_id') != configuration['run_id'] or original.get('scope_id') != scope['scope_id']:
                 raise ResourceError('ARTIFACT_MISMATCH', 'resource scope identity differs from original run')
+            job = original['provider_binding'].get('job_authority')
+            if job is not None:
+                key = job['request_key']
+                unit = job.get('inspection_key', key)
+                if unit != key:
+                    from .recovery_contract import identity
+                    if unit != identity(['fit.snapshot_inspection.v1', key]):
+                        raise ResourceError('ARTIFACT_MISMATCH', 'inspection does not name its original fit')
+                if (scope['scope_id'] != 'fit-' + unit or original['authority_ref'] != scope['scope_id']
+                        or journal.source_binding('fit-resource-' + unit) != job):
+                    raise ResourceError('ARTIFACT_MISMATCH', 'job scope has no matching original launch')
+                fact = journal.fit_submission(fence, job['action'], job['occurrence'], instance=job['instance'],
+                            request_key=key, digest=job['digest'], scope=job['provider_scope'])
+                if fact['state'] not in {'sent', 'unknown', 'confirmed'}:
+                    raise ResourceError('ARTIFACT_MISMATCH', 'job has no recorded submission')
+                if preserve_jobs:
+                    # Rows retire with their old attempt. A job has its own
+                    # original scope and will be observed by its fenced owner.
+                    continue
             state = RunResourceState(journal, cleanup_scope=scope['scope_id'])
             provider = _OriginalLocalExit(journal, state, original['provider_binding'], deadline)
             manager = ResourceManager(provider, state)

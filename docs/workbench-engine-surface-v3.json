@@ -55,6 +55,10 @@
         "demiflow.execution.run_telemetry",
         "observe"
       ],
+      "reconcile_stopped_fits": [
+        "demiflow.execution.training.maintenance",
+        "reconcile_stopped_fits"
+      ],
       "resolve_payload_bounds": [
         "demiflow.execution.payload_limits",
         "resolve_payload_bounds"
@@ -622,6 +626,8 @@
       "observe_nodes"
     ],
     "RunReader": [
+      "training_provenance",
+      "training_outputs",
       "state",
       "attempt_state",
       "execution_view",
@@ -855,6 +861,14 @@
         "status": "existing design values never_started or not_proven"
       },
       "signature": "preparation_evidence() -> PreparationEvidence"
+    },
+    "RunReader.training_outputs": {
+      "result": "None or at most eight immutable table/model facts for this attempt, with has_more",
+      "signature": "training_outputs(attempt, action_id)"
+    },
+    "RunReader.training_provenance": {
+      "result": "One recorded scoring-table version, model/weight/base and training/evaluation source facts, at most 1 MiB",
+      "signature": "training_provenance(attempt, action_id, occurrence)"
     },
     "action_recovery_facts": {
       "result": {

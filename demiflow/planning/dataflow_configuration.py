@@ -262,7 +262,7 @@ def _admitted(node) -> frozenset | None:
     """Every key this node may carry, or ``None`` when its kind is not known to the schema."""
     kind = node.kernel.kind
     if node.kind == 'terminal':
-        return TERMINAL_KEYS | {'occurrence_id'}
+        return TERMINAL_KEYS | {'occurrence_id'} | ({'sink_id'} if kind == 'fixed_dataset' else set())
     if node.kind in ('source', 'relational'):
         keys = SOURCE_KEYS.get(kind)
         return None if keys is None else keys | {'occurrence_id', SCHEMA_KEY, 'graph_observe'}
@@ -278,7 +278,8 @@ def _admitted(node) -> frozenset | None:
     if _has_field(kind, 'callable'):
         keys |= VARIANT_KEYS
     if kind == 'MapBatchesOp':
-        keys |= {'default_batch_size'}
+        keys |= {'default_batch_size', 'predict_step', 'predict_inputs', 'predict_parameters',
+                 'predict_model_format', 'predict_input_schema', 'predict_output_schema'}
     if kind == 'RandomShuffleOp':
         keys |= {'shuffle_order_version'}
     if kind in TASK_KINDS:

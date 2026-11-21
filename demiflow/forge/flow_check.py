@@ -41,7 +41,7 @@ class DatasetPort:
 @dataclass
 class API:
     record: dict
-    receiver: DatasetPort | None = None
+    receiver: DatasetPort | DeclaredValue | None = None
 
 
 @dataclass
@@ -409,6 +409,14 @@ class FlowChecker:
                                         scalar('str' if node.attr == 'status' else 'int'))
             if isinstance(parent, Symbol):
                 return self._resolve(Symbol(parent.name + "." + node.attr))
+            if isinstance(parent, DeclaredValue):
+                owner = {"fit": "FitRef", "model_selection": "ModelSelection"}.get(parent.type["kind"])
+                if owner == "FitRef" and node.attr == "checkpoints":
+                    return parent
+                if (owner, node.attr) in {("FitRef", "select"), ("ModelSelection", "predict")}:
+                    member = self.symbols.get("demiflow.data.training." + owner + "." + node.attr)
+                    if member:
+                        return API(member, parent)
             if isinstance(parent, DatasetPort) and node.attr in self.methods:
                 return API(self.methods[node.attr], parent)
             self.fail(
@@ -603,6 +611,14 @@ class FlowChecker:
             )
         except (ValueError, TypeError, SyntaxError) as exc:
             self.fail("FL-03", str(exc), node, module)
+        if kind in {"training_recipe", "predictor_spec"}:
+            return self._training_declaration(kind, values, node, module)
+        if kind == "select_model":
+            from ..data.training import _steps
+            fitted = values["self"]
+            if not isinstance(fitted, DeclaredValue) or fitted.type != scalar("fit"):
+                self.fail("FL-04", "select requires the declared fit result", node, module)
+            return DeclaredValue({**fitted.value, "steps": list(_steps(values["steps"]))}, scalar("model_selection"))
         from ..execution.capabilities import check_action
         capability = check_action(kind, values)
         if not capability['supported']:
@@ -666,6 +682,29 @@ class FlowChecker:
                 if not isinstance(ds, DatasetPort):
                     self.fail("FL-04", f"{port} requires a Dataset", node, module)
                 inputs.append(ds)
+        model_dependencies = set()
+        if kind == "fit":
+            recipe = values["recipe"]
+            if not isinstance(recipe, DeclaredValue) or recipe.type != scalar("training_recipe"):
+                self.fail("FL-06", "fit requires a declared TrainingRecipe", node, module)
+            monitors = values["monitors"] if values["monitors"] is not None else {}
+            if not isinstance(monitors, dict) or monitors.keys() != recipe.value["monitor_schemas"].keys():
+                self.fail("FL-04", "monitor datasets must match declared recipe ports", node, module)
+            for name, ds in sorted(monitors.items()):
+                if not isinstance(ds, DatasetPort):
+                    self.fail("FL-04", "monitor requires a Dataset: " + name, node, module)
+                inputs.append(ds)
+            parent = values["resume_from"]
+            if isinstance(parent, DeclaredValue):
+                if parent.type != scalar("model_selection") or len(parent.value["steps"]) != 1:
+                    self.fail("FL-04", "resume_from requires a single model selection", node, module)
+                model_dependencies.add(parent.value["fit_node"])
+        elif kind == "predict":
+            selection = values["self"]
+            if not isinstance(selection, DeclaredValue) or selection.type != scalar("model_selection"):
+                self.fail("FL-04", "predict requires a model selection", node, module)
+            model_dependencies.add(selection.value["fit_node"])
+        runtime_values.update(model_dependencies)
         if kind == 'prepend' and (len(inputs)!=2 or inputs[1].stream):
             self.fail('FL-08','Prepend prefix must be a finite synchronous Dataset without actors',node,module)
         stream = sem["execution"] == "stream" or any(ds.stream for ds in inputs)
@@ -1279,6 +1318,8 @@ class FlowChecker:
         if sem["role"] in {"action", "bridge", "query"}:
             self.actions.append(identifier)
         if result == 'value':
+            if kind == "fit":
+                return DeclaredValue({"fit_node": identifier, "recipe": values["recipe"].value}, scalar("fit"))
             if sem['role'] == 'value':
                 return DeclaredValue(analysis['value'], analysis['value_type'])
             return RuntimeValue({'runtime_value': {'node': identifier}}, analysis['value_type'])
@@ -1287,6 +1328,42 @@ class FlowChecker:
             if result == "action"
             else DatasetPort(identifier, schema, stream)
         )
+
+    def _training_declaration(self, kind, values, node, module):
+        """Bind source-level callable identities. No project code is imported or run."""
+        from ..data.training import _plain, predictor_values, recipe_values
+        key = "trainer" if kind == "training_recipe" else "factory"
+        definition = values[key]
+        if not isinstance(definition, Definition):
+            self.fail("OP-02", "training callables must resolve to project source", node, module)
+        if kind == "predictor_spec":
+            if not isinstance(definition.node, ast.ClassDef):
+                self.fail("OP-02", "predictor factory requires an actor class", node, module)
+            methods = {m.name: m for m in definition.node.body if isinstance(m, ast.FunctionDef)}
+            if "__init__" not in methods or "__call__" not in methods:
+                self.fail("OP-02", "predictor needs a model constructor and batch call", node, module)
+            bind_parameters(parameters(methods["__init__"], drop_self=True), [], dict(model=None, inputs={}, parameters={}))
+            bind_parameters(parameters(methods["__call__"], drop_self=True), [None], {})
+            normalized = predictor_values(values)
+        else:
+            if isinstance(definition.node, ast.ClassDef):
+                methods = {m.name: m for m in definition.node.body if isinstance(m, ast.FunctionDef)}
+                if "__call__" not in methods:
+                    self.fail("OP-02", "training actors require a synchronous call", node, module)
+                if "__init__" in methods:
+                    bind_parameters(parameters(methods["__init__"], drop_self=True), [], {})
+                bind_parameters(parameters(methods["__call__"], drop_self=True), [None, None], {})
+            elif isinstance(definition.node, ast.FunctionDef):
+                bind_parameters(parameters(definition.node), [None, None], {})
+            else:
+                self.fail("OP-02", "trainer must be a synchronous function or actor class", node, module)
+            predictor = values["predictor"]
+            if not isinstance(predictor, DeclaredValue) or predictor.type != scalar("predictor_spec"):
+                self.fail("FL-06", "recipe requires an original PredictorSpec", node, module)
+            normalized = recipe_values(values)
+        value = {**self._json_value(values), **_plain(normalized)}
+        bounded_json(value, 1024 * 1024)
+        return DeclaredValue(value, scalar(kind))
 
     def _segment_capability(self, identity, driver):
         """At most one evaluation per node and driver, including shared paths."""

@@ -211,9 +211,9 @@ def _join_sealed_observations(root, run_id, attempt, logical_view):
         # A v3 entry already carries the build_plan_view per-occurrence projection
         # (observed/not_observed, never inferred). Keep it as the plan-level authority
         # so the attempt-scoped bridge join below never replaces or re-derives it.
-        if entry.get('version') == 'v3' and 'node_observations' in entry:
+        if entry.get('version') in ('v3','v4') and 'node_observations' in entry:
             entry['plan_node_observations'] = entry['node_observations']
-        v3 = entry.get('version') == 'v3'
+        v3 = entry.get('version') in ('v3','v4')
         scope = (dict(plan_id=entry['plan_id'], dag_id=entry['dag']['dag_id'],
                       plan_revision=entry['physical']['plan_revision']) if v3 else {})
         try:
@@ -525,7 +525,7 @@ def bound_source(root, binding, node_id, *, include_parameters=True, logical_nod
         if logical_node_id is not None:
             owner = _resolve_bridge_action(target, report, logical_node_id, occurrence_id)
             sealed = facts.read_sealed_plan(target, owner)
-            if sealed.get('available') and sealed.get('version') == 'v3':
+            if sealed.get('available') and sealed.get('version') in ('v3','v4'):
                 sealed_code_pin_ref = sealed['plan_view'].get('code_pin_ref')
     evidence = report.get('binding', {})
     observed = dict(workspace_id=key, basis_kind=binding['basis_kind'], basis_digest=digest,

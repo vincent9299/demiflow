@@ -79,7 +79,7 @@ def _merge_cleanup(old, new):
 class RunResourceState:
     def __init__(self, journal, *, event_window=1024, operation_retention_ms=3600000,
                  claim_lease_ms=30000, page_size=64, max_allocations=4096,
-                 max_operations=4096, cleanup_scope=None):
+                 max_operations=4096, cleanup_scope=None, operation_scope=None):
         self.journal = journal
         self.event_window = event_window
         self.operation_retention_ms = operation_retention_ms
@@ -87,6 +87,7 @@ class RunResourceState:
         self.page_size = page_size
         self.max_allocations = max_allocations
         self.max_operations = max_operations
+        self.operation_scope = identifier(operation_scope) if operation_scope else None
         self.cleanup_scope = None if cleanup_scope is None else identifier(cleanup_scope)
 
     @property
@@ -157,6 +158,14 @@ class RunResourceState:
                 "desired_revision": row[3], "observed_revision": row[4],
                 "document": self._read_document(row[5], bounded=bounded),
                 "close_document": self._read_document(row[6], bounded=bounded) if row[6] else None}
+
+    def scope(self, scope_id):
+        identifier(scope_id)
+        with self.journal._connection() as db:
+            if not self._tables_exist(db) or db.execute(
+                    'SELECT 1 FROM resource_scopes WHERE scope_id=?', (scope_id,)).fetchone() is None:
+                return None
+            return self._scope_row(db, scope_id, bounded=True)
 
     def unfinished_scopes(self, run_id, *, after=''):
         """One bounded original-Journal page; never scan deployment-wide pools."""
@@ -538,6 +547,11 @@ class RunResourceState:
                     "WHERE scope_id=? AND kind='ensure_absent' AND (status='pending' OR "
                     "(status='claimed' AND (claimed_until_ms<? OR claimed_epoch<?))) "
                     "ORDER BY sequence LIMIT ?", (self.cleanup_scope, now_ms, epoch, min(limit, 64))).fetchall()
+            elif self.operation_scope is not None:
+                rows = db.execute("SELECT sequence,scope_id,allocation_id,kind,desired_revision FROM resource_intents "
+                    "WHERE scope_id=? AND (status='pending' OR (status='claimed' AND "
+                    "(claimed_until_ms<? OR claimed_epoch<?))) ORDER BY sequence LIMIT ?",
+                    (self.operation_scope, now_ms, epoch, limit)).fetchall()
             else:
                 rows = db.execute("SELECT sequence,scope_id,allocation_id,kind,desired_revision FROM resource_intents "
                                   "WHERE status='pending' OR (status='claimed' AND claimed_until_ms<?) "

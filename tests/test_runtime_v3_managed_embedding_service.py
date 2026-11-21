@@ -191,7 +191,7 @@ def test_guardian_observer_exception_reaps_detached_closefd_descendant(tmp_path,
         'command': list(fixture['service'].command), 'shutdown_timeout_s': .5}
     script = '''import json,sys
 from pathlib import Path
-from demiflow.execution import dataflow_managed_http_child as child
+from demiflow.resources import process_group as child
 original=child.descendants
 def failed_observer(owner):
     rows=original(owner)

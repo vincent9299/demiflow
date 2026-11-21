@@ -15,7 +15,7 @@ _NATIVE = 'demiflow.stream_lance.v3'
 def stage_binding(journal, directory, parent, node, report_digest):
     seal = journal.source_binding(parent + '-dataflow-sealed')
     original = journal.recovery_identity()
-    if (not seal or not original or seal.get('schema') != 'demiflow.dataflow_seal.v3'
+    if (not seal or not original or seal.get('schema') not in {'demiflow.dataflow_seal.v3', 'demiflow.dataflow_seal.v4'}
             or seal.get('action_id') != parent
             or seal.get('run_id') != original['run_id']):
         raise RecoveryContractError('Native stage has no original sealed action')

@@ -14,6 +14,11 @@ if TYPE_CHECKING:
 class DatasetExecutor:
     NAME = ""
 
+    @property
+    def declaration_scope(self):
+        """Immutable composition identity shared by independently created public readers."""
+        return (self.NAME, self.resource_root)
+
     def execute(self, request: ActionSpec):
         """Run one SDK action through the execution-owned lifecycle."""
         from ..dataset_runtime import execute_action

@@ -98,6 +98,8 @@ class DataflowExecution:
         self._sealed: SealedExecution | None = None
         self._physical: PhysicalDataflow | None = None
         self._graph = None
+        self._fit = None
+        self._waiting_for_fit = False
         self._checkpoint_source_rows_only = False
         self._scheduler: DataflowScheduler | None = None
         self._checkpoint: DataflowCheckpointCoordinator | None = None
@@ -303,7 +305,9 @@ class DataflowExecution:
                                                      if s.source_id == source_id)
                        if stage.partitions[index % len(stage.partitions)] in lease.partition_ids)
         return WorkerAssignment(
-            schema="demiflow.dataflow_assignment.v3", run_id=self._run_id(),
+            schema="demiflow.dataflow_assignment.v4" if self._fit else "demiflow.dataflow_assignment.v3",
+            model_bindings=({o: self._fit.bindings[o] for o in stage.occurrences if o in self._fit.bindings}
+                            if self._fit else None), run_id=self._run_id(),
             action_id=self._action.action_id, attempt=self._attempt(), fence=self._fence(),
             plan_id=self._physical.plan_id, plan_revision=self._physical.plan_revision,
             lease=lease, sealed=self._sealed, stages=(stage,), inputs=inputs, outputs=outputs,
@@ -424,10 +428,10 @@ class DataflowExecution:
             bridge = None
             if checked is not None and checked.report_digest and compiled.report_bindings:
                 covered = {b["occurrence_id"] for b in compiled.report_bindings}
-                if covered == {n.occurrence_id for n in graph.nodes}:
+                if covered == {n.occurrence_id for n in (*graph.nodes, *graph.jobs)}:
                     bridge = build_identity_bridge({"dag_id": graph.dag_id,
                         "nodes": [{"occurrence_id": n.occurrence_id, "logical_node_id": n.semantic_id}
-                                  for n in graph.nodes]}, action_id=self._action.action_id,
+                                  for n in (*graph.nodes, *graph.jobs)]}, action_id=self._action.action_id,
                         report_digest=checked.report_digest,
                         bindings=[thaw_record_value(b) for b in compiled.report_bindings])
             sealed = seal_dataflow(self._action, graph, physical, store=self._store, identity_bridge=bridge,
@@ -462,7 +466,10 @@ class DataflowExecution:
         from ..dataflow_sinks import make_sink_adapter
         for node in graph.nodes:
             if node.kind == "terminal":
-                if self._request.kind in ("write_lance", "write_datasink", "write_file"):
+                if node.kernel.kind == "fixed_dataset":
+                    self._sinks[node.kernel.configuration['sink_id']] = make_sink_adapter(
+                        node.kernel, services=self._services)
+                elif self._request.kind in ("write_lance", "write_datasink", "write_file"):
                     from ..dataflow_sinks import make_native_terminal_sink
                     self._sinks[node.kernel.kind] = make_native_terminal_sink(node.kernel,
                         request=self._request, services=self._services,
@@ -496,6 +503,11 @@ class DataflowExecution:
             hosts=self._services.hosts, bounds=self._bounds, policy=live_policy,
             scope_id=runtime_scope_id(physical.plan_id, self._attempt()))
         self._checkpoint = DataflowCheckpointCoordinator(self._action, physical, store=self._store)
+        if graph.jobs:
+            from .fit import FitDependencies
+            self._fit = FitDependencies(action=self._action, services=self._services, graph=graph,
+                    physical=physical, sealed=sealed, scheduler=self._scheduler, check_stop=self._check_stop)
+
         if completed_live_nodes:
             # A final result belongs to the original journal, not the released
             # live registry. Authenticate that result through the SAME native
@@ -570,7 +582,10 @@ class DataflowExecution:
         gpu_budget = int(sum(host.logical_resources.get('gpu', 0) for host in self._services.hosts))
         if gpu_budget:
             budget['accelerator_gpu'] = gpu_budget
+        if self._fit:
+            self._scheduler.bind_job_capacity(budget, self._services.job_gpu)
         from ..dataflow_services import resource_scope_binding
+        self._services.resources.state.operation_scope = self._scheduler.scope_id
         self._services.resources.state.open_scope(self._fence(), ResourceScope(
             self._scheduler.scope_id, self._run_id(), resource_scope_binding(self._services.resources, self._policy),
             self._fence(), budget))
@@ -685,7 +700,7 @@ class DataflowExecution:
             # A prepend cannot consume its live input until its finite prefix
             # has reached EOI. Admit that prefix's existing finite phase first.
             needs_prefix = any(n.kernel.kind == 'StreamPrependOp' for n in self._graph.nodes)
-            self._phases = ((tuple(s.stage_id for s in stages),) if fits and prior is None and not needs_prefix
+            self._phases = ((tuple(s.stage_id for s in stages),) if fits and prior is None and not needs_prefix and self._fit is None
                             else pack_finite_phases(self._physical, fits=phase_fits, prior=prior))
         # Preflight EVERY phase before business side effects.
         self._durable_peers_live = (durable and self._durable_residency is None
@@ -718,6 +733,15 @@ class DataflowExecution:
             and not self._active_worker_allocations and not self._by_partition
             and not self._lease_by_operation and self._checkpoint_progress() == 0)
         phase = self._phases[self._phase_index]
+        if self._fit:
+            completed = self._completed_stages
+            if self._durable_residency is not None:
+                completed = {s.stage_id for s in self._physical.stages
+                             if set(s.partitions) <= self._durable_residency.completed}
+            self._waiting_for_fit = not self._fit.ready(phase, completed=completed, image=self._restore_image)
+            if self._waiting_for_fit:
+                return
+            self._checkpoint_at = time.monotonic()
         stages = [s for s in self._stage_order() if s.stage_id in phase]
         members = (set(self._durable_residency.partition_groups[self._phase_index])
                    if self._durable_residency is not None else {p for s in stages for p in s.partitions})
@@ -849,6 +873,11 @@ class DataflowExecution:
         if self._cancelled:
             return ExecutionStatus(state='cancelled', pending_events=0, confirmed_rows=self._confirmed_rows)
         self._check_stop()
+        if self._waiting_for_fit:
+            self._launch_phase()
+            if self._waiting_for_fit:
+                time.sleep(min(.05, deadline_ms / 1000))
+                return ExecutionStatus(state=self._state, pending_events=0, confirmed_rows=self._confirmed_rows)
         self._renew_workers()
         deadline = time.monotonic() + deadline_ms / 1000.0
         events, replies = self._poll_control(deadline)
@@ -1421,10 +1450,17 @@ class DataflowExecution:
         native_queue_state = (self._acquisition.checkpoint_state()
             if self._acquisition is not None and hasattr(self._acquisition, 'checkpoint_state') else None)
 
+        options = {}
+        if self._fit:
+            options['model_bindings'] = self._fit.checkpoint_bindings(self._restore_image)
+            if self._cut.final and self._request.kind == 'write_lance':
+                spec = next(p.value for p in self._request.programs if p.name == 'write_lance')
+                self._fit.retain_table(spec.uri)
+
         def publish():
             try:
                 image = context.run(self._checkpoint.commit, cut_id, sinks=self._sinks,
-                                    native_queue_state=native_queue_state)
+                                    native_queue_state=native_queue_state, **options)
             except BaseException as exc:
                 future.set_exception(exc)
             else:
@@ -1510,6 +1546,8 @@ class DataflowExecution:
         return json.loads(b"".join(self._store.read(result_ref, max_bytes=self._bounds.max_control_bytes)))
 
     def _set_result(self, image):
+        if self._fit and self._action.replaying and self._restore_image is image:
+            self._fit.verify_completed(image)
         publication = self._publication(image)
         rows = publication["manifest"]["total_rows"]
         self._confirmed_rows = rows
@@ -1523,6 +1561,8 @@ class DataflowExecution:
             if getattr(self._action, "object_sinks", None):
                 receipt_data = receipt_data["rows"]
             receipt = receipt_data.get("native_receipt")
+            if self._fit and self._request.kind == 'write_lance' and receipt:
+                self._fit.retain_table(receipt['data']['uri'], receipt=receipt)
             write = WriteResult(written_rows=rows, blocks_written=len(publication["manifest"]["partitions"]),
                                 metadata={"native_receipt": receipt, "queue_settled": self._acquisition is not None and self._acquisition.binding.mode == "sink"})
         self._terminal_result = TerminalResult(kind=self._request.kind, rows=rows,
@@ -1545,6 +1585,8 @@ class DataflowExecution:
             return
         self._cancelled = True
         self._state = "cancelled"
+        if self._fit:
+            self._fit.cancel()
         self._services.journal_service.stop_model_admission(reason)
         self._drain_publication()
         if self._cut is not None:
@@ -1568,6 +1610,10 @@ class DataflowExecution:
         cleanup_error = None
         try:
             self._drain_publication()
+            if self._fit:
+                if self._cancelled:
+                    self._fit.drain_cancel(time.monotonic() + self._cleanup_grace_ms() / 1000)
+                self._fit.release()
         except Exception as exc:
             cleanup_error = exc
         self._closed = True

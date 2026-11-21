@@ -130,7 +130,7 @@ def build_logical_plan_view(graph: DataflowGraph, *, declarations: tuple[Program
     from .contracts.dataflow import DataflowGraph, ProgramDeclaration
     if not isinstance(graph, DataflowGraph):
         raise TypeError('build_logical_plan_view requires a DataflowGraph')
-    semantic = {node.occurrence_id: node.semantic_id for node in graph.nodes}
+    semantic = {node.occurrence_id: node.semantic_id for node in (*graph.nodes, *graph.jobs)}
     labels = observation_labels if observation_labels is not None else {}
     if (not isinstance(labels, Mapping) or not set(labels) <= set(semantic)
             or any(type(v) is not str or not v for v in labels.values())):
@@ -172,11 +172,11 @@ def build_logical_plan_view(graph: DataflowGraph, *, declarations: tuple[Program
         return dict(label=label[:256], program=program, data_source=source)
 
     ports = {}
-    for edge in graph.edges:
+    for edge in (*graph.edges, *graph.value_edges):
         ports.setdefault(edge.producer, [])
         if edge.output_port not in ports[edge.producer]:
             ports[edge.producer].append(edge.output_port)
-    return dict(
+    result = dict(
         schema_version=graph.schema, dag_id=graph.dag_id, action_id=graph.action_id,
         nodes=[dict(logical_node_id=node.semantic_id, occurrence_id=node.occurrence_id,
                     op_kind=node.kernel.kind, input_ports=[p.name for p in node.kernel.inputs],
@@ -192,3 +192,30 @@ def build_logical_plan_view(graph: DataflowGraph, *, declarations: tuple[Program
                                  occurrence_id=edge.consumer, port=edge.input_port)})
                for edge in graph.edges],
         sources=list(graph.sources), terminals=list(graph.terminals))
+    if graph.jobs:
+        project_training_ports(graph, result)
+    return result
+
+
+def project_training_ports(graph, dag):
+    """Append sealed jobs and typed dependencies to a logical or historical view."""
+    from .recovery_contract import identity
+    by_id = {n.occurrence_id: n.semantic_id for n in (*graph.nodes, *graph.jobs)}
+    inputs, outputs = {}, {}
+    for edge in graph.value_edges:
+        inputs.setdefault(edge.consumer, []).append(edge.input_port)
+        outputs.setdefault(edge.producer, set()).add(edge.output_port)
+        dag["edges"].append({
+            "edge_id": identity(["dataflow-value-edge-v4", edge.producer, edge.output_port, edge.consumer, edge.input_port]),
+            "kind": edge.kind, "step": edge.step,
+            "from": {"logical_node_id": by_id[edge.producer], "occurrence_id": edge.producer, "port": edge.output_port},
+            "to": {"logical_node_id": by_id[edge.consumer], "occurrence_id": edge.consumer, "port": edge.input_port}})
+    for job in graph.jobs:
+        dag["nodes"].append({"logical_node_id": job.semantic_id, "occurrence_id": job.occurrence_id, "op_kind": "fit",
+                             "label": "fit", "input_ports": [], "output_ports": []})
+    for node in dag["nodes"]:
+        key = node["occurrence_id"]
+        node["input_ports"].extend(inputs.get(key, ()))
+        for name in sorted(outputs.get(key, ())):
+            if name not in node["output_ports"]:
+                node["output_ports"].append(name)

@@ -271,6 +271,18 @@ def operation_identity(operation):
     native declarations must never fall back to describing a mutable actor.
     """
     from ..data import plan as ops
+    if type(operation) is ops.PredictOp:
+        from ..data.training import ModelSelection
+        def fit_identity(decl, ancestors):
+            if decl in ancestors or len(ancestors) >= 32:
+                raise RecoveryContractError("training declaration cycle or excessive depth")
+            parent = decl.parent
+            if isinstance(parent, ModelSelection):
+                parent = {"fit": fit_identity(parent.declaration, ancestors | {decl}), "step": parent.steps[0]}
+            return {"inputs": {name: plan_identity("input", source, plan) for name, source, plan in decl.inputs},
+                    "recipe": describe(decl.recipe), "retrain_id": decl.retrain_id, "parent": describe(parent)}
+        return {"prediction": {"fit": fit_identity(operation.fit, set()), "steps": list(operation.steps),
+                               "inputs": describe(operation.inputs), "parameters": describe(operation.parameters)}}
     from .plan_facts import operation_facts
     specialized = type(operation) in {ops.EmbeddingMapOp, ops.VectorSearchOp,
         ops.StreamGroupBatchesOp, ops.DeduplicateOp, ops.StreamPrependOp}
