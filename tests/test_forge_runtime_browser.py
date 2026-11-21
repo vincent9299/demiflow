@@ -10,11 +10,18 @@ import pytest
 from demiflow.workbench.runs import manager as runs
 from demiflow.workbench.api import WorkspaceServer
 from test_forge_runs import base, root, wait
+from test_forge_runtime_core_flow import assert_single_run, submit_run
+from demiflow.workbench.projects import workspace as ws
 from test_forge_run_faults import _slow, _first_committed
 
 
 @pytest.fixture
 def browser_page(root,tmp_path,monkeypatch):
+    # A single saved configuration makes this pipeline runnable from its normal UI.
+    control = ws.read_control(root / 'workspace.json')
+    expected = ws.content_digest(control)
+    control['entries']['flows/questions.py:select'] = ['flows/select_a.json']
+    ws.write_control(root / 'workspace.json', control, expected=expected)
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN',str(tmp_path/'runtime-domain'))
     from playwright.sync_api import sync_playwright
 
@@ -57,12 +64,13 @@ def test_rm19_real_runtime_metrics_stop_and_responsive_tabs(
     value = _slow(root)
     try:
         _first_committed(root, value)
-        page.get_by_role("button", name="管道", exact=True).click()
-        page.get_by_role("button",name="运行记录",exact=True).click()
-        page.locator('.wb-run-record[data-run="'+value["run_id"]+'"]').click()
-        page.locator(".wb-run-bar > strong").wait_for()
+        page.get_by_role('navigation',name='项目功能').get_by_role('button',name='运行',exact=True).click()
+        page.locator(f'.wb-run-flow[data-entry="{value["entry"]}"]').click()
+        expect(page.get_by_role('combobox', name='运行记录')).to_have_value(value['run_id'])
+        expect(page.locator('.wb-run-id')).to_have_text('#'+value['run_id'][-10:])
         page.get_by_role("button",name="性能趋势 · 整次运行",exact=True).click()
-        page.get_by_text("控制事件", exact=True).click()
+        page.get_by_role("button",name="日志",exact=True).click()
+        page.get_by_role("button",name="控制事件",exact=True).click()
         deadline = time.monotonic() + 15
         while (
             time.monotonic() < deadline
@@ -87,7 +95,8 @@ def test_rm19_real_runtime_metrics_stop_and_responsive_tabs(
             )
         page.get_by_role("button", name="停止", exact=True).focus()
         page.keyboard.press("Enter")
-        expect(page.locator('.wb-run-bar > .wb-tag')).to_have_text('已取消',timeout=60000)
+        page.get_by_role("button",name="确认停止",exact=True).click()
+        expect(page.locator('.wb-run-bar > .wb-tag')).to_have_text('已停止',timeout=60000)
         assert "部分输出已提交" in page.locator(".workbench").inner_text()
         assert "所属执行已停止" in page.locator(".workbench").inner_text()
         page.screenshot(
@@ -116,16 +125,16 @@ def test_rm03_browser_lost_prepare_response_reuses_persistent_identity(
         page.unroute("**/run-prepare", drop_first)
 
     page.route("**/run-prepare", drop_first)
-    page.get_by_role("button", name="运行", exact=True).click()
-    page.get_by_role("button", name="运行", exact=True).wait_for(state="visible")
+    submit_run(page)
     page.locator(".error-box").last.wait_for()
     page.get_by_role("button",name="以原请求重试准备",exact=True).click()
     page.get_by_role("button", name="开始这次运行", exact=True).wait_for()
-    assert len(list((root / ".forge/runs").iterdir())) == 1
     request_id = bodies[0]["request_id"]
     receipt = json.loads(
         (root / ".forge/requests" / (request_id + ".json")).read_text()
     )
     assert receipt["status"] == "ready"
-    assert receipt["run_id"] in page.locator(".workbench").inner_text()
+    assert_single_run(root, receipt["run_id"])
+    assert page.get_by_role('combobox',name='运行记录').input_value()==receipt["run_id"]
+    assert page.evaluate('ForgeView.decodeView(location.hash).run_id')==receipt["run_id"]
     assert not errors, errors
