@@ -196,6 +196,8 @@ class ManagedFitHost:
                 return 'unknown'
             if not allocation.retire(cancelled=False, timeout_ms=self._remaining_ms()):
                 return 'unknown'
+        # A job-level close cannot replace proof from the original device pool.
+        allocation.allocated_gpu_seconds()
         if (root / 'cancel').exists():
             return 'cancelled'
         if (root / 'result.json').exists():

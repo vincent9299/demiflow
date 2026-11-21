@@ -102,20 +102,9 @@ def original_job_resources(run, scope_id):
     from .dataflow_devices import device_configuration
     from .resource_state import RunResourceState
     state = RunResourceState(run.journal, operation_scope=scope_id)
-    scope = state.scope(scope_id)
     domain, capacity = local_capacity()
-    key = scope_id.removeprefix('fit-')
-    if scope:
-        binding = scope['document']['provider_binding']
-        if (scope['run_id'] != run.ref.run_id or binding.get('capacity_root') != str(domain / 'capacity')
-                or binding.get('job_authority') != run.journal.source_binding('fit-resource-' + key)):
-            raise DataflowError('INCOMPATIBLE_HISTORY', 'Original training resource domain changed')
     units = run.directory.with_name(run.directory.name + '-driver-resources') / 'units'
     devices, _ = device_configuration('local')
-    if scope and state.read_allocation(scope_id, key):
-        record = state.read_cleanup_allocation(scope_id, key)
-        if record['effective'].get('accelerators') and devices is None:
-            raise DataflowError('UNKNOWN_EFFECT', 'Original device authority unavailable')
     return ResourceManager(LocalResourceProvider(LocalCapacityPool(domain / 'capacity', capacity=capacity),
                         ManagedProcessUnit(units), device_pool=devices), state)
 

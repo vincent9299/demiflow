@@ -301,6 +301,9 @@ class DevicePool:
         finally:
             os.close(fd)
 
+    def authority(self):
+        return {'root': str(self.root), 'devices': sorted(self.inventory, key=lambda device: device['device_id'])}
+
     def released_device_seconds(self, allocation_id, spec_hash, device_type):
         """Return reserved-device seconds only after the original verified release."""
         identifier(allocation_id)

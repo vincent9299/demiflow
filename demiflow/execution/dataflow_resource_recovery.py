@@ -68,7 +68,7 @@ class _OriginalLocalExit:
             raise ResourceError('UNSUPPORTED_CAPABILITY', 'original device cleanup binding is unavailable')
         if self.binding.get('provider') != 'local':
             raise ResourceError('UNSUPPORTED_CAPABILITY', 'original provider is unavailable for stopped cleanup')
-        if set(self.binding) - {'provider', 'worker_mode', 'capacity_root', 'job_authority'}:
+        if set(self.binding) - {'provider', 'worker_mode', 'capacity_root', 'job_authority', 'device_authority'}:
             raise ResourceError('INVALID_SPEC', 'unknown original resource binding')
         modern = 'worker_mode' in self.binding and 'capacity_root' in self.binding
         if ('worker_mode' in self.binding) != ('capacity_root' in self.binding):
@@ -130,6 +130,9 @@ class _OriginalLocalExit:
         if row['effective'].get('accelerators'):
             from .dataflow_devices import device_configuration
             devices, _ = device_configuration('local')
+            from .recovery_contract import identity
+            if devices is not None and self.binding.get('device_authority') != identity(devices.authority()):
+                raise ResourceError('ARTIFACT_MISMATCH', 'original training device authority changed')
             if devices is None or devices.reservation_view(allocation) is None:
                 raise ResourceError('CLEANUP_UNCONFIRMED', 'original job device reservation cannot be verified')
         provider = LocalResourceProvider(pool, ManagedProcessUnit(self.root / 'units'), device_pool=devices)

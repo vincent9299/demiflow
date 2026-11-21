@@ -4,6 +4,7 @@ import time
 from ...resources.contracts import (RESOURCE_PROTOCOL_VERSION, MutationContext, ResourcePlan,
                                    ResourceScope, WorkerRequest)
 from ..contracts.dataflow_errors import DataflowError
+from ..recovery_contract import identity
 
 
 class JobAllocation:
@@ -12,6 +13,25 @@ class JobAllocation:
         self.key = key
         self.scope_id = 'fit-' + key
         self.manager = manager
+        scope = manager.state.scope(self.scope_id)
+        if scope is not None:
+            self.verify_authority(manager, scope, run, key)
+
+    @staticmethod
+    def verify_authority(manager, scope, run, key):
+        binding = scope['document']['provider_binding']
+        if (scope['run_id'] != run.ref.run_id or binding.get('provider') != 'local'
+                or binding.get('worker_mode') != 'process'
+                or binding.get('capacity_root') != str(manager.provider.pool.root)
+                or binding.get('job_authority') != run.journal.source_binding('fit-resource-' + key)):
+            raise DataflowError('INCOMPATIBLE_HISTORY', 'Original training resource domain changed')
+        if 'device_authority' in binding:
+            if binding['device_authority'] != identity(manager.provider.device_authority()):
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'Original training device authority changed')
+        elif manager.state.read_allocation(scope['scope_id'], key):
+            record = manager.state.read_cleanup_allocation(scope['scope_id'], key)
+            if record['effective'].get('accelerators'):
+                raise DataflowError('UNKNOWN_EFFECT', 'Original training device authority has no receipt')
 
     def _context(self, operation, revision):
         return MutationContext(RESOURCE_PROTOCOL_VERSION, self.scope_id, self.run.attempt,
@@ -23,6 +43,11 @@ class JobAllocation:
             raise DataflowError('UNSUPPORTED_CAPABILITY', 'The managed process carrier needs one local resource host')
         binding = dict(provider='local', worker_mode='process', capacity_root=str(self.manager.provider.pool.root),
                        job_authority=authority)
+        if profile.requests.get('accelerators'):
+            grant = self.manager.provider.device_authority()
+            if grant is None:
+                raise DataflowError('RESOURCE_INFEASIBLE', 'Managed job requires a device authority')
+            binding['device_authority'] = identity(grant)
         self.manager.state.open_scope(self.run.fence, ResourceScope(self.scope_id, self.run.ref.run_id,
                                       binding, self.scope_id, budget))
         request = WorkerRequest(self.key, self.key, profile, launch, provision_deadline_ms=timeout_ms)
@@ -39,7 +64,10 @@ class JobAllocation:
         row = self.manager.state.read_cleanup_allocation(self.scope_id, self.key)
         if not row['effective'].get('accelerators'):
             return 0.0
-        return self.manager.provider.released_device_seconds(self.key, row['spec_hash'], 'gpu')
+        seconds = self.manager.provider.released_device_seconds(self.key, row['spec_hash'], 'gpu')
+        if seconds is None:
+            raise DataflowError('UNKNOWN_EFFECT', 'Original GPU reservation lacks a confirmed release receipt')
+        return seconds
 
     def refresh(self, *, deadline, observe_only=False):
         if not observe_only:
