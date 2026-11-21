@@ -40,7 +40,11 @@ def test_wide_hot_key_uses_original_disk_budget(tmp_path, monkeypatch, disk_byte
         if isinstance(error.value, DataflowError):
             assert error.value.code == 'BUDGET_EXCEEDED'
         else:
-            assert str(error.value) == 'Execution budget exhausted: artifact_staging_bytes'
+            # Staging and other journal-owned files share the original scratch ceiling.
+            assert (error.value.budget, str(error.value)) in {
+                ('artifact_staging_bytes', 'Execution budget exhausted: artifact_staging_bytes'),
+                ('max_scratch_bytes', 'Runtime storage exceeds scratch admission budget'),
+            }
         assert not any(e._restore_image is not None and e._restore_image.cut.final
                        for e in executions)
     else:
