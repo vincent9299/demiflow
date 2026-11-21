@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import hashlib
 import hmac
 import http.client
+from itertools import islice
 import json
 import os
 from pathlib import Path
@@ -16,7 +17,6 @@ import subprocess
 import tempfile
 import threading
 import time
-from urllib.parse import quote
 
 from demiflow.forge.schema import ForgeError
 from demiflow.forge.io import no_symlinks
@@ -32,7 +32,6 @@ class Instance:
     process: subprocess.Popen
     state: Path
     notebooks: Path
-    initial_path: str
     executable: bool
     writable: bool
     channels: int = 0
@@ -75,7 +74,7 @@ class Notebooks:
         _, root, permissions = self.server.resolve('/api/workspaces/' + project + '/context')
         return root, permissions
 
-    def get(self, project):
+    def get(self, project, *, initialize=True):
         root, permissions = self.authorize(project)
         with self.lock:
             if self.closed.is_set():
@@ -110,20 +109,8 @@ class Notebooks:
             if not directory.is_dir():
                 raise ForgeError('Project notebooks path is not a directory', code='conflict')
             self._import_legacy(project, directory, permissions)
-            paths = []
-            with os.scandir(directory) as entries:
-                for index, entry in enumerate(entries):
-                    if index >= 512:
-                        raise ForgeError('Notebook directory exceeds 512 entries', code='resource_limit')
-                    if entry.name.endswith('.ipynb') and entry.is_file(follow_symlinks=False):
-                        paths.append(entry.name)
-            if not paths and permissions['analysis_write']:
-                initial = dict(nbformat=4, nbformat_minor=5, metadata={
-                    'kernelspec': {'display_name': 'Python 3', 'language': 'python', 'name': 'python3'}},
-                    cells=[dict(id=secrets.token_hex(8), cell_type='code', metadata={},
-                                execution_count=None, outputs=[], source='')])
-                self._create(directory / '分析.ipynb', initial)
-                paths = ['分析.ipynb']
+            if initialize and permissions['analysis_write'] and not self.documents(directory):
+                self.new_document(directory)
             state = Path(self.temp.name) / (project + '-' + secrets.token_hex(4))
             state.mkdir(mode=0o700, exist_ok=True)
             for name in ('runtime', 'config', 'data', 'ipython'):
@@ -158,7 +145,7 @@ class Notebooks:
                     str(config_path)], cwd=code_root, env=env, stdin=subprocess.DEVNULL,
                     stdout=log, stderr=log, start_new_session=True)
             instance = Instance(project, root, port, token, base, process, state, directory,
-                                'notebooks/' + quote(sorted(paths)[0]) if paths else 'tree', permissions['analysis_execute'], permissions['analysis_write'])
+                                permissions['analysis_execute'], permissions['analysis_write'])
             self.instances[project] = instance
             try:
                 deadline = time.monotonic() + 40
@@ -183,6 +170,31 @@ class Notebooks:
                 raise
 
     @staticmethod
+    def documents(directory):
+        names = []
+        with os.scandir(directory) as entries:
+            for index, entry in enumerate(entries):
+                if index >= 512:
+                    raise ForgeError('Notebook directory exceeds 512 entries', code='resource_limit')
+                if entry.name.endswith('.ipynb') and not entry.name.startswith('.') and entry.is_file(follow_symlinks=False):
+                    names.append(entry.name)
+        return sorted(names, key=lambda name: (name.removesuffix('.ipynb').casefold(), name))
+
+    def new_document(self, directory):
+        initial = dict(nbformat=4, nbformat_minor=5, metadata={
+            'kernelspec': {'display_name': 'Python 3', 'language': 'python', 'name': 'python3'}},
+            cells=[dict(id=secrets.token_hex(8), cell_type='code', metadata={},
+                        execution_count=None, outputs=[], source='')])
+        with os.scandir(directory) as entries:
+            if sum(1 for _ in islice(entries, 512)) >= 512:
+                raise ForgeError('Notebook directory is full', code='resource_limit')
+        for number in range(1, 513):
+            name = '分析.ipynb' if number == 1 else f'分析 {number}.ipynb'
+            if self._create(directory / name, initial):
+                return name
+        raise ForgeError('Notebook directory is full', code='resource_limit')
+
+    @staticmethod
     def _grants(state, writable):
         temporary = state / 'grants.tmp'
         temporary.write_text(json.dumps({'writable': writable}))
@@ -195,8 +207,9 @@ class Notebooks:
             with path.open('x', encoding='utf-8') as stream:
                 path.chmod(0o600)
                 json.dump(value, stream, ensure_ascii=False)
+            return True
         except FileExistsError:
-            pass
+            return False
 
     def _import_legacy(self, project, directory, permissions):
         service = self.server.analysis

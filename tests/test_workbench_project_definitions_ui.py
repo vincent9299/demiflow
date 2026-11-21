@@ -167,6 +167,7 @@ def test_unwired_operator_editor_and_data_tools_in_their_own_pages(project,brows
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
         nav.get_by_role('button',name='数据',exact=True).click()
         page.get_by_role('tab',name='工具',exact=True).click()
+        page.get_by_text('data_tools/review.py',exact=True).click()
         page.get_by_role('button',name='ReviewPage 标注',exact=True).click()
         dialog=page.get_by_role('dialog',name='标注工具')
         expect(dialog.get_by_role('heading',name='ReviewPage')).to_be_visible()

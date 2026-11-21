@@ -9,8 +9,9 @@ import http.client
 import re
 import select
 import socket
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
+from demiflow.forge.io import no_symlinks
 from demiflow.forge.schema import ForgeError
 
 MAX_BODY = 16 * 1024**2
@@ -173,16 +174,27 @@ def _websocket(handler, service, instance, origin):
         service.channels.release()
 
 
-def open_notebook(handler, project):
+def open_notebook(handler, project, *, create=False):
     service = handler.server.notebooks
     if service is None:
         raise ForgeError('Native Notebook is not configured', code='operation_rejected')
-    instance = service.get(project)
-    _, permissions = service.authorize(project)
+    with service.lock:
+        root, permissions = service.authorize(project)
+        if create and not permissions['analysis_write']:
+            raise PermissionError('此项目尚未开启 Notebook 保存权限。')
+        if not permissions['analysis_write'] and not (root / 'notebooks').exists():
+            handler._send(dict(url=None, documents=[], permissions=permissions))
+            return
+        instance = service.get(project, initialize=not create)
+        no_symlinks(instance.notebooks)
+        selected = service.new_document(instance.notebooks) if create else None
+        documents = service.documents(instance.notebooks)
+        selected = selected or next(iter(documents), None)
+        url = instance.base_url + ('notebooks/' + quote(selected) if selected else 'tree')
     cookie = 'demiflow_notebook=' + service.credentials(project, instance.root)
     cookie += '; Path=' + instance.base_url + '; HttpOnly; SameSite=Strict'
     if handler._request_origin().startswith('https:'):
         cookie += '; Secure'
-    handler._send(dict(url=instance.base_url+instance.initial_path, base_url=instance.base_url,
+    handler._send(dict(url=url, documents=documents, base_url=instance.base_url,
         root=str(instance.root), notebooks=str(instance.notebooks), permissions=permissions),
         headers={'Set-Cookie': cookie})

@@ -134,7 +134,7 @@ GET_FIELDS = {
 }
 POST_FIELDS = {
     'development-settings': ({'expected','provider','model','effort','authentication','base_url','api_key'}, set()),
-    'notebook-open': (set(), set()),
+    'notebook-open': (set(), {'create'}),
     'flow-arguments-save': ({'entry', 'revision', 'source_sha256', 'arguments'}, set()),
     'project-capabilities': ({'workspace_id','expected','capabilities'}, set()),
     'parameter-preview': ({'path','expected_sha256','graph_binding','replace'}, set()),
@@ -631,7 +631,7 @@ class Handler(BaseHTTPRequestHandler):
             elif key=='replace':
                 if type(value) is not list or not 1<=len(value)<=32:
                     raise ForgeError('Expected 1..32 parameter replacements',code='invalid_request')
-            elif key in {'new_outputs','telemetry','compact','run_submit','run_control','attach'}:
+            elif key in {'new_outputs','telemetry','compact','run_submit','run_control','attach','create'}:
                 if type(value) is not bool:
                     raise ForgeError(key+' must be boolean', code='invalid_request')
             elif type(value) is not str or not value or len(value.encode()) > 4096:
@@ -937,10 +937,10 @@ class Handler(BaseHTTPRequestHandler):
             if name not in POST_FIELDS:
                 raise ForgeError('Unknown endpoint', code='not_found')
             if name == 'notebook-open':
-                self._body(name)
+                create = self._body(name).get('create', False)
                 from demiflow.workbench.notebooks.proxy import open_notebook
                 key = self.path.split('/')[3] if self.path.startswith('/api/workspaces/') else next(iter(self.server.single['projects']))
-                open_notebook(self, key)
+                open_notebook(self, key, create=create)
                 return
             if name in {'project-create', 'project-register', 'project-remove', 'project-permissions','project-capabilities'}:
                 raise ForgeError('Project management requires a console endpoint', code='invalid_request')

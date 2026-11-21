@@ -782,7 +782,20 @@
     const project=workspaceId,epoch=viewEpoch;
     const localApi=(path,query,body)=>{if(epoch!==viewEpoch)throw staleRequest();return api(path,query,body,project);};
     const originalPath=pendingOriginalPath;pendingOriginalPath=null;
-    const mounted=await ForgeNotebooks.mount({parent:main,api:localApi,project,context,request,originalPath,onBinding,mountText,disposeReaders});
+    const notebookAccess={
+      canGrant:key=>projectManageEnabled&&!!serviceWorkbenchPermissions[key],
+      async enable(grants){
+        const inventory=await localApi('projects');
+        const row=inventory.projects.find(item=>item.workspace_id===project);
+        if(!row)throw Error('项目登记已变化，请刷新。');
+        await localApi('project-capabilities',{}, {workspace_id:project,expected:inventory.digest,
+          capabilities:{...row.configured_capabilities,...grants}});
+        const fresh=await localApi('context');
+        if(epoch!==viewEpoch)throw staleRequest();
+        context=fresh;projectHeading();return fresh;
+      }
+    };
+    const mounted=await ForgeNotebooks.mount({parent:main,api:localApi,project,context,request,originalPath,onBinding,mountText,disposeReaders,notebookAccess});
     if(epoch!==viewEpoch){mounted.dispose();throw staleRequest();}
     notebooksView=mounted;
     updates.context=fresh=>mounted.updateContext(fresh);

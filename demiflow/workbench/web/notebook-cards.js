@@ -1,7 +1,7 @@
 import {presentDataFrame} from './notebook-dataframe.js';
 import {notebookConversation} from './notebook-assistant.js';
 
-const icons={plus:'M12 5v14M5 12h14',chat:'M5 4h14a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H9l-5 4V5a1 1 0 0 1 1-1Z',close:'m6 6 12 12M6 18 18 6',run:'m8 5 11 7-11 7z',code:'m8 7-5 5 5 5m8-10 5 5-5 5',up:'M12 19V5m-6 6 6-6 6 6'};
+const icons={cell:'M3 4h18v11H3zM8 20h8m-4-4v8',chat:'M5 4h14a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H9l-5 4V5a1 1 0 0 1 1-1Z',close:'m6 6 12 12M6 18 18 6',run:'m8 5 11 7-11 7z',code:'m8 7-5 5 5 5m8-10 5 5-5 5',up:'M12 19V5m-6 6 6-6 6 6'};
 function element(doc,tag,cls,text){
   const node=doc.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;
 }
@@ -11,7 +11,7 @@ function icon(doc,name,label,action){
   svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');path.setAttribute('d',icons[name]);svg.append(path);button.append(svg);button.onclick=action;return button;
 }
 
-export function mountCards({desk,documentPane,panel,app,api,project,alive,permissions,tables,catalogCommand,layout}){
+export function mountCards({desk,controls,panel,app,api,project,alive,permissions,tables,catalogCommand,layout}){
   const book=panel.content,doc=book.node.ownerDocument,win=doc.defaultView;
   const style=element(doc,'link');style.rel='stylesheet';style.href='/notebook-cards.css';doc.head.append(style);
   const frameTables='.jp-RenderedHTMLCommon table.dataframe';
@@ -19,7 +19,6 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
     if(node.matches?.(frameTables))presentDataFrame(node);
     node.querySelectorAll?.(frameTables).forEach(presentDataFrame);
   };
-  const top=element(document,'header','df-book-header'),title=element(document,'strong');
   const nativeMode=element(document,'button','df-view-switch','完整 Notebook');nativeMode.type='button';
   const aside=element(document,'aside','df-card-assistant');aside.setAttribute('aria-label','卡片助手');
   const head=element(document,'header','df-assistant-head'),heading=element(document,'strong',null,'卡片助手'),targetName=element(document,'small','df-target-name');
@@ -65,7 +64,7 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
     for(const [id,draft] of state.drafts||[])if(typeof draft==='string')drafts.set(id,draft);
     if(typeof state.open==='boolean')savedOpen=state.open;
   }catch{}
-  function rename(){if(path!==panel.context.path)conversations.clear();path=panel.context.path;title.textContent=path.split('/').pop().replace(/\.ipynb$/,'');}
+  function rename(){if(path!==panel.context.path)conversations.clear();path=panel.context.path;}
   function focusCell(cell){book.deselectAll();book.activeCellIndex=cells().indexOf(cell);}
   function newCell(source=''){
     if(!writable())return null;
@@ -84,9 +83,9 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
     if(classic)showAssistant(false);
     win.dispatchEvent(new win.Event('resize'));
   }
-  const add=icon(document,'plus','新建卡片',()=>{const cell=newCell();cell?.editor?.focus();});
+  const add=icon(document,'cell','新建卡片',()=>{const cell=newCell();cell?.editor?.focus();});
   const toggle=icon(document,'chat','卡片助手',()=>showAssistant(!assistantOpen));
-  add.disabled=!writable();top.append(title,add,nativeMode,toggle);documentPane.prepend(top);
+  add.disabled=!writable();controls.append(add,nativeMode,toggle);
   head.append(heading,targetName,icon(document,'close','关闭助手',()=>showAssistant(false)));form.append(reference,input,executionLabel,send);aside.append(head,thread,form);desk.append(aside);
   const divider=ForgeNavigation.resizable({layout:desk,sidebar:aside,label:'卡片助手',right:true,active:false});
   function ask(item){
@@ -265,8 +264,8 @@ export function mountCards({desk,documentPane,panel,app,api,project,alive,permis
   book.activeCellChanged.connect(trackSelection);panel.model.contentChanged.connect(changed);panel.context.pathChanged.connect(rename);nativeMode.onclick=()=>setMode(!classic);
   input.maxLength=8192;input.onchange=remember;win.addEventListener('pagehide',remember);
   rename();setMode(false);showAssistant(savedOpen===true);trackSelection();decorate();
-  return {ask,dispose(){
+  return {ask,pending:()=>inFlight.size>0,dispose(){
     remember();dead=true;outputObserver.disconnect();book.node.querySelectorAll('.df-dataframe-view').forEach(view=>view.remove());win.removeEventListener('pagehide',remember);observer.disconnect();win.cancelAnimationFrame(paintFrame);book.activeCellChanged.disconnect(trackSelection);panel.model?.contentChanged.disconnect(changed);panel.context.pathChanged.disconnect(rename);
-    divider.dispose();for(const [cell,bar] of decorated){cell.model.stateChanged.disconnect(onExecution);bar.remove();}style.remove();doc.body.classList.remove('df-card-mode');aside.remove();top.remove();delete desk.dataset.assistant;
+    divider.dispose();for(const [cell,bar] of decorated){cell.model.stateChanged.disconnect(onExecution);bar.remove();}style.remove();doc.body.classList.remove('df-card-mode');aside.remove();add.remove();nativeMode.remove();toggle.remove();delete desk.dataset.assistant;
   }};
 }
