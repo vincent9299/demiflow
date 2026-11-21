@@ -100,14 +100,25 @@ def test_assistant_cli_edits_runs_and_reads_native_output(browser,native_project
     settings['projects'][project]=dict(grant,root=str(root),sources=['README.md'],writes=[],watch=[])
     conf.write_text(json.dumps(settings))
     recorded=[]
+    continue_reply=threading.Event()
+    attempts=[]
     with service(None,registry=registry_path,notebook_python=PYTHON,development_config=conf) as app:
         dev=app.development
         caps=dev.capabilities
         monkeypatch.setattr(dev,'capabilities',lambda *args:dict(caps(*args),notebook_cells=True,notebook_cli=True))
         def launch(turn,session):
+            attempts.append(turn['id'])
+            if len(attempts)==3:
+                dev.store.finish_provider(turn['id'],state='interrupted',cleanup='complete',
+                                          result={'reason':'BrokenPipeError: [Errno 32] Broken pipe'})
+                return dev.store.public_turn(dev.store.turn(turn['id']))
             def assistant():
                 bridge=CellCommands(dev.store,turn,time.time()+100)
                 try:
+                    if len(attempts)==1:
+                        dev.store.event(turn['id'],'message.delta',dict(item_id='step',channel='process',text='正在检查测试卡片'))
+                        dev.store.event(turn['id'],'item.updated',dict(id='inspect',command='data cell show',status='running'))
+                        assert continue_reply.wait(30)
                     def cli(*args,source=None,success=True):
                         result=subprocess.run([str(bridge.bin/'data'),*args],input=source,text=True,
                             env={**os.environ,'DEMIFLOW_CONTROL_ENDPOINT':str(bridge.path)},
@@ -146,10 +157,19 @@ def test_assistant_cli_edits_runs_and_reads_native_output(browser,native_project
         try:
             view=quote(json.dumps(dict(v=2,workspace=project,kind='tables')))
             page.goto(app.origin+'/#token='+app.token+'&view='+view)
-            page.get_by_role('button',name='卡片助手',exact=True).click(timeout=60000)
+            page.frame_locator('iframe.native-notebook-frame').get_by_role('button',name='卡片助手',exact=True).first.click(timeout=60000)
             pane=page.get_by_role('complementary',name='卡片助手')
             query=pane.get_by_role('textbox',name='卡片要求')
             query.fill('inspect');pane.get_by_role('button',name='发送要求').click()
+            expect(pane.locator('.dfc-think .dfc-summary')).to_have_text('正在检查测试卡片',timeout=30000)
+            expect(pane.locator('.dfc-tool .dfc-summary')).to_have_text('data cell show')
+            expect(pane.locator('.dfc-answer')).to_have_count(0)
+            expect(pane.locator('.dfc-bubble')).to_have_text('inspect')
+            pane.locator('.dfc-tool > summary').click()
+            pane.locator('.dfc-tool').get_by_role('button',name='View original').click()
+            expect(pane.locator('.df-card-original pre')).to_contain_text('data cell show')
+            pane.get_by_role('button',name='关闭原文').click()
+            continue_reply.set()
             expect(pane).to_contain_text('本轮仅编辑',timeout=30000)
             pane.get_by_role('checkbox',name='允许本轮运行').check()
             query.fill('检查评分，并验证运行错误');pane.get_by_role('button',name='发送要求').click()
@@ -157,5 +177,22 @@ def test_assistant_cli_edits_runs_and_reads_native_output(browser,native_project
             frame=page.frame_locator('iframe.native-notebook-frame')
             expect(frame.locator('.jp-CodeCell').last).to_contain_text('native error probe')
             assert len(recorded)==1 and 'execution_count' in recorded[0],recorded
+            query.fill('重试中断的连接');pane.get_by_role('button',name='发送要求').click()
+            expect(pane).to_contain_text('模型连接已关闭，未收到完整回复。')
+            assert len(attempts)==3
+            pane.get_by_role('button',name='重新发送').click()
+            expect(pane.locator('.dfc-answer').last).to_contain_text('已收到内核回执',timeout=30000)
+            expect(pane.locator('.dfc-turn')).to_have_count(4)
+            expect(query).to_be_enabled(timeout=30000)
+            assert len(set(attempts))==4 and len(recorded)==1
+            sid=dev.store.turn(attempts[0])['session']
+            assert not dev.sessions(project,root)['sessions']
+            # An old browser bookmark used to open the cell inside Development.
+            view=quote(json.dumps(dict(v=2,workspace=project,kind='development_session',session_id=sid)))
+            page.goto(app.origin+'/#view='+view)
+            page.reload()
+            expect(page.get_by_role('button',name='新会话')).to_be_enabled(timeout=30000)
+            expect(page.locator('.development-session-list button')).to_have_count(0)
+            expect(page.locator('.dfc-bubble')).to_have_count(0)
         finally:
             page.close()

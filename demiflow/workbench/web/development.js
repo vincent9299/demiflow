@@ -415,7 +415,10 @@ SOFTWARE.
     latest.onclick=async()=>{state.navigationEpoch++;follow.setFollowing(true);clearTimeline();state.historyOnly=false;state.displaySession=null;state.sequence=Math.max(0,state.session.sequence-50,(state.session.archive_sequence||0)-1);state.windowStart=state.sequence;earlier.hidden=state.sequence===0;latest.hidden=true;clearTimeout(state.timer);await refresh();};
     if(capabilities.enabled){
       const primary=(await api('dev-conversation')).session;if(state.disposed)return handle;state.primaryId=primary?.id||null;
-      if(view?.session_id)state.session=await api('dev-session',{session_id:view.session_id});
+      if(view?.session_id){
+        const chosen=await api('dev-session',{session_id:view.session_id});
+        state.session=chosen.session_kind==='notebook'?primary:chosen;
+      }
       else if(!state.newDraft)state.session=primary;
       if(state.disposed)return handle;
       if(state.session){

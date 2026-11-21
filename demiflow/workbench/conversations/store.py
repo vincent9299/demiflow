@@ -48,6 +48,7 @@ class Store:
                   id TEXT PRIMARY KEY, workspace TEXT NOT NULL, root TEXT NOT NULL,
                   provider TEXT NOT NULL, request_key TEXT NOT NULL, policy_hash TEXT NOT NULL,
                   title TEXT NOT NULL DEFAULT '', created REAL NOT NULL, revision INTEGER NOT NULL DEFAULT 0,
+                  session_kind TEXT NOT NULL DEFAULT 'development',
                   sequence INTEGER NOT NULL DEFAULT 0, bytes INTEGER NOT NULL DEFAULT 0,
                   provider_session TEXT, metadata_bytes INTEGER NOT NULL DEFAULT 0, UNIQUE(workspace, request_key));
                 CREATE TABLE IF NOT EXISTS turns(
@@ -75,6 +76,20 @@ class Store:
                 PRAGMA user_version=1;
                 COMMIT;
                 ''')
+            # Classify only histories consisting entirely of cell turns. The
+            # write transaction also serializes two initializers during upgrade.
+            with self.connect(write=True) as db:
+                if 'session_kind' not in {row['name'] for row in db.execute('PRAGMA table_info(sessions)')}:
+                    db.execute("ALTER TABLE sessions ADD COLUMN session_kind TEXT NOT NULL DEFAULT 'development'")
+                    db.execute("""UPDATE sessions SET session_kind='notebook'
+                        WHERE EXISTS (SELECT 1 FROM turns WHERE session=sessions.id)
+                        AND NOT EXISTS (SELECT 1 FROM turns WHERE session=sessions.id
+                            AND operation NOT IN ('notebook_cell','notebook_cell_cli'))""")
+                    db.execute("""INSERT OR IGNORE INTO project_conversation_members(workspace,session)
+                        SELECT workspace,session FROM project_conversations WHERE session IN
+                        (SELECT id FROM sessions WHERE session_kind='notebook')""")
+                    db.execute("""DELETE FROM project_conversations WHERE session IN
+                        (SELECT id FROM sessions WHERE session_kind='notebook')""")
             os.chmod(self.path, 0o600)
             reserve = self.root / 'control.reserve'
             if not reserve.exists() and not (self.root / 'storage-pressure').exists():
@@ -142,7 +157,7 @@ class Store:
             return self._session(db, workspace, pinned['session'])
         # Old records remain unchanged. Prefer the newest usable conversation
         # with messages over an unused empty session; old grants never upgrade.
-        row = db.execute("""SELECT * FROM sessions WHERE workspace=? AND root=? AND policy_hash=?
+        row = db.execute("""SELECT * FROM sessions WHERE workspace=? AND root=? AND policy_hash=? AND session_kind='development'
             AND NOT EXISTS(SELECT 1 FROM project_conversation_members m WHERE m.workspace=sessions.workspace AND m.session=sessions.id)
             ORDER BY (revision>0) DESC,coalesce((SELECT max(created) FROM turns WHERE session=sessions.id),created) DESC,id LIMIT 1""",
             (workspace, wire(identity).decode(), policy_hash)).fetchone()
@@ -170,7 +185,7 @@ class Store:
             db.execute('INSERT OR IGNORE INTO project_conversations(workspace,session) VALUES(?,?)',(workspace,sid))
             return self._session(db,workspace,sid)
 
-    def create_conversation(self, workspace, identity, provider, request_id, policy_hash):
+    def create_conversation(self, workspace, identity, provider, request_id, policy_hash, *, session_kind="development"):
         """Explicit writable membership is created with the session, never inferred from history."""
         identifier(request_id)
         with self.connect(write=True) as db:
@@ -179,7 +194,7 @@ class Store:
             if old:
                 member = db.execute('SELECT 1 FROM project_conversation_members WHERE workspace=? AND session=?',
                                     (workspace, old['id'])).fetchone()
-                if (not member or old['provider'] != provider or old['policy_hash'] != policy_hash
+                if (not member or old['session_kind'] != session_kind or old['provider'] != provider or old['policy_hash'] != policy_hash
                         or json.loads(old['root']) != identity):
                     reject('Session idempotency key has different content or membership', 'conflict')
                 return dict(old)
@@ -187,13 +202,14 @@ class Store:
                 reject('Session count budget exhausted', 'resource_limit')
             # Pin the old migration choice before adding an empty conversation.
             # Otherwise creating a member could silently replace an unpinned main.
-            primary = self._primary(db, workspace, identity, policy_hash)
+            primary = self._primary(db, workspace, identity, policy_hash) if session_kind == 'development' else None
             sid = 'd' + secrets.token_hex(16)
-            db.execute('INSERT INTO sessions(id,workspace,root,provider,request_key,policy_hash,created) VALUES(?,?,?,?,?,?,?)',
-                       (sid, workspace, wire(identity).decode(), provider, request_id, policy_hash, time.time()))
+            db.execute('INSERT INTO sessions(id,workspace,root,provider,request_key,policy_hash,created,session_kind) VALUES(?,?,?,?,?,?,?,?)',
+                       (sid, workspace, wire(identity).decode(), provider, request_id, policy_hash, time.time(), session_kind))
             db.execute('INSERT INTO project_conversation_members(workspace,session) VALUES(?,?)', (workspace, sid))
-            db.execute('INSERT OR IGNORE INTO project_conversations(workspace,session) VALUES(?,?)',
-                       (workspace, primary['id'] if primary else sid))
+            if session_kind == 'development':
+                db.execute('INSERT OR IGNORE INTO project_conversations(workspace,session) VALUES(?,?)',
+                           (workspace, primary['id'] if primary else sid))
             return self._session(db, workspace, sid)
 
     def writable(self, workspace, sid, identity, policy_hash, providers, *, pin=False):
@@ -224,7 +240,7 @@ class Store:
                 substr(t.text,1,80) AS title,t.result,
                 (SELECT min(sequence) FROM events WHERE turn=t.id) AS sequence,
                 EXISTS(SELECT 1 FROM events WHERE turn=t.id AND json_extract(body,'$.type')='check.reference') AS checks
-                FROM turns t JOIN sessions s ON s.id=t.session WHERE s.workspace=? {predicate}
+                FROM turns t JOIN sessions s ON s.id=t.session WHERE s.workspace=? AND s.session_kind='development' {predicate}
                 ORDER BY t.created DESC,t.id LIMIT ? OFFSET ?""",(*args,limit+1,offset)).fetchall()
             result=[]
             for row in rows[:limit]:
@@ -242,7 +258,7 @@ class Store:
                 t.id AS turn_id,t.state,t.cleanup
                 FROM sessions s LEFT JOIN turns t ON t.id=(
                     SELECT id FROM turns WHERE session=s.id ORDER BY created DESC,id DESC LIMIT 1)
-                WHERE s.workspace=? ORDER BY s.created DESC,s.id LIMIT ? OFFSET ?''',
+                WHERE s.workspace=? AND s.session_kind='development' ORDER BY s.created DESC,s.id LIMIT ? OFFSET ?''',
                 (workspace, limit + 1, offset)).fetchall()
             sessions = []
             for row in rows[:limit]:
@@ -255,12 +271,12 @@ class Store:
             busy, active_session_id = False, None
             if identity is not None:
                 root = Path(identity['path'])
-                for writer in db.execute('''SELECT s.id,s.workspace,s.root FROM turns t JOIN sessions s ON s.id=t.session
+                for writer in db.execute('''SELECT s.id,s.workspace,s.root,s.session_kind FROM turns t JOIN sessions s ON s.id=t.session
                         WHERE t.cleanup!='complete' '''):
                     other = Path(json.loads(writer['root'])['path'])
                     if root == other or root in other.parents or other in root.parents:
                         busy = True
-                        if writer['workspace'] == workspace:
+                        if writer['workspace'] == workspace and writer['session_kind']=='development':
                             active_session_id = writer['id']
             return dict(sessions=sessions, next_offset=offset + limit if len(rows) > limit else None,
                         writer_busy=busy, active_session_id=active_session_id)
@@ -321,6 +337,17 @@ class Store:
                 return dict(old), False
             if session['revision'] != expected_revision or session['policy_hash'] != policy_hash or json.loads(session['root']) != identity:
                 reject('Session policy, root or revision changed', 'conflict')
+            cell_turn = operation in ('notebook_cell', 'notebook_cell_cli')
+            if cell_turn and session['session_kind'] != 'notebook':
+                # Older clients can still establish a new card conversation.
+                if db.execute('SELECT 1 FROM turns WHERE session=? LIMIT 1', (sid,)).fetchone():
+                    reject('请从目标卡片开启独立会话。', 'conflict')
+                db.execute("UPDATE sessions SET session_kind='notebook' WHERE id=?", (sid,))
+                db.execute("""INSERT OR IGNORE INTO project_conversation_members(workspace,session)
+                    SELECT workspace,session FROM project_conversations WHERE session=?""", (sid,))
+                db.execute('DELETE FROM project_conversations WHERE session=?', (sid,))
+            elif not cell_turn and session['session_kind'] == 'notebook':
+                reject('此会话属于 Notebook 卡片。', 'conflict')
             active = db.execute("SELECT t.*,s.root FROM turns t JOIN sessions s ON s.id=t.session WHERE t.cleanup != 'complete'").fetchall()
             if len(active) >= self.limits.active: reject('Development capacity reserved', 'busy')
             root = Path(identity['path'])

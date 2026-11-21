@@ -119,14 +119,20 @@ class Service:
         session=self.store.primary(workspace,root_identity(root),self.current_hash(workspace,root))
         return dict(session=self.show(workspace,session['id']) if session else None)
 
-    def create_project(self, workspace, root, request_id, provider_id, new_conversation=False):
+    def create_project(self, workspace, root, request_id, provider_id, new_conversation=False, session_kind="development"):
         if type(new_conversation) is not bool:
             reject('new_conversation must be a boolean', 'invalid_request')
+        if session_kind not in ('development','notebook') or (session_kind=='notebook' and not new_conversation):
+            reject('Invalid project conversation kind','invalid_request')
         self.project(workspace,root);identifier(provider_id)
         deployment, revision, _ = self.binding(workspace, root, seal=True)
         if provider_id not in deployment.providers:reject('Provider is not configured')
-        create = self.store.create_conversation if new_conversation else self.store.ensure_project
-        return dict(create(workspace,root_identity(root),provider_id,request_id,revision), writable=True)
+        args = (workspace, root_identity(root), provider_id, request_id, revision)
+        if new_conversation:
+            session = self.store.create_conversation(*args, session_kind=session_kind)
+        else:
+            session = self.store.ensure_project(*args)
+        return dict(session, writable=True)
 
     def sessions(self, workspace, root, offset=0, limit=20):
         self.project(workspace, root)

@@ -150,6 +150,54 @@ def test_paged_minimal_list_and_writer_identity_are_workspace_scoped(case):
         listing(case, limit=21)
 
 
+def test_card_sessions_stay_out_of_development_navigation_and_keep_their_own_events(case):
+    def card(request):
+        return case.store.create_conversation(case.workspace, case.identity, 'codex', request, case.policy,
+                                              session_kind='notebook')['id']
+
+    first, second = card('card-1'), card('card-2')
+    assert card('card-1') == first != second
+    assert service_for(case).conversation(case.workspace, case.root)['session'] is None
+    main = create(case, 'main')
+    finish(case, submit(case, main))
+    turn, _ = case.store.submit(case.workspace, first, 'ask', 0, 'question about first cell',
+                                case.identity, case.policy, 'notebook_cell_cli')
+    page = listing(case, limit=1)
+    assert [row['id'] for row in page['sessions']] == [main] and page['next_offset'] is None
+    assert page['writer_busy'] and page['active_session_id'] is None
+    finish(case, turn)
+    assert [row['session'] for row in case.store.project_turns(case.workspace)['turns']] == [main]
+    assert case.store.events(case.workspace, first)['events'][0]['data']['text'] == 'question about first cell'
+    assert not case.store.events(case.workspace, second)['events']
+    with pytest.raises(ForgeError, match='Notebook'):
+        submit(case, first, 'dev-message', 1)
+    with pytest.raises(ForgeError, match='idempotency'):
+        create(case, 'card-1', new=True)
+
+
+def test_upgrade_reclassifies_old_pinned_card_without_rewriting_history(case):
+    card = create(case, 'old-card', new=True)
+    question, _ = case.store.submit(case.workspace, card, 'ask', 0, 'cell question', case.identity, case.policy, 'notebook_cell')
+    finish(case, question)
+    mixed = create(case, 'mixed', new=True)
+    finish(case, submit(case, mixed))
+    second = submit(case, mixed, 'second', 1)
+    finish(case, second)
+    saved = case.store.events(case.workspace, card)
+    with case.store.connect(write=True) as db:
+        db.execute("UPDATE turns SET operation='notebook_cell' WHERE id=?", (second['id'],))
+        db.execute('UPDATE project_conversations SET session=? WHERE workspace=?', (card, case.workspace))
+        db.execute('DELETE FROM project_conversation_members WHERE session=?', (card,))
+        db.execute('ALTER TABLE sessions DROP COLUMN session_kind')
+    upgraded = Store(case.store.root, case.store.limits, initialize=True)
+    assert upgraded.session(card)['session_kind'] == 'notebook'
+    assert upgraded.session(mixed)['session_kind'] == 'development'
+    assert [row['id'] for row in listing(case)['sessions']] == [mixed]
+    assert upgraded.primary(case.workspace, case.identity, case.policy) is None
+    assert upgraded.writable(case.workspace, card, case.identity, case.policy, {'codex'})
+    assert upgraded.events(case.workspace, card) == saved
+
+
 def test_session_scoped_project_turns_preserve_aggregate_and_ownership(case):
     main = create(case, 'main')
     member = create(case, 'member', new=True)

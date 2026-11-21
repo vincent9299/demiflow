@@ -22,7 +22,7 @@ GET_FIELDS = {
 }
 POST_FIELDS = {
     'dev-compact': ({'session_id','submission_id','expected_revision'},set()),
-    'dev-session-create': ({'request_id', 'provider_id'}, {'new_conversation'}),
+    'dev-session-create': ({'request_id', 'provider_id'}, {'new_conversation', 'session_kind'}),
     'dev-turn-start': ({'session_id', 'submission_id', 'expected_revision', 'text'}, {'operation'}),
     'dev-notebook-claim': ({'session_id','turn_id','pending_request_id','expected_digest'},set()),
     'dev-input': ({'session_id', 'turn_id', 'pending_request_id', 'expected_digest', 'answer'}, set()),
