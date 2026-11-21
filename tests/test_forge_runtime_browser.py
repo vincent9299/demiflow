@@ -126,7 +126,7 @@ def test_rm03_browser_lost_prepare_response_reuses_persistent_identity(
 
     page.route("**/run-prepare", drop_first)
     submit_run(page)
-    page.locator(".error-box").last.wait_for()
+    page.locator(".wb-notice.error-box").wait_for()
     page.get_by_role("button",name="以原请求重试准备",exact=True).click()
     page.get_by_role("button", name="开始这次运行", exact=True).wait_for()
     request_id = bodies[0]["request_id"]
