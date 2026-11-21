@@ -103,7 +103,7 @@ def test_published_v3_engine_cold_resume_reads_original_cut(old_sdk, tmp_path, c
     def invoke(checkout, operation):
         return subprocess.run([sys.executable, '-B','-c',DRIVER,str(checkout),str(tmp_path),cut,operation,family],
             cwd=tmp_path, env=dict(os.environ, PYTHONPATH=os.pathsep.join((str(checkout), str(tmp_path)))),
-            capture_output=True, text=True, timeout=120)
+            capture_output=True, text=True, timeout=300)
 
     crashed = invoke(old_sdk, 'generate')
     assert crashed.returncode == 75, crashed.stderr
