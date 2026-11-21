@@ -168,6 +168,18 @@ def test_occurrence_scoped_endpoint_validation_remains_strict(version):
     assert model['choice']['reason'] == 'v3_endpoint_identity_missing'
 
 
+@pytest.mark.parametrize('edge_fields', [{'step': 4}, {'kind': 'model_manifest', 'step': 0},
+                                         {'kind': 'fixed_dataset', 'step': 1}])
+def test_v4_projection_rejects_invalid_step_edges(edge_fields):
+    payload = v3_payload()
+    entry = payload['graph']['logical']['actions'][0]
+    entry['version'] = 'v4'
+    entry['dag']['schema_version'] = 'demiflow.dataflow_graph.v4'
+    entry['dag']['edges'][0].update(edge_fields)
+    rendered = project(payload, MODEL)
+    assert not rendered['nodes'] and rendered['choice']['reason'] == 'invalid_topology'
+
+
 @pytest.mark.parametrize('digest', [None, 'missing', 'f' * 64, 'manifest'])
 def test_bridge_requires_the_original_report_digest(digest):
     payload = v3_payload()

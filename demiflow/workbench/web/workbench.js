@@ -1343,7 +1343,7 @@
         if(value.run_id!==target.run_id||value.attempt!==target.attempt)throw new Error('节点观测身份不一致');
         if(value.availability==='unsupported'){runDetailBody.append($('p','历史运行未记录此类观测。'));return;}
         if(presentation.hasOccurrenceIds(execution?.format)&&(value.action_id!==execution.actionId||value.dag_id!==execution.dagId||value.plan_id!==execution.planId||value.plan_revision!==execution.planRevision)){
-          runDetailBody.append($('p','观测页缺少与当前 v3 计划一致的作用域凭据；不提升为当前节点指标。','wb-caption'));return;
+          runDetailBody.append($('p','观测页缺少与当前封存计划一致的作用域凭据。','wb-caption'));return;
         }
         const rows=presentation.hasOccurrenceIds(execution?.format)?value.observations.filter(row=>
           presentation.matchesExecutionObservation(row,execution,selection.occurrenceId)&&row.node_id===selection.reportNodeId):value.observations;

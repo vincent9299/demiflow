@@ -129,9 +129,9 @@
     return ports;
   }
   function valueEdgeFacts(edge, format) {
-    if (format !== 'v4' || edge.kind == null) return {};
+    if (format !== 'v4' || (edge.kind == null && edge.step == null)) return {};
     if (edge.kind === 'fixed_dataset' && edge.step == null) return {kind: edge.kind};
-    if (edge.kind === 'model_manifest' && isInt(edge.step)) return {kind: edge.kind, step: edge.step};
+    if (edge.kind === 'model_manifest' && isInt(edge.step) && edge.step > 0) return {kind: edge.kind, step: edge.step};
     raise('invalid_topology', '训练依赖的类型或模型步数无效');
   }
   function readRecovery(physical, entry, format) {
