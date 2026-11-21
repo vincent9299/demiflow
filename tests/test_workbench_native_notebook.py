@@ -440,7 +440,7 @@ def test_reuse_annotation_tool_preset_in_native_notebook(browser,native_project)
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
             if folder:page.screenshot(path=str(Path(folder)/'annotation-library-mobile.png'))
             page.set_viewport_size({'width':1440,'height':950})
-            page.get_by_role('button',name='review_images 工具',exact=True).click()
+            page.get_by_role('button',name='查看 review_images 定义',exact=True).click()
             dialog=page.get_by_role('dialog',name='标注工具')
             dialog.get_by_label('工具预设').select_option(label='候选图质检')
             expect(dialog.get_by_label('batch',exact=True)).to_have_value('batch-12')
@@ -462,12 +462,12 @@ def test_reuse_annotation_tool_preset_in_native_notebook(browser,native_project)
             expect(cells.nth(1).locator('.jp-OutputArea-output')).to_contain_text('已记录 sample-1')
             assert (root/'sample-review.txt').read_text()=='batch-13/sample-1 通过'
             page.get_by_role('tab',name='标注工具',exact=True).click()
-            page.get_by_role('button',name='review_images 工具',exact=True).click()
+            page.get_by_role('button',name='查看 review_images 定义',exact=True).click()
             dialog.get_by_label('工具预设').select_option(label='下一批')
             expect(dialog.get_by_label('page_size',exact=True)).to_have_value('20')
             if folder:page.screenshot(path=str(Path(folder)/'annotation-tool-preset.png'))
             dialog.get_by_role('button',name='关闭').click()
-            page.get_by_role('button',name='card 组件',exact=True).click()
+            page.get_by_role('button',name='查看 card 定义',exact=True).click()
             component=page.get_by_role('dialog',name='标注组件')
             expect(component).to_contain_text('from data_tools.ratings import card')
             expect(component.locator('.tok-keyword').first).to_have_text('def')
@@ -483,7 +483,7 @@ def test_reuse_annotation_tool_preset_in_native_notebook(browser,native_project)
             page.keyboard.press('ArrowLeft')
             expect(dataTabs.get_by_role('tab',name='分析工具')).to_be_focused()
             expect(page.get_by_role('button',name='card 组件',exact=True)).to_have_count(0)
-            page.get_by_role('button',name='count_accepted 分析',exact=True).click()
+            page.get_by_role('button',name='查看 count_accepted 定义',exact=True).click()
             analysis=page.get_by_role('dialog',name='分析工具')
             expect(analysis).to_contain_text('统计已接受样本数')
             analysis.get_by_role('button',name='插入导入语句').click()
@@ -498,3 +498,96 @@ def test_reuse_annotation_tool_preset_in_native_notebook(browser,native_project)
             expect(cells.first).to_contain_text('original_draft')
         finally:
             page.close()
+
+
+def test_card_assistant_generates_editable_notebook_widgets(browser,native_project,tmp_path,monkeypatch):
+    import threading
+    from test_forge_development_chat import configuration
+    root,registry_path,project=native_project
+    fixture=tmp_path/'provider'
+    fixture.mkdir()
+    _,config,value=configuration(fixture)
+    grant=value['projects'].pop('wfixture')
+    value['projects'][project]=dict(grant,root=str(root),sources=['README.md'],writes=[],watch=[])
+    config.write_text(json.dumps(value))
+    tools=root/'data_tools'
+    tools.mkdir()
+    (tools/'scores.py').write_text('__demiflow_data_tools__={"mean_score":"analysis"}\n'
+        'def mean_score(values):\n    """返回分组均值。"""\n    return sum(values)/len(values)\n')
+    source=('from data_tools.scores import mean_score\nimport ipywidgets as w\n'
+            'group = w.Dropdown(options=["A", "B"], description="分组")\n'
+            'result = w.Label(value=f"平均分 {mean_score(scores[group.value])}")\n'
+            'def update(change):\n    result.value = f"平均分 {mean_score(scores[group.value])}"\n'
+            'group.observe(update, names="value")\nw.VBox([group,result])')
+    with service(None,registry=registry_path,notebook_python=PYTHON,development_config=config) as app:
+        # Substitute the provider reply only. The real HTTP routes, turn admission,
+        # durable events, source catalog and Jupyter kernel remain in the path.
+        development=app.development
+        capabilities=development.capabilities
+        monkeypatch.setattr(development,'capabilities',lambda *args:dict(capabilities(*args),notebook_cells=True))
+        submitted=[]
+        editing,edited=threading.Event(),threading.Event()
+        def respond(turn,session):
+            assert turn['operation']=='notebook_cell'
+            submitted.append(turn['text'])
+            if len(submitted)==2:
+                editing.set()
+                assert edited.wait(15)
+            store=development.store
+            code=source if len(submitted)==1 else 'print("保留手动修改")'
+            store.event(turn['id'],'message.completed',dict(item_id='answer',text='切换分组可以查看这批样本的平均分。\n```python\n'+code+'\n```'))
+            store.update(turn['id'],state='completed',cleanup='complete',dispatch='acknowledged')
+            return store.public_turn(store.turn(turn['id']))
+        monkeypatch.setattr(development,'_launch_provider',respond)
+        page=browser.new_page(viewport={'width':1440,'height':950})
+        try:
+            view=quote(json.dumps(dict(v=2,workspace=project,kind='tables')))
+            page.goto(app.origin+'/#token='+app.token+'&view='+view)
+            frame=page.frame_locator('iframe.native-notebook-frame')
+            page.get_by_role('tab',name='分析工具',exact=True).click()
+            page.get_by_role('button',name='卡片助手',exact=True).wait_for(timeout=60000)
+            cells=frame.locator('.jp-CodeCell')
+            cells.first.locator('.cm-content').fill('# 本批样本\nimport pandas as pd\n'
+                'scores = {"A":[1,3], "B":[3,5]}\n'
+                'pd.DataFrame({"样本":["A-01","A-02","B-01","B-02"], "评分":[1,3,3,5]})')
+            cells.first.get_by_role('button',name='运行卡片').click()
+            expect(cells.first.locator('.jp-OutputArea-output')).to_contain_text('B-02',timeout=30000)
+            page.get_by_role('button',name='新建卡片',exact=True).click()
+            page.get_by_role('button',name='mean_score 分析').click()
+            pane=page.get_by_role('complementary',name='卡片助手')
+            separator=page.get_by_role('separator',name='调整卡片助手宽度')
+            before=pane.bounding_box()['width']
+            separator.focus();page.keyboard.press('Shift+ArrowLeft')
+            expect(separator).to_have_attribute('aria-valuenow',str(round(before+40)))
+            pane.get_by_role('textbox',name='卡片要求').fill('按分组比较平均分')
+            pane.get_by_role('button',name='发送要求').click()
+            card=cells.nth(1)
+            expect(card.locator('.cm-content')).to_contain_text('from data_tools.scores import mean_score',timeout=30000)
+            assert all(term in submitted[0] for term in ('mean_score','samples','scores ='))
+            expect(card.locator('.jp-OutputArea-output')).to_have_count(0)
+            card.get_by_role('button',name='运行卡片').click()
+            output=card.locator('.jp-OutputArea-output')
+            expect(output.locator('select')).to_be_visible(timeout=30000)
+            output.locator('select').select_option(label='B')
+            expect(output).to_contain_text('平均分 4.0',timeout=10000)
+            shots=os.environ.get('FORGE_ACCEPTANCE_DIR')
+            if shots:page.screenshot(path=str(Path(shots)/'notebook-cards-assistant.png'))
+            card.get_by_role('button',name='编辑代码').click()
+            editor=card.locator('.cm-content')
+            editor.fill('manual_draft = 1')
+            pane.get_by_role('textbox',name='卡片要求').fill('打印修改结果')
+            pane.get_by_role('button',name='发送要求').click()
+            assert editing.wait(15)
+            expect(editor).to_contain_text('manual_draft = 1')
+            editor.fill('manual_draft = 2')
+            edited.set()
+            pane.get_by_role('button',name='作为新卡片插入').click()
+            expect(cells).to_have_count(3)
+            expect(card).to_contain_text('manual_draft = 2')
+            expect(cells.last).to_contain_text('print("保留手动修改")')
+            page.set_viewport_size({'width':390,'height':844})
+            expect(pane).to_be_visible()
+            pane.get_by_role('button',name='关闭助手').click()
+            expect(cells.last).to_be_in_viewport()
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+        finally:page.close()

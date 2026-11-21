@@ -311,7 +311,7 @@ class Store:
 
     def submit(self, workspace, sid, submission_id, expected_revision, message, identity, policy_hash, operation="message"):
         text(message); identifier(submission_id); integer(expected_revision, 0, 2**31)
-        if operation not in {'message','compact'}:reject('Unknown conversation operation')
+        if operation not in {'message','compact','notebook_cell'}:reject('Unknown conversation operation')
         hashed = digest({'text': message, **({'operation':operation} if operation!='message' else {})})
         with self.connect(write=True) as db:
             session = self._session(db, workspace, sid)
@@ -341,7 +341,7 @@ class Store:
                        (tid, sid, submission_id, hashed, message, 'preparing', 'not_sent', 'pending', epoch, time.time(), reserve, 'admitted', operation))
             db.execute('UPDATE sessions SET revision=revision+1,title=CASE WHEN title=\'\' THEN ? ELSE title END WHERE id=?', (message[:80], sid))
             db.execute('UPDATE sessions SET metadata_bytes=metadata_bytes+? WHERE id=?', (len(message.encode()), sid))
-            self._event(db,sid,tid,epoch,'message.user' if operation=='message' else 'compaction.requested',{'text':message})
+            self._event(db,sid,tid,epoch,'compaction.requested' if operation=='compact' else 'message.user',{'text':message})
             return dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone()), True
 
     def _event(self, db, sid, tid, epoch, kind, data, *, control=False):

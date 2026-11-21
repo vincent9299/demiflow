@@ -59,3 +59,30 @@ def test_restricted_cli_reads_external_input_without_user_path_or_registration(t
             server.server_close()
     finally:
         shutil.rmtree(external)
+
+
+def test_notebook_turn_generates_a_cell_with_read_only_project_access(tmp_path,monkeypatch):
+    root=tmp_path/'orders';root.mkdir()
+    host=tmp_path/'host';host.mkdir()
+    path,registry,workspace,domain,_=combined_configuration(host,root,monkeypatch)
+    config=json.loads(path.read_text())
+    config['mode']='restricted';domain.chmod(0o700)
+    monkeypatch.setenv('NOTEBOOK_FIXTURE_KEY','offline-fixture-only')
+    config['providers']['codex'].update(base_url='http://127.0.0.1:1/v1',credential_env='NOTEBOOK_FIXTURE_KEY')
+    path.write_text(json.dumps(config))
+    server=WorkspaceServer(registry=registry,development_config=path)
+    try:
+        service=server.development
+        assert service.capabilities(workspace,root)['notebook_cells']
+        sid=service.create_project(workspace,root,'create','codex',new_conversation=True)['id']
+        args=(workspace,root,sid,'cell-1',0,'generate notebook widget fixture')
+        started=service.start_project(*args,operation='notebook_cell')
+        assert service.start_project(*args,operation='notebook_cell')['id']==started['id']
+        saved=wait_turn(service,started['id'])
+        assert saved['state']=='completed',saved['result']
+        assert json.loads(saved['context'])['operation']=='notebook_cell'
+        assert json.loads(saved['result'])['execution_assurance']=='enforced'
+        events=service.store.events(workspace,sid)['events']
+        assert any(e['type']=='message.completed' and 'IntSlider()' in e['data']['text'] for e in events)
+        assert (root/'notes.py').read_text()=='# fixture note\n'
+    finally:server.server_close()

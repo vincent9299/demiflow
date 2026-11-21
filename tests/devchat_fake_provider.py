@@ -39,6 +39,19 @@ for line in sys.stdin:
         message=params['input'][0]['text']
         if '## 当前版本 DemiFlow 原生 API' in instructions:
             (Path.home() / 'received-request.txt').write_text(message)
+        if message == 'generate notebook widget fixture':
+            assert 'ipywidgets' in instructions and '当前 Notebook' in instructions
+            assert (project_root/'notes.py').read_text()=='# fixture note\n'
+            try:
+                (project_root/'notes.py').open('ab').close()
+            except PermissionError:
+                pass
+            else:
+                raise AssertionError('Notebook generation received write access')
+            answer = '已找到 notes.py。\n```python\nfrom ipywidgets import IntSlider\nIntSlider()\n```'
+            event('item/completed',{'threadId':thread,'turnId':turn,'item':{'id':'answer','type':'agentMessage','text':answer}})
+            event('turn/completed',{'threadId':thread,'turn':{'id':turn,'status':'completed'}})
+            continue
         if message.startswith('guided fixture edit'):
             assert 'Dataset.map_prompt_async' in instructions and 'DF-02' in instructions
             flow = project_root / 'flows' / 'guided.py'

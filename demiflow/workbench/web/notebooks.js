@@ -24,6 +24,7 @@
   function prepareFrame(session) {
     const frame=session.frame;
     frame.addEventListener('load',()=>{
+      session.readyPanel=null;session.onPanel?.(null);
       const win=frame.contentWindow;
       // Notebook's own File → Open/New actions remain in this native pane.
       // Every destination must remain under this project's proxy prefix.
@@ -64,6 +65,7 @@
           try{sessionStorage.setItem('demiflow-jupyter:'+session.project,session.base+'notebooks/'+path);}catch{}
         };
         panel.context.pathChanged.connect(remember);remember();
+        session.readyPanel=panel;session.onPanel?.(panel);
       })().catch(()=>{});
     });
   }
@@ -170,19 +172,21 @@
       tab.setAttribute('aria-controls',pane.id);pane.hidden=key!==activeTab;
     }
     dictionary.append(navigation.element,tabs.element,...Object.values(panes));
+    const desk=node('section',undefined,'notebook-desk'),documentPane=node('div',undefined,'notebook-document');
     const native=node('div',undefined,'native-notebook-host');native.setAttribute('aria-label','Notebook 工作区');
-    const status=node('p','正在连接 Jupyter…','native-notebook-status');native.append(status);root.append(dictionary,native);
+    const status=node('p','正在连接 Jupyter…','native-notebook-status');native.append(status);
+    documentPane.append(native);desk.append(documentPane);root.append(dictionary,desk);
     const dictionaryNavigation=ForgeNavigation.collapsible({layout:root,sidebar:dictionary,header:navigation,label:'数据字典目录'});
     let disposed=false,session=null;
     const alive=()=>!disposed&&root.isConnected;
     const resize=()=>{root.style.height=Math.max(240,innerHeight-root.getBoundingClientRect().top)+'px';if(session)position(session);};
     const observer=new ResizeObserver(resize);observer.observe(native);window.addEventListener('resize',resize);window.addEventListener('scroll',resize,true);
     const fail=error=>{if(alive()){status.textContent=error.message||String(error);status.classList.add('error-box');}};
-    let toolsDialog;
+    let toolsDialog,cards,cardsEpoch=0;
     async function openTool(item){
       try{
         const {showTool}=await import('./data-tools.js');
-        if(alive()&&!toolsDialog?.open)toolsDialog=showTool({root,item,api,mountText,disposeReaders,project,
+        if(alive()&&!toolsDialog?.open)toolsDialog=showTool({root,item,api,mountText,disposeReaders,project,reference:cards?()=>cards.ask(item):null,
           canInsert:!!context.native_notebook&&!!context.capabilities?.analysis_write,insert:code=>insert(session,code)});
       }catch(error){fail(error);}
     }
@@ -201,7 +205,11 @@
           const button=node('button',undefined,'data-tool-leaf');button.type='button';
           const type={analysis:'分析',view:'查看',annotation:'工具',annotation_component:'组件'}[item.tool_kind];
           button.append(node('span',item.symbol),node('small',type));
-          button.title=item.description||item.path;button.onclick=()=>openTool(item);file.append(button);
+          button.title=item.description||item.path;
+          button.onclick=()=>cards?cards.ask(item):openTool(item);
+          const row=node('div',undefined,'data-tool-row'),info=node('button','···','data-tool-info');
+          info.type='button';info.title='查看 '+item.symbol+' 定义';info.setAttribute('aria-label',info.title);
+          info.onclick=()=>openTool(item);row.append(button,info);file.append(row);
         }
         host.append(file);
       }
@@ -311,12 +319,29 @@
       }
     }
     if(context.native_notebook){
-      attach(native,project,api,alive).then(value=>{if(!alive())return;session=value;status.hidden=!!value;resize();}).catch(fail);
+      attach(native,project,api,alive).then(value=>{
+        if(!alive()||!value)return;session=value;status.hidden=true;resize();
+        session.onPanel=async panel=>{
+          const epoch=++cardsEpoch;cards?.dispose();cards=null;
+          if(!panel?.content?.activeCellChanged)return;
+          try{
+            const {mountCards}=await import('./notebook-cards.js');
+            if(!alive()||epoch!==cardsEpoch)return;
+            cards=mountCards({desk,documentPane,panel,app:session.frame.contentWindow.jupyterapp,api,project,alive,
+              permissions:()=>context.capabilities||{},tables:()=>[...tables.values()].map(({item,fieldNames})=>({
+                table:item.original?item.original.id:item.alias,version:item.version,binding:item.binding,
+                expected:item.original?context.project?.digest:undefined,fields:fieldNames,
+                reader:item.original?'demiflow.workbench.notebooks.data.project_sample':'demiflow.workbench.notebooks.data.sample'})),
+              layout:resize});
+          }catch(error){fail(error);}
+        };
+        if(session.readyPanel)session.onPanel(session.readyPanel);
+      }).catch(fail);
     }else{status.textContent='此服务尚未启用原生 Jupyter Notebook。';}
     return {
       canLeave:()=>true,
       updateContext(fresh){if(alive()){context=fresh;populate(fresh);}},
-      dispose(){if(disposed)return;disposed=true;if(toolsDialog?.open)toolsDialog.close();dictionaryNavigation.dispose();observer.disconnect();window.removeEventListener('resize',resize);window.removeEventListener('scroll',resize,true);if(session){session.host=null;position(session);}parent.classList.remove('native-data-active');}
+      dispose(){if(disposed)return;disposed=true;if(toolsDialog?.open)toolsDialog.close();cards?.dispose();dictionaryNavigation.dispose();observer.disconnect();window.removeEventListener('resize',resize);window.removeEventListener('scroll',resize,true);if(session){session.onPanel=null;session.host=null;position(session);}parent.classList.remove('native-data-active');}
     };
   }
   window.ForgeNotebooks=Object.freeze({mount});

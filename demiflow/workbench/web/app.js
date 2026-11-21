@@ -60,8 +60,9 @@
     select(items[0][0]);return {element,select};
   }
   let navigationSequence=0;
-  function resizableNavigation({layout,sidebar,label,active=true}) {
+  function resizableNavigation({layout,sidebar,label,active=true,right=false}) {
     const handle=$('div',undefined,'side-navigation-resizer'),key='demiflow.navigation-width.'+label;
+    const direction=right?-1:1;
     let width=null,drag=null,shield=null,disposed=false;
     try{const saved=Number(sessionStorage.getItem(key));if(saved>=140&&saved<=560)width=saved;}catch{}
     if(!sidebar.id)sidebar.id='side-navigation-'+(++navigationSequence);
@@ -75,7 +76,7 @@
       const {min,max}=bounds();
       if(width!==null)layout.style.setProperty('--side-navigation-width',Math.max(min,Math.min(max,width))+'px');
       const rect=sidebar.getBoundingClientRect(),parent=layout.getBoundingClientRect();
-      handle.style.left=(rect.right-parent.left-4)+'px';
+      handle.style.left=((right?rect.left:rect.right)-parent.left-4)+'px';
       handle.setAttribute('aria-valuemin',min);handle.setAttribute('aria-valuemax',max);handle.setAttribute('aria-valuenow',Math.round(rect.width));
     }
     function setWidth(value){const {min,max}=bounds();width=Math.max(min,Math.min(max,value));sync();}
@@ -90,13 +91,13 @@
       // Native Notebook is an iframe: keep the gesture in the shell while crossing it.
       shield=$('div',undefined,'side-navigation-drag-shield');document.body.append(shield);
     };
-    handle.onpointermove=event=>{if(drag?.id===event.pointerId)setWidth(drag.width+event.clientX-drag.x);};
+    handle.onpointermove=event=>{if(drag?.id===event.pointerId)setWidth(drag.width+direction*(event.clientX-drag.x));};
     handle.onpointerup=finish;handle.onpointercancel=finish;handle.onlostpointercapture=finish;
     handle.ondblclick=()=>{width=null;layout.style.removeProperty('--side-navigation-width');save();sync();};
     handle.onkeydown=event=>{
       if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
       event.preventDefault();const {min,max}=bounds(),now=sidebar.getBoundingClientRect().width;
-      setWidth(event.key==='Home'?min:event.key==='End'?max:now+(event.key==='ArrowRight'?1:-1)*(event.shiftKey?40:10));save();
+      setWidth(event.key==='Home'?min:event.key==='End'?max:now+direction*(event.key==='ArrowRight'?1:-1)*(event.shiftKey?40:10));save();
     };
     const observer=new ResizeObserver(sync);observer.observe(layout);observer.observe(sidebar);sync();
     return {setActive(value){active=value;if(!active)finish();else if(width===null)layout.style.removeProperty('--side-navigation-width');sync();},dispose(){disposed=true;finish();observer.disconnect();handle.remove();}};

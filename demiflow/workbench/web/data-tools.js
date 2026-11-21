@@ -96,7 +96,7 @@ function launchForm(body,detail,{project,canInsert,insert,dialog}){
   form.append(launch,note);body.append(form);
 }
 
-export function showTool({root,item,api,mountText,disposeReaders,project,canInsert,insert}){
+export function showTool({root,item,api,mountText,disposeReaders,project,canInsert,insert,reference}){
   const importOnly=['analysis','annotation_component'].includes(item.tool_kind);
   const label={analysis:'分析工具',view:'查看工具',annotation:'标注工具',annotation_component:'标注组件'}[item.tool_kind];
   const dialog=el('dialog',undefined,'data-tools-dialog'),header=el('header');
@@ -110,6 +110,9 @@ export function showTool({root,item,api,mountText,disposeReaders,project,canInse
     body.replaceChildren(el('h3',detail.symbol),el('p',detail.path+' · L'+detail.line,'op-location'));
     if(detail.description||detail.module_summary)
       body.append(el('p',detail.description||'模块说明 · '+detail.module_summary,'op-description'));
+    if(reference){
+      const use=el('button','在当前卡片中引用');use.onclick=()=>{dialog.close();reference();};body.append(use);
+    }
     if(!importOnly)launchForm(body,detail,{project,canInsert,insert,dialog});
     else if(detail.module){
       const code='from '+detail.module+' import '+detail.symbol;

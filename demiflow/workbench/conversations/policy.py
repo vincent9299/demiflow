@@ -242,7 +242,7 @@ class Deployment:
                 reason=reason))
         available = any(p['available'] for p in providers)
         return dict(format='demiflow_development_chat_v1', enabled=permitted, start=available,
-            conversation_stats=True, multiple_conversations=True,
+            conversation_stats=True, multiple_conversations=True, notebook_cells=self.mode == 'restricted',
             mode=self.mode, filesystem_enforcement=execution['filesystem_enforcement'], reason=execution['reason'],
             providers=providers,
             limits=asdict(self.limits), host_partition=dict(self.value['host_budget'],
