@@ -10,6 +10,10 @@ from ..lance.model import LanceScanSpec
 from .dataflow_budget import default_profile
 
 
+FIT_CONFIGURATION_FIELDS = frozenset({'semantics', 'train_schema', 'monitor_schemas', 'media_fields',
+                                      'retrain_id', 'parent'})
+
+
 def _fixed_input(capture, source, plan, path):
     child = capture.capture_chain(source, plan, path)
     if (not plan.operations and isinstance(source, LanceSource) and isinstance(source.query, LanceScanSpec)
@@ -113,8 +117,7 @@ def validate_values(graph, nodes):
         raise DataflowError("INVALID_CONTRACT", "duplicate training occurrence")
     for job in graph.jobs:
         configuration = job.configuration
-        keys = {"semantics", "train_schema", "monitor_schemas", "media_fields", "retrain_id", "parent"}
-        if set(configuration) != keys:
+        if set(configuration) != FIT_CONFIGURATION_FIELDS:
             raise DataflowError("INVALID_CONTRACT", "fit configuration has missing or unknown fields")
         required = {"base_model_digest", "environment_digest", "parameters", "model_format",
                     "budget", "save_steps", "topology"}
