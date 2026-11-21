@@ -160,8 +160,6 @@ def build_plan_details(compiled, *, sources, root, callsites=None, bounds=None, 
     from demiflow.workbench.python_sources import bound_files
     shared = {origin: (path.as_posix(), digest)
               for _, origin, path, digest in bound_files({'shared_sources': shared_sources or {}})}
-    if len(compiled.graph.nodes) + len(compiled.graph.jobs) > 256:
-        raise ValueError('Plan materials exceed node budget')
     if callsites is not None:
         callsites.check_compilation(compiled.graph)
     from demiflow.execution.host.inspection import compiled_node_materials
