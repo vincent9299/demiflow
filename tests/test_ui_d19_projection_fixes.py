@@ -168,6 +168,24 @@ def test_occurrence_scoped_endpoint_validation_remains_strict(version):
     assert model['choice']['reason'] == 'v3_endpoint_identity_missing'
 
 
+def test_fit_control_node_in_v4_preview_has_no_row_traits():
+    payload = v3_payload()['graph']
+    dag = payload['logical']['actions'][0]['dag']
+    dag['schema_version'] = 'demiflow.dataflow_graph.v4'
+    node = dag['nodes'][1]
+    node.pop('traits', None)
+    preview = dict(format='demiflow.plan_preview.v1', available=True, scope='first_action',
+                   entry_completed=False, basis={'digest': 'a' * 64}, dag=dag)
+    expression = """
+try { console.log(JSON.stringify(P.buildPlanPreviewModel(payload).nodes.length)); }
+catch (error) { console.log(JSON.stringify(error.message)); }
+"""
+    node['op_kind'] = 'fit'
+    assert project(preview, expression) == len(dag['nodes'])
+    node['op_kind'] = 'MapBatchesOp'
+    assert '节点身份、端口或声明无效' in project(preview, expression)
+
+
 @pytest.mark.parametrize('edge_fields', [{'step': 4}, {'kind': 'model_manifest', 'step': 0},
                                          {'kind': 'fixed_dataset', 'step': 1}])
 def test_v4_projection_rejects_invalid_step_edges(edge_fields):

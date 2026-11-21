@@ -812,7 +812,8 @@
     for (const node of dag.nodes) {
       if (!isRecord(node) || !text(node.logical_node_id) || !text(node.occurrence_id)
           || !text(node.op_kind) || !ports(node.input_ports) || !ports(node.output_ports)
-          || !isRecord(node.traits) || byId.has(node.occurrence_id))
+          || !(isRecord(node.traits) || (dag.schema_version === V4_SCHEMA
+                && node.op_kind === 'fit' && node.traits == null)) || byId.has(node.occurrence_id))
         reject('节点身份、端口或声明无效');
       byId.set(node.occurrence_id, node);
       keys.set(node.occurrence_id, jsonKey(['preview', value.basis.digest, dag.dag_id, node.occurrence_id]));
