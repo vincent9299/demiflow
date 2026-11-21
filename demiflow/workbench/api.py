@@ -126,7 +126,7 @@ POST_FIELDS = {
     'project-register': ({'root'}, {'name'}),
     'project-remove': ({'workspace_id', 'expected'}, set()),
     'project-permissions': ({'workspace_id', 'expected', 'run_submit', 'run_control', 'attach'}, set()),
-    'flow-register': ({'entry', 'params'}, set()),
+    'flow-register': ({'entry'}, {'params'}),
     'project-check': (set(), set()),
     'audit-check': ({'kind', 'expected_policy'}, {'digest'}),
     'inspect': ({'entry', 'params'}, set()),

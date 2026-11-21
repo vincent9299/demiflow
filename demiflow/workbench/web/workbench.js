@@ -1341,12 +1341,14 @@
       const form=$('div',undefined,'wb-inline-form'),entry=$('input'),params=$('input');entry.maxLength=params.maxLength=1024;
       entry.value=working?.entry||'';params.value=working?.params||'';entry.placeholder='flows/process.py:process';params.placeholder='flows/configs/default.json';
       entry.setAttribute('aria-label','登记流程入口');params.setAttribute('aria-label','登记参数文件');field('入口',entry,form);field('参数',params,form);
-      const register=button('登记原生流程',async()=>{const ticket=state.capture(),body={entry:entry.value.trim(),params:params.value.trim()};
-        try{await request('flow-register',{},body);}
+      const register=button('登记原生流程',async()=>{const ticket=state.capture(),body={entry:entry.value.trim()};
+        if(params.value.trim())body.params=params.value.trim();
+        let binding;
+        try{binding=await request('flow-register',{},body);}
         catch(error){if(error.code==='busy'&&current(ticket)){message('服务正在读取或检查，登记尚未开始；填写已保留，请稍后重试。','error-box',ticket);return;}throw error;}
         if(!current(ticket))return;
         settings.hidden=true;message('已登记 '+body.entry+'；正在读取入口与配置。');
-        try{const fresh=await request('context');if(!current(ticket))return;ctx=fresh;onContext(fresh);await useWorking(body.entry,body.params);}
+        try{const fresh=await request('context');if(!current(ticket))return;ctx=fresh;onContext(fresh);await useWorking(binding.entry,binding.params);}
         catch(error){if(current(ticket)&&error.name!=='AbortError')message('入口已登记，读取视图暂未完成；请刷新后选择 '+body.entry+'。 '+error.message,'error-box',ticket);}
       },form,{disabled:!configWrite()});register.dataset.access='register';settings.append(form);
       const meta=projectSettings.get?.();

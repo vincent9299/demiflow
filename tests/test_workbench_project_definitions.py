@@ -35,6 +35,34 @@ def test_catalog_does_not_import_and_is_project_scoped(project):
     with pytest.raises(ForgeError): definitions.read(project,id='../dispatch.py')
 
 
+def test_prompt_and_agent_tasks_share_the_catalog_and_select_their_own_source(project):
+    import yaml
+    from demiflow.forge.project import create_role_file
+    from test_map_prompt_async import PACK
+
+    task = yaml.safe_load(PACK)['prompts']['enrich']
+    model = task.pop('model')
+    document = dict(schema_version='demiflow_agent_v2', runtime='demiflow', model=model,
+                    tasks={'review': task, 'independent': {**task, 'template': 'Second {{ payload | json }}'}},
+                    budgets={'max_requests': 2}, operators={'custom': {
+                        'fn': 'operators.would_raise:run', 'description': 'Inspect one item', 'replay':'verify',
+                        'arguments': {'type': 'object', 'properties': {}, 'additionalProperties': False}}})
+    (project/'operators/would_raise.py').write_text("raise AssertionError('must not import project code')\n")
+    create_role_file(project, 'prompt', 'judge', content=yaml.safe_dump(document))
+    index = definitions.catalog(project)
+    assert not index['diagnostics']
+    prompts = {(row['path'], row['symbol']): row for row in index['definitions'] if row['kind'] == 'prompt'}
+    assert set(prompts) == {('prompts/review.yaml', 'review'), ('prompts/judge.yaml', 'review'),
+                            ('prompts/judge.yaml', 'independent')}
+    assert len({row['id'] for row in prompts.values()}) == 3
+    agent = definitions.read(project, id=prompts['prompts/judge.yaml', 'independent']['id'])
+    assert agent['model']['name'] == model['name'] and agent['template'] == 'Second {{ payload | json }}'
+    assert yaml.safe_load(agent['source']) == document['tasks']['independent']
+    assert agent['file_sha256'] == index['sources']['prompts/judge.yaml']
+    pack = definitions.read(project, id=prompts['prompts/review.yaml', 'review']['id'])
+    assert pack['template'] == 'Review {{ value }}'
+
+
 def test_real_versions_from_nested_repository_and_current_changes(project):
     repo=project.parent
     def git(*args): return subprocess.check_output(['git','-C',str(repo),*args],text=True).strip()

@@ -127,3 +127,36 @@ def test_unrelated_registered_layout_does_not_fail_changed_operator(project, ref
     put(project, 'misplaced.py', 'from external import get_dataset\ndef run():\n    return get_dataset().count()\n')
     unknown = check_project(project, paths=['operators/normal.py'], reference=reference)
     assert unknown['status'] == 'incomplete' and unknown['coverage']['unverified'], unknown
+
+
+def test_agent_tool_closure_is_static_and_evidenced(project, reference):
+    import yaml
+    from test_map_prompt_async import PACK
+    from demiflow.forge.project import create_role_file
+    from demiflow.workbench.projects.definitions import catalog
+
+    task = yaml.safe_load(PACK)['prompts']['enrich']
+    model = task.pop('model')
+    settings = dict(schema_version='demiflow_agent_v2', runtime='demiflow', model=model,
+                    budgets={'max_requests':2}, tasks={'evaluate': task}, operators={'review':{
+                        'fn':'operators.review:run', 'description':'Review one item', 'replay':'verify',
+                        'arguments':{'type':'object', 'properties':{}, 'additionalProperties':False}}})
+    yaml_path = 'prompts/judge.yaml'
+    create_role_file(project, 'prompt', 'judge', content=yaml.safe_dump(settings))
+    def check():
+        return check_project(project, paths=[yaml_path], reference=reference)
+    missing = check()
+    assert missing['status'] == 'incomplete' and missing['coverage']['unverified'], missing
+    assert [x['symbol'] for x in catalog(project)['definitions'] if x['kind'] == 'prompt'] == ['evaluate']
+    marker = project/'executed'
+    put(project, 'operators/review.py', f'open({str(marker)!r}, "w").close()\ndef run() -> int:\n    return 1\n')
+    blocked = check()
+    assert blocked['status'] in {'incomplete','failed'} and not marker.exists()
+    put(project, 'operators/review.py', 'from operators.number import one\ndef run() -> int:\n    return one()\n')
+    put(project, 'operators/number.py', 'def one() -> int:\n    return 1\n')
+    proven = check()
+    assert proven['status'] == 'passed', proven
+    assert {yaml_path, 'operators/review.py', 'operators/number.py'} <= proven['basis']['sources'].keys()
+    assert not marker.exists()
+    denied = check_project(project, paths=[yaml_path], reference=reference, exclude=['operators/number.py'])
+    assert denied['status'] == 'incomplete' and 'operators/number.py' not in denied['basis']['sources']

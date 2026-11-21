@@ -48,6 +48,10 @@ def _split_entry(path):
     return path.split(':')
 
 
+def is_project_entry(path):
+    return 'operators' in _split_entry(path)[0].split('.')
+
+
 def _load(path):
     module, name = _split_entry(path)
     return getattr(import_module(module), name)
@@ -55,7 +59,7 @@ def _load(path):
 
 def _entry(path, *, standard=False, bind=True):
     module, _ = _split_entry(path)
-    if not standard and 'operators' not in module.split('.'):
+    if not standard and not is_project_entry(path):
         raise ValueError('Custom fn/actor and validators must be defined under operators/')
     if not bind:
         return None

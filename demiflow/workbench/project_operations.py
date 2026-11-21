@@ -128,7 +128,7 @@ def set_table_view(root, alias, *, display, provenance, expected):
         display=display, provenance=provenance, expected=expected, fields=description['fields'])
 
 
-def register_flow(root, entry, *, params, authorize):
+def register_flow(root, entry, *, params=None, authorize):
     """Register an authored flow with this deployment's fixed table references."""
     from demiflow.forge.project import register_flow as register
     from demiflow.workbench.table_bindings import make_resolver

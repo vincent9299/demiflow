@@ -159,13 +159,43 @@ def _binding_files(root, binding, sources, table_files):
     return files.keys() | binding['controls'].keys()
 
 
+def _check_agent_tools(root, references, *, deadline, exclude, sources):
+    """Verify project-owned tool definitions and their statically supported Python closure."""
+    tree = SourceTree(root, {'seconds': max(1, int(deadline - time.monotonic()))}, exclude=exclude)
+    checker = OperatorChecker(tree)
+    try:
+        for reference in references:
+            entry, kind = reference['entry'], reference['kind']
+            module, symbol = entry.split(':')
+            # A declaration cannot re-export another module's callable.
+            item = tree.load(module).get(symbol)
+            if not isinstance(item, Definition) or item.module != module:
+                raise InspectionError('OP-01', '工具无法定位到声明中的本地定义：' + entry,
+                                      path=module.replace('.', '/') + '.py', status='incomplete')
+            if (kind == 'actor') != isinstance(item.node, ast.ClassDef):
+                raise InspectionError('OP-02', '工具形态与声明不符：' + entry, node=item.node,
+                                      path=module.replace('.', '/') + '.py')
+            description = checker.describe(item)
+            expected = reference.get('execution')
+            if expected and expected != ('async' if description['async'] else 'thread'):
+                raise InspectionError('OP-02', '工具执行方式与声明不符：' + entry, node=item.node,
+                                      path=module.replace('.', '/') + '.py')
+            checker.check(description, constructor_kwargs=reference.get('init'))
+        tree.unchanged()
+    finally:
+        for path, digest in tree.files.items():
+            _record(sources, path, digest)
+
+
 def _definition(root, path, deadline, exclude, sources):
     """A detached definition proves its own syntax and shape, not a call-site binding."""
     relative = Path(path)
     if relative.parts[0] == 'prompts' and relative.suffix in {'.yaml', '.yml', '.json'}:
         raw = read_bounded(relative_path(root, path), 1024**2)
         _record(sources, path, sha256(raw).hexdigest())
-        format_name, names = inspect_prompt_source(raw.decode('utf-8'))
+        format_name, names, tools = inspect_prompt_source(raw.decode('utf-8'))
+        if tools:
+            _check_agent_tools(root, tools, deadline=deadline, exclude=exclude, sources=sources)
         return dict(path=path, format=format_name, symbols=list(names), scope='definition')
     if relative.parts[0] == 'operators' and relative.suffix == '.py' and relative.name != '__init__.py':
         module = path[:-3].replace('/', '.')
@@ -254,6 +284,7 @@ def _check(root, view, paths, entry, params, reference, table_resolver, exclude,
     variants = visible
     layout_paths.update(p for p in relevant if Path(p).parts[0] in ROLE_DIRS)
     visited_sources = set()
+    agent_configs = set()
     for index, (candidate, param, hypothetical) in enumerate(variants):
         seconds = int(deadline - time.monotonic())
         if index >= max_variants or seconds < 1:
@@ -284,6 +315,9 @@ def _check(root, view, paths, entry, params, reference, table_resolver, exclude,
                                         for n in report['nodes']):
                 continue
             visited_sources.update(dependencies)
+            for node in report['nodes']:
+                if node['api'].rsplit('.', 1)[-1] == 'agentmap_async':
+                    agent_configs.update(r['path'] for r in node['source_resources'] if r['kind'] == 'config')
             checked.append(candidate)
             native.extend({**d, 'entry': candidate, 'params': param} for d in report['diagnostics'])
             inspected, issues = _layout(report)
@@ -303,7 +337,7 @@ def _check(root, view, paths, entry, params, reference, table_resolver, exclude,
             layout.append(diagnostic('DF-01', path, '入口和配置未完整核实。', status='incomplete'))
             rows.append(dict(entry=candidate, params=param, status='incomplete'))
 
-    for path in sorted(relevant - visited_sources):
+    for path in sorted(agent_configs | (relevant - visited_sources)):
         if not (root / path).exists():
             native.append(diagnostic('FL-01', path, '变更的文件已删除，无法验证其定义。', status='incomplete'))
             continue

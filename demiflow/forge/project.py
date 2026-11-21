@@ -287,13 +287,13 @@ def inspect_prompt_source(text):
             raise ForgeError('Prompt source requires a native schema_version', code='invalid_request')
         version = raw.get('schema_version')
         if version == 'demiflow_agent_v2':
-            names = inspect_agent_config_document(raw)
+            names, tools = inspect_agent_config_document(raw)
         else:
             inspected = inspect_prompt_pack(text)
             if inspected.diagnostics:
                 raise ForgeError('; '.join(item.message for item in inspected.diagnostics[:8]))
-            names = tuple(inspected.prompt_definitions)
-        return version, names
+            names, tools = tuple(inspected.prompt_definitions), ()
+        return version, names, tools
     except ForgeError:
         raise
     except (TypeError, ValueError, yaml.YAMLError, RecursionError) as exc:
@@ -317,7 +317,7 @@ def create_role_file(root, role, name, *, content=None, actor=False):
         if type(raw) is not bytes or len(raw) > _PROMPT_BYTES:
             raise ForgeError('Prompt source must be UTF-8 within 1 MiB', code='resource_limit')
         try:
-            version, definitions = inspect_prompt_source(raw.decode('utf-8'))
+            version, definitions, _ = inspect_prompt_source(raw.decode('utf-8'))
         except UnicodeDecodeError as exc:
             raise ForgeError('Prompt source must be UTF-8', code='invalid_request') from exc
         result = dict(format=version, definitions=list(definitions), sha256=sha256(raw).hexdigest())

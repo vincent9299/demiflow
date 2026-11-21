@@ -120,18 +120,30 @@ def _agent_document(raw):
     return pack, environment, raw.get('options', {}), budgets['max_requests']
 
 
-def inspect_agent_config_document(document: dict) -> tuple[str, ...]:
+def inspect_agent_config_document(document: dict) -> tuple[tuple[str, ...], tuple[dict, ...]]:
     """Inspect static fields and tool declarations without loading project callables."""
     pack, environment, options, max_requests = _agent_document(document)
     _validate_settings(environment['runtime'], pack, options, max_requests)
     for prompt in pack.prompts:
         validate_agent_prompt(prompt)
-    prepare_environment(environment['runtime'], environment['operators'], environment['resources'],
+    resolved, _ = prepare_environment(environment['runtime'], environment['operators'], environment['resources'],
                         environment['operator_settings'], {
                             key: environment.get(key, getattr(OperatorEnvironment, key))
                             for key in (*LIMITS, 'max_operator_calls')
                         }, bind=False)
-    return tuple(pack.prompt_definitions)
+    from .operator_api import is_project_entry
+    references = []
+    for declaration in resolved.values():
+        for kind in ('function', 'actor', 'validate_resources', 'validate_arguments'):
+            entry = declaration.get(kind)
+            if entry and is_project_entry(entry):
+                reference = dict(kind=kind, entry=entry)
+                if kind in ('function', 'actor'):
+                    reference['execution'] = declaration.get('execution')
+                if kind == 'actor':
+                    reference['init'] = declaration['init']
+                references.append(reference)
+    return tuple(pack.prompt_definitions), tuple(references)
 
 
 def load_agent_config(path: str | Path) -> AgentConfig:
