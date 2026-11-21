@@ -56,7 +56,14 @@ def test_declared_admission_bounds_fresh_calls_and_excludes_replay(kind, prompt_
         assert 1 < prompt_server['peak'] <= 2 and admission['adaptive']['fresh_responses'] == 8
         return
     options = {'sqlite_journal': {'path': str(tmp_path / 'calls.sqlite')}, 'collect_journal_totals': False}
-    embedding_server['delay'] = .04
+    # Keep the first request in flight until a second actually reaches the HTTP fixture.
+    # A sleep can expire between requests on a loaded release runner.
+    overlap = threading.Event()
+    def observe_overlap():
+        if embedding_server['active'] >= 2:
+            overlap.set()
+        assert overlap.wait(timeout=5), 'Two admitted embedding requests never overlapped'
+    embedding_server['on_request'] = observe_overlap
     ds = data.from_items([{'text': str(i)} for i in range(8)]).map_embeddings(
         model=embedding_server['model'], inputs={'text': 'text'},
         **embedding_execution_config(batch_size=1, concurrency=4,

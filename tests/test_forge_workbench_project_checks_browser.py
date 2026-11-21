@@ -4,7 +4,7 @@ import pytest
 
 from playwright.sync_api import expect
 
-from test_forge_project_checks import project,demo,isolated
+from test_forge_workspace import demo, isolated
 from test_forge_markdown_reading import browser
 from test_forge_public_api import service
 from test_forge_workbench_browser import page_for
@@ -13,14 +13,15 @@ from demiflow.workbench.projects import registry as console
 
 
 @pytest.mark.parametrize('late_error',[False,True])
-def test_late_project_status_cannot_replace_newer_check_result(project,browser,monkeypatch,tmp_path,late_error):
+def test_late_project_status_cannot_replace_newer_check_result(isolated,browser,monkeypatch,tmp_path,late_error):
+    project = isolated
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN',str(tmp_path/'domain'))
     with service(project) as app,page_for(browser,app) as (page,errors):
         project_info(page)
         with page.expect_response('**/project-check') as checked:
             page.get_by_role('button',name='检查当前项目',exact=True).click()
         assert checked.value.json()['status']=='checked'
-        source=project/'processing.py';source.write_text('import subprocess\n'+source.read_text())
+        source=project/'operators/question_rules.py';source.write_text('import subprocess\n'+source.read_text())
         page.evaluate('''() => {
           const native=fetch.bind(window);window.__heldStatus=false;
           window.fetch=async(...args)=>{
@@ -59,7 +60,8 @@ def test_late_project_status_cannot_replace_newer_check_result(project,browser,m
 
 
 @pytest.mark.parametrize('late_error',[False,True])
-def test_project_switch_discards_old_status_and_detached_check(project,browser,monkeypatch,tmp_path,late_error):
+def test_project_switch_discards_old_status_and_detached_check(isolated,browser,monkeypatch,tmp_path,late_error):
+    project = isolated
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN',str(tmp_path/'domain'))
     registry=tmp_path/'registry.json'
     key=console.add(registry,project)['workspace_id']

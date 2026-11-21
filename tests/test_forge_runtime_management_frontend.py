@@ -4,7 +4,7 @@ import pytest
 from playwright.sync_api import expect
 
 from demiflow.workbench.runs import manager as runs
-from demiflow.workbench.projects import workspace as ws
+from test_workbench_run_module import single_flow
 from test_forge_runs import base, root
 from test_forge_markdown_reading import browser
 from test_forge_public_api import service
@@ -19,13 +19,16 @@ def test_empty_project_shows_capability_without_grant_or_execution(tmp_path, bro
     original = (project / 'workspace.json').read_bytes()
     with service(project, enable_runs=False) as app, opened(browser, app) as (page, requests):
         navigate(page, '管道')
-        expect(page.get_by_role('button',name='运行',exact=True)).to_be_disabled()
+        expect(page.locator('.wb-actions').get_by_role('button', name='运行', exact=True)).to_be_disabled()
+        page.locator('.wb-more > summary').click()
         expect(page.get_by_role('button',name='检查',exact=True)).to_be_disabled()
-        expect(page.locator('.wb-graph')).to_contain_text('尚无已声明入口')
+        page.locator('.wb-more > summary').click()
+        expect(page.locator('.wb-graph')).to_contain_text('未识别到受支持的入口声明')
         expect(page.locator('.wb-settings')).to_be_visible()
         expect(page.get_by_role('button',name='登记原生流程',exact=True)).to_be_disabled()
-        page.get_by_role('button',name='运行记录',exact=True).click()
-        expect(page.locator('.wb-history')).to_contain_text('当前页没有运行记录')
+        navigate(page, '运行')
+        expect(page.get_by_role('navigation', name='运行记录导航')).to_be_visible()
+        expect(page.locator('.wb-run-record')).to_have_count(0)
         assert not page.locator('.wb-run-facts').is_visible()
         for width in (1440, 390, 320):
             page.set_viewport_size({'width': width, 'height': 1000})
@@ -42,23 +45,38 @@ def private_domain(tmp_path,monkeypatch):
 
 
 def test_management_runs_filters_and_opens_real_result(root,browser):
+    # This business fixture also carries historical parameter variants. Select
+    # the one current binding explicitly, as an author must in a real project.
+    single_flow(root)
     with service(root,enable_runs=True) as app,opened(browser,app) as (page,_):
         page.set_default_timeout(65000)
         navigate(page,'管道')
-        page.get_by_role('button',name='运行',exact=True).click()
+        page.locator('.wb-flow-record[data-entry="flows/questions.py:select"]').click()
+        page.locator('.wb-actions').get_by_role('button', name='运行', exact=True).click()
+        page.get_by_role('button', name='确认运行', exact=True).click()
         expect(page.locator('.wb-run-bar')).to_be_visible(timeout=65000)
-        expect(page.locator('.wb-run-bar > .wb-tag')).to_have_text('成功',timeout=65000)
+        expect(page.locator('.wb-run-bar > .wb-tag')).to_have_text('已完成',timeout=65000)
         run_id=page.evaluate('ForgeView.decodeView(location.hash).run_id')
         value=runs.show(root,run_id)
         assert value['status']=='succeeded' and value['outputs'][0]['result']['ref']['row_count']==2
-        page.get_by_role('button',name='运行记录',exact=True).click()
-        state=page.get_by_label('筛选本页运行状态',exact=True)
-        state.select_option('failed')
-        expect(page.locator('.wb-history')).to_contain_text('本页没有符合筛选条件的运行')
-        assert page.locator('.wb-run-record').count()==0
-        state.select_option('succeeded')
-        page.locator('.wb-run-record[data-run="'+run_id+'"]').click()
-        expect(page.locator('.wb-run-bar > strong')).to_have_text(run_id)
-        page.get_by_role('button',name='输出结果',exact=True).click()
+        navigate(page, '运行')
+        group = page.locator('.wb-run-group[data-entry="flows/questions.py:select"]')
+        group.locator('.wb-run-group-heading').click()
+        record = group.locator(f'.wb-run-record[data-run="{run_id}"]')
+        expect(record).to_be_visible()
+        expect(record).to_have_attribute('data-status', 'succeeded')
+        page.get_by_role('button', name='搜索运行', exact=True).click()
+        search = page.get_by_role('searchbox', name='搜索运行')
+        search.fill('不存在的运行')
+        expect(record).to_be_hidden()
+        search.fill(run_id)
+        expect(record).to_be_visible()
+        record.click()
+        expect(record).to_have_attribute('aria-pressed', 'true')
+        assert page.evaluate('ForgeView.decodeView(location.hash).run_id') == run_id
+        expect(page.locator('.wb-run-bar')).to_contain_text(run_id[-10:])
+        page.locator('.wb-monitor-tabs').get_by_role('button', name='输出结果', exact=True).click()
         page.get_by_role('button',name='查看固定结果',exact=True).click()
-        page.get_by_text('c01',exact=True).first.wait_for()
+        preview = page.locator('.wb-result-preview')
+        expect(preview).to_contain_text('c01', timeout=15000)
+        expect(preview).to_contain_text('c02')

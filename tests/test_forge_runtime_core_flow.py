@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from playwright.sync_api import expect
@@ -97,14 +98,40 @@ def test_http_registration_permissions_cas_and_no_execution(unregistered, tmp_pa
         assert not list((unregistered/'.forge/runs').glob('*'))
 
 
+def open_menu_action(page, name):
+    menu = page.locator('.wb-more')
+    if menu.get_attribute('open') is None:
+        menu.locator('summary').first.click()
+    menu.get_by_role('button', name=name, exact=True).click()
+
+
+def submit_run(page):
+    page.locator('.wb-actions').get_by_role('button', name='运行', exact=True).click()
+    page.get_by_role('button', name='确认运行', exact=True).click()
+
+
+def choose_flow(page, entry):
+    page.get_by_role('button', name=entry, exact=True).click()
+    expect(page.get_by_role('button', name=entry, exact=True)).to_have_attribute('aria-current', 'page')
+
+
 def register_from_page(page, entry, params, *, evidence_dir):
     settings=page.locator('.wb-settings')
-    if not settings.is_visible():page.get_by_role('button',name='接入与权限',exact=True).click()
+    if not settings.is_visible():
+        open_menu_action(page, '接入与权限')
     settings.get_by_label('登记流程入口',exact=True).fill(entry)
     settings.get_by_label('登记参数文件',exact=True).fill(params)
-    with page.expect_response('**/flow-register') as registered:
-        settings.get_by_role('button',name='登记原生流程',exact=True).click()
-    assert registered.value.ok,registered.value.text()
+    def registered_graph(response):
+        url = urlsplit(response.url)
+        query = parse_qs(url.query)
+        return (url.path.endswith('/graph') and query.get('basis_kind') == ['source']
+                and query.get('entry') == [entry] and query.get('params') == [params])
+    with page.expect_response(registered_graph) as graph:
+        with page.expect_response('**/flow-register') as registered:
+            settings.get_by_role('button',name='登记原生流程',exact=True).click()
+        assert registered.value.ok,registered.value.text()
+    assert graph.value.ok,graph.value.text()
+    expect(page.locator('.wb-graph')).not_to_have_attribute('aria-busy','true')
     try:
         expect(settings).not_to_be_visible(timeout=65000)
     except AssertionError:
@@ -113,11 +140,11 @@ def register_from_page(page, entry, params, *, evidence_dir):
         evidence_dir.mkdir(parents=True,exist_ok=True)
         (evidence_dir/'registration-failure-R2.json').write_text(json.dumps(evidence,ensure_ascii=False,indent=2)+'\n')
         raise
-    expect(page.get_by_label('流程',exact=True)).to_have_value(entry,timeout=65000)
-    page.locator('.wb-node').first.wait_for()
+    expect(page.get_by_role('button', name=entry, exact=True)).to_have_attribute('aria-current', 'page')
+    page.wait_for_function('(params) => ForgeView.decodeView(location.hash)?.params === params', arg=params)
 
 
-def finished(page,status='成功'):
+def finished(page,status='已完成'):
     expect(page.locator('.wb-run-bar')).to_be_visible(timeout=65000)
     expect(page.locator('.wb-run-bar > .wb-tag')).to_have_text(status,timeout=65000)
 
@@ -151,6 +178,8 @@ def test_browser_onboard_submit_result_then_monitor_stop(unregistered, tmp_path,
         dialog.get_by_role('button', name='注册已有项目', exact=True).click()
         navigate(page, '管道')
         settings=page.locator('.wb-settings')
+        if not settings.is_visible():
+            open_menu_action(page, '接入与权限')
         expect(settings.get_by_role('button', name='登记原生流程', exact=True)).to_be_disabled()
         for name in ('接入与提交', '停止与核对', '保留结果为输入'):
             settings.get_by_label(name, exact=True).check()
@@ -164,7 +193,7 @@ def test_browser_onboard_submit_result_then_monitor_stop(unregistered, tmp_path,
             page.set_viewport_size({'width': width, 'height': 1000})
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
             artifact(page, f'core-submit-{width}')
-        page.get_by_role('button', name='运行', exact=True).click()
+        submit_run(page)
         finished(page)
         first = current_run(page)
         assert runs.show(unregistered, first)['outputs'][0]['result']['ref']['row_count'] == 2
@@ -176,21 +205,22 @@ def test_browser_onboard_submit_result_then_monitor_stop(unregistered, tmp_path,
         page.get_by_text('c01', exact=True).first.wait_for()
         navigate(page, '管道')
         register_from_page(page, 'flows/waiting.py:run', 'flows/waiting.json', evidence_dir=tmp_path/'evidence')
-        expect(page.get_by_label('配置', exact=True)).to_have_value('flows/waiting.json')
+        open_menu_action(page, '整图配置')
         page.get_by_text('本次运行设置',exact=True).click()
         page.get_by_label('本次运行秒数上限', exact=True).fill('90')
         try:
-            page.get_by_role('button', name='运行', exact=True).click()
+            submit_run(page)
             page.wait_for_function(
                 "prior => {const v=ForgeView.decodeView(location.hash);return v.run_id && v.run_id!==prior;}",
                 arg=first)
             active = current_run(page)
-            expect(page.get_by_role('combobox',name='运行记录',exact=True)).to_have_value(active)
+            expect(page.locator('.wb-run-record.selected')).to_have_attribute('data-run', active)
             page.get_by_text('部分输出已提交', exact=False).first.wait_for()
             page.get_by_text('性能趋势 · 整次运行', exact=True).click()
             page.get_by_role('img', name='整次运行的 CPU 核数趋势').wait_for()
             artifact(page, 'core-running-320')
             page.get_by_role('button', name='停止', exact=True).click()
+            page.get_by_role('button', name='确认停止', exact=True).click()
             page.get_by_text('所属执行已停止', exact=False).first.wait_for()
             result = runs.show(unregistered, active)
             assert result['status'] == 'cancelled' and result['state']['execution_stopped']
@@ -230,8 +260,8 @@ def test_lost_prepare_and_start_responses_keep_one_run(unregistered, browser, tm
 
         page.route('**/run-prepare', drop_prepare)
         page.route('**/run-start', drop_start)
-        page.get_by_role('button', name='运行', exact=True).click()
-        page.locator('.error-box').last.wait_for()
+        submit_run(page)
+        page.locator('.wb-notice.error-box').wait_for()
         page.reload()
         page.get_by_role('button', name='以原请求重试准备', exact=True).click()
         page.get_by_role('button', name='开始这次运行',exact=True).click()
@@ -251,8 +281,8 @@ def test_failed_prepare_can_be_read_closed_and_corrected(unregistered, browser, 
         config = unregistered/'flows/select_a.json'
         original = config.read_bytes()
         config.write_bytes((unregistered/'flows/waiting.json').read_bytes())
-        page.get_by_role('button', name='运行', exact=True).click()
-        page.locator('.error-box').last.wait_for()
+        submit_run(page)
+        page.locator('.wb-notice.error-box').wait_for()
         saved = page.evaluate("JSON.parse(sessionStorage.getItem('demiflow-workbench-run-intents-v1'))")
         assert len(saved) == 1
         receipt = json.loads((unregistered/'.forge/requests'/(saved[0]['request_id']+'.json')).read_text())
@@ -263,8 +293,8 @@ def test_failed_prepare_can_be_read_closed_and_corrected(unregistered, browser, 
         assert not list((unregistered/'.forge/runs').glob('*'))
         config.write_bytes(original)
         register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json', evidence_dir=tmp_path/'evidence')
-        expect(page.get_by_label('配置', exact=True)).to_have_value('flows/select_a.json')
-        page.get_by_role('button', name='运行', exact=True).click()
+        assert page.evaluate('ForgeView.decodeView(location.hash).params') == 'flows/select_a.json'
+        submit_run(page)
         finished(page)
         # The failed receipt is preserved, and only the corrected request executes.
         assert json.loads((unregistered/'.forge/requests'/(saved[0]['request_id']+'.json')).read_text()) == receipt
@@ -279,7 +309,7 @@ def test_reload_during_start(unregistered, browser, tmp_path):
         held=[]
         page.route('**/run-start', lambda route: held.append(route))
         with page.expect_request('**/run-start'):
-            page.get_by_role('button', name='运行', exact=True).click()
+            submit_run(page)
         for _ in range(20):
             if held: break
             page.wait_for_timeout(50)

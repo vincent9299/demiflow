@@ -255,7 +255,7 @@
       runInspectorTabs.hidden=!monitoring||!hasRun;
       for(const b of runInspectorTabs.querySelectorAll('button'))b.setAttribute('aria-pressed',String(b.dataset.kind===runInspector));
       const detailParent=monitoring?nodePanel:graphSection;if(runDetail.parentElement!==detailParent)detailParent.append(runDetail);
-      detailHeader.hidden=monitoring&&detailKind!=='events';
+      detailHeader.hidden=monitoring&&runInspector!=='logs';
       monitorTabs.hidden=!monitoring||!hasRun;
       monitorStatus.setAttribute('aria-pressed',String(!resultsActive&&!definitionActive));monitorDefinition.setAttribute('aria-pressed',String(definitionActive));monitorOutputs.setAttribute('aria-pressed',String(resultsActive));
       outputMenu.hidden=monitoring&&hasRun;

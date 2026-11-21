@@ -9,7 +9,6 @@ from playwright.sync_api import expect
 
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.graph import model, parameters
-from demiflow.workbench.projects import workspace as ws
 from test_forge_markdown_reading import browser
 from test_forge_public_api import service
 from test_forge_web_redesign import opened
@@ -69,34 +68,36 @@ def test_registered_plain_configuration_cold_open_switch_and_reload(browser, tmp
         '    rows = data.from_items([{"id":1}]).map(transform)\n'
         '    if extra: rows = rows.filter(keep)\n'
         '    return rows.take_all()\n')
-    for name, extra in [('base.json', False), ('extra.json', True)]:
-        (root / name).write_text(json.dumps({'arguments': {'extra': extra}}))
-        declare_existing_flow(root, 'flow.py:run', params=name)
-    with service(root) as app, opened(browser, app) as (page, requests):
-        graph_reply = lambda response: '/graph?' in response.url
-        # The default 管道 page already loads automatically. Observe a fresh
-        # mount rather than waiting for a request from an idempotent tab click.
-        with page.expect_response(graph_reply) as first:
-            page.reload()
-        assert first.value.status == 200, first.value.text()
-        expect(page.locator('.wb-graph')).not_to_have_attribute('aria-busy', 'true')
-        expect(page.locator('.wb-notice')).to_be_hidden()
+    entry = 'flow.py:run'
+    parameter_file = root / 'base.json'
+    parameter_file.write_text(json.dumps({'arguments': {'extra': False}}))
+    declare_existing_flow(root, entry, params=parameter_file.name)
+    with service(root) as app, opened(browser, app) as (page, _):
+        flows = page.get_by_role('navigation', name='项目功能').get_by_role('button', name='管道', exact=True)
+        flows.click()
         expect(page.locator('.wb-node')).to_have_count(3, timeout=65000)
-        for name, expected in [('base.json', 3), ('extra.json', 4), ('base.json', 3)]:
-            selector = page.get_by_role('combobox', name='入参文件', exact=True)
-            if selector.input_value() != name:
-                with page.expect_response(graph_reply) as switched:
-                    selector.select_option(name)
-                assert switched.value.status == 200, switched.value.text()
-                expect(page.locator('.wb-node')).to_have_count(0)
-            with page.expect_response(lambda response: response.url.endswith('/plan-preview')) as compiled:
+        for extra, expected in [(True, 4), (False, 3)]:
+            # The project changes its saved business values at the registered path.
+            raw = json.dumps({'arguments': {'extra': extra}}).encode()
+            parameter_file.write_bytes(raw)
+            with page.expect_response(lambda r: r.url.endswith('/plan-preview'), timeout=65000) as compiled:
                 page.get_by_role('button', name='解析执行计划', exact=True).click()
-            assert compiled.value.status == 200, compiled.value.text()
+            response = compiled.value
+            assert response.ok, response.text()
+            assert response.json()['basis']['params_sha256'] == hashlib.sha256(raw).hexdigest()
             expect(page.locator('.wb-node')).to_have_count(expected)
-            expect(page.locator('.wb-notice')).to_be_hidden()
-        with page.expect_response(graph_reply) as reloaded:
-            page.reload()
-        assert reloaded.value.status == 200, reloaded.value.text()
-        expect(page.locator('.wb-node')).to_have_count(3)
+        page.reload()
+        flows.click()
+        expect(page.locator('.wb-node')).to_have_count(3, timeout=65000)
         expect(page.locator('.wb-notice')).to_be_hidden()
-        expect(page.get_by_role('button', name='运行', exact=True)).to_be_disabled()
+        expect(page.locator('.wb-actions').get_by_role('button', name='运行', exact=True)).to_be_disabled()
+
+    # Existing declarations with more than one binding still compile precisely
+    # the supplied file, independently of which business values are editable.
+    from demiflow.workbench.graph.preview import preview
+    (root / 'extra.json').write_text(json.dumps({'arguments': {'extra': True}}))
+    declare_existing_flow(root, entry, params='extra.json')
+    for name, size in [('base.json', 3), ('extra.json', 4)]:
+        plan = preview(root, entry=entry, params=name)
+        assert len(plan['dag']['nodes']) == size
+        assert plan['basis']['params_sha256'] == hashlib.sha256((root / name).read_bytes()).hexdigest()

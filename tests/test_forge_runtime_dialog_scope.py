@@ -141,7 +141,10 @@ def test_late_context_cannot_replace_other_project_or_save_its_draft(projects, b
         held = []
         pattern = '**/api/workspaces/'+ids[0]+'/context'
         page.route(pattern, lambda route: held.append(route))
-        dialog.get_by_role('button', name=action(kind)[0], exact=True).click()
+        label, endpoint = action(kind)
+        with page.expect_response('**/' + endpoint, timeout=65000) as mutation:
+            dialog.get_by_role('button', name=label, exact=True).click()
+        assert mutation.value.ok, mutation.value.text()
         route = wait_held(page, held)
         response = route.fetch(timeout=30000)
         assert response.ok, response.text()
