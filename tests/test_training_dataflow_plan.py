@@ -112,7 +112,7 @@ def test_static_flow_resolves_training_and_selection_without_executing(tmp_path)
         '    def __call__(self, batch):\n        return batch\n'
         'def evaluate(*, digest):\n'
         '    ds = data.range(5)\n'
-        '    predictor = data.PredictorSpec(factory=Predictor,inputs={"x":"id"},input_schema={"x":"int64"},output_schema={"score":"int"})\n'
+        '    predictor = data.PredictorSpec(factory=Predictor,inputs={"x":"id"},input_schema={"x":"int64"},output_schema={"score":"int"},native_options={"ray":{"worker_resources":{"gpu":1}}})\n'
         '    recipe = data.TrainingRecipe(trainer=trainer,predictor=predictor,train_schema={"id":"int"},'
         'base_model_digest=digest,environment_digest=digest,model_format="m",budget={"optimizer_updates":4},'
         'save_steps=[2,4],topology={"nodes":1})\n'
@@ -123,6 +123,8 @@ def test_static_flow_resolves_training_and_selection_without_executing(tmp_path)
     assert report["status"] == "checked", report["diagnostics"]
     assert [n["kind"] for n in report["nodes"]] == ["range", "fit", "predict", "count"]
     assert report["value_edges"] == [{"from": report["nodes"][1]["id"], "to": report["nodes"][2]["id"]}]
+    assert report["nodes"][1]["analysis"]["topology"] == {"nodes":1}
+    assert report["nodes"][2]["capability_fact"]["resource_declaration"]["gpu"] == 1
     assert len(report["actions"]) == 1
 
 
@@ -178,3 +180,26 @@ def test_predictor_input_aliases_keep_all_type_constraints():
     selection = rows.fit(recipe=replace(recipe(), predictor=valid)).checkpoints.select(steps=[2])
     with pytest.raises(ValueError, match='Conflicting predictor types for column x'):
         selection.predict(on=rows, inputs={'left':'x'})
+
+def test_native_view_projects_fit_topology_and_predictor_gpu_without_running(tmp_path):
+    from dataclasses import replace
+    import pyarrow as pa
+    from demiflow import data
+    from demiflow.execution.host.control import DEFAULT_LIMITS
+    from demiflow.execution.host.inspection import capture_managed_pipeline, native_submission_view
+    config = recipe()
+    config = replace(config, topology={'nodes': 2, 'gpus_per_node': 4}, predictor=replace(
+        config.predictor, native_options={'ray': {'worker_resources': {'gpu': 1}}}))
+    def entry():
+        rows = data.from_items([{'x':'text'}])
+        fitted = rows.fit(recipe=config)
+        return fitted.checkpoints.select(steps=[2,4]).predict(on=rows).write_lance(
+            str(tmp_path / 'scores.lance'), schema=pa.schema([('score',pa.float64())]), mode='create')
+    captured = capture_managed_pipeline(entry, {}, limits=DEFAULT_LIMITS)
+    nodes = native_submission_view(captured)['nodes']
+    job, = (n for n in nodes if n['kind'] == 'fit')
+    assert job['analysis']['topology'] == {'nodes':2, 'gpus_per_node':4}
+    branches = [n for n in nodes if n['parameters'].get('predict_step')]
+    assert [n['parameters']['predict_step'] for n in branches] == [2,4]
+    assert all(n['capability_fact']['resource_declaration'] == {'gpu':1} for n in branches)
+    assert not (tmp_path / 'scores.lance').exists()

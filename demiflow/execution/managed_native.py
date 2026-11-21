@@ -64,9 +64,9 @@ def native_submission_view(captured):
         nodes.append(dict(id=job.occurrence_id, kind="fit", role="value", parameters=thaw_record_value(job.configuration),
                           normalized_parameters={}, analysis={"topology": thaw_record_value(job.configuration["semantics"]["topology"])},
                           contract={}, source=None, operator=None, api="fit"))
-    edges.extend(dict(**{'from': keys[e.producer], 'to': keys[e.consumer]}, port=e.input_port, kind=e.kind,
-                      step=e.step) for e in graph.value_edges)
-    return dict(nodes=nodes, edges=edges, actions=[action], operators=[],
+    values = [dict(**{'from': keys[e.producer], 'to': keys[e.consumer]}, port=e.input_port,
+                   kind=e.kind, step=e.step) for e in graph.value_edges]
+    return dict(nodes=nodes, edges=edges, actions=[action], operators=[], **({'value_edges': values} if values else {}),
         observations=[dict(action_id=action, node_id=n['id'], occurrence=0) for n in nodes],
         dag=build_logical_plan_view(graph, declarations=captured.compiled.declarations,
                                     observation_labels=captured.compiled.observation_labels))

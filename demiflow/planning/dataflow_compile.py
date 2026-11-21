@@ -36,6 +36,7 @@ from ..execution.contracts.dataflow import (
     Bounds,
     CompiledDataflow,
     DataflowGraph,
+    FitJobNode,
     GraphEdge,
     GraphNode,
     InputPort,
@@ -927,8 +928,8 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None, on_com
     # fold the terminal into another node and re-derive semantic identities, so the
     # identities are read here, from the finished nodes, not when a node was captured.
     report_bindings = []
-    for index, report_node_id, report_occurrence, mode in capture.report_bindings:
-        node = bound_nodes[terminal if index == captured_terminal else index]
+    for member, report_node_id, report_occurrence, mode in capture.report_bindings:
+        node = member if isinstance(member, FitJobNode) else bound_nodes[terminal if member == captured_terminal else member]
         report_bindings.append({"report_node_id": report_node_id, "report_occurrence": report_occurrence,
                                 "occurrence_id": node.occurrence_id, "logical_node_id": node.semantic_id,
                                 "mode": mode})

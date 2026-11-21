@@ -36,15 +36,23 @@ class SeedScores:
             raise ValueError("Model step changed during restore")
 
     def __call__(self, batch):
+        import signal
         import time
         import pyarrow as pa
         # Give the native control loop a mid-inference checkpoint opportunity.
-        time.sleep(.1)
+        time.sleep(.65 if self.step == 800 else .01)
         values = batch[self.input].to_pylist()
         with (self.audit / f'calls-{self.attempt}.jsonl').open('a') as trace:
             trace.write(json.dumps([self.step,values]) + '\n')
+        outputs = [[] for _ in values]
+        for i, seed in enumerate(self.seeds):
+            for x, scores in zip(values,outputs):
+                scores.append(self.step + seed*x)
+            if self.attempt == 1 and self.step == 800 and i == 0 and (self.audit / 'fault.json').exists():
+                (self.audit / 'interrupted-batch.json').write_text(json.dumps({'ids':values,'scores':outputs}))
+                os.kill(int((self.audit / 'driver-pid').read_text()),signal.SIGKILL)
         return batch.append_column('step', pa.array([self.step] * len(values))).append_column(
-            'scores', pa.array([[self.step + seed*x for seed in self.seeds] for x in values]))
+            'scores', pa.array(outputs))
 
 
 def _install_driver_crash(run, location):
@@ -76,10 +84,9 @@ def _install_driver_crash(run, location):
                     for occurrence, metrics in state['metrics'].items():
                         if occurrence in models:
                             rows[models[occurrence]] += metrics['rows_output']
-        if rows[400] == 100 and 0 < rows[800] < 100:
+        if rows == {400:100, 800:30} and not location.exists():
             location.write_text(json.dumps({'cut':commit_id,'steps':rows,'attempt':run.attempt,
                                             'action_id':record['action_id'], 'bindings':cut['model_bindings']}))
-            os._exit(73)
     commit.fault_point = fault
 
 
@@ -89,13 +96,14 @@ def _execute(root, mode):
     deployment = TrainingDeployment('project', binding)
     directory = root / 'run'
     ctx = RunContext.start(directory, training=deployment,
-        limits={'checkpoint_rows':16,'checkpoint_interval_ms':300,'timeout_s':300}) if mode == 'crash' else (
+        limits={'checkpoint_rows':10,'checkpoint_interval_ms':300,'timeout_s':300}) if mode == 'crash' else (
         RunContext.resume(RunRef(str(directory), RunJournal(directory).recovery_identity()['run_id']),
                           training=deployment))
     with ctx:
         if mode == 'crash':
+            (root / 'driver-pid').write_text(str(os.getpid()))
             _install_driver_crash(ctx, root / 'fault.json')
-        predictor = replace(recipe().predictor, factory=SeedScores, batch_size=4, parameters={'seeds':[1,3],'audit':str(root)},
+        predictor = replace(recipe().predictor, factory=SeedScores, batch_size=10, parameters={'seeds':[1,3],'audit':str(root)},
             parameter_schema={'type':'object','properties':{'seeds':{'type':'array','items':{'type':'integer'}},'audit':{'type':'string'}}},
             output_schema={'x':'int64','step':'int64','scores':'list<item: int64>'})
         train = data.read_lance(str(root / 'train.lance'), version=1)
@@ -111,11 +119,15 @@ def test_two_checkpoint_predictions_recover_original_partial_model_frontier(tmp_
         'from test_training_prediction_recovery import _execute; _execute(Path(sys.argv[1]),sys.argv[2])',str(tmp_path)]
     env = dict(os.environ, PYTHONPATH=os.pathsep.join(s for s in sys.path if s))
     crash = subprocess.run([*cmd, 'crash'], env=env, text=True, capture_output=True, timeout=320)
-    assert crash.returncode == 73, crash.stderr
+    import signal
+    assert crash.returncode == -signal.SIGKILL, crash.stderr
     fault = json.loads((tmp_path / 'fault.json').read_bytes())
     run = RunJournal(tmp_path / 'run')
     before = run.execution_commit(fault['cut'])
-    assert before['status'] == 'checkpoint_committed' and not (tmp_path / 'scores.lance').exists()
+    assert before['status'] in {'checkpoint_committed', 'acked'}
+    partial = json.loads((tmp_path / 'interrupted-batch.json').read_bytes())
+    assert partial['ids'] == list(range(30,40)) and all(len(v)==1 for v in partial['scores'])
+    assert not (tmp_path / 'scores.lance').exists()
     launch, = (tmp_path / 'run' / 'training').glob('*/launch.json')
     receipt = (launch.parent / 'result.json').read_bytes()
     (tmp_path / 'resuming').touch()
@@ -124,7 +136,7 @@ def test_two_checkpoint_predictions_recover_original_partial_model_frontier(tmp_
     calls = [json.loads(line) for line in (tmp_path / 'calls-2.jsonl').read_text().splitlines()]
     assert {step for step, _ in calls} == {800}
     resumed_ids = [x for _, batch in calls for x in batch]
-    assert len(set(resumed_ids)) == len(resumed_ids) == 100-fault['steps']['800']
+    assert resumed_ids == list(range(30,100))
     assert (launch.parent / 'result.json').read_bytes() == receipt
     assert len(list(launch.parent.parent.glob('*/launch.json'))) == 1
     assert run.execution_status()['attempt'] == 2 and run.execution_commit(fault['cut'])['status'] == 'acked'

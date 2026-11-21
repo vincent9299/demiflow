@@ -160,7 +160,7 @@ def build_plan_details(compiled, *, sources, root, callsites=None, bounds=None, 
     from demiflow.workbench.python_sources import bound_files
     shared = {origin: (path.as_posix(), digest)
               for _, origin, path, digest in bound_files({'shared_sources': shared_sources or {}})}
-    if len(compiled.graph.nodes) > 256:
+    if len(compiled.graph.nodes) + len(compiled.graph.jobs) > 256:
         raise ValueError('Plan materials exceed node budget')
     if callsites is not None:
         callsites.check_compilation(compiled.graph)
@@ -169,9 +169,8 @@ def build_plan_details(compiled, *, sources, root, callsites=None, bounds=None, 
     from .plan_schema import build_schema_details
     schemas = build_schema_details(projected) if bounds is not None else {}
     result, total = {}, 0
-    for node in compiled.graph.nodes:
+    for occurrence, native in projected.items():
         details = {kind: unavailable('本节点没有已核验的这类材料。') for kind in KINDS}
-        native = projected[node.occurrence_id]
         details['implementation'] = _implementation(native.implementation, root, sources, shared)
         details['implementation']['referenced'] = native.implementation.referenced
         prompts = native.prompts
@@ -182,9 +181,9 @@ def build_plan_details(compiled, *, sources, root, callsites=None, bounds=None, 
                 # Presentation cannot turn an accepted compilation into failure.
                 details['prompt'] = unavailable(str(exc))
             details['prompt']['referenced'] = prompts.state != 'none'
-        details['callsite'] = (callsites.detail(node.occurrence_id) if callsites is not None
+        details['callsite'] = (callsites.detail(occurrence) if callsites is not None
                                else unavailable('这份计划未记录精确 API 调用；不会按函数名猜测。'))
-        details['schema'] = schemas.get(node.occurrence_id, unavailable('这份计划未提供 Schema 材料。'))
+        details['schema'] = schemas.get(occurrence, unavailable('这份计划未提供 Schema 材料。'))
         call_meta = details['callsite'].get('metadata', {})
         schema_meta = details['schema'].get('metadata')
         if schema_meta is not None:
@@ -203,5 +202,5 @@ def build_plan_details(compiled, *, sources, root, callsites=None, bounds=None, 
                 details[kind] = unavailable('材料超过展示预算。', referenced=detail.get('referenced', False))
                 size = len(json.dumps(details[kind], ensure_ascii=False).encode())
             total += size
-        result[node.occurrence_id] = details
+        result[occurrence] = details
     return result

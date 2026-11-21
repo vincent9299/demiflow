@@ -53,6 +53,8 @@ def _fit(capture, decl, path):
         occurrence = _hash(["dataflow-fit-v4", capture.request.action.action_id, len(capture.jobs)])
         job = FitJobNode(occurrence, _hash(["fit-semantic-v4", configuration, identity]), configuration, None)
         capture.jobs.append(job)
+        if capture.report is not None:
+            capture._bind_report(job, capture.report.operation(decl))
         capture.declarations.append((None, ProgramDeclaration(occurrence, spec, None, None, identity)))
         for role, producer in fixed:
             capture.value_edges.append(ValueEdge(producer, "dataset", occurrence, role, "fixed_dataset"))
