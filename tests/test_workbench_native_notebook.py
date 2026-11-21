@@ -731,3 +731,34 @@ def test_create_notebooks_from_collapsed_data_page(browser, native_project):
             assert not errors
         finally:
             page.close()
+
+
+def test_enable_notebook_execution_after_saving_only(browser, native_project):
+    _, registry_path, project = native_project
+    grants(registry_path, project, analysis_write=False, analysis_execute=False)
+    with service(None, registry=registry_path, notebook_python=PYTHON) as app:
+        page = browser.new_page()
+        starts = []
+        page.on('request', lambda req: starts.append(req.url) if req.method == 'POST'
+                and urlsplit(req.url).path.endswith(('/api/sessions', '/api/kernels')) else None)
+        try:
+            view = quote(json.dumps(dict(v=2, workspace=project, kind='tables')))
+            page.goto(app.origin + '/#token=' + app.token + '&view=' + view)
+            page.get_by_role('button', name='新建 Notebook', exact=True).click()
+            page.get_by_label('同时允许运行 Python 代码').uncheck()
+            page.get_by_role('button', name='允许并新建').click()
+            frame = page.frame_locator('iframe.native-notebook-frame:not([hidden])')
+            run = frame.get_by_role('button', name='运行卡片', exact=True).first
+            expect(run).to_be_disabled(timeout=60000)
+            frame.locator('body').evaluate('async()=>{await window.jupyterapp.shell.currentWidget.sessionContext.ready;}')
+            assert not starts
+            editor = frame.locator('.cm-content').first
+            editor.fill('print(6 * 7)')
+            page.get_by_role('button', name='启用运行', exact=True).click()
+            page.get_by_role('button', name='允许运行', exact=True).click()
+            expect(run).to_be_enabled(timeout=30000)
+            run.click()
+            expect(frame.locator('.jp-OutputArea-output')).to_contain_text('42', timeout=30000)
+            expect(frame.locator('.jp-Dialog')).to_have_count(0)
+        finally:
+            page.close()

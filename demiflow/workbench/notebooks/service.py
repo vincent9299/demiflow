@@ -33,7 +33,7 @@ class Instance:
     state: Path
     notebooks: Path
     executable: bool
-    writable: bool
+    grants: dict
     channels: int = 0
     requests: int = 0
 
@@ -76,6 +76,7 @@ class Notebooks:
 
     def get(self, project, *, initialize=True):
         root, permissions = self.authorize(project)
+        grants = dict(writable=permissions['analysis_write'], execute=permissions['analysis_execute'])
         with self.lock:
             if self.closed.is_set():
                 raise ForgeError('Notebook service is stopping', code='busy')
@@ -84,9 +85,9 @@ class Notebooks:
                 raise ForgeError('Project root changed; original Notebook session was not rebound', code='conflict')
             if current and current.root == root and current.process.poll() is None:
                 current.executable |= permissions['analysis_execute']
-                if current.writable != permissions['analysis_write']:
-                    current.writable = permissions['analysis_write']
-                    self._grants(current.state, current.writable)
+                if current.grants != grants:
+                    self._grants(current.state, grants)
+                    current.grants = grants
                 return current
             if current:
                 self._retire(current)
@@ -115,7 +116,7 @@ class Notebooks:
             state.mkdir(mode=0o700, exist_ok=True)
             for name in ('runtime', 'config', 'data', 'ipython'):
                 (state / name).mkdir(mode=0o700, exist_ok=True)
-            self._grants(state, permissions['analysis_write'])
+            self._grants(state, grants)
             token = secrets.token_urlsafe(32)
             with socket.socket() as listener:
                 listener.bind(('127.0.0.1', 0))
@@ -145,7 +146,7 @@ class Notebooks:
                     str(config_path)], cwd=code_root, env=env, stdin=subprocess.DEVNULL,
                     stdout=log, stderr=log, start_new_session=True)
             instance = Instance(project, root, port, token, base, process, state, directory,
-                                permissions['analysis_execute'], permissions['analysis_write'])
+                                permissions['analysis_execute'], grants)
             self.instances[project] = instance
             try:
                 deadline = time.monotonic() + 40
@@ -195,9 +196,9 @@ class Notebooks:
         raise ForgeError('Notebook directory is full', code='resource_limit')
 
     @staticmethod
-    def _grants(state, writable):
+    def _grants(state, grants):
         temporary = state / 'grants.tmp'
-        temporary.write_text(json.dumps({'writable': writable}))
+        temporary.write_text(json.dumps(grants))
         temporary.chmod(0o600)
         temporary.replace(state / 'grants.json')
 

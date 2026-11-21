@@ -406,6 +406,9 @@
         try{
           const {mountCards}=await import('./notebook-cards.js');
           if(!alive()||epoch!==cardsEpoch)return;
+          const kernel=panel.sessionContext;
+          if(context.capabilities?.analysis_execute && kernel.kernelPreference.shouldStart===false)
+            kernel.kernelPreference={...kernel.kernelPreference,shouldStart:true,autoStartDefault:true};
           cards=mountCards({desk,controls,panel,app:session.frame.contentWindow.jupyterapp,api,project,alive,
             permissions:()=>context.capabilities||{},tables:()=>[...tables.values()].map(({item,fieldNames})=>({
               table:item.original?item.original.id:item.alias,version:item.version,binding:item.binding,
