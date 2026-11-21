@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 
@@ -39,6 +39,10 @@ from demiflow.execution.plan_facts import (  # noqa: E402
 )
 from demiflow.execution.recovery_contract import RuntimeContractError  # noqa: E402
 from demiflow.planning.dataflow_compile import (  # noqa: E402
+    _LiteralEmptySource,
+    _operation_semantic_facts,
+    _source_kind,
+    _source_semantic_facts,
     bind_occurrences,
     capture_graph,
     compile_kernel_spec,
@@ -87,6 +91,29 @@ def _expect_error(code, fn):
     with pytest.raises(DataflowError) as exc:
         fn()
     assert exc.value.code == code, (exc.value.code, exc.value.message)
+
+
+def test_same_named_prompt_uses_generic_semantic_fields():
+    @dataclass(frozen=True)
+    class OperatorLLMMapOp(LogicalOp):
+        text: str
+        node_id: str
+
+    op = OperatorLLMMapOp("row value", "execution-coordinate")
+    assert _operation_semantic_facts(op) == {
+        "type": f"{type(op).__module__}.{type(op).__qualname__}",
+        "fields": {"text": "row value"},
+    }
+
+
+@pytest.mark.parametrize("project, expected", [
+    (_source_kind, "literal_empty"),
+    (_source_semantic_facts, {"kind": "literal_empty"}),
+])
+def test_literal_empty_source_requires_the_compiler_type(project, expected):
+    assert project(_LiteralEmptySource()) == expected
+    same_named_subclass = type("_LiteralEmptySource", (_LiteralEmptySource,), {})
+    _expect_error("INVALID_CONTRACT", lambda: project(same_named_subclass()))
 
 
 def _enumeration_1025():
