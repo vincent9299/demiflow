@@ -54,6 +54,13 @@ def test_all_navigation_resize_ellipsis_and_retained_width(project,tmp_path,brow
                 page.set_viewport_size(dict(width=width,height=900))
                 page.evaluate('() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
                 if kind=='development' and not sidebar.is_visible():page.get_by_role('button',name='会话列表',exact=True).click()
+                if kind=='monitor' and width==390:
+                    expect(sidebar).to_be_hidden()
+                    expect(separator).to_be_hidden()
+                    reopen=page.get_by_role('button',name='运行目录',exact=True)
+                    expect(reopen).to_have_attribute('aria-expanded','false')
+                    reopen.click()
+                    expect(reopen).to_have_attribute('aria-expanded','true')
                 expect(separator).to_be_visible();separator.press('End')
                 expect(sidebar).to_be_visible()
                 assert sidebar.bounding_box()['width']<=width-140+1,(kind,width)
