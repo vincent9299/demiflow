@@ -21,11 +21,13 @@ from ..data.sources import (
     FileSource,
     ItemsSource,
     IterableSource,
+    KeyedSource,
     LanceSource,
     MaterializedSource,
     RangeSource,
     SourcePlan,
     SqlSource,
+    UnionSource,
 )
 from ..execution.contracts.dataflow import (
     ActionProgram,
@@ -44,7 +46,6 @@ from ..execution.contracts.dataflow import (
 from ..execution.contracts.dataflow_codec import compute_graph_digest
 from ..execution.contracts.dataflow_errors import DataflowError
 from ..execution.contracts.dataflow_kinds import NATIVE, TYPED, kinds_with, traits_of
-from ..execution.local_kernel import KeyedSource, PlanInput, UnionSource
 from ..execution.recovery_contract import identity
 from ..execution.recovery_identity import describe
 from .dataflow_budget import (

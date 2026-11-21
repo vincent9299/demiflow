@@ -12,6 +12,23 @@ from .recovery_contract import identity, document, RecoveryContractError, MAX_DO
 _SOURCE_WALK = ContextVar('demiflow_source_identity_walk', default=None)
 
 
+def _persistent_module(value):
+    """Preserve the v3 names for the relocated relational classes and their methods."""
+    module = value.__module__
+    if type(module) is not str or module != 'demiflow.data.sources':
+        return module
+    from ..data.sources import KeyedSource, PlanInput, UnionSource
+    for declaration in (KeyedSource, PlanInput, UnionSource):
+        if value is declaration:
+            return 'demiflow.execution.local_kernel'
+        if inspect.isfunction(value):
+            method = vars(declaration).get(value.__name__)
+            # The generated dataclass repr also captures its wrapped function.
+            if value is method or value is getattr(method, '__wrapped__', None):
+                return 'demiflow.execution.local_kernel'
+    return module
+
+
 def describe(value, depth=0):
     if depth > 32:
         raise RecoveryContractError("Plan identity exceeds depth budget")
@@ -87,7 +104,7 @@ def describe(value, depth=0):
             if Path(filename).stat().st_size > 8 * 1024**2:
                 raise RecoveryContractError("Callable source exceeds identity byte budget")
             source_hash = hashlib.sha256(Path(filename).read_bytes()).hexdigest()
-        return dict(module=value.__module__, name=value.__qualname__, source_hash=source_hash,
+        return dict(module=_persistent_module(value), name=value.__qualname__, source_hash=source_hash,
                     code=identity(code_record(value.__code__)),
                     defaults=describe(value.__defaults__, depth + 1),
                     kwdefaults=describe(value.__kwdefaults__, depth + 1), closure=closure)
@@ -96,8 +113,8 @@ def describe(value, depth=0):
         for name, method in vars(value).items():
             if inspect.isfunction(method):
                 methods[name] = identity(code_record(method.__code__))
-        return dict(module=value.__module__, name=value.__qualname__, methods=methods)
-    from .local_kernel import PlanInput
+        return dict(module=_persistent_module(value), name=value.__qualname__, methods=methods)
+    from ..data.sources import PlanInput
     if isinstance(value, PlanInput):
         return plan_identity('input', value.source, value.plan)
     if type(value).__module__.startswith('numpy') and hasattr(value, 'dtype'):
@@ -112,7 +129,7 @@ def describe(value, depth=0):
         return {'array': str(value.dtype), 'shape': list(value.shape), 'sha256': digest.hexdigest()}
     if is_dataclass(value):
         # Runtime validators/observation coordinates are not semantic parameters.
-        return {"type": type(value).__module__ + "." + type(value).__qualname__,
+        return {"type": _persistent_module(type(value)) + "." + type(value).__qualname__,
                 "fields": {f.name: describe(getattr(value, f.name), depth + 1)
                            for f in fields(value) if f.name not in {"runtime_contract", "label"}}}
     native = getattr(value, "recovery_identity", None)
@@ -215,8 +232,9 @@ def source_identity(source):
 
 
 def _source_identity(source):
-    from ..data.sources import MaterializedSource, DatasourceSource, FileSource, ItemsSource
-    from .local_kernel import UnionSource, KeyedSource
+    from ..data.sources import (
+        DatasourceSource, FileSource, ItemsSource, KeyedSource, MaterializedSource, UnionSource,
+    )
     # Composite plans bind child identities, never runtime handles/executors.
     # In particular a captured materialization is identified by its receipts,
     # not by serializing the lazy _CheckpointBlocks reader into a declaration.

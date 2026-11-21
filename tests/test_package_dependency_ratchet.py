@@ -99,7 +99,6 @@ PLANNING_MAY_IMPORT = {
     'demiflow.execution.kernels.reducer_memory',
     'demiflow.execution.kernels.shuffle_order',
     'demiflow.execution.kernels.task_scope',
-    'demiflow.execution.local_kernel',
     'demiflow.execution.operator_policy',
     'demiflow.execution.payload_limits',
     'demiflow.execution.plan_facts',

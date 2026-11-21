@@ -138,7 +138,7 @@ def _recipe_actor_relation(request, *, bounds):
     """
     from dataclasses import replace
     from ..data.plan import CallableSpec
-    from ..execution.local_kernel import KeyedSource, UnionSource
+    from ..data.sources import KeyedSource, UnionSource
     from .contracts.dataflow import NativeOperation
     from ..planning.dataflow_compile import expand_relational_inputs, expand_operation_inputs, _hash
     from .dataflow_model_factory import native_model_declaration

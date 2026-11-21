@@ -6,11 +6,10 @@ def exclude_lance_rows(engine, source):
     import lance
     import pyarrow as pa
     from ..data.plan import LogicalPlan
-    from ..data.sources import LanceSource
+    from ..data.sources import LanceSource, PlanInput
     from ..lance.arrow_batches import LANCE_FILE_ROWS
     from ..lance.model import LanceScanSpec
     from ..lance.storage import open_lance_dataset
-    from .local_kernel import PlanInput
 
     query=source.left.source.query
     snapshot=open_lance_dataset(query.uri,query.version,query.storage_options)

@@ -16,10 +16,9 @@ import hashlib
 from pathlib import Path
 
 from ..data import plan as ops
-from ..data.sources import LanceSource, MaterializedSource
+from ..data.sources import KeyedSource, LanceSource, MaterializedSource, UnionSource
 from ..data.execution_contract import PlanView
 from ..data.runtime_contract import RuntimeContractError
-from .local_kernel import KeyedSource, UnionSource
 from .plan_facts import operation_facts, source_facts
 from .capabilities import check_composition
 

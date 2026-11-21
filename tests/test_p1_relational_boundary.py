@@ -1,6 +1,7 @@
 """Pure relational assembly retains existing plans and historic source classes."""
 from pathlib import Path
 import os
+import pickle
 import subprocess
 import sys
 
@@ -9,9 +10,8 @@ import pytest
 from demiflow.data.dataset import Dataset, MaterializedDataset
 from demiflow.data.plan import LimitOp, LogicalPlan, SelectColumnsOp
 from demiflow.data.relational_declaration import compose_keyed_source, compose_union_sources
-from demiflow.data.sources import ItemsSource, LanceSource
+from demiflow.data.sources import ItemsSource, KeyedSource, LanceSource, PlanInput, UnionSource
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.local_kernel import KeyedSource, PlanInput, UnionSource
 
 
 def _input(executor=None):
@@ -28,7 +28,40 @@ def test_keyed_source_retains_exact_plan_inputs_without_sort_or_normalizing_rows
     assert result.on == result.right_on == ('key',)
     assert (result.how, result.suffix) == ('left', '_r')
     assert result.left.executor is left.executor and result.right.executor is right.executor
-    assert result.__class__.__module__ == 'demiflow.execution.local_kernel'
+
+
+@pytest.mark.parametrize('kind', [PlanInput, KeyedSource, UnionSource])
+def test_relational_declarations_keep_historical_pickle_names_and_code_pins(kind):
+    from demiflow.execution.recovery_identity import describe
+
+    old_module = 'demiflow.execution.local_kernel'
+    # Protocol 0 GLOBAL is the exact historic module/name lookup, independent
+    # of where the candidate's pickler would now choose to store the class.
+    old_reference = f'c{old_module}\n{kind.__name__}\n.'.encode('ascii')
+    assert pickle.loads(old_reference) is kind
+    assert kind.__module__ == 'demiflow.data.sources'
+    assert describe(kind)['module'] == old_module
+    assert describe(kind.__init__)['module'] == old_module
+    assert describe(kind.__repr__)['module'] == old_module
+    wrapped = getattr(kind.__repr__, '__wrapped__', None)
+    if wrapped is not None:
+        assert describe(wrapped)['module'] == old_module
+
+    # An identically named class or method must keep its own module identity.
+    unrelated = type(kind.__name__, (), {'__module__': kind.__module__})
+    assert describe(unrelated)['module'] == kind.__module__
+
+
+def test_relational_instance_seal_retains_tags_and_fields():
+    from demiflow.execution.recovery_identity import describe
+
+    item = _input()
+    keyed = KeyedSource('groups', item, ('key',))
+    union = UnionSource((item,))
+    assert describe(keyed)['type'] == 'demiflow.execution.local_kernel.KeyedSource'
+    assert describe(keyed)['fields']['on'] == ['key']
+    assert describe(union)['type'] == 'demiflow.execution.local_kernel.UnionSource'
+    assert describe(union)['fields']['inputs'] == [describe(item)]
 
 
 def test_reduce_retains_declaration_and_copies_only_keyword_container():
@@ -139,8 +172,7 @@ def test_cold_compose_and_native_validation_do_not_load_runtime_owners():
     program = '''
 import sys
 from demiflow.data.relational_declaration import compose_keyed_source, compose_union_sources
-from demiflow.execution.local_kernel import PlanInput
-from demiflow.data.sources import ItemsSource
+from demiflow.data.sources import ItemsSource, PlanInput
 from demiflow.data.plan import LogicalPlan
 from demiflow.planning.dataflow_declaration import validate_native_operation
 left = PlanInput(ItemsSource(({'key': 1},)), LogicalPlan())
@@ -148,7 +180,7 @@ source = compose_keyed_source(left, 'join', 'key', right=left)
 assert source.left is left
 assert compose_union_sources((left,)).inputs[0] is left
 assert validate_native_operation('lookup', {'key': 'key'}, bindings={'key': 'key'}) is None
-for prefix in ('demiflow.execution.run_context', 'demiflow.execution.checked',
+for prefix in ('demiflow.execution.local_kernel', 'demiflow.execution.run_context', 'demiflow.execution.checked',
                'demiflow.execution.action_driver.dataflow', 'demiflow.execution.dataflow_api',
                'demiflow.execution.executors', 'demiflow.execution.package_loader',
                'demiflow.data.dataset', 'demiflow.data.local_relational'):

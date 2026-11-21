@@ -15,6 +15,37 @@ class SourcePlan:
 
 
 @dataclass(frozen=True)
+class PlanInput:
+    source: SourcePlan
+    plan: Any
+    executor: Any = None
+
+
+@dataclass(frozen=True)
+class UnionSource(SourcePlan):
+    """Concatenation within one local task engine; never nested Dataset actions."""
+    inputs: tuple[PlanInput, ...]
+
+
+@dataclass(frozen=True)
+class KeyedSource(SourcePlan):
+    kind: str
+    left: PlanInput
+    on: tuple[str, ...]
+    right: PlanInput | None = None
+    right_on: tuple[str, ...] = ()
+    how: str = "inner"
+    suffix: str = "_right"
+    reducer: Any = None
+    initial: Any = None
+    chunk_bytes: int = 32 * 1024 * 1024
+    max_rows: int = 32
+    output: str = "items"
+    reducer_contract: dict | None = None
+    reducer_kwargs: dict | None = None
+
+
+@dataclass(frozen=True)
 class ItemsSource(SourcePlan):
     items: Tuple[Any, ...]
 
