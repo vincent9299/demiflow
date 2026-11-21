@@ -89,10 +89,6 @@ main.native-data-active{padding:0!important;max-width:none!important;overflow:hi
 .df-book-strip button:is(:hover,:focus-visible){background:#eff1f5}
 .df-book-controls{flex:none}
 .df-book-notice{margin:4px 12px;font-size:12px;color:#92542d}
-.df-notebook-access{border:1px solid #dce1e8;border-radius:10px;padding:18px;max-width:90vw}
-.df-notebook-access h3{margin:0 0 10px}.df-notebook-access p,.df-notebook-access label{font-size:13px}
-.df-notebook-access label{display:flex;align-items:center;gap:5px}
-.df-notebook-access form>div{display:flex;justify-content:flex-end;gap:8px;margin-top:15px}
 @media(max-width:700px){.notebook-document > .df-book-header{height:auto;min-height:36px;flex-wrap:wrap;gap:0 4px}.df-book-strip{flex:1 0 min(8rem,90%)}.df-book-controls{margin-left:auto}}
 
 

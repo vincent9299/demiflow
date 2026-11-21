@@ -655,7 +655,7 @@ def test_card_assistant_generates_editable_notebook_widgets(browser,native_proje
 
 def test_create_notebooks_from_collapsed_data_page(browser, native_project):
     root, registry_path, project = native_project
-    grants(registry_path, project, analysis_write=False, analysis_execute=False, config_write=True)
+    grants(registry_path, project, analysis_write=False, analysis_execute=True, config_write=True)
     folder = root / 'data_tools'
     folder.mkdir()
     (folder / 'metrics.py').write_text('__demiflow_data_tools__={"total":"analysis"}\ndef total(values):\n    return sum(values)\n')
@@ -683,12 +683,13 @@ def test_create_notebooks_from_collapsed_data_page(browser, native_project):
             expect(page.locator('.dictionary-table[open]')).to_have_count(0)
             group.click()
             expect(page.get_by_role('button', name='total 分析')).to_be_visible()
+            page.route('**/project-capabilities', lambda route: route.fulfill(
+                status=403, json={'error':'当前项目无法开启保存权限。'}), times=1)
             new.click()
-            dialog = page.get_by_role('dialog')
-            dialog.get_by_role('button', name='取消').click()
+            expect(page.get_by_role('dialog')).to_have_count(0)
+            expect(page.locator('.df-book-notice')).to_have_text('当前项目无法开启保存权限。')
             assert not (root / 'notebooks').exists()
             new.click()
-            dialog.get_by_role('button', name='允许并新建').click()
             tabs = page.get_by_role('tablist', name='Notebook', exact=True)
             first = tabs.get_by_role('tab', name='分析', exact=True)
             expect(first).to_have_attribute('aria-selected', 'true', timeout=60000)
@@ -754,19 +755,23 @@ def test_enable_notebook_execution_after_saving_only(browser, native_project):
         try:
             view = quote(json.dumps(dict(v=2, workspace=project, kind='tables')))
             page.goto(app.origin + '/#token=' + app.token + '&view=' + view)
-            page.get_by_role('button', name='新建 Notebook', exact=True).click()
-            page.get_by_label('同时允许运行 Python 代码').uncheck()
-            page.get_by_role('button', name='允许并新建').click()
+            new = page.get_by_role('button', name='新建 Notebook', exact=True)
+            expect(new).to_be_enabled(timeout=30000)
+            new.evaluate('(button)=>{button.click();button.click();}')
             frame = page.frame_locator('iframe.native-notebook-frame:not([hidden])')
             run = frame.get_by_role('button', name='运行卡片', exact=True).first
             expect(run).to_be_disabled(timeout=60000)
             frame.locator('body').evaluate('async()=>{await window.jupyterapp.shell.currentWidget.sessionContext.ready;}')
+            expect(page.get_by_role('dialog')).to_have_count(0)
+            expect(page.get_by_role('tablist',name='Notebook').get_by_role('tab')).to_have_count(1)
+            permissions = json.loads(registry_path.read_text())['projects'][project]['permissions']
+            assert permissions['analysis_write'] and not permissions['analysis_execute']
             assert not starts
             editor = frame.locator('.cm-content').first
             editor.fill("import ipywidgets as widgets\nwidgets.Button(description=str(6 * 7))")
             page.get_by_role('button', name='启用运行', exact=True).click()
-            page.get_by_role('button', name='允许运行', exact=True).click()
             expect(run).to_be_enabled(timeout=30000)
+            expect(page.get_by_role('dialog')).to_have_count(0)
             run.click()
             expect(frame.get_by_role('button', name='42', exact=True)).to_be_visible(timeout=30000)
             expect(frame.locator('.jp-Dialog')).to_have_count(0)

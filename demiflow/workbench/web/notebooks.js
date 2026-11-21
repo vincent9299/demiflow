@@ -192,6 +192,7 @@
     bookTabs.setAttribute('role','tablist');bookTabs.setAttribute('aria-label','Notebook');
     const create=node('button','＋','df-new-book');create.type='button';create.title='新建 Notebook';create.setAttribute('aria-label',create.title);
     const enableRun=node('button','启用运行','df-view-switch');
+    enableRun.title='允许此项目的 Notebook 运行 Python 代码';
     const controls=node('div',undefined,'df-book-controls');
     strip.append(bookTabs,create);header.append(strip,enableRun,controls);
     const notice=node('p',undefined,'df-book-notice');notice.setAttribute('role','status');notice.hidden=true;
@@ -405,7 +406,9 @@
     function accessState(){
       const caps=context.capabilities||{};
       create.disabled=busy||!context.native_notebook||(!caps.analysis_write&&!notebookAccess.canGrant('analysis_write'));
+      create.title=!caps.analysis_write&&notebookAccess.canGrant('analysis_write')?'新建 Notebook 并开启项目保存权限':'新建 Notebook';
       enableRun.hidden=!context.native_notebook||!session||caps.analysis_execute||!notebookAccess.canGrant('analysis_execute');
+      enableRun.disabled=busy;
     }
     function detach(){
       ++cardsEpoch;cards?.dispose();cards=null;
@@ -448,8 +451,14 @@
     async function connect(createNew=false){
       if(busy)return;
       busy=true;accessState();notice.hidden=true;
+      if(createNew&&!session){status.textContent='正在新建 Notebook…';status.hidden=false;}
       try{
         if(createNew||![...sessions].some(item=>item.project===project))makeRoom();
+        if(createNew&&!context.capabilities?.analysis_write){
+          context=await notebookAccess.enable({analysis_write:true});
+          if(!alive())return;
+          populate(context);
+        }
         let opened;
         for(let attempt=0;;attempt++){
           try{opened=await api('notebook-open',{},createNew?{create:true}:{});break;}
@@ -478,37 +487,21 @@
       }catch(error){if(!session)status.hidden=true;paintTabs();fail(error);}
       finally{busy=false;if(alive())accessState();}
     }
-    function grantDialog(forCreate){
-      const dialog=node('dialog',undefined,'df-notebook-access'),form=node('form');
-      const write=forCreate&&!context.capabilities?.analysis_write;
-      const selectRun=write&&!context.capabilities?.analysis_execute&&notebookAccess.canGrant('analysis_execute');
-      form.append(node('h3',forCreate?'新建 Notebook':'启用 Notebook 运行'),
-        node('p',write?'允许在当前项目创建和保存 Notebook。':'允许 Notebook 在当前项目运行 Python 代码。'));
-      const run=node('input');run.type='checkbox';run.checked=true;
-      if(selectRun){const label=node('label','同时允许运行 Python 代码');label.prepend(run);form.append(label);}
-      const actions=node('div'),cancel=node('button','取消'),confirm=node('button',forCreate?'允许并新建':'允许运行','primary');
-      cancel.type='button';cancel.onclick=()=>dialog.close();confirm.type='submit';actions.append(cancel,confirm);form.append(actions);
-      dialog.append(form);root.append(dialog);dialog.onclose=()=>dialog.remove();dialog.showModal();
-      form.onsubmit=async event=>{
-        event.preventDefault();if(confirm.disabled)return;
-        confirm.disabled=true;
-        const grants={};if(write)grants.analysis_write=true;
-        if(!forCreate||(selectRun&&run.checked))grants.analysis_execute=true;
-        try{
-          context=await notebookAccess.enable(grants);
-          if(!alive())return;
-          populate(context);accessState();dialog.close();
-          if(forCreate)await connect(true);
-          else if(session?.readyPanel)session.onPanel(session.readyPanel);
-        }catch(error){dialog.close();fail(error);}
-      };
-    }
     create.onclick=()=>{
       if(busy)return;
       if(cards?.pending()){fail(Error('当前卡片正在更新，请在更新完成后新建。'));return;}
-      if(context.capabilities?.analysis_write)connect(true);else grantDialog(true);
+      connect(true);
     };
-    enableRun.onclick=()=>grantDialog(false);
+    enableRun.onclick=async()=>{
+      if(busy)return;
+      busy=true;accessState();notice.hidden=true;
+      try{
+        context=await notebookAccess.enable({analysis_execute:true});
+        if(!alive())return;
+        if(session?.readyPanel)await session.onPanel(session.readyPanel);
+      }catch(error){fail(error);}
+      finally{busy=false;if(alive())accessState();}
+    };
     accessState();
     if(context.native_notebook)connect();else status.textContent='此服务尚未启用原生 Jupyter Notebook。';
     return {
