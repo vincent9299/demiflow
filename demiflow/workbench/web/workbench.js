@@ -1293,8 +1293,13 @@
           box.append($('p','固定版本 v'+output.result.ref.lance_version+' · '+output.result.ref.row_count+' 行'));
           if(output.training?.models?.length){
             const provenance=details('训练模型',box);
-            materialTable(provenance,['训练实例','模型步数','清单 SHA-256'],output.training.models.map(model=>
-              [model.instance,model.selected_steps.join(', '),model.manifest_digest]));
+            materialTable(provenance,['训练实例','模型步数','清单 SHA-256'],output.training.models.map(model=>{
+              let steps=model.selected_steps.join(', ');
+              if(model.selection_count>model.selected_steps.length){
+                steps+='（显示前 '+model.selected_steps.length+' 项，共 '+model.selection_count+' 项）';
+              }
+              return [model.instance,steps,model.manifest_digest];
+            }));
             if(output.training.has_more)provenance.append($('p','此处显示前 '+output.training.models.length+' 个模型清单。','wb-caption'));
           }
           const captured=Object.freeze({run_id:run.run_id,attempt:run.attempt,output:output.name,alias:'',expected_result:output.result_digest});
