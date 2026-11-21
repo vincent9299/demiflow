@@ -123,6 +123,14 @@ def test_sdk_created_nested_function_is_checked_before_and_after_pickle(tmp_path
     separate_copy.write_bytes(same_file.read_bytes())
     decoded.__globals__['__file__'] = str(separate_copy)
     assert describe(decoded)['source_hash'] == sha256(_source(decoded)).hexdigest()
+    # A genuine second installation has both coordinates pointing to its own
+    # definition. The reader checks those bytes against its canonical source.
+    saved = decoded.__code__
+    decoded.__code__ = saved.replace(co_filename=str(separate_copy))
+    assert describe(decoded) == describe(live)
+    separate_copy.write_bytes(separate_copy.read_bytes() + b"\n# changed\n")
+    assert describe(decoded)['source_hash'] == sha256(_source(decoded)).hexdigest()
+    decoded.__code__ = saved
     decoded.__globals__['__file__'] = str(same_file)
     decoded.__globals__['undeclared'] = 123
     assert describe(decoded)['source_hash'] == sha256(_source(decoded)).hexdigest()

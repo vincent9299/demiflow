@@ -10,6 +10,7 @@ import builtins
 from dis import get_instructions
 from functools import lru_cache
 from os.path import samefile
+from pathlib import Path
 import sys
 from types import CodeType, FunctionType
 
@@ -83,17 +84,33 @@ def _same_module_file(recorded, loaded):
         return False
 
 
-def _matches_definition(fn, module, compiled, root_name, code):
+def _restored_source(fn, module, source):
+    # cloudpickle preserves the defining installation's own file coordinates;
+    # v3 binds its bytes, not the path or inode of the reader's installation.
+    recorded = fn.__globals__.get('__file__')
+    filename = fn.__code__.co_filename
+    if not _same_module_file(recorded, filename):
+        return False
+    if _same_module_file(filename, module.__file__):
+        return True
+    try:
+        with Path(module.__file__).open('rb') as stream:
+            return stream.read(len(source) + 1) == source
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def _matches_definition(fn, module, compiled, root_name, code, source):
     live_globals = fn.__globals__ is vars(module)
     # Cloudpickle restores SDK-created closures by value. Only a closed body
     # with no global names can use this route. Its original closure/defaults
     # remain independently bound by describe; no supplied global is trusted.
     restored = (not live_globals and not fn.__code__.co_names and fn.__code__.co_qualname == fn.__qualname__
                 and fn.__builtins__ is vars(builtins)
-                and set(fn.__globals__) == {'__name__', '__package__', '__file__', '__builtins__'}
+                and fn.__globals__.keys() == {'__name__', '__package__', '__file__', '__builtins__'}
                 and fn.__globals__['__name__'] == module.__name__
                 and fn.__globals__['__package__'] == module.__package__
-                and _same_module_file(fn.__globals__['__file__'], module.__file__))
+                and _restored_source(fn, module, source))
     for root in _owners(module, root_name):
         if type(root) is not FunctionType or root.__globals__ is not vars(module):
             continue
@@ -147,7 +164,7 @@ def function_pin(fn, source, source_hash, code):
         # Its runtime type test changed; the function itself keeps its new pin.
         return source_hash, code
     compiled = _declared_codes(source).get(root_name)
-    if compiled is None or not _matches_definition(fn, module, compiled, root_name, code):
+    if compiled is None or not _matches_definition(fn, module, compiled, root_name, code, source):
         return source_hash, code
     return revision[1], _method_pin(fn, code)
 
