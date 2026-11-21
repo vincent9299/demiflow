@@ -85,7 +85,30 @@ def _read(path, maximum=32768):
     return raw
 
 
-def descendants(owner, *, include_owner=False):
+def _retained_unit(pid, start, units):
+    if any((unit['pid'], unit['start']) == (pid, start) for unit in units):
+        return True
+    # A surviving guardian may have been adopted separately after its launcher
+    # exited. Require the actual held flock, not just an open path to its file.
+    inodes = {(unit['unit']['device'], unit['unit']['inode']) for unit in units}
+    with os.scandir(f'/proc/{pid}/fd') as entries:
+        for count, entry in enumerate(entries):
+            if count >= 4096:
+                raise RuntimeError("Process descriptor observation budget exceeded")
+            try:
+                info = entry.stat()
+                if (info.st_dev, info.st_ino) not in inodes:
+                    continue
+                proof = _read(f'/proc/{pid}/fdinfo/{entry.name}')
+                if any(line.startswith(b'lock:') and b'FLOCK' in line and b'WRITE' in line
+                       for line in proof.splitlines()):
+                    return True
+            except FileNotFoundError:
+                continue
+    return False
+
+
+def descendants(owner, *, include_owner=False, retained_units=()):
     pending, seen, result = [owner], set(), {}
     while pending:
         pid = pending.pop()
@@ -96,6 +119,8 @@ def descendants(owner, *, include_owner=False):
         seen.add(pid)
         try:
             fields = _read(f"/proc/{pid}/stat").decode().rsplit(")", 1)[1].split()
+            if retained_units and pid != owner and _retained_unit(pid, fields[19], retained_units):
+                continue
             if include_owner or pid != owner:
                 result[pid] = dict(
                     start=fields[19],
@@ -120,10 +145,10 @@ def descendants(owner, *, include_owner=False):
     return result
 
 
-def signal_owned(owner, signum):
+def signal_owned(owner, signum, *, retained_units=()):
     # The owner is a dedicated subreaper. Even children in a different session
     # remain its descendants; never use a process name or a shared UID as proof.
-    for pid, identity in descendants(owner).items():
+    for pid, identity in descendants(owner, retained_units=retained_units).items():
         try:
             fd = _pidfd(pid)
             try:
@@ -136,16 +161,18 @@ def signal_owned(owner, signum):
             pass
 
 
-def drain_owned(process, *, timeout_s=5):
+def drain_owned(process, *, timeout_s=5, retained_units=()):
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        signal_owned(os.getpid(), signal.SIGKILL)
+        signal_owned(os.getpid(), signal.SIGKILL, retained_units=retained_units)
         # Let Popen reap its direct child first, retaining the real exit code.
         process.poll()
         try:
             if process.returncode is not None:
                 while os.waitpid(-1, os.WNOHANG)[0]:
                     pass
+                if retained_units and not descendants(os.getpid(), retained_units=retained_units):
+                    return True
         except ChildProcessError:
             return True
         time.sleep(0.02)

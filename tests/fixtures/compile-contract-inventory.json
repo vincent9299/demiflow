@@ -27,6 +27,7 @@
    "NativeOperation",
    "PackPromptInputs",
    "ParseWikitext",
+   "PredictOp",
    "PromptActor",
    "QueueAcknowledge",
    "QueueProducer",
@@ -405,6 +406,7 @@
     "execution/kernels/dataflow.py"
    ],
    "semantics": [
+    "execution/managed_native.py",
     "planning/dataflow_training.py"
    ],
    "shared_actor": [

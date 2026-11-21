@@ -139,6 +139,57 @@ class _OriginalLocalExit:
         return provider.ensure_absent(exact_identity, min(remaining, _remaining(self.deadline)))
 
 
+def retained_process_units(journal, *, expected_attempt):
+    """Identify separately journaled, live allocations after their driver exits.
+
+    The supervisor still owns all other descendants, including ordinary row
+    workers. A recorded group whose physical identity is ambiguous leaves
+    attempt cleanup unconfirmed until that identity can be established.
+    """
+    configuration = journal.recovery_identity()
+    if configuration is None:
+        return ()
+    if journal.execution_status()['attempt'] != expected_attempt:
+        raise ResourceError('FENCED', 'driver attempt changed before process handoff')
+    state = RunResourceState(journal)
+    scopes = state.unfinished_scopes(configuration['run_id'])
+    retained = []
+    while scopes:
+        for scope in scopes:
+            document = scope['document']
+            job = document['provider_binding'].get('job_authority')
+            if job is None:
+                continue
+            unit = job.get('inspection_key', job['request_key'])
+            name = scope['scope_id']
+            if (name != 'fit-' + unit or document['authority_ref'] != name
+                    or journal.source_binding('fit-resource-' + unit) != job):
+                raise ResourceError('ARTIFACT_MISMATCH', 'original job scope membership differs')
+            allocation = state.read_allocation_identity(name, unit)
+            if allocation is None:
+                continue
+            root = journal.directory.with_name(journal.directory.name + '-driver-resources')
+            directory = _original_path(root / 'units' / name / unit)
+            recorded = _record(directory / 'process.json')
+            if recorded is None:
+                if directory.exists():
+                    raise ResourceError('CLEANUP_UNCONFIRMED', 'original job process birth is unconfirmed')
+                continue
+            if recorded['spec_hash'] != allocation['spec_hash']:
+                raise ResourceError('ARTIFACT_MISMATCH', 'original job process spec differs')
+            physical = recorded['identity']
+            original = allocation['observation'].get('identity')
+            if original is not None and physical != original:
+                raise ResourceError('ARTIFACT_MISMATCH', 'original job birth identity differs')
+            from ..resources.process_observation import unit_stopped
+            if not unit_stopped(directory / 'unit.lock', physical['unit']):
+                retained.append(physical)
+            if len(retained) > 128:
+                raise ResourceError('QUOTA_EXCEEDED', 'too many retained process units')
+        scopes = state.unfinished_scopes(configuration['run_id'], after=scopes[-1]['scope_id'])
+    return tuple(retained)
+
+
 def recover_execution_resources(journal, configuration, fence, *, preserve_jobs=False):
     """Called only by an owner claim made while holding the original run lease."""
     reader = RunResourceState(journal)

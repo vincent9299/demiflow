@@ -63,6 +63,10 @@
         "demiflow.execution.payload_limits",
         "resolve_payload_bounds"
       ],
+      "retained_process_units": [
+        "demiflow.execution.dataflow_resource_recovery",
+        "retained_process_units"
+      ],
       "stream_limits": [
         "demiflow.execution.payload_limits",
         "stream_limits"
