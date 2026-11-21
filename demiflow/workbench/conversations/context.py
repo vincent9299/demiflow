@@ -37,9 +37,6 @@ def assemble(project, requirement, limits, *, execution_mode='trusted_local', in
     for parent in parents:
         candidate = parent / 'AGENTS.md'
         if candidate.is_file(): paths.append(candidate)
-        specification = parent / 'PIPELINE_SPEC.md'
-        if project['kind'] != 'platform' and specification.is_file():
-            paths.append(specification)
     for relative in project['writes']:
         candidate = safe_path(root, relative, missing=True)
         if not candidate.is_dir(): candidate = candidate.parent
@@ -54,45 +51,19 @@ def assemble(project, requirement, limits, *, execution_mode='trusted_local', in
                sha=hashlib.sha256(raw.encode()).hexdigest())
     guidance = None
     if coding is not None:
-        from demiflow.forge.api_reference import render_reference
-        from demiflow.forge.project_rules import RULES_ID, guidance as project_guidance
-        from demiflow.workbench.projects.discovery import coding_view
+        from demiflow.forge.context import build_context, render_context
 
-        view = coding_view(root, exclude=project.get('protected', ()))
-        api_text, symbols = render_reference(coding)
-        append('native-api-reference', 'urn:demiflow:sdk:' + coding['sdk_revision'],
-               api_text, binding=coding['catalog_id'], origin='platform_api_reference')
-        append('pipeline-rules', 'urn:demiflow:rules:' + RULES_ID, project_guidance(),
-               binding=RULES_ID, origin='platform_project_rules')
-        # Count all recognised paths, but hold the supplied index to a small
-        # portion of the turn budget. Full files remain available to the reader.
-        readme = safe_path(root, 'README.md', missing=True)
-        index = dict(registered_flows=[], role_files={role: [] for role in view['roles']},
-                     registered_flow_count=len(view['entries']),
-                     role_counts={role: len(paths) for role, paths in view['roles'].items()},
-                     readme='README.md' if readme.is_file() else None)
-        remaining = 24 * 1024
-        for entry, parameters in list(view['entries'].items())[:64]:
-            item = dict(entry=entry, parameters=parameters[:4], parameter_count=len(parameters))
-            size = len(wire(item)) + 1
-            if size > remaining:
-                break
-            index['registered_flows'].append(item)
-            remaining -= size
-        for role, paths in view['roles'].items():
-            for path in paths[:64]:
-                size = len(wire(path)) + 1
-                if size > remaining:
-                    break
-                index['role_files'][role].append(path)
-                remaining -= size
-        append('local-project-roles', 'urn:demiflow:project-roles',
-               '当前项目的真实源码位置（列表节选，发现不等于登记）：\n' + wire(index, 32768).decode(),
-               origin='local_project_index')
-        if readme.is_file() and readme.stat().st_size <= 8192:
-            append('local-project-readme', readme, read_file(readme, 8192).decode())
-        guidance = dict(sdk_revision=coding['sdk_revision'], catalog_id=coding['catalog_id'],
-                        rules_id=RULES_ID, symbols=symbols)
+        facts = build_context(root, reference=coding, exclude=project.get('protected', ()))
+        if facts['status'] != 'ready':
+            reject('Forge coding context incomplete: ' + '; '.join(
+                item['detail'] for item in facts['diagnostics']), 'resource_limit')
+        sdk = facts['sdk']
+        guidance = dict(sdk_revision=sdk['sdk_revision'], catalog_id=sdk['catalog_id'],
+                        rules_id=facts['rules_id'], symbols=[item['id'] for item in sdk['apis']],
+                        sources=[{key: item[key] for key in ('origin', 'path', 'sha256')}
+                                 for item in facts['sources']])
+        append('forge-authoring-context', root, render_context(facts), binding=digest(facts),
+               origin='forge_authoring_context')
     grant = {key: project[key] for key in ('kind', 'phase', 'writes', 'watch', 'non_goals', 'authorization')}
     header = (
         '你正在 DemiFlow 中执行一个明确授权的项目开发任务。\n'

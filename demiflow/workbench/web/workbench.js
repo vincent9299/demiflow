@@ -1328,7 +1328,7 @@
       const stale=settingsBasis!==settingsIdentity();
       const note=settings.querySelector('.wb-settings-stale');if(note)note.hidden=!stale;
       const register=settings.querySelector('[data-access=register]');
-      if(register)register.disabled=!can('run_submit')||graphHost.getAttribute('aria-busy')==='true'||register.dataset.pending==='true';
+      if(register)register.disabled=!configWrite()||graphHost.getAttribute('aria-busy')==='true'||register.dataset.pending==='true';
       // Keep the captured registry CAS base and the user's fields. A sync must
       // not silently rebase an unfinished permission edit onto another grant.
       if(stale)for(const b of settings.querySelectorAll('[data-access=permissions]'))b.disabled=true;
@@ -1341,14 +1341,16 @@
       const form=$('div',undefined,'wb-inline-form'),entry=$('input'),params=$('input');entry.maxLength=params.maxLength=1024;
       entry.value=working?.entry||'';params.value=working?.params||'';entry.placeholder='flows/process.py:process';params.placeholder='flows/configs/default.json';
       entry.setAttribute('aria-label','登记流程入口');params.setAttribute('aria-label','登记参数文件');field('入口',entry,form);field('参数',params,form);
-      const register=button('登记原生流程',async()=>{const ticket=state.capture(),body={entry:entry.value.trim(),params:params.value.trim()};
-        try{await request('flow-register',{},body);}
+      const register=button('登记原生流程',async()=>{const ticket=state.capture(),body={entry:entry.value.trim()};
+        if(params.value.trim())body.params=params.value.trim();
+        let binding;
+        try{binding=await request('flow-register',{},body);}
         catch(error){if(error.code==='busy'&&current(ticket)){message('服务正在读取或检查，登记尚未开始；填写已保留，请稍后重试。','error-box',ticket);return;}throw error;}
         if(!current(ticket))return;
         settings.hidden=true;message('已登记 '+body.entry+'；正在读取入口与配置。');
-        try{const fresh=await request('context');if(!current(ticket))return;ctx=fresh;onContext(fresh);await useWorking(body.entry,body.params);}
+        try{const fresh=await request('context');if(!current(ticket))return;ctx=fresh;onContext(fresh);await useWorking(binding.entry,binding.params);}
         catch(error){if(current(ticket)&&error.name!=='AbortError')message('入口已登记，读取视图暂未完成；请刷新后选择 '+body.entry+'。 '+error.message,'error-box',ticket);}
-      },form,{disabled:!can('run_submit')});register.dataset.access='register';settings.append(form);
+      },form,{disabled:!configWrite()});register.dataset.access='register';settings.append(form);
       const meta=projectSettings.get?.();
       if(!meta?.manage||!meta.project){settings.append($('p','当前项目权限由服务部署者配置。','wb-caption'));return;}
       const permissions=$('div',undefined,'wb-inline-form'),inputs=new Map(),configured=meta.project.configured_permissions||meta.project.permissions;

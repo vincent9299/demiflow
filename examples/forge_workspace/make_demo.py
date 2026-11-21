@@ -4,6 +4,7 @@ Run with the same installed environment as the Forge CLI:
   python examples/forge_workspace/make_demo.py /tmp/forge-stage2-demo
 """
 
+from demiflow.forge.project import initialize_project
 from pathlib import Path
 import json
 import shutil
@@ -18,11 +19,13 @@ def create(root):
     from demiflow.workbench import project_operations as project_ops
 
     root = Path(root).absolute()
-    workspace.init_workspace(root, name="question-experiments")
+    initialize_project(root, name="question-experiments")
     for directory in ('flows', 'operators', 'tables', 'data'):
         (root / directory).mkdir()
     control = workspace.read_control(root / 'workspace.json')
     expected = workspace.content_digest(control)
+    # This fixture represents an existing project with two published configurations.
+    control['entries'] = {'flows/questions.py:select': ['flows/select_a.json', 'flows/select_b.json']}
     control['locations']['local'] = {'root': 'data', 'writable': True}
     workspace.write_control(root / 'workspace.json', control, expected=expected)
     source = Path(__file__).parent
@@ -98,8 +101,6 @@ def create(root):
             schema_name=alias,
             schema_version="1",
         )
-    for variant in ('a', 'b'):
-        workspace.register_flow(root, 'flows/questions.py:select', params=f'flows/select_{variant}.json')
     reports = {}
     for variant in ("a", "b"):
         report = project_ops.inspect_flow(

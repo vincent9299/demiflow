@@ -4,6 +4,7 @@ Fixtures use only owned local Lance tables and pure Python operators. Held
 responses are real API responses; observation reservations below test protocol
 reset behavior and are not reported as measured business execution.
 """
+from _forge_project_fixtures import declare_existing_flow
 import json
 import time
 from urllib.parse import parse_qs,urlparse
@@ -109,7 +110,7 @@ def test_native_multiple_runs_select_graph_logs_outputs_and_discard_late_deliver
 
 
 def test_native_stop_survives_current_code_removal_and_keeps_attempt_identity(unregistered,browser):
-    ws.register_flow(unregistered,'flows/waiting.py:run',params='flows/waiting.json')
+    declare_existing_flow(unregistered,'flows/waiting.py:run',params='flows/waiting.json')
     author={p:(unregistered/p).read_bytes() for p in ('flows/waiting.py','flows/waiting.json','operators/waiting.py')}
     active=None
     with service(unregistered,enable_runs=True) as app,page_for(browser,app) as (page,errors):
@@ -201,7 +202,7 @@ def run(*, source, target):
         'format':'demiflow_forge_flow_parameters_v1','arguments':{
             'source':{'kind':'table','alias':'candidates'},
             'target':{'kind':'output','location_id':'local','relative_uri':'quiet.lance'}}}))
-    ws.register_flow(isolated,'flows/quiet.py:run',params='flows/quiet.json')
+    declare_existing_flow(isolated,'flows/quiet.py:run',params='flows/quiet.json')
     with service(isolated,enable_runs=True) as app,page_for(browser,app) as (page,errors):
         pipeline(page)
         page.get_by_label('流程',exact=True).select_option('flows/quiet.py:run')

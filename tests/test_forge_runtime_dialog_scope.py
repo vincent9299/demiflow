@@ -31,6 +31,10 @@ def register_projects(projects, kind):
     registry, first, second = projects
     ids = [console.add(registry, path, allow_runs=kind == 'setup')['workspace_id']
            for path in (first, second)]
+    if kind == 'setup':
+        from _forge_project_fixtures import grant_config_write
+        for key in ids:
+            grant_config_write(registry, key)
     return ids
 
 
@@ -72,7 +76,7 @@ def assert_unchanged_second(projects, ids, kind):
 def test_navigation_invalidates_dialog_and_detached_submit(projects, browser, kind, navigation):
     registry, first, second = projects
     ids = register_projects(projects, kind)
-    with service(None, registry=registry, enable_runs=True) as app, opened(browser, app) as (page, requests):
+    with service(None, registry=registry, enable_runs=True, enable_config_write=True) as app, opened(browser, app) as (page, requests):
         page.set_default_timeout(30000)
         go(page, ids[1]);go(page, ids[0])
         dialog = open_dialog(page, kind)
@@ -104,7 +108,7 @@ def wait_held(page, held):
 def test_late_mutation_response_does_not_restore_departed_view(projects, browser, kind):
     registry, first, _ = projects
     ids = register_projects(projects, kind)
-    with service(None, registry=registry, enable_runs=True) as app, opened(browser, app) as (page, _):
+    with service(None, registry=registry, enable_runs=True, enable_config_write=True) as app, opened(browser, app) as (page, _):
         page.set_default_timeout(30000)
         go(page, ids[0]);dialog = open_dialog(page, kind)
         label, endpoint = action(kind)
@@ -131,7 +135,7 @@ def test_late_mutation_response_does_not_restore_departed_view(projects, browser
 def test_late_context_cannot_replace_other_project_or_save_its_draft(projects, browser, kind):
     registry, first, second = projects
     ids = register_projects(projects, kind)
-    with service(None, registry=registry, enable_runs=True) as app, opened(browser, app) as (page, _):
+    with service(None, registry=registry, enable_runs=True, enable_config_write=True) as app, opened(browser, app) as (page, _):
         page.set_default_timeout(30000)
         go(page, ids[0]);dialog = open_dialog(page, kind)
         held = []

@@ -4,6 +4,7 @@ import inspect
 
 import pytest
 
+from demiflow.forge.project_bindings import resolve_arguments
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.table_bindings import make_resolver
 from demiflow.workbench.projects import workspace as ws, checks
@@ -39,7 +40,7 @@ def test_invalid_attempt_cannot_reach_run_owner(selector):
         make_resolver(forbidden, forbidden)(Path('/fixture'), {}, selector)
 
 
-@pytest.mark.parametrize('target', [ws.resolve_arguments, ws._inspect_flow, ws._report_status,
+@pytest.mark.parametrize('target', [resolve_arguments, ws._inspect_flow, ws._report_status,
     ws._audit_check, checks.check, checks.status])
 def test_core_requires_explicit_resolver_and_has_no_domain_fallback(target):
     parameter = inspect.signature(target).parameters['table_resolver']

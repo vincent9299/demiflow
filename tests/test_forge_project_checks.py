@@ -30,12 +30,14 @@ def project(isolated):
 
 def test_original_module_paths_check_execute_and_stale_gate(project):
     checked = project_ops.check_project(project)
-    assert checked['status'] == 'checked', checked
+    assert checked['status'] == 'invalid', checked
+    assert checked['native_flow']['status'] == 'passed' and checked['entries'][0]['status'] == 'checked'
+    assert checked['project_layout']['status'] == 'failed'
     assert 'rules' not in checked and 'static_status' not in checked
     assert checked['coverage']['declared'] == checked['coverage']['inspected'] == 1
     assert set(checked['sources']) == {'recipe.py', 'processing.py'}
     (project / 'README.md').write_text('# Documentation only\n\n[Missing reference](notes.json)\n')
-    assert project_ops.project_check_status(project)['status'] == 'checked'
+    assert project_ops.project_check_status(project)['status'] == 'invalid'
     prepared = runs.prepare(project, 'recipe.py:select', params='settings/small.json')
     done = execute(project, prepared)
     assert done['status'] == 'succeeded', done
@@ -50,12 +52,12 @@ def test_original_module_paths_check_execute_and_stale_gate(project):
 
 def test_previous_project_review_does_not_count_as_current_static_check(project):
     record = project / '.forge/project-check.json'
-    saved = b'{"format":"demiflow_forge_project_check_v1","status":"incomplete","static_status":"checked"}'
+    saved = b'{"format":"demiflow_workbench_project_static_check_v2","status":"checked"}'
     record.write_bytes(saved)
     assert project_ops.project_check_status(project)['status'] == 'missing'
     assert record.read_bytes() == saved
-    assert project_ops.check_project(project)['status'] == 'checked'
-    assert project_ops.project_check_status(project)['status'] == 'checked'
+    assert project_ops.check_project(project)['status'] == 'invalid'
+    assert project_ops.project_check_status(project)['status'] == 'invalid'
 
 
 def test_forbidden_effects_are_reported_and_never_fixed(project):

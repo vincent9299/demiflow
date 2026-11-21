@@ -1,4 +1,5 @@
 """Managed native flows use the original service, journal and fixed results."""
+from _forge_project_fixtures import declare_existing_flow
 import json
 from pathlib import Path
 import pytest
@@ -24,7 +25,7 @@ def run(*, target, stage):
 ''')
     arguments = dict(target=str(root / 'native-output.lance'), stage=str(root / 'native-stage.lance'))
     (root / 'flows/native.json').write_text(json.dumps(dict(format='demiflow_forge_flow_parameters_v1', arguments=arguments)))
-    ws.register_flow(root, 'flows/native.py:run', params='flows/native.json')
+    declare_existing_flow(root, 'flows/native.py:run', params='flows/native.json')
     return runs.prepare(root, 'flows/native.py:run', params='flows/native.json')
 
 
@@ -157,7 +158,7 @@ def run(*, directory):
 ''')
     params = dict(format='demiflow_forge_flow_parameters_v1', arguments={'directory': str(root / 'stop-output')})
     (root / 'flows/native_stop.json').write_text(json.dumps(params))
-    ws.register_flow(root, 'flows/native_stop.py:run', params='flows/native_stop.json')
+    declare_existing_flow(root, 'flows/native_stop.py:run', params='flows/native_stop.json')
     prepared = runs.prepare(root, 'flows/native_stop.py:run', params='flows/native_stop.json',
                             limits={'cancel_grace_s': 1, 'timeout_s': 180})
     identity = prepared['run_id']

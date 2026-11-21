@@ -21,30 +21,30 @@ from .schema import ForgeError
 
 
 def read_bounded(path, maximum):
-    from .io import no_symlinks
-
-    no_symlinks(path)
-    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    with os.fdopen(descriptor, "rb") as source:
-        before = os.fstat(source.fileno())
-        if not stat.S_ISREG(before.st_mode):
-            raise ForgeError("Metadata must be a regular file")
-        if maximum < 0 or before.st_size > maximum:
+    from .io import directory_handle, no_symlinks
+    path = no_symlinks(Path(path))
+    with directory_handle(path.parent) as parent:
+        descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        with os.fdopen(descriptor, "rb") as source:
+            before = os.fstat(source.fileno())
+            if not stat.S_ISREG(before.st_mode):
+                raise ForgeError("Metadata must be a regular file")
+            if maximum < 0 or before.st_size > maximum:
+                raise ForgeError(f"Metadata exceeds byte budget: {path.name}", code='resource_limit')
+            # The limit is an admission ceiling, not a buffer reservation. A large
+            # read(n) can allocate n bytes even for a tiny regular file. Probe one
+            # byte past the observed size, then reject any concurrent change.
+            raw = source.read(before.st_size + 1)
+            after = os.fstat(source.fileno())
+        if len(raw) > maximum:
             raise ForgeError(f"Metadata exceeds byte budget: {path.name}", code='resource_limit')
-        # The limit is an admission ceiling, not a buffer reservation. A large
-        # read(n) can allocate n bytes even for a tiny regular file. Probe one
-        # byte past the observed size, then reject any concurrent change.
-        raw = source.read(before.st_size + 1)
-        after = os.fstat(source.fileno())
-    if len(raw) > maximum:
-        raise ForgeError(f"Metadata exceeds byte budget: {path.name}", code='resource_limit')
-    current = path.lstat()
-    def identity(info):
-        return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
-    if (len(raw) != before.st_size or identity(before) != identity(after)
-            or not stat.S_ISREG(current.st_mode)
-            or (after.st_dev, after.st_ino) != (current.st_dev, current.st_ino)):
-        raise ForgeError("Metadata changed while reading", code='conflict')
+        current = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        def identity(info):
+            return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+        if (len(raw) != before.st_size or identity(before) != identity(after)
+                or not stat.S_ISREG(current.st_mode)
+                or (after.st_dev, after.st_ino) != (current.st_dev, current.st_ino)):
+            raise ForgeError("Metadata changed while reading", code='conflict')
     return raw
 
 

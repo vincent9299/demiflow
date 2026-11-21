@@ -5,7 +5,7 @@ from pathlib import Path
 import click
 
 from .platform import PUBLIC_MODULES, discover_catalog
-from .platform_snapshot import build_snapshot, check_snapshot, write_snapshot, _complete, _diagnostics
+from .platform_snapshot import build_snapshot, check_snapshot, write_snapshot, snapshot_complete, _diagnostics
 from .schema import ForgeError
 
 
@@ -75,7 +75,7 @@ def register(forge):
     def snapshot(modules, extras, path, pretty):
         def perform():
             value = build_snapshot(modules or None, extras=extras)
-            if not _complete(value):
+            if not snapshot_complete(value):
                 return {"status": "incomplete", "diagnostics": _diagnostics(value)}
             write_snapshot(path, value)
             return {"status": "created", "path": str(path.absolute()), "scope": value["scope"],

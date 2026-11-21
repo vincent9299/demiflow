@@ -8,6 +8,7 @@ import sys
 
 from demiflow.forge.platform import content_digest, bounded_json
 from demiflow.forge.platform_environment import read_bounded
+from demiflow.forge.project_bindings import resolve_arguments
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.projects import workspace as ws
 
@@ -30,7 +31,7 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits, sourc
     shared = SharedSources(root, {} if source_modules is None else source_modules)
     sources = PythonSources(root, shared_imports=shared.importer)
     module = sources.entry_module(target)
-    arguments, tables, targets, _ = ws.resolve_arguments(root, control, parameters, table_resolver=table_resolver)
+    arguments, tables, targets, _ = resolve_arguments(root, control, parameters, table_resolver=table_resolver)
     if targets:
         raise ForgeError('Native admission cannot mix implicit and explicit output grants')
     sys.dont_write_bytecode = True

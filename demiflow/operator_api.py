@@ -42,17 +42,27 @@ def _json_budget(value, limit, label):
             raise ValueError(label + ' exceeds ' + str(limit) + ' bytes')
 
 
-def _load(path):
+def _split_entry(path):
     if not isinstance(path, str) or not re.fullmatch(r'[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*', path):
         raise ValueError('Operator entry must be a trusted module:name declaration')
-    module, name = path.split(':')
+    return path.split(':')
+
+
+def is_project_entry(path):
+    return 'operators' in _split_entry(path)[0].split('.')
+
+
+def _load(path):
+    module, name = _split_entry(path)
     return getattr(import_module(module), name)
 
 
-def _entry(path, *, standard=False):
-    module = path.split(':', 1)[0] if isinstance(path, str) else ''
-    if not standard and 'operators' not in module.split('.'):
+def _entry(path, *, standard=False, bind=True):
+    module, _ = _split_entry(path)
+    if not standard and not is_project_entry(path):
         raise ValueError('Custom fn/actor and validators must be defined under operators/')
+    if not bind:
+        return None
     target = _load(path)
     if not callable(target):
         raise TypeError('Operator entry must resolve to a callable')
@@ -64,8 +74,8 @@ def _entry(path, *, standard=False):
     return target
 
 
-def definitions(operators):
-    """Resolve a bounded mapping; legacy lists may select standard names only."""
+def definitions(operators, *, bind=True):
+    """Validate the declaration; binding also verifies actual Python callables."""
     if isinstance(operators, (tuple, list)):
         if any(not isinstance(name, str) for name in operators) or len(set(operators)) != len(operators):
             raise ValueError('Operators must be distinct standard names')
@@ -101,8 +111,8 @@ def definitions(operators):
             definition.setdefault(key, deepcopy(default))
         is_actor = 'actor' in definition
         entry = definition['actor'] if is_actor else definition.get('function')
-        target = _entry(entry, standard=bool(standard_name))
-        if is_actor != inspect.isclass(target):
+        target = _entry(entry, standard=bool(standard_name), bind=bind)
+        if bind and is_actor != inspect.isclass(target):
             raise TypeError('actor must name a callable class; fn must name a function')
         if not is_actor and 'init' in definition:
             raise ValueError('init is only valid for actor')
@@ -111,12 +121,16 @@ def definitions(operators):
             if not isinstance(initial, dict):
                 raise ValueError('Actor init must be an object')
             _json_budget(initial, 65536, 'Actor init')
-            inspect.signature(target).bind(**initial)  # No construction during parsing.
-            target = target.__call__
-        asynchronous = inspect.iscoroutinefunction(target)
-        definition.setdefault('execution', 'async' if asynchronous else 'thread')
-        if definition['execution'] not in ('async', 'thread') or (definition['execution'] == 'async') != asynchronous:
-            raise ValueError('execution must match async fn/actor or synchronous thread execution')
+        if bind:
+            if is_actor:
+                inspect.signature(target).bind(**initial)
+                target = target.__call__
+            asynchronous = inspect.iscoroutinefunction(target)
+            expected = 'async' if asynchronous else 'thread'
+            if definition.setdefault('execution', expected) != expected:
+                raise ValueError('execution must match async fn/actor or synchronous thread execution')
+        elif 'execution' in definition and definition['execution'] not in ('async', 'thread'):
+            raise ValueError('execution must be async or thread')
         for key in ('description', 'version'):
             if not isinstance(definition.get(key), str) or not definition[key]:
                 raise ValueError('Operator requires ' + key)
@@ -138,7 +152,7 @@ def definitions(operators):
         for key in ('validate_resources', 'validate_arguments'):
             if definition[key] is not None:
                 # Only the unchanged native validator gets the native exemption.
-                _entry(definition[key], standard=bool(base and definition[key] == base.get(key)))
+                _entry(definition[key], standard=bool(base and definition[key] == base.get(key)), bind=bind)
         if definition['result_images'] is not None:
             from .operator_media import image_fields
             definition['result_images'] = image_fields(definition['result_images'])

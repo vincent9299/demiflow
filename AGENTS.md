@@ -21,7 +21,7 @@
 
 ## Forge 开发辅助边界
 
-适用 [Forge 开发辅助方案](docs/forge-guided-coding-redesign.md)。Forge 提供当前 SDK 参考、通用目录规则和原生静态检查。项目入口和参数来自所选工作区。工作台负责开发授权、真实对话和展示，原生运行服务负责执行准入与封存。旧 DemiForge 的父级声明、受管任务和验收协议已退役。
+按 [Forge 开发流程](docs/forge-cli.md) 和随包提供的 demiforge Skill 使用 context、init、add、check。Forge 持有通用开发指南、项目构建和原生静态检查。项目入口和参数来自所选工作区。工作台负责开发授权、真实对话和展示，原生运行服务负责执行准入与封存。旧 DemiForge 的父级声明、受管任务和验收协议已退役。
 
 ## 模型与环境的交互仍然算子化
 

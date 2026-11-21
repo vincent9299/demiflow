@@ -1,4 +1,5 @@
 """Actual browser execution through a transparent loopback TCP forward."""
+from _forge_project_fixtures import declare_existing_flow
 import json
 import os
 from pathlib import Path
@@ -41,7 +42,7 @@ def take_one(*, source, target):
             'source': {'kind': 'table', 'alias': 'candidates'},
             'target': {'kind': 'output', 'location_id': 'local', 'relative_uri': 'continued.lance'}}}))
     from demiflow.workbench.projects import workspace
-    workspace.register_flow(root, 'flows/continue_result.py:take_one', params='flows/continue_result.json')
+    declare_existing_flow(root, 'flows/continue_result.py:take_one', params='flows/continue_result.json')
     output_dir = Path(os.environ.get('FORGE_ACCEPTANCE_DIR', str(tmp_path)))
     output_dir.mkdir(parents=True, exist_ok=True)
     server = WorkspaceServer(root, enable_runs=True)

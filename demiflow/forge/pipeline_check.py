@@ -1,16 +1,27 @@
-"""Static checks for code changed through the workbench or another caller."""
+"""Read-only authoring checks against native SDK contracts and project files."""
+from __future__ import annotations
+
+import ast
 from hashlib import sha256
 from pathlib import Path
 import time
 
+from demiflow.errors import DemiflowError
+from . import operation_budget
+from .api_reference import build_reference, sdk_identity
 from .flow_check import FlowChecker
+from .operator_check import OperatorChecker
 from .platform import content_digest
 from .platform_environment import read_bounded
-from .project_rules import RULES_ID, check_layout, diagnostic
+from .platform_worker import describe_fixed_table
+from .project import discover_project_sources, inspect_prompt_source, validate_entry, validate_parameter_path
+from .project_bindings import resolve_arguments, resolve_flow_resources, table_binding, table_identity
+from .project_io import decode_control, relative_path
+from .project_rules import ROLE_DIRS, RULES_ID, check_layout, diagnostic
 from .schema import ForgeError
+from .source import Definition, InspectionError, SourceTree
 
 
-# A turn covers a finite set of variants. The checker already limits each graph.
 MAX_VARIANTS = 24
 CHECK_SECONDS = 24
 MAX_SOURCE_BYTES = 16 * 1024**2
@@ -20,98 +31,378 @@ def result(diagnostics, inspected, *, applicable=True):
     invalid = any(d.get('status') == 'invalid' for d in diagnostics)
     status = ('failed' if invalid else 'incomplete' if diagnostics else
               'passed' if applicable else 'not_applicable')
-    def summary(value, size):
-        raw = value.encode()
-        return value if len(raw) <= size else raw[:size].decode('utf-8', errors='ignore') + '…'
-
     return dict(status=status, inspected_count=len(inspected), diagnostic_count=len(diagnostics),
-                diagnostics=[dict(rule=d['rule'], path=summary(d.get('path', ''), 256), line=d.get('line'),
-                                  detail=summary(d['detail'], 256)) for d in diagnostics[:4]])
+                diagnostics=[{k: (v[:256] if isinstance(v, str) else v)
+                              for k, v in d.items() if k in {'rule', 'path', 'line', 'detail'}}
+                             for d in diagnostics[:4]])
 
 
 def _record(sources, path, value):
-    old = sources.setdefault(path, value)
-    if old != value:
-        raise ForgeError('Source changed between inspected flows: ' + path, code='conflict')
+    if sources.setdefault(path, value) != value:
+        raise ForgeError('Source changed between inspections: ' + path, code='inputs_changed')
 
 
-def check_changes(root, *, changed, variants, layout_diagnostics, coverage, catalog, catalog_id):
-    """Check the same source and SDK basis as the coding turn, without execution."""
-    deadline = time.monotonic() + CHECK_SECONDS
-    diagnostics, inspected, sources = list(coverage), [], {}
-    operators, prompts, misplaced_flows = set(), set(), set()
-    layout_diagnostics = list(layout_diagnostics)
-    for index, (entry, load, outside_flows) in enumerate(variants):
-        available = int(deadline - time.monotonic())
-        if index >= MAX_VARIANTS or available < 1:
-            diagnostics.append(diagnostic('FL-10', '', '还有入口未检查，达到本轮检查预算。', status='incomplete'))
-            layout_diagnostics.append(diagnostic('DF-01', '', '检查预算内未覆盖所有入口的文件角色。', status='incomplete'))
-            break
+def inspect_variant(root, control, entry, parameters, catalog, *, table_resolver, limits=None,
+                    exclude=(), table_describer=None):
+    """Produce the sole native report used by both authoring and local run preparation."""
+    args, tables, targets, controls = resolve_arguments(
+        root, control, parameters, table_resolver=table_resolver, table_describer=table_describer)
+    def resources(tree, references, bindings):
+        return resolve_flow_resources(root, tree, references, bindings, control=control)
+    report = FlowChecker(root, catalog, tables, targets, limits=limits, exclude=exclude,
+                         resource_resolver=resources).inspect(entry, args)
+    report['binding'].update(controls=controls, parameters=parameters)
+    return report
+
+
+def _layout(report):
+    binding = report['binding']
+    path = report['entry'].partition(':')[0]
+    issues = []
+    if Path(path).parts[0] != 'flows':
+        issues.append(diagnostic('DF-02', path, 'Flow 入口应位于 flows/。'))
+    for other in sorted({n['source'] for n in report['nodes']
+                         if n['source'] != path and n['source'].startswith('flows/')}):
+        issues.append(diagnostic('DF-03', other, 'Flow 之间通过共享算子复用逻辑。'))
+    operators, prompts = set(), set()
+    for node in report['nodes']:
+        callbacks = list(node.get('callbacks', {}).values())
+        if node.get('operator'):
+            callbacks.append(node['operator'])
+        for callback in callbacks:
+            module = callback['module'].replace('.', '/')
+            filename = next((p for p in (module + '.py', module + '/__init__.py')
+                             if p in binding['sources']), None)
+            if filename:
+                operators.add((filename, callback['line']))
+            else:
+                issues.append(diagnostic('DF-01', module, '无法确认算子定义位置。', status='incomplete'))
+        if node['api'].rsplit('.', 1)[-1] in {'map_prompt', 'map_prompt_async', 'agentmap_async'}:
+            prompts.update((resource['path'], None) for resource in node['source_resources'])
+    inspected, violations = check_layout(changed=(path,), operators=sorted(operators), prompts=sorted(prompts))
+    return inspected | {path}, issues + violations
+
+
+def _visible(path, exclude):
+    value = Path(path)
+    return not any(value.is_relative_to(parent) for parent in exclude)
+
+
+def _candidates(root, view, paths, entry, params, sources, native, layout):
+    """Select explicit variants, or conservatively resolve all possible shared consumers."""
+    entries = (view['control'] or {}).get('entries', {})
+    if entry is not None:
+        validate_entry(root, entry)
+        return [(entry, p, False) for p in ([params] if params else entries.get(entry, [None]))], set()
+    if not paths:
+        return [(e, p, False) for e, bindings in entries.items() for p in bindings], set()
+    declared = {e.partition(':')[0] for e in entries}
+    parameters = {p for bindings in entries.values() for p in bindings}
+    relevant = set()
+    direct = []
+    drafts = set()
+    for path in paths:
+        file = Path(path)
+        if (path in declared or path in parameters or file.parts[0] in ROLE_DIRS
+                or path == 'workspace.json' or file.parts[0] == 'tables'
+                or (file.parts[0] not in {'tests', 'docs'} and file.suffix.lower() != '.md')):
+            relevant.add(path)
+        physical = relative_path(root, path)
+        if path not in relevant:
+            continue
+        if not physical.exists():
+            if path in declared or path in parameters:
+                layout.append(diagnostic('DF-02', path, '登记的入口或参数文件已删除。'))
+            continue
+        if path in declared or file.suffix != '.py' or file.name == '__init__.py':
+            continue
+        # A misplaced terminal pipeline is detectable from its wiring, never from its name.
+        raw = read_bounded(physical, 128 * 1024)
+        _record(sources, path, sha256(raw).hexdigest())
         try:
-            args, tables, targets, resolver, recheck = load()
-            available = int(deadline - time.monotonic())
-            if available < 1:
-                raise ForgeError('Flow input preparation exhausted the check budget', code='resource_limit')
-            report = FlowChecker(root, catalog, tables, targets,
-                                 limits={'seconds': available}, resource_resolver=resolver).inspect(entry, args)
-            recheck()
-            for name, digest in report['binding']['sources'].items():
-                _record(sources, name, digest)
-            for item in report['binding']['resources'].values():
-                if 'sha256' in item:
-                    _record(sources, item['path'], item['sha256'])
-            files = report['binding']['sources']
-            entry_path = entry.partition(':')[0]
-            if outside_flows:
-                if not any(node['role'] in {'action', 'query'} or node['kind'] == 'materialize'
-                           for node in report['nodes']):
+            tree = ast.parse(raw, filename=path)
+        except (SyntaxError, ValueError) as exc:
+            native.append(diagnostic('FL-01', path, '源码语法错误。', line=getattr(exc, 'lineno', None)))
+            continue
+        public = [n.name for n in tree.body if isinstance(n, ast.FunctionDef) and not n.name.startswith('_')]
+        is_flow = file.parts[0] == 'flows'
+        if len(public) != 1:
+            if is_flow:
+                layout.append(diagnostic('DF-02', path, '新 Flow 需要一个明确的公开入口。'))
+                native.append(diagnostic('FL-01', path, '缺少唯一的 Flow 入口。', status='incomplete'))
+            continue
+        if is_flow:
+            drafts.add(path)
+        direct.append((path + ':' + public[0], None, not is_flow))
+
+    shared = bool(relevant - declared - parameters - drafts)
+    if shared and any(path not in declared | drafts and Path(path).name != '__init__.py'
+                      for path in view['roles']['flows']):
+        native.append(diagnostic('FL-10', '', '存在未登记 Flow，其共享依赖尚未确定。', status='incomplete'))
+    variants = [(e, p, False) for e, bound in entries.items() for p in bound
+                if shared or e.partition(':')[0] in relevant or p in relevant]
+    return variants + direct, relevant
+
+
+def _binding_files(root, binding, sources, table_files):
+    files = dict(binding['sources'])
+    for resource in binding['resources'].values():
+        if 'sha256' in resource:
+            _record(files, resource['path'], resource['sha256'])
+    for name, digest in files.items():
+        _record(sources, name, digest)
+    for name, semantic in binding['controls'].items():
+        raw = read_bounded(relative_path(root, name), 16384)
+        if content_digest(table_identity(decode_control(raw))) != semantic:
+            raise ForgeError('Pinned table changed during inspection', code='inputs_changed')
+        _record(table_files, name, sha256(raw).hexdigest())
+    return files.keys() | binding['controls'].keys()
+
+
+def _check_agent_tools(root, references, *, deadline, exclude, sources):
+    """Verify project-owned tool definitions and their statically supported Python closure."""
+    from demiflow.data.callable_contract import bind_parameters
+    tree = SourceTree(root, {'seconds': max(1, int(deadline - time.monotonic()))}, exclude=exclude)
+    checker = OperatorChecker(tree)
+    try:
+        for reference in references:
+            entry, kind = reference['entry'], reference['kind']
+            module, symbol = entry.split(':')
+            # A declaration cannot re-export another module's callable.
+            item = tree.load(module).get(symbol)
+            if not isinstance(item, Definition) or item.module != module:
+                raise InspectionError('OP-01', '工具无法定位到声明中的本地定义：' + entry,
+                                      path=module.replace('.', '/') + '.py', status='incomplete')
+            if (kind == 'actor') != isinstance(item.node, ast.ClassDef):
+                raise InspectionError('OP-02', '工具形态与声明不符：' + entry, node=item.node,
+                                      path=module.replace('.', '/') + '.py')
+            description = checker.describe(item)
+            expected = reference.get('execution')
+            if expected and expected != ('async' if description['async'] else 'thread'):
+                raise InspectionError('OP-02', '工具执行方式与声明不符：' + entry, node=item.node,
+                                      path=module.replace('.', '/') + '.py')
+            try:
+                if kind in {'function', 'actor'}:
+                    for names in ('required_arguments', 'possible_arguments'):
+                        bind_parameters(description['parameters'], [], dict.fromkeys(reference[names]))
+                else:
+                    count = 2 if kind == 'validate_resources' else 3
+                    bind_parameters(description['parameters'], [None]*count, {})
+            except TypeError as exc:
+                raise InspectionError('OP-02', f'工具声明与签名不匹配：{entry} · {exc}',
+                                      node=item.node, path=module.replace('.', '/') + '.py') from exc
+            checker.check(description, constructor_kwargs=reference.get('init'))
+        tree.unchanged()
+    finally:
+        for path, digest in tree.files.items():
+            _record(sources, path, digest)
+
+
+def _definition(root, path, deadline, exclude, sources):
+    """A detached definition proves its own syntax and shape, not a call-site binding."""
+    relative = Path(path)
+    if relative.parts[0] == 'prompts' and relative.suffix in {'.yaml', '.yml', '.json'}:
+        raw = read_bounded(relative_path(root, path), 1024**2)
+        _record(sources, path, sha256(raw).hexdigest())
+        format_name, names, tools = inspect_prompt_source(raw.decode('utf-8'))
+        if tools:
+            _check_agent_tools(root, tools, deadline=deadline, exclude=exclude, sources=sources)
+        return dict(path=path, format=format_name, symbols=list(names), scope='definition')
+    if relative.parts[0] == 'operators' and relative.suffix == '.py' and relative.name != '__init__.py':
+        module = path[:-3].replace('/', '.')
+        tree = SourceTree(root, {'seconds': max(1, int(deadline - time.monotonic()))}, exclude=exclude)
+        try:
+            namespace = tree.load(module)
+            checker = OperatorChecker(tree)
+            names = []
+            for name, item in namespace.items():
+                if name.startswith('_') or not isinstance(item, Definition) or item.module != module:
                     continue
-                layout_diagnostics.append(diagnostic('DF-02', entry_path, '新 flow 应位于 flows/。'))
-                misplaced_flows.add(entry_path)
-            cross_flows = {node['source'] for node in report['nodes']
-                           if node['source'] != entry_path and node['source'].startswith('flows/')}
-            for path in sorted(cross_flows):
-                layout_diagnostics.append(diagnostic('DF-03', path, 'flow 之间通过共享算子复用逻辑。'))
-            for node in report['nodes']:
-                callables = list(node.get('callbacks', {}).values())
-                if node.get('operator'):
-                    callables.append(node['operator'])
-                for operator in callables:
-                    module = operator['module'].replace('.', '/')
-                    path = next((value for value in (module + '.py', module + '/__init__.py') if value in files), None)
-                    if path is None:
-                        layout_diagnostics.append(diagnostic('DF-01', module, '无法确认算子定义位置。', status='incomplete'))
-                    else:
-                        operators.add((path, operator['line']))
-                if node['api'].rsplit('.', 1)[-1] in {'map_prompt', 'map_prompt_async', 'agentmap_async'}:
-                    prompts.update((resource['path'], None) for resource in node['source_resources'])
-            inspected.append(entry)
-            diagnostics.extend(report['diagnostics'])
-        except (OSError, ValueError, KeyError, RecursionError) as exc:
-            path = entry.partition(':')[0]
-            diagnostics.append(diagnostic('FL-10', path, str(exc), status='incomplete'))
-            layout_diagnostics.append(diagnostic('DF-01', path, '此入口的引用文件角色未核实。', status='incomplete'))
+                if isinstance(item.node, ast.ClassDef) and not any(
+                        isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)) and member.name == '__call__'
+                        for member in item.node.body):
+                    continue
+                checker.describe(item)
+                names.append(name)
+            tree.unchanged()
+        finally:
+            for filename, value in tree.files.items():
+                _record(sources, filename, value)
+        if not names:
+            raise InspectionError('OP-01', '没有可独立确认的公开算子定义。', path=path, status='incomplete')
+        return dict(path=path, symbols=names, scope='definition')
+    return None
 
-    if changed and not inspected and not diagnostics:
-        diagnostics.append(diagnostic('FL-10', '', '没有可核对的 flow 入口。', status='incomplete'))
-    paths, violations = check_layout(changed=changed, operators=sorted(operators),
-                                     prompts=sorted(prompts))
-    layout_diagnostics.extend(violations)
-    paths.update(misplaced_flows)
-    remaining = MAX_SOURCE_BYTES
-    for path, digest in sources.items():
-        try:
-            if time.monotonic() > deadline:
-                raise ForgeError('Source verification exceeded the check budget', code='resource_limit')
-            raw = read_bounded(Path(root) / path, remaining)
-            remaining -= len(raw)
-            if sha256(raw).hexdigest() != digest:
-                raise ForgeError('Source changed during the checks', code='conflict')
-        except (OSError, ValueError) as exc:
-            diagnostics.append(diagnostic('FL-10', path, str(exc), status='incomplete'))
-            layout_diagnostics.append(diagnostic('DF-01', path, str(exc), status='incomplete'))
+
+def check_project(root, *, paths=(), entry=None, params=None, reference=None, table_resolver=None,
+                  exclude=(), publish=None, max_variants=MAX_VARIANTS, seconds=CHECK_SECONDS,
+                  max_bytes=MAX_SOURCE_BYTES):
+    """Check without importing candidate code. A product may publish each exact inspected report."""
+    if paths and entry is not None or params is not None and entry is None:
+        raise ForgeError('Choose paths or one entry and its parameters', code='invalid_request')
+    root = Path(root).absolute()
+    paths = tuple(dict.fromkeys(paths))
+    if len(paths) > 256:
+        raise ForgeError('Changed path count exceeds check budget', code='resource_limit')
+    for name in (*paths, *((entry.partition(':')[0],) if entry else ()), *((params,) if params else ())):
+        if not _visible(name, exclude):
+            raise ForgeError('Requested input is outside the visible scope', code='operation_rejected')
+        relative_path(root, name)
+    if any(type(n) is not int or not 1 <= n <= cap for n, cap in (
+            (max_variants, 32), (seconds, 35), (max_bytes, 32*1024**2))):
+        raise ForgeError('Invalid project inspection limits', code='invalid_request')
+    with operation_budget.scope(deadline=time.monotonic() + seconds) as deadline:
+        reference = reference or build_reference()
+        if content_digest(reference['catalog']) != reference['catalog_id']:
+            raise ForgeError('SDK catalogue differs from its supplied identity', code='inputs_changed')
+        view = discover_project_sources(root, exclude=exclude, include_roles=bool(paths))
+        return _check(root, view, paths, entry, params, reference, table_resolver,
+                      exclude, deadline, publish, max_variants, max_bytes)
+
+
+def _check(root, view, paths, entry, params, reference, table_resolver, exclude, deadline, publish, max_variants, max_bytes):
+    native, layout, checked, rows, definitions = [], [], [], [], []
+    sources, parameter_digests, table_files = {}, {}, {}
+    layout_paths = set()
+    control = view['control']
+    manifest = 'workspace.json'
+    manifest_hash = None
+    if control is not None:
+        raw = read_bounded(relative_path(root, manifest), 1024**2)
+        if decode_control(raw) != control:
+            raise ForgeError('Project declaration changed during discovery', code='inputs_changed')
+        manifest_hash = sha256(raw).hexdigest()
+    elif not paths and not entry:
+        native.append(diagnostic('DF-01', manifest, '完整项目检查需要项目声明。', status='incomplete'))
+    control = control or {'entries': {}, 'locations': {}}
+    scope = dict(kind='entry' if entry else 'paths' if paths else 'project', requested=entry or list(paths))
+    local_resolver = table_resolver or table_binding
+    def resolve(root, current, alias):
+        if isinstance(alias, str) and not alias.startswith('run:'):
+            name = 'tables/' + alias + '.json'
+            if not _visible(name, exclude):
+                raise ForgeError('Table is outside the visible scope')
+        if isinstance(alias, str) and alias.startswith('run:') and table_resolver is None:
+            raise ForgeError('Run-backed table requires an explicit receipt resolver', code='not_found')
+        return local_resolver(root, current, alias)
+
+    variants, relevant = _candidates(root, view, paths, entry, params, sources, native, layout)
+    visible = [item for item in variants if _visible(item[0].partition(':')[0], exclude)
+               and (item[1] is None or _visible(item[1], exclude))]
+    if len(visible) != len(variants):
+        native.append(diagnostic('FL-10', '', '部分受影响的入口或参数超出允许读取的范围。', status='incomplete'))
+        layout.append(diagnostic('DF-01', '', '部分受影响入口的目录角色未核实。', status='incomplete'))
+    variants = visible
+    layout_paths.update(p for p in relevant if Path(p).parts[0] in ROLE_DIRS)
+    visited_sources = set()
+    agent_configs = set()
+    for index, (candidate, param, hypothetical) in enumerate(variants):
+        seconds = int(deadline - time.monotonic())
+        if index >= max_variants or seconds < 1:
+            native.append(diagnostic('FL-10', '', f'{len(variants)-index} 个入口或参数变体超出检查预算。', status='incomplete'))
+            layout.append(diagnostic('DF-01', '', '未覆盖全部入口的文件角色。', status='incomplete'))
             break
-    return dict(catalog_id=catalog_id, rules_id=RULES_ID,
-                source_digest=content_digest(sources), source_count=len(sources),
-                native_flow=result(diagnostics, inspected[:MAX_VARIANTS], applicable=bool(inspected)),
-                project_layout=result(layout_diagnostics, sorted(paths)[:MAX_VARIANTS], applicable=bool(paths)))
+        path = candidate.partition(':')[0]
+        try:
+            parameters = {'format': 'demiflow_forge_flow_parameters_v2', 'arguments': {}}
+            if param is not None:
+                raw = read_bounded(validate_parameter_path(root, param), 65536)
+                _record(parameter_digests, param, sha256(raw).hexdigest())
+                parameters = decode_control(raw)
+            report = inspect_variant(root, control, candidate, parameters, reference['catalog'],
+                                     table_resolver=resolve, limits={'seconds': seconds},
+                                     exclude=exclude, table_describer=describe_fixed_table if table_resolver is None else None)
+            binding = report['binding']
+            dependencies = _binding_files(root, binding, sources, table_files)
+            # Shared changes require probing potential consumers. An unrelated complete
+            # closure is evidence of independence, not another flow under review.
+            if (paths and path not in relevant and param not in relevant
+                    and 'workspace.json' not in relevant and dependencies.isdisjoint(relevant)):
+                if report['status'] != 'checked':
+                    native.append(diagnostic('FL-10', path, '入口依赖未能完整解析，与变更的关系待核实。',
+                                             status='incomplete'))
+                continue
+            if hypothetical and not any(n['role'] in {'action','query'} or n['kind'] == 'materialize'
+                                        for n in report['nodes']):
+                continue
+            visited_sources.update(dependencies)
+            for node in report['nodes']:
+                if node['api'].rsplit('.', 1)[-1] == 'agentmap_async':
+                    agent_configs.update(r['path'] for r in node['source_resources'] if r['kind'] == 'config')
+            checked.append(candidate)
+            native.extend({**d, 'entry': candidate, 'params': param} for d in report['diagnostics'])
+            inspected, issues = _layout(report)
+            layout_paths.update(inspected)
+            layout.extend({**d, 'entry': candidate, 'params': param} for d in issues)
+            report['binding']['parameter_path'] = param
+            row = dict(entry=candidate, params=param, status=report['status'])
+            if publish is not None:
+                publish(report)
+            rows.append(row)
+        except (ValueError, OSError, KeyError, TypeError, RuntimeError, RecursionError, DemiflowError) as exc:
+            if isinstance(exc, ForgeError) and exc.code in {'conflict', 'inputs_changed'}:
+                raise ForgeError(str(exc), code='inputs_changed') from exc
+            invalid = isinstance(exc, ForgeError) and exc.code == 'invalid_request'
+            native.append(diagnostic('FL-03' if invalid else 'FL-10', path, str(exc),
+                                     status='invalid' if invalid else 'incomplete'))
+            layout.append(diagnostic('DF-01', path, '入口和配置未完整核实。', status='incomplete'))
+            rows.append(dict(entry=candidate, params=param, status='incomplete'))
+
+    for path in sorted(agent_configs | (relevant - visited_sources)):
+        if not (root / path).exists():
+            native.append(diagnostic('FL-01', path, '变更的文件已删除，无法验证其定义。', status='incomplete'))
+            continue
+        try:
+            operation_budget.check(deadline)
+            definition = _definition(root, path, deadline, exclude, sources)
+            if definition:
+                definitions.append(definition)
+        except InspectionError as exc:
+            native.append(exc.diagnostic)
+        except (ValueError, OSError, RecursionError) as exc:
+            invalid = not isinstance(exc, (OSError, RecursionError)) and getattr(exc,'code',None) != 'resource_limit'
+            native.append(diagnostic('DF-05' if Path(path).parts[0] == 'prompts' else 'OP-01',
+                                     path, str(exc), status='invalid' if invalid else 'incomplete'))
+    if relevant and not checked and not definitions and not native:
+        native.append(diagnostic('FL-10', '', '未定位到可核对的原生流程或独立定义。', status='incomplete'))
+    basis = dict(sdk_revision=reference['sdk_revision'], catalog_id=reference['catalog_id'], rules_id=RULES_ID,
+                 manifest_sha256=manifest_hash, sources=sources, parameter_digests=parameter_digests, controls=table_files)
+    verify_check_inputs(root, basis, deadline=deadline, max_bytes=max_bytes)
+    if sdk_identity(reference['catalog']) != reference['sdk_revision']:
+        raise ForgeError('SDK changed during inspection', code='inputs_changed')
+    flow = result(native, checked, applicable=bool(checked))
+    roles = result(layout, layout_paths, applicable=bool(layout_paths))
+    statuses = {flow['status'], roles['status']}
+    status = next(x for x in ('failed','incomplete','passed','not_applicable') if x in statuses)
+    diagnostics = list(native) + list(layout)
+    unverified = [d for d in diagnostics if d.get('status') == 'incomplete']
+    data = dict(status=status, scope=scope, root=str(root), entries=rows, definitions=definitions,
+                native_flow=flow, project_layout=roles, rules_id=RULES_ID, catalog_id=reference['catalog_id'],
+                source_digest=content_digest(sources), source_count=len(sources), basis=basis,
+                diagnostics=diagnostics[:256], diagnostic_count=len(diagnostics),
+                coverage=dict(checked=len(checked), unverified=unverified[:64], requested_variants=len(variants)))
+    data['check_digest'] = content_digest(data)
+    return data
+
+
+def verify_check_inputs(root, basis, *, deadline=None, max_bytes=MAX_SOURCE_BYTES):
+    """Compare exact project bytes at inspection completion and before registration."""
+    root = Path(root)
+    expected = {}
+    for group in ('sources', 'parameter_digests', 'controls'):
+        for path, value in basis[group].items():
+            _record(expected, path, value)
+    if basis['manifest_sha256'] is not None:
+        _record(expected, 'workspace.json', basis['manifest_sha256'])
+    elif (root / 'workspace.json').exists():
+        raise ForgeError('Project initialized during inspection', code='inputs_changed')
+    remaining = max_bytes
+    for path, digest in expected.items():
+        operation_budget.check(deadline)
+        try:
+            raw = read_bounded(relative_path(root, path), remaining)
+        except FileNotFoundError as exc:
+            raise ForgeError('Input disappeared during inspection: ' + path, code='inputs_changed') from exc
+        remaining -= len(raw)
+        if sha256(raw).hexdigest() != digest:
+            raise ForgeError('Input changed during inspection: ' + path, code='inputs_changed')

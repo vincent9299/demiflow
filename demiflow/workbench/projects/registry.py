@@ -8,6 +8,7 @@ import re
 from demiflow.workbench.projects import workspace as ws
 from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
+from demiflow.forge.project import initialize_project
 
 FORMAT = 'demiflow_forge_console_v1'
 FORMAT_V2 = 'demiflow_forge_console_v2'
@@ -74,7 +75,7 @@ def create(path, root, *, name):
     """
     if '..' in Path(root).parts:
         raise ForgeError('Project directory must be normalized', code='invalid_request')
-    ws.init_workspace(root, name=name)
+    initialize_project(root, name=name)
     return add(path, root)
 
 
@@ -87,7 +88,7 @@ def add(path, root, *, allow_runs=False, name=None):
     if type(allow_runs) is not bool:
         raise ForgeError('Invalid run permission')
     if not (root / 'workspace.json').exists():
-        ws.init_workspace(root, name=name or root.name, existing=True)
+        initialize_project(root, name=name or root.name, existing=True)
     root, workspace, _ = ws.load_workspace(root)
     if name is not None and name != workspace['name']:
         raise ForgeError('Existing project has a different name', code='conflict')

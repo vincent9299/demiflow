@@ -28,6 +28,7 @@ from demiflow.forge.platform import bounded_json
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.platform_environment import platform_declaration
 from demiflow.forge.platform_environment import environment_inventory
+from demiflow.forge.project_bindings import resolve_arguments
 from demiflow.forge.schema import ForgeError
 from demiflow.forge import operation_budget
 from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
@@ -331,7 +332,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
         raise ForgeError('new_outputs must be boolean')
     original = ws.read_control(parameter_path) if parameter_path else copy.deepcopy(params)
     # Existing resolver validates the closed parameter format before modifications.
-    ws.resolve_arguments(root, workspace, original, table_resolver=_table_resolver())
+    resolve_arguments(root, workspace, original, table_resolver=_table_resolver())
     effective = copy.deepcopy(original)
     if inputs is not None:
         if type(inputs) is not dict or len(inputs) > 32:
@@ -341,7 +342,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
             if type(alias) is not str or type(arg) is not dict or arg.get('kind') != 'table':
                 raise ForgeError('Input override must name an existing table argument')
             effective['arguments'][name] = {'kind': 'table', 'alias': alias}
-        ws.resolve_arguments(root, workspace, effective, table_resolver=_table_resolver())
+        resolve_arguments(root, workspace, effective, table_resolver=_table_resolver())
     run_id = reserved_run_id or 'r' + uuid.uuid4().hex[:24]
     directory(root, run_id)
     output_specs = {}
@@ -519,6 +520,8 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     from demiflow.workbench.projects import index
     with ws.control_lock(root):
         operation_budget.check()
+        from demiflow.workbench.projects.index import initialize_if_empty
+        initialize_if_empty(root)
         store.mkdir(exist_ok=True)
         marker = index.begin(root, 'run', run_id)
         target = directory(root, run_id)

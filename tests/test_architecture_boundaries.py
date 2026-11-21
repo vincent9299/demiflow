@@ -24,7 +24,7 @@ def test_forge_imports_without_product_or_interactive_runtime():
 
 def test_forge_guidance_and_check_use_the_same_public_catalogue(tmp_path):
     from demiflow.forge.api_reference import build_reference, render_reference
-    from demiflow.workbench.projects.workspace import inspect_coding_changes
+    from demiflow.forge.pipeline_check import check_project
 
     flows = tmp_path / 'flows'
     flows.mkdir()
@@ -35,7 +35,7 @@ def test_forge_guidance_and_check_use_the_same_public_catalogue(tmp_path):
     text, symbols = render_reference(reference)
     assert 'demiflow.data:Dataset.materialize' in symbols
     assert 'Dataset.materialize' in text
-    inspected = inspect_coding_changes(tmp_path, [dict(path='flows/example.py', after={})], reference)
+    inspected = check_project(tmp_path, paths=['flows/example.py'], reference=reference)
     assert inspected['catalog_id'] == reference['catalog_id']
     assert inspected['native_flow']['status'] == 'passed', inspected
     assert inspected['project_layout']['status'] == 'passed'

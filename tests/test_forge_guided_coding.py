@@ -85,17 +85,14 @@ def test_guided_browser_reports_independent_pipeline_checks(tmp_path, browser):
 
 def test_new_root_flow_is_reported_without_guessing_from_function_names(tmp_path):
     from demiflow.forge.api_reference import build_reference
-    from demiflow.workbench.projects.workspace import inspect_coding_changes
+    from demiflow.forge.pipeline_check import check_project
 
     (tmp_path / 'misplaced.py').write_text(
         "from demiflow.data import from_items\ndef compute():\n    return from_items([{'id': 1}]).count()\n")
     (tmp_path / 'helper.py').write_text('def run():\n    return 42\n')
     (tmp_path / 'source.py').write_text(
         "from demiflow.data import from_items\ndef build_source():\n    return from_items([{'id': 1}])\n")
-    report = inspect_coding_changes(tmp_path, [
-        dict(path=name, before=None, after=dict(sha256='fixture'))
-        for name in ('helper.py', 'source.py', 'misplaced.py')
-    ], build_reference())
+    report = check_project(tmp_path, paths=['helper.py', 'source.py', 'misplaced.py'], reference=build_reference())
     assert report['native_flow']['status'] == 'passed', report
     assert report['native_flow']['inspected_count'] == 1
     assert report['project_layout']['status'] == 'failed'

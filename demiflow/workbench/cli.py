@@ -21,15 +21,6 @@ def register(main):
     from demiflow.workbench.projects.registry import register as register_registry
     register_registry(workspace)
 
-    @workspace.command("init")
-    @root_arg
-    @click.option("--name", default="workspace")
-    @click.option('--existing', is_flag=True, help='Initialize controls in a nonempty project without replacing files.')
-    @click.option('--extra', 'extras', multiple=True, help='Bind a declared platform dependency extra.')
-    @pretty_option
-    def initialize(root, name, existing, extras, pretty):
-        output(lambda: api.init_workspace(root, name=name, existing=existing, extras=extras), pretty)
-
     @workspace.command("location")
     @root_arg
     @click.argument("name")
@@ -404,14 +395,6 @@ def register(main):
     @workspace.group("flow")
     def flow():
         """Inspect source wiring; this stage does not execute the flow."""
-
-    @flow.command('register')
-    @root_arg
-    @click.argument('entry')
-    @click.option('--params', required=True)
-    @pretty_option
-    def register_flow(root, entry, params, pretty):
-        output(lambda: api.register_flow(root, entry, params=params), pretty)
 
     @flow.command('unregister')
     @root_arg

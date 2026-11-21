@@ -50,42 +50,59 @@ def build_reference():
     return dict(catalog=catalog, catalog_id=content_digest(catalog), sdk_revision=sdk_identity(catalog))
 
 
-def render_reference(reference, *, maximum=20 * 1024):
+def select_apis(reference, api=None, *, maximum=20 * 1024):
+    """Project complete signatures and bounded documentation from one public catalogue."""
+    from .schema import canonical
+
     catalog = reference['catalog']
+    if not catalog['inspection_complete']:
+        raise ForgeError('SDK catalogue inspection incomplete', code='resource_limit')
     by_id = {item['id']: item for item in catalog['objects']}
-    rows = ['## 当前版本 DemiFlow 原生 API',
-            '用原生 Dataset API 编排读取、转换、模型调用和输出。'
-            '业务行逻辑写成普通函数或 Actor，保持 I/O 和模型节点在 flow 中可见。',
-            '下列签名来自当前 SDK，使用说明为文档节选。需要完整说明时读取所列 SDK 源文件。',
-            "最小接线示例：`from_items([{'id': 1}]).materialize()`。"
-            "在实际 flow 里替换为所需的原生读取、转换和受控输出。"]
-    total = sum(len(row.encode()) + 2 for row in rows)
-    if total > maximum:
-        raise ForgeError('Context cannot fit native API guidance', code='resource_limit')
-    included = []
-    for symbol in ESSENTIAL:
+    if api is not None:
+        if api.partition(':')[0] not in catalog['modules']:
+            raise ForgeError('SDK symbol outside inspected modules: ' + api, code='invalid_request')
+        if api not in by_id:
+            raise ForgeError('Unknown SDK symbol: ' + api, code='invalid_request')
+    rows, remaining = [], maximum
+    for symbol in ((api,) if api is not None else ESSENTIAL):
         item = by_id.get(symbol)
         if item is None or item['signature']['status'] != 'available':
-            raise ForgeError('Required native API unavailable: ' + symbol)
-        # Select whole documentation lines. The signature itself is never clipped.
-        doc, used = [], 0
-        for line in item['documentation']['text'].splitlines():
-            size = len(line.encode()) + 1
-            if used + size > 720:
-                break
-            doc.append(line)
-            used += size
+            raise ForgeError('SDK signature unavailable: ' + symbol, code='resource_limit')
         origin = item['origin']
         source = str(SDK_ROOT / origin['path']) if origin['kind'] == 'platform' else origin['module']
-        line = f"- {symbol} {item['signature']['text']}\n  来源：{source}"
+        documentation = item['documentation']['text'].encode()
+        doc_limit = maximum // 2 if api is not None else 720
+        excerpt = documentation[:doc_limit].decode('utf8', 'ignore')
+        row = dict(id=symbol, signature=item['signature']['text'], source=source,
+                   documentation=excerpt, documentation_truncated=len(documentation) > doc_limit,
+                   native_semantics=(item['native_semantics'] if api is not None else
+                                     {k: v for k, v in item['native_semantics'].items() if k == 'role'}))
+        size = len(canonical(row)) + 1
+        if size > remaining:
+            raise ForgeError('Selected SDK signatures exceed context budget', code='resource_limit')
+        remaining -= size
+        rows.append(row)
+    return rows
+
+
+def api_markdown(apis):
+    from .schema import canonical
+
+    rows = ['## 当前版本 DemiFlow 原生 API']
+    for item in apis:
+        facts = f"- {item['id']} {item['signature']}\n  来源：{item['source']}"
         if 'role' not in item['native_semantics']:
-            line += '\n  此方法是公开 API，原生 flow 静态检查尚未覆盖。'
-        if doc:
-            line += '\n  ' + '\n  '.join(doc)
-        size = len(line.encode()) + 2
-        if total + size > maximum:
-            raise ForgeError('Context cannot fit required native API signatures', code='resource_limit')
-        included.append(symbol)
-        rows.append(line)
-        total += size
-    return '\n\n'.join(rows), included
+            facts += '\n  此方法的原生 flow 静态语义尚未覆盖。'
+        else:
+            facts += '\n  原生语义：' + canonical(item['native_semantics']).decode()
+        if item['documentation']:
+            facts += '\n  ' + item['documentation']
+            if item['documentation_truncated']:
+                facts += '（节选）'
+        rows.append(facts)
+    return '\n\n'.join(rows)
+
+
+def render_reference(reference, *, maximum=20 * 1024):
+    rows = select_apis(reference, maximum=maximum)
+    return api_markdown(rows), [item['id'] for item in rows]

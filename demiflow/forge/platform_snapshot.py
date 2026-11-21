@@ -7,9 +7,8 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import stat
-import tempfile
 
-from .io import no_symlinks
+from .io import no_symlinks, publish_bytes
 from .platform import LIMITS, bounded_json, content_digest, discover_catalog, limits_with, module_scope
 from .platform_environment import environment_inventory, platform_declaration, read_bounded
 from .schema import ForgeError
@@ -127,13 +126,13 @@ def _diagnostics(value):
     return [*value["catalog"]["diagnostics"], *value["environment"]["diagnostics"]]
 
 
-def _complete(value):
+def snapshot_complete(value):
     return value["catalog"]["inspection_complete"] and not value["environment"]["diagnostics"]
 
 
 def write_snapshot(path, value):
     """Publish a complete new file atomically; an existing file is never replaced."""
-    if not _complete(value):
+    if not snapshot_complete(value):
         raise ForgeError("Cannot publish an incomplete platform snapshot")
     raw = bounded_json(value, value["limits"]["snapshot_bytes"])
     path = Path(path).absolute()
@@ -142,22 +141,7 @@ def write_snapshot(path, value):
         raise ForgeError("Snapshot output must be outside the platform package")
     if path.exists():
         raise ForgeError("Snapshot output already exists")
-    # Parent creation is explicit: do not walk or create an arbitrary tree.
-    descriptor, temporary = tempfile.mkstemp(prefix=".forge-platform-", dir=path.parent)
-    try:
-        with os.fdopen(descriptor, "wb") as output:
-            output.write(raw)
-            output.flush()
-            os.fsync(output.fileno())
-        no_symlinks(path)
-        os.link(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
+    publish_bytes(path, raw)
 
 
 def load_snapshot(path):
@@ -266,7 +250,7 @@ def compare_snapshots(previous, current):
     if previous["scope"] != current["scope"] or previous["limits"] != current["limits"]:
         changes.append({"kind": "inspection_configuration_changed"})
     status = "current" if previous["digests"]["snapshot"] == current["digests"]["snapshot"] else "stale"
-    if not _complete(previous) or not _complete(current):
+    if not snapshot_complete(previous) or not snapshot_complete(current):
         status = "incomplete"
     return {"status": status, "previous_digest": previous["digests"]["snapshot"],
             "current_digest": current["digests"]["snapshot"], "scope": previous["scope"],

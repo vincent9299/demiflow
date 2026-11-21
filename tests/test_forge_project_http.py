@@ -1,4 +1,5 @@
 """The HTTP client shares project creation, registration and rule checks."""
+from demiflow.forge.project import initialize_project
 import json
 
 from click.testing import CliRunner
@@ -43,7 +44,7 @@ def test_http_project_management_and_headless_visibility(tmp_path):
 
 
 def test_missing_project_check_cli_is_nonzero_without_fixing(tmp_path):
-    root=tmp_path/'project'; ws.init_workspace(root)
+    root=tmp_path/'project'; initialize_project(root)
     result=CliRunner().invoke(main,['workbench','check',str(root)])
     assert result.exit_code == 1
     assert json.loads(result.output)['status'] == 'incomplete'

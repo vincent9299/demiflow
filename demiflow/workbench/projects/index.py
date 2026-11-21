@@ -15,7 +15,7 @@ import sqlite3
 import time
 import uuid
 
-from demiflow.workbench.projects import io as ws
+from demiflow.forge import project_io as ws
 from demiflow.forge.schema import ForgeError
 
 FORMAT = 'demiflow_forge_index_v1'
@@ -109,6 +109,21 @@ def _ensure(root, *, complete=False):
 def initialize_empty(root):
     """The caller exclusively created the workspace control directory."""
     _ensure(root, complete=True)
+
+
+def initialize_if_empty(root):
+    """Under the project control lock, attest emptiness before the first publication."""
+    if ws.relative_path(root, '.forge/index.sqlite').exists():
+        return
+    for name in ('runs', 'inspections', 'index-pending'):
+        directory = ws.relative_path(root, '.forge/' + name)
+        try:
+            with os.scandir(directory) as entries:
+                if next(entries, None) is not None:
+                    return
+        except FileNotFoundError:
+            continue
+    initialize_empty(root)
 
 
 def begin(root, kind, identity):

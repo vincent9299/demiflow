@@ -1,5 +1,7 @@
 # Forge 开发辅助改造
 
+> 历史方案。当前开发流程与命令见 [用 Forge 开发 DemiFlow 项目](forge-cli.md)。
+
 任务分支 `gpt/workbench/interaction-20261120`。工程基线 `a9641d2`，含 `main@5f3c077` 和本分支发送修复 `5ae98dc`。本方案按用户最后确认的全新 Forge 设计。
 
 ## 中粒度

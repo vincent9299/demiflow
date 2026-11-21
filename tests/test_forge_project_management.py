@@ -5,6 +5,7 @@ import pytest
 from click.testing import CliRunner
 
 from demiflow.cli import main
+from demiflow.forge import project
 from demiflow.workbench.projects import registry as console
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench import project_operations as project_ops
@@ -18,7 +19,7 @@ def snapshot():
 
 @pytest.fixture(autouse=True)
 def cached_snapshot(monkeypatch, snapshot):
-    monkeypatch.setattr(ws, 'build_snapshot', lambda *a, **kw: snapshot)
+    monkeypatch.setattr(project, 'build_snapshot', lambda *a, **kw: snapshot)
 
 
 def test_create_only_control_files_and_no_false_pass(tmp_path):
@@ -57,7 +58,7 @@ def test_register_keeps_business_bytes_and_is_idempotent(tmp_path):
 def test_registration_controls_conflict_does_not_overwrite(tmp_path):
     root = tmp_path / 'existing'; root.mkdir(); (root / '.forge').mkdir()
     (root / '.forge/owned').write_text('keep')
-    with pytest.raises(ForgeError, match='already exist'):
+    with pytest.raises(ForgeError, match='Unrecognized controls'):
         console.add(tmp_path / 'console.json', root)
     assert (root / '.forge/owned').read_text() == 'keep'
     assert not (root / 'workspace.json').exists()

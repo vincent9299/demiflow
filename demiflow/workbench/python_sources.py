@@ -25,7 +25,7 @@ def deployment_modules(root):
     setting = os.environ.get(ENVIRONMENT)
     if not setting:
         return None
-    from demiflow.workbench.projects.io import read_control
+    from demiflow.forge.project_io import read_control
 
     path = Path(setting)
     if not path.is_absolute() or '..' in path.parts or path.is_relative_to(root):

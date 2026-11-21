@@ -56,7 +56,18 @@ def _target(backend, timeout_seconds, ray_job_api_address, ray_namespace):
     )
 
 
-@click.group()
+class _CommandGroup(click.Group):
+    def list_commands(self, ctx):
+        return sorted(set(super().list_commands(ctx)) | {'workbench'})
+
+    def get_command(self, ctx, cmd_name):
+        if cmd_name == 'workbench' and cmd_name not in self.commands:
+            from .workbench.cli import register
+            register(self)
+        return super().get_command(ctx, cmd_name)
+
+
+@click.group(cls=_CommandGroup)
 def main():
     """Inspect and run immutable Demiflow Pipeline bundles."""
 
@@ -215,10 +226,6 @@ def _error(exc):
 from .forge.cli import register as _register_forge
 
 _register_forge(main)
-
-from .workbench.cli import register as _register_workbench
-
-_register_workbench(main)
 
 from .services.cli import register as _register_services
 

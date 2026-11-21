@@ -1,10 +1,12 @@
 """Explicit directory maintenance; domain owners interpret their own sources."""
 from itertools import chain
+import os
 import time
 
 from demiflow.forge import operation_budget
 from demiflow.forge.schema import ForgeError
-from demiflow.workbench.projects import index, io, workspace
+from demiflow.forge import project_io as io
+from demiflow.workbench.projects import index, workspace
 from demiflow.workbench.runs import manager as runs
 
 

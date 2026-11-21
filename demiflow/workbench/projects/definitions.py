@@ -41,7 +41,6 @@ def _items(path, raw, kind):
             yield dict(code_definition(node, body), label=node.name,
                        line=start, end_line=node.end_lineno)
     else:
-        import yaml
         value = yaml.safe_load(text)
         # Reject recursion/alias expansion before serialization or traversal.
         pending = [(value, 0)]; count = 0
@@ -53,13 +52,26 @@ def _items(path, raw, kind):
                 pending.extend((v, depth + 1) for v in obj.values())
             elif type(obj) is list:
                 pending.extend((v, depth + 1) for v in obj)
-        if type(value) is not dict or value.get('schema_version') != 'demiflow_prompt_pack_v2' or type(value.get('prompts')) is not dict:
-            raise ForgeError('Expected a native versioned Prompt pack', code='invalid_request')
-        for name, item in value['prompts'].items():
+        if type(value) is not dict:
+            raise ForgeError('Expected a native Prompt or Agent document', code='invalid_request')
+        agent = value.get('schema_version') == 'demiflow_agent_v2'
+        if agent:
+            from demiflow.forge.project import inspect_prompt_source
+            _, names, _ = inspect_prompt_source(text)
+            tasks = value['tasks']
+        elif value.get('schema_version') == 'demiflow_prompt_pack_v2' and type(value.get('prompts')) is dict:
+            tasks = value['prompts']
+            names = tasks.keys()
+        else:
+            raise ForgeError('Expected a native versioned Prompt pack or Agent config', code='invalid_request')
+        for name in names:
+            item = tasks[name]
             if type(name) is not str or type(item) is not dict:
                 raise ForgeError('Invalid named Prompt definition', code='invalid_request')
             body = yaml.safe_dump(item, allow_unicode=True, sort_keys=False)
-            yield dict(prompt_definition(name, item), label=name, source=body, line=None, end_line=None,
+            # Agent tasks share the document model; the source excerpt stays scoped to the selected task.
+            projected = {**item, 'model': value['model']} if agent else item
+            yield dict(prompt_definition(name, projected), label=name, source=body, line=None, end_line=None,
                        template_sha256=hashlib.sha256(item['template'].encode()).hexdigest() if type(item.get('template')) is str else None)
 
 

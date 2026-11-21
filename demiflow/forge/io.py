@@ -1,12 +1,80 @@
 """Safe local JSON and durable file writes for Forge control files."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+import errno
 import json
 import os
 from pathlib import Path
 import uuid
 
 from .schema import ForgeError
+
+
+@contextmanager
+def directory_handle(path, *, create=False):
+    """Anchor every component of the publication directory without following links."""
+    path = Path(path).absolute()
+    if '..' in path.parts:
+        raise ForgeError('Non-normalized directory', code='invalid_request')
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open(path.anchor, flags)
+    try:
+        for component in path.parts[1:]:
+            try:
+                child = os.open(component, flags, dir_fd=fd)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                try:
+                    os.mkdir(component, mode=0o700, dir_fd=fd)
+                except FileExistsError:
+                    pass
+                else:
+                    os.fsync(fd)
+                child = os.open(component, flags, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        yield fd
+        if not os.path.samestat(os.fstat(fd), os.stat(path, follow_symlinks=False)):
+            raise ForgeError('Project directory changed during publication', code='conflict')
+    except OSError as exc:
+        if exc.errno in (errno.ENOTDIR, errno.ELOOP):
+            raise ForgeError('Invalid project directory or symlink: ' + str(path), code='conflict') from exc
+        raise
+    finally:
+        os.close(fd)
+
+
+def ensure_directory(path):
+    with directory_handle(path, create=True):
+        pass
+
+
+def publish_bytes(path, raw, *, create=True):
+    """Publish a complete file using relative names on one open directory."""
+    path = Path(path)
+    with directory_handle(path.parent) as parent:
+        temp = '.forge-write-' + uuid.uuid4().hex
+        handle = os.open(temp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600, dir_fd=parent)
+        try:
+            with os.fdopen(handle, 'wb') as out:
+                out.write(raw)
+                out.flush()
+                os.fsync(out.fileno())
+            if create:
+                try:
+                    os.link(temp, path.name, src_dir_fd=parent, dst_dir_fd=parent, follow_symlinks=False)
+                except FileExistsError as exc:
+                    raise ForgeError('File already exists: ' + path.name, code='conflict') from exc
+            else:
+                os.replace(temp, path.name, src_dir_fd=parent, dst_dir_fd=parent)
+            os.fsync(parent)
+        finally:
+            try:
+                os.unlink(temp, dir_fd=parent)
+            except FileNotFoundError:
+                pass
 
 
 def no_symlinks(path: Path) -> Path:
@@ -70,4 +138,4 @@ def fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-__all__ = ["atomic_write_json", "atomic_write_text", "no_symlinks", "read_json", "write_exclusive"]
+__all__ = ["atomic_write_json", "atomic_write_text", "directory_handle", "ensure_directory", "no_symlinks", "publish_bytes", "read_json", "write_exclusive"]

@@ -15,152 +15,27 @@ import tempfile
 import uuid
 
 from demiflow.workbench.projects.io import workspace_id
-from demiflow.workbench.projects.io import identifier
-from demiflow.workbench.projects.io import relative_path
-from demiflow.workbench.projects.io import read_control
-from demiflow.workbench.projects.io import control_lock
-from demiflow.workbench.projects.io import write_control
+from demiflow.forge.project import (
+    FORMAT, FORMAT_V2, FORMAT_V3, MODERN_FORMATS, load_project as load_workspace_control, load_project_snapshot as load_workspace,
+    location_root, project_name, validate_entry, validate_parameter_path,
+)
+from demiflow.forge.project_io import identifier
+from demiflow.forge.project_io import relative_path
+from demiflow.forge.project_io import read_control
+from demiflow.forge.project_io import control_lock
+from demiflow.forge.project_io import write_control
 from demiflow.forge.io import no_symlinks
+from demiflow.forge.project_bindings import table_identity
+from demiflow.forge.project_bindings import table_binding as local_table_binding
 from demiflow.forge.platform import bounded_json
 from demiflow.forge.platform import content_digest
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.platform_snapshot import build_snapshot
 from demiflow.forge.platform_snapshot import check_snapshot
-from demiflow.forge.platform_snapshot import load_snapshot
 from demiflow.forge.platform_snapshot import write_snapshot
 from demiflow.forge.schema import ForgeError
 
-FORMAT = "demiflow_forge_workspace_v1"
-FORMAT_V2 = "demiflow_forge_workspace_v2"
-FORMAT_V3 = "demiflow_forge_workspace_v3"
-MODERN_FORMATS = {FORMAT_V2, FORMAT_V3}
 README_BYTES = 1024**2
-
-
-def project_name(value):
-    if (type(value) is not str or not value.strip() or value != value.strip()
-            or len(value.encode('utf-8')) > 256 or any(ord(c) < 32 for c in value)):
-        raise ForgeError('Project name requires 1..256 UTF-8 bytes without control characters', code='invalid_request')
-    return value
-
-
-def init_workspace(root, *, name="workspace", modules=("demiflow.data",), existing=False, extras=()):
-    root = Path(root).absolute()
-    no_symlinks(root)
-    project_name(name)
-    if not existing and root.exists() and any(root.iterdir()):
-        raise ForgeError("Workspace initialization requires an empty directory")
-    if (root / 'workspace.json').exists() or (root / '.forge').exists():
-        raise ForgeError('Workspace controls already exist; refusing initialization')
-    snapshot = build_snapshot(modules, extras=extras)
-    snapshot_path = ".forge/platform/" + snapshot["digests"]["snapshot"] + ".json"
-    value = {
-        "format": FORMAT_V3,
-        "audit": {"reports": [], "change_scope": None},
-        "id": 'w' + uuid.uuid4().hex,
-        "name": name,
-        "entries": {},
-        "locations": {},
-        "platform": {"path": snapshot_path, "digest": snapshot["digests"]["snapshot"]},
-    }
-    created_dirs, created_files = [], []
-    try:
-        if not root.exists():
-            root.mkdir(parents=True)
-            created_dirs.append(root)
-        # Exclusive control-directory creation also serializes competing initializers.
-        (root / '.forge').mkdir()
-        created_dirs.append(root / '.forge')
-        for directory in ('.forge/platform', '.forge/inspections'):
-            path = root / directory
-            if not path.exists():
-                path.mkdir()
-                created_dirs.append(path)
-        write_snapshot(root / snapshot_path, snapshot)
-        created_files.append(root / snapshot_path)
-        lease = root / '.forge/execution.lock'
-        with lease.open('x') as stream:
-            stream.write('{"format":"demiflow_forge_execution_owner_v1","run_id":null}')
-            stream.flush()
-            os.fsync(stream.fileno())
-        created_files.append(lease)
-        from demiflow.workbench.projects import index
-        index.initialize_empty(root)
-        created_files.append(root / '.forge/index.sqlite')
-        write_control(root / 'workspace.json', value, create=True)
-    except BaseException:
-        for path in reversed(created_files):
-            path.unlink(missing_ok=True)
-        for path in reversed(created_dirs):
-            try:
-                path.rmdir()
-            except OSError:
-                pass  # Never remove contents created by another actor.
-        raise
-    return {"status": "created", "workspace": str(root), "id": value['id'], "platform": value["platform"]}
-
-
-def load_workspace_control(root):
-    """Validate local project declarations without opening platform provenance."""
-    root = Path(root).absolute()
-    no_symlinks(root)
-    value = read_control(root / "workspace.json")
-    modern = type(value) is dict and value.get('format') in MODERN_FORMATS
-    audit_fields = {'audit'} if type(value) is dict and value.get('format') == FORMAT_V3 else set()
-    if (type(value) is not dict or value.get('format') not in {FORMAT, *MODERN_FORMATS}
-            or set(value) - ({'budgets'} if modern else set()) != {'format', 'name', 'locations', 'platform'} | ({'id', 'entries'} if modern else set()) | audit_fields):
-        raise ForgeError("Unsupported workspace format")
-    if audit_fields:
-        from demiflow.forge.audit import validate_policy
-        validate_policy(value['audit'])
-    if modern:
-        from demiflow.workbench.pipeline_policy import limits_with
-        limits_with(policy=value.get('budgets'))
-        if not isinstance(value['id'], str) or not re.fullmatch(r'w[0-9a-f]{32}', value['id']):
-            raise ForgeError('Invalid workspace identity')
-        if type(value['entries']) is not dict or len(value['entries']) > 256:
-            raise ForgeError('Invalid registered entry index')
-        for entry, parameters in value['entries'].items():
-            validate_entry(root, entry)
-            if type(parameters) is not list or not 1 <= len(parameters) <= 64 or any(type(p) is not str for p in parameters) or len(set(parameters)) != len(parameters):
-                raise ForgeError('Entry requires 1..64 distinct parameter paths')
-            for params in parameters:
-                validate_parameter_path(root, params)
-    project_name(value["name"])
-    if type(value["locations"]) is not dict or not 0 <= len(value["locations"]) <= 16:
-        raise ForgeError("Invalid location count")
-    for key, location in value["locations"].items():
-        identifier(key)
-        if (
-            set(location) not in ({"root", "writable"}, {"root", "writable", "write_modes"})
-            or type(location["writable"]) is not bool
-            or not isinstance(location["root"], str)
-        ):
-            raise ForgeError("Invalid data location")
-        if 'write_modes' in location:
-            modes = location['write_modes']
-            if not modern or type(modes) is not list or len(modes) > 3 or len(set(modes)) != len(modes) or set(modes) - {'create', 'overwrite', 'checkpoint'} or bool(modes) != location['writable']:
-                raise ForgeError('Invalid explicit location write modes')
-        if not modern and location["writable"] and (key != "local" or location["root"] != "data"):
-            raise ForgeError("Only workspace data/ may be writable")
-        location_root(root, location)
-    return root, value
-
-
-def load_workspace(root):
-    root, value = load_workspace_control(root)
-    if set(value["platform"]) != {"path", "digest"}:
-        raise ForgeError("Invalid platform binding")
-    path = relative_path(root, value["platform"]["path"])
-    if path.parent != root / ".forge/platform":
-        raise ForgeError("Platform snapshot must be in .forge/platform")
-    snapshot = load_snapshot(path)
-    if (
-        snapshot["digests"]["snapshot"] != value["platform"]["digest"]
-        or snapshot["scope"]["discovery_version"] not in (2, 3)
-    ):
-        raise ForgeError("Workspace platform binding requires a matching supported snapshot")
-    return root, value, snapshot
 
 
 def _audit_workspace(root, expected):
@@ -501,24 +376,6 @@ def set_budgets(root, limits, *, expected):
     return {'status': 'updated', 'workspace_digest': content_digest(value), 'limits': effective}
 
 
-def validate_entry(root, entry):
-    if not isinstance(entry, str) or entry.count(':') != 1:
-        raise ForgeError('Entry requires project-relative file.py:function')
-    path, symbol = entry.split(':')
-    target = relative_path(root, path)
-    if (target.suffix != '.py' or not symbol.isidentifier() or symbol.startswith('_')
-            or any(not part.isidentifier() for part in path[:-3].split('/'))):
-        raise ForgeError('Entry must name a local Python module and public function')
-    return target, symbol
-
-
-def validate_parameter_path(root, params):
-    target = relative_path(root, params)
-    if target.suffix != '.json' or any(part.startswith('.') for part in Path(params).parts):
-        raise ForgeError('Parameters require a project-relative author JSON file', code='invalid_request')
-    return target
-
-
 def read_parameters(root, path):
     root, _, _ = load_workspace(root)
     return read_control(validate_parameter_path(root, path), 65536)
@@ -539,34 +396,6 @@ def source_text(root, path, *, expected_sha256=None):
     return {'path': path, 'text': raw.decode('utf-8'), 'sha256': actual}
 
 
-def _register_flow_value(root, value, entry, params):
-    import ast
-    if value['format'] not in MODERN_FORMATS:
-        raise ForgeError('Explicit flow registration requires workspace v2')
-    target, symbol = validate_entry(root, entry)
-    tree = ast.parse(read_bounded(target, 1024**2))
-    if sum(isinstance(n, ast.FunctionDef) and n.name == symbol for n in tree.body) != 1:
-        raise ForgeError('Registered entry function is missing or ambiguous')
-    read_control(validate_parameter_path(root, params), 65536)
-    paths = value['entries'].setdefault(entry, [])
-    if params in paths:
-        return dict(status='unchanged', entry=entry, params=params)
-    if len(value['entries']) > 256 or len(paths) >= 64:
-        raise ForgeError('Entry registration budget exceeded')
-    paths.append(params)
-    return dict(status='registered', entry=entry, params=params)
-
-
-def register_flow(root, entry, *, params):
-    root, value, _ = load_workspace(root)
-    expected = content_digest(value)
-    result = _register_flow_value(root, value, entry, params)
-    if result['status'] == 'unchanged': return result
-    with control_lock(root):
-        write_control(root / 'workspace.json', value, expected=expected)
-    return result
-
-
 def unregister_flow(root, entry, *, expected):
     root, value, _ = load_workspace(root)
     if value['format'] not in MODERN_FORMATS or entry not in value['entries']:
@@ -577,15 +406,6 @@ def unregister_flow(root, entry, *, expected):
     with control_lock(root):
         write_control(root / 'workspace.json', value, expected=expected)
     return dict(status='unregistered', entry=entry)
-
-
-def location_root(root, location):
-    path = Path(location["root"])
-    result = path if path.is_absolute() else relative_path(root, location["root"])
-    no_symlinks(result)
-    if not result.is_dir():
-        raise ForgeError("Data location must be an existing directory")
-    return result.absolute()
 
 
 def add_location(root, name, path, *, writable=False, write_modes=None):
@@ -657,34 +477,11 @@ def table_files(root):
 
 
 def table_binding(root, value, alias):
-    from demiflow.lance.refs import DatasetRef
-
-    identifier(alias)
-    control = read_control(root / "tables" / f"{alias}.json", 16384)
-    modern = control.get('format') == 'demiflow_forge_table_v2'
-    if (
-        set(control) != {"format", "alias", "location_id", "ref"} | ({'display', 'provenance'} if modern else set())
-        or control["format"] not in {"demiflow_forge_table_v1", 'demiflow_forge_table_v2'}
-        or control["alias"] != alias
-    ):
-        raise ForgeError("Invalid table reference")
-    if control["location_id"] not in value["locations"]:
-        raise ForgeError("Unknown table location")
-    if modern:
+    control, ref, uri = local_table_binding(root, value, alias)
+    if control['format'] == 'demiflow_forge_table_v2':
         from demiflow.workbench.catalog import validate
         validate(control['display'], control['provenance'], value['locations'])
-    ref = DatasetRef.from_dict(control["ref"])
-    base = location_root(root, value["locations"][control["location_id"]])
-    uri = relative_path(base, ref.relative_uri)
-    if ref.store_id != control["location_id"]:
-        raise ForgeError("Reference store and location differ")
     return control, ref, uri
-
-
-def table_identity(control):
-    """Presentation edits do not change a fixed Dataset binding or old v1 IDs."""
-    return {key: 'demiflow_forge_table_v1' if key == 'format' else control[key]
-            for key in ('format', 'alias', 'location_id', 'ref')}
 
 
 def preview_binding(root, control, uri):
@@ -781,217 +578,37 @@ def _set_table_view_control(root, alias, *, display, provenance, expected, field
     return {'status': 'updated', 'table': updated, 'digest': content_digest(updated)}
 
 
-def resolve_arguments(root, value, parameters, *, table_resolver):
-    from demiflow.lance.preview import describe_table
-
-    if (
-        not isinstance(parameters, dict)
-        or parameters.get("format") not in {"demiflow_forge_flow_parameters_v1", "demiflow_forge_flow_parameters_v2"}
-        or set(parameters) != {"format", "arguments"}
-        or not isinstance(parameters["arguments"], dict)
-    ):
-        raise ForgeError("Invalid flow parameter format")
-    tables = {}
-    targets = {}
-    controls = {}
-
-    def visit(item, depth=0):
-        if depth > 16:
-            raise ForgeError("Parameter nesting exceeds budget")
-        if isinstance(item, dict):
-            if item.get('kind') == 'location':
-                if parameters['format'] != 'demiflow_forge_flow_parameters_v2' or set(item) != {'kind', 'location_id'}:
-                    raise ForgeError('Location arguments require v2 and an explicit location_id')
-                location = value['locations'].get(item['location_id'])
-                if location is None:
-                    raise ForgeError('Unknown declared location')
-                return str(location_root(root, location))
-            if item.get("kind") == "table":
-                if set(item) != {"kind", "alias"}:
-                    raise ForgeError("Invalid table argument")
-                alias = item["alias"]
-                control, ref, uri = table_resolver(root, value, alias)
-                description = describe_table(uri, ref.lance_version)
-                if (
-                    description["schema_hash"] != ref.schema_hash
-                    or description["row_count"] != ref.row_count
-                ):
-                    raise ForgeError("Pinned table metadata changed")
-                tables[alias] = {**description, "uri": str(uri), "reference": table_identity(control)}
-                if not alias.startswith("run:"):
-                    controls["tables/" + alias + ".json"] = content_digest(table_identity(control))
-                return {"uri": str(uri), "version": ref.lance_version}
-            if item.get("kind") == "output":
-                modern = parameters['format'] == 'demiflow_forge_flow_parameters_v2'
-                required = {'kind', 'location_id', 'relative_uri'} | ({'mode', 'expected_version'} if modern else set())
-                if set(item) != required:
-                    raise ForgeError("Invalid output argument")
-                location = value["locations"].get(item["location_id"])
-                if not location or not location["writable"]:
-                    raise ForgeError("Output location must be workspace-owned")
-                mode, expected = item.get('mode', 'create'), item.get('expected_version')
-                if (mode not in location.get('write_modes', ['create']) or mode in {'create', 'checkpoint'} and expected is not None
-                        or mode == 'overwrite' and (type(expected) is not int or expected < 1)):
-                    raise ForgeError('Output mode requires location permission and a valid fixed CAS baseline')
-                path = relative_path(
-                    location_root(root, location), item["relative_uri"]
-                )
-                if path.suffix != ".lance":
-                    raise ForgeError("Output must name a .lance table")
-                if str(path) in targets:
-                    raise ForgeError('Each output target must have one declaration')
-                targets[str(path)] = {'mode': mode, 'expected_version': expected}
-                return {'uri': str(path), **({'mode': mode, 'expected_version': expected} if modern else {})}
-            return {k: visit(v, depth + 1) for k, v in item.items()}
-        if isinstance(item, list):
-            if len(item) > 1024:
-                raise ForgeError("Parameter sequence exceeds budget")
-            return [visit(v, depth + 1) for v in item]
-        if item is None or type(item) in (str, int, float, bool):
-            return item
-        raise ForgeError("Only finite JSON parameters are accepted")
-
-    args = visit(parameters["arguments"])
-    bounded_json(args, 1024**2)
-    return args, tables, targets, controls
-
-
 def current_platform_snapshot(snapshot):
     """Inspect the loaded checker; a workspace's historical snapshot is provenance."""
     return build_snapshot(snapshot['scope']['modules'], extras=snapshot['scope']['extras'],
                           limits=snapshot['limits'])
 
 
-def inspect_coding_changes(root, changes, reference, *, exclude=()):
-    """Resolve development check inputs using local, existing project controls."""
-    import ast
-    from functools import partial
-    from demiflow.forge.pipeline_check import MAX_VARIANTS, check_changes
-    from demiflow.forge.project_rules import ROLE_DIRS, diagnostic
-    from .discovery import coding_view
-
-    root = Path(root)
-    view = coding_view(root, exclude=exclude)
-    control = view['control']
-    entries = view['entries']
-    declared = {entry.partition(':')[0] for entry in entries}
-    registered_parameters = {path for paths in entries.values() for path in paths}
-    relevant, possible_flows, coverage, layout = set(), [], [], []
-    outside_candidates = 0
-    for change in changes:
-        path = change['path']
-        file = Path(path)
-        top = file.parts[0]
-        if (path in declared or path in registered_parameters or top in ROLE_DIRS or
-                file.suffix == '.py' and top not in {'tests', 'docs'}):
-            relevant.add(path)
-        if path in declared:
-            if change['after'] is None:
-                layout.append(diagnostic('DF-02', path, '项目登记的 flow 文件被删除。'))
-            elif top != 'flows':
-                layout.append(diagnostic('DF-02', path, '项目登记的 flow 应位于 flows/。'))
-        in_flows = path in view['roles']['flows']
-        new_python = (path in relevant and top != 'flows' and file.suffix == '.py'
-                      and change.get('before') is None and change['after'] is not None)
-        if path in declared or file.name == '__init__.py' or not (in_flows or new_python):
-            continue
-        if new_python:
-            outside_candidates += 1
-            if outside_candidates > MAX_VARIANTS:
-                if outside_candidates == MAX_VARIANTS + 1:
-                    detail = '本轮新 Python 文件超过入口发现预算。'
-                    coverage.append(diagnostic('FL-10', '', detail, status='incomplete'))
-                    layout.append(diagnostic('DF-01', '', detail, status='incomplete'))
-                continue
-        try:
-            tree = ast.parse(read_bounded(relative_path(root, path), 128 * 1024))
-        except SyntaxError as exc:
-            if in_flows:
-                layout.append(diagnostic('DF-02', path, '无法解析 flow 源码。', line=exc.lineno))
-                coverage.append(diagnostic('FL-01', path, '源码语法错误。'))
-            continue
-        public = [node.name for node in tree.body if isinstance(node, ast.FunctionDef)
-                  and not node.name.startswith('_')]
-        if len(public) != 1:
-            if in_flows:
-                layout.append(diagnostic('DF-02', path, '新 flow 需要一个明确的公开入口。'))
-                coverage.append(diagnostic('FL-01', path, '缺少唯一的 flow 入口。', status='incomplete'))
-            continue
-        entry = path + ':' + public[0]
-        validate_entry(root, entry)
-        if in_flows:
-            entries[entry] = [None]
-        else:
-            possible_flows.append(entry)
-
-    # Shared definitions can affect any registered flow. Never guess a
-    # dependency from a model message or silently skip an unregistered caller.
-    flow_paths = {entry.partition(':')[0] for entry in entries}
-    shared = bool(relevant - flow_paths - registered_parameters)
-    if not shared and relevant:
-        shared = any(c['path'] in relevant and c['after'] is None for c in changes)
-    if shared and any(path not in flow_paths and Path(path).name != '__init__.py' for path in view['roles']['flows']):
-        coverage.append(diagnostic('FL-10', '', '项目有尚未绑定的 flow，无法确认所有共享依赖。', status='incomplete'))
-    def load(params):
-        path = validate_parameter_path(root, params) if params is not None else None
-        value = read_control(path) if path else None
-        args, tables, targets, controls = resolve_arguments(
-            root, control or {'locations': {}}, value, table_resolver=table_binding
-        ) if path else ({}, {}, {}, {})
-
-        def recheck():
-            workspace_path = root / 'workspace.json'
-            current = read_control(workspace_path) if workspace_path.exists() else None
-            if current != control or path is not None and read_control(path) != value:
-                raise ForgeError('Project or flow parameters changed during inspection', code='conflict')
-            for filename, expected in controls.items():
-                if content_digest(table_identity(read_control(relative_path(root, filename)))) != expected:
-                    raise ForgeError('Table binding changed during inspection', code='conflict')
-
-        def resources(tree, references, bindings):
-            return resolve_flow_resources(root, tree, references, bindings, control=control or {'locations': {}})
-        return args, tables, targets, resources, recheck
-
-    def variants():
-        for entry, parameters in entries.items():
-            for params in parameters:
-                if relevant and (shared or entry.partition(':')[0] in relevant or params in relevant):
-                    yield entry, partial(load, params), False
-        for entry in possible_flows:
-            yield entry, partial(load, None), True
-
-    return check_changes(root, changed=relevant, variants=variants(),
-                         layout_diagnostics=layout, coverage=coverage,
-                         catalog=reference['catalog'], catalog_id=reference['catalog_id'])
-
-
 def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None):
-    from demiflow.forge.flow_check import FlowChecker
+    from demiflow.forge.pipeline_check import inspect_variant
 
     root, value, snapshot = load_workspace(root)
     snapshot = current_platform_snapshot(snapshot)
     path = validate_parameter_path(root, params) if isinstance(params, str) else None
-    parameters_value = read_control(path) if path else params
-    args, tables, targets, controls = resolve_arguments(root, value, parameters_value, table_resolver=table_resolver)
-    report = FlowChecker(
-        root, snapshot["catalog"], tables, targets, limits=limits,
-        resource_resolver=lambda tree, references, bindings: resolve_flow_resources(root, tree, references, bindings),
-    ).inspect(entry, args)
-    report["binding"].update(
-        {
-            "root": str(root),
-            "platform": snapshot["digests"]["snapshot"],
-            "controls": controls,
-            "parameters": parameters_value,
-            "parameter_path": str(path.relative_to(root)) if path else None,
-        }
-    )
+    parameters = read_control(path) if path else params
+    report = inspect_variant(root, value, entry, parameters, snapshot['catalog'],
+                             table_resolver=table_resolver, limits=limits)
+    report['binding']['parameter_path'] = str(path.relative_to(root)) if path else None
+    return _publish_inspection(root, value, snapshot, report, save=save)
+
+
+def _publish_inspection(root, value, snapshot, report, *, save=True):
+    binding = report['binding']
+    path = validate_parameter_path(root, binding['parameter_path']) if binding['parameter_path'] else None
+    parameters_value = binding['parameters']
+    controls = binding['controls']
+    binding.update(root=str(root), platform=snapshot['digests']['snapshot'])
     report['binding']['workspace_policy'] = workspace_policy(value, report['binding'])
     report['binding']['workspace'] = content_digest(report['binding']['workspace_policy'])
     if (
         read_control(root / "workspace.json") != value
         or any(
-            content_digest(read_control(root / p)) != digest
+            content_digest(table_identity(read_control(root / p))) != digest
             for p, digest in controls.items()
         )
         or path
@@ -1011,7 +628,7 @@ def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None
     if (
         read_control(root / "workspace.json") != value
         or any(
-            content_digest(read_control(root / p)) != digest
+            content_digest(table_identity(read_control(root / p))) != digest
             for p, digest in controls.items()
         )
         or path
@@ -1031,10 +648,13 @@ def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None
     report["digest"] = content_digest(report)
     if save:
         from demiflow.workbench.projects import index
+        from demiflow.workbench.projects.index import initialize_if_empty
         import shutil
         with control_lock(root):
+            initialize_if_empty(root)
             directory = root / ".forge/inspections"
             no_symlinks(directory)
+            directory.mkdir(exist_ok=True)
             target = directory / (report["digest"] + ".json")
             marker = index.begin(root, 'report', report['digest'])
             interrupted = False
@@ -1051,104 +671,6 @@ def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None
                 if not interrupted:
                     publish_report_index(root, marker)
     return report
-
-
-def resolve_flow_resources(root, tree, references, bindings, *, control=None):
-    """Read declared files under the workspace's existing source budget.
-
-    Analyzers receive configuration text or immutable file metadata, never a
-    workspace, SourceTree, connection or unrestricted reader.
-    """
-    if type(references) is not list or len(references) > 256:
-        raise ForgeError("Declared resource count exceeds budget")
-    result = {}
-    for reference in references:
-        if type(reference) is not dict or type(reference.get('parameter')) is not str or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,63}', reference['parameter']) or reference['parameter'] in result:
-            raise ForgeError('Invalid or duplicate resource parameter')
-        if reference.get('kind') == 'objects':
-            if set(reference)-{'access'} != {'kind', 'parameter', 'root', 'relocations', 'layout'}:
-                raise ForgeError('Invalid object location reference')
-            reference=dict(reference)
-            from demiflow.objects import _local_path
-            value=str(reference['root'])
-            logical=_local_path(value) if value.startswith('file:') else Path(value)
-            reference['root']=str(logical if logical.is_absolute() else Path(root)/logical)
-            workspace = control if control is not None else load_workspace(root)[1]
-            matches = [key for key, location in workspace['locations'].items()
-                       if str(location_root(root, location)) == reference['root']]
-            if len(matches) != 1:
-                raise ForgeError('Object root must match one registered workspace location')
-            if reference.get('access') not in {None,'write'}:
-                raise ForgeError('Unknown object resource access')
-            if reference.get('access')=='write' and not workspace['locations'][matches[0]].get('writable',False):
-                raise ForgeError('Image object destination is not writable')
-            binding = {k: reference[k] for k in ('kind', 'root', 'relocations', 'layout')}
-            binding['location_id'] = matches[0]
-            if 'access' in reference:binding['access']=reference['access']
-            key = 'objects:' + content_digest(binding)
-            if key not in bindings and len(bindings) >= 256:
-                raise ForgeError('Declared resource closure exceeds count budget')
-            bindings[key] = binding
-            result[reference['parameter']] = binding
-            continue
-        if type(reference) is dict and reference.get('kind') == 'ledger':
-            from demiflow.operator_llm.sqlite_journal import MAX_DISK_BYTES
-            if set(reference) != {'kind', 'parameter', 'path', 'format', 'max_bytes'}:
-                raise ForgeError('Invalid native ledger reference')
-            path = reference['path']
-            if type(path) is not str or not re.fullmatch(r'evidence/[A-Za-z][A-Za-z0-9_-]{0,63}\.sqlite', path):
-                raise ForgeError('Run ledger must use evidence/<name>.sqlite')
-            if type(reference['max_bytes']) is not int or not 4 * 1024**2 <= reference['max_bytes'] <= MAX_DISK_BYTES:
-                raise ForgeError('Run ledger requires a 4 MiB..32 GiB disk ceiling')
-            if type(reference['format']) is not str or not re.fullmatch(r'[a-z][a-z0-9_]{0,95}', reference['format']):
-                raise ForgeError('Invalid native ledger format')
-            binding = {k: reference[k] for k in ('kind', 'path', 'format', 'max_bytes')}
-            key = 'ledger:' + path
-            if key in bindings and bindings[key] != binding:
-                raise ForgeError('Shared ledger declarations must have identical limits and format')
-            if key not in bindings and len(bindings) >= 256:
-                raise ForgeError('Declared resource closure exceeds count budget')
-            bindings[key] = binding
-            result[reference['parameter']] = binding
-            continue
-        kind = reference.get('kind')
-        required = {"kind", "parameter", "path"}
-        if kind == 'file':
-            required |= {'format', 'sha256', 'max_bytes'}
-        if set(reference) != required:
-            raise ForgeError("Invalid declared resource reference")
-        if kind not in {'config', 'file'}:
-            raise ForgeError("Declared resource kind has no workspace binding contract")
-        maximum = 1024**2
-        if kind == 'file':
-            maximum = reference['max_bytes']
-            if type(maximum) is not int or not 1 <= maximum <= 16 * 1024**2:
-                raise ForgeError('Sealed file requires a byte ceiling <= 16 MiB')
-            if type(reference['format']) is not str or not re.fullmatch(r'[a-z][a-z0-9_]{0,95}', reference['format']):
-                raise ForgeError('Invalid sealed file format')
-            if type(reference['sha256']) is not str or not re.fullmatch('[0-9a-f]{64}', reference['sha256']):
-                raise ForgeError('Sealed file requires an exact SHA256')
-        name, path = reference["parameter"], reference["path"]
-        physical = relative_path(root, path)
-        if any(part.startswith('.') for part in Path(path).parts):
-            raise ForgeError("Declared resource must be an author file within the project")
-        allowance = maximum if path in bindings else min(maximum, tree.limits["total_bytes"] - tree.bytes)
-        raw = read_bounded(physical, allowance)
-        digest = hashlib.sha256(raw).hexdigest()
-        binding = {"kind": kind, "path": path, "size": len(raw), "sha256": digest}
-        if kind == 'file':
-            if digest != reference['sha256']:
-                raise ForgeError('Declared file SHA256 mismatch')
-            binding.update(format=reference['format'], max_bytes=maximum)
-        if path in bindings and bindings[path] != binding:
-            raise ForgeError("Declared resource changed during analysis")
-        if path not in bindings:
-            if len(bindings) >= 256:
-                raise ForgeError("Declared resource closure exceeds count budget")
-            tree.bytes += len(raw)
-            bindings[path] = binding
-        result[name] = {**binding, "text": raw.decode("utf-8")} if kind == 'config' else dict(binding)
-    return result
 
 
 def report_index_entry(root, digest, *, deadline=None):
@@ -1443,6 +965,8 @@ def report_files(root):
     directory = Path(root) / '.forge/inspections'
     no_symlinks(directory)
     paths, total = [], 0
+    if not directory.exists():
+        return paths
     with os.scandir(directory) as entries:
         for entry in entries:
             if len(paths) >= 128:

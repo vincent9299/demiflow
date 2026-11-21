@@ -5,7 +5,8 @@ from pathlib import Path
 
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.schema import ForgeError
-from .io import no_symlinks, relative_path
+from demiflow.forge.io import no_symlinks
+from demiflow.forge.project_io import relative_path
 
 DIRECTORY_ENTRIES = 4096
 DIRECTORY_BYTES = 512 * 1024

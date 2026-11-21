@@ -6,12 +6,36 @@ import hashlib
 import json
 import yaml
 
-from .environment import OperatorEnvironment, LIMITS
+from .environment import OperatorEnvironment, LIMITS, prepare_environment, validate_agent_prompt
 from .operator_llm.errors import PromptPackError
 from .operator_llm.model import PromptModel, PromptPack, PromptPackVersion, parse_prompt_model
 from .operator_llm.parser import _inspect_prompt
 
 __all__ = ["AgentConfig", "load_agent_config"]
+
+
+def _validate_settings(runtime, pack, options, max_requests):
+    if type(max_requests) is not int or max_requests < 0:
+        raise ValueError('Agent max_requests must be a finite nonnegative integer')
+    options = deepcopy(options)
+    if not isinstance(options, dict):
+        raise TypeError('Agent options must be a mapping')
+    if set(options) & {'codex_exec', 'offline_dir', 'offline_store', 'sqlite_journal', 'journal_dir'}:
+        raise ValueError('Agent configuration owns runtime settings; journals/replay belong to the node')
+    if runtime == 'codex':
+        from .operator_llm.codex_agent import validate_options
+        options.setdefault('codex_agent', {})
+        validate_options(options)
+    else:
+        from .operator_llm.http_options import validate_http_options
+        validate_http_options(options)
+        if any(options.get('request_options', {}).get(key) for key in
+               ('tools', 'functions', 'tool_choice', 'function_call', 'web_search_options')):
+            raise ValueError('Agent external interactions must use environment operators')
+    for prompt in pack.prompts:
+        if (prompt.model.transport == 'codex') != (runtime == 'codex'):
+            raise ValueError('Agent model transport must match its runtime')
+    return options
 
 
 @dataclass(frozen=True)
@@ -25,26 +49,8 @@ class AgentConfig:
     def __post_init__(self):
         if not isinstance(self.prompt_pack, PromptPack) or not isinstance(self.environment, OperatorEnvironment):
             raise TypeError('AgentConfig requires a prompt definition and an operator environment')
-        if type(self.max_requests) is not int or self.max_requests < 0:
-            raise ValueError('Agent max_requests must be a finite nonnegative integer')
-        options = deepcopy(self.options)
-        if not isinstance(options, dict):
-            raise TypeError('Agent options must be a mapping')
-        if set(options) & {'codex_exec', 'offline_dir', 'offline_store', 'sqlite_journal', 'journal_dir'}:
-            raise ValueError('Agent configuration owns runtime settings; journals/replay belong to the node')
-        if self.environment.runtime == 'codex':
-            from .operator_llm.codex_agent import validate_options
-            options.setdefault('codex_agent', {})
-            validate_options(options)
-        else:
-            from .operator_llm.http_options import validate_http_options
-            validate_http_options(options)
-            if any(options.get('request_options', {}).get(key) for key in
-                   ('tools', 'functions', 'tool_choice', 'function_call', 'web_search_options')):
-                raise ValueError('Agent external interactions must use environment operators')
+        options = _validate_settings(self.environment.runtime, self.prompt_pack, self.options, self.max_requests)
         for prompt in self.prompt_pack.prompts:
-            if (prompt.model.transport == 'codex') != (self.environment.runtime == 'codex'):
-                raise ValueError('Agent model transport must match its runtime')
             self.environment.prompt(prompt)
         object.__setattr__(self, 'options', options)
 
@@ -65,13 +71,8 @@ class AgentConfig:
         return result
 
 
-def load_agent_config(path: str | Path) -> AgentConfig:
-    """Read one complete agent file; never load a second task/prompt file."""
-    with Path(path).open('rb') as source:
-        encoded = source.read(1024 * 1024 + 1)
-    if len(encoded) > 1024 * 1024:
-        raise PromptPackError('Agent configuration exceeds 1 MiB')
-    raw = yaml.safe_load(encoded)
+def _agent_document(raw):
+    """Pure native bindings shared by authoring and execution."""
     fields = {'schema_version', 'runtime', 'model', 'tasks', 'operators', 'operator_settings',
               'resources', 'budgets', 'options'}
     if not isinstance(raw, dict) or raw.get('schema_version') != 'demiflow_agent_v2' or set(raw) - fields:
@@ -96,7 +97,7 @@ def load_agent_config(path: str | Path) -> AgentConfig:
         raise PromptPackError('Agent budgets require max_requests and only declared environment limits')
     if runtime == 'codex' and set(budgets) & {'max_turns', 'max_calls_per_turn'}:
         raise PromptPackError('Codex owns model turns; use session/operator budgets')
-    environment = OperatorEnvironment(runtime=runtime, operators=tuple(operators) if isinstance(operators, list) else operators, resources=raw.get('resources'),
+    environment = dict(runtime=runtime, operators=tuple(operators) if isinstance(operators, list) else operators, resources=raw.get('resources'),
         operator_settings=raw.get('operator_settings', {}),
         **{key: value for key, value in budgets.items() if key != 'max_requests'})
     tasks = raw.get('tasks')
@@ -116,4 +117,44 @@ def load_agent_config(path: str | Path) -> AgentConfig:
     identity = hashlib.sha256(json.dumps(raw, sort_keys=True,
         ensure_ascii=False, allow_nan=False).encode()).hexdigest()
     pack = PromptPack(PromptPackVersion.V2, tuple(definitions), 'sha256:' + identity)
-    return AgentConfig(pack, environment, raw.get('options', {}), budgets['max_requests'])
+    return pack, environment, raw.get('options', {}), budgets['max_requests']
+
+
+def inspect_agent_config_document(document: dict) -> tuple[tuple[str, ...], tuple[dict, ...]]:
+    """Inspect static fields and tool declarations without loading project callables."""
+    pack, environment, options, max_requests = _agent_document(document)
+    _validate_settings(environment['runtime'], pack, options, max_requests)
+    for prompt in pack.prompts:
+        validate_agent_prompt(prompt)
+    resolved, settings = prepare_environment(environment['runtime'], environment['operators'], environment['resources'],
+                        environment['operator_settings'], {
+                            key: environment.get(key, getattr(OperatorEnvironment, key))
+                            for key in (*LIMITS, 'max_operator_calls')
+                        }, bind=False)
+    from .operator_api import is_project_entry
+    references = []
+    for declaration in resolved.values():
+        for kind in ('function', 'actor', 'validate_resources', 'validate_arguments'):
+            entry = declaration.get(kind)
+            if entry and is_project_entry(entry):
+                reference = dict(kind=kind, entry=entry)
+                if kind in ('function', 'actor'):
+                    reference['execution'] = declaration.get('execution')
+                    fixed = set(settings.get(declaration['name'], {}).get('arguments', {}))
+                    bound = fixed | declaration['bindings'].keys()
+                    reference['required_arguments'] = sorted(bound | set(declaration['arguments'].get('required', ())))
+                    reference['possible_arguments'] = sorted(bound | declaration['arguments'].get('properties', {}).keys())
+                if kind == 'actor':
+                    reference['init'] = declaration['init']
+                references.append(reference)
+    return tuple(pack.prompt_definitions), tuple(references)
+
+
+def load_agent_config(path: str | Path) -> AgentConfig:
+    """Read one complete agent file; never load a second task/prompt file."""
+    with Path(path).open('rb') as source:
+        encoded = source.read(1024 * 1024 + 1)
+    if len(encoded) > 1024 * 1024:
+        raise PromptPackError('Agent configuration exceeds 1 MiB')
+    pack, environment, options, max_requests = _agent_document(yaml.safe_load(encoded))
+    return AgentConfig(pack, OperatorEnvironment(**environment), options, max_requests)

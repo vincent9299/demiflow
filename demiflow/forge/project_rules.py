@@ -1,22 +1,50 @@
-"""Project roles for pipeline authoring and independent layout diagnostics."""
+"""Packaged authoring rules and independent source-layout diagnostics."""
+from hashlib import sha256
 from pathlib import Path
+import re
+
 from .platform import content_digest
+from .platform_environment import read_bounded
+from .schema import ForgeError
 
 
 ROLE_DIRS = ('flows', 'operators', 'prompts')
-RULES = (
-    ('DF-02', '每条 flow 在 flows/ 中定义一个明确入口。共用代码算子放 operators/，'
-              '原生 Prompt 和 Agent 配置放 prompts/。只创建需要的目录。'),
-    ('DF-03', '在 flow 内用原生 Dataset API 串联算子、模型和 I/O。业务函数或 Actor 只负责其本地逻辑。'
-              '不要把子流程、模型调用或写入藏在普通算子中，也不要从一个 flow 导入另一个 flow 的入口。'),
-    ('DF-05', '在版本化的 Prompt 或 Agent 文件内保留原生模型、输入和输出声明。'
-              '在 flow 使用原生节点显式引用所需定义。'),
-)
-RULES_ID = content_digest(RULES)
+TOPICS = ('flow', 'operator', 'prompt')
+GUIDE_RESOURCE = 'standards/pipeline-authoring.md'
 
 
-def guidance():
-    return '## Pipeline 开发规则\n' + '\n'.join(f'- {rule} {text}' for rule, text in RULES)
+def _read_guide():
+    path = Path(__file__).parent / GUIDE_RESOURCE
+    raw = read_bounded(path, 64 * 1024)
+    sections = re.split(r'^## (\w+)\s*$', raw.decode(), flags=re.MULTILINE)
+    if tuple(sections[1::2]) != ('core', *TOPICS):
+        raise ForgeError('Authoring guide has invalid topic headings')
+    rules, notes = [], []
+    for topic, body in zip(sections[1::2], sections[2::2]):
+        items = re.split(r'^### ([^\n]+)$', body, flags=re.MULTILINE)
+        for heading, text in zip(items[1::2], items[2::2]):
+            source = f'{GUIDE_RESOURCE}#{topic}'
+            if heading == '建议与示例':
+                notes.append(dict(topic=topic, text=text.strip(), source=source))
+            elif re.fullmatch(r'DF-\d{2}', heading):
+                if any(rule['id'] == heading for rule in rules):
+                    raise ForgeError('Duplicate authoring rule: ' + heading)
+                rules.append(dict(topic=topic, id=heading, text=text.strip(), source=source))
+            else:
+                raise ForgeError('Unknown authoring guide heading: ' + heading)
+    return rules, notes, sha256(raw).hexdigest()
+
+
+_RULES, _NOTES, GUIDE_DIGEST = _read_guide()
+RULES_ID = content_digest([(item['id'], item['text']) for item in _RULES])
+
+
+def guidance(*, topics=()):
+    selected = {'core', *topics}
+    if selected.difference(('core', *TOPICS)):
+        raise ForgeError('Unknown authoring topic', code='invalid_request')
+    return ([dict(item) for item in _RULES if item['topic'] in selected],
+            [dict(item) for item in _NOTES if item['topic'] in selected])
 
 
 def diagnostic(rule, path, detail, *, line=None, status='invalid'):

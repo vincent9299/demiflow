@@ -1,4 +1,5 @@
 """Real registered metadata, CAS faults and sealed-source/occurrence identities."""
+from _forge_project_fixtures import declare_existing_flow
 import hashlib
 import json
 import shutil
@@ -236,7 +237,7 @@ def test_nested_parameter_paths_correlate_only_the_actual_consumers(isolated):
     minimum=value['arguments'].pop('minimum')
     value['arguments']['settings']=dict(minimum=minimum,max_chars=1024)
     (isolated/'flows/nested.json').write_text(json.dumps(value))
-    ws.register_flow(isolated,'flows/nested.py:run',params='flows/nested.json')
+    declare_existing_flow(isolated,'flows/nested.py:run',params='flows/nested.json')
     report=project_ops.inspect_flow(isolated,'flows/nested.py:run',params='flows/nested.json')
     assert report['status']=='checked',report['diagnostics']
     graph=model.get(isolated,basis_kind='report',report_digest=report['digest'])
@@ -408,7 +409,7 @@ def test_source_display_clipping_does_not_claim_semantic_coverage(isolated):
     path.write_text('def run():\n'+''.join('    unknown()\n' for _ in range(260)))
     params=isolated/'flows/unexpanded.json'
     params.write_text(json.dumps(dict(format='demiflow_forge_flow_parameters_v1',arguments={})))
-    ws.register_flow(isolated,'flows/unexpanded.py:run',params='flows/unexpanded.json')
+    declare_existing_flow(isolated,'flows/unexpanded.py:run',params='flows/unexpanded.json')
     g=model.get(isolated,basis_kind='source',entry='flows/unexpanded.py:run',params='flows/unexpanded.json')
     assert g['completeness']['display']=='clipped' and g['completeness']['total_nodes']==260
     assert len(g['nodes'])==128 and g['completeness']['semantic']=='unchecked'
@@ -434,7 +435,7 @@ def test_source_edges_do_not_guess_last_branch_or_cross_nested_scopes(isolated):
     return consume(selected, lambda selected: also_deferred(selected))
 ''')
     params.write_text(json.dumps(dict(format='demiflow_forge_flow_parameters_v1',arguments={'flag':True})))
-    ws.register_flow(isolated,'flows/syntax.py:run',params='flows/syntax.json')
+    declare_existing_flow(isolated,'flows/syntax.py:run',params='flows/syntax.json')
     observed=model.get(isolated,basis_kind='source',entry='flows/syntax.py:run',params='flows/syntax.json')
     assert {n['api'] for n in observed['nodes']}=={'left','right','consume'}
     assert observed['edges']==[]

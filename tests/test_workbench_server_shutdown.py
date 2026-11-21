@@ -1,4 +1,5 @@
 """HTTP teardown waits for its real bounded inspection before reader cleanup."""
+from demiflow.forge.project import initialize_project
 import http.client
 import json
 from pathlib import Path
@@ -19,7 +20,7 @@ from demiflow.workbench.projects import workspace
 @pytest.mark.parametrize('outcome', ['success', 'inspection_error', 'disconnect'])
 def test_close_drains_owned_inspection_before_closing_shared_reader(tmp_path, monkeypatch, outcome):
     root = tmp_path / 'workspace'
-    workspace.init_workspace(root, name='Owned HTTP shutdown')
+    initialize_project(root, name='Owned HTTP shutdown')
     ready, release = tmp_path / 'ready', tmp_path / 'release'
     events, requests, failures = [], [], []
     request_finished, close_started, closed = (threading.Event() for _ in range(3))

@@ -35,6 +35,16 @@ def _local_path(uri):
     return path
 
 
+def local_object_directory(directory, *, base=None):
+    """Resolve an object-store root without opening or creating the store."""
+    value = str(directory)
+    if urlsplit(value).scheme not in {'', 'file'}:
+        raise ValueError('LocalObjectStore requires a local directory or file URI')
+    if value.startswith('file:'):
+        return _local_path(value)
+    return ((Path(base) / value) if base is not None else Path(value)).absolute()
+
+
 def read_local_object(uri, sha256, *, root, max_bytes):
     """Read one exact, bounded local object under an explicit root.
 
@@ -206,11 +216,7 @@ class LocalObjectStore:
         elif domain_id is not None:
             raise ValueError('Host domain identity is assigned by the native resource registry')
         self.read_domain, self.domain_id, self.store_id = read_domain, domain_id, identifier(store_id)
-        value = str(directory)
-        if urlsplit(value).scheme not in {'', 'file'}:
-            raise ValueError('LocalObjectStore requires a local directory or file URI')
-        self.directory = (_local_path(value) if value.startswith('file:')
-                          else Path(value).absolute())
+        self.directory = local_object_directory(directory)
         # New explicit domain reads require a direct physical declaration. Keep
         # the original spelling for that check without changing legacy put/read
         # location and artifact-alias behavior.

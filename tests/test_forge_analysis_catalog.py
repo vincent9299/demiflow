@@ -2,6 +2,7 @@
 
 No analysis helper, kernel, external deployment, original business or model.
 """
+from demiflow.forge.project import initialize_project
 import json
 import pytest
 from urllib.parse import urlencode
@@ -35,7 +36,7 @@ def test_catalog_profile_is_read_only_fixed_and_available_without_analysis_envir
 
 
 def test_original_declared_profile_keeps_fixed_version_and_does_not_edit_business_files(original):
-    ws.init_workspace(original,existing=True);before=business_bytes(original)
+    initialize_project(original,existing=True);before=business_bytes(original)
     discovery=ws.discover_project(original);item=next(row for row in discovery['tables'] if row['version']==1)
     metadata=project_ops.project_table(original,item['id'],expected=discovery['digest'])
     with service(original) as app:

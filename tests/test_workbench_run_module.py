@@ -1,4 +1,5 @@
 """Run workspace acceptance against the real service and execution journal."""
+from _forge_project_fixtures import declare_existing_flow
 import json
 import time
 from pathlib import Path
@@ -186,7 +187,7 @@ def run(*, directory):
     (root/'flows/native.json').write_text(json.dumps({
         'format': 'demiflow_forge_flow_parameters_v1',
         'arguments': {'directory': str(root/'never-created')}}))
-    ws.register_flow(root, 'flows/native.py:run', params='flows/native.json')
+    declare_existing_flow(root, 'flows/native.py:run', params='flows/native.json')
     with service(root, enable_runs=True) as app, page_for(browser, app) as (page, errors):
         page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
         page.locator('.wb-flow-record[data-entry="flows/native.py:run"]').click()

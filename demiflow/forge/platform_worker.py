@@ -152,6 +152,15 @@ def run_inspection(modules, limits, *, version=3):
                     {"modules": list(modules), "limits": limits, "version": version}, limits)
 
 
+def describe_fixed_table(uri, version):
+    """Load native table metadata in a one-shot inspection process."""
+    limits = {'timeout_seconds': 24, 'catalog_bytes': 2*1024**2, 'stderr_bytes': 64*1024}
+    response = capture([sys.executable, '-I', '-B', str(Path(__file__).resolve())],
+                       {'fixed_table': str(uri), 'version': version}, limits,
+                       response_formats={'demiflow_forge_fixed_table_metadata_v1'})
+    return response['metadata']
+
+
 def main():
     package = Path(__file__).resolve().parents[1]
     bind_parent()
@@ -161,6 +170,19 @@ def main():
     if len(raw) > 16384:
         raise ValueError("Inspection request exceeds byte budget")
     request = json.loads(raw)
+    if set(request) == {'fixed_table', 'version'}:
+        import resource
+        from demiflow.lance.preview import describe_table
+        if type(request['version']) is not int or request['version'] < 1:
+            raise ValueError('Metadata inspection requires a fixed table version')
+        maximum = 4 * 1024**3
+        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        ceiling = min(n for n in (soft, hard, maximum) if n != resource.RLIM_INFINITY)
+        resource.setrlimit(resource.RLIMIT_AS, (ceiling, hard))
+        metadata = describe_table(request['fixed_table'], request['version'])
+        sys.stdout.buffer.write(bounded_json(
+            {'format': 'demiflow_forge_fixed_table_metadata_v1', 'metadata': metadata}, 2*1024**2))
+        return
     if set(request) not in ({"modules", "limits"}, {"modules", "limits", "version"}):
         raise ValueError("Invalid inspection request")
     limits = limits_with(request["limits"])

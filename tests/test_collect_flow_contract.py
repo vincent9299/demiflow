@@ -1,4 +1,5 @@
 """Native object/media facts and byte-preserving behavior, without business imports."""
+from demiflow.forge.project import initialize_project
 import hashlib
 import io
 import json
@@ -16,6 +17,7 @@ from demiflow.execution.local_kernel import local_execution
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules, LIMITS
 from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
+from demiflow.forge.project_bindings import resolve_flow_resources
 from demiflow.workbench.projects import workspace as ws
 from test_operator_foundation_models import load
 
@@ -23,7 +25,7 @@ from test_operator_foundation_models import load
 @pytest.fixture(scope='module')
 def base(tmp_path_factory):
     path = tmp_path_factory.mktemp('collect-contract') / 'workspace'
-    ws.init_workspace(path)
+    initialize_project(path)
     for directory in ('flows', 'operators', 'tables', 'data'):
         (path / directory).mkdir()
     control = ws.read_control(path / 'workspace.json')
@@ -90,7 +92,7 @@ def inspected(root, family):
     (root / 'flows/collect.py').write_text('from demiflow import data\ndef run():\n    return ' + body + '.materialize()\n')
     catalog = inspect_modules(['demiflow.data'], Path(data.__file__).resolve().parents[1], LIMITS)
     report = FlowChecker(root, catalog, {}, [], resource_resolver=lambda tree, refs, bindings:
-        ws.resolve_flow_resources(root, tree, refs, bindings)).inspect('flows/collect.py:run', {})
+        resolve_flow_resources(root, tree, refs, bindings)).inspect('flows/collect.py:run', {})
     return report, raw
 
 
@@ -127,7 +129,7 @@ def test_object_locations_must_be_registered_and_cannot_drift(root):
     source.write_text(source.read_text().replace(repr(str(root / 'data')), repr(str(root))))
     catalog = inspect_modules(['demiflow.data'], Path(data.__file__).resolve().parents[1], LIMITS)
     report = FlowChecker(root, catalog, {}, [], resource_resolver=lambda tree, refs, bindings:
-        ws.resolve_flow_resources(root, tree, refs, bindings)).inspect('flows/collect.py:run', {})
+        resolve_flow_resources(root, tree, refs, bindings)).inspect('flows/collect.py:run', {})
     assert report['status'] != 'checked'
     assert any('registered' in d['detail'] for d in report['diagnostics'])
 

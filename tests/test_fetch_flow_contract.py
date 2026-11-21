@@ -4,7 +4,7 @@ import pytest
 from demiflow import data
 from demiflow.forge.platform import inspect_modules,LIMITS
 from demiflow.forge.flow_check import FlowChecker
-from demiflow.workbench.projects import workspace as ws
+from demiflow.forge.project_bindings import resolve_flow_resources
 from demiflow.execution.checked import CheckedExecution
 from demiflow.execution.run_context import RunContext
 from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
@@ -25,7 +25,7 @@ def test_forge_inspection_and_actual_fetch_share_native_contract(root,monkeypatc
         catalog=inspect_modules(['demiflow.data','demiflow.objects','demiflow.collect.raw_contract'],Path(data.__file__).resolve().parents[1],LIMITS)
         assert catalog['inspection_complete'],catalog['diagnostics']
         report=FlowChecker(root,catalog,{},[],resource_resolver=lambda tree,refs,bindings:
-            ws.resolve_flow_resources(root,tree,refs,bindings)).inspect('flows/acquire.py:run',{})
+            resolve_flow_resources(root,tree,refs,bindings)).inspect('flows/acquire.py:run',{})
         assert report['status']=='checked',report['diagnostics']
         assert not calls and not list((root/'data').iterdir())
         fetched=[n for n in report['nodes'] if n['kind']=='fetch']

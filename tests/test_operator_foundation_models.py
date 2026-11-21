@@ -14,7 +14,7 @@ from demiflow.execution.checked import CheckedExecution
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules, LIMITS
 from demiflow.workbench.runs.manager import DEFAULT_LIMITS
-from demiflow.workbench.projects.workspace import resolve_flow_resources
+from demiflow.forge.project_bindings import resolve_flow_resources
 from demiflow.execution.local_kernel import local_execution
 from test_map_prompt_async import PACK, server
 

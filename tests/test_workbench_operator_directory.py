@@ -1,4 +1,6 @@
 """The operator directory navigates the real compiler and existing bound reader."""
+from demiflow.forge.project import initialize_project
+from _forge_project_fixtures import declare_existing_flow
 import json
 
 from playwright.sync_api import expect
@@ -105,7 +107,7 @@ def test_directory_real_source_prompt_config_graph_link_reload_and_narrow(origin
 
 def test_directory_configuration_switch_clears_old_rows_and_keeps_tab(tmp_path, browser):
     root = tmp_path / 'plain-project'
-    ws.init_workspace(root, name='Directory configurations')
+    initialize_project(root, name='Directory configurations')
     (root / 'flow.py').write_text(
         'from demiflow import data\n'
         'def keep(row): raise AssertionError("must not execute rows")\n'
@@ -115,7 +117,7 @@ def test_directory_configuration_switch_clears_old_rows_and_keeps_tab(tmp_path, 
         '    return rows.take_all()\n')
     for name, extra in [('base.json', False), ('extra.json', True)]:
         (root / name).write_text(json.dumps({'arguments': {'extra': extra}}))
-        ws.register_flow(root, 'flow.py:run', params=name)
+        declare_existing_flow(root, 'flow.py:run', params=name)
     with service(root) as app, opened(browser, app) as (page, requests):
         page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
         expect(page.get_by_role('button', name='解析执行计划', exact=True)).to_be_enabled()

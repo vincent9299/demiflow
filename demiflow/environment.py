@@ -41,6 +41,60 @@ def _error(code, message):
     return {'status': 'error', 'code': code, 'message': message}
 
 
+def validate_agent_prompt(business_prompt):
+    if business_prompt.response_format == 'text':
+        raise ValueError('agentmap_async requires a JSON business response schema')
+    if {STATE, TOOL_IMAGES} & set(business_prompt.template.arguments):
+        raise ValueError('Reserved environment template variable')
+
+
+def prepare_environment(runtime, operators, resources, operator_settings, limits, *, bind):
+    """Validate environment fields; only execution binds application code."""
+    if runtime not in ('demiflow', 'codex'):
+        raise ValueError('runtime must be demiflow or codex')
+    if type(limits['max_operator_calls']) is not int or not 1 <= limits['max_operator_calls'] <= 256:
+        raise ValueError('max_operator_calls must be an integer in [1, 256]')
+    if runtime == 'codex' and (limits['max_turns'] != 4 or limits['max_calls_per_turn'] != 2):
+        raise ValueError('Codex owns model turns; use max_operator_calls instead of turn limits')
+    if resources is not None and (not isinstance(resources, str) or not resources):
+        raise ValueError('resources must name a row column')
+    for key in LIMITS[:-1]:
+        if type(limits[key]) is not int or limits[key] < 1:
+            raise ValueError(key + ' must be a positive integer')
+    if limits['max_turns'] > 32 or limits['max_calls_per_turn'] > 8 or limits['max_resources'] > 256:
+        raise ValueError('Environment exceeds protocol turn/call/resource limits')
+    if type(limits['timeout_s']) not in (int, float) or not math.isfinite(limits['timeout_s']) or limits['timeout_s'] <= 0:
+        raise ValueError('timeout_s must be finite and positive')
+
+    resolved, inline_settings = definitions(operators, bind=bind)
+    apis = list(resolved.values())
+    if runtime == 'demiflow' and any(api['replay'] != 'verify' for api in apis):
+        raise ValueError('Recorded-only operator APIs require Codex runtime; HTTP replay needs verifiable APIs')
+    if any(api['requires_resources'] for api in apis) and resources is None:
+        raise ValueError('resources must name a row column for the selected APIs')
+    settings = deepcopy(operator_settings)
+    if not isinstance(settings, dict):
+        raise ValueError('operator_settings must be a mapping')
+    for name, inline in inline_settings.items():
+        if set(inline) & set(settings.get(name, {})):
+            raise ValueError('Do not declare fixed arguments twice: ' + name)
+        settings[name] = {**settings.get(name, {}), **inline}
+    if (not isinstance(settings, dict) or set(settings) - set(operators)
+            or len(canonical(settings)) > 65536):
+        raise ValueError('operator_settings must configure only selected APIs within 64 KiB')
+    for api in apis:
+        for source in api['bindings'].values():
+            if source.startswith('limits.') and source[7:] not in {*LIMITS, 'max_operator_calls'}:
+                raise ValueError('Unknown operator execution limit binding: ' + source)
+        setting = settings.get(api['name'], {})
+        if not isinstance(setting, dict) or set(setting) - {'arguments', 'result_images'}:
+            raise ValueError('Operator settings accept fixed arguments and result_images only')
+        validate_fixed(api, setting.get('arguments', {}))
+        if 'result_images' in setting:
+            image_fields(setting['result_images'])
+    return resolved, settings
+
+
 @dataclass(frozen=True)
 class OperatorEnvironment:
     """Native operators made available within each model row.
@@ -76,54 +130,15 @@ class OperatorEnvironment:
     max_tool_image_candidates: int = 64
 
     def __post_init__(self):
-        if self.runtime not in ('demiflow', 'codex'):
-            raise ValueError('runtime must be demiflow or codex')
-        if type(self.max_operator_calls) is not int or not 1 <= self.max_operator_calls <= 256:
-            raise ValueError('max_operator_calls must be an integer in [1, 256]')
-        if self.runtime == 'codex' and (self.max_turns != 4 or self.max_calls_per_turn != 2):
-            raise ValueError('Codex owns model turns; use max_operator_calls instead of turn limits')
-        if self.resources is not None and (not isinstance(self.resources, str) or not self.resources):
-            raise ValueError('resources must name a row column')
-        resolved, inline_settings = definitions(self.operators)
+        resolved, settings = prepare_environment(self.runtime, self.operators, self.resources,
+            self.operator_settings, {key: getattr(self, key) for key in (*LIMITS, 'max_operator_calls')}, bind=True)
         object.__setattr__(self, '_definitions', resolved)
         selected = deepcopy(self.operators)
         if isinstance(selected, dict):
             for specification in selected.values():
                 specification.pop('fixed_arguments', None)
         object.__setattr__(self, 'operators', selected)
-        apis = list(resolved.values())
-        if self.runtime == 'demiflow' and any(api['replay'] != 'verify' for api in apis):
-            raise ValueError('Recorded-only operator APIs require Codex runtime; HTTP replay needs verifiable APIs')
-        if any(api['requires_resources'] for api in apis) and self.resources is None:
-            raise ValueError('resources must name a row column for the selected APIs')
-        settings = deepcopy(self.operator_settings)
-        if not isinstance(settings, dict):
-            raise ValueError('operator_settings must be a mapping')
-        for name, inline in inline_settings.items():
-            if set(inline) & set(settings.get(name, {})):
-                raise ValueError('Do not declare fixed arguments twice: ' + name)
-            settings[name] = {**settings.get(name, {}), **inline}
-        if (not isinstance(settings, dict) or set(settings) - set(self.operators)
-                or len(canonical(settings)) > 65536):
-            raise ValueError('operator_settings must configure only selected APIs within 64 KiB')
-        for api in apis:
-            for source in api['bindings'].values():
-                if source.startswith('limits.') and source[7:] not in {*LIMITS, 'max_operator_calls'}:
-                    raise ValueError('Unknown operator execution limit binding: ' + source)
-            setting = settings.get(api['name'], {})
-            if not isinstance(setting, dict) or set(setting) - {'arguments', 'result_images'}:
-                raise ValueError('Operator settings accept fixed arguments and result_images only')
-            validate_fixed(api, setting.get('arguments', {}))
-            if 'result_images' in setting:
-                image_fields(setting['result_images'])
-        object.__setattr__(self, 'operator_settings', deepcopy(settings))
-        for key in LIMITS[:-1]:
-            if type(getattr(self, key)) is not int or getattr(self, key) < 1:
-                raise ValueError(key + ' must be a positive integer')
-        if self.max_turns > 32 or self.max_calls_per_turn > 8 or self.max_resources > 256:
-            raise ValueError('Environment exceeds protocol turn/call/resource limits')
-        if type(self.timeout_s) not in (int, float) or not math.isfinite(self.timeout_s) or self.timeout_s <= 0:
-            raise ValueError('timeout_s must be finite and positive')
+        object.__setattr__(self, 'operator_settings', settings)
 
     @classmethod
     def from_yaml(cls, path, **node_options):
@@ -204,10 +219,7 @@ class OperatorEnvironment:
         return result
 
     def prompt(self, business_prompt):
-        if business_prompt.response_format == 'text':
-            raise ValueError('agentmap_async requires a JSON business response schema')
-        if {STATE, TOOL_IMAGES} & set(business_prompt.template.arguments):
-            raise ValueError('Reserved environment template variable')
+        validate_agent_prompt(business_prompt)
         contract_id = hashlib.sha256(canonical([catalog_identity(self._definitions), self.operator_settings]).encode()).hexdigest()[:16]
         if self.runtime == 'codex':
             if not self.operators:

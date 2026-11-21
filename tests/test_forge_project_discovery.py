@@ -1,4 +1,6 @@
 """Original declarations are evidence, never imports, execution or copied code."""
+from demiflow.forge.project import initialize_project
+from _forge_project_fixtures import declare_existing_flow
 import hashlib
 import json
 from pathlib import Path
@@ -41,11 +43,11 @@ def original(tmp_path):
 def register_fixture_flow(root, params='settings/preview.json'):
     """Register the fixture entry explicitly under the selected project."""
     if not (root / 'workspace.json').exists():
-        ws.init_workspace(root, existing=True)
+        initialize_project(root, existing=True)
     path = root / params
     if not path.exists():
         path.write_text('{"format": "demiflow_forge_flow_parameters_v2", "arguments": {}}')
-    ws.register_flow(root, 'dispatch.py:run_pipeline', params=params)
+    declare_existing_flow(root, 'dispatch.py:run_pipeline', params=params)
 
 
 def business_bytes(root):
@@ -72,19 +74,44 @@ def test_register_recognizes_original_without_execution_or_copies(original, tmp_
     assert not (original / 'tables').exists() and not (original / 'flows').exists()
 
 
-def test_project_check_tracks_the_checker_revision(original, monkeypatch):
+def test_project_check_tracks_the_checker_revision(tmp_path, monkeypatch):
+    from demiflow.forge import project_rules
+    from demiflow.forge.project import register_flow
     from demiflow.workbench.projects import checks as project_check
     from demiflow.workbench.runs import manager as runs
     from demiflow.workbench.table_bindings import make_resolver
-    ws.init_workspace(original, existing=True)
-    result = project_ops.check_project(original)
-    assert result['checker_platform_digest']
-    monkeypatch.setattr(ws, 'check_snapshot', lambda path: {'status': 'current', 'current_digest': '0'*64})
+    initialize_project(tmp_path)
+    (tmp_path / 'flows').mkdir()
+    (tmp_path / 'flows/counts.py').write_text('from demiflow import data\ndef run():\n    return data.range(2).count()\n')
+    register_flow(tmp_path, 'flows/counts.py:run')
+    report = project_ops.check_project(tmp_path)
+    assert report['status'] == 'checked'
+    saved = ws.load_workspace(tmp_path)[2]
+    current = ws.current_platform_snapshot(saved)
     resolver = make_resolver(ws.table_binding, runs.result_table)
-    status = project_check.status(original, table_resolver=resolver)
-    assert 'platform_changed' not in status['changes']
-    assert status['platform_provenance']['current_digest'] == '0'*64
-    assert status['status'] == result['status']
+    def status():
+        return project_check.status(tmp_path, table_resolver=resolver)
+    assert status()['status'] == 'checked'
+    with monkeypatch.context() as m:
+        m.setattr(ws, 'current_platform_snapshot', lambda _: {
+            **current, 'digests': {**current['digests'], 'snapshot': '0'*64}})
+        result = status()
+        assert result['status'] == 'stale' and 'checker_platform_changed' in result['changes']
+        assert result['platform_provenance']['status'] == 'stale'
+    with monkeypatch.context() as m:
+        m.setattr(ws, 'current_platform_snapshot', lambda _: {
+            **current, 'catalog': {**current['catalog'], 'inspection_complete': False}})
+        result = status()
+        assert result['status'] == 'incomplete' and 'checker_platform_incomplete' in result['changes']
+    with monkeypatch.context() as m:
+        m.setattr(project_rules, 'RULES_ID', 'other-revision')
+        result = status()
+        assert result['status'] == 'stale' and 'authoring_rules_changed' in result['changes']
+    # Reformatting a bound document changes the raw bytes recorded by the check.
+    manifest = tmp_path / 'workspace.json'
+    manifest.write_bytes(manifest.read_bytes() + b'\n')
+    result = status()
+    assert result['status'] == 'stale' and 'source_changed:workspace.json' in result['changes']
 
 
 def test_config_reference_budget_is_visible_without_hiding_the_project(original):
@@ -136,7 +163,7 @@ def test_symlink_private_and_external_references_are_not_read(original, tmp_path
     assert not any(e['path'].endswith('private.json') or e['path'].endswith('link.json') for e in value['evidence'])
     assert not any(c.get('sha256') for c in value['configurations'] if c['path'] != 'settings/small.json')
     assert 'secret' not in json.dumps(value)
-    ws.init_workspace(original, existing=True)
+    initialize_project(original, existing=True)
     with pytest.raises(ForgeError):
         project_ops.project_table(original, value['tables'][0]['id'], expected=value['digest'])
 
@@ -151,7 +178,7 @@ def test_configuration_budget_and_invalid_json_remain_visible(original):
     value = discover(original, {'entries': {}})
     assert value['configurations'][0]['status'] == 'unreadable'
     assert len(value['evidence']) < 128
-    ws.init_workspace(original, existing=True)
+    initialize_project(original, existing=True)
     (original / 'README.md').write_text('x' * (ws.README_BYTES + 1))
     context = ws.workspace_context(original)
     assert '无法读取' in context['readme']
@@ -159,7 +186,7 @@ def test_configuration_budget_and_invalid_json_remain_visible(original):
 
 
 def test_preview_fixes_version_and_rejects_changed_evidence(original):
-    ws.init_workspace(original, existing=True)
+    initialize_project(original, existing=True)
     before = business_bytes(original)
     value = ws.discover_project(original)
     row = next(t for t in value['tables'] if t['version'] is None)

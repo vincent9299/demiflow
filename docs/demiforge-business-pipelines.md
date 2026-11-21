@@ -1,5 +1,7 @@
 > 历史文档。当前实现见 [Forge 开发辅助方案](forge-guided-coding-redesign.md)。
 
+> 历史方案。当前开发流程与命令见 [用 Forge 开发 DemiFlow 项目](forge-cli.md)。
+
 # DemiForge 业务 Pipeline 开发定位
 
 ## 目标

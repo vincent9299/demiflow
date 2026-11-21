@@ -1,4 +1,6 @@
 """Editor availability must not be confused with parameter file identity."""
+from demiflow.forge.project import initialize_project
+from _forge_project_fixtures import declare_existing_flow
 import hashlib
 import json
 
@@ -58,7 +60,7 @@ def test_real_change_between_source_and_parameter_read_still_rejects(isolated, m
 
 def test_registered_plain_configuration_cold_open_switch_and_reload(browser, tmp_path):
     root = tmp_path / 'plain-project'
-    ws.init_workspace(root, name='Plain preview')
+    initialize_project(root, name='Plain preview')
     (root / 'flow.py').write_text(
         'from demiflow import data\n'
         'def transform(row): raise AssertionError("must not execute rows")\n'
@@ -69,7 +71,7 @@ def test_registered_plain_configuration_cold_open_switch_and_reload(browser, tmp
         '    return rows.take_all()\n')
     for name, extra in [('base.json', False), ('extra.json', True)]:
         (root / name).write_text(json.dumps({'arguments': {'extra': extra}}))
-        ws.register_flow(root, 'flow.py:run', params=name)
+        declare_existing_flow(root, 'flow.py:run', params=name)
     with service(root) as app, opened(browser, app) as (page, requests):
         graph_reply = lambda response: '/graph?' in response.url
         # The default 管道 page already loads automatically. Observe a fresh

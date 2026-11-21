@@ -26,8 +26,8 @@ demiflow workbench check-status /absolute/existing-pipeline
 失败仅清理本次创建且未提交的文件。旧 v1 工作区仍按原格式读取，不自动升级绑定或认证。
 
 ```bash
-demiflow workbench init /absolute/project --name project --existing
-demiflow workbench flow register /absolute/project flows/process.py:process --params flows/configs/default.json
+demiflow forge init --root /absolute/project --name project --existing
+demiflow forge add flow --root /absolute/project --register --entry flows/process.py:process --params flows/configs/default.json
 demiflow workbench console --registry /absolute/console.json add /absolute/project
 demiflow workbench console --registry /absolute/console.json list
 demiflow workbench console --registry /absolute/console.json serve --port 59865
@@ -88,7 +88,7 @@ Notebook 可留在项目中，也可从其他工具使用这些代码和数据�
 表别名不是实际身份。身份包括位置根、原生 DatasetRef、固定 Lance 版本和元数据；`--head` 只在 attach 时解析一次。后续读取不会自动跟随新版本，旧版本不存在时直接失败。外部位置默认只读；v2 只有显式 `workspace location ... --writable` 才声明写入权限，具体执行模式还需运行契约允许。detach 只删引用，不删表。
 
 ```bash
-demiflow workbench init /tmp/experiment --name experiment
+demiflow forge init --root /tmp/experiment --name experiment
 demiflow workbench location /tmp/experiment corpus /absolute/read-only-root
 demiflow workbench table attach /tmp/experiment candidates --location-id corpus \
   --uri candidates.lance --version 3 \
