@@ -12,7 +12,8 @@ from test_forge_public_api import service
 from test_forge_web_redesign import opened
 
 
-def test_author_without_workbench_then_open_compile_and_run(tmp_path, browser):
+def test_author_without_workbench_then_open_compile_and_run(tmp_path, browser, monkeypatch):
+    monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path/'runtime-domain'))
     root = tmp_path / 'odd-and-even'
     # Use a separate author process. Any import of the product is a contract violation.
     author = dedent("""

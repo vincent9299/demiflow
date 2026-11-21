@@ -161,6 +161,7 @@ def _binding_files(root, binding, sources, table_files):
 
 def _check_agent_tools(root, references, *, deadline, exclude, sources):
     """Verify project-owned tool definitions and their statically supported Python closure."""
+    from demiflow.data.callable_contract import bind_parameters
     tree = SourceTree(root, {'seconds': max(1, int(deadline - time.monotonic()))}, exclude=exclude)
     checker = OperatorChecker(tree)
     try:
@@ -180,6 +181,16 @@ def _check_agent_tools(root, references, *, deadline, exclude, sources):
             if expected and expected != ('async' if description['async'] else 'thread'):
                 raise InspectionError('OP-02', '工具执行方式与声明不符：' + entry, node=item.node,
                                       path=module.replace('.', '/') + '.py')
+            try:
+                if kind in {'function', 'actor'}:
+                    for names in ('required_arguments', 'possible_arguments'):
+                        bind_parameters(description['parameters'], [], dict.fromkeys(reference[names]))
+                else:
+                    count = 2 if kind == 'validate_resources' else 3
+                    bind_parameters(description['parameters'], [None]*count, {})
+            except TypeError as exc:
+                raise InspectionError('OP-02', f'工具声明与签名不匹配：{entry} · {exc}',
+                                      node=item.node, path=module.replace('.', '/') + '.py') from exc
             checker.check(description, constructor_kwargs=reference.get('init'))
         tree.unchanged()
     finally:

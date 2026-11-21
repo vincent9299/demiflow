@@ -126,7 +126,7 @@ def inspect_agent_config_document(document: dict) -> tuple[tuple[str, ...], tupl
     _validate_settings(environment['runtime'], pack, options, max_requests)
     for prompt in pack.prompts:
         validate_agent_prompt(prompt)
-    resolved, _ = prepare_environment(environment['runtime'], environment['operators'], environment['resources'],
+    resolved, settings = prepare_environment(environment['runtime'], environment['operators'], environment['resources'],
                         environment['operator_settings'], {
                             key: environment.get(key, getattr(OperatorEnvironment, key))
                             for key in (*LIMITS, 'max_operator_calls')
@@ -140,6 +140,10 @@ def inspect_agent_config_document(document: dict) -> tuple[tuple[str, ...], tupl
                 reference = dict(kind=kind, entry=entry)
                 if kind in ('function', 'actor'):
                     reference['execution'] = declaration.get('execution')
+                    fixed = set(settings.get(declaration['name'], {}).get('arguments', {}))
+                    bound = fixed | declaration['bindings'].keys()
+                    reference['required_arguments'] = sorted(bound | set(declaration['arguments'].get('required', ())))
+                    reference['possible_arguments'] = sorted(bound | declaration['arguments'].get('properties', {}).keys())
                 if kind == 'actor':
                     reference['init'] = declaration['init']
                 references.append(reference)

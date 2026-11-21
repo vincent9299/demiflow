@@ -158,5 +158,9 @@ def test_agent_tool_closure_is_static_and_evidenced(project, reference):
     assert proven['status'] == 'passed', proven
     assert {yaml_path, 'operators/review.py', 'operators/number.py'} <= proven['basis']['sources'].keys()
     assert not marker.exists()
+    put(project, 'operators/review.py', 'def run(extra: int) -> int:\n    return extra\n')
+    mismatch = check()
+    assert mismatch['status'] == 'failed' and any('extra' in d['detail'] for d in mismatch['diagnostics'])
+    put(project, 'operators/review.py', 'from operators.number import one\ndef run() -> int:\n    return one()\n')
     denied = check_project(project, paths=[yaml_path], reference=reference, exclude=['operators/number.py'])
     assert denied['status'] == 'incomplete' and 'operators/number.py' not in denied['basis']['sources']
