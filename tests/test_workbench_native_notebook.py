@@ -695,6 +695,7 @@ def test_create_notebooks_from_collapsed_data_page(browser, native_project):
             visible = 'iframe.native-notebook-frame:not([hidden])'
             frame = page.frame_locator(visible)
             editor = frame.locator('.jp-CodeCell .cm-content').first
+            expect(page.locator(visible)).to_be_visible(timeout=60000)
             expect(editor).to_be_visible(timeout=60000)
             expect(page.get_by_role('button', name='新建卡片')).to_be_enabled(timeout=20000)
             ready = 'async f=>{const panel=f.contentWindow.jupyterapp.shell.currentWidget;await panel.context.ready;await panel.sessionContext.ready;}'
@@ -707,6 +708,7 @@ def test_create_notebooks_from_collapsed_data_page(browser, native_project):
             second = tabs.get_by_role('tab', name='分析 2', exact=True)
             expect(second).to_have_attribute('aria-selected', 'true', timeout=30000)
             expect(tabs.get_by_role('tab')).to_have_text(['分析', '分析 2'])
+            expect(page.locator(visible)).to_be_visible(timeout=60000)
             expect(editor).to_be_visible(timeout=60000)
             expect(editor).to_be_empty()
             editor.fill('print(7 * 6)')
@@ -731,7 +733,10 @@ def test_create_notebooks_from_collapsed_data_page(browser, native_project):
             new.click()
             third = tabs.get_by_role('tab', name='分析 3', exact=True)
             expect(third).to_have_attribute('aria-selected', 'true')
-            editor.fill('third_draft = 3', timeout=60000)
+            expect(page.locator(visible)).to_be_visible(timeout=60000)
+            editor.fill('third_draft = 3')
+            page.wait_for_function("""() => document.querySelector('iframe:not([hidden])').contentWindow.jupyterapp.shell.currentWidget
+                .content.widgets[0].model.sharedModel.getSource()==='third_draft = 3' """)
             expect(frame.locator('.jp-Dialog')).to_have_count(0)
             assert not errors
         finally:
