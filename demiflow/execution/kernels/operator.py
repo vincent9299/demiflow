@@ -589,11 +589,8 @@ class OperatorKernel:
                 self._services.assignment.run_id, self._services.assignment.action_id,
                 state_owner, self._partition_id, slot if self._worker_scope else 0,
                 (self._task_ordinal or 0) if self._task_rows and self._shared_actor is None else None]))
-            from ...operator_llm.runtime import PromptActor
-            if type(instance.fn) is PromptActor:
-                from ..dataflow_model_journal import bind_prompt_adapter, bind_agent_adapter
-                bind = bind_prompt_adapter if instance.fn.environment is None else bind_agent_adapter
-                bind(instance.fn, services=self._services, node_id=self._occurrence)
+            from ..dataflow_models import bind_cached_model_services
+            bind_cached_model_services(instance.fn, services=self._services, node_id=self._occurrence)
         import inspect
         owner = self._state_owner(instance)
         lifecycle = (None if inspect.isroutine(owner) or inspect.isclass(owner)

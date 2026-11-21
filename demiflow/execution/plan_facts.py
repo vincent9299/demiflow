@@ -35,11 +35,9 @@ def execution_instances(nodes, edges, actions, *, maximum=1024):
 
 
 def source_facts(source):
-    from ..data.sources import LanceSource, MaterializedSource
+    from ..data.sources import DatasourceSource, KeyedSource, LanceSource, MaterializedSource, UnionSource
     from ..lance.model import LanceScanSpec
-    from .local_kernel import KeyedSource, UnionSource
 
-    from ..data.sources import DatasourceSource
     from .queue_source import QueueDatasource
     from .queue_history import QueueHistoryDatasource
     if type(source) is DatasourceSource and type(source.datasource) is QueueHistoryDatasource:
@@ -260,8 +258,7 @@ def operation_facts(operation):
     if type(operation) is ops.AsyncMapOp:
         from .stream_lookup import LanceLookup
         from ..lance.flow_contract import lookup_facts
-        from ..operator_llm.runtime import PromptActor
-        from ..operator_llm.flow_contract import prompt_facts
+        from ..operator_llm.native_actor import is_native_prompt_actor
         target = operation.callable.target
         target = target.__self__ if inspect.ismethod(target) else target
         from .raw_fetch import RawFetch, raw_fetch_facts
@@ -275,12 +272,9 @@ def operation_facts(operation):
             domain = raw_fetch_facts(target)
         elif type(target) is LanceLookup:
             domain = {'native': lookup_facts(target), 'reserved_bytes': 8 * 1024**2 + 2 * target.max_bytes}
-        elif type(target) is PromptActor:
-            if type(operation) is ops.AgentMapOp:
-                from ..operator_llm.flow_contract import agent_facts
-                native = agent_facts(target, operation.environment)
-            else:
-                native = prompt_facts(target)
+        elif is_native_prompt_actor(target):
+            from ..operator_llm.flow_contract import prompt_facts
+            native = prompt_facts(target)
             options = native['options'] or {}
             token_bytes = 0
             if native['token_budget'] and native['token_budget']['unit'] == 'tokens':

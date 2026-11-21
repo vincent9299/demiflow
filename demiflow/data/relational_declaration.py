@@ -1,14 +1,14 @@
 """Pure relational source assembly using the existing graph declarations.
 
-The SDK wraps these sources in Dataset. Execution consumes the original source
-classes at their historic paths; no data, worker or runtime state is constructed.
+The SDK wraps these sources in Dataset. Planning and execution consume the same
+source classes; no data, worker or runtime state is constructed.
 """
 from __future__ import annotations
 
 from typing import Literal, Sequence
 
 from .plan import reject_streaming_map_options
-from ..execution.local_kernel import PlanInput, KeyedSource, UnionSource
+from .sources import KeyedSource, PlanInput, UnionSource
 from ..planning.dataflow_declaration import validate_relational_inputs
 
 

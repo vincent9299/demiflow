@@ -8,8 +8,26 @@ from contextvars import ContextVar
 
 from .artifacts import code_record
 from .recovery_contract import identity, document, RecoveryContractError, MAX_DOCUMENT_BYTES
+from .recovery_sdk_v3 import class_method_pins, function_pin
 
 _SOURCE_WALK = ContextVar('demiflow_source_identity_walk', default=None)
+
+
+def _persistent_module(value):
+    """Preserve the v3 names for the relocated relational classes and their methods."""
+    module = value.__module__
+    if type(module) is not str or module != 'demiflow.data.sources':
+        return module
+    from ..data.sources import KeyedSource, PlanInput, UnionSource
+    for declaration in (KeyedSource, PlanInput, UnionSource):
+        if value is declaration:
+            return 'demiflow.execution.local_kernel'
+        if inspect.isfunction(value):
+            method = vars(declaration).get(value.__name__)
+            # The generated dataclass repr also captures its wrapped function.
+            if value is method or value is getattr(method, '__wrapped__', None):
+                return 'demiflow.execution.local_kernel'
+    return module
 
 
 def describe(value, depth=0):
@@ -82,13 +100,17 @@ def describe(value, depth=0):
                 item = None
             closure.append(describe(item, depth + 1))
         filename = inspect.getsourcefile(value)
+        source = None
         source_hash = None
         if filename and Path(filename).is_file():
             if Path(filename).stat().st_size > 8 * 1024**2:
                 raise RecoveryContractError("Callable source exceeds identity byte budget")
-            source_hash = hashlib.sha256(Path(filename).read_bytes()).hexdigest()
-        return dict(module=value.__module__, name=value.__qualname__, source_hash=source_hash,
-                    code=identity(code_record(value.__code__)),
+            source = Path(filename).read_bytes()
+            source_hash = hashlib.sha256(source).hexdigest()
+        code = identity(code_record(value.__code__))
+        source_hash, code = function_pin(value, source, source_hash, code)
+        return dict(module=_persistent_module(value), name=value.__qualname__, source_hash=source_hash,
+                    code=code,
                     defaults=describe(value.__defaults__, depth + 1),
                     kwdefaults=describe(value.__kwdefaults__, depth + 1), closure=closure)
     if inspect.isclass(value):
@@ -96,8 +118,9 @@ def describe(value, depth=0):
         for name, method in vars(value).items():
             if inspect.isfunction(method):
                 methods[name] = identity(code_record(method.__code__))
-        return dict(module=value.__module__, name=value.__qualname__, methods=methods)
-    from .local_kernel import PlanInput
+        return dict(module=_persistent_module(value), name=value.__qualname__,
+                    methods=class_method_pins(value, methods))
+    from ..data.sources import PlanInput
     if isinstance(value, PlanInput):
         return plan_identity('input', value.source, value.plan)
     if type(value).__module__.startswith('numpy') and hasattr(value, 'dtype'):
@@ -112,7 +135,7 @@ def describe(value, depth=0):
         return {'array': str(value.dtype), 'shape': list(value.shape), 'sha256': digest.hexdigest()}
     if is_dataclass(value):
         # Runtime validators/observation coordinates are not semantic parameters.
-        return {"type": type(value).__module__ + "." + type(value).__qualname__,
+        return {"type": _persistent_module(type(value)) + "." + type(value).__qualname__,
                 "fields": {f.name: describe(getattr(value, f.name), depth + 1)
                            for f in fields(value) if f.name not in {"runtime_contract", "label"}}}
     native = getattr(value, "recovery_identity", None)
@@ -168,9 +191,9 @@ def describe(value, depth=0):
             return {'arrow_csv_options': type(value).__name__, 'fields': state}
     # Nested native prompts were previously unrepresentable (live runtime).
     # Reuse their guarded native facts; existing operation identities are unchanged.
-    from ..operator_llm.runtime import PromptActor
-    if type(value) is PromptActor:
-        from ..operator_llm.flow_contract import prompt_facts, agent_facts
+    from ..operator_llm.native_actor import is_native_prompt_actor
+    if is_native_prompt_actor(value):
+        from ..operator_llm.flow_contract import agent_facts, prompt_facts
         return {'native_prompt': prompt_facts(value) if value.environment is None
                 else agent_facts(value, value.environment)}
     if callable(value):
@@ -215,8 +238,9 @@ def source_identity(source):
 
 
 def _source_identity(source):
-    from ..data.sources import MaterializedSource, DatasourceSource, FileSource, ItemsSource
-    from .local_kernel import UnionSource, KeyedSource
+    from ..data.sources import (
+        DatasourceSource, FileSource, ItemsSource, KeyedSource, MaterializedSource, UnionSource,
+    )
     # Composite plans bind child identities, never runtime handles/executors.
     # In particular a captured materialization is identified by its receipts,
     # not by serializing the lazy _CheckpointBlocks reader into a declaration.

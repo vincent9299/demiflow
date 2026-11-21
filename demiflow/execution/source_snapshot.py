@@ -8,8 +8,7 @@ from .recovery_contract import SourcePosition, identity
 def freeze_source(action, source, path="root"):
     """Resolve a mutable Lance head once, before capture or any downstream work."""
     from dataclasses import replace
-    from ..data.sources import LanceSource
-    from .local_kernel import KeyedSource, UnionSource
+    from ..data.sources import KeyedSource, LanceSource, UnionSource
     def bound(frozen):
         from .checked import current
         checked = current()

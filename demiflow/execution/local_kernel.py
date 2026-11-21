@@ -10,7 +10,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
-from ..data.sources import SourcePlan
+# Historical programs may import the relational declarations by these names.
+from ..data.sources import KeyedSource, PlanInput, SourcePlan, UnionSource
 
 
 @dataclass(frozen=True)
@@ -39,37 +40,6 @@ class LocalKernelOptions:
             raise ValueError("memory_bytes must provide at least 64 KiB per worker")
         from .native_resources import parse_native_resources
         object.__setattr__(self, 'native_resources', parse_native_resources(self.native_resources))
-
-
-@dataclass(frozen=True)
-class PlanInput:
-    source: SourcePlan
-    plan: Any
-    executor: Any = None
-
-
-@dataclass(frozen=True)
-class UnionSource(SourcePlan):
-    """Concatenation within one local task engine; never nested Dataset actions."""
-    inputs: tuple[PlanInput, ...]
-
-
-@dataclass(frozen=True)
-class KeyedSource(SourcePlan):
-    kind: str
-    left: PlanInput
-    on: tuple[str, ...]
-    right: PlanInput | None = None
-    right_on: tuple[str, ...] = ()
-    how: str = "inner"
-    suffix: str = "_right"
-    reducer: Any = None
-    initial: Any = None
-    chunk_bytes: int = 32 * 1024 * 1024
-    max_rows: int = 32
-    output: str = "items"
-    reducer_contract: dict | None = None
-    reducer_kwargs: dict | None = None
 
 
 class LocalExecutionSession:

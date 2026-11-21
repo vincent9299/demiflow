@@ -743,8 +743,9 @@ def source_callable_roots(source):
     import functools
     import inspect
     from ..data.plan import CallableSpec
-    from ..data.sources import FileSource, IterableSource, SqlSource
-    from .local_kernel import KeyedSource, PlanInput, UnionSource
+    from ..data.sources import (
+        FileSource, IterableSource, KeyedSource, PlanInput, SqlSource, UnionSource,
+    )
 
     def pinnable(value):
         """Reduce a declared callable to the function whose code must be pinned."""

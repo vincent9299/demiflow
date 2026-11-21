@@ -37,6 +37,24 @@ def test_cached_prompt_binds_native_journal_before_dispatch(tmp_path, native_ser
     assert len(native_server) == 1
 
 
+def test_cached_agent_charges_and_reuses_its_run_journal(tmp_path, native_server):
+    from demiflow.agent import AgentConfig
+    from demiflow.environment import OperatorEnvironment
+
+    config = AgentConfig(parse_prompt_pack(PACK), OperatorEnvironment(operators=()), {}, 1)
+    native_server.response = {'api_calls': [], 'response': {'result': 'agent-ok'}}
+    for name, expected_requests in [('first', 1), ('reuse', 0)]:
+        with RunContext.start(tmp_path / name) as run, data.local_execution():
+            source = data.from_items([{'item': 'one'}])
+            actor = source.agentmap_async('enrich', config=config,
+                inputs={'payload': 'item'}, output='answer')._stages[-1]
+            rows = source.map_cached(actor, cache_dir=tmp_path / 'cache', version='v1').take_all()
+            assert rows == [{'item': 'one', 'answer': 'agent-ok'}]
+            assert run.journal.budget_consumed('requests') == expected_requests
+            assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
+    assert len(native_server) == 1
+
+
 def test_public_worker_error_preserves_builtin_and_closes_owner(tmp_path):
     closed = tmp_path / 'closed'
     class Actor:
