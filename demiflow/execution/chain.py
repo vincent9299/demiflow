@@ -360,6 +360,7 @@ def _classify_dependency_module(module):
     import inspect
     import os
     import sys
+    import site
     import sysconfig
     from pathlib import Path
     name = getattr(module, "__name__", "") or ""
@@ -381,8 +382,12 @@ def _classify_dependency_module(module):
             resolved = path
         if resolved.is_relative_to(Path(__file__).resolve().parents[1]):
             return None
-        for key in ("purelib", "platlib"):
-            base = sysconfig.get_path(key)
+        # A virtual environment may explicitly inherit its base installation.
+        # Only accept active interpreter installation roots, never arbitrary
+        # PYTHONPATH directories that merely end in "site-packages".
+        roots = {sysconfig.get_path(key) for key in ('purelib', 'platlib')}
+        roots.update(path for path in site.getsitepackages() if path in sys.path)
+        for base in roots:
             if base and resolved.is_relative_to(Path(base).resolve()):
                 return None
             if base and module_filename:

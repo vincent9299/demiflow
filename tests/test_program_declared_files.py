@@ -59,3 +59,19 @@ def test_package_files_share_the_existing_source_byte_budget(recipe, monkeypatch
     entry.__demiflow_package_files__ = {'pinned_training_project': ('extra',)}
     with pytest.raises(DataflowError, match='source budget'):
         sources(entry)
+
+
+def test_inherited_package_root_is_classified_by_the_active_interpreter(tmp_path, monkeypatch):
+    import site
+    import types
+    from demiflow.execution.chain import _classify_dependency_module
+    installed = tmp_path / 'base' / 'site-packages'
+    source = installed / 'example_wheel.py'
+    installed.mkdir(parents=True)
+    source.write_text('version = 1')
+    module = types.ModuleType('example_wheel')
+    module.__file__ = str(source)
+    monkeypatch.syspath_prepend(str(installed))
+    assert _classify_dependency_module(module) == source
+    monkeypatch.setattr(site, 'getsitepackages', lambda: [str(installed)])
+    assert _classify_dependency_module(module) is None
