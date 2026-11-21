@@ -6,6 +6,7 @@ file identity after verifying both the actual module binding and the live code
 against the measured source. Business source hashes and program artifact
 digests are verified independently. An unrecognised revision uses its own pin.
 """
+from dis import get_instructions
 from functools import lru_cache
 import sys
 from types import CodeType, FunctionType
@@ -29,15 +30,7 @@ _REVISIONS = {
         '2ac2ab41bb6a1b4eda601b8c06f78e7c0bc74caf638d9c54afe6360190a4912b',
         'dc6858f90a4ea48fb5c950027e405084d9f820ba26b3159592b38a9f42d46788'),
 }
-# A v3 class pins only its methods, not the source file. An unrelated
-# module edit must not invalidate unchanged Dataset method pins.
-_RELATIONAL_METHODS = {
-    'join': 'e112dd6eccbd697cfad76e42b10fb5a3e51338e59c0b73c601c4fd3500cdd242',
-    'reduce_by_key': 'a3942ee0527daa30ed54278c27754438de944e655fa47385050e55360b770424',
-    'group_batches': 'fdc6608779fd319db1d03ebe966a80dfb454f24b347578fcb7e446f107e9c723',
-    'exclude_keys': '8d6b971dc304a9e0f1d94e8de6429c7c808b7835d5e514d5870a3b74211c0770',
-    'union': '0f9fc1b1618f644ceb473ad918614a238d177763755afb6bf9b57a61d91dd5b5',
-}
+_RELATIONAL_METHODS = ('join', 'reduce_by_key', 'group_batches', 'exclude_keys', 'union')
 
 
 @lru_cache(maxsize=len(_REVISIONS))
@@ -71,14 +64,24 @@ def _canonical_function(fn, module):
 
 
 def _method_pin(fn, code):
-    # The D1 edit kept the IMPORT_NAME instruction and its relative import
-    # level. Its one changed co_names entry is the declaration's package.
-    if (fn.__module__ == 'demiflow.data.dataset' and fn.__name__ in _RELATIONAL_METHODS
-            and fn.__qualname__ == 'Dataset.' + fn.__name__):
-        names = tuple('execution.local_kernel' if name == 'data.sources' else name
-                      for name in fn.__code__.co_names)
-        return identity(code_record(fn.__code__.replace(co_names=names)))
-    return code
+    # v3 expresses this one declaration import by its original package. Every
+    # other instruction, constant (including the relative level) and operand
+    # still enters code_record. This works with the caller's Python optimizer.
+    if (fn.__module__ != 'demiflow.data.dataset' or fn.__name__ not in _RELATIONAL_METHODS
+            or fn.__qualname__ != 'Dataset.' + fn.__name__):
+        return code
+    instructions = tuple(get_instructions(fn))
+    uses = [index for index, op in enumerate(instructions) if op.argval == 'data.sources']
+    if len(uses) != 1 or fn.__code__.co_names.count('data.sources') != 1:
+        return code
+    index = uses[0]
+    if (instructions[index].opname != 'IMPORT_NAME' or index + 1 == len(instructions)
+            or instructions[index + 1].opname != 'IMPORT_FROM'
+            or instructions[index + 1].argval != 'PlanInput'):
+        return code
+    names = tuple('execution.local_kernel' if name == 'data.sources' else name
+                  for name in fn.__code__.co_names)
+    return identity(code_record(fn.__code__.replace(co_names=names)))
 
 
 def function_pin(fn, source, source_hash, code):
@@ -103,9 +106,8 @@ def class_method_pins(cls, methods):
     module = sys.modules.get('demiflow.data.dataset')
     if module is None or cls is not vars(module).get('Dataset'):
         return methods
-    for name, approved_code in _RELATIONAL_METHODS.items():
+    for name in _RELATIONAL_METHODS:
         fn = vars(cls).get(name)
-        if (methods.get(name) == approved_code and type(fn) is FunctionType
-                and _canonical_function(fn, module)):
-            methods[name] = _method_pin(fn, approved_code)
+        if type(fn) is FunctionType and _canonical_function(fn, module):
+            methods[name] = _method_pin(fn, methods[name])
     return methods

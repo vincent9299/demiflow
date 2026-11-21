@@ -51,10 +51,13 @@ def test_unrecognised_source_or_function_keeps_actual_evidence():
 def test_live_sdk_method_change_preserves_the_changed_function_and_class_pins(monkeypatch):
     fn = data.Dataset.join
     source_sha = sha256(_source(fn)).hexdigest()
+    old_class_pins = describe(data.Dataset)['methods']
     altered = fn.__code__.replace(co_consts=(*fn.__code__.co_consts, 'modified'))
     monkeypatch.setattr(fn, '__code__', altered)
     actual_code = identity(code_record(altered))
-    assert describe(fn)['code'] == describe(data.Dataset)['methods']['join'] == actual_code
+    assert describe(fn)['code'] == actual_code
+    changed_methods = describe(data.Dataset)['methods']
+    assert {key for key in changed_methods if changed_methods[key] != old_class_pins[key]} == {'join'}
     assert describe(fn)['source_hash'] == source_sha
     assert describe(data.Dataset)['methods']['union'] == describe(data.Dataset.union)['code']
 
@@ -73,3 +76,23 @@ def test_changed_result_cache_policy_always_uses_actual_source_and_code():
     captured = describe(_state_policy)
     assert captured['source_hash'] == sha256(_source(_state_policy)).hexdigest()
     assert captured['code'] == identity(code_record(_state_policy.__code__))
+
+
+def test_dataset_class_v3_qualified_import_in_optimized_python():
+    import json
+    import subprocess
+    import sys
+
+    probe = '''
+import json
+from demiflow import data
+from demiflow.execution.artifacts import code_record
+from demiflow.execution.recovery_contract import identity
+from demiflow.execution.recovery_identity import describe
+fn = data.Dataset.join
+old = tuple("execution.local_kernel" if name == "data.sources" else name for name in fn.__code__.co_names)
+print(json.dumps([describe(data.Dataset)["methods"]["join"], identity(code_record(fn.__code__.replace(co_names=old)))]))
+'''
+    out = subprocess.check_output([sys.executable, '-OO', '-B', '-c', probe], text=True)
+    actual, expected = json.loads(out)
+    assert actual == expected
