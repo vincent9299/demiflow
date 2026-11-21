@@ -41,6 +41,7 @@
   "planning.compiler": [
    "DatasourceSource",
    "FileSource",
+   "FitJobNode",
    "ItemsSource",
    "IterableSource",
    "KeyedSource",
