@@ -60,6 +60,8 @@ def main():
                             raise HTTPError(413, 'Directory exceeds 512 entries')
             return super().get(path, content=content, type=type, format=format, **kwargs)
 
+    kernel_limit = 2
+
     class ProjectKernels(MappingKernelManager):
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
@@ -67,7 +69,7 @@ def main():
 
         async def start_kernel(self, *, kernel_id=None, path=None, **kwargs):
             async with self._admission:
-                if kernel_id is None and len(self.list_kernel_ids()) >= 2:
+                if kernel_id is None and len(self.list_kernel_ids()) >= kernel_limit:
                     raise HTTPError(429, 'This project already has two kernels')
                 kwargs['cwd'] = settings['root']
                 return await super().start_kernel(kernel_id=kernel_id, path=None, **kwargs)
@@ -93,7 +95,8 @@ def main():
         'headers': {'Content-Security-Policy': "frame-ancestors 'self'"},
         'page_config_hook': lambda handler, value: {
             **value, 'token': '', 'allow_hidden': False,
-            'notebookStartsKernel': json.loads((config_path.parent/'grants.json').read_text())['execute'],
+            'notebookStartsKernel': (json.loads((config_path.parent/'grants.json').read_text())['execute']
+                                     and len(handler.kernel_manager.list_kernel_ids()) < kernel_limit),
             'disabledExtensions': list(value.get('disabledExtensions', [])) + [
                 '@jupyter-notebook/lab-extension:interface-switcher',
                 '@jupyterlab/lsp-extension',
