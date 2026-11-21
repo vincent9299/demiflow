@@ -99,12 +99,24 @@ async function open(panel, project, base) {
     previous=now;
     clearTimeout(timer);timer=setTimeout(persistDrafts,250);notify();
   }
+  let documentSnapshot;
   async function savedDocument(_, state) {
-    if (state !== 'completed') return;
-    const snapshot = new Map(cells().map(c=>[c.id, JSON.stringify(c.toJSON())]));
+    if (state === 'started') {
+      documentSnapshot = new Map(cells().map(c=>[c.id, JSON.stringify(c.toJSON())]));
+      return;
+    }
+    if (state !== 'completed' || !documentSnapshot) return;
+    // A reload can follow the native save immediately, before the revision
+    // read returns. Drop only drafts covered by that completed write now.
+    baseline.clear();
+    for (const [id,raw] of documentSnapshot) {
+      baseline.set(id,raw);
+      if (!Object.hasOwn(revisions,id)) revisions[id]=null;
+    }
+    documentSnapshot=null;
+    persistDrafts();
     try {
-      revisions=(await request()).cells;baseline.clear();
-      for (const [id,raw] of snapshot) baseline.set(id,raw);
+      revisions=(await request()).cells;
       persistDrafts();notify();
     } catch { /* Individual writes still check the last observed revision. */ }
   }

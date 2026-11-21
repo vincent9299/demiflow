@@ -137,6 +137,11 @@ class Notebooks:
             doc_settings = state / 'settings/@jupyterlab/docmanager-extension'
             doc_settings.mkdir(parents=True, exist_ok=True)
             self._create(doc_settings/'plugin.jupyterlab-settings', {'autosave': False})
+            # Keep widget comms on the notebook kernel across interrupt/restart.
+            # A separate comm subshell can still be starting when that kernel exits.
+            kernel_settings = state / 'settings/@jupyterlab/apputils-extension'
+            kernel_settings.mkdir(parents=True, exist_ok=True)
+            self._create(kernel_settings/'kernels-settings.jupyterlab-settings', {'commsOverSubshells': 'disabled'})
             # Native kernel imports the same reviewed platform and works at the
             # project root. This is a trusted Python environment, not a sandbox.
             kernelspec = state / 'data/kernels/python3'
