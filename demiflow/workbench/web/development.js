@@ -424,6 +424,7 @@ SOFTWARE.
       if(submission.text!==message){
         error(body,new Error('上次发送结果未确认，请先核对记录后再编辑要求。'));return;
       }
+      const returnFocus=submission.after && (document.activeElement===input || document.activeElement===send);
       state.submission=submission;state.sending=true;availability();
       try{
         if(!state.session){
@@ -450,7 +451,13 @@ SOFTWARE.
         if(err.operationStarted===false||['invalid_request','conflict','resource_limit','forbidden'].includes(err.code))state.submission=null;
         if(!state.disposed){error(body,err);await refresh().catch(()=>{});}
       }
-      finally{state.sending=false;if(!state.disposed)availability();}
+      finally{
+        state.sending=false;
+        if(!state.disposed){
+          availability();
+          if(returnFocus&&document.activeElement===document.body&&!input.disabled)input.focus({preventScroll:true});
+        }
+      }
     };
     stop.onclick=async()=>{stop.disabled=true;try{await api('dev-cancel',{}, {session_id:state.session.id,turn_id:state.session.turn.id,request_id:uid()});status.textContent='已请求停止，等待所属工具清理。';}catch(e){error(body,e);stop.disabled=false;}};
     function clearTimeline(){state.feedEpoch=(state.feedEpoch||0)+1;chat.reset();newContent.hidden=true;}
