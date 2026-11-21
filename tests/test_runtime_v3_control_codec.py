@@ -4,6 +4,7 @@ import json
 import pytest
 
 from demiflow.execution.contracts import dataflow_codec as codec
+from demiflow.execution.contracts.dataflow import ValueEdge
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.dataflow_hosts import _event_from_dict
 from test_runtime_v3_c import make, bounds
@@ -127,3 +128,36 @@ def test_document_path_preserves_original_conservative_payload_admission():
     for decoder, value in ((codec.decode_wire, raw), (codec.decode_wire_document, frame)):
         with pytest.raises(DataflowError, match='control byte budget'):
             decoder(value, type_name='WorkerEvent', bounds=narrow)
+
+
+@pytest.mark.parametrize(('kind', 'output_port', 'input_port', 'step'), [
+    ('fixed_dataset', 'dataset', 'train', None), ('model_manifest', 'manifest', 'model', 400),
+])
+def test_v4_value_edge_canonical_frames(kind, output_port, input_port, step):
+    fields = dict(producer='upstream', output_port=output_port, consumer='downstream',
+                  input_port=input_port, kind=kind, step=step)
+    frame = {'schema': 'demiflow.runtime_wire.v4', 'type': 'ValueEdge', 'payload': fields}
+    raw = json.dumps(frame, sort_keys=True, separators=(',', ':')).encode()
+    value = ValueEdge(**fields)
+    budget = bounds()
+    assert codec.encode_wire(value, type_name='ValueEdge', bounds=budget) == raw
+    assert codec.decode_wire(raw, type_name='ValueEdge', bounds=budget) == value
+    assert codec.decode_wire_document(frame, type_name='ValueEdge', bounds=budget) == value
+
+
+@pytest.mark.parametrize(('kind', 'output_port', 'step'), [
+    ('fixed_dataset', 'manifest', None), ('fixed_dataset', 'dataset', 400),
+    ('model_manifest', 'dataset', 400), ('model_manifest', 'manifest', None),
+    ('model_manifest', 'manifest', 0), ('model_manifest', 'manifest', -1),
+    ('model_manifest', 'manifest', True),
+])
+def test_v4_value_edge_rejects_mismatched_ports_and_selectors(kind, output_port, step):
+    fields = dict(producer='upstream', consumer='downstream', input_port='model',
+                  output_port=output_port, kind=kind, step=step)
+    frame = {'schema': 'demiflow.runtime_wire.v4', 'type': 'ValueEdge', 'payload': fields}
+    with pytest.raises(DataflowError):
+        ValueEdge(**fields)
+    with pytest.raises(DataflowError):
+        codec.decode_wire_document(frame, type_name='ValueEdge', bounds=bounds())
+    with pytest.raises(DataflowError):
+        codec.decode_wire(json.dumps(frame).encode(), type_name='ValueEdge', bounds=bounds())
