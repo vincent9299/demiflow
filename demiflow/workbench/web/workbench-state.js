@@ -19,7 +19,7 @@
     if ((project!==null&&p!==project)||!SHA256.test(basisDigest)||typeof runId!=='string'||!runId||
         !Number.isSafeInteger(attempt)||attempt<1||typeof actionId!=='string'||!actionId||actionId.length>128||
         !SHA256.test(dagId)||!SHA256.test(planId)||!Number.isSafeInteger(planRevision)||planRevision<0||
-        (format!=='legacy'&&format!=='v3')) throw new Error('执行身份不合法');
+        (!['legacy','v3','v4'].includes(format))) throw new Error('执行身份不合法');
     return Object.freeze({project:p,basisDigest,runId,attempt,actionId,dagId,planId,planRevision,format});
   }
   const identityKey = execution => execution===null?null:JSON.stringify([execution.project,execution.basisDigest,

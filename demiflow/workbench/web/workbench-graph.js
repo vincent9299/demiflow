@@ -42,6 +42,8 @@
     return side==='output'?(branches[port]||'分支：'+port):'输入：'+port;
   }
   function edgeCaption(edge,target) {
+    if(edge.kind==='model_manifest')return '模型 · 第 '+edge.step+' 步';
+    if(edge.kind==='fixed_dataset')return '固定数据 · '+edge.toPort;
     return [portLabel(edge.fromPort,'output',target),portLabel(edge.toPort,'input',target)].filter(Boolean).join(' → ');
   }
   function visibleSummary(card) {

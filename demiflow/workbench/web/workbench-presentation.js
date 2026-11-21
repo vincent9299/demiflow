@@ -7,6 +7,8 @@
   const MAX_NODES = 256, MAX_EDGES = 512, MAX_FACTS = 16;
   const LEGACY_SCHEMA = 'demiflow.logical_dag.v1';
   const V3_SCHEMA = 'demiflow.dataflow_graph.v3';
+  const V4_SCHEMA = 'demiflow.dataflow_graph.v4';
+  const hasOccurrenceIds = format => format === 'v3' || format === 'v4';
   const SHA = /^[0-9a-f]{64}$/;
   const ID = /^[A-Za-z0-9_-]{1,128}$/;
   const PROJECT = /^[wl][0-9a-f]{32}$/;
@@ -29,7 +31,7 @@
     RegisterDocumentsOp:'登记文档',RegisterDocumentsBatchOp:'批量登记文档',
     ReadDocumentsOp:'读取文档',StreamPrependOp:'前置数据',
     lance:'固定表读取',write_lance:'写出结果',SaveLanceOp:'固定中间交付',
-    materialized:'内存输入',take_all:'读取结果',ReadObjectOp:'读取对象',
+    fit:'训练',fixed_dataset:'固定训练输入',materialized:'内存输入',take_all:'读取结果',ReadObjectOp:'读取对象',
   };
   const STATES = {
     pending: '已登记 · 未开始', running: '运行中', succeeded: '执行完成', failed: '执行失败',
@@ -126,10 +128,16 @@
     }
     return ports;
   }
+  function valueEdgeFacts(edge, format) {
+    if (format !== 'v4' || edge.kind == null) return {};
+    if (edge.kind === 'fixed_dataset' && edge.step == null) return {kind: edge.kind};
+    if (edge.kind === 'model_manifest' && isInt(edge.step)) return {kind: edge.kind, step: edge.step};
+    raise('invalid_topology', '训练依赖的类型或模型步数无效');
+  }
   function readRecovery(physical, entry, format) {
     const raw = physical.recovery;
     let declared;
-    if (format === 'v3') {
+    if (hasOccurrenceIds(format)) {
       if (!RECOVERY_MODES.has(raw)) raise('invalid_physical_binding', 'v3 recovery 声明不在已知枚举内');
       declared = raw;
     } else if (typeof raw === 'string' && raw) {
@@ -147,7 +155,7 @@
     return {declared, limitations, restriction};
   }
   function readExchanges(physical, edgeIds, format) {
-    const list = format === 'v3' ? physical.exchanges : physical.channels;
+    const list = hasOccurrenceIds(format) ? physical.exchanges : physical.channels;
     if (list === undefined || list === null) return [];
     if (!Array.isArray(list)) raise('invalid_physical_binding', '物理通道列表无效');
     const out = [], seen = new Set();
@@ -156,7 +164,7 @@
         raise('invalid_physical_binding', 'channel_id 无效');
       if (seen.has(item.channel_id)) raise('invalid_physical_binding', 'channel_id 重复');
       seen.add(item.channel_id);
-      if (format === 'v3') {
+      if (hasOccurrenceIds(format)) {
         if (!isSha(item.edge_id) || !edgeIds.has(item.edge_id))
           raise('invalid_physical_binding', 'exchange.edge_id 不在图边集合内');
         if (!EXCHANGE_MODES.has(item.mode)) raise('invalid_physical_binding', 'exchange.mode 不在已知枚举内');
@@ -201,12 +209,12 @@
       if (!isRecord(dag)) return fail('unsupported_plan_schema', '缺少 dag');
       const schema = dag.schema_version, version = entry.version;
       let format;
-      if (schema === V3_SCHEMA) {
-        if (version !== 'v3') return fail('identity_mismatch', 'v3 dag 缺少一致的 version 标记');
-        format = 'v3';
+      if (schema === V3_SCHEMA || schema === V4_SCHEMA) {
+        format = schema === V3_SCHEMA ? 'v3' : 'v4';
+        if (version !== format) return fail('identity_mismatch', 'dag 与 version 标记不一致');
       } else if (schema === LEGACY_SCHEMA) {
         if (version === undefined || version === null || version === 'v1' || version === 'v2') format = 'legacy';
-        else if (version === 'v3') return fail('identity_mismatch', 'version 与 dag schema 冲突');
+        else if (hasOccurrenceIds(version)) return fail('identity_mismatch', 'version 与 dag schema 冲突');
         else return fail('unsupported_plan_schema', '未知计划版本 ' + bounded(version, 40));
       } else {
         return fail('unsupported_plan_schema', '未知 dag schema ' + bounded(schema, 60));
@@ -226,8 +234,8 @@
       for (const raw of dag.nodes) {
         if (!isRecord(raw)) return fail('invalid_topology', '节点格式无效');
         const logical = raw.logical_node_id, occurrence = raw.occurrence_id;
-        const validLogical = format === 'v3' ? isSha(logical) : isId(logical);
-        const validOccurrence = format === 'v3' ? isSha(occurrence) : isId(occurrence);
+        const validLogical = hasOccurrenceIds(format) ? isSha(logical) : isId(logical);
+        const validOccurrence = hasOccurrenceIds(format) ? isSha(occurrence) : isId(occurrence);
         if (!validLogical || !validOccurrence) return fail('invalid_topology', '节点身份无效');
         if (byOccurrence.has(occurrence)) return fail('invalid_topology', 'occurrence_id 重复');
         if (typeof raw.op_kind !== 'string' || !raw.op_kind || raw.op_kind.length > 64)
@@ -245,7 +253,7 @@
         if (!isRecord(raw) || !isRecord(raw.from) || !isRecord(raw.to)) return fail('invalid_topology', '边格式无效');
         const fromPort = portString(raw.from.port), toPort = portString(raw.to.port);
         if (fromPort === null || toPort === null) return fail('invalid_topology', '边端口无效');
-        if (format === 'v3') {
+        if (hasOccurrenceIds(format)) {
           if (!isSha(raw.edge_id)) return fail('invalid_topology', 'edge_id 无效');
           if (edgeIds.has(raw.edge_id)) return fail('invalid_topology', 'edge_id 重复');
           for (const endpoint of [raw.from, raw.to]) {
@@ -261,6 +269,7 @@
           edgeIds.add(raw.edge_id);
           edges.push({
             edgeId: raw.edge_id,
+            ...valueEdgeFacts(raw, format),
             from: {logicalNodeId: fromNode.logicalNodeId, occurrenceId: fromNode.occurrenceId, port: fromPort},
             to: {logicalNodeId: toNode.logicalNodeId, occurrenceId: toNode.occurrenceId, port: toPort},
           });
@@ -277,7 +286,7 @@
 
       const sources = Array.isArray(dag.sources) ? dag.sources : [];
       const terminals = Array.isArray(dag.terminals) ? dag.terminals : [];
-      if (format === 'v3') {
+      if (hasOccurrenceIds(format)) {
         for (const item of [...sources, ...terminals])
           if (!byOccurrence.has(item)) return fail('invalid_topology', 'source/terminal occurrence 不在节点集合内');
       } else {
@@ -297,7 +306,7 @@
       const stages = isRecord(physical.stages) ? physical.stages : {};
       const stageByKey = new Map();
       for (const stageKey of Object.keys(stages)) {
-        const known = format === 'v3' ? byOccurrence.has(stageKey) : logicalIds.has(stageKey);
+        const known = hasOccurrenceIds(format) ? byOccurrence.has(stageKey) : logicalIds.has(stageKey);
         if (!known) raise('invalid_physical_binding', '物理 stage 索引指向未知节点');
         const stage = stages[stageKey];
         if (!isRecord(stage) || typeof stage.stage_id !== 'string' || !stage.stage_id || stage.stage_id.length > 128)
@@ -305,21 +314,21 @@
         stageByKey.set(stageKey, stage);
       }
       for (const node of nodes) {
-        const stageKey = format === 'v3' ? node.occurrenceId : node.logicalNodeId;
+        const stageKey = hasOccurrenceIds(format) ? node.occurrenceId : node.logicalNodeId;
         const stage = stageByKey.get(stageKey);
         if (!stage) continue;
         node.placement = {
           stageId: stage.stage_id, role: roleByOccurrence.get(node.occurrenceId),
-          profile: format === 'v3' ? (isRecord(stage.profile) ? stage.profile : null)
+          profile: hasOccurrenceIds(format) ? (isRecord(stage.profile) ? stage.profile : null)
             : (isRecord(stage.budgets) ? stage.budgets : null),
           partitionCount: isInt(stage.partition_count) ? stage.partition_count : null,
-          replicaMin: format === 'v3' && isInt(stage.replica_min) ? stage.replica_min : null,
-          replicaTarget: format === 'v3' && isInt(stage.replica_target) ? stage.replica_target : null,
-          replicaMax: format === 'v3' && isInt(stage.replica_max) ? stage.replica_max : null,
+          replicaMin: hasOccurrenceIds(format) && isInt(stage.replica_min) ? stage.replica_min : null,
+          replicaTarget: hasOccurrenceIds(format) && isInt(stage.replica_target) ? stage.replica_target : null,
+          replicaMax: hasOccurrenceIds(format) && isInt(stage.replica_max) ? stage.replica_max : null,
           fusedOccurrences: [], basis: 'sealed',
         };
       }
-      if (format === 'v3') {
+      if (hasOccurrenceIds(format)) {
         const byStage = new Map();
         for (const node of nodes) {
           if (!node.placement) continue;
@@ -382,7 +391,7 @@
     if (!isRecord(page) || page.available !== true || !Array.isArray(page.entries))
       return {ok: false, reason: isRecord(page) && typeof page.reason === 'string' ? page.reason : 'observation_page_unavailable'};
     if (page.attempt !== identity.attempt) return {ok: false, reason: 'observation_scope_mismatch'};
-    if (identity.format === 'v3'
+    if (hasOccurrenceIds(identity.format)
         && (page.action_id !== identity.actionId || page.dag_id !== identity.dagId
             || page.plan_id !== identity.planId || page.plan_revision !== identity.planRevision))
       return {ok: false, reason: 'observation_scope_mismatch'};
@@ -399,7 +408,7 @@
     const set = new Set();
     for (const item of list) {
       if (typeof item === 'string') set.add(item);
-      else if (format !== 'v3' && isRecord(item) && typeof item.logical_node_id === 'string') set.add(item.logical_node_id);
+      else if (!hasOccurrenceIds(format) && isRecord(item) && typeof item.logical_node_id === 'string') set.add(item.logical_node_id);
     }
     return set;
   }
@@ -421,7 +430,7 @@
     // The snapshot/page wrapper binds run and attempt; an individual v3 row
     // must independently carry its original plan and execution occurrence.
     // A current wrapper cannot turn an old or unscoped row into current data.
-    return isRecord(row) && !!identity && identity.format === 'v3'
+    return isRecord(row) && !!identity && hasOccurrenceIds(identity.format)
       && row.action_id === identity.actionId && row.dag_id === identity.dagId
       && row.plan_id === identity.planId && row.plan_revision === identity.planRevision
       && row.occurrence_id === occurrenceId
@@ -431,11 +440,11 @@
   function memberState(node, context) {
     const {identity, binding, bridgeEntries, page, terminals, snapshot} = context;
     const neutral = label => ({label, tone: 'neutral'});
-    const isTerminal = identity.format === 'v3' ? terminals.has(node.occurrenceId) : terminals.has(node.logicalNodeId);
+    const isTerminal = hasOccurrenceIds(identity.format) ? terminals.has(node.occurrenceId) : terminals.has(node.logicalNodeId);
     if (snapshot && isTerminal) {
       const output = (Array.isArray(snapshot.outputs) ? snapshot.outputs : [])
         .find(item => isRecord(item) && item.action_id === identity.actionId
-          && (identity.format !== 'v3' || (matchesExecutionObservation(item, identity, node.occurrenceId)
+          && (!hasOccurrenceIds(identity.format) || (matchesExecutionObservation(item, identity, node.occurrenceId)
             && (item.retained_from_attempt == null || item.retained_from_attempt === identity.attempt))));
       if (output && output.status === 'committed')
         return {label: output.result ? '已提交并核验' : '已提交 · 登记待完成', tone: 'success'};
@@ -445,18 +454,18 @@
     if (!page.ok) {
       if (page.reason === 'historical_observation_contract') return neutral('历史未记录节点观测');
       if (page.reason === 'observation_scope_mismatch')
-        return neutral(identity.format === 'v3' ? '观测凭据不完整' : '观测页作用域不符');
+        return neutral(hasOccurrenceIds(identity.format) ? '观测凭据不完整' : '观测页作用域不符');
       return neutral('观测页不可用');
     }
     const pageEntry = page.byKey.get(jsonKey([node.logicalNodeId, node.occurrenceId]));
     if (!pageEntry || pageEntry.availability !== 'observed') return neutral('本页未见观测');
-    if (identity.format === 'v3' && (pageEntry.report_node_id !== bridgeEntry.report_node_id
+    if (hasOccurrenceIds(identity.format) && (pageEntry.report_node_id !== bridgeEntry.report_node_id
         || pageEntry.report_occurrence !== bridgeEntry.report_occurrence)) return neutral('观测凭据不完整');
     if (!snapshot) return neutral('已有观测 · 摘要未载入');
     const rows = (Array.isArray(snapshot.observations) ? snapshot.observations : []).filter(item =>
       isRecord(item) && item.action_id === identity.actionId
       && item.node_id === bridgeEntry.report_node_id && item.occurrence === bridgeEntry.report_occurrence);
-    const row = identity.format === 'v3'
+    const row = hasOccurrenceIds(identity.format)
       ? rows.find(item => matchesExecutionObservation(item, identity, node.occurrenceId)) : rows[0];
     if (!row && rows.length) return neutral('观测凭据不完整');
     if (!row) return neutral('已有观测 · 摘要未载入');
@@ -537,7 +546,7 @@
     const bridgeEntry = bridgeEntryFor(context.bridgeEntries, node.logicalNodeId, node.occurrenceId);
     const reportNodeId = bridgeEntry ? bridgeEntry.report_node_id
       : (typeof context.nodeMap[node.logicalNodeId] === 'string' ? context.nodeMap[node.logicalNodeId] : null);
-    const key = identity.format === 'v3' ? v3Key(identity, node.occurrenceId)
+    const key = hasOccurrenceIds(identity.format) ? v3Key(identity, node.occurrenceId)
       : legacyMemberKey(binding.basis_digest, identity.actionId, node.logicalNodeId, node.occurrenceId);
     return {
       key, reportNodeId, actionId: identity.actionId,
@@ -550,7 +559,7 @@
       : (typeof context.nodeMap[node.logicalNodeId] === 'string' ? context.nodeMap[node.logicalNodeId] : null);
     let name = reportName(findReportNode(graph, reportId)) || (reportId ? indexLabel(graph, reportId) : null);
     name = displayTitle(name, node.kind);
-    if (identity.format === 'v3' && sameLogicalCount > 1) name = bounded(name + ' · 第' + ordinal + '次', 80);
+    if (hasOccurrenceIds(identity.format) && sameLogicalCount > 1) name = bounded(name + ' · 第' + ordinal + '次', 80);
     return name;
   }
   function placementSummary(node) {
@@ -589,7 +598,7 @@
     }
     const identity = execution.identity;
     const context = sealedContext(graph, findAction(graph, identity.actionId), identity, snapshot);
-    if (identity.format === 'v3') {
+    if (hasOccurrenceIds(identity.format)) {
       const node = execution.nodes.find(item => item.occurrenceId === selection.occurrenceId
         && item.logicalNodeId === selection.logicalNodeId);
       if (!node) {
@@ -667,7 +676,7 @@
       const reason = logical && typeof logical.reason === 'string' ? logical.reason : 'no_declared_actions';
       return {kind: 'unavailable', actionId: null, label: '没有可投影的 action · ' + reason, reason};
     }
-    const first = actions[0];
+    const first = actions.find(entry => isRecord(entry) && entry.status === 'sealed') || actions[0];
     const firstId = isRecord(first) && typeof first.action_id === 'string' ? first.action_id : null;
     if (isRecord(first) && first.status === 'sealed') return {kind: 'sealed', actionId: firstId, label: '运行封存计划', reason: null};
     const reason = nonSealedReason(first);
@@ -734,7 +743,7 @@
     const identity = projection.identity;
     const context = sealedContext(graph, entry, identity, snapshot);
     const cards = [], cardByKey = new Map();
-    if (identity.format === 'v3') {
+    if (hasOccurrenceIds(identity.format)) {
       for (const node of projection.nodes) {
         const cardSelection = memberSelection(graph, node, identity, context);
         const card = buildNodeCard(graph, cardSelection, snapshot, projection);
@@ -755,12 +764,12 @@
     }
     const edges = [];
     for (const edge of projection.edges) {
-      const from = identity.format === 'v3' ? v3Key(identity, edge.from.occurrenceId)
+      const from = hasOccurrenceIds(identity.format) ? v3Key(identity, edge.from.occurrenceId)
         : legacyGroupKey(binding.basis_digest, identity.actionId, edge.from.logicalNodeId);
-      const to = identity.format === 'v3' ? v3Key(identity, edge.to.occurrenceId)
+      const to = hasOccurrenceIds(identity.format) ? v3Key(identity, edge.to.occurrenceId)
         : legacyGroupKey(binding.basis_digest, identity.actionId, edge.to.logicalNodeId);
       if (!cardByKey.has(from) || !cardByKey.has(to)) continue;
-      edges.push({edgeId: edge.edgeId, from, to, kind: 'data', fromPort: edge.from.port, toPort: edge.to.port});
+      edges.push({edgeId: edge.edgeId, from, to, kind: edge.kind || 'data', step: edge.step, fromPort: edge.from.port, toPort: edge.to.port});
       if (edges.length >= MAX_EDGES) break;
     }
     let selected = null;
@@ -795,7 +804,7 @@
         || !isRecord(value.basis) || !isSha(value.basis.digest) || !isRecord(value.dag))
       reject('响应缺少明确的编译依据或动作范围');
     const dag = value.dag;
-    if (dag.schema_version !== V3_SCHEMA || !text(dag.dag_id) || !text(dag.action_id)
+    if ((dag.schema_version !== V3_SCHEMA && dag.schema_version !== V4_SCHEMA) || !text(dag.dag_id) || !text(dag.action_id)
         || !Array.isArray(dag.nodes) || !dag.nodes.length || dag.nodes.length > MAX_NODES
         || !Array.isArray(dag.edges) || dag.edges.length > MAX_EDGES)
       reject('计划格式或展示预算不受支持');
@@ -825,7 +834,8 @@
       edgeIds.add(edge.edge_id);incoming.set(to.occurrence_id, incoming.get(to.occurrence_id) + 1);
       outgoing.get(from.occurrence_id).push(to.occurrence_id);
       return {edgeId: edge.edge_id, from: keys.get(from.occurrence_id), to: keys.get(to.occurrence_id),
-        kind: 'data', fromPort: edge.from.port, toPort: edge.to.port};
+        kind: 'data', ...valueEdgeFacts(edge, dag.schema_version === V4_SCHEMA ? 'v4' : 'v3'),
+        fromPort: edge.from.port, toPort: edge.to.port};
     });
     const queue = [...incoming].filter(([, count]) => count === 0).map(([id]) => id);
     for (let i = 0; i < queue.length; i++) for (const id of outgoing.get(queue[i])) {
@@ -888,7 +898,7 @@
     const node = projection.nodes.find(item => item.occurrenceId === selection.occurrenceId
       && item.logicalNodeId === selection.logicalNodeId);
     const context = sealedContext(graph, entry, identity, null);
-    if (identity.format !== 'v3' && selection.occurrenceId === null) {
+    if (!hasOccurrenceIds(identity.format) && selection.occurrenceId === null) {
       const members = projection.nodes.filter(item => item.logicalNodeId === selection.logicalNodeId);
       if (members.length > 1) {
         const name = reportName(findReportNode(graph, context.nodeMap[selection.logicalNodeId]))
@@ -908,10 +918,10 @@
     const title = reportName(reportNode) || (reportId ? indexLabel(graph, reportId) : null) || kindLabel(node.kind);
     const inputs = [];
     for (const edge of projection.edges) {
-      const adjacent = identity.format === 'v3' ? edge.to.occurrenceId === node.occurrenceId
+      const adjacent = hasOccurrenceIds(identity.format) ? edge.to.occurrenceId === node.occurrenceId
         : edge.to.logicalNodeId === node.logicalNodeId;
       if (!adjacent) continue;
-      const upstream = projection.nodes.find(item => identity.format === 'v3'
+      const upstream = projection.nodes.find(item => hasOccurrenceIds(identity.format)
         ? item.occurrenceId === edge.from.occurrenceId : item.logicalNodeId === edge.from.logicalNodeId);
       const upstreamBridge = upstream ? bridgeEntryFor(context.bridgeEntries, upstream.logicalNodeId, upstream.occurrenceId) : null;
       const upstreamReportId = upstreamBridge ? upstreamBridge.report_node_id
@@ -927,7 +937,7 @@
       : [{label: '输出字段', value: null, basis: 'sealed', reason: 'report_node_unbridged'}];
     const parameters = reportNode ? parameterFacts(reportNode, 'sealed') : [];
     let exchanges = [];
-    if (identity.format === 'v3') {
+    if (hasOccurrenceIds(identity.format)) {
       const adjacentEdges = new Set(projection.edges
         .filter(edge => edge.from.occurrenceId === node.occurrenceId || edge.to.occurrenceId === node.occurrenceId)
         .map(edge => edge.edgeId));
@@ -945,6 +955,6 @@
   }
 
   globalThis.ForgeWorkbenchPresentation = Object.freeze({
-    chooseGraphView, buildNodeCard, buildGraphModel, buildNodeDetails, buildPlanPreviewModel, normalizeExecutionPlan, matchesExecutionObservation,
+    hasOccurrenceIds, chooseGraphView, buildNodeCard, buildGraphModel, buildNodeDetails, buildPlanPreviewModel, normalizeExecutionPlan, matchesExecutionObservation,
   });
 })();

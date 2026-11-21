@@ -151,10 +151,17 @@ def test_v3_current_wrapper_does_not_certify_old_rows_or_retained_output():
     assert selected_state(payload)['tone'] == 'neutral'
 
 
-def test_v3_endpoint_validation_remains_strict():
+@pytest.mark.parametrize('version', ['v3', 'v4'])
+def test_occurrence_scoped_endpoint_validation_remains_strict(version):
     payload = v3_payload()
     entry = payload['graph']['logical']['actions'][0]
     assert len(project(payload, MODEL)['nodes']) == len(entry['dag']['nodes'])
+    entry['version'] = version
+    entry['dag']['schema_version'] = 'demiflow.dataflow_graph.' + version
+    payload['graph']['logical']['actions'].insert(0, {'status': 'projected', 'action_id': 'earlier'})
+    rendered = project(payload, MODEL)
+    assert rendered['execution']['format'] == version
+    assert rendered['execution']['actionId'] == entry['action_id']
     del entry['dag']['edges'][0]['from']['occurrence_id']
     model = project(payload, MODEL)
     assert model['nodes'] == []
