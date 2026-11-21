@@ -254,6 +254,9 @@ def test_turn_rail_history_and_project_files_share_the_conversation(tmp_path):
         for i in range(25):
             turn, _ = store.submit(workspace, sid, 'message-'+str(i), i, '第 '+str(i+1)+' 个问题',
                                    root_identity(root), server.development.policy_hash)
+            if i == 24:
+                store.event(turn['id'], 'message.completed', dict(item_id='reason', channel='process',
+                            text=('展开的思考段落。\n\n' * 90)))
             store.event(turn['id'], 'message.completed', dict(item_id='answer', text=('这是一段长回复。\n\n'*18)))
             store.finish_provider(turn['id'], state='completed', cleanup='complete', result={})
         with browser_page(server) as (page, expect):
@@ -275,6 +278,25 @@ def test_turn_rail_history_and_project_files_share_the_conversation(tmp_path):
             expect(page.get_by_role('button',name='跳到第 3 轮',exact=True)).to_have_attribute('aria-current','true')
             page.get_by_role('button',name='回到最新记录').click()
             expect(current).to_have_attribute('aria-current','true')
+            earlier = page.get_by_role('button', name='加载更早的记录')
+            earlier.click()
+            expect(page.get_by_label('开发要求')).to_be_disabled()
+            page.get_by_role('button',name='回到最新记录').click()
+            expect(current).to_have_attribute('aria-current','true')
+            page.locator('.dfc-think>summary').last.click()
+            process = page.locator('.dfc-step-process>.dfc-disclosure-body').last
+            expect(process).to_contain_text('展开的思考段落')
+            assert process.evaluate('n=>n.scrollHeight>800 && n.scrollHeight<=n.clientHeight+1')
+            timeline = page.locator('.development-timeline')
+            process.evaluate("n=>n.scrollIntoView({block:'start'})")
+            viewport = timeline.bounding_box()
+            page.mouse.move(viewport['x']+viewport['width']/2, viewport['y']+viewport['height']/2)
+            before = timeline.evaluate('n=>n.scrollTop')
+            fixed = page.get_by_label('开发要求').bounding_box()
+            page.mouse.wheel(0,360)
+            page.wait_for_function("top=>document.querySelector('.development-timeline').scrollTop>top+120",arg=before)
+            assert page.get_by_label('开发要求').bounding_box()['y']==fixed['y']
+            assert page.evaluate('window.scrollY')==0
             page.get_by_label('开发要求').fill('草稿')
             page.get_by_role('button',name='打开项目根目录').click()
             pane = page.get_by_role('complementary',name='项目文件')
