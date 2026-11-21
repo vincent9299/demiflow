@@ -1,0 +1,13 @@
+{
+  "name": "demiflow-notebook-outputs",
+  "private": true,
+  "scripts": {
+    "build": "esbuild outputs.js --bundle --minify --format=esm --legal-comments=none --outfile=../../demiflow/workbench/web/notebook-outputs.js"
+  },
+  "dependencies": {
+    "@observablehq/inputs": "1.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.11"
+  }
+}

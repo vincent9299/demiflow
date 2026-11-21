@@ -329,8 +329,22 @@ def test_failed_prepare_can_be_read_closed_and_corrected(unregistered, browser, 
         assert len(saved) == 1
         receipt = json.loads((unregistered/'.forge/requests'/(saved[0]['request_id']+'.json')).read_text())
         assert receipt['status'] == 'failed'
-        page.get_by_role('button', name='核对原请求', exact=True).click()
-        page.get_by_role('button', name='结束此失败请求', exact=True).click()
+        inspect_request = page.get_by_role('button', name='核对原请求', exact=True)
+        finish_request = page.get_by_role('button', name='结束此失败请求', exact=True)
+        def matches_receipt(response):
+            url = urlsplit(response.url)
+            return (response.request.method == 'GET' and url.path.endswith('/run-request')
+                    and parse_qs(url.query).get('request_id') == [saved[0]['request_id']])
+        with page.expect_response(matches_receipt) as inspected:
+            inspect_request.click()
+        if not_admitted(inspected.value):
+            expect(page.locator('.wb-notice.error-box')).to_contain_text(inspected.value.json()['error'])
+            expect(finish_request).to_have_count(0)
+            assert page.evaluate("JSON.parse(sessionStorage.getItem('demiflow-workbench-run-intents-v1'))") == saved
+            with page.expect_response(matches_receipt) as inspected:
+                inspect_request.click()
+        assert inspected.value.ok, inspected.value.text()
+        finish_request.click()
         assert page.evaluate("JSON.parse(sessionStorage.getItem('demiflow-workbench-run-intents-v1'))") == []
         assert not list((unregistered/'.forge/runs').glob('*'))
         config.write_bytes(original)

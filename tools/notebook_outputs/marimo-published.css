@@ -1,0 +1,20 @@
+/* marimo Gallery's example cards use rounded-lg, border-border (Radix slate-6)
+   and #bcbcbc on hover/focus. Keep that outline around the Notebook output. */
+.df-card-mode .jp-CodeCell {
+  border: 1px solid #d9d9e0;
+  border-radius: 8px;
+  background: white;
+  box-shadow: none;
+}
+.df-card-mode .jp-CodeCell:is(:hover, :focus-within, .jp-mod-active) {
+  border-color: #bcbcbc;
+}
+/* Adapted from marimo 0.25.2, frontend/src/css/app/Cell.css, .published .output-area. */
+.df-card-mode .jp-CodeCell[data-df-folded="true"] .jp-Cell-outputWrapper {
+  display: block;
+  padding-top: 0;
+  padding-bottom: 0;
+  border: none;
+  box-shadow: none;
+  overflow: visible;
+}

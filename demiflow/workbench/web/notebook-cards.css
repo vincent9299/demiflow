@@ -1,24 +1,88 @@
-/* The cells, editors, outputs and widget events belong to Notebook 7. */
-.df-cell-tools{display:none}
-.df-card-mode #top-panel-wrapper,.df-card-mode #menu-panel-wrapper,.df-card-mode .jp-NotebookPanel-toolbar{display:none!important}
-.df-card-mode #main-panel{position:absolute;inset:0!important;width:100%;height:100%!important}
-.df-card-mode .jp-NotebookPanel-notebook{top:0!important;height:100%!important}
-.df-card-mode :is(#main,.jp-WindowedPanel-outer,.jp-WindowedPanel-inner,.jp-WindowedPanel-viewport){background:#fff;box-shadow:none!important;border:0}
-.df-card-mode .jp-WindowedPanel-inner{margin:0 auto!important}.df-card-mode .jp-WindowedPanel-viewport{padding-block:0!important}
-.df-card-mode .jp-Notebook{background:#fff;padding:18px clamp(8px,3vw,44px) 56px}
-.df-card-mode .jp-CodeCell{position:relative;box-sizing:border-box;background:#fff;margin:2px auto 14px;max-width:960px;padding:8px 10px 10px;border:1px solid #e7e9ee;border-radius:12px}
-.df-card-mode .jp-CodeCell.jp-mod-active{border-color:#b9caed}
-.df-card-mode .jp-CodeCell::before{display:none!important}
-.df-card-mode .jp-InputArea-editor{background:#f8f9fb;border:0;border-radius:6px}
-.df-card-mode .jp-CodeCell[data-df-folded=true]>.jp-Cell-inputWrapper{display:none}
-.df-card-mode :is(.jp-InputPrompt,.jp-OutputPrompt,.jp-Collapser){display:none}
-.df-card-mode .df-cell-tools{display:flex;align-items:center;gap:2px;min-height:22px;margin-bottom:3px}
-.df-cell-title{min-width:0;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#353e4f;font:500 13px/20px system-ui,sans-serif}
-.df-card-icon{display:inline-grid;place-items:center;width:27px;height:27px;border:0;background:transparent;padding:4px;box-shadow:none;border-radius:5px;color:#647083;cursor:pointer}
-.df-card-icon svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-.df-card-icon:hover,.df-card-icon:focus-visible{background:#eef1f5;color:#172235}
-.df-cell-tools button{opacity:0}
-.jp-CodeCell:is(:hover,:focus-within,.jp-mod-active) .df-cell-tools button{opacity:1}
-@media(hover:none){.df-cell-tools button{opacity:1}}
+@import url("/notebook-outputs.css");
 
-.df-run-error{margin:4px 0;color:#9f3131;font-size:13px}
+/* Notebook 7 owns the original cells, editors and widget events. */
+.df-cell-tools,
+body:not(.df-card-mode) .df-dataframe-view { display: none !important; }
+
+.df-card-mode {
+  --df-ink: #20242b;
+  --df-muted: #626a75;
+  --df-line: #e4e6e9;
+  --df-accent: #4664bb;
+  --sans-serif: var(--jp-ui-font-family, system-ui, sans-serif);
+}
+.df-card-mode #top-panel-wrapper, .df-card-mode #menu-panel-wrapper,
+.df-card-mode .jp-NotebookPanel-toolbar { display: none !important; }
+.df-card-mode #main-panel { position: absolute; inset: 0 !important; width: 100%; height: 100% !important; }
+.df-card-mode .jp-NotebookPanel-notebook { top: 0 !important; height: 100% !important; }
+.df-card-mode :is(#main, .jp-WindowedPanel-outer, .jp-WindowedPanel-inner, .jp-WindowedPanel-viewport) {
+  background: white; box-shadow: none !important; border: 0;
+}
+.df-card-mode .jp-WindowedPanel-inner { margin: 0 auto !important; }
+.df-card-mode .jp-WindowedPanel-viewport { padding-block: 0 !important; }
+.df-card-mode .jp-Notebook { background: white; padding: 12px clamp(12px, 4vw, 56px) 56px; }
+.df-card-mode .jp-CodeCell {
+  position: relative; box-sizing: border-box; max-width: 880px;
+  margin: 6px auto 16px; padding: 12px 16px 14px;
+}
+.df-card-mode .jp-CodeCell::before { display: none !important; }
+.df-card-mode .jp-InputArea-editor {
+  background: #f7f8fa; border: 1px solid var(--df-line); border-radius: 6px; overflow: hidden;
+}
+.df-card-mode .jp-CodeCell[data-df-folded=true] > .jp-Cell-inputWrapper { display: none; }
+.df-card-mode :is(.jp-InputPrompt, .jp-OutputPrompt, .jp-Collapser) { display: none; }
+.df-card-mode .df-cell-tools {
+  display: flex !important; align-items: center; gap: 2px; position: relative; min-height: 28px; margin-bottom: 8px;
+}
+.df-cell-title { min-width: 0; flex: 1; color: var(--df-ink); font: 600 16px/1.4 var(--sans-serif); overflow-wrap: anywhere; }
+.df-card-icon {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 4px;
+  border: 0; border-radius: 5px; background: transparent; color: var(--df-muted); cursor: pointer;
+}
+.df-card-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.df-card-icon:is(:hover, :focus-visible) { background: #edf0f4; color: var(--df-ink); }
+.df-cell-tools button { opacity: 0; }
+.jp-CodeCell:is(:focus-within, .jp-mod-active) .df-cell-tools button,
+.df-cell-tools:focus-within button { opacity: 1; }
+@media (hover: hover) { .jp-CodeCell:hover .df-cell-tools button { opacity: 1; } }
+
+.df-card-mode .jp-OutputArea-output { max-width: 100%; min-width: 0; }
+.df-card-mode table.dataframe:has(+ .df-dataframe-view) { display: none; }
+.df-card-mode .jp-RenderedHTMLCommon:has(.df-dataframe-view) { padding: 0; }
+.df-card-mode .df-dataframe-view {
+  display: block; width: 100%; max-width: 100%; margin: 0; overflow: auto;
+  border-block: 1px solid var(--df-line); color: var(--df-ink); font: 14px/1.5 var(--sans-serif);
+}
+.df-card-mode .df-dataframe-view table { width: 100%; margin: 0; font: inherit; border-collapse: collapse; }
+.df-card-mode .df-dataframe-view :is(td, th) { padding: 7px 12px; white-space: nowrap; border-bottom: 1px solid var(--df-line); }
+.df-card-mode .df-dataframe-view thead th { background: #f6f7f8; color: var(--df-muted); font-weight: 550; }
+.df-card-mode .df-dataframe-view tbody tr { background: white; }
+.df-card-mode .df-dataframe-view tbody tr:hover { background: #f5f7fb; }
+.df-card-mode .df-dataframe-view tbody tr:last-child td { border-bottom: 0; }
+.df-card-mode .df-dataframe-view tr > :first-child { display: none; }
+.df-card-mode .df-indexed-table tr > :nth-child(2) {
+  width: 2.5em; color: var(--df-muted); font-size: 12px;
+}
+.df-card-mode .df-dataframe-view td { font-variant-numeric: tabular-nums; }
+.df-card-mode .df-dataframe-view th:focus-visible { outline: 2px solid var(--df-accent); outline-offset: -2px; }
+
+.df-card-mode .jupyter-widgets {
+  --jp-widgets-font-size: 14px; --jp-widgets-label-width: auto; --jp-widgets-inline-height: 32px;
+  max-width: 100%; color: var(--df-ink);
+}
+.df-card-mode .widget-vbox > .widget-dropdown { width: fit-content; max-width: 100%; }
+.df-card-mode .widget-dropdown > select {
+  min-width: 5em; height: 30px; padding-inline: 8px; border: 1px solid #cfd5dc;
+  border-radius: 6px; background-color: white; color: var(--df-ink); font: inherit;
+}
+.df-card-mode .widget-dropdown .widget-label {
+  flex: 0 0 auto; width: auto; min-width: 0; text-align: start;
+  margin-inline: 0 10px; color: var(--df-muted);
+}
+.df-card-mode .widget-vbox > .widget-label { margin: 7px 0 0; color: var(--df-ink); font-size: 18px; font-weight: 550; }
+.df-run-error { margin: 4px 0; color: #9f3131; font-size: 13px; }
+@media (max-width: 480px) {
+  .df-card-mode .jp-Notebook { padding-inline: 14px; }
+  .df-card-mode .jp-CodeCell { margin-bottom: 12px; padding: 10px; }
+  .df-card-mode .df-dataframe-view :is(td, th) { padding-inline: 7px; }
+}
