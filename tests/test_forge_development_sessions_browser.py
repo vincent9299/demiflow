@@ -242,3 +242,66 @@ def test_existing_new_draft_does_not_erase_different_legacy_draft(tmp_path):
         saved = dict(page.evaluate("JSON.parse(sessionStorage.getItem('forge-development-drafts'))"))
         assert saved[workspace + ':new'] == 'Newer unsent draft'
         assert saved[workspace + ':project'] == 'Older unsent draft'
+
+
+def test_turn_rail_history_and_project_files_share_the_conversation(tmp_path):
+    with conversation_app(tmp_path) as (server, workspace, root):
+        (root / 'nested').mkdir()
+        (root / 'nested' / 'notes.md').write_text('Project-only document')
+        (root / 'nested' / 'step.py').write_text('print(1)')
+        store = server.development.store
+        sid = server.development.create_project(workspace, root, 'rail-fixture', 'codex')['id']
+        for i in range(25):
+            turn, _ = store.submit(workspace, sid, 'message-'+str(i), i, '第 '+str(i+1)+' 个问题',
+                                   root_identity(root), server.development.policy_hash)
+            store.event(turn['id'], 'message.completed', dict(item_id='answer', text=('这是一段长回复。\n\n'*18)))
+            store.finish_provider(turn['id'], state='completed', cleanup='complete', result={})
+        with browser_page(server) as (page, expect):
+            shot_dir = Path(os.environ.get('FORGE_ACCEPTANCE_DIR', tmp_path))
+            shot_dir.mkdir(parents=True, exist_ok=True)
+            current = page.get_by_role('button', name='跳到第 25 轮', exact=True)
+            expect(current).to_have_attribute('aria-current', 'true')
+            assert current.bounding_box()['x'] > 1390
+            first = page.get_by_role('button', name='加载第 1 轮', exact=True)
+            expect(first).to_be_visible()
+            first.hover()
+            expect(page.get_by_role('tooltip')).to_contain_text('第 1 个问题')
+            page.screenshot(path=str(shot_dir/'turn-rail.png'))
+            first.click()
+            expect(page.get_by_role('button', name='跳到第 1 轮', exact=True)).to_have_attribute('aria-current','true')
+            expect(page.locator('.dfc-user').first).to_contain_text('第 1 个问题')
+            expect(page.get_by_label('开发要求')).to_be_disabled()
+            page.get_by_role('button',name='跳到第 3 轮',exact=True).click()
+            expect(page.get_by_role('button',name='跳到第 3 轮',exact=True)).to_have_attribute('aria-current','true')
+            page.get_by_role('button',name='回到最新记录').click()
+            expect(current).to_have_attribute('aria-current','true')
+            page.get_by_label('开发要求').fill('草稿')
+            page.get_by_role('button',name='打开项目根目录').click()
+            pane = page.get_by_role('complementary',name='项目文件')
+            expect(pane).to_contain_text(str(root))
+            pane.get_by_role('button',name='nested',exact=True).click()
+            pane.get_by_role('button',name='step.py').click()
+            expect(page.get_by_role('dialog')).to_contain_text('print(1)')
+            page.get_by_role('button',name='关闭文件预览').click()
+            pane.get_by_role('button',name='notes.md').click()
+            expect(page.get_by_role('dialog')).to_contain_text('Project-only document')
+            page.get_by_role('button',name='关闭文件预览').click()
+            assert page.locator('.development-timeline').bounding_box()['x'] < pane.bounding_box()['x']
+            assert page.get_by_label('开发要求').bounding_box()['x'] < pane.bounding_box()['x']
+            page.screenshot(path=str(shot_dir/'project-files.png'))
+            page.get_by_role('button',name='刷新项目目录').click()
+            expect(pane.get_by_role('button',name='nested')).to_have_attribute('aria-expanded','false')
+            page.get_by_role('button',name='关闭项目目录').click()
+            for width in (390,320):
+                page.set_viewport_size({'width':width,'height':760})
+                picker=page.get_by_role('combobox',name='跳到会话轮次')
+                expect(picker).to_be_visible()
+                picker.select_option(index=0)
+                expect(page.locator('.dfc-user').first).to_contain_text('第 1 个问题')
+                page.get_by_role('button',name='回到最新记录').click()
+                page.get_by_role('button',name='打开项目根目录').click()
+                expect(pane.get_by_role('button',name='nested')).to_be_visible()
+                assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+                page.get_by_role('button',name='关闭项目目录').click()
+                expect(page.get_by_label('开发要求')).to_have_value('草稿')
+            assert page.locator('.development-more,.development-trajectory,[role=tablist]').count()==0

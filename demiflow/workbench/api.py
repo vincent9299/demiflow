@@ -59,6 +59,10 @@ STATIC_ASSETS = {
     "/workbench-observer.js": ("workbench-observer.js", "text/javascript; charset=utf-8"),
     "/workbench.js": ("workbench.js", "text/javascript; charset=utf-8"),
     "/workbench.css": ("workbench.css", "text/css; charset=utf-8"),
+    "/dsh-components.js": ("dsh-components.js", "text/javascript; charset=utf-8"),
+    "/dsh-components.css": ("dsh-components.css", "text/css; charset=utf-8"),
+    "/dsh-runtime.min.js": ("dsh-runtime.min.js", "text/javascript; charset=utf-8"),
+    "/development-navigation.js": ("development-navigation.js", "text/javascript; charset=utf-8"),
     "/development.css": ("development.css", "text/css; charset=utf-8"),
     "/development-chat.css": ("development-chat.css", "text/css; charset=utf-8"),
     "/development-composer.css": ("development-composer.css", "text/css; charset=utf-8"),
@@ -77,6 +81,8 @@ BODY_BYTES = 65536
 RESPONSE_BYTES = 9 * 1024**2
 # Required and optional wire fields; these describe transport, never Flow operators.
 GET_FIELDS = {
+    'project-file-text': ({'path'}, set()),
+    'project-files': (set(), {'path', 'offset', 'limit'}),
     'project-documents': (set(), {'path', 'offset', 'limit'}),
     'project-markdown': ({'path'}, set()),
     'project-operators': (set(), set()),
@@ -694,7 +700,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:self._send(value)
                 return
             with self._work(control=url.path in {'/api/run-snapshot','/api/run-events'},
-                            project=name in {'project-operators','operator-definition','operator-history','flow-arguments','project-documents','project-markdown'}):
+                            project=name in {'project-operators','operator-definition','operator-history','flow-arguments','project-file-text','project-files','project-documents','project-markdown'}):
                 if url.path == "/api/context":
                     value = api.workspace_context(root)
                     value['runs_enabled'] = permissions['run_submit']
@@ -752,10 +758,16 @@ class Handler(BaseHTTPRequestHandler):
                 elif url.path == '/api/flow-arguments':
                     from demiflow.workbench.projects.flow_arguments import read
                     value = read(root, **query)
-                elif url.path in {'/api/project-documents', '/api/project-markdown'}:
+                elif url.path == '/api/project-file-text':
+                    from demiflow.workbench.projects import documents
+                    value = documents.read(root, query['path'], project_text=True)
+                elif url.path in {'/api/project-files', '/api/project-documents', '/api/project-markdown'}:
                     from demiflow.workbench.projects import documents
                     value = (documents.read(root, query['path']) if url.path == '/api/project-markdown' else
-                             documents.listing(root, query.get('path', ''), int(query.get('offset', 0)), int(query.get('limit', 50))))
+                             documents.listing(root, query.get('path', ''), int(query.get('offset', 0)), int(query.get('limit', 50)),
+                                               all_files=url.path == '/api/project-files'))
+                    if url.path == '/api/project-files':
+                        value['root'] = str(root)
                 elif url.path == '/api/project-discovery':
                     value = api.discover_project(root)
                 elif url.path == '/api/project-document':
