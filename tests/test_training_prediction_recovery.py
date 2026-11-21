@@ -39,9 +39,16 @@ class SeedScores:
         import signal
         import time
         import pyarrow as pa
-        # Give the native control loop a mid-inference checkpoint opportunity.
-        time.sleep(.65 if self.step == 800 else .01)
         values = batch[self.input].to_pylist()
+        if self.attempt == 1 and self.step == 800 and values == list(range(20,30)):
+            # Hold the real third inference call while the driver sends the native cut request.
+            # Its completed rows therefore precede the barrier on every host, independent of speed.
+            (self.audit / 'request-cut').touch()
+            limit = time.monotonic() + 20
+            while not (self.audit / 'sent-cut').exists():
+                if time.monotonic() > limit:
+                    raise TimeoutError('Driver did not send the original checkpoint request')
+                time.sleep(.01)
         with (self.audit / f'calls-{self.attempt}.jsonl').open('a') as trace:
             trace.write(json.dumps([self.step,values]) + '\n')
         outputs = [[] for _ in values]
@@ -59,6 +66,17 @@ def _install_driver_crash(run, location):
     from demiflow.execution import commit
     from demiflow.execution.sealed_plans import load_sealed_plan
     from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+    # Drive the real public checkpoint control on the driver's own pump thread.
+    # Preparation, barriers, evidence, publication and recovery execute unchanged.
+    pump = DataflowExecution.pump
+    def pump_with_cut(execution, *, deadline_ms):
+        ready, sent = location.parent / 'request-cut', location.parent / 'sent-cut'
+        if ready.exists() and not sent.exists():
+            execution.request_checkpoint()
+            sent.touch()
+        return pump(execution, deadline_ms=deadline_ms)
+    DataflowExecution.pump = pump_with_cut
     models = {}
     def fault(name, commit_id):
         if name != 'after_checkpoint_committed':
@@ -96,7 +114,7 @@ def _execute(root, mode):
     deployment = TrainingDeployment('project', binding)
     directory = root / 'run'
     ctx = RunContext.start(directory, training=deployment,
-        limits={'checkpoint_rows':10,'checkpoint_interval_ms':300,'timeout_s':300}) if mode == 'crash' else (
+        limits={'checkpoint_rows':256,'checkpoint_interval_ms':60000,'timeout_s':300}) if mode == 'crash' else (
         RunContext.resume(RunRef(str(directory), RunJournal(directory).recovery_identity()['run_id']),
                           training=deployment))
     with ctx:
