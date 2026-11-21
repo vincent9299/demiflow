@@ -64,6 +64,36 @@ def test_submit_history_snapshot_and_result(root, browser):
         assert not errors, errors
 
 
+def test_history_recovers_when_its_first_read_is_not_dispatched(root, browser):
+    from test_forge_runs import prepared
+
+    value = prepared(root)
+    with service(root, enable_runs=True) as app, page_for(browser, app) as (page, errors):
+        attempts = []
+
+        def read_history(route):
+            assert route.request.method == 'GET'
+            if not attempts:
+                # Exercise the real admission response before any history read begins.
+                with app.workers:
+                    response = route.fetch()
+                assert response.status == 503
+                assert response.json()['operation_started'] is False
+                attempts.append(response.status)
+                route.fulfill(response=response)
+            else:
+                attempts.append('retry')
+                route.continue_()
+
+        page.route('**/runs?*', read_history)
+        page.locator('.function-nav').get_by_role('button', name='运行', exact=True).click()
+        record = page.locator(f'.wb-run-record[data-run="{value["run_id"]}"]')
+        expect(record).to_be_visible()
+        assert attempts[:2] == [503, 'retry']
+        assert runs.show(root, value['run_id'])['status'] == 'prepared'
+        assert not errors
+
+
 def test_stop_resume_and_historical_result_use_same_run(root, browser):
     import lance
     value = custom(root, '''
