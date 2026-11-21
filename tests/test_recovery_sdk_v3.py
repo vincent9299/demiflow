@@ -115,5 +115,14 @@ def test_sdk_created_nested_function_is_checked_before_and_after_pickle(tmp_path
     assert decoded.__globals__ is not live.__globals__
     assert describe(decoded) == describe(live)
     assert describe(different_closure) != describe(live)
+    same_file = tmp_path / 'same-module.py'
+    same_file.symlink_to(decoded.__globals__['__file__'])
+    decoded.__globals__['__file__'] = str(same_file)
+    assert describe(decoded) == describe(live)
+    separate_copy = tmp_path / 'different-module.py'
+    separate_copy.write_bytes(same_file.read_bytes())
+    decoded.__globals__['__file__'] = str(separate_copy)
+    assert describe(decoded)['source_hash'] == sha256(_source(decoded)).hexdigest()
+    decoded.__globals__['__file__'] = str(same_file)
     decoded.__globals__['undeclared'] = 123
     assert describe(decoded)['source_hash'] == sha256(_source(decoded)).hexdigest()

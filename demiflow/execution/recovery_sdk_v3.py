@@ -9,6 +9,7 @@ digests are verified independently. An unrecognised revision uses its own pin.
 import builtins
 from dis import get_instructions
 from functools import lru_cache
+from os.path import samefile
 import sys
 from types import CodeType, FunctionType
 
@@ -71,6 +72,17 @@ def _children(code):
             yield from _children(item)
 
 
+def _same_module_file(recorded, loaded):
+    if type(recorded) is not str or type(loaded) is not str:
+        return False
+    if recorded == loaded:
+        return True
+    try:
+        return samefile(recorded, loaded)
+    except (OSError, ValueError):
+        return False
+
+
 def _matches_definition(fn, module, compiled, root_name, code):
     live_globals = fn.__globals__ is vars(module)
     # Cloudpickle restores SDK-created closures by value. Only a closed body
@@ -81,7 +93,7 @@ def _matches_definition(fn, module, compiled, root_name, code):
                 and set(fn.__globals__) == {'__name__', '__package__', '__file__', '__builtins__'}
                 and fn.__globals__['__name__'] == module.__name__
                 and fn.__globals__['__package__'] == module.__package__
-                and fn.__globals__['__file__'] == module.__file__)
+                and _same_module_file(fn.__globals__['__file__'], module.__file__))
     for root in _owners(module, root_name):
         if type(root) is not FunctionType or root.__globals__ is not vars(module):
             continue
