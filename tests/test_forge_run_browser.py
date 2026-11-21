@@ -111,7 +111,9 @@ def take_one(*, source, target):
                 return identity, held
             def pick(identity):
                 nav('运行')
-                page.locator('.wb-run-record[data-run="'+identity+'"]').click()
+                entry=runs.show(root,identity)['entry']
+                page.locator(f'.wb-run-flow[data-entry="{entry}"]').click()
+                page.get_by_label('运行记录',exact=True).select_option(identity)
                 expect(page.locator('.wb-run-bar')).to_contain_text(identity[-10:])
             def output():
                 page.get_by_role('button',name='输出结果',exact=True).click()
@@ -225,7 +227,8 @@ def test_prepared_view_observes_external_start_and_partial_cancel(root, tmp_path
             page.set_default_timeout(90000)
             page.goto(server.origin + '/#token=' + server.token)
             page.get_by_role('navigation',name='项目功能').get_by_role('button',name='运行',exact=True).click()
-            page.locator('.wb-run-record[data-run="'+value['run_id']+'"]').click()
+            page.locator(f'.wb-run-flow[data-entry="{value["entry"]}"]').click()
+            expect(page.get_by_label('运行记录',exact=True)).to_have_value(value['run_id'])
             page.get_by_role('button',name='开始这次运行',exact=True).wait_for()
             runs.start(root,value['run_id'],expected=value['digest'])
             page.locator('.wb-partial').wait_for()

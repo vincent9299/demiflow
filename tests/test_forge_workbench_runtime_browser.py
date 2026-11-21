@@ -44,10 +44,10 @@ def run_finished(page,status='已完成'):
 
 
 def pick_run(page,run_id):
-    page.locator('.wb-run-record[data-run="'+run_id+'"]').click()
+    page.get_by_label('运行记录',exact=True).select_option(run_id)
     expect(page.locator('.wb-graph')).not_to_have_attribute('aria-busy','true')
-    expect(page.locator('.wb-run-record.selected')).to_have_attribute('data-run',run_id)
-    expect(page.locator('.wb-run-record.selected')).to_have_attribute('aria-pressed','true')
+    expect(page.get_by_label('运行记录',exact=True)).to_have_value(run_id)
+    expect(page.get_by_label('运行记录',exact=True).locator('option:checked')).to_have_attribute('value',run_id)
 
 
 def hold_next_log(page,run_id):
@@ -100,13 +100,13 @@ def test_native_multiple_runs_select_graph_logs_outputs_and_discard_late_deliver
         assert first!=second
         assert runs.show(isolated,second)['outputs'][0]['result']['ref']['row_count']==1
         page.locator('.function-nav [data-page="monitor"]').click()
-        expect(page.locator('.wb-run-record')).to_have_count(2)
+        expect(page.get_by_label('运行记录',exact=True).locator('option')).to_have_count(2)
         page.get_by_role('button',name='日志',exact=True).click()
         expect(page.locator('.wb-run-detail-body')).to_contain_text(second+' / 尝试 1')
         for fail in (False,True):
             pick_run(page,first)
             page.get_by_role('button', name='日志', exact=True).click()
-            expect(page.locator('.wb-run-detail-body')).to_contain_text(first+' / 尝试 1')
+            expect(page.locator('.wb-run-detail-body')).to_contain_text('本次尝试日志 · '+first+' / 尝试 1')
             hold_next_log(page,first)
             page.get_by_role('button', name='读取后续日志', exact=True).click()
             page.wait_for_function('() => window.__heldLog&&window.__releaseLog!==null')
@@ -139,7 +139,7 @@ def test_native_stop_survives_current_code_removal_and_keeps_attempt_identity(un
             page.wait_for_function("() => ForgeView.decodeView(location.hash)?.params === 'flows/waiting.json'")
             submit_run(page)
             page.wait_for_function('() => ForgeView.decodeView(location.hash)?.run_id')
-            expect(page.locator('.wb-run-record.selected')).to_have_attribute('data-run',selected(page)['run_id'])
+            expect(page.get_by_label('运行记录',exact=True)).to_have_value(selected(page)['run_id'])
             active=selected(page)['run_id']
             expect(page.locator('.wb-partial')).to_contain_text('部分输出已提交')
             for path in author:(unregistered/path).unlink()
@@ -257,6 +257,10 @@ def run(*, source, target):
         page.get_by_label('本次运行秒数上限').fill('77')
         submit_run(page)
         run_id=run_finished(page)
+        performance=page.get_by_role('button',name='性能趋势 · 整次运行')
+        expect(page.locator('.wb-run-seal')).to_be_hidden()
+        performance.click()
+        expect(page.locator('.wb-run-seal')).to_be_visible()
         expect(page.locator('.wb-run-seal')).to_contain_text('封存输入 candidates v3')
         expect(page.locator('.wb-run-seal')).to_contain_text('预算 77 秒累计')
         pipeline(page)
@@ -264,11 +268,11 @@ def run(*, source, target):
         page.get_by_text('本次运行设置',exact=True).click()
         page.get_by_label('本次运行秒数上限').fill('99')
         page.locator('.function-nav [data-page="monitor"]').click()
-        row=page.locator('.wb-run-record[data-run="'+run_id+'"]')
+        picker=page.get_by_role('combobox',name='运行记录')
         created=runs.show(isolated,run_id)['created_at']
-        assert time.strftime('%Y-%m-%d %H:%M',time.localtime(created)) in row.get_attribute('title')
-        row.click()
-        expect(page.locator('.wb-run-record.selected')).to_have_attribute('data-run',run_id)
+        expect(picker.locator('option:checked')).to_contain_text(time.strftime('%Y-%m-%d %H:%M',time.localtime(created)))
+        picker.select_option(run_id)
+        expect(page.get_by_label('运行记录',exact=True)).to_have_value(run_id)
         expect(page.locator('.wb-run-seal')).to_contain_text('预算 77 秒累计')
         expect(page.locator('.wb-run-seal')).not_to_contain_text('预算 99')
         assert not errors,errors

@@ -75,20 +75,12 @@
 .workbench .wb-flow-record .wb-caption{font-size:10px;line-height:1.6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .workbench .wb-flow-record:hover:not(:disabled){background:#f0f2f8}
 .workbench .wb-flow-record.selected{background:#eef2ff;color:var(--op-accent)}
-.workbench .wb-flow-record:focus-visible,.workbench .wb-run-record:focus-visible{outline:2px solid var(--op-accent);outline-offset:-2px}
+.workbench .wb-flow-record:focus-visible,.workbench .wb-run-flow:focus-visible{outline:2px solid var(--op-accent);outline-offset:-2px}
 @media(max-width:680px){
   .workbench .wb-workspace-layout.wb-project-layout{grid-template-columns:var(--side-navigation-width,150px) minmax(0,1fr);gap:0}
   .workbench .wb-workspace-layout>.wb-section-navigation{position:static;height:auto;max-height:42dvh;border-right:0;border-bottom:1px solid var(--op-line);padding:12px 6px}
 }
 
-/* Quiet pipeline groups, like a conversation sidebar. */
-.workbench .wb-run-group{min-width:0;margin:0 0 4px}
-.workbench .wb-run-group-heading{display:block;width:100%;min-width:0;height:26px;padding:3px 8px;margin:0;border:0;border-radius:5px;background:transparent;box-shadow:none;text-align:left;font-family:inherit;font-size:12px;font-weight:500;line-height:20px;color:#727983;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.workbench .wb-run-group-heading:hover{background:#f0f1f3;color:#30343b}
-.workbench .wb-run-branch{margin:0;padding:0;border:0}
-.workbench .wb-run-more{border:0;background:transparent;box-shadow:none;color:#8b9098;font-size:11px;line-height:20px;padding:2px 8px;margin:0;text-align:left}
-.workbench .wb-run-more:hover{color:#333;background:#eef0f3}
-.workbench .wb-run-empty-note{display:block;font-size:11px;line-height:24px;padding:0 8px;color:#a0a5ae}
 @media(max-width:680px){.workbench .wb-workspace-layout>.wb-section-navigation{max-height:30dvh}}
 
 .wb-workspace-main{padding:14px 20px;min-width:0}

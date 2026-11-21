@@ -17,12 +17,12 @@
     // Different outputs may be successive stages. Never sum them as one row count.
     return ready.length?ready.length+' 个输出已提交':'尚无已提交输出';
   }
-  function summary(parent,run,context){
-    parent.replaceChildren();
-    const heading=node('div',undefined,'wb-run-heading');
-    heading.append(node('strong',flowName(context,run.entry)),node('span',run.run_id.slice(-10),'wb-caption'));
-    parent.append(heading,node('span',labels[run.status]||run.status,'wb-tag'),
-      node('span',duration(run.state)+' · '+outputCount(run.outputs),'wb-caption'));
+  function summary(parent,run){
+    const identity=node('span','#'+run.run_id.slice(-10),'wb-run-id');identity.title=run.run_id;
+    const status=node('span',labels[run.status]||run.status,'wb-tag');
+    status.dataset.state=run.status;
+    const timing=node('span',duration(run.state),'wb-run-duration');timing.title='本次尝试耗时';
+    parent.replaceChildren(status,timing,node('span',outputCount(run.outputs),'wb-run-output-count'),identity);
   }
   function snapshot(parent,value){
     parent.replaceChildren(node('h3','本次参数与版本'));

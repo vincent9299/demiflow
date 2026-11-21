@@ -102,8 +102,9 @@
     const observer=new ResizeObserver(sync);observer.observe(layout);observer.observe(sidebar);sync();
     return {setActive(value){active=value;if(!active)finish();else if(width===null)layout.style.removeProperty('--side-navigation-width');sync();},dispose(){disposed=true;finish();observer.disconnect();handle.remove();}};
   }
-  function collapsibleNavigation({layout,sidebar,header,label,initialOpen=true,active=true}) {
-    let open=initialOpen;
+  function collapsibleNavigation({layout,sidebar,header,label,initialOpen=true,active=true,narrowQuery=null}) {
+    const narrow=narrowQuery&&window.matchMedia(narrowQuery);
+    let wideOpen=initialOpen,open=wideOpen&&!narrow?.matches;
     const reopen=$('div',undefined,'side-navigation-reopen'),toggle=$('button',undefined,'side-navigation-toggle');toggle.type='button';
     if(!sidebar.id)sidebar.id='side-navigation-'+(++navigationSequence);
     toggle.setAttribute('aria-label',label);toggle.setAttribute('aria-controls',sidebar.id);toggle.append(icon(['M3 4h18v16H3zM9 4v16']));
@@ -116,8 +117,12 @@
       layout.classList.toggle('side-navigation-closed',!!layout.querySelector(':scope > .side-navigation-reopen:not([hidden])'));
       resize.setActive(active&&open);
     }
-    toggle.onclick=()=>{open=!open;render();toggle.focus();};render();
-    return {setActive(value){active=value;render();},dispose(){resize.dispose();}};
+    const resized=()=>{open=wideOpen&&!narrow.matches;render();};
+    narrow?.addEventListener('change',resized);
+    toggle.onclick=()=>{open=!open;if(!narrow?.matches)wideOpen=open;render();toggle.focus();};render();
+    return {setActive(value){active=value;render();},
+      closeOnNarrow(){if(narrow?.matches&&open){open=false;render();toggle.focus();}},
+      dispose(){narrow?.removeEventListener('change',resized);resize.dispose();}};
   }
   globalThis.ForgeNavigation=Object.freeze({header:navigationHeader,categoryTabs,collapsible:collapsibleNavigation,resizable:resizableNavigation});
   const json = value => JSON.stringify(value, null, 2);
@@ -177,6 +182,9 @@
     const reader=globalThis.ForgeReading.createTextReader({text, compactSource, continuousSource, pythonLine, defaultMode:sourceOnly?'source':defaultMode,
       identity:{epoch:viewEpoch, selection:selectionEpoch}, resolveLink, offline:!!offline});
     if(sourceOnly)reader.element.querySelector('.reading-toolbar').hidden=true;
+    return attachReader(parent,reader);
+  }
+  function attachReader(parent,reader){
     readers.add(reader);parent.append(reader.element);return reader;
   }
   function closeProjectPicker({restoreFocus=false}={}) {
@@ -692,18 +700,19 @@
       finally{delete host.dataset.loading;}
     }
     const catalog=$('div',undefined,'document-tree');directory.append(catalog);folder(catalog);
-    const intro=panel(documentPath,viewer);intro.id='project-readme';intro.tabIndex=-1;
+    const intro=panel(null,viewer);intro.id='project-readme';intro.tabIndex=-1;
     let text=context.readme;
-    if(reference.document){try{const doc=await api('project-markdown',{path:documentPath});if(!current())return;text=doc.text;}catch(err){if(current())error(intro,err);return;}}
-    if(!text){intro.append($('p',reference.document?'此文档为空。':'尚无 README.md。可在开发中补充项目说明。','notice'));if(!reference.document)button('进入开发',()=>navigate('development'),intro);}
-    else if(!reference.document&&text.startsWith('项目说明无法读取：'))intro.append($('p',text,'error-box'));
-    else mountText(intro,text,{resolveLink:href=>{
+    if(reference.document){try{const doc=await api('project-markdown',{path:documentPath});if(!current())return;text=doc.text;}catch(err){if(current()){intro.append($('h2',documentPath));error(intro,err);}return;}}
+    if(!text){intro.append($('h2',documentPath));intro.append($('p',reference.document?'此文档为空。':'尚无 README.md。可在开发中补充项目说明。','notice'));if(!reference.document)button('进入开发',()=>navigate('development'),intro);}
+    else if(!reference.document&&text.startsWith('项目说明无法读取：'))intro.append($('h2',documentPath),$('p',text,'error-box'));
+    else attachReader(intro,ForgeReading.createTextReader({text,documentTitle:documentPath,compactSource:true,continuousSource:true,
+      identity:{epoch,project,documentPath},offline:!!offline,resolveLink:href=>{
       if(!current()||/^(?:[a-z][a-z0-9+.-]*:|\/|#)/i.test(href))return null;
       let path;try{path=decodeURIComponent(new URL(href,'https://project.invalid/'+documentPath).pathname.slice(1));}catch{return null;}
       if(/\.(?:md|markdown)$/i.test(path)){try{V.validateView(target('overview',{document:path}));}catch{return null;}
         return {label:'打开文档 · '+path,open:()=>navigateDocument(path)};}
       return resolveProjectLink(path);
-    }});
+    }}));
     const info=$('details');info.append($('summary','项目内容、能力与依据'));viewer.append(info);
     info.append($('p',context.flows.length+' 个登记流程 · '+context.tables.length+' 个固定数据引用 · '+context.report_total+' 份报告；报告数量不代表全部通过。','muted small'));
     button('查看管道与检查',()=>navigate('flows'),info);button('查看数据',()=>navigate('tables'),info);
@@ -790,7 +799,7 @@
     if(workbenchContract!=='demiflow_workbench_graph_v1')throw new Error('当前服务尚未提供图工作台契约');
     const id=workspaceId,epoch=viewEpoch;let reference=request,mountedHandle=null,checkVersion=0,checksPending=0;
     const isCurrent=()=>epoch===viewEpoch&&workspaceId===id;
-    const handle=await ForgeWorkbench.mount({main,api,context,workspaceId:id,view:request,mountText,disposeReaders,openResult,navigate,
+    const handle=await ForgeWorkbench.mount({main,api,icon,context,workspaceId:id,view:request,mountText,disposeReaders,openResult,navigate,
       register:handle=>{mountedHandle=handle;if(isCurrent())workbenchView=handle;else handle.dispose();},
       projectCheckState:()=>({version:checkVersion,active:checksPending>0}),
       continueInput,
