@@ -89,3 +89,19 @@ body.df-card-mode #main-panel .jp-Notebook .jp-WindowedPanel-outer { padding: 0 
   .df-card-mode .jp-CodeCell { margin-bottom: 12px; padding: 10px; }
   .df-card-mode .df-dataframe-view :is(td, th) { padding-inline: 7px; }
 }
+
+.df-card-mode .jp-CodeCell .jp-Cell-outputWrapper .jp-OutputArea {
+  box-sizing: border-box; height: var(--df-output-height, auto);
+  max-height: min(85vh, var(--df-output-height, min(55vh, 32rem)));
+  overflow: auto; resize: none; min-height: 0;
+}
+.df-card-mode .jp-CodeCell.jp-mod-outputsScrolled .jp-Cell-outputArea {
+  box-shadow: none; resize: none;
+}
+.df-output-grip { display: none; }
+.df-card-mode .jp-CodeCell:has(.jp-OutputArea-output):not(.jp-mod-outputsHidden) > .df-output-grip {
+  display: grid; place-items: center; height: 10px; cursor: ns-resize; touch-action: none;
+}
+.df-output-grip::after { content: ''; width: 34px; height: 3px; border-radius: 2px; background: transparent; }
+.jp-CodeCell:hover .df-output-grip::after, .df-output-grip:focus-visible::after { background: #a9b2c2; }
+@media (hover: none) { .df-output-grip::after { background: #c4cad4; } }

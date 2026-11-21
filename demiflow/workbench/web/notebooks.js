@@ -43,9 +43,8 @@
     frame.addEventListener('load',()=>{
       session.readyPanel=null;session.onPanel?.(null);
       const win=frame.contentWindow;
-      frame.toggleAttribute('data-loading',win.location.pathname.startsWith(session.base+'notebooks/'));
-      // Notebook's own File → Open/New actions remain in this native pane.
-      // Every destination must remain under this project's proxy prefix.
+      frame.setAttribute('data-loading','');
+      // Document links stay within their project's existing notebook frame.
       const follow=url=>{
         const target=new URL(url,win.location.href);
         if(target.origin===location.origin&&target.pathname.startsWith(session.base)){
@@ -71,13 +70,26 @@
       (async()=>{
         // Notebook exposes its application after the iframe load event. Wait
         // for that native lifecycle before subscribing to document renames.
-        const until=Date.now()+30000;
+        if(!win.location.pathname.startsWith(session.base+'notebooks/'))throw Error('请从文档标签打开卡片。');
+        const style=win.document.createElement('link');
+        style.rel='stylesheet';style.href='/notebook-cards.css';
+        const styled=new Promise((resolve,reject)=>{
+          style.onload=resolve;style.onerror=()=>reject(Error('卡片样式加载失败，请刷新重试。'));
+        });
+        win.document.body.classList.add('df-card-mode');win.document.head.append(style);
+        await styled;
+        const until=Date.now()+60000;
         while(!win.jupyterapp&&Date.now()<until&&session.loadEpoch===epoch&&frame.isConnected)
           await new Promise(resolve=>setTimeout(resolve,100));
-        if(!win.jupyterapp||session.loadEpoch!==epoch||!frame.isConnected)return;
+        if(session.loadEpoch!==epoch||!frame.isConnected)return;
+        if(!win.jupyterapp)throw Error('文档加载超时，请刷新后重试。');
         await win.jupyterapp.restored;
-        const panel=notebookPanel(session);
-        if(!panel)return;
+        let panel=notebookPanel(session);
+        while(!panel&&Date.now()<until&&session.loadEpoch===epoch&&frame.isConnected){
+          await new Promise(resolve=>setTimeout(resolve,100));panel=notebookPanel(session);
+        }
+        if(session.loadEpoch!==epoch||!frame.isConnected)return;
+        if(!panel)throw Error('未能打开卡片文档，请刷新后重试。');
         await panel.context.ready;
         await panel.sessionContext.ready;
         connectWidgets(win,panel);
@@ -88,12 +100,9 @@
           session.onPath?.(previous,session.url);
         };
         panel.context.pathChanged.connect(remember);remember();
-        session.readyPanel=panel;session.onPanel?.(panel);
-      })().catch(()=>{}).finally(()=>{
-        if(session.loadEpoch!==epoch)return;
-        frame.removeAttribute('data-loading');
-        session.onReady?.();
-      });
+        if(session.loadEpoch!==epoch||!frame.isConnected)return;
+        session.readyPanel=panel;await session.onPanel?.(panel);
+      })().catch(error=>{if(session.loadEpoch===epoch)session.onReady?.(error);});
     });
   }
   function makeRoom(){
@@ -110,7 +119,7 @@
       const frame=node('iframe',undefined,'native-notebook-frame');
       frame.title='Jupyter Notebook';frame.referrerPolicy='same-origin';
       session={frame,project,base,url,host:null};prepareFrame(session);
-      frame.toggleAttribute('data-loading',url.startsWith(base+'notebooks/'));
+      frame.setAttribute('data-loading','');
       frame.src=url;frame.hidden=true;document.body.append(frame);sessions.add(session);
     }
     session.host=host;position(session);
@@ -421,7 +430,7 @@
         detach();session=next;
       }
       notice.hidden=true;status.textContent='正在打开 Notebook…';status.hidden=!session.frame.hasAttribute('data-loading');resize();
-      session.onReady=()=>{status.hidden=true;};
+      session.onReady=error=>{status.hidden=true;if(error)fail(error);};
       session.onPath=(previous,current)=>{
         const old=pathFrom(previous),path=pathFrom(current);
         if(old!==path&&old)documents=documents.map(item=>item===old?path:item);
@@ -430,6 +439,7 @@
       };
       session.onPanel=async panel=>{
         const epoch=++cardsEpoch;cards?.dispose();cards=null;
+        session.frame.setAttribute('data-loading','');
         if(!panel?.content?.activeCellChanged)return;
         try{
           const {mountCards}=await import('./notebook-cards.js');
@@ -443,7 +453,8 @@
               expected:item.expected,fields:fieldNames,
               reader:item.original?'demiflow.workbench.notebooks.data.project_sample':'demiflow.workbench.notebooks.data.sample'})),
             catalogCommand,layout:resize});
-        }catch(error){fail(error);}
+          session.frame.removeAttribute('data-loading');session.onReady?.();
+        }catch(error){status.hidden=true;fail(error);}
       };
       if(!cards&&session.readyPanel)session.onPanel(session.readyPanel);
       paintTabs(focus);accessState();
@@ -483,6 +494,10 @@
           const path=pathFrom(previous);
           if(path&&(documents.includes(path)||(path.includes('/')&&!path.split('/').includes('..'))))url=previous;
         }catch{}
+        if(!pathFrom(url)){
+          status.textContent=notebookAccess.canGrant('analysis_write')?'点击上方 ＋ 新建第一份 Notebook。':'此项目尚无可查看的 Notebook。请联系项目管理员开启保存权限。';
+          return;
+        }
         activate(url,createNew);
       }catch(error){if(!session)status.hidden=true;paintTabs();fail(error);}
       finally{busy=false;if(alive())accessState();}

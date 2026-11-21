@@ -558,7 +558,7 @@ def test_card_assistant_generates_editable_notebook_widgets(browser,native_proje
             page.goto(app.origin+'/#token='+app.token+'&view='+view)
             frame=page.frame_locator('iframe.native-notebook-frame')
             page.get_by_role('tab',name='工具',exact=True).click()
-            page.get_by_role('button',name='卡片助手',exact=True).wait_for(timeout=60000)
+            frame.get_by_role('button',name='卡片助手',exact=True).first.wait_for(timeout=60000)
             cells=frame.locator('.jp-CodeCell')
             cells.first.locator('.cm-content').fill('# 本批样本\nimport pandas as pd\n'
                 'scores = {"A":[1,3], "B":[3,5]}\n'
@@ -573,10 +573,19 @@ def test_card_assistant_generates_editable_notebook_widgets(browser,native_proje
             score.press('Enter')
             expect(score).to_have_attribute('aria-sort','descending')
             expect(grid.locator('tbody tr').first).to_contain_text('B-02')
-            page.get_by_role('button',name='完整 Notebook').click()
-            expect(cells.first.locator('table.dataframe')).to_be_visible()
-            expect(grid).to_be_hidden()
-            page.get_by_role('button',name='卡片视图').click()
+            expect(page.get_by_role('button',name='完整 Notebook')).to_have_count(0)
+            expect(frame.locator('#menu-panel-wrapper')).to_be_hidden()
+            grip=cells.first.get_by_role('separator',name='调整结果区高度')
+            viewport=cells.first.locator('.jp-OutputArea')
+            auto_height=viewport.bounding_box()['height']
+            bounds=grip.bounding_box()
+            x,y=bounds['x']+bounds['width']/2,bounds['y']+bounds['height']/2
+            page.mouse.move(x,y);page.mouse.down();page.mouse.move(x,y+50,steps=5);page.mouse.up()
+            assert viewport.bounding_box()['height'] > auto_height+30
+            grip.focus();grip.press('ArrowUp')
+            assert viewport.bounding_box()['height'] < auto_height+40
+            grip.dblclick()
+            assert not cells.first.locator('.jp-OutputArea').evaluate("n=>n.style.getPropertyValue('--df-output-height')")
             expect(grid).to_be_visible()
             expect(cells.first).to_have_css('border-left','1px solid rgb(188, 188, 188)')
             expect(cells.first).to_have_css('border-radius','8px')
@@ -634,12 +643,12 @@ def test_card_assistant_generates_editable_notebook_widgets(browser,native_proje
             expect(card.locator('.df-cell-status')).to_have_text('正在更新…')
             if shots:page.screenshot(path=str(Path(shots)/'notebook-cell-generating.png'))
             cells.last.locator('.df-cell-title').click()
-            expect(pane.locator('.df-card-request')).to_have_count(0)
+            expect(pane.locator('.dfc-user')).to_have_count(0)
             finish_update.set()
             expect(card.locator('.cm-content')).to_contain_text('当前卡片的新代码')
             expect(card.locator('.df-cell-status')).to_have_text('代码已更新 · 待运行')
             expect(cells.last.locator('.cm-content')).to_contain_text('print("保留手动修改")')
-            expect(pane.locator('.df-card-request')).to_have_count(0)
+            expect(pane.locator('.dfc-user')).to_have_count(0)
             pane.get_by_role('textbox',name='卡片要求').fill('改这一格')
             pane.get_by_role('button',name='发送要求').click()
             expect(cells.last.locator('.cm-content')).to_contain_text('另一张卡片')

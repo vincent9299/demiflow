@@ -19,11 +19,13 @@ function promptFor(request,context,tools){
   return text;
 }
 
-async function answer(api,sid,turn,after,active,handleCommand){
-  let item=null,epoch=null,content='',paged=false,incomplete=false,terminal=null,state;
+async function answer(api,sid,turn,after,active,onEvents,cli,handleCommand){
+  let item=null,epoch=null,content='',paged=false,incomplete=false,oversize=false,terminal=null,state;
   while(active()){
     const response=await api('dev-events',{session_id:sid,after_sequence:after,limit:50,wait_ms:1200});
     if(!active())throw Error('已离开此工作区，可稍后取回回复。');
+    let otherInput=false;
+    onEvents(sid,response.events);
     for(const event of response.events){
       if(event.turn_id!==turn||event.session_id!==sid)continue;
       const data=event.data;
@@ -43,6 +45,7 @@ async function answer(api,sid,turn,after,active,handleCommand){
         }
         continue;
       }
+      if(event.type==='input.requested')otherInput=true;
       if(event.type==='turn.state'){
         if(data.state)state=data.state;
         if(data.cleanup==='complete'||data.cleanup==='unknown')terminal=data;
@@ -50,15 +53,28 @@ async function answer(api,sid,turn,after,active,handleCommand){
       if(['process','summary'].includes(data.channel))continue;
       const complete=event.type==='message.completed';
       if(!(complete||event.type==='message.delta'||(event.type==='output.delta'&&paged&&data.item_id===item&&event.provider_epoch===epoch)))continue;
-      if(complete||item!==data.item_id||epoch!==event.provider_epoch){content='';paged=false;incomplete=false;}
+      if(complete||item!==data.item_id||epoch!==event.provider_epoch){content='';paged=false;incomplete=false;oversize=false;}
       item=data.item_id;epoch=event.provider_epoch;
       if(complete){paged=!!data.paged;incomplete=!!data.interrupted||data.status==='incomplete';}
-      content+=data.text||'';
-      if(utf8.encode(content).length>65536)throw Error('该回复超过单张卡片的大小，请在开发会话中查看。');
+      // CLI edits arrive as cell commands. Only the older text adapter needs
+      // to collect a code suggestion; the timeline already renders both.
+      if(!cli&&!oversize){
+        content+=data.text||'';
+        if(utf8.encode(content).length>65536){oversize=true;content='';}
+      }
     }
     after=response.next_sequence;
     if(terminal){
-      if(terminal.state!=='completed'||incomplete||terminal.cleanup!=='complete')throw Object.assign(Error('本轮未完成。'+(terminal.reason||state)),{finished:true});
+      if(terminal.state!=='completed'||incomplete||terminal.cleanup!=='complete'){
+        const result=typeof terminal.result==='string'?JSON.parse(terminal.result):terminal.result;
+        const reason=result?.reason||terminal.reason||'';
+        const interrupted=terminal.state==='interrupted';
+        const detail=/BrokenPipeError|Broken pipe/i.test(reason)?'模型连接已关闭，未收到完整回复。':reason;
+        const message=detail||(interrupted?'助手连接已中断。':'本轮未完成。');
+        const finished=terminal.cleanup==='complete';
+        throw Object.assign(Error(message),{finished,turn,retryable:finished&&interrupted});
+      }
+      if(cli||oversize)return {message:'',code:null};
       const tokens=globalThis.markdownit('commonmark').parse(content,{});
       const blocks=tokens.filter(t=>t.type==='fence'&&/^(python|py|python3)$/i.test(t.info.trim()));
       if(blocks.length!==1||!blocks[0].content.trim())return {message:content,code:null};
@@ -67,17 +83,19 @@ async function answer(api,sid,turn,after,active,handleCommand){
       if(closer.length<marker.length||[...closer].some(ch=>ch!==marker[0]))return {message:content,code:null};
       return {message:[...lines.slice(0,start),...lines.slice(end)].join('\n').trim(),code:blocks[0].content};
     }
-    if(after>=response.last_sequence&&['waiting_input','waiting_approval'].includes(state))throw Error('助手需要补充信息，可在开发会话中处理后取回回复。');
+    if(after>=response.last_sequence&&(state==='waiting_approval'||(otherInput&&state==='waiting_input')))
+      throw Error('助手正在等待确认，可稍后取回回复。');
   }
   throw Error('稍后可取回这次回复。');
 }
 
-export function notebookConversation({api,project,path,cell,active,command}){
+export function notebookConversation({api,project,path,cell,active,command,onSession,onEvents}){
   const key='demiflow.notebook-assistant.cell.'+JSON.stringify([project,path,cell]);
   let record={};
   try{
     const saved=sessionStorage.getItem(key);
     if(saved)record=JSON.parse(saved)||{};
+    else if(localStorage.getItem(key))record=JSON.parse(localStorage.getItem(key))||{};
     else{
       // A previous version kept one pending turn per notebook. Finish it on
       // its original cell, then start a dedicated session for future prompts.
@@ -89,7 +107,15 @@ export function notebookConversation({api,project,path,cell,active,command}){
       }
     }
   }catch{}
-  const save=()=>{try{sessionStorage.setItem(key,JSON.stringify(record));}catch{}};
+  // Persist just the session binding across browser restarts. Outstanding
+  // commands and execution consent belong to the tab that submitted them.
+  function rememberSession(){
+    if(record.sid&&!record.legacyPending)try{
+      localStorage.setItem(key,JSON.stringify({sid:record.sid,provider:record.provider}));
+    }catch{}
+  }
+  rememberSession();
+  const save=()=>{try{sessionStorage.setItem(key,JSON.stringify(record));}catch{}rememberSession();};
   function finishTurn(){
     if(record.legacyPending)record={};
     else delete record.pending;
@@ -101,7 +127,8 @@ export function notebookConversation({api,project,path,cell,active,command}){
     if(pending&&pending.cell!==cell)throw Error('该请求属于另一张卡片。');
     if(!pending?.turn){
       const caps=await api('dev-capabilities');
-      const provider=caps.providers?.find(p=>p.available);
+      const available=(caps.providers||[]).filter(p=>p.available);
+      const provider=record.provider?available.find(p=>p.id===record.provider):available.find(p=>p.id==='deepseek')||available[0];
       if(!caps.enabled||!caps.start||!caps.notebook_cells||!provider)throw Error('本项目当前无法生成单元格。'+(caps.reason||''));
       record.provider||=provider.id;record.cli=caps.notebook_cli===true;
     }
@@ -111,9 +138,13 @@ export function notebookConversation({api,project,path,cell,active,command}){
       record.pending=pending;save();
     }
     if(!record.sid){
-      record.createId||=crypto.randomUUID();save();
-      const session=await api('dev-session-create',{}, {request_id:record.createId,provider_id:record.provider,new_conversation:true});
-      record.sid=session.id;save();
+      if(!record.createId){
+        const digest=await crypto.subtle.digest('SHA-256',utf8.encode(key));
+        record.createId='cell-'+Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+        save();
+      }
+      const session=await api('dev-session-create',{}, {request_id:record.createId,provider_id:record.provider,new_conversation:true,session_kind:'notebook'});
+      record.sid=session.id;save();onSession(record.sid);
     }
     if(!pending.turn){
       if(pending.revision===undefined){
@@ -129,7 +160,7 @@ export function notebookConversation({api,project,path,cell,active,command}){
       }
     }
     try{
-      const result=await answer(api,record.sid,pending.turn,pending.after,active,async(name,args)=>{
+      const result=await answer(api,record.sid,pending.turn,pending.after,active,onEvents,record.cli,async(name,args)=>{
         const value=await command(name,args,pending);
         if(name==='cell.edit'){pending.edited=true;pending.current=args.source;save();}
         return value;
@@ -139,5 +170,7 @@ export function notebookConversation({api,project,path,cell,active,command}){
       return {...result,source:pending.source,request:pending.request,turn:pending.turn};
     }catch(error){if(error.finished){finishTurn();}throw error;}
   }
-  return {generate,get pending(){return record.pending;},get sessionId(){return record.sid;}};
+  return {generate,get pending(){return record.pending;},get sessionId(){return record.sid;},
+    get provider(){return record.provider;},
+    chooseProvider(id){if(!record.sid&&!record.pending){record.provider=id;save();}}};
 }
