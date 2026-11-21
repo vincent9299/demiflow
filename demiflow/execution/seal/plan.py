@@ -198,6 +198,27 @@ def _code_identity_from_value(kind, value, *, sources=None):
             'imports': source_identity(business_sources(kind, value) if sources is None else sources)}
 
 
+
+def _matches_original_program(kind, value, expected):
+    actual = _code_identity_from_value(kind, value)
+    expected_digest = identity(expected)
+    if identity(actual) == expected_digest:
+        return True
+    if kind != 'callable' or type(value) is not CallableSpec:
+        return False
+    # This is a fresh plan_code_pin for one MapOp. Business arguments, the
+    # entire code record and every dependency remain in the digest comparison.
+    from ..recovery_sdk_v3 import routing_source_revisions
+    revisions = routing_source_revisions(value.target)
+    if revisions is None:
+        return False
+    target = actual['operations'][0]['fields']['callable']['fields']['target']
+    if target['source_hash'] != revisions[0]:
+        return False
+    target['source_hash'] = revisions[1]
+    return identity(actual) == expected_digest
+
+
 def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds,
                        live_binding=None, force_live=False, shared_payload=None) -> ArtifactRef:
     from ..dataflow_program_pickle import dumps
@@ -430,8 +451,7 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
                 value = value[binding['members'].index(manifest['occurrence_id'])]
         except Exception as exc:
             raise DataflowError("CORRUPT_ARTIFACT", "Program payload failed to load: " + str(exc)) from exc
-    recomputed = _code_identity_from_value(kind, value)
-    if identity(recomputed) != identity(code_identity):
+    if not _matches_original_program(kind, value, code_identity):
         raise DataflowError("INVALID_CONTRACT",
                             "Loaded program code differs from the sealed pin (edited code or wrong module)")
     return LoadedProgram(kind=kind, value=value, digest=identity(code_identity))
@@ -456,8 +476,7 @@ def verify_completed_live_program(ref, *, expected_pin, declaration, store, boun
             or identity(code) != identity(expected_pin)):
         raise DataflowError('CORRUPT_ARTIFACT', 'completed live program differs from its sealed code pin')
     kind = _program_kind(declaration)
-    if (kind != manifest.get('kind') or identity(_code_identity_from_value(kind, _program_value(declaration)))
-            != identity(code)):
+    if kind != manifest.get('kind') or not _matches_original_program(kind, _program_value(declaration), code):
         raise DataflowError('CODE_MISMATCH', 'completed live program code differs from the sealed pin')
     sources, imports = manifest.get('business_sources', {}), code.get('imports', {})
     if (type(sources) is not dict or set(sources) != set(imports) or len(sources) > MAX_SOURCES
