@@ -5,7 +5,7 @@ from pathlib import Path
 
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.schema import ForgeError
-from . import workspace as ws
+from .projects.io import relative_path
 
 
 def _api(snapshot):
@@ -142,7 +142,7 @@ def direct_references(root, entries, items, snapshot):
     for entry in entries:
         if entry['status'] != 'recognized':
             continue
-        raw = read_bounded(ws.relative_path(root, entry['path']), 1024**2)
+        raw = read_bounded(relative_path(root, entry['path']), 1024**2)
         if hashlib.sha256(raw).hexdigest() != entry['sha256']:
             raise ForgeError('Flow changed while reading operator bindings', code='conflict')
         tree = ast.parse(raw)  # Discovery already bounded and checked this exact source.

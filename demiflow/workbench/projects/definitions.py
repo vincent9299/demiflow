@@ -15,7 +15,7 @@ from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.schema import ForgeError
 from . import workspace as ws
 from .discovery import discover
-from .operator_references import direct_references
+from ..operator_references import direct_references
 
 from ..definition_contracts import signature, code_definition, prompt_definition
 
