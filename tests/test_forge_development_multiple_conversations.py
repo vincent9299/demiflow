@@ -175,7 +175,7 @@ def test_card_sessions_stay_out_of_development_navigation_and_keep_their_own_eve
         create(case, 'card-1', new=True)
 
 
-def test_upgrade_reclassifies_old_pinned_card_without_rewriting_history(case):
+def test_upgrade_recognizes_old_pinned_card_without_modifying_the_database(case):
     card = create(case, 'old-card', new=True)
     question, _ = case.store.submit(case.workspace, card, 'ask', 0, 'cell question', case.identity, case.policy, 'notebook_cell')
     finish(case, question)
@@ -188,7 +188,8 @@ def test_upgrade_reclassifies_old_pinned_card_without_rewriting_history(case):
         db.execute("UPDATE turns SET operation='notebook_cell' WHERE id=?", (second['id'],))
         db.execute('UPDATE project_conversations SET session=? WHERE workspace=?', (card, case.workspace))
         db.execute('DELETE FROM project_conversation_members WHERE session=?', (card,))
-        db.execute('ALTER TABLE sessions DROP COLUMN session_kind')
+    with case.store.connect() as db:
+        original_dump = list(db.iterdump())
     upgraded = Store(case.store.root, case.store.limits, initialize=True)
     assert upgraded.session(card)['session_kind'] == 'notebook'
     assert upgraded.session(mixed)['session_kind'] == 'development'
@@ -196,6 +197,12 @@ def test_upgrade_reclassifies_old_pinned_card_without_rewriting_history(case):
     assert upgraded.primary(case.workspace, case.identity, case.policy) is None
     assert upgraded.writable(case.workspace, card, case.identity, case.policy, {'codex'})
     assert upgraded.events(case.workspace, card) == saved
+    with upgraded.connect() as db:
+        assert list(db.iterdump()) == original_dump
+    main = create(case, 'first-dev-write')
+    assert main not in (card, mixed)
+    assert upgraded.primary(case.workspace, case.identity, case.policy)['id'] == main
+    assert upgraded.writable(case.workspace, card, case.identity, case.policy, {'codex'})
 
 
 def test_session_scoped_project_turns_preserve_aggregate_and_ownership(case):
