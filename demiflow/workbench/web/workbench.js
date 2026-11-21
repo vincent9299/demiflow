@@ -1276,7 +1276,7 @@
       // Run details and live snapshots carry different diagnostics for the same
       // output. Its result digest identifies the complete fixed table reference.
       const outputKeys=run?.outputs.map(o=>[o.name,o.action_id,o.uri,o.status,o.retained_from_attempt,
-        o.result?.location_id,o.result_digest]);
+        o.result?.location_id,o.result_digest,o.training]);
       const fingerprint=json([comparison,run?.run_id,run?.attempt,run?.current_attempt,outputKeys,can('attach'),can('run_submit')]);
       if(fingerprint===outputFingerprint)return;outputFingerprint=fingerprint;
       results.replaceChildren($('h3',comparison?'两次运行对比':'本次输出'));
@@ -1291,6 +1291,12 @@
         if(output.retained_from_attempt!=null)box.append($('small','保留自尝试 '+output.retained_from_attempt));
         if(output.result){
           box.append($('p','固定版本 v'+output.result.ref.lance_version+' · '+output.result.ref.row_count+' 行'));
+          if(output.training?.models?.length){
+            const provenance=details('训练模型',box);
+            materialTable(provenance,['训练实例','模型步数','清单 SHA-256'],output.training.models.map(model=>
+              [model.instance,model.selected_steps.join(', '),model.manifest_digest]));
+            if(output.training.has_more)provenance.append($('p','此处显示前 '+output.training.models.length+' 个模型清单。','wb-caption'));
+          }
           const captured=Object.freeze({run_id:run.run_id,attempt:run.attempt,output:output.name,alias:'',expected_result:output.result_digest});
           const snapshotRun=run,snapshotOutput=output;
           button('查看固定结果',()=>previewOutput(snapshotRun,snapshotOutput,box),box);

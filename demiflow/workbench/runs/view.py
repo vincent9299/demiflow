@@ -173,7 +173,7 @@ def snapshot(root, run_id, *, attempt=None, revision=None):
             status = ('committed' if projection['committed'] else
                       ('writing' if state['status'] in runs.ACTIVE and not projection['failed'] else 'unknown')
                       if projection['has_intent'] else 'not_started')
-            training = reader.training_outputs(attempt, spec['action_id'])
+            training = reader.training_outputs(retained or attempt, spec['action_id'])
             ref = projection['result_ref']
             outputs.append(
                 dict(
@@ -202,6 +202,7 @@ def snapshot(root, run_id, *, attempt=None, revision=None):
             state=state,
             actions=action_sequence,
             nodes=observation_revision,
+            training=[output['training'] for output in outputs if 'training' in output],
             telemetry=[sample.get("epoch"), sample.get("sequence")],
             supervisor_alive=alive,
         )
