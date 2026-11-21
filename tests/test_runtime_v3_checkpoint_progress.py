@@ -27,6 +27,9 @@ def execution(metrics, *, previous=None, source_rows=0, threshold=10):
     driver._node_metrics = {key: {'rows_input': 0, 'rows_output': value}
                             for key, value in metrics.items()}
     driver._graph = NS(sources=('source',))
+    # Match DataflowExecution.__init__ for this row-only scheduling probe.
+    driver._fit = None
+    driver._waiting_for_fit = False
     driver._checkpoint_source_rows_only = False
     driver._last_checkpoint_rows = source_rows
     driver._last_checkpoint_outputs = dict(previous or {})
