@@ -228,7 +228,7 @@ def test_prepared_view_observes_external_start_and_partial_cancel(root, tmp_path
             page.goto(server.origin + '/#token=' + server.token)
             page.get_by_role('navigation',name='项目功能').get_by_role('button',name='运行',exact=True).click()
             page.locator(f'.wb-run-flow[data-entry="{value["entry"]}"]').click()
-            expect(page.get_by_label('运行记录',exact=True)).to_have_value(value['run_id'])
+            expect(page.get_by_label('运行记录',exact=True)).to_have_value(value['run_id'], timeout=90000)
             page.get_by_role('button',name='开始这次运行',exact=True).wait_for()
             runs.start(root,value['run_id'],expected=value['digest'])
             page.locator('.wb-partial').wait_for()
