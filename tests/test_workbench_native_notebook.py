@@ -763,12 +763,12 @@ def test_enable_notebook_execution_after_saving_only(browser, native_project):
             frame.locator('body').evaluate('async()=>{await window.jupyterapp.shell.currentWidget.sessionContext.ready;}')
             assert not starts
             editor = frame.locator('.cm-content').first
-            editor.fill('print(6 * 7)')
+            editor.fill("import ipywidgets as widgets\nwidgets.Button(description=str(6 * 7))")
             page.get_by_role('button', name='启用运行', exact=True).click()
             page.get_by_role('button', name='允许运行', exact=True).click()
             expect(run).to_be_enabled(timeout=30000)
             run.click()
-            expect(frame.locator('.jp-OutputArea-output')).to_contain_text('42', timeout=30000)
+            expect(frame.get_by_role('button', name='42', exact=True)).to_be_visible(timeout=30000)
             expect(frame.locator('.jp-Dialog')).to_have_count(0)
         finally:
             page.close()

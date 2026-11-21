@@ -21,6 +21,23 @@
     const rect=session.host.getBoundingClientRect();
     Object.assign(session.frame.style,{left:rect.left+'px',top:rect.top+'px',width:rect.width+'px',height:rect.height+'px'});
   }
+  function connectWidgets(win,panel){
+    const config=JSON.parse(win.document.getElementById('jupyter-config-data').textContent);
+    if(!config.demiflowDeferredWidgets)return;
+    const extension=win._JUPYTERLAB?.['@jupyter-widgets/jupyterlab-manager'];
+    if(!extension)return;
+    const context=panel.sessionContext;
+    async function activate(){
+      if(!context.session?.kernel)return;
+      context.kernelChanged.disconnect(activate);
+      const factory=await extension.get('./extension');
+      const plugins=factory().default,app=win.jupyterapp;
+      for(const plugin of plugins)if(!app.hasPlugin(plugin.id))app.registerPlugin(plugin);
+      await Promise.all(plugins.filter(plugin=>plugin.autoStart).map(plugin=>app.activatePlugin(plugin.id)));
+    }
+    context.kernelChanged.connect(activate);
+    activate();
+  }
   function prepareFrame(session) {
     const frame=session.frame;
     frame.addEventListener('load',()=>{
@@ -63,6 +80,7 @@
         if(!panel)return;
         await panel.context.ready;
         await panel.sessionContext.ready;
+        connectWidgets(win,panel);
         const remember=()=>{
           const path=panel.context.path.split('/').map(encodeURIComponent).join('/');
           const previous=session.url;session.url=session.base+'notebooks/'+path;
