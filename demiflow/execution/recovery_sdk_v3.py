@@ -20,7 +20,7 @@ from .recovery_contract import identity
 # Current source SHA-256, v3 pre-move source SHA-256.
 _REVISIONS = {
     'demiflow.data.dataset': (
-        'dc1d00c71a1bef0c1b2db7d069298c3d2839c7094f69c7c1508a1dee5d6428f6',
+        'a6da1d250f3ed498f80219913fc662b1cc088d07d8332d255549dbfdf223e817',
         '1ba0e80f1ed0853948a97792dc65125fdaec17504bc3396b5f53ffb593da7e88'),
     'demiflow.data.sources': (
         '4c349450034860cbaaa81d7b88e39b5caeea6c9ea56849e031804007cd226e79',
@@ -160,6 +160,9 @@ def function_pin(fn, source, source_hash, code):
         return source_hash, code
     module = sys.modules.get(fn.__module__)
     root_name = fn.__qualname__.partition('.<locals>.')[0]
+    if fn.__module__ == 'demiflow.data.dataset' and root_name == 'Dataset.fit':
+        # The additive v4 method never existed in the audited v3 file.
+        return source_hash, code
     if fn.__module__ == 'demiflow.data.result_cache' and root_name == '_state_policy':
         # Its runtime type test changed; the function itself keeps its new pin.
         return source_hash, code

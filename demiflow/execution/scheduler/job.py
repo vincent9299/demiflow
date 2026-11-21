@@ -33,6 +33,14 @@ class JobAllocation:
             return False
         return self.manager.state.read_allocation(self.scope_id, self.key) is not None
 
+    def allocated_gpu_seconds(self):
+        if not self.manager.state.cleanup_complete(self.scope_id):
+            return None
+        row = self.manager.state.read_cleanup_allocation(self.scope_id, self.key)
+        if not row['effective'].get('accelerators'):
+            return 0.0
+        return self.manager.provider.released_device_seconds(self.key, row['spec_hash'], 'gpu')
+
     def refresh(self, *, deadline, observe_only=False):
         if not observe_only:
             self.manager.reconcile_once(self.run.fence, deadline, 1)

@@ -98,6 +98,15 @@ class TrainingIndex:
             row = self._row(db, instance)
             return dict(row) if row else None
 
+    @staticmethod
+    def request_key(instance, launch, scope):
+        return identity([instance,launch,scope])
+
+    def request_keys(self, row):
+        if not 0 <= row['launch'] <= self.binding.max_resumes:
+            raise FitConflict("Training launch history exceeds its declared restart limit")
+        return tuple(self.request_key(row['instance'],i,row['provider_scope']) for i in range(row['launch']+1))
+
     def claim_or_get(self, request: FitRequest, *, run_id, run_dir, action, occurrence, attempt):
         """Only the owner of the original run may take over its instance."""
         instance = request.instance_id
@@ -107,7 +116,7 @@ class TrainingIndex:
             if row is None:
                 if db.execute('SELECT count(*) FROM fit_instances').fetchone()[0] >= self.binding.max_instances:
                     raise FitConflict("Project training instance quota exceeded")
-                request_key = identity([instance, 0, scope])
+                request_key = self.request_key(instance, 0, scope)
                 db.execute('''INSERT INTO fit_instances
                     (instance,project,fit_key,run_id,run_dir,action,occurrence,attempt,epoch,
                      provider_scope,launch,request_key,state,request) VALUES (?,?,?,?,?,?,?,?,1,?,0,?,'claimed',?)''',
@@ -243,7 +252,7 @@ class TrainingIndex:
             if row['state'] != 'claimed' or row['launch'] >= self.binding.max_resumes:
                 raise FitConflict("Training cannot restart within its recovery budget")
             launch = row['launch'] + 1
-            new_key = identity([instance,launch,row['provider_scope']])
+            new_key = self.request_key(instance,launch,row['provider_scope'])
             db.execute('UPDATE fit_instances SET launch=?,request_key=?,job=NULL,snapshot=? WHERE instance=?',
                        (launch,new_key,document(snapshot.to_dict()).decode(),instance))
 

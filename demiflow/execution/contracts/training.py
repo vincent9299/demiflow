@@ -282,6 +282,8 @@ class FitBinding(_Value):
             _number(getattr(self, name), name, positive=True)
         for name in ('max_resumes','max_charge','project_charge_limit'):
             _number(getattr(self,name),name)
+        if self.max_resumes > 16384:
+            raise ValueError("Training restart count exceeds launch metadata budget")
         if self.max_charge > self.project_charge_limit or (self.max_charge and
                 (self.hosting != 'ProviderManaged' or type(self.currency) is not str or
                  not re.fullmatch(r'[A-Z]{3}', self.currency))):

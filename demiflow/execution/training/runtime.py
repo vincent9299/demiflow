@@ -517,7 +517,13 @@ class FitRuntime:
             raise FitConflict("Result belongs to a different training request")
         snapshots = [self._snapshot(row, s) for s in result.snapshots]
         merged = self._change(self.index.save_steps, row['instance'], row['epoch'], row['request_key'], snapshots)
-        result = replace(result, snapshots=merged)
+        gpu_seconds = result.metrics.get('allocated_gpu_seconds')
+        if self.binding.hosting == 'EngineManaged':
+            read_usage = getattr(self.provider,'allocated_gpu_seconds',None)
+            gpu_seconds = read_usage(self.index.request_keys(row)) if read_usage else None
+        if gpu_seconds is not None and (type(gpu_seconds) not in (int,float) or gpu_seconds < 0):
+            raise FitConflict("Invalid training allocation duration")
+        result = replace(result, snapshots=merged, metrics={**result.metrics,'allocated_gpu_seconds':gpu_seconds})
         validate_result(result, self.request)
         manifest = self.store.save_manifest(result)
         coordinator.commit(1, outputs={'model_manifest': (sink, [manifest])},

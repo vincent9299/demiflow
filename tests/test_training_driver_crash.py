@@ -1,5 +1,6 @@
 """Kill the submitting driver before the first row cut and resume the original action."""
 from dataclasses import replace
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -8,6 +9,7 @@ import time
 
 import lance
 import pyarrow as pa
+import pytest
 from demiflow import data
 from demiflow.execution.recovery_contract import RunRef
 from demiflow.execution.run_context import RunContext
@@ -18,7 +20,17 @@ from test_training_domain import setup_request
 from training_action_programs import waiting_trainer
 
 
-def execute(root, resume):
+def execute(root, resume, stopped_at):
+    if stopped_at == 'ready' and not resume:
+        from demiflow.execution.training.managed_host import ManagedFitHost
+        activate = ManagedFitHost._activate
+        def wait_before_activation(self, key, location):
+            if (location / 'ready.json').exists():
+                (root / 'ready_to_authorize').touch()
+                while not (root / 'release_driver').exists():
+                    time.sleep(.05)
+            return activate(self, key, location)
+        ManagedFitHost._activate = wait_before_activation
     _, binding = setup_request(root, managed=True)
     deployment = TrainingDeployment('project', replace(binding, provider_options={
         'cpu_millis': 100, 'memory_bytes': 16 << 20}))
@@ -35,33 +47,51 @@ def execute(root, resume):
         scores.write_lance(str(root / 'scores.lance'), mode='create')
 
 
-def test_original_lance_create_adopts_running_fit_without_row_cut(tmp_path):
+@pytest.mark.parametrize('stopped_at', ['training', 'ready'])
+def test_original_lance_create_adopts_running_fit_without_row_cut(tmp_path, stopped_at):
     lance.write_dataset(pa.table({'x': [1]}), str(tmp_path / 'train.lance'))
     command = [sys.executable, '-B', '-c',
                'import sys; from pathlib import Path; from test_training_driver_crash import execute; '
-               'execute(Path(sys.argv[1]), sys.argv[2]=="resume")', str(tmp_path)]
+               'execute(Path(sys.argv[1]), sys.argv[3]=="resume", sys.argv[2])', str(tmp_path), stopped_at]
     env = dict(os.environ, PYTHONPATH=os.pathsep.join(p for p in sys.path if p))
-    with subprocess.Popen(command + ['start'], env=env) as process:
-        try:
-            deadline = time.monotonic() + 50
-            while not (tmp_path / 'project' / 'started').exists():
-                assert process.poll() is None and time.monotonic() < deadline
-                time.sleep(.05)
-            process.kill()
-            process.wait(timeout=5)
-            journal = RunJournal(tmp_path / 'run')
-            import json
-            launch, = (tmp_path / 'run' / 'training').glob('*/launch.json')
-            source_id = json.loads(launch.read_bytes())['action']
-            assert journal.latest_execution_commit(source_id) is None
-        finally:
-            if process.poll() is None:
+    started = tmp_path / 'project' / 'started'
+    stop_point = started if stopped_at == 'training' else tmp_path / 'ready_to_authorize'
+    proceed = tmp_path / 'project' / 'proceed'
+    try:
+        with subprocess.Popen(command + ['start'], env=env) as process:
+            try:
+                deadline = time.monotonic() + 60
+                while not stop_point.exists():
+                    assert process.poll() is None and time.monotonic() < deadline
+                    time.sleep(.05)
+                if stopped_at == 'ready':
+                    assert not started.exists()
+            finally:
                 process.kill()
-            (tmp_path / 'project' / 'proceed').touch()
-    subprocess.run(command + ['resume'], env=env, check=True, timeout=75)
+                process.wait(timeout=5)
+        journal = RunJournal(tmp_path / 'run')
+        launch, = (tmp_path / 'run' / 'training').glob('*/launch.json')
+        source_id = json.loads(launch.read_bytes())['action']
+        assert journal.latest_execution_commit(source_id) is None
+        with subprocess.Popen(command + ['resume'], env=env) as successor:
+            try:
+                deadline = time.monotonic() + 60
+                while journal.execution_status()['attempt'] < 2 or not started.exists():
+                    assert successor.poll() is None and time.monotonic() < deadline
+                    time.sleep(.05)
+                assert journal.latest_execution_commit(source_id) is None
+                proceed.touch()
+                assert successor.wait(timeout=60) == 0
+            finally:
+                proceed.touch()
+                if successor.poll() is None:
+                    successor.kill()
+    finally:
+        if proceed.parent.exists():
+            proceed.touch()
     score_table = lance.dataset(str(tmp_path / 'scores.lance'))
     assert score_table.version == 1
     assert score_table.to_table().to_pylist() == [{'x': 19, 'step': 3}]
     launch, = (tmp_path / 'run' / 'training').iterdir()
-    assert launch.name == (tmp_path / 'project' / 'started').read_text()
-    assert RunJournal(tmp_path / 'run').execution_status()['attempt'] == 2
+    assert launch.name == started.read_text()
+    assert journal.execution_status()['attempt'] == 2

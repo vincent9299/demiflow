@@ -301,6 +301,24 @@ class DevicePool:
         finally:
             os.close(fd)
 
+    def released_device_seconds(self, allocation_id, spec_hash, device_type):
+        """Return reserved-device seconds only after the original verified release."""
+        identifier(allocation_id)
+        fd = self._lock()
+        try:
+            record = self._read(allocation_id)
+            if record is None or record['state'] != 'RELEASED':
+                return None
+            if record['spec_hash'] != spec_hash:
+                raise ResourceError("ARTIFACT_MISMATCH", "original device allocation spec changed")
+            start, end = record.get('created_ms'), record.get('released_ms')
+            if type(start) is not int or type(end) is not int or end < start:
+                return None
+            count = sum(device['type'] == device_type for device in record['devices'])
+            return count * (end - start) / 1000
+        finally:
+            os.close(fd)
+
     def release(self, allocation_id, cleanup_evidence):
         """Device capacity releases only on confirmed exit evidence, never on intent."""
         identifier(allocation_id)

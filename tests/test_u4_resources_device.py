@@ -473,3 +473,17 @@ def test_device_pending_rolls_back_cpu_then_real_process_lifecycle(tmp_path):
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=5)
+
+def test_elapsed_device_seconds_require_the_original_release(tmp_path, monkeypatch):
+    import time
+    pool = DevicePool(tmp_path, inventory=_inventory())
+    current = [100.]
+    monkeypatch.setattr(time, 'time', lambda: current[0])
+    spec = 'a' * 64
+    pool.reserve('job', spec, [{'type': 'gpu', 'count': 2}], deadline_ms=1000)
+    assert pool.released_device_seconds('job', spec, 'gpu') is None
+    current[0] += 3.5
+    pool.release('job', {'confirmed': True, 'identity': None, 'evidence_ref': 'exit'})
+    assert pool.released_device_seconds('job', spec, 'gpu') == 7.
+    with pytest.raises(ResourceError, match='original device allocation spec changed'):
+        pool.released_device_seconds('job', 'b'*64, 'gpu')

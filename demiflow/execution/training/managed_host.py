@@ -219,6 +219,15 @@ class ManagedFitHost:
             if active and not (root / 'cancel').exists():
                 atomic_bytes(root / 'activate.json', document(proof))
 
+    def allocated_gpu_seconds(self, request_keys):
+        total = 0.0
+        for key in request_keys:
+            seconds = self._allocation(key).allocated_gpu_seconds()
+            if seconds is None:
+                return None
+            total += seconds
+        return total
+
     def result(self, job):
         return FitResult.from_dict(json.loads(read_metadata(self._directory(self._key(job)) / 'result.json',
                                                              1024 * 1024)))

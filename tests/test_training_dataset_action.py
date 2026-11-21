@@ -113,3 +113,27 @@ def test_unreachable_budget_is_rejected_before_managed_allocation(tmp_path):
         fit.checkpoints.select(steps=[1]).predict(on=data.from_items([{'x': 2}])).count()
     assert not (tmp_path / 'run' / 'training').exists()
     assert not list((tmp_path / 'run-driver-resources' / 'units').glob('fit-*'))
+
+
+def test_managed_native_checkpoint_reconciliation_runs_in_cpu_unit(tmp_path):
+    from dataclasses import replace
+    import json
+    import os
+    import lance
+    from training_action_programs import native_checkpoint_crash
+    source = tmp_path / 'train.lance'
+    lance.write_dataset(pa.table({'x': [1]}), str(source))
+    _, binding = setup_request(tmp_path, managed=True)
+    binding = replace(binding, provider_options={'cpu_millis': 100, 'memory_bytes': 16 << 20})
+    with RunContext.start(tmp_path / 'run', training=TrainingDeployment('project', binding)):
+        train = data.read_lance(str(source), version=1)
+        scores = train.fit(recipe=replace(recipe(), trainer=native_checkpoint_crash)).checkpoints.select(
+            steps=[1, 3]).predict(on=data.from_items([{'x': 9}]))
+        assert sorted(row['step'] for row in scores.take_all()) == [1, 3]
+    launches = {p.parent: json.loads(p.read_bytes()) for p in (tmp_path / 'run' / 'training').glob('*/launch.json')}
+    assert len(launches) == 3
+    inspector, = [launch for launch in launches.values() if 'inspect_source' in launch]
+    original = tmp_path / 'run' / 'training' / inspector['inspect_source']['key']
+    assert int((original / 'inspection-pid').read_text()) != os.getpid()
+    from demiflow.execution.contracts.training import FitRequest
+    assert len({FitRequest.from_dict(launch['request']).instance_id for launch in launches.values()}) == 1
