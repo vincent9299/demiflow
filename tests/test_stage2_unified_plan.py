@@ -844,9 +844,6 @@ def test_f8a_chain_load_failure_identifiable_releases_capacity(tmp_path, monkeyp
         return ref
 
     monkeypatch.setattr(chain, "stage_plan_artifact", stage_then_edit)
-    original_run = chain.run_local_chain
-    monkeypatch.setattr(chain, "run_local_chain",
-                        lambda *a, **k: original_run(*a, **k, control_timeout_s=5))
     root = tmp_path / "run"
     with pytest.raises(RecoveryContractError, match="Worker failed") as excinfo:
         with RunContext.start(root, limits=LIMITS):
@@ -866,7 +863,7 @@ def test_f8b_queue_load_failure_identifiable_releases_capacity(tmp_path, monkeyp
     from test_mvp2_queue_unified import _config, _settle
     from test_queue_v2_boundaries import seed
     from test_raw_fetch import origin_server
-    from demiflow.execution import chain, queue_chain
+    from demiflow.execution import chain
     from demiflow.execution.queue import QueueChannel
     cfg = _config(tmp_path, "f8b")
     root = tmp_path / "run"
@@ -879,9 +876,6 @@ def test_f8b_queue_load_failure_identifiable_releases_capacity(tmp_path, monkeyp
         return ref
 
     monkeypatch.setattr(chain, "stage_plan_artifact", stage_then_corrupt)
-    original_run = queue_chain.run_local_queue_chain
-    monkeypatch.setattr(queue_chain, "run_local_queue_chain",
-                        lambda *a, **k: original_run(*a, **k, control_timeout_s=5))
     with origin_server() as (url, calls):
         seed(QueueChannel(cfg), tmp_path / "seed", url)
         with pytest.raises(RecoveryContractError, match="Worker failed") as excinfo:
@@ -895,14 +889,10 @@ def test_f8b_queue_load_failure_identifiable_releases_capacity(tmp_path, monkeyp
 
 # F8-c: chain ROW error outside an outstanding cut (_pending None) -> F8 frame.
 def test_f8c_chain_row_error_identifiable_releases_capacity(tmp_path, monkeypatch):
-    from demiflow.execution import chain
     bizname = "f8c_biz_" + uuid.uuid4().hex[:8]
     sources = {bizname: ("def boom(row):\n    if row['x'] == 0:\n"
                          "        raise RuntimeError('boom-row-error')\n    return row\n")}
     biz, _ = _load_modules(tmp_path, monkeypatch, sources, bizname)
-    original_run = chain.run_local_chain
-    monkeypatch.setattr(chain, "run_local_chain",
-                        lambda *a, **k: original_run(*a, **k, control_timeout_s=5))
     root = tmp_path / "run"
     with pytest.raises(RecoveryContractError, match="Worker failed") as excinfo:
         with RunContext.start(root, limits=LIMITS):

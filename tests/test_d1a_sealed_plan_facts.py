@@ -428,13 +428,7 @@ def test_v3_queue_caller_seals_and_persists(tmp_path):
 
 
 def test_v3_ray_caller_routes_through_same_seam():
-    # ray is not installed in this environment, so end-to-end ray execution is
-    # unavailable (honest limitation, not a code defect). The single-seam guarantee
-    # is structural: run_ray_chain calls the SAME compile_chain_topology that seals
-    # F1 (chain.py:1044), exactly as the executed local/queue callers do.
-    import inspect
-    import demiflow.execution.chain as chain
-    ray_src = inspect.getsource(chain.run_ray_chain)
-    local_src = inspect.getsource(chain.run_local_chain)
-    assert "compile_chain_topology(" in ray_src
-    assert "compile_chain_topology(" in local_src
+    from demiflow.execution.executors.base import DatasetExecutor
+    from demiflow.execution.executors.local import LocalDatasetExecutor
+    from demiflow.execution.executors.ray import RayDatasetExecutor
+    assert LocalDatasetExecutor.execute is RayDatasetExecutor.execute is DatasetExecutor.execute

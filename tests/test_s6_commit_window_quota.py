@@ -578,7 +578,6 @@ def _clean_baseline(tmp_path, rows_in, transform):
 
 def test_s6_gate9_real_worker_sigkill_recovery_same_quota(tmp_path, monkeypatch):
     from test_u2_chain_faults import _release_crash_orphans
-    from demiflow.execution import chain
     rows_in = [{"x": i} for i in range(8)]
 
     def transform(row):
@@ -592,9 +591,6 @@ def test_s6_gate9_real_worker_sigkill_recovery_same_quota(tmp_path, monkeypatch)
         return (data.from_items(rows_in).map_async(transform, concurrency=1)
                 .map_async(hook, concurrency=1))
 
-    original_run = chain.run_local_chain
-    monkeypatch.setattr(chain, "run_local_chain",
-                        lambda *a, **k: original_run(*a, **k, control_timeout_s=5))
     root = tmp_path / "run"
     with pytest.raises((RecoveryContractError, OSError)):
         with RunContext.start(root, limits=LIMITS) as run:
@@ -619,7 +615,6 @@ def test_s6_gate9_real_worker_window3_recovery_same_quota(tmp_path, monkeypatch)
     # Resume re-produces the same logical cut and re-prepares the pending commit:
     # commit-keyed attribution must reuse the charge, not double it.
     from test_u2_chain_faults import _release_crash_orphans
-    from demiflow.execution import chain
     rows_in = [{"x": i} for i in range(8)]
 
     def transform(row):
@@ -641,9 +636,6 @@ def test_s6_gate9_real_worker_window3_recovery_same_quota(tmp_path, monkeypatch)
                 raise OSError("driver window-3 crash before prepared record")
 
     monkeypatch.setattr(commit_module, "fault_point", fault)
-    original_run = chain.run_local_chain
-    monkeypatch.setattr(chain, "run_local_chain",
-                        lambda *a, **k: original_run(*a, **k, control_timeout_s=5))
     root = tmp_path / "run"
     with pytest.raises((RecoveryContractError, OSError)):
         with RunContext.start(root, limits=LIMITS) as run:
