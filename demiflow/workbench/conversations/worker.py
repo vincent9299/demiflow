@@ -294,6 +294,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
     confined = None
     sandbox_deadline = 0.0
     warm_ready = False
+    warm_operation = None
     provider_opened = False
     already_claimed = False
     acp = False
@@ -303,8 +304,15 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
     try:
         if standby is not None:
             standby_info = json.loads(standby)
+            st_operation = standby_info.get('operation', 'message')
+            st_cell_cli = st_operation == 'notebook_cell_cli'
+            st_notebook = st_cell_cli or st_operation == 'notebook_cell'
+            if st_notebook and deployment.mode != 'restricted':
+                return
             st_project = deployment.project(standby_info['workspace'], standby_info['root_path'])
-            st_guided = st_project['kind'] == 'pipeline'
+            if st_notebook:
+                st_project = dict(st_project, writes=[])
+            st_guided = (not st_notebook) and st_project['kind'] == 'pipeline'
             if st_guided and coding_fd is not None:
                 from demiflow.forge.api_reference import REFERENCE_BYTES
                 try:
@@ -323,29 +331,39 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
             if st_broker_home is not None:
                 st_broker_home.mkdir(mode=0o700, parents=True, exist_ok=True)
             st_config = deployment.providers[standby_info['provider']]
-            st_adapter = adapter_for(standby_info['provider'], 'message')
+            st_adapter = adapter_for(standby_info['provider'], st_operation)
             acp = getattr(st_adapter, 'acp', False)
-            if acp and st_guided:
+            if st_cell_cli:
+                from demiflow.workbench.notebooks.cell_commands import CellCommands
+                control_bridge = CellCommands(store, None, 0.0)
+            elif acp and st_guided:
                 control_bridge = BridgeServer(None)
-            st_manifest = dict(sources=[dict(origin='authoritative_file', canonical_path=str(p))
-                                        for p in authoritative_source_paths(st_project)])
+            st_manifest = dict(sources=[] if st_notebook else [
+                dict(origin='authoritative_file', canonical_path=str(p))
+                for p in authoritative_source_paths(st_project)])
             st_session = dict(id=standby_info['session_id'], workspace=standby_info['workspace'],
                               provider=standby_info['provider'], policy_hash=standby_info['policy_hash'])
             warm_sandbox_secs = min(3600, max(limits.turn_seconds, WARM_SANDBOX_SECONDS))
             standby_spec = (sandbox_spec(deployment, st_project, st_session,
-                                         {'operation': 'message', 'created': time.time()},
+                                         {'operation': st_operation, 'created': time.time()},
                                          st_manifest, st_config, st_provider_home, seconds=warm_sandbox_secs)
                             if deployment.mode == 'restricted' else None)
+            warm_operation = st_operation
             standby_lease = None
             try:
                 if standby_spec is not None:
                     sandbox_deadline = time.time() + standby_spec.seconds
+                    if st_cell_cli:
+                        from dataclasses import replace
+                        standby_spec = replace(standby_spec, runtime_paths=(*standby_spec.runtime_paths, str(control_bridge.bin)))
                     from demiflow.workbench.conversations.sandbox import specification
                     specification(standby_spec, [sys.executable], {}, st_project['root'])
                     if not getattr(deployment, 'direct_model', False):
                         from demiflow.workbench.conversations.model_broker import start_model_broker
                         model_broker = start_model_broker(deployment, None, st_session, st_broker_home, defer_handshake=True)
                         st_config = model_broker.child_config
+                    if st_cell_cli:
+                        st_config = {**st_config, '_cell_bin': str(control_bridge.bin)}
                 else:
                     standby_lease = tempfile.TemporaryFile(dir=st_home)
                 process = launch_provider(
@@ -635,8 +653,9 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         reject('Notebook generation requires a read-only project scope')
                     project = dict(project, writes=[])
                     if cell_cli:
-                        from demiflow.workbench.notebooks.cell_commands import CellCommands
-                        control_bridge = CellCommands(store, turn, deadline)
+                        if not (warm_ready and warm_operation == turn.get('operation', 'message') and control_bridge is not None):
+                            from demiflow.workbench.notebooks.cell_commands import CellCommands
+                            control_bridge = CellCommands(store, turn, deadline)
                         skill = Path(__file__).parents[1] / 'notebooks/skills/dataskill/SKILL.md'
                         prompt = skill.read_text(encoding='utf-8')
                     else:
@@ -670,14 +689,26 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 tick()
                 if requested: raise InterruptedError(reason)
 
+                turn_op = turn.get('operation', 'message')
+                if warm_ready and warm_operation != turn_op:
+                    _teardown_provider(process, transport, provider, model_broker, control_bridge)
+                    process = transport = provider = model_broker = control_bridge = None
+                    effective_bound = None
+                    standby_spec = None
+                    warm_ready = False
+                    provider_opened = False
+
                 if warm_ready and not provider_opened:
-                    compatible = not (compact or notebook)
+                    compatible = (not compact) and (warm_operation == turn_op)
                     if compatible and deployment.mode == 'restricted':
                         provider_home = home / 'provider'
                         provider_home.mkdir(mode=0o700, exist_ok=True)
                         actual_spec = sandbox_spec(deployment, project, session, turn, manifest,
                             deployment.providers[session['provider']], provider_home,
                             seconds=max(.1, sandbox_deadline - time.time()))
+                        if cell_cli and control_bridge is not None:
+                            from dataclasses import replace
+                            actual_spec = replace(actual_spec, runtime_paths=(*actual_spec.runtime_paths, str(control_bridge.bin)))
                         from demiflow.workbench.conversations.sandbox import specification
                         specification(actual_spec, [sys.executable], {}, project['root'])
                         compatible = _sandbox_compatible(standby_spec, actual_spec)
@@ -692,7 +723,9 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 if warm_ready:
                     if model_broker is not None:
                         model_broker.begin_turn(turn, limits)
-                    if control_bridge is not None and input_access is not None:
+                    if cell_cli and control_bridge is not None:
+                        control_bridge.set_turn(turn, deadline)
+                    elif control_bridge is not None and input_access is not None:
                         control_bridge.set_turn(input_access, delivery_review=delivery_review)
                     transport.frame_count = 0
                     transport.output_bytes = 0
@@ -724,18 +757,22 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         send_parent('notify')
                 else:
                     config = deployment.providers[session['provider']]
-                    adapter = adapter_for(session['provider'], turn.get('operation', 'message'))
+                    adapter = adapter_for(session['provider'], turn_op)
                     acp = getattr(adapter, 'acp', False)
-                    if acp and guided:
+                    if cell_cli and control_bridge is None:
+                        from demiflow.workbench.notebooks.cell_commands import CellCommands
+                        control_bridge = CellCommands(store, turn, deadline)
+                    elif acp and guided:
                         control_bridge = BridgeServer(input_access, delivery_review=delivery_review)
                     provider_home = home / 'provider' if deployment.mode == 'restricted' else home
                     provider_home.mkdir(mode=0o700, exist_ok=True)
                     if broker_home is not None:
                         broker_home.mkdir(mode=0o700, parents=True, exist_ok=True)
                     warm_sandbox_secs = (min(3600, max(limits.turn_seconds, WARM_SANDBOX_SECONDS))
-                                         if (parent_sock is not None and not compact and not notebook) else None)
+                                         if (parent_sock is not None and not compact) else None)
                     confined = (sandbox_spec(deployment, project, session, turn, manifest, config, provider_home, seconds=warm_sandbox_secs)
                                 if deployment.mode == 'restricted' else None)
+                    warm_operation = turn_op
                     if confined is not None:
                         sandbox_deadline = time.time() + confined.seconds
                         if cell_cli:
@@ -886,12 +923,14 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
             compaction_metadata = getattr(provider, 'compaction_result', None)
             assurance = (getattr(process, 'execution_assurance', 'host_permissions')
                          if process is not None else (effective_bound or {}).get('execution_assurance', 'not_started'))
-            if guided and control_bridge is not None:
+            if cell_cli and control_bridge is not None:
+                control_bridge.park_idle()
+            elif guided and control_bridge is not None:
                 control_bridge.set_turn(None)
             review_requested = delivery_review is not None and delivery_review.selection is not None
             keep_warm = (
                 parent_sock is not None
-                and not compact and not notebook and not review_requested
+                and not compact and not review_requested
                 and final == 'completed' and completed and not requested
                 and process is not None and process.poll() is None
                 and transport is not None and not transport.closed

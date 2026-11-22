@@ -30,12 +30,27 @@ export function mountCards({desk,controls,panel,app,api,project,alive,permission
   const input=element(document,'textarea');input.rows=2;input.placeholder='描述你想做的分析或标注…';input.setAttribute('aria-label','卡片要求');
   const providerSelect=element(document,'select','df-card-provider');
   providerSelect.hidden=true;providerSelect.setAttribute('aria-label','卡片助手模型');providerSelect.title='卡片助手模型';
-  let providers=[];
-  providerSelect.onchange=()=>{if(selectedId)assistantFor(selectedId).chooseProvider(providerSelect.value);};
+  let providers=[],canPrewarm=false,prewarmKey='';
+  function requestNotebookPrewarm(conversation,providerId){
+    if(!valid()||!assistantOpen||!canPrewarm||!providerId)return;
+    const sid=conversation?.sessionId||null;
+    const key=(sid||'new')+':'+providerId;
+    if(key===prewarmKey)return;
+    prewarmKey=key;
+    api('dev-prewarm',{},{session_kind:'notebook',...(sid?{session_id:sid}:{}),provider_id:providerId}).catch(()=>{if(prewarmKey===key)prewarmKey='';});
+  }
+  providerSelect.onchange=()=>{
+    if(selectedId){
+      const conv=assistantFor(selectedId);
+      conv.chooseProvider(providerSelect.value);
+      requestNotebookPrewarm(conv,providerSelect.value);
+    }
+  };
   async function loadProviders(){
     try{
       const caps=await api('dev-capabilities');
       if(!valid()||!assistantOpen)return;
+      canPrewarm=caps.prewarm_api===true&&caps.notebook_cells===true&&caps.enabled===true&&caps.start===true;
       providers=(caps.providers||[]).filter(p=>p.available);
       providerSelect.replaceChildren(...providers.map(p=>new Option(p.label||p.id,p.id)));
       renderThread();
@@ -136,6 +151,7 @@ export function mountCards({desk,controls,panel,app,api,project,alive,permission
     providerSelect.hidden=providers.length<2||!id;
     providerSelect.disabled=!!(busy||pending||conversation?.sessionId);
     providerSelect.value=conversation?.provider||providers.find(p=>p.id==='deepseek')?.id||providers[0]?.id||'';
+    if(assistantOpen&&id&&!busy&&!pending)requestNotebookPrewarm(conversation,providerSelect.value);
     executionLabel.hidden=!permissions().analysis_execute;execution.disabled=busy;
     input.disabled=busy||!writable()||!id;send.disabled=input.disabled;
     if(!id){actions.append(element(document,'p','df-chat-status','选中一张代码卡片即可调整。'));return;}
