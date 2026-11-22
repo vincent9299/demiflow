@@ -72,6 +72,16 @@ def test_a_mixed_module_accounts_for_every_function_and_class():
         assert not unlisted, (module, unlisted)
 
 
+def test_removed_parts_stay_retired():
+    for entry in LEDGER['removed']:
+        module = entry['module']
+        if module not in KNOWN:
+            continue
+        symbol = entry.get('symbol')
+        assert symbol is not None, f"Retired module restored: {module}"
+        assert symbol not in scan.top_level(KNOWN[module]), f"Retired symbol restored: {module}.{symbol}"
+
+
 def test_old_modules_have_exactly_the_recorded_importers():
     """A new importer of old code fails here; so does a stale entry after an importer is gone."""
     wrong = {}

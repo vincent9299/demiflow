@@ -394,21 +394,31 @@ def test_write_seam_bundle_identity_is_code_pin_carrier_survives(tmp_path, monke
     assert (after_raw, after["facts"]) == original
 
 
-def test_write_seam_code_pin_resume_fail_closed(tmp_path):
-    """gap④: the write-seam code-pin binding key is stable across attempts (one write
-    plan per action), so re-sealing the same action with drifted business code finds
-    the sealed pin and refuses. Keying the pin on identity(code_pin) would change with
-    the code and silently re-bind — this guards against that regression.
-    """
-    import demiflow.execution.chain as chain_mod
+def test_write_seam_rejects_drift_on_same_run_before_lance_publication(tmp_path, monkeypatch):
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
 
-    ds = relational_dataset()
-    drifted = drifted_relational_dataset()
-    with RunContext.start(tmp_path / "run") as run:
-        action = RunAction(run, "rel-action", {"kind": "write_table"})
-        chain_mod.seal_write_plan_ref(action, ds._plan)
-        with pytest.raises(RecoveryContractError, match="Business code changed"):
-            chain_mod.seal_write_plan_ref(action, drifted._plan)
+    root = tmp_path / 'run'
+    target = tmp_path / 'original.lance'
+
+    def stop_after_prepare(execution):
+        assert execution._sealed is not None
+        raise InterruptedError('stop after genuine original seal')
+
+    with monkeypatch.context() as patch:
+        patch.setattr(DataflowExecution, 'start', stop_after_prepare)
+        with pytest.raises(InterruptedError, match='after genuine original seal'):
+            with RunContext.start(root) as run:
+                original = run.ref
+                relational_dataset().write_lance(str(target), mode='create')
+    assert not target.exists()
+    action_id = sealed_action_id(run.journal)
+    before = run.journal.source_binding(action_id + '-dataflow-sealed')
+    with pytest.raises((RecoveryContractError, DataflowError), match='[Dd]iffer|changed|mismatch'):
+        with RunContext.resume(original):
+            drifted_relational_dataset().write_lance(str(target), mode='create')
+    assert not target.exists()
+    assert run.journal.source_binding(action_id + '-dataflow-sealed') == before
 
 
 # --- Streamed layer-3 counterexample: wide row rejected by sealed byte budget --

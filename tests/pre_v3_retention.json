@@ -23,126 +23,6 @@
     "never_ran": 7
    }
   },
-  "demiflow.execution.chain": {
-   "status": "mixed",
-   "reason": "旧拓扑写入与旧执行的测试仍使用部分实现；当前公开入口和 v3 封存已独立。",
-   "symbols": {
-    "ChainResultSink": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "DriverStreamTerminal": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "_build_sealed_manifest": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "_seal_chain_bindings": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "_seal_chain_identity_bridge": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "_seal_plan_code": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "build_commit_cut": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "build_commit_receipt": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "chain_checkpoint_manifest": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "compile_chain_topology": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "seal_plan_facts": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "seal_write_plan_ref": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "snapshot_code_sources": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "stage_plan_artifact": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "validate_commit_cut": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "validate_commit_receipt": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "verify_loaded_plan": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    }
-   },
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 218,
-     "historical_set_139_files": 93
-    },
-    "functions": 62,
-    "reached_through_a_product_entry": 26,
-    "called_only_by_tests": 29,
-    "ran_only_at_import": 0,
-    "never_ran": 7
-   }
-  },
   "demiflow.execution.contracts.pipeline": {
    "status": "separate_entry",
    "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
@@ -845,6 +725,11 @@
    "module": "demiflow.execution.graph",
    "batch": 4,
    "reason": "当前图动作与两种 provider 共用 v3；06 校验原封存，09 执行 worker。移除原来独立的拓扑生成、通道连接、握手和结果提交。"
+  },
+  {
+   "module": "demiflow.execution.chain",
+   "batch": 3,
+   "reason": "v3 封存持有业务源码与代码身份。当前 worker、调度和提交没有旧 chain 入口。历史读取从固定的发布版生成 F1/F2、K6、代码及输出回执，在现行读取端核验。"
   }
  ]
 }

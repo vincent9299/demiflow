@@ -425,7 +425,7 @@ def test_code_edit_after_seal_refuses_resume_then_unedited_recovers(tmp_path, mo
     # catch this. Resume must fail-closed (no silent value change). The driver has
     # two code-sensitive resume gates: the existing action-declaration identity
     # (bind_execution_action, which embeds the code-sensitive plan identity) fires
-    # first; the new per-plan code-pin gate (stage_plan_artifact) is defense in depth
+    # first; the worker program code-pin gate is defense in depth
     # and is proven in isolation by test_resume_code_pin_gate_fail_closes below. The
     # worker load-time code-pin gate (the actual gap-4 fix) is proven by
     # test_worker_load_gate_fail_closes_edited_code.
@@ -466,90 +466,46 @@ def _map_plan(*functions):
     return LogicalPlan(tuple(MapOp(CallableSpec.create(f)) for f in functions))
 
 
-def _topology(sealed, plan, plan_ref):
-    from demiflow.data.sources import ItemsSource
-    from demiflow.execution.chain import compile_chain_topology
-    source = ItemsSource(items=({"x": 1}, {"x": 2}))
-    return compile_chain_topology(
-        sealed.action, source, plan, {"source_id": identity(["test-source"]), "data": {}},
-        output_child_id="main-action-chain", host_id="local", plan_ref=plan_ref)
+def test_worker_rejects_code_different_from_the_sealed_expectation(sealed):
+    from runtime_v3_program_probe import stage_callable
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.seal.plan import verify_dataflow_program
+
+    def first(row):
+        return row["x"] + 1
+
+    def changed(row):
+        return row["x"] + 9999
+
+    settings = {'store': sealed.store, 'bounds': sealed.bounds}
+    first_ref, first_manifest = stage_callable(_map_plan(first).operations[0].callable, **settings)
+    changed_ref, _ = stage_callable(_map_plan(changed).operations[0].callable, **settings)
+    assert verify_dataflow_program(first_ref, expected_pin=first_manifest['code_identity'],
+                                   **settings).value.target({'x': 1}) == 2
+    with pytest.raises(DataflowError, match="pin differs"):
+        verify_dataflow_program(changed_ref, expected_pin=first_manifest['code_identity'], **settings)
 
 
-def test_worker_load_gate_fail_closes_edited_code(sealed):
-    from demiflow.execution.chain import stage_plan_artifact, verify_loaded_plan
-
-    def v1(row):
-        return {**row, "score": row["x"] + 1}
-
-    plan1 = _map_plan(v1)
-    plan_ref = stage_plan_artifact(sealed.action, plan1)
-    topology, _, _ = _topology(sealed, plan1, plan_ref)
-    # The genuine loaded plan passes both bindings.
-    verify_loaded_plan(plan1, plan_ref, topology["operators"])
-    # Edited business code (same structure, different body) -> code-pin fail-closed.
-    def v2(row):
-        return {**row, "score": row["x"] + 9999}
-
-    plan2 = _map_plan(v2)
-    with pytest.raises(RecoveryContractError, match="code-pin differs"):
-        verify_loaded_plan(plan2, plan_ref, topology["operators"])
-
-
-def test_resume_code_pin_gate_fail_closes(sealed, tmp_path, monkeypatch):
-    # The per-plan driver resume gate in isolation, on the exact gap-4 scenario:
-    # by-reference business code (importable module) whose pickle bytes are UNCHANGED
-    # by an edit, so only the code-sensitive code-pin can catch it. Re-staging the
-    # same action with edited code fail-closes against the sealed binding before any
-    # worker is launched.
+def test_reference_pickle_unchanged_but_sealed_worker_refuses_source_edit(sealed, tmp_path, monkeypatch):
     import cloudpickle
-    import hashlib
-    from demiflow.execution.chain import stage_plan_artifact
+    from runtime_v3_program_probe import stage_callable
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.seal.plan import verify_dataflow_program
+
     biz, path = _load_biz(tmp_path, monkeypatch, offset=1)
-    plan1 = _map_plan(biz.fetch_request, biz.fetch, biz.analyze, biz.fetch_result)
-    first = stage_plan_artifact(sealed.action, plan1)
-    again = stage_plan_artifact(sealed.action, plan1)
-    assert again["code_pin_digest"] == first["code_pin_digest"]
-    assert again["sha256"] == first["sha256"]
-    # Edit the actual business function; the by-reference pickle bytes are unchanged.
+    settings = {'store': sealed.store, 'bounds': sealed.bounds}
+    spec = _map_plan(biz.analyze).operations[0].callable
+    original_pickle = cloudpickle.dumps(spec)
+    first_ref, manifest = stage_callable(spec, **settings)
     path.write_text(_biz_source(9999))
     importlib.reload(biz)
-    plan2 = _map_plan(biz.fetch_request, biz.fetch, biz.analyze, biz.fetch_result)
-    assert hashlib.sha256(cloudpickle.dumps(plan2)).hexdigest() == first["sha256"]
-    with pytest.raises(RecoveryContractError,
-                       match="Business code changed since the plan was sealed"):
-        stage_plan_artifact(sealed.action, plan2)
-
-
-# --- Gate 5: loaded plan identity == sealed logical_dag (chain) ---
-
-def test_plan_identity_binds_sealed_logical_dag(sealed):
-    from demiflow.execution.chain import stage_plan_artifact, verify_loaded_plan
-
-    def f(row):
-        return row
-
-    def g(row):
-        return row
-
-    plan = _map_plan(f, g)
-    plan_ref = stage_plan_artifact(sealed.action, plan)
-    topology, logical_dag, _ = _topology(sealed, plan, plan_ref)
-    # The K1 manifest binds the code-pin via the existing definition_ref slot (D6);
-    # bundle_digest stays the plan-bundle pickle digest (frozen contract unchanged).
-    mref = topology["artifact_manifest_ref"]
-    manifest = json.loads((sealed.run.directory / (mref["sha256"] + ".json")).read_text())
-    entry = manifest["business"]["entrypoints"][0]
-    assert entry["definition_ref"]["sha256"] == plan_ref["code_pin_digest"]
-    assert manifest["business"]["bundle_digest"] == "sha256:" + plan_ref["sha256"]
-    # The genuine plan's recomputed operator ids equal the sealed logical_dag operators.
-    verify_loaded_plan(plan, plan_ref, topology["operators"])
-    assert topology["operators"] == [
-        {"logical_node_id": n["logical_node_id"], "occurrence_id": n["occurrence_id"]}
-        for n in logical_dag["nodes"][1:-1]]
-    # A sealed logical_dag whose operator ids do not match the loaded plan fail-closes.
-    wrong = [{"logical_node_id": identity(["bogus"]), "occurrence_id": identity(["bogus-occ"])}]
-    with pytest.raises(RecoveryContractError, match="operator identity differs"):
-        verify_loaded_plan(plan, plan_ref, wrong)
+    edited = _map_plan(biz.analyze).operations[0].callable
+    assert original_pickle == cloudpickle.dumps(edited)
+    changed_ref, changed_manifest = stage_callable(edited, **settings)
+    assert changed_ref != first_ref
+    assert changed_manifest['code_identity'] != manifest['code_identity']
+    with pytest.raises(DataflowError, match='Loaded program code differs'):
+        verify_dataflow_program(first_ref, expected_pin=manifest['code_identity'], **settings)
 
 
 # --- Gate 5: carrier binds the same sealed plan (functional, queue settlement) ---
@@ -832,27 +788,26 @@ def _capacity_snapshot(tmp_path):
 
 # F8-a: chain LOAD failure (helper edited between seal and worker load) -> F8 frame.
 def test_f8a_chain_load_failure_identifiable_releases_capacity(tmp_path, monkeypatch):
-    from demiflow.execution import chain
+    from demiflow.execution.seal import plan as sealing
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
     biz, paths, helper = _direct_graph(tmp_path, monkeypatch, "f8a")
-    original_stage = chain.stage_plan_artifact
+    original_stage = sealing._stage_one_program
 
-    def stage_then_edit(action, plan):
-        ref = original_stage(action, plan)
-        # Edit AFTER the driver seals the code-pin, BEFORE the worker re-imports:
-        # the worker's recomputed manifest differs -> load gate fails (_pending None).
-        paths[helper].write_text("def delta():\n    return 9999\n")
+    def stage_then_edit(declaration, **options):
+        ref = original_stage(declaration, **options)
+        if declaration.callable_spec is not None and declaration.callable_spec.target is biz.transform:
+            paths[helper].write_text("def delta():\n    return 9999\n")
         return ref
 
-    monkeypatch.setattr(chain, "stage_plan_artifact", stage_then_edit)
+    monkeypatch.setattr(sealing, "_stage_one_program", stage_then_edit)
     root = tmp_path / "run"
-    with pytest.raises(RecoveryContractError, match="Worker failed") as excinfo:
+    with pytest.raises((DataflowError, RuntimeError), match="code differs") as excinfo:
         with RunContext.start(root, limits=LIMITS):
             with data.local_execution(workers=1, worker_mode="thread", partitions=1,
                                       unified_chain=True):
                 (data.from_items([{"x": i} for i in range(4)])
                  .map_async(biz.transform, concurrency=1).materialize().take_all())
     assert not isinstance(excinfo.value, TimeoutError)
-    assert "code-pin differs" in str(excinfo.value)
     snap = _capacity_snapshot(tmp_path)
     assert snap["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
     assert snap["active"] == []
@@ -863,25 +818,25 @@ def test_f8b_queue_load_failure_identifiable_releases_capacity(tmp_path, monkeyp
     from test_mvp2_queue_unified import _config, _settle
     from test_queue_v2_boundaries import seed
     from test_raw_fetch import origin_server
-    from demiflow.execution import chain
+    from demiflow.execution.seal import plan as sealing
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.queue import QueueChannel
-    cfg = _config(tmp_path, "f8b")
+    cfg = _config(tmp_path, 'f8b')
     root = tmp_path / "run"
-    original_stage = chain.stage_plan_artifact
+    original_stage = sealing._stage_one_program
 
-    def stage_then_corrupt(action, plan):
-        ref = original_stage(action, plan)
-        artifact = action.context.directory / ref["path"]
-        artifact.write_bytes(artifact.read_bytes() + b"\x00corrupt")
+    def stage_then_corrupt(declaration, **options):
+        ref = original_stage(declaration, **options)
+        path = root / '.dataflow-store' / ref.store_id / 'objects' / ref.digest
+        path.write_bytes(path.read_bytes() + b"corrupt")
         return ref
 
-    monkeypatch.setattr(chain, "stage_plan_artifact", stage_then_corrupt)
+    monkeypatch.setattr(sealing, "_stage_one_program", stage_then_corrupt)
     with origin_server() as (url, calls):
         seed(QueueChannel(cfg), tmp_path / "seed", url)
-        with pytest.raises(RecoveryContractError, match="Worker failed") as excinfo:
+        with pytest.raises((DataflowError, RuntimeError), match="size differs|do not match") as excinfo:
             _settle(cfg, root, url=url, unified_queue_chain=True)
     assert not isinstance(excinfo.value, TimeoutError)
-    assert "digest differs" in str(excinfo.value)
     snap = _capacity_snapshot(tmp_path)
     assert snap["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
     assert snap["active"] == []
