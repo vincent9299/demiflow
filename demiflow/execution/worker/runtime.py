@@ -4,9 +4,8 @@ Consumes the frozen E2 contracts (K3 worker messages, K1 manifest, envelope
 fencing) without redefining them. The driver owns a WorkerProtocolModel per
 worker for receipts/idempotency/fence; this runtime performs the actual side
 effects: K1 recheck, read-only state restore, granted-fence authority attach at
-Activate, the business-input gate, and drain/cancel. The data path (source-in,
-run_stream drive, CommitCut/CommitReceipt wire) is injected and wired in S4; the
-worker never builds a second commit authority.
+Activate, the business-input gate, and drain/cancel. Sealed dataflow workers
+run the v3 assignment. Standalone K3 workers only hold their granted authority.
 """
 import tempfile
 import time
@@ -21,9 +20,6 @@ from ..contracts.envelope import (
 from ..contracts.errors import ProtocolError
 from ..contracts.worker import apply_assignment, next_worker_state, validate_message
 from ..recovery_contract import RecoveryContractError
-from ..run_journal import RunJournal
-from ..state_artifacts import StateArtifacts
-from .authority import WorkerAuthority
 
 
 class _ReadContext:
@@ -31,10 +27,6 @@ class _ReadContext:
 
     def __init__(self, directory, limits):
         self.directory, self.limits = directory, limits
-
-
-def _is_dataflow_executor(executor):
-    return executor is not None and executor.__class__.__name__ == "DataflowWorkerExecutor"
 
 
 def _decode_v3_ref(value, *, type_name, media_type, store, bounds):
@@ -112,8 +104,15 @@ def _build_v3_executor(config, *, control):
     return executor
 
 
+def validate_worker_launch(launch_spec):
+    """Reject the retired business worker before allocating a host or opening its journal."""
+    if "execution" in launch_spec:
+        raise ProtocolError("INVALID_SPEC", "pre-v3 worker execution has been retired")
+
+
 class WorkerRuntime:
-    def __init__(self, launch_spec, *, control=None, manifest_loader=None, executor=None):
+    def __init__(self, launch_spec, *, control=None, manifest_loader=None):
+        validate_worker_launch(launch_spec)
         self.directory = Path(launch_spec["directory"]).absolute()
         self.run_id = launch_spec["run_id"]
         self.scope_id = launch_spec["scope_id"]
@@ -130,13 +129,12 @@ class WorkerRuntime:
         self.progress = None
         self._control = control
         self._manifest_loader = manifest_loader
-        self._executor = executor
         self._restored = {}
         self._admit_open = False
         self._draining = False
         self._v3_config = launch_spec.get("dataflow_v3")
-        self._v3 = self._v3_config is not None or _is_dataflow_executor(executor)
-        self._v3_executor = executor if _is_dataflow_executor(executor) else None
+        self._v3 = self._v3_config is not None
+        self._v3_executor = None
         if self._v3:
             # v3 workers never open the driver RunJournal database; limits and
             # the code pin come from the sealed launch payload and are mandatory
@@ -152,6 +150,7 @@ class WorkerRuntime:
                 raise DataflowError("CODE_MISMATCH", "v3 launch payload missing code pin observation")
             self._artifact_digest_observed = digest
         else:
+            from ..run_journal import RunJournal
             config = RunJournal(self.directory).recovery_identity()
             if config is None or config["run_id"] != self.run_id:
                 raise RecoveryContractError("Worker launch run identity differs")
@@ -201,8 +200,6 @@ class WorkerRuntime:
                                    lambda: self._execute(kind, payload, now_ms))
 
     def _execute(self, kind, payload, now_ms):
-        if self._v3:
-            return self._execute_v3(kind, payload, now_ms)
         if kind == "VerifyArtifactAndCapabilities":
             self._verify(payload["artifact_manifest_ref"])
             require_capabilities(self.capabilities, payload["required_capabilities"])
@@ -222,14 +219,12 @@ class WorkerRuntime:
         if kind == "Assign":
             self.plan_revision = apply_assignment(self.plan_revision, payload["assignment"])
             self.assignment = payload["assignment"]
-            if self._executor is not None:
-                self._executor.start(self.authority, payload["assignment"])
+            if self._v3:
+                self._v3_ensure_executor().run()
             return {"kind": "Assigned", "plan_revision": self.plan_revision}
         if kind == "CheckpointRequest":
-            # The driver-initiated cut converges to the same E1 barrier during
-            # execution; the durable cut itself flows out as a CommitCut.
-            if self._executor is not None:
-                self._executor.checkpoint(payload["cut"])
+            if self._v3:
+                self._v3_ensure_executor().request_cut(payload["cut"])
             return {"kind": "CheckpointAck", "state_refs": [], "inflight_desc": [],
                     "channel_cuts": []}
         if kind in ("Quiesce", "Drain"):
@@ -244,50 +239,10 @@ class WorkerRuntime:
             return {"kind": "Cancelled", "state": self.state}
         raise ProtocolError("INVALID_SPEC", "unhandled worker command: " + str(kind))
 
-    # ---- v3 unified worker path (B011-B018, contract C07) ----
     def _v3_ensure_executor(self):
         if self._v3_executor is None:
             self._v3_executor = _build_v3_executor(self._v3_config or {}, control=self._control)
         return self._v3_executor
-
-    def _execute_v3(self, kind, payload, now_ms):
-        if kind == "VerifyArtifactAndCapabilities":
-            self._verify(payload["artifact_manifest_ref"])
-            require_capabilities(self.capabilities, payload["required_capabilities"])
-            self.state = next_worker_state(self.state, "VERIFIED")
-            return {"kind": "Verified", "state": self.state}
-        if kind == "Restore":
-            self.state = next_worker_state(self.state, "RESTORING")
-            checksums = self._restore(payload["state_refs"])
-            self.state = next_worker_state(self.state, "READY")
-            return {"kind": "Restored", "state": self.state, "state_checksums": checksums}
-        if kind == "Activate":
-            target = next_worker_state(self.state, "ACTIVATED")
-            self._activate(payload, now_ms)
-            self.state = target
-            self._admit_open = True
-            return {"kind": "Activated", "state": self.state}
-        if kind == "Assign":
-            self.plan_revision = apply_assignment(self.plan_revision, payload["assignment"])
-            self.assignment = payload["assignment"]
-            self._v3_ensure_executor().run()
-            return {"kind": "Assigned", "plan_revision": self.plan_revision}
-        if kind == "CheckpointRequest":
-            executor = self._v3_ensure_executor()
-            executor.request_cut(payload["cut"])
-            return {"kind": "CheckpointAck", "state_refs": [], "inflight_desc": [],
-                    "channel_cuts": []}
-        if kind in ("Quiesce", "Drain"):
-            self._drain(payload)
-            if self.state == "ACTIVATED":
-                self.state = next_worker_state(self.state, "DRAINING")
-            return {"kind": "DrainProof", "state": self.state, "release_hint": "DRAINED"}
-        if kind == "Cancel":
-            self._cancel(payload)
-            if self.state != "RETIRED":
-                self.state = next_worker_state(self.state, "RETIRED")
-            return {"kind": "Cancelled", "state": self.state}
-        raise ProtocolError("INVALID_SPEC", "unhandled worker command: " + str(kind))
 
     def _verify(self, ref):
         if self._v3:
@@ -323,6 +278,7 @@ class WorkerRuntime:
                     type_name="RecoveryImage", bounds=executor._services.bounds)
             executor.restore(image)
             return [ref["sha256"] for ref in state_refs]
+        from ..state_artifacts import StateArtifacts
         artifacts = StateArtifacts(_ReadContext(self.directory, self._limits))
         checksums = []
         for ref in state_refs:
@@ -347,6 +303,7 @@ class WorkerRuntime:
         # driver restart that replaced the fence fails here (ExecutionConflict).
         # Bind only after a successful enter so a rejected attach leaves no
         # dangling authority and cannot poison a later activation.
+        from .authority import WorkerAuthority
         authority = WorkerAuthority(self.directory, self.grant)
         authority.__enter__()
         self.authority = authority
@@ -354,25 +311,15 @@ class WorkerRuntime:
     def _drain(self, payload):
         self._admit_open = False
         self._draining = True
-        if self._v3:
-            if self._v3_executor is not None:
-                self._v3_executor.cancel(payload.get("reason", "drain"),
-                                         deadline_ms=int(payload.get("deadline_ms", 1000)))
-            return
-        # The final barrier and astop/aclose run inside run_stream (E1) on the
-        # execution thread; drain joins it and surfaces any chain error.
-        if self._executor is not None:
-            self._executor.drain(payload)
+        if self._v3_executor is not None:
+            self._v3_executor.cancel(payload.get("reason", "drain"),
+                                     deadline_ms=int(payload.get("deadline_ms", 1000)))
 
     def _cancel(self, payload):
         self._admit_open = False
-        if self._v3:
-            if self._v3_executor is not None:
-                self._v3_executor.cancel(payload.get("reason", "cancel"),
-                                         deadline_ms=int(payload.get("deadline_ms", 1000)))
-            return
-        if self._executor is not None:
-            self._executor.cancel(payload)
+        if self._v3_executor is not None:
+            self._v3_executor.cancel(payload.get("reason", "cancel"),
+                                     deadline_ms=int(payload.get("deadline_ms", 1000)))
         elif self.authority is not None:
             self.authority.cancel_local()
         # In-flight converges under the existing cancel_grace; unconfirmed

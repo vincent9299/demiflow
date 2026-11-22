@@ -22,6 +22,7 @@ from pathlib import Path
 from ..artifacts import read
 from ..contracts.errors import ProtocolError
 from ..recovery_contract import RecoveryContractError, document
+from .runtime import validate_worker_launch
 
 LAUNCH_ENV = "DEMIFLOW_WORKER_LAUNCH"
 CONTROL_FD_ENV = "DEMIFLOW_WORKER_CONTROL_FD"
@@ -318,37 +319,22 @@ def _run_v3_worker(launch_spec, sock):
 
 
 def run_worker(launch_spec, sock):
-    import threading
-
-    from ..chain import COMMIT_RECEIPT_SCHEMA
-    from .execution import WorkerChainExecutor
-    from .runtime import WorkerRuntime
     if "dataflow_v3" in launch_spec:
         return _run_v3_worker(launch_spec, sock)
-    send_lock = threading.Lock()
+    from .runtime import WorkerRuntime
 
     def send(frame):
-        with send_lock:
-            send_message(sock, frame)
+        send_message(sock, frame)
 
-    if "execution" in launch_spec:
-        executor = WorkerChainExecutor(launch_spec, send=send)
-    else:
-        executor = None
     runtime = WorkerRuntime(
         launch_spec, control=send,
-        manifest_loader=_manifest_loader(launch_spec["directory"]),
-        executor=executor)
+        manifest_loader=_manifest_loader(launch_spec["directory"]))
     runtime.register()
     try:
         while True:
             message = recv_message(sock)
             if message is None:
                 break
-            if message.get("schema_version") == COMMIT_RECEIPT_SCHEMA:
-                if executor is not None:
-                    executor.deliver_receipt(message)
-                continue
             if "kind" not in message:
                 continue
             operation_id = message["operation_id"]
@@ -363,8 +349,6 @@ def run_worker(launch_spec, sock):
             if kind in ("Drain", "Quiesce", "Cancel"):
                 break
     finally:
-        if executor is not None:
-            executor.join(timeout_s=5)
         runtime.close()
         sock.close()
     return runtime
@@ -406,6 +390,7 @@ def spawn_local_worker(launch_spec, *, log_path=None):
     spawn (unit lock, owner-alive bootstrap guard, capacity) is wired by chain.py
     in S4; this exercises the real worker process lifecycle over a real channel.
     """
+    validate_worker_launch(launch_spec)
     driver_sock, child_sock = socket.socketpair()
     descriptor, launch_path = tempfile.mkstemp(prefix="demiflow-worker-launch-", suffix=".json")
     try:
@@ -451,6 +436,7 @@ class LocalControlConnector:
         self.driver_socks = {}
 
     def stage(self, allocation_id, launch_spec):
+        validate_worker_launch(launch_spec)
         self._staged[allocation_id] = launch_spec
 
     def spawn_payload(self, allocation_id):

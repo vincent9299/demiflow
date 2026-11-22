@@ -620,7 +620,7 @@ def _converge_terminal(run, timeout_s=45.0):
     so convergence is bounded by that lease rather than by the kill itself.
     """
     from demiflow.execution.resource_state import RunResourceState
-    from demiflow.execution.worker.ray_host import RayControlConnector
+    from demiflow.execution.hosts.ray_worker_host import RayControlConnector
     from demiflow.resources.manager import ManagerBounds, ResourceManager
     from demiflow.resources.ray import RayResourceProvider
 

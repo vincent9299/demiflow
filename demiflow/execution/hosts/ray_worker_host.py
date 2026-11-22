@@ -1,18 +1,8 @@
-"""Ray actor worker host and control connector (U2/S5, D3 single worker host).
+"""Ray host for the independent K3 control protocol and its resource connector.
 
-The actor hosts the *same* WorkerRuntime + WorkerChainExecutor + WorkerStreamProgress
-as the Local process worker (design §8: worker bootstrap/runtime/progress/stream are
-byte-identical across providers). Only the host shell and the control transport
-differ: driver->worker commands are synchronous actor method calls; worker->driver
-events (Register/Ready/Heartbeat) and CommitCut requests flow through a bounded
-outbox the driver pulls. CommitReceipt returns via an actor method that unblocks the
-execution thread's lock-step publish. This is worker-host承载差异, not an Exchange
-data transfer (D3): result blocks still hand off as staging descriptors on the
-shared same-host run directory.
-
-The actor is created with max_restarts=0/max_task_retries=0 (A design §08): a dead
-actor is never automatically restarted into a business replay; host replacement is
-a fresh allocation driven by native recovery.
+The host validates lifecycle commands, manages the worker grant and returns
+correlated receipts and bounded worker events. Dataflow workers have their own
+host and transport.
 """
 import threading
 import time
@@ -24,8 +14,7 @@ from ray.exceptions import GetTimeoutError, RayActorError
 
 from ..artifacts import read as _read_artifact
 from ..contracts.errors import ProtocolError
-from .execution import WorkerChainExecutor
-from .runtime import WorkerRuntime
+from ..worker.runtime import WorkerRuntime, validate_worker_launch
 
 _MAX_OUTBOX = 4096
 _PULL_LIMIT = 64
@@ -51,11 +40,8 @@ class _RayWorkerHost:
         def manifest_loader(ref):
             return _read_artifact(Path(directory) / (ref["sha256"] + ".json"))
 
-        self.executor = (WorkerChainExecutor(launch_spec, send=send)
-                         if "execution" in launch_spec else None)
         self.runtime = WorkerRuntime(
-            launch_spec, control=send, manifest_loader=manifest_loader,
-            executor=self.executor)
+            launch_spec, control=send, manifest_loader=manifest_loader)
         self.runtime.register()
 
     def identity(self):
@@ -77,16 +63,10 @@ class _RayWorkerHost:
                 batch.append(self._outbox.popleft())
             return batch
 
-    def deliver_receipt(self, receipt):
-        if self.executor is not None:
-            self.executor.deliver_receipt(receipt)
-
     def close(self):
         if self._closed:
             return
         self._closed = True
-        if self.executor is not None:
-            self.executor.join(timeout_s=5)
         self.runtime.close()
 
 
@@ -97,7 +77,7 @@ class RayControlConnector:
     spawn payload is the launch spec handed to the actor constructor and the
     driver end is a set of actor methods plus a bounded outbox pull instead of an
     inherited socketpair. The provider creates the named actor and adopts it here
-    so the chain can drive the frozen K3 lifecycle and the commit handshake.
+    so the driver can run the K3 lifecycle.
     """
 
     def __init__(self, *, command_timeout_s=120):
@@ -109,6 +89,7 @@ class RayControlConnector:
         return _RayWorkerHost
 
     def stage(self, allocation_id, launch_spec):
+        validate_worker_launch(launch_spec)
         self._staged[allocation_id] = launch_spec
 
     def launch_spec(self, allocation_id):
@@ -132,10 +113,6 @@ class RayControlConnector:
     def pull(self, allocation_id, limit=_PULL_LIMIT):
         return ray.get(self._actor(allocation_id).pull_events.remote(limit),
                        timeout=self._command_timeout_s)
-
-    def deliver_receipt(self, allocation_id, receipt):
-        ray.get(self._actor(allocation_id).deliver_receipt.remote(receipt),
-                timeout=self._command_timeout_s)
 
     def terminate(self, allocation_id):
         actor = self._actors.get(allocation_id)

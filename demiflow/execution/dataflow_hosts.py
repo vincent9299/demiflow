@@ -641,7 +641,7 @@ def make_host_endpoint(lease: "WorkerLease", *, services: "DriverServices"):
 if _RAY_AVAILABLE:
     import ray
     from ray.exceptions import GetTimeoutError, RayActorError
-    from .worker.ray_host import RayControlConnector as _RayControlConnector
+    from .hosts.ray_worker_host import RayControlConnector as _RayControlConnector
 else:
     _RayControlConnector = object
 

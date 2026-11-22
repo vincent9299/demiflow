@@ -43,7 +43,7 @@ from demiflow.resources.contracts import (
 )
 from demiflow.resources.manager import ResourceManager
 from demiflow.resources.ray import RayResourceProvider
-from demiflow.execution.worker.ray_host import RayControlConnector
+from demiflow.execution.hosts.ray_worker_host import RayControlConnector
 
 pytestmark = [
     pytest.mark.ray,

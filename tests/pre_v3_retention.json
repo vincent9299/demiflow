@@ -972,12 +972,9 @@
   },
   "demiflow.execution.worker.execution": {
    "status": "old",
-   "reason": "11-09 那一代的 worker 执行器。run_worker 的 execution 分支没有产品来源；worker/ray_host.py 在模块顶部导入它（Ray 路径）。批次 4。",
+   "reason": "旧 worker 执行循环已经从 Local 和 Ray 的启动路径退出。剩余直接调用仅在旧执行循环的故障与回执测试中。",
    "batch": 4,
-   "importers": [
-    "demiflow.execution.worker.bootstrap",
-    "demiflow.execution.worker.ray_host"
-   ],
+   "importers": [],
    "measured": {
     "at": "74d2f99",
     "test_files_that_load_it": {
@@ -1032,7 +1029,7 @@
     "never_ran": 2
    }
   },
-  "demiflow.execution.worker.ray_host": {
+  "demiflow.execution.hosts.ray_worker_host": {
    "status": "undecided",
    "reason": "v3 的 DataflowRayConnector 继承这里的 RayControlConnector；_RayWorkerHost 属于 11-09 那一代。需要在 Ray 环境里测量后细化到符号。",
    "importers": [
