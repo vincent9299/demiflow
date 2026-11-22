@@ -542,7 +542,8 @@
       const reportNode=member.reportNodeId?data().graph.nodes.find(n=>n.id===member.reportNodeId):null;
       sourceTitle.textContent=(binding.basis_kind==='run'?'封存源码 · ':'源码 · ')+(reportNode?(reportNode.operator?.name||reportNode.api.split(/[.:]/).at(-1)||reportNode.kind):card.title);
       if(binding.basis_kind==='report')rememberView({kind:'inspection',report_digest:binding.basis_digest,node_id:member.reportNodeId});
-      else if(binding.basis_kind==='run')rememberView({kind:'run',run_id:run.run_id,attempt:run.attempt,report_digest:run.report_digest,node_id:member.reportNodeId,
+      else if(binding.basis_kind==='run')rememberView({kind:'run',run_id:run.run_id,attempt:run.attempt,
+        ...(member.reportNodeId!=null?{report_digest:run.report_digest,node_id:member.reportNodeId}:{}),
         ...(member.actionId?{action_id:member.actionId}:{}),...(member.logicalNodeId?{logical_node_id:member.logicalNodeId}:{}),...(member.occurrenceId?{occurrence_id:member.occurrenceId}:{}),
         ...(member.execution?{dag_id:member.execution.dagId,plan_id:member.execution.planId,plan_revision:member.execution.planRevision,plan_format:member.execution.format}:{})});
       if(isGroup){

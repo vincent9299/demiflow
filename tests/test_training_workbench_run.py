@@ -16,6 +16,10 @@ from test_training_domain import setup_request
 @pytest.mark.parametrize(('native', 'gpu'), [(False, 0), (True, 0), (False, 1), (True, 1)],
                          ids=['checked-cpu', 'native-cpu', 'checked-gpu', 'native-gpu'])
 def test_registered_native_training_run_seals_and_reports_model_evidence(root, tmp_path, monkeypatch, native, gpu):
+    run_registered_training(root, tmp_path, monkeypatch, native=native, gpu=gpu)
+
+
+def run_registered_training(root, tmp_path, monkeypatch, *, native=False, gpu=0):
     monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT', str(tmp_path / 'private-resources'))
     (root / 'operators' / 'training.py').write_text('''from hashlib import sha256
 from demiflow.execution.contracts.training import FitResult, ProjectObject, TrainingSnapshotRef
@@ -116,3 +120,4 @@ def run(*, digest, target):
     assert len(provenance['manifest_digest']) == 64
     assert 'configuration schema:' not in runs.logs(root,run_id)['text']
     assert provenance['action_id'] == output_history['action_id'] and provenance['attempt'] == 1
+    return run_id
