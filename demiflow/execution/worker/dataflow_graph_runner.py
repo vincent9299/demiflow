@@ -183,7 +183,7 @@ class WorkerGraphRunner:
         for contribution in image.contributions:
             if contribution.participant_id not in self.e._participant_ids():
                 continue
-            ref = contribution.sinks.get(self._terminal_spec.kind)
+            ref = contribution.sinks.get(self._terminal_spec.configuration.get('sink_id', self._terminal_spec.kind))
             if ref is None:
                 continue
             blocks = self._terminal_blocks
@@ -1524,7 +1524,7 @@ class WorkerGraphRunner:
                 partitions = blocks.manifest_partitions()
                 with blocks.hold_metadata(partitions):
                     blocks._check_workspace(2048)
-                    sink_id = self._terminal_spec.kind
+                    sink_id = self._terminal_spec.configuration.get('sink_id', self._terminal_spec.kind)
                     manifest = {'schema': 'demiflow.dataflow_sink_manifest.v3', 'sink_id': sink_id,
                                 'partition_id': self.partition, 'rows': self._terminal_rows,
                                 'bytes': self._terminal_bytes, 'columns': self._terminal_columns,

@@ -64,11 +64,11 @@ class _OriginalLocalExit:
         remaining = min(terminate_deadline_ms, _remaining(self.deadline))
         scope, allocation = exact_identity['scope_id'], exact_identity['allocation_id']
         row = self.state.read_cleanup_allocation(scope, allocation)
-        if row['effective'].get('accelerators'):
+        if row['effective'].get('accelerators') and 'job_authority' not in self.binding:
             raise ResourceError('UNSUPPORTED_CAPABILITY', 'original device cleanup binding is unavailable')
         if self.binding.get('provider') != 'local':
             raise ResourceError('UNSUPPORTED_CAPABILITY', 'original provider is unavailable for stopped cleanup')
-        if set(self.binding) - {'provider', 'worker_mode', 'capacity_root'}:
+        if set(self.binding) - {'provider', 'worker_mode', 'capacity_root', 'job_authority', 'device_authority'}:
             raise ResourceError('INVALID_SPEC', 'unknown original resource binding')
         modern = 'worker_mode' in self.binding and 'capacity_root' in self.binding
         if ('worker_mode' in self.binding) != ('capacity_root' in self.binding):
@@ -126,11 +126,74 @@ class _OriginalLocalExit:
             return provider.ensure_absent(exact_identity, min(remaining, _remaining(self.deadline)))
         from ..resources.local import LocalResourceProvider
         from ..resources.process_unit import ManagedProcessUnit
-        provider = LocalResourceProvider(pool, ManagedProcessUnit(self.root / 'units'))
+        devices = None
+        if row['effective'].get('accelerators'):
+            from .dataflow_devices import device_configuration
+            devices, _ = device_configuration('local')
+            from .recovery_contract import identity
+            if devices is not None and self.binding.get('device_authority') != identity(devices.authority()):
+                raise ResourceError('ARTIFACT_MISMATCH', 'original training device authority changed')
+            if devices is None or devices.reservation_view(allocation) is None:
+                raise ResourceError('CLEANUP_UNCONFIRMED', 'original job device reservation cannot be verified')
+        provider = LocalResourceProvider(pool, ManagedProcessUnit(self.root / 'units'), device_pool=devices)
         return provider.ensure_absent(exact_identity, min(remaining, _remaining(self.deadline)))
 
 
-def recover_execution_resources(journal, configuration, fence):
+def retained_process_units(journal, *, expected_attempt):
+    """Identify separately journaled, live allocations after their driver exits.
+
+    The supervisor still owns all other descendants, including ordinary row
+    workers. A recorded group whose physical identity is ambiguous leaves
+    attempt cleanup unconfirmed until that identity can be established.
+    """
+    configuration = journal.recovery_identity()
+    if configuration is None:
+        return ()
+    if journal.execution_status()['attempt'] != expected_attempt:
+        raise ResourceError('FENCED', 'driver attempt changed before process handoff')
+    state = RunResourceState(journal)
+    scopes = state.unfinished_scopes(configuration['run_id'])
+    retained = []
+    while scopes:
+        for scope in scopes:
+            document = scope['document']
+            job = document['provider_binding'].get('job_authority')
+            if job is None:
+                continue
+            unit = job.get('inspection_key', job['request_key'])
+            name = scope['scope_id']
+            if (name != 'fit-' + unit or document['authority_ref'] != name
+                    or journal.source_binding('fit-resource-' + unit) != job):
+                raise ResourceError('ARTIFACT_MISMATCH', 'original job scope membership differs')
+            allocation = state.read_allocation_identity(name, unit)
+            if allocation is None:
+                continue
+            root = journal.directory.with_name(journal.directory.name + '-driver-resources')
+            directory = _original_path(root / 'units' / name / unit)
+            recorded = _record(directory / 'process.json')
+            if recorded is None:
+                if directory.exists():
+                    raise ResourceError('CLEANUP_UNCONFIRMED', 'original job process birth is unconfirmed')
+                continue
+            if recorded['spec_hash'] != allocation['spec_hash']:
+                raise ResourceError('ARTIFACT_MISMATCH', 'original job process spec differs')
+            physical = recorded['identity']
+            original = allocation['observation'].get('identity')
+            if original is not None and physical != original:
+                raise ResourceError('ARTIFACT_MISMATCH', 'original job birth identity differs')
+            from ..resources.process_observation import unit_lock_status
+            lock = unit_lock_status(directory / 'unit.lock', physical['unit'])
+            if lock == 'unknown':
+                raise ResourceError('CLEANUP_UNCONFIRMED', 'original job unit lock identity changed')
+            if lock == 'held':
+                retained.append(physical)
+            if len(retained) > 128:
+                raise ResourceError('QUOTA_EXCEEDED', 'too many retained process units')
+        scopes = state.unfinished_scopes(configuration['run_id'], after=scopes[-1]['scope_id'])
+    return tuple(retained)
+
+
+def recover_execution_resources(journal, configuration, fence, *, preserve_jobs=False):
     """Called only by an owner claim made while holding the original run lease."""
     reader = RunResourceState(journal)
     scopes = reader.unfinished_scopes(configuration['run_id'])
@@ -146,6 +209,25 @@ def recover_execution_resources(journal, configuration, fence):
             original = scope['document']
             if original.get('run_id') != configuration['run_id'] or original.get('scope_id') != scope['scope_id']:
                 raise ResourceError('ARTIFACT_MISMATCH', 'resource scope identity differs from original run')
+            job = original['provider_binding'].get('job_authority')
+            if job is not None:
+                key = job['request_key']
+                unit = job.get('inspection_key', key)
+                if unit != key:
+                    from .recovery_contract import identity
+                    if unit != identity(['fit.snapshot_inspection.v1', key]):
+                        raise ResourceError('ARTIFACT_MISMATCH', 'inspection does not name its original fit')
+                if (scope['scope_id'] != 'fit-' + unit or original['authority_ref'] != scope['scope_id']
+                        or journal.source_binding('fit-resource-' + unit) != job):
+                    raise ResourceError('ARTIFACT_MISMATCH', 'job scope has no matching original launch')
+                fact = journal.fit_submission(fence, job['action'], job['occurrence'], instance=job['instance'],
+                            request_key=key, digest=job['digest'], scope=job['provider_scope'])
+                if fact['state'] not in {'sent', 'unknown', 'confirmed'}:
+                    raise ResourceError('ARTIFACT_MISMATCH', 'job has no recorded submission')
+                if preserve_jobs:
+                    # Rows retire with their old attempt. A job has its own
+                    # original scope and will be observed by its fenced owner.
+                    continue
             state = RunResourceState(journal, cleanup_scope=scope['scope_id'])
             provider = _OriginalLocalExit(journal, state, original['provider_binding'], deadline)
             manager = ResourceManager(provider, state)

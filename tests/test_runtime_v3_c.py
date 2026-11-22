@@ -67,6 +67,7 @@ def aref(key: str | None = None) -> d.ArtifactRef:
 
 _WIRE_OVERRIDE = {
     "Record": {"inline": {}},
+    "ValueEdge": {"kind": "fixed_dataset", "output_port": "dataset", "input_port": "train"},
     "WorkerEvent": {"payload": {}},
     "ControlReply": {"status": "ok", "error_code": None},
     "QueueCommand": {"operation": "poll"},

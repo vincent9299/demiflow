@@ -137,7 +137,17 @@ def _key(name, stage, shape, meaning):
 # Keys the compiler itself writes. Operation fields, source facts and model
 # declarations are admitted by ``_admitted`` below and carry no shape here:
 # their values are whatever the declaration said.
+PREDICTION_KEYS = {key.name: key for key in (
+    _key('predict_step', 'lowering', _count, 'the manifest step selected for this prediction branch'),
+    _key('predict_inputs', 'lowering', _mapping, 'predictor input names mapped to holdout columns'),
+    _key('predict_parameters', 'lowering', _mapping, 'effective predictor parameters'),
+    _key('predict_input_schema', 'lowering', _mapping, 'required holdout columns and types'),
+    _key('predict_output_schema', 'lowering', _mapping, 'the columns and types emitted by the predictor'),
+    _key('predict_model_format', 'lowering', _text, 'model format accepted by the predictor'),
+)}
+
 COMPILER_KEYS: Mapping[str, ConfigurationKey] = {key.name: key for key in (
+    *PREDICTION_KEYS.values(),
     _key('occurrence_id', 'capture', _text, 'the occurrence this kernel was captured as; equals the node identity'),
     _key('program', 'capture', _text, 'the occurrence whose sealed program this transform runs; equals the node identity'),
     _key('reducer_program', 'capture', _text, 'the occurrence whose sealed reducer a reduce node folds with'),
@@ -262,7 +272,7 @@ def _admitted(node) -> frozenset | None:
     """Every key this node may carry, or ``None`` when its kind is not known to the schema."""
     kind = node.kernel.kind
     if node.kind == 'terminal':
-        return TERMINAL_KEYS | {'occurrence_id'}
+        return TERMINAL_KEYS | {'occurrence_id'} | ({'sink_id'} if kind == 'fixed_dataset' else set())
     if node.kind in ('source', 'relational'):
         keys = SOURCE_KEYS.get(kind)
         return None if keys is None else keys | {'occurrence_id', SCHEMA_KEY, 'graph_observe'}
@@ -278,7 +288,7 @@ def _admitted(node) -> frozenset | None:
     if _has_field(kind, 'callable'):
         keys |= VARIANT_KEYS
     if kind == 'MapBatchesOp':
-        keys |= {'default_batch_size'}
+        keys |= {'default_batch_size', *PREDICTION_KEYS}
     if kind == 'RandomShuffleOp':
         keys |= {'shuffle_order_version'}
     if kind in TASK_KINDS:

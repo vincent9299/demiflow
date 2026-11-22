@@ -499,8 +499,64 @@ class GraphEdge:
 
 
 @dataclass(frozen=True)
+class FitJobNode:
+    occurrence_id: str
+    semantic_id: str
+    configuration: Mapping[str, Json]
+    program_ref: ArtifactRef | None
+
+    def __post_init__(self):
+        _sha256(self.occurrence_id, "FitJobNode.occurrence_id")
+        _sha256(self.semantic_id, "FitJobNode.semantic_id")
+        _opt_ref(self.program_ref, "FitJobNode.program_ref")
+        object.__setattr__(self, "configuration", _json_map(self.configuration, "FitJobNode.configuration"))
+
+
+@dataclass(frozen=True)
+class FitJobStage:
+    stage_id: str
+    occurrence_id: str
+
+    def __post_init__(self):
+        _ident(self.stage_id, "FitJobStage.stage_id")
+        _sha256(self.occurrence_id, "FitJobStage.occurrence_id")
+
+
+@dataclass(frozen=True)
+class ValueEdge:
+    """One complete value. Logical endpoints name occurrences, physical endpoints name stages."""
+    producer: str
+    output_port: str
+    consumer: str
+    input_port: str
+    kind: Literal["fixed_dataset", "model_manifest"]
+    step: int | None = None
+
+    def __post_init__(self):
+        for name in ("producer", "consumer", "output_port", "input_port"):
+            _ident(getattr(self, name), "ValueEdge." + name)
+        if self.kind == "fixed_dataset" and self.step is None and self.output_port == "dataset":
+            return
+        if self.kind == "model_manifest" and self.output_port == "manifest":
+            _int(self.step, "ValueEdge.step", minimum=1)
+            return
+        raise _err("invalid value edge type, selector or output port")
+
+
+def _value_ports(owner, job_type, schema_name):
+    for name, expected in (("jobs", job_type), ("value_edges", ValueEdge)):
+        value = getattr(owner, name)
+        if type(value) not in (tuple, list) or any(type(item) is not expected for item in value):
+            raise _err(name + " has incorrect member type")
+        object.__setattr__(owner, name, tuple(value))
+    expected_schema = schema_name + (".v4" if owner.jobs else ".v3")
+    if owner.schema != expected_schema or bool(owner.jobs) != bool(owner.value_edges):
+        raise _err("value ports require a training graph and its original format")
+
+
+@dataclass(frozen=True)
 class DataflowGraph:
-    schema: Literal["demiflow.dataflow_graph.v3"]
+    schema: Literal["demiflow.dataflow_graph.v3", "demiflow.dataflow_graph.v4"]
     action_id: str
     dag_id: str
     nodes: tuple[GraphNode, ...]
@@ -508,9 +564,11 @@ class DataflowGraph:
     terminals: tuple[str, ...]
     sources: tuple[str, ...]
 
+    jobs: tuple[FitJobNode, ...] = ()
+    value_edges: tuple[ValueEdge, ...] = ()
+
     def __post_init__(self):
-        if self.schema != "demiflow.dataflow_graph.v3":
-            raise _err("DataflowGraph.schema must be demiflow.dataflow_graph.v3")
+        _value_ports(self, FitJobNode, "demiflow.dataflow_graph")
         _ident(self.action_id, "DataflowGraph.action_id")
         _sha256(self.dag_id, "DataflowGraph.dag_id")
         object.__setattr__(self, "nodes", _tuple(self.nodes, "DataflowGraph.nodes", lambda v, l: _is_graph_node(v, l)))
@@ -813,7 +871,7 @@ class FiniteScope:
 
 @dataclass(frozen=True)
 class PhysicalDataflow:
-    schema: Literal["demiflow.physical_dataflow.v3"]
+    schema: Literal["demiflow.physical_dataflow.v3", "demiflow.physical_dataflow.v4"]
     dag_id: str
     plan_id: str
     plan_revision: int
@@ -829,9 +887,11 @@ class PhysicalDataflow:
     limitations: tuple[str, ...]
     constants_ref: ArtifactRef
 
+    jobs: tuple[FitJobStage, ...] = ()
+    value_edges: tuple[ValueEdge, ...] = ()
+
     def __post_init__(self):
-        if self.schema != "demiflow.physical_dataflow.v3":
-            raise _err("PhysicalDataflow.schema must be demiflow.physical_dataflow.v3")
+        _value_ports(self, FitJobStage, "demiflow.physical_dataflow")
         _sha256(self.dag_id, "PhysicalDataflow.dag_id")
         _sha256(self.plan_id, "PhysicalDataflow.plan_id")
         _int(self.plan_revision, "PhysicalDataflow.plan_revision")
@@ -941,7 +1001,7 @@ class WorkerLease:
 
 @dataclass(frozen=True)
 class WorkerAssignment:
-    schema: Literal["demiflow.dataflow_assignment.v3"]
+    schema: Literal["demiflow.dataflow_assignment.v3", "demiflow.dataflow_assignment.v4"]
     run_id: str
     action_id: str
     attempt: int
@@ -958,9 +1018,14 @@ class WorkerAssignment:
     bounds: Bounds
     native_limits: Mapping[str, Json] | None = None
 
+    model_bindings: Mapping[str, Json] | None = None
+
     def __post_init__(self):
-        if self.schema != "demiflow.dataflow_assignment.v3":
-            raise _err("WorkerAssignment.schema must be demiflow.dataflow_assignment.v3")
+        if self.model_bindings is not None:
+            object.__setattr__(self, "model_bindings", _json_map(self.model_bindings, "WorkerAssignment.model_bindings"))
+        version = "v4" if self.model_bindings is not None else "v3"
+        if self.schema != "demiflow.dataflow_assignment." + version:
+            raise _err("assignment model bindings differ from its schema")
         _ident(self.run_id, "WorkerAssignment.run_id")
         _ident(self.action_id, "WorkerAssignment.action_id")
         _int(self.attempt, "WorkerAssignment.attempt")
@@ -1048,7 +1113,11 @@ class RecoveryImage:
     confirmed_sinks: Mapping[str, ArtifactRef]
     source_vector: tuple[SourceCursor, ...]
 
+    model_bindings: Mapping[str, Json] | None = None
+
     def __post_init__(self):
+        if self.model_bindings is not None:
+            object.__setattr__(self, "model_bindings", _json_map(self.model_bindings, "RecoveryImage.model_bindings"))
         _sha256(self.commit_id, "RecoveryImage.commit_id")
         if not isinstance(self.cut, CutRequest):
             raise _err("RecoveryImage.cut must be a CutRequest")
@@ -1452,6 +1521,8 @@ class DriverServices:
     bounds: Bounds
     hosts: tuple[HostDescriptor, ...]
     clock_ms: Callable[[], int]
+    job_resources: Callable[[str], ResourceManager] | None = None
+    job_gpu: int = 0
 
     def __post_init__(self):
         if not isinstance(self.policy, RuntimePolicy):

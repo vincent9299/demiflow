@@ -268,6 +268,50 @@ class CheckedExecution:
             contract['max_input_bytes'] = self.limits['max_batch_bytes']
         return replace(spec, runtime_contract=contract)
 
+    def _checked_fit(self, fit, identity, depth):
+        """Check the actual recipe and recursively bind its named input plans."""
+        if depth > 128 or identity not in self.nodes or self.nodes[identity]['kind'] != 'fit':
+            raise RuntimeContractError('Invalid native training dependency')
+        if identity in self.checked_fits:
+            original, checked = self.checked_fits[identity]
+            if original is not fit:
+                raise RuntimeContractError('Distinct fits share a checked training declaration')
+            return checked
+        from ..data.training import ModelSelection, training_json
+        expected = self.nodes[identity]['normalized_parameters']
+        def callable_ref(target):
+            module = target.__module__
+            if Path(inspect.getfile(target)).resolve() != self.source_root / (module.replace('.', '/') + '.py'):
+                raise RuntimeContractError('Training program is not from the sealed source closure')
+            return {'callable': module + ':' + target.__qualname__}
+        recipe = fit.recipe
+        actual = {**vars(recipe), 'trainer': callable_ref(recipe.trainer), 'predictor': {
+            **vars(recipe.predictor), 'factory': callable_ref(recipe.predictor.factory)}}
+        _equal(training_json(actual), expected['recipe'], identity + '.recipe')
+        _equal(fit.retrain_id, expected['retrain_id'], identity + '.retrain_id')
+        parent = fit.parent
+        if isinstance(parent, ModelSelection):
+            selected = expected['resume_from']
+            if not isinstance(selected, dict) or 'fit_node' not in selected:
+                raise RuntimeContractError('Training parent differs from the checked model selection')
+            _equal(list(parent.steps), selected['steps'], identity + '.parent_steps')
+            parent = replace(parent, declaration=self._checked_fit(parent.declaration, selected['fit_node'], depth+1))
+        else:
+            _equal(training_json(parent), expected['resume_from'], identity + '.resume_from')
+        parents = self.parents[identity]
+        roles = ['train', *sorted(recipe.monitor_schemas)]
+        _equal([v[0] for v in fit.inputs], roles, identity + '.roles')
+        if len(parents) != len(roles):
+            raise RuntimeContractError('Training input count differs from its checked declaration')
+        inputs = tuple((role, *self.plan(source, plan, node, depth+1))
+                       for (role, source, plan), node in zip(fit.inputs, parents))
+        checked = replace(fit, inputs=inputs, parent=parent)
+        observation = self._match(identity)
+        if observation is not None:
+            self.operation_bindings[id(checked)] = observation
+        self.checked_fits[identity] = (fit, checked)
+        return checked
+
     def _operation(self, op, node):
         identity = node['id']
         facts = operation_facts(op)
@@ -342,7 +386,12 @@ class CheckedExecution:
         for op in reversed(plan.operations):
             node = self.nodes[identity]
             parents = self.parents[identity]
-            if type(op) is ops.StreamPrependOp:
+            if type(op) is ops.PredictOp:
+                selection = node['normalized_parameters']['self']
+                if len(parents) != 1:
+                    raise RuntimeContractError('Prediction requires one checked holdout')
+                op = replace(op, fit=self._checked_fit(op.fit, selection['fit_node'], depth+1))
+            elif type(op) is ops.StreamPrependOp:
                 if len(parents) != 2:
                     raise RuntimeContractError('Prepend requires main and finite prefix ports')
                 other: PlanView = op.source_dataset
@@ -578,6 +627,7 @@ class CheckedExecution:
         identity = self.actions[self.position]
         self.matching_action = identity
         self.occurrences = {}
+        self.checked_fits = {}
         self.operation_bindings = {}
         self.source_bindings = {}
         self.actor_bindings, self.actor_states = {}, {}

@@ -50,7 +50,7 @@ def owner(store, ref):
     contribution = NS(participant_id='worker', sinks={'write_lance':ref}, final=False)
     value.e = NS(_restore_image=NS(contributions=(contribution,)),
                  _participant_ids=lambda:('worker',), _kernels={}, _readers={})
-    value._terminal_spec = NS(kind='write_lance')
+    value._terminal_spec = make('KernelSpec', kind='write_lance', configuration={})
     value._terminal_columns = value._terminal_schema_ref = None
     value._restored_terminal = False
     value._condition = threading.Condition()

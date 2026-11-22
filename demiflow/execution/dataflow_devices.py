@@ -15,7 +15,10 @@ from .contracts.dataflow_errors import DataflowError
 
 
 def device_configuration(provider):
-    path = os.environ.get('DEMIFLOW_DEVICE_INVENTORY')
+    from .dataflow_capacity import original_device_inventory
+    path = original_device_inventory()
+    if path is None:
+        path = os.environ.get('DEMIFLOW_DEVICE_INVENTORY')
     if not path:
         return None, None
     from ..resources.capacity import inherited_envelope

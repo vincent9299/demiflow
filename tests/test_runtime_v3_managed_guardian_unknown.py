@@ -20,7 +20,7 @@ def test_cleanup_helper_unknown_keeps_original_fd_and_charge_until_observation_r
         'command': list(fixture['service'].command), 'shutdown_timeout_s': .5}
     script = '''import json,sys
 from pathlib import Path
-from demiflow.execution import dataflow_managed_http_child as child
+from demiflow.resources import process_group as child
 from demiflow.resources import process_observation as observation
 original=observation._read
 def failed_proc_read(path,*args,**kwargs):
@@ -75,7 +75,7 @@ def test_worker_owner_and_outer_unit_do_not_kill_unknown_guardian(tmp_path, monk
     ready, failed = tmp_path / 'owner-ready.json', tmp_path / 'owner-close.json'
     guardian_script = '''import json,sys
 from pathlib import Path
-from demiflow.execution import dataflow_managed_http_child as child
+from demiflow.resources import process_group as child
 from demiflow.resources import process_observation as observation
 original=observation._read
 def failed_read(path,*args,**kwargs):

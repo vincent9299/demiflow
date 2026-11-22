@@ -16,6 +16,7 @@
 模型节点的流式 HTTP、连接池、超时与恢复契约见 [map_prompt_async HTTP 说明](docs/prompt_http.md)。
 模型需要在当前行内与算子多轮交互时使用 [`agentmap_async` 算子环境](docs/operator_environment.md)，复用原生算子契约与同一节点的日志、预算及生命周期。
 图片/文本向量使用原生 [`Dataset.map_embeddings`](docs/embeddings.md)，复用流式批处理、请求准入、服务生命周期和 SQLite HTTP 日志。
+训练、按步数选取权重及在留出集上预测可连入同一 Dataset action，接口和原 run 恢复条件见 [Dataset 训练与评测](docs/dataset-training.md)。
 逐行向量检索使用 [`Dataset.search_vectors`](docs/vector_search.md)：每行输入一个查询向量，Lance 原生检索后将候选列表写回该行，可直接连接编码与下游任务节点。
 
 `demiflow workbench console` 提供新建项目、原地注册与移除登记；原 pipeline 目录就是项目。平台按实际入口、配置和调用关系检查代码，目录名称不决定职责。注册后可只读识别受支持的公开项目声明，查看原入口、配置、数据引用及覆盖缺口；登记、识别和静态检查各自报告结果。详见 [工作区指南](docs/forge-workspace.md)、[原项目识别](docs/forge-project-discovery.md) 和 [当前推进记录](docs/forge-roadmap-20261101.md)。

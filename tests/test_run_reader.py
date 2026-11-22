@@ -28,6 +28,31 @@ def _row(target, sql, *parameters):
         db.close()
 
 
+@pytest.mark.parametrize('extra', [0, 1])
+def test_training_provenance_combined_byte_limit(tmp_path, extra):
+    from demiflow.execution.recovery_contract import MAX_DOCUMENT_BYTES, document
+
+    table = dict(attempt=1, action_id='scores', occurrence='predict', provenance_id='owner',
+                 instance='model', manifest_digest='manifest')
+    provenance = {'uri': '图'}
+    expected = dict(table=table, provenance=provenance)
+    provenance['uri'] += 'x' * (MAX_DOCUMENT_BYTES - len(document(expected)) + extra)
+    owner = dict(instance='model', manifest='manifest', provenance=provenance)
+    with sqlite3.connect(tmp_path / 'run.sqlite') as db:
+        db.execute('CREATE TABLE runtime_sources (action_id TEXT PRIMARY KEY, document TEXT)')
+        db.executemany('INSERT INTO runtime_sources VALUES (?, ?)', [
+            (run_reader.fit_table_prefix(1, 'scores') + 'predict', document(table).decode()),
+            ('owner', document(owner).decode()),
+        ])
+    with read_run(tmp_path) as reader:
+        if extra:
+            with pytest.raises(RunReadError) as refused:
+                reader.training_provenance(1, 'scores', 'predict')
+            assert refused.value.code == 'resource_limit'
+        else:
+            assert reader.training_provenance(1, 'scores', 'predict') == expected
+
+
 def test_every_read_leaves_the_journal_byte_identical(tmp_path):
     target, _ = run_fixture(tmp_path)
     before = _digests(target)

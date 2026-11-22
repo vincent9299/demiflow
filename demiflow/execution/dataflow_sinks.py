@@ -382,6 +382,205 @@ def ack_source_claims(image: RecoveryImage, *, action: RunAction) -> None:
     if fact["intent"]["position"] != position.to_dict():
         raise DataflowError("SOURCE_CHANGED", "Confirmed source frontier differs from the committed position")
 
+def publication_blocks(manifest, *, store, bounds, batch_rows, publication_workspace,
+                       publication_metadata, declared_schema=None):
+    """Read an ACKed or pending row publication inside its admitted memory envelope."""
+    import pyarrow as pa
+    from .exchange.dataflow_bridge import _decode_payload
+    from .dataflow_record_frames import (decode_frame, decode_document, line_limit, frame_stream,
+        read_chunk_bytes, admit_workspace, metadata_bytes, read_document, raw_workspace,
+        _typed_shape, _json_shape)
+    from .contracts.dataflow import thaw_record_value
+    from .record_schema import RecordSchemas
+    from .arrow_payload import ArrowBatchCache, is_arrow_record
+    from ..data.runtime_contract import check_size
+    schemas = RecordSchemas(store=store, bounds=bounds)
+    arrow = ArrowBatchCache(store, bounds)
+    pending = stream = None
+    batch, size = [], 0
+    batch_resident = check_size(batch, bounds.max_resident_bytes)
+    schema_ref, schema = None, None
+    control_bytes = metadata_bytes(manifest) if publication_workspace else 0
+    index_bytes = held_record_bytes = schema_bytes = last_output_bytes = 0
+
+    def cached_bytes():
+        if arrow.batch is None:
+            return 0
+        return arrow.ref.size_bytes + arrow.batch.get_total_buffer_size() + metadata_bytes(arrow.header)
+
+    def held():
+        return (control_bytes + index_bytes + batch_resident + held_record_bytes
+                + cached_bytes() + schema_bytes + last_output_bytes)
+
+    def call(function, *args, _frame_retained=0, **kwargs):
+        retained = held() if publication_workspace else size
+        return function(*args, retained=retained + _frame_retained, **kwargs)
+
+    def index_call(function, *args, _frame_retained=0, **kwargs):
+        return call(function, *args, _frame_retained=_frame_retained +
+                    (stream.buffered_bytes if stream is not None else 0), **kwargs)
+
+    def retain_index(value):
+        nonlocal index_bytes
+        index_bytes = value
+
+    def table():
+        from .batch_conversion import admit_batch_conversion, native_arrow_table, native_writer_workspace
+        writer_window = []
+        reserved = (held() - batch_resident + stream.buffered_bytes + (0 if publication_metadata else 65536)
+                    if publication_workspace else 0)
+        admit_batch_conversion(batch, 'pyarrow', schema=schema, bounds=bounds,
+            reserved_bytes=reserved, resident_workspace=bool(publication_workspace),
+            writer_copies=2 if publication_workspace else 0,
+            writer_metadata=publication_metadata,
+            observe_writer_workspace=writer_window.append if publication_metadata else None)
+        result = native_arrow_table(batch, schema)
+        if publication_workspace:
+            if size > bounds.max_batch_bytes or result.nbytes > bounds.max_batch_bytes:
+                raise DataflowError('BUDGET_EXCEEDED', 'native sink payload exceeds max_batch_bytes')
+            overhead = writer_window[0] if publication_metadata else 65536
+            if publication_metadata and native_writer_workspace(result.schema, bounds) > overhead:
+                raise DataflowError('BUDGET_EXCEEDED', 'native writer schema exceeds its constructor admission')
+            call(admit_workspace, 3 * result.get_total_buffer_size() + overhead,
+                 bounds, _frame_retained=stream.buffered_bytes)
+        elif size + result.nbytes > bounds.max_batch_bytes:
+            raise DataflowError('BUDGET_EXCEEDED', 'native sink conversion coexistence exceeds max_batch_bytes')
+        return result
+
+    def arrow_table(value):
+        if publication_workspace:
+            # The cache already owns the retained parent. Writer copies
+            # and the caller's previous yielded batch share this grant.
+            from .batch_conversion import native_writer_workspace
+            overhead = native_writer_workspace(value.schema, bounds) if publication_metadata else 65536
+            if publication_metadata:
+                overhead += sum(64*len(chunk.buffers()) for column in value.columns for chunk in column.chunks)
+            call(admit_workspace, 2 * value.get_total_buffer_size() + overhead,
+                 bounds, _frame_retained=stream.buffered_bytes)
+            if value.nbytes > bounds.max_batch_bytes:
+                raise DataflowError('BUDGET_EXCEEDED', 'native Arrow payload exceeds max_batch_bytes')
+        return value
+
+    try:
+        for partition in manifest['partitions']:
+            ref = _artifact_from_json(partition['data_ref'])
+            from .dataflow_segments import block_chunks
+            stream = frame_stream(block_chunks(store, ref, bounds,
+                chunk_bytes=read_chunk_bytes(bounds),
+                frame_call=index_call if publication_workspace else None,
+                on_retained=retain_index if publication_workspace else None), bounds,
+                check_workspace=(lambda amount: call(admit_workspace, amount, bounds))
+                                if publication_workspace else None)
+            try:
+                while True:
+                    line = stream.readline(line_limit(bounds))
+                    if not line:
+                        break
+                    raw, item = call(decode_frame, line, bounds,
+                                     _frame_retained=stream.buffered_bytes)
+                    del line
+                    record = call(decode_document, raw, record_id=item['record_id'],
+                        sequence=item['sequence'], bounds=bounds,
+                        _frame_retained=stream.buffered_bytes)
+                    del raw, item
+                    held_record_bytes = (_typed_shape(record.inline, bounds.max_row_bytes)[1]
+                        if record.inline is not None else 0)
+                    held_record_bytes += (_json_shape(record.source_position, bounds.max_control_bytes)[1]
+                        + metadata_bytes((record.payload_ref, record.schema_ref, record.record_id)) + 256)
+                    if is_arrow_record(record):
+                        if batch:
+                            output = table()
+                            yield output
+                            last_output_bytes = output.get_total_buffer_size()
+                            del output
+                            batch, size = [], 0
+                            batch_resident = check_size(batch, bounds.max_resident_bytes)
+                        if pending is not None and (record.payload_ref != pending[0]
+                                or record.source_position['row_offset'] != pending[4]
+                                or pending[3] >= batch_rows
+                                or pending[5] + record.encoded_bytes > bounds.max_batch_bytes // 2):
+                            output = arrow_table(pa.Table.from_batches([pending[1].slice(pending[2], pending[3])]))
+                            yield output
+                            last_output_bytes = output.get_total_buffer_size()
+                            del output
+                            pending = None
+                        if record.payload_ref != arrow.ref:
+                            arrow.close()
+                            if publication_workspace:
+                                # IPC is uncompressed and at most the original
+                                # Arrow window; admit raw/header/object peaks
+                                # before the cache reads or opens the batch.
+                                call(admit_workspace, 12 * record.payload_ref.size_bytes + 16384,
+                                     bounds, _frame_retained=stream.buffered_bytes)
+                        native_batch, index = arrow.locate(record)
+                        if pending is None:
+                            pending = [record.payload_ref, native_batch, index, 0, record.source_position['row_offset'], 0]
+                        pending[3] += 1
+                        pending[4] += 1
+                        pending[5] += record.encoded_bytes
+                        del native_batch, index, record
+                        held_record_bytes = 0
+                        continue
+                    if pending is not None:
+                        output = arrow_table(pa.Table.from_batches([pending[1].slice(pending[2], pending[3])]))
+                        yield output
+                        last_output_bytes = output.get_total_buffer_size()
+                        del output
+                        pending = None
+                        arrow.close()
+                    # Flush the previous window before constructing the
+                    # next mutable row; its record already has an admitted
+                    # immutable owner included in held_record_bytes.
+                    if batch and (record.schema_ref != schema_ref or len(batch) >= batch_rows
+                            or size + record.encoded_bytes > bounds.max_batch_bytes // 2):
+                        output = table()
+                        yield output
+                        last_output_bytes = output.get_total_buffer_size()
+                        del output
+                        batch, size = [], 0
+                        batch_resident = check_size(batch, bounds.max_resident_bytes)
+                    if record.inline is None:
+                        raw = call(read_document, record.payload_ref, store, bounds,
+                                   _maximum=bounds.max_row_bytes,
+                                   _frame_retained=stream.buffered_bytes)
+                        call(admit_workspace, raw_workspace(raw), bounds,
+                             _frame_retained=stream.buffered_bytes)
+                        row = _decode_payload(raw, max_bytes=bounds.max_row_bytes)
+                        del raw
+                    else:
+                        call(admit_workspace, 2 * held_record_bytes, bounds,
+                             _frame_retained=stream.buffered_bytes)
+                        row = thaw_record_value(record.inline)
+                    schema_ref = record.schema_ref
+                    if schema_ref is not None and schemas._input[0] != schema_ref:
+                        call(admit_workspace, 8 * schema_ref.size_bytes + 512, bounds,
+                             _frame_retained=stream.buffered_bytes)
+                        schema_bytes = 8 * schema_ref.size_bytes + 512
+                    schema = schemas.read(schema_ref)
+                    declared = declared_schema
+                    if schema is None and declared is not None:
+                        extra = set(row) - set(declared.names)
+                        if extra:
+                            raise ValueError('Lance output has undeclared fields: ' + ', '.join(sorted(extra)))
+                        schema = declared
+                    row_bytes = check_size(row, bounds.max_resident_bytes)
+                    call(admit_workspace, row_bytes + 64, bounds,
+                         _frame_retained=stream.buffered_bytes)
+                    batch.append(row)
+                    size += record.encoded_bytes
+                    batch_resident = check_size(batch, bounds.max_resident_bytes)
+                    del record, row
+                    held_record_bytes = 0
+            finally:
+                stream.close()
+        if batch:
+            yield table()
+        if pending is not None:
+            yield arrow_table(pa.Table.from_batches([pending[1].slice(pending[2], pending[3])]))
+    finally:
+        arrow.close()
+
+
 class NativeTerminalSink(_DataflowArtifactSink):
     """Bind a published result manifest and a native destination to one commit.
 
@@ -409,202 +608,6 @@ class NativeTerminalSink(_DataflowArtifactSink):
                       max_batch_bytes=self._bounds.max_batch_bytes, batch_rows=self._batch_rows)
         return payload_scope(self._action.context, None, owner_limits=limits)
 
-    def _blocks(self, manifest):
-        import pyarrow as pa
-        from .exchange.dataflow_bridge import _decode_payload
-        from .dataflow_record_frames import (decode_frame, decode_document, line_limit, frame_stream,
-            read_chunk_bytes, admit_workspace, metadata_bytes, read_document, raw_workspace,
-            _typed_shape, _json_shape)
-        from .contracts.dataflow import thaw_record_value
-        from .record_schema import RecordSchemas
-        from .arrow_payload import ArrowBatchCache, is_arrow_record
-        from ..data.runtime_contract import check_size
-        schemas = RecordSchemas(store=self._store, bounds=self._bounds)
-        arrow = ArrowBatchCache(self._store, self._bounds)
-        pending = stream = None
-        batch, size = [], 0
-        batch_resident = check_size(batch, self._bounds.max_resident_bytes)
-        schema_ref, schema = None, None
-        control_bytes = metadata_bytes(manifest) if self._publication_workspace else 0
-        index_bytes = held_record_bytes = schema_bytes = last_output_bytes = 0
-
-        def cached_bytes():
-            if arrow.batch is None:
-                return 0
-            return arrow.ref.size_bytes + arrow.batch.get_total_buffer_size() + metadata_bytes(arrow.header)
-
-        def held():
-            return (control_bytes + index_bytes + batch_resident + held_record_bytes
-                    + cached_bytes() + schema_bytes + last_output_bytes)
-
-        def call(function, *args, _frame_retained=0, **kwargs):
-            retained = held() if self._publication_workspace else size
-            return function(*args, retained=retained + _frame_retained, **kwargs)
-
-        def index_call(function, *args, _frame_retained=0, **kwargs):
-            return call(function, *args, _frame_retained=_frame_retained +
-                        (stream.buffered_bytes if stream is not None else 0), **kwargs)
-
-        def retain_index(value):
-            nonlocal index_bytes
-            index_bytes = value
-
-        def table():
-            from .batch_conversion import admit_batch_conversion, native_arrow_table, native_writer_workspace
-            writer_window = []
-            reserved = (held() - batch_resident + stream.buffered_bytes + (0 if self._publication_metadata else 65536)
-                        if self._publication_workspace else 0)
-            admit_batch_conversion(batch, 'pyarrow', schema=schema, bounds=self._bounds,
-                reserved_bytes=reserved, resident_workspace=bool(self._publication_workspace),
-                writer_copies=2 if self._publication_workspace else 0,
-                writer_metadata=self._publication_metadata,
-                observe_writer_workspace=writer_window.append if self._publication_metadata else None)
-            result = native_arrow_table(batch, schema)
-            if self._publication_workspace:
-                if size > self._bounds.max_batch_bytes or result.nbytes > self._bounds.max_batch_bytes:
-                    raise DataflowError('BUDGET_EXCEEDED', 'native sink payload exceeds max_batch_bytes')
-                overhead = writer_window[0] if self._publication_metadata else 65536
-                if self._publication_metadata and native_writer_workspace(result.schema, self._bounds) > overhead:
-                    raise DataflowError('BUDGET_EXCEEDED', 'native writer schema exceeds its constructor admission')
-                call(admit_workspace, 3 * result.get_total_buffer_size() + overhead,
-                     self._bounds, _frame_retained=stream.buffered_bytes)
-            elif size + result.nbytes > self._bounds.max_batch_bytes:
-                raise DataflowError('BUDGET_EXCEEDED', 'native sink conversion coexistence exceeds max_batch_bytes')
-            return result
-
-        def arrow_table(value):
-            if self._publication_workspace:
-                # The cache already owns the retained parent. Writer copies
-                # and the caller's previous yielded batch share this grant.
-                from .batch_conversion import native_writer_workspace
-                overhead = native_writer_workspace(value.schema, self._bounds) if self._publication_metadata else 65536
-                if self._publication_metadata:
-                    overhead += sum(64*len(chunk.buffers()) for column in value.columns for chunk in column.chunks)
-                call(admit_workspace, 2 * value.get_total_buffer_size() + overhead,
-                     self._bounds, _frame_retained=stream.buffered_bytes)
-                if value.nbytes > self._bounds.max_batch_bytes:
-                    raise DataflowError('BUDGET_EXCEEDED', 'native Arrow payload exceeds max_batch_bytes')
-            return value
-
-        try:
-            for partition in manifest['partitions']:
-                ref = _artifact_from_json(partition['data_ref'])
-                from .dataflow_segments import block_chunks
-                stream = frame_stream(block_chunks(self._store, ref, self._bounds,
-                    chunk_bytes=read_chunk_bytes(self._bounds),
-                    frame_call=index_call if self._publication_workspace else None,
-                    on_retained=retain_index if self._publication_workspace else None), self._bounds,
-                    check_workspace=(lambda amount: call(admit_workspace, amount, self._bounds))
-                                    if self._publication_workspace else None)
-                try:
-                    while True:
-                        line = stream.readline(line_limit(self._bounds))
-                        if not line:
-                            break
-                        raw, item = call(decode_frame, line, self._bounds,
-                                         _frame_retained=stream.buffered_bytes)
-                        del line
-                        record = call(decode_document, raw, record_id=item['record_id'],
-                            sequence=item['sequence'], bounds=self._bounds,
-                            _frame_retained=stream.buffered_bytes)
-                        del raw, item
-                        held_record_bytes = (_typed_shape(record.inline, self._bounds.max_row_bytes)[1]
-                            if record.inline is not None else 0)
-                        held_record_bytes += (_json_shape(record.source_position, self._bounds.max_control_bytes)[1]
-                            + metadata_bytes((record.payload_ref, record.schema_ref, record.record_id)) + 256)
-                        if is_arrow_record(record):
-                            if batch:
-                                output = table()
-                                yield output
-                                last_output_bytes = output.get_total_buffer_size()
-                                del output
-                                batch, size = [], 0
-                                batch_resident = check_size(batch, self._bounds.max_resident_bytes)
-                            if pending is not None and (record.payload_ref != pending[0]
-                                    or record.source_position['row_offset'] != pending[4]
-                                    or pending[3] >= self._batch_rows
-                                    or pending[5] + record.encoded_bytes > self._bounds.max_batch_bytes // 2):
-                                output = arrow_table(pa.Table.from_batches([pending[1].slice(pending[2], pending[3])]))
-                                yield output
-                                last_output_bytes = output.get_total_buffer_size()
-                                del output
-                                pending = None
-                            if record.payload_ref != arrow.ref:
-                                arrow.close()
-                                if self._publication_workspace:
-                                    # IPC is uncompressed and at most the original
-                                    # Arrow window; admit raw/header/object peaks
-                                    # before the cache reads or opens the batch.
-                                    call(admit_workspace, 12 * record.payload_ref.size_bytes + 16384,
-                                         self._bounds, _frame_retained=stream.buffered_bytes)
-                            native_batch, index = arrow.locate(record)
-                            if pending is None:
-                                pending = [record.payload_ref, native_batch, index, 0, record.source_position['row_offset'], 0]
-                            pending[3] += 1
-                            pending[4] += 1
-                            pending[5] += record.encoded_bytes
-                            del native_batch, index, record
-                            held_record_bytes = 0
-                            continue
-                        if pending is not None:
-                            output = arrow_table(pa.Table.from_batches([pending[1].slice(pending[2], pending[3])]))
-                            yield output
-                            last_output_bytes = output.get_total_buffer_size()
-                            del output
-                            pending = None
-                            arrow.close()
-                        # Flush the previous window before constructing the
-                        # next mutable row; its record already has an admitted
-                        # immutable owner included in held_record_bytes.
-                        if batch and (record.schema_ref != schema_ref or len(batch) >= self._batch_rows
-                                or size + record.encoded_bytes > self._bounds.max_batch_bytes // 2):
-                            output = table()
-                            yield output
-                            last_output_bytes = output.get_total_buffer_size()
-                            del output
-                            batch, size = [], 0
-                            batch_resident = check_size(batch, self._bounds.max_resident_bytes)
-                        if record.inline is None:
-                            raw = call(read_document, record.payload_ref, self._store, self._bounds,
-                                       _maximum=self._bounds.max_row_bytes,
-                                       _frame_retained=stream.buffered_bytes)
-                            call(admit_workspace, raw_workspace(raw), self._bounds,
-                                 _frame_retained=stream.buffered_bytes)
-                            row = _decode_payload(raw, max_bytes=self._bounds.max_row_bytes)
-                            del raw
-                        else:
-                            call(admit_workspace, 2 * held_record_bytes, self._bounds,
-                                 _frame_retained=stream.buffered_bytes)
-                            row = thaw_record_value(record.inline)
-                        schema_ref = record.schema_ref
-                        if schema_ref is not None and schemas._input[0] != schema_ref:
-                            call(admit_workspace, 8 * schema_ref.size_bytes + 512, self._bounds,
-                                 _frame_retained=stream.buffered_bytes)
-                            schema_bytes = 8 * schema_ref.size_bytes + 512
-                        schema = schemas.read(schema_ref)
-                        declared = getattr(getattr(self.native, 'spec', None), 'schema', None)
-                        if schema is None and declared is not None:
-                            extra = set(row) - set(declared.names)
-                            if extra:
-                                raise ValueError('Lance output has undeclared fields: ' + ', '.join(sorted(extra)))
-                            schema = declared
-                        row_bytes = check_size(row, self._bounds.max_resident_bytes)
-                        call(admit_workspace, row_bytes + 64, self._bounds,
-                             _frame_retained=stream.buffered_bytes)
-                        batch.append(row)
-                        size += record.encoded_bytes
-                        batch_resident = check_size(batch, self._bounds.max_resident_bytes)
-                        del record, row
-                        held_record_bytes = 0
-                finally:
-                    stream.close()
-            if batch:
-                yield table()
-            if pending is not None:
-                yield arrow_table(pa.Table.from_batches([pending[1].slice(pending[2], pending[3])]))
-        finally:
-            arrow.close()
-
     def prepare(self, manifest, context):
         result = super().prepare(manifest, context)
         # An intermediate cut commits the durable result prefix, while the
@@ -612,7 +615,11 @@ class NativeTerminalSink(_DataflowArtifactSink):
         with self._native_scope():
             if manifest.get('final', True) and self._admit_publication is not None:
                 self._admit_publication()
-            result['native'] = (self.native.prepare(self._blocks(manifest), context)
+            result['native'] = (self.native.prepare(publication_blocks(manifest, store=self._store,
+                                    bounds=self._bounds, batch_rows=self._batch_rows,
+                                    publication_workspace=self._publication_workspace,
+                                    publication_metadata=self._publication_metadata,
+                                    declared_schema=getattr(getattr(self.native, "spec", None), "schema", None)), context)
                                 if manifest.get('final', True) else None)
         return result
 

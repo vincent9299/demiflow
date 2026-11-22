@@ -72,6 +72,7 @@ def test_registry_and_runtime_disagree_only_in_these_known_ways():
     # These are the names a direct NativeOperation would use; the SDK reaches the
     # same features through typed operations instead (see the entries test).
     assert DIFFERENCES['registered_operators_not_admitted_by_runtime'] == {
+        'PredictOp',  # lowered to one model-bound MapBatchesOp per selected step
         'decode_document', 'deduplicate', 'encode_image', 'group_batches', 'lance_lookup',
         'pack_prompt_inputs', 'parse_wikitext', 'queue_ack', 'queue_produce', 'raw_fetch',
         'read_documents', 'read_local_object', 'register_documents', 'register_documents_batch',

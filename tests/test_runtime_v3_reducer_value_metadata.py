@@ -104,7 +104,7 @@ def test_bounded_sink_table_consistency_drift_and_mixed_values(tmp_path):
             from test_runtime_v3_small_terminal_metadata import owner
             def restored(ref):
                 runner = owner(store, ref)
-                runner._terminal_spec.kind = SINK_ID
+                runner._terminal_spec = make_kernel(configuration={'sink_id': SINK_ID})
                 runner.e._restore_image.contributions[0].sinks = {SINK_ID: ref}
                 return runner
             # Read the original, authenticated manifests through the real

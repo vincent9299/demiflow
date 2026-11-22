@@ -134,7 +134,7 @@ def _execute(root, run_id, run, attempt=None):
             batch_rows=limits['batch_rows'], threads=2, partitions=1,
             timeout_s=min(3600, limits['timeout_s']), admission_timeout_s=limits['admission_timeout_s'])
         # Use the unified bounded host default; the manifest still owns all resource ceilings.
-        with RunContext.attach(run, entry_identity=manifest.get('source_digest'),
+        with RunContext.attach(run, entry_identity=manifest.get('source_digest'), training_project_root=root,
                 limits=manifest['limits'], check_stop=check_stop), local_execution(
                 worker_mode=(manifest.get('native_execution') or {}).get('worker_mode', 'thread'), partitions=1,
                 batch_rows=limits['batch_rows'], memory_bytes=limits['memory_bytes'],
@@ -232,9 +232,9 @@ def _stop_group(pid, signum):
         pass
 
 
-def _drain_descendants(process, *, timeout_s=5):
+def _drain_descendants(process, *, timeout_s=5, retained_units=()):
     from demiflow.resources.process_observation import drain_owned
-    return drain_owned(process, timeout_s=timeout_s)
+    return drain_owned(process, timeout_s=timeout_s, retained_units=retained_units)
 
 
 class RunLog:
@@ -301,6 +301,7 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
     started = None
     accounting_valid = True
     children_drained = True
+    retained_units = ()
     final_status, final_details = None, {}
     peaks = dict(rss_bytes=0, scratch_bytes=0, output_bytes=0, evidence_bytes=0)
     terminate = [False]
@@ -337,6 +338,7 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
             output.get('allocation_root', output['uri']) for output in manifest['outputs'].values())))
         env = runs.worker_environment(target, limits, manifest.get('credential_names', []),
                                       native_execution=manifest.get('native_execution'),
+                                      training_deployment=manifest.get('training_deployment'),
                                       capacity_domain=manifest.get('capacity_domain'),
                                       executable_dirs=manifest.get('executable_dirs', []))
         env['DEMIFLOW_INSPECTION_PARENT'] = str(os.getpid())
@@ -433,7 +435,13 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
             process.wait()
         finally:
             log.close()
-        children_drained = _drain_descendants(process)
+        if process.returncode and not killed_reason and manifest.get('training_deployment'):
+            from demiflow.execution.host.control import retained_process_units
+            # If a group cannot be identified, never broaden the retry into
+            # unconditional SIGKILL against a potentially separate allocation.
+            retained_units = None
+            retained_units = retained_process_units(run, expected_attempt=attempt)
+        children_drained = _drain_descendants(process, retained_units=retained_units)
         if not children_drained:
             accounting_valid = False
             raise RuntimeError('Owned native descendants did not stop; final accounting remains unknown')
@@ -469,9 +477,9 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
                              recoverable=process is None, finished_at=time.time())
     finally:
         if process is not None:
-            if not children_drained:
+            if not children_drained and retained_units is not None:
                 try:
-                    children_drained = _drain_descendants(process)
+                    children_drained = _drain_descendants(process, retained_units=retained_units)
                 except (OSError, RuntimeError, subprocess.TimeoutExpired):
                     children_drained = False
             accounting_valid = accounting_valid and children_drained
@@ -499,7 +507,8 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
                         and snapshot['supervisor'] == supervisor_identity
                         and snapshot['unit_identity'] == value['state'].get('unit_identity'))
 
-                clean_stopped(run, confirm_stopped=stopped_snapshot, deadline=maintenance_deadline)
+                clean_stopped(run, confirm_stopped=stopped_snapshot, deadline=maintenance_deadline,
+                              preserve_jobs=final_status == 'interrupted')
                 remove_attempt_work(work, deadline=maintenance_deadline)
                 cleanup = 'complete'
         except Exception as exc:

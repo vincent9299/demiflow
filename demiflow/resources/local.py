@@ -40,6 +40,16 @@ class LocalResourceProvider:
         # a zombie with a matching birth identity is not a live host.
         self._spawned = {}
 
+    def device_authority(self):
+        if self._device_pool is None:
+            return None
+        return self._device_pool.authority()
+
+    def released_device_seconds(self, allocation_id, spec_hash, device_type):
+        if self._device_pool is None:
+            return None
+        return self._device_pool.released_device_seconds(allocation_id, spec_hash, device_type)
+
     def describe_and_normalize(self, binding, requirements, spec):
         if not sys.platform.startswith("linux"):
             raise ResourceError("UNSUPPORTED_CAPABILITY", "Local managed units require Linux")

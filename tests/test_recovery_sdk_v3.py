@@ -136,3 +136,29 @@ def test_sdk_created_nested_function_is_checked_before_and_after_pickle(tmp_path
     assert describe(decoded) == describe(live)
     decoded.__globals__['__package__'] = 'unrelated'
     assert describe(decoded)['source_hash'] == sha256(_source(decoded)).hexdigest()
+
+
+def test_only_audited_original_routing_functions_accept_the_earlier_sealed_digest():
+    from copy import deepcopy
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.seal.plan import _code_identity_from_value, _matches_original_program
+    from demiflow.planning import dataflow_graph_adapter as routing
+
+    recent = '0ab9e3db6f4dffe74c2f614ac887ce0a69749910b083db63eaa95c819652cbcf'
+    earlier = 'cee316a5adf1fb7542a57efd9471ae4a1c836ae6d107a570ac5fc81b179fce16'
+    for fn in (routing._identity, routing._tag, routing._unwrap):
+        spec = CallableSpec.create(fn)
+        current = _code_identity_from_value('callable', spec)
+        old = deepcopy(current)
+        target = old['operations'][0]['fields']['callable']['fields']['target']
+        assert target['source_hash'] == recent
+        target['source_hash'] = earlier
+        assert _matches_original_program('callable', spec, old)
+        assert not _matches_original_program('callable', CallableSpec.create(fn, fn_kwargs={'reader': 'changed'}), old)
+        clone = FunctionType(fn.__code__, fn.__globals__, fn.__name__)
+        assert not _matches_original_program('callable', CallableSpec.create(clone), old)
+        target['code'] = 'f' * 64
+        assert not _matches_original_program('callable', spec, old)
+    assert describe(routing.validate_graph_replay)['source_hash'] == sha256(_source(routing.validate_graph_replay)).hexdigest()
+    class_pin = describe(routing._ClassTarget)
+    assert class_pin['methods']['__call__'] == identity(code_record(routing._ClassTarget.__call__.__code__))

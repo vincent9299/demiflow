@@ -20,7 +20,7 @@ from .recovery_contract import identity
 # Current source SHA-256, v3 pre-move source SHA-256.
 _REVISIONS = {
     'demiflow.data.dataset': (
-        'dc1d00c71a1bef0c1b2db7d069298c3d2839c7094f69c7c1508a1dee5d6428f6',
+        'a6da1d250f3ed498f80219913fc662b1cc088d07d8332d255549dbfdf223e817',
         '1ba0e80f1ed0853948a97792dc65125fdaec17504bc3396b5f53ffb593da7e88'),
     'demiflow.data.sources': (
         '4c349450034860cbaaa81d7b88e39b5caeea6c9ea56849e031804007cd226e79',
@@ -28,10 +28,15 @@ _REVISIONS = {
     'demiflow.execution.local_kernel': (
         '474ffe83ef57fcf0dd18d84dc2e03bf4a52d382d83090ae54a85e8543d17de7b',
         'e67e3703f03ea14f8bcefb803bafc3251072e78bc17a5c1f2df60fad2ca2f83f'),
+    'demiflow.planning.dataflow_graph_adapter': (
+        '219b7b61382f2c0a5a71a160a762047b088f03107a0bd1f1096bf3b48e11c5d5',
+        '0ab9e3db6f4dffe74c2f614ac887ce0a69749910b083db63eaa95c819652cbcf'),
     'demiflow.data.result_cache': (
         '2ac2ab41bb6a1b4eda601b8c06f78e7c0bc74caf638d9c54afe6360190a4912b',
         'dc6858f90a4ea48fb5c950027e405084d9f820ba26b3159592b38a9f42d46788'),
 }
+_ROUTING_MODULE = 'demiflow.planning.dataflow_graph_adapter'
+_ROUTING_FUNCTIONS = frozenset(('_identity', '_tag', '_unwrap'))
 _RELATIONAL_METHODS = ('join', 'reduce_by_key', 'group_batches', 'exclude_keys', 'union')
 
 
@@ -160,6 +165,12 @@ def function_pin(fn, source, source_hash, code):
         return source_hash, code
     module = sys.modules.get(fn.__module__)
     root_name = fn.__qualname__.partition('.<locals>.')[0]
+    if fn.__module__ == _ROUTING_MODULE and root_name not in _ROUTING_FUNCTIONS:
+        # Only the three unchanged row-routing functions were sealed as programs.
+        return source_hash, code
+    if fn.__module__ == 'demiflow.data.dataset' and root_name == 'Dataset.fit':
+        # The additive v4 method never existed in the audited v3 file.
+        return source_hash, code
     if fn.__module__ == 'demiflow.data.result_cache' and root_name == '_state_policy':
         # Its runtime type test changed; the function itself keeps its new pin.
         return source_hash, code
@@ -167,6 +178,22 @@ def function_pin(fn, source, source_hash, code):
     if compiled is None or not _matches_definition(fn, module, compiled, root_name, code, source):
         return source_hash, code
     return revision[1], _method_pin(fn, code)
+
+
+
+def routing_source_revisions(fn):
+    """The same three routed row functions had a distinct file digest in f12f2e40.
+
+    New plans use the published b2613ba8 pin. An original older program may
+    use the earlier hash only for its canonical engine function and only after
+    the current file and live instructions authenticated in ``function_pin``.
+    """
+    if (type(fn) is not FunctionType or fn.__module__ != _ROUTING_MODULE or fn.__qualname__ not in _ROUTING_FUNCTIONS):
+        return None
+    module = sys.modules.get(_ROUTING_MODULE)
+    if module is None or fn is not vars(module).get(fn.__qualname__):
+        return None
+    return _REVISIONS[_ROUTING_MODULE][1], 'cee316a5adf1fb7542a57efd9471ae4a1c836ae6d107a570ac5fc81b179fce16'
 
 
 def class_method_pins(cls, methods):

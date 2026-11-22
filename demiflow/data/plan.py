@@ -332,6 +332,24 @@ class RandomizeBlockOrderOp(LogicalOp):
     seed: Optional[int] = None
 
 
+@dataclass(frozen=True, eq=False)
+class FitDeclaration:
+    """Construction references stay in the SDK until the action captures them."""
+    inputs: tuple
+    recipe: Any
+    executor: Any
+    retrain_id: str | None
+    parent: Any
+
+
+@dataclass(frozen=True, eq=False)
+class PredictOp(LogicalOp):
+    fit: FitDeclaration
+    steps: tuple[int, ...]
+    inputs: Mapping[str, str]
+    parameters: Mapping[str, Any]
+
+
 @dataclass(frozen=True)
 class LogicalPlan:
     operations: Tuple[LogicalOp, ...] = ()

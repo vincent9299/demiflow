@@ -680,7 +680,7 @@
       if(!graph.nodes.length)renderDiagnostics(graph.diagnostics,inspector);
       if(node){
         inspector.append($('p',node.api+' · '+node.source+':'+node.line,'wb-caption'));
-        const status=selection?.execution?.format==='v3'
+        const status=presentation.hasOccurrenceIds(selection?.execution?.format)
           ?graphModel?.nodes.find(card=>card.selection.key===selection.key)?.state||{label:'观测尚未载入'}
           :ForgeWorkbenchGraph.status(node,snapshot||run);
         inspector.append($('span',status.label,'wb-tag'));
@@ -1276,7 +1276,7 @@
       // Run details and live snapshots carry different diagnostics for the same
       // output. Its result digest identifies the complete fixed table reference.
       const outputKeys=run?.outputs.map(o=>[o.name,o.action_id,o.uri,o.status,o.retained_from_attempt,
-        o.result?.location_id,o.result_digest]);
+        o.result?.location_id,o.result_digest,o.training]);
       const fingerprint=json([comparison,run?.run_id,run?.attempt,run?.current_attempt,outputKeys,can('attach'),can('run_submit')]);
       if(fingerprint===outputFingerprint)return;outputFingerprint=fingerprint;
       results.replaceChildren($('h3',comparison?'两次运行对比':'本次输出'));
@@ -1291,6 +1291,17 @@
         if(output.retained_from_attempt!=null)box.append($('small','保留自尝试 '+output.retained_from_attempt));
         if(output.result){
           box.append($('p','固定版本 v'+output.result.ref.lance_version+' · '+output.result.ref.row_count+' 行'));
+          if(output.training?.models?.length){
+            const provenance=details('训练模型',box);
+            materialTable(provenance,['训练实例','模型步数','清单 SHA-256'],output.training.models.map(model=>{
+              let steps=model.selected_steps.join(', ');
+              if(model.selection_count>model.selected_steps.length){
+                steps+='（显示前 '+model.selected_steps.length+' 项，共 '+model.selection_count+' 项）';
+              }
+              return [model.instance,steps,model.manifest_digest];
+            }));
+            if(output.training.has_more)provenance.append($('p','此处显示前 '+output.training.models.length+' 个模型清单。','wb-caption'));
+          }
           const captured=Object.freeze({run_id:run.run_id,attempt:run.attempt,output:output.name,alias:'',expected_result:output.result_digest});
           const snapshotRun=run,snapshotOutput=output;
           button('查看固定结果',()=>previewOutput(snapshotRun,snapshotOutput,box),box);
@@ -1325,20 +1336,20 @@
         const node=data().node;if(!node){runDetailBody.replaceChildren($('p','选择图中的算子，查看本次执行情况。','wb-caption'));return;}
         const selection=data().selection,execution=selection?.execution??null;
         const value=await request('run-observations',{...target,node_id:node,limit:32,
-          ...(execution?.format==='v3'?{action_id:execution.actionId}:{}),...(observationCursor?{cursor:observationCursor}:{})});
+          ...(presentation.hasOccurrenceIds(execution?.format)?{action_id:execution.actionId}:{}),...(observationCursor?{cursor:observationCursor}:{})});
         if(!current(ticket)||sequence!==nodeSequence||detailKind!==kind)return;
         if(identityKey(data().selection?.execution??null)!==identityKey(execution))return;
         runDetailBody.replaceChildren($('p','节点关联观测 · '+target.run_id+' / 尝试 '+target.attempt+' · 观测 '+(value.observation_revision||'不可用').slice(0,10)+' · 不是完整节点日志','wb-caption'));
         if(value.run_id!==target.run_id||value.attempt!==target.attempt)throw new Error('节点观测身份不一致');
         if(value.availability==='unsupported'){runDetailBody.append($('p','历史运行未记录此类观测。'));return;}
-        if(execution?.format==='v3'&&(value.action_id!==execution.actionId||value.dag_id!==execution.dagId||value.plan_id!==execution.planId||value.plan_revision!==execution.planRevision)){
-          runDetailBody.append($('p','观测页缺少与当前 v3 计划一致的作用域凭据；不提升为当前节点指标。','wb-caption'));return;
+        if(presentation.hasOccurrenceIds(execution?.format)&&(value.action_id!==execution.actionId||value.dag_id!==execution.dagId||value.plan_id!==execution.planId||value.plan_revision!==execution.planRevision)){
+          runDetailBody.append($('p','观测页缺少与当前封存计划一致的作用域凭据。','wb-caption'));return;
         }
-        const rows=execution?.format==='v3'?value.observations.filter(row=>
+        const rows=presentation.hasOccurrenceIds(execution?.format)?value.observations.filter(row=>
           presentation.matchesExecutionObservation(row,execution,selection.occurrenceId)&&row.node_id===selection.reportNodeId):value.observations;
-        if(execution?.format==='v3'&&rows.length!==value.observations.length)
+        if(presentation.hasOccurrenceIds(execution?.format)&&rows.length!==value.observations.length)
           runDetailBody.append($('p','部分观测缺少与当前执行实例一致的完整凭据，未显示为节点指标。','wb-caption'));
-        if(!rows.length)runDetailBody.append($('p',execution?.format==='v3'?'本页没有与当前执行实例一致的完整观测凭据。':'这个节点没有单独观测；不会从整次运行状态推断节点成功。'));
+        if(!rows.length)runDetailBody.append($('p',presentation.hasOccurrenceIds(execution?.format)?'本页没有与当前执行实例一致的完整观测凭据。':'这个节点没有单独观测；不会从整次运行状态推断节点成功。'));
         const paint=rows=>{for(const row of rows){const line=$('div',undefined,'wb-observation');line.append($('strong','动作 '+row.action_id+' · 第 '+(row.occurrence+1)+' 次 · '+(labels[row.state]||row.state)),
           $('p','输入 '+safe(row.rows_input)+' 行 · 输出 '+safe(row.rows_output)+' 行 · 调用 '+safe(row.calls)+' · 错误 '+safe(row.errors)),
           $('p','累计处理时间 '+safe(row.elapsed_s)+' 秒 · '+(row.timing_scope==='group'?'融合组共享范围':'节点观测范围'),'wb-caption'));

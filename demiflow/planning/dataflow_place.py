@@ -336,7 +336,11 @@ def plan_exchanges(
         port = _input_port(consumer_node, edge.input_port)
         if port is None:
             raise _error("INVALID_CONTRACT", "edge targets an unknown input port", edge_id=edge.edge_id)
-        if port.requirement == "finite_complete":
+        # The model phase consumes ordinary batches incrementally from a sealed
+        # exchange. The transport boundary does not change its kernel's finish().
+        model_boundary = (consumer_node.kernel.configuration.get("predict_step") is not None
+                          or nodes[edge.producer].kernel.configuration.get("predict_step") is not None)
+        if port.requirement == "finite_complete" or model_boundary:
             mode = "finite_sealed"
         elif policy.durability == "durable":
             mode = "durable_incremental"
@@ -599,7 +603,7 @@ def _check_bounds(bounds: Bounds) -> None:
 
 
 def validate_physical_dataflow(graph: DataflowGraph, physical: PhysicalDataflow) -> None:
-    if physical.schema != "demiflow.physical_dataflow.v3":
+    if physical.schema != ("demiflow.physical_dataflow.v4" if graph.jobs else "demiflow.physical_dataflow.v3"):
         raise _error("INVALID_CONTRACT", "unexpected physical schema")
     if physical.dag_id != graph.dag_id:
         raise _error("INVALID_CONTRACT", "physical dag_id does not match the graph")
@@ -626,9 +630,15 @@ def validate_physical_dataflow(graph: DataflowGraph, physical: PhysicalDataflow)
             if occ in seen_occ:
                 raise _error("INVALID_CONTRACT", "occurrence has two stage owners", occurrence_id=occ)
             seen_occ[occ] = stage.stage_id
-    if set(seen_occ) != set(nodes):
+    from .dataflow_training import physical_values, reference_only_sources
+    refs = reference_only_sources(graph)
+    if set(seen_occ) != set(nodes) - refs:
         raise _error("INVALID_CONTRACT", "stages do not cover every occurrence exactly once")
 
+    if (physical.jobs, physical.value_edges) != physical_values(graph, physical.stages):
+        raise _error("INVALID_CONTRACT", "physical job stages or value bindings differ from their logical ports")
+    if any(split.source_id in refs for split in physical.splits):
+        raise _error("INVALID_CONTRACT", "version-only input has executable splits")
     owner = _stage_of_occurrence(physical.stages)
     edge_ids = {edge.edge_id for edge in graph.edges}
     seen_edges: set[str] = set()
@@ -846,6 +856,9 @@ def compile_physical_dataflow(
         if split.source_id not in snapshot_ids:
             raise _error("SOURCE_CHANGED", "split references an unknown source", split_id=split.split_id)
 
+    from .dataflow_training import physical_values, reference_only_sources
+    refs = reference_only_sources(graph)
+    splits = tuple(split for split in splits if split.source_id not in refs)
     stages = partition_stages(graph, policy=policy, bounds=bounds)
     stages = _refine_source_partitions(graph, stages, splits, policy, bounds)
     # Optional co-location must fit the same caller ceiling as the original
@@ -859,19 +872,24 @@ def compile_physical_dataflow(
                 host.logical_resources.get('cpu', 0) * 1000), cpu_ceiling)}) for host in hosts)
     from .dataflow_shared import colocate_shared_actors
     stages = colocate_shared_actors(graph, stages, bounds=bounds, hosts=hosts)
-    from .dataflow_single_worker import fuse_single_worker_dag
-    stages = fuse_single_worker_dag(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
-    from .dataflow_fusion import fuse_single_worker_pipeline
-    stages = fuse_single_worker_pipeline(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
-    from .dataflow_thread_fusion import fuse_thread_suffix
-    stages = fuse_thread_suffix(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
-    from .dataflow_relational_regions import fuse_relational_regions
-    stages = fuse_relational_regions(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
-    from .dataflow_finite_fusion import fuse_finite_suffix
-    stages = fuse_finite_suffix(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
+    # Whole-row-region shortcuts assume a single action sink. A v4 job or
+    # materialization boundary may not be swallowed by one such region.
+    if not graph.jobs:
+        from .dataflow_single_worker import fuse_single_worker_dag
+        stages = fuse_single_worker_dag(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
+        from .dataflow_fusion import fuse_single_worker_pipeline
+        stages = fuse_single_worker_pipeline(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
+        from .dataflow_thread_fusion import fuse_thread_suffix
+        stages = fuse_thread_suffix(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
+        from .dataflow_relational_regions import fuse_relational_regions
+        stages = fuse_relational_regions(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
+        from .dataflow_finite_fusion import fuse_finite_suffix
+        stages = fuse_finite_suffix(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
     stages = select_fusion_groups(graph, stages, policy=policy)
     from .dataflow_graph_adapter import specialize_graph_stages, specialize_graph_exchanges
     stages = specialize_graph_stages(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
+    stages = tuple(stage for stage in stages if not refs.intersection(stage.occurrences))
+    jobs, values = physical_values(graph, stages)
     exchanges = plan_exchanges(graph, stages, policy=policy, bounds=bounds)
     exchanges = specialize_graph_exchanges(graph, stages, exchanges, bounds=bounds)
     exchanges = _share_exchange_storage(exchanges, bounds)
@@ -910,7 +928,8 @@ def compile_physical_dataflow(
         for exchange in exchanges if exchange.mode == "finite_sealed"
     )
     physical = PhysicalDataflow(
-        schema="demiflow.physical_dataflow.v3",
+        schema="demiflow.physical_dataflow.v4" if jobs else "demiflow.physical_dataflow.v3",
+        jobs=jobs, value_edges=values,
         dag_id=graph.dag_id,
         plan_id="0" * 64,
         plan_revision=0,
@@ -928,4 +947,7 @@ def compile_physical_dataflow(
     )
     physical = replace(physical, plan_id=compute_physical_digest(physical))
     validate_physical_dataflow(graph, physical)
+    if graph.jobs:
+        from .dataflow_training import validate_training_inputs
+        validate_training_inputs(graph, physical, bounds=bounds)
     return physical

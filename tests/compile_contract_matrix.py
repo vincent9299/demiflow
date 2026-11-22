@@ -47,7 +47,7 @@ def matrix():
         return [value.name, value.requirement, value.ordering]
 
     def sealable(node_kind, kind):
-        return dataflow_seal._builtin_node(SimpleNamespace(kind=node_kind, kernel=SimpleNamespace(kind=kind)))
+        return dataflow_seal._builtin_node(SimpleNamespace(kind=node_kind, kernel=SimpleNamespace(kind=kind, configuration={})))
 
     def definition(table, kind):
         value = table.get(kind)

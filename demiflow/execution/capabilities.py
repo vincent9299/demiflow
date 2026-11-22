@@ -54,7 +54,7 @@ def check_call(fact, *, backend="local", driver="pull"):
         'map': 'MapOp', 'async_map': 'AsyncMapOp', 'batch_map': 'BatchMapOp',
         'flat_map': 'FlatMapOp', 'filter': 'FilterOp', 'project': 'SelectColumnsOp',
         'drop': 'DropColumnsOp', 'rename': 'RenameColumnsOp', 'limit': 'LimitOp',
-        'map_batches': 'MapBatchesOp', 'add_column': 'AddColumnOp',
+        'map_batches': 'MapBatchesOp', 'predict': 'PredictOp', 'add_column': 'AddColumnOp',
         'sample': 'RandomSampleOp', 'model_map': 'OperatorLLMMapOp',
         'sort': 'SortOp', 'repartition': 'RepartitionOp',
         'shuffle': 'RandomShuffleOp', 'block_order': 'RandomizeBlockOrderOp',
