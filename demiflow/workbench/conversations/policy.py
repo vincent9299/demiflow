@@ -244,6 +244,7 @@ class Deployment:
         available = any(p['available'] for p in providers)
         return dict(format='demiflow_development_chat_v1', enabled=permitted, start=available,
             conversation_stats=True, multiple_conversations=True, history_replay_api=True, events_include_session=True,
+            prewarm_api=True,
             notebook_cells=self.mode == 'restricted', notebook_cli=self.mode == 'restricted',
             mode=self.mode, filesystem_enforcement=execution['filesystem_enforcement'], reason=execution['reason'],
             providers=providers,

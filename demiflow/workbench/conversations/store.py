@@ -178,8 +178,10 @@ class Store:
         db.execute("""INSERT INTO project_conversations(workspace,session) VALUES(?,?)
             ON CONFLICT(workspace) DO UPDATE SET session=excluded.session""", (workspace, sid))
 
-    def ensure_project(self, workspace, identity, provider, request_id, policy_hash):
+    def ensure_project(self, workspace, identity, provider, request_id, policy_hash, *, session_id=None):
         identifier(request_id)
+        if session_id is not None:
+            identifier(session_id)
         with self.connect(write=True) as db:
             current = self._primary(db, workspace, identity, policy_hash)
             if current:
@@ -190,15 +192,20 @@ class Store:
             else:
                 if db.execute('SELECT count(*) FROM sessions').fetchone()[0] >= self.limits.sessions:
                     reject('Session count budget exhausted', 'resource_limit')
-                sid = 'd' + secrets.token_hex(16)
+                if session_id is not None and not db.execute('SELECT 1 FROM sessions WHERE id=?', (session_id,)).fetchone():
+                    sid = session_id
+                else:
+                    sid = 'd' + secrets.token_hex(16)
                 db.execute('INSERT INTO sessions(id,workspace,root,provider,request_key,policy_hash,created) VALUES(?,?,?,?,?,?,?)',
                            (sid,workspace,wire(identity).decode(),provider,'project-'+secrets.token_hex(16),policy_hash,time.time()))
             self._pin_development(db, workspace, sid)
             return self._session(db,workspace,sid)
 
-    def create_conversation(self, workspace, identity, provider, request_id, policy_hash, *, session_kind="development"):
+    def create_conversation(self, workspace, identity, provider, request_id, policy_hash, *, session_kind="development", session_id=None):
         """Explicit writable membership is created with the session, never inferred from history."""
         identifier(request_id)
+        if session_id is not None:
+            identifier(session_id)
         card_key = 'notebook:' + request_id
         with self.connect(write=True) as db:
             old = db.execute(f'SELECT * FROM {_SCOPED_SESSIONS} WHERE workspace=? AND request_key IN (?,?)',
@@ -216,7 +223,10 @@ class Store:
             # Otherwise creating a member could silently replace an unpinned main.
             primary = self._primary(db, workspace, identity, policy_hash) if session_kind == 'development' else None
             key = card_key if session_kind == 'notebook' else request_id
-            sid = 'd' + secrets.token_hex(16)
+            if session_id is not None and not db.execute('SELECT 1 FROM sessions WHERE id=?', (session_id,)).fetchone():
+                sid = session_id
+            else:
+                sid = 'd' + secrets.token_hex(16)
             db.execute('INSERT INTO sessions(id,workspace,root,provider,request_key,policy_hash,created) VALUES(?,?,?,?,?,?,?)',
                        (sid, workspace, wire(identity).decode(), provider, key, policy_hash, time.time()))
             db.execute('INSERT INTO project_conversation_members(workspace,session) VALUES(?,?)', (workspace, sid))

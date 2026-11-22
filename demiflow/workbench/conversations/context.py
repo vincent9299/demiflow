@@ -18,6 +18,24 @@ from demiflow.workbench.conversations.common import safe_path
 from demiflow.workbench.conversations.common import wire
 
 
+def authoritative_source_paths(project):
+    root = Path(project['root'])
+    paths = []
+    parents = reversed((root, *root.parents)) if project['kind'] == 'platform' else (root,)
+    for parent in parents:
+        candidate = parent / 'AGENTS.md'
+        if candidate.is_file(): paths.append(candidate)
+    for relative in project['writes']:
+        candidate = safe_path(root, relative, missing=True)
+        if not candidate.is_dir(): candidate = candidate.parent
+        while candidate != root and root in candidate.parents:
+            agents = candidate / 'AGENTS.md'
+            if agents.is_file() and agents not in paths: paths.append(agents)
+            candidate = candidate.parent
+    paths.extend(safe_path(root, p) for p in project['sources'])
+    return list(dict.fromkeys(paths))
+
+
 def assemble(project, requirement, limits, *, execution_mode='trusted_local', input_access=False,
              coding=None, delivery_review=False, previous_review=None):
     root = Path(project['root'])
@@ -33,20 +51,7 @@ def assemble(project, requirement, limits, *, execution_mode='trusted_local', in
             bytes=len(raw.encode()), delivery='prepared', origin=origin))
         pages.append(raw)
 
-    paths = []
-    parents = reversed((root, *root.parents)) if project['kind'] == 'platform' else (root,)
-    for parent in parents:
-        candidate = parent / 'AGENTS.md'
-        if candidate.is_file(): paths.append(candidate)
-    for relative in project['writes']:
-        candidate = safe_path(root, relative, missing=True)
-        if not candidate.is_dir(): candidate = candidate.parent
-        while candidate != root and root in candidate.parents:
-            agents = candidate / 'AGENTS.md'
-            if agents.is_file() and agents not in paths: paths.append(agents)
-            candidate = candidate.parent
-    paths.extend(safe_path(root, p) for p in project['sources'])
-    for path in dict.fromkeys(paths):
+    for path in authoritative_source_paths(project):
         raw = read_file(path).decode('utf-8')
         append(str(path), path, '# Source: ' + str(path) + '\n' + raw,
                sha=hashlib.sha256(raw.encode()).hexdigest())

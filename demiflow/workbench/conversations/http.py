@@ -23,6 +23,7 @@ GET_FIELDS = {
 }
 POST_FIELDS = {
     'dev-compact': ({'session_id','submission_id','expected_revision'},set()),
+    'dev-prewarm': (set(), {'session_id', 'provider_id'}),
     'dev-session-create': ({'request_id', 'provider_id'}, {'new_conversation', 'session_kind'}),
     'dev-turn-start': ({'session_id', 'submission_id', 'expected_revision', 'text'}, {'operation'}),
     'dev-notebook-claim': ({'session_id','turn_id','pending_request_id','expected_digest'},set()),
@@ -139,8 +140,10 @@ def post(server, workspace, root, name, request, *, consumer_closed=None):
     service = server.development
     if service is None: reject('Project development is not enabled')
     if getattr(service, 'remote', False):
+        if name == 'dev-prewarm':
+            return dict(status='unsupported')
         return service.forward(workspace, root, name, request, mutation=True, consumer_closed=consumer_closed)
-    actions = {'dev-session-create': service.create_project, 'dev-turn-start': service.start_project, 'dev-compact': service.compact, 'dev-input': service.input, 'dev-notebook-claim': service.claim_cell_command,
+    actions = {'dev-prewarm': service.prewarm, 'dev-session-create': service.create_project, 'dev-turn-start': service.start_project, 'dev-compact': service.compact, 'dev-input': service.input, 'dev-notebook-claim': service.claim_cell_command,
                'dev-cancel': service.cancel, 'dev-recover': service.recover}
     with service.lock:
         result = actions[name](workspace, root, **request)

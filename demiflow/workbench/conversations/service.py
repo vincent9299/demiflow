@@ -6,7 +6,9 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import secrets
 import select
+import shutil
 import socket
 import subprocess
 import sys
@@ -31,14 +33,17 @@ from demiflow.resources.process_observation import unit_stopped
 
 
 class _WarmWorker:
-    def __init__(self, session_id, policy_hash, provider, root_path, process, sock):
+    def __init__(self, session_id, policy_hash, provider, root_path, process, sock, *, workspace=None, standby=False, reserved=False):
         self.session_id = session_id
+        self.workspace = workspace
         self.policy_hash = policy_hash
         self.provider = provider
         self.root_path = root_path
         self.process = process
         self.sock = sock
         self.idle = False
+        self.standby = standby
+        self.reserved = reserved
         self.dead = False
         self.busy_tid = None
         self.sandbox_deadline = 0.0
@@ -151,12 +156,162 @@ class Service:
         self.project(workspace,root);identifier(provider_id)
         deployment, revision, _ = self.binding(workspace, root, seal=True)
         if provider_id not in deployment.providers:reject('Provider is not configured')
-        args = (workspace, root_identity(root), provider_id, request_id, revision)
+        identity = root_identity(root)
+        root_path = identity['path']
+        reserved_warm = None
+        warm_map = getattr(self, 'warm_workers', None)
+        if session_kind == 'development' and warm_map:
+            for warm in list(warm_map.values()):
+                if (warm.reserved and not warm.dead and warm.process.poll() is None
+                        and warm.workspace == workspace and warm.root_path == root_path
+                        and warm.provider == provider_id and warm.policy_hash == revision):
+                    reserved_warm = warm
+                    break
+        reserved_sid = reserved_warm.session_id if reserved_warm is not None else None
+        args = (workspace, identity, provider_id, request_id, revision)
         if new_conversation:
-            session = self.store.create_conversation(*args, session_kind=session_kind)
+            session = self.store.create_conversation(*args, session_kind=session_kind, session_id=reserved_sid)
         else:
-            session = self.store.ensure_project(*args)
+            session = self.store.ensure_project(*args, session_id=reserved_sid)
+        if reserved_warm is not None and session['id'] == reserved_sid:
+            reserved_warm.reserved = False
         return dict(session, writable=True)
+
+    def _ensure_coding_catalog(self):
+        if self.coding_catalog is None:
+            from demiflow.forge.api_reference import REFERENCE_BYTES, build_reference
+            raw = wire(build_reference(), REFERENCE_BYTES)
+            catalog = tempfile.TemporaryFile(dir=self.root)
+            try:
+                catalog.write(raw)
+                catalog.flush()
+            except BaseException:
+                catalog.close()
+                raise
+            self.coding_catalog = catalog
+        return self.coding_catalog.fileno()
+
+    def _worker_env(self, policy):
+        env = dict(PATH='/usr/bin:/bin', LANG='C.UTF-8', PYTHONDONTWRITEBYTECODE='1')
+        env['DEMIFLOW_INPUT_DENIED_PATHS'] = wire(list(self.input_denied_paths), 65536).decode()
+        if self.deployment.value.get('runtime_domain'):
+            env['DEMIFLOW_FORGE_DOMAIN'] = self.deployment.value['runtime_domain']
+        for config in policy.providers.values():
+            if config.get('credential_env') and config['credential_env'] in os.environ:
+                env[config['credential_env']] = os.environ[config['credential_env']]
+            env.update(proxy_environment(config))
+        return env
+
+    def prewarm(self, workspace, root, *, session_id=None, provider_id=None):
+        """Best-effort standby pre-warming so Turn 1 skips cold CLI startup."""
+        warm_map = getattr(self, 'warm_workers', None)
+        if warm_map is None:
+            return dict(status='unsupported')
+        project = self.project(workspace, root)
+        deployment, revision, _ = self.binding(workspace, root, seal=True)
+        caps = self.capabilities(workspace, root)
+        available_providers = [p['id'] for p in caps['providers'] if p['available']]
+        if not caps['start'] or not available_providers:
+            return dict(status='unavailable')
+        identity = root_identity(root)
+        root_path = identity['path']
+        reserved = session_id is None
+        target_sid = None
+        if not reserved:
+            identifier(session_id)
+            session = self.store.show(workspace, session_id)
+            if (session.get('session_kind') != 'development'
+                    or not self.store.writable(workspace, session_id, identity, revision, deployment.providers)):
+                return dict(status='skipped')
+            target_provider = session['provider'] if session['provider'] in available_providers else available_providers[0]
+            target_sid = session_id
+        else:
+            if provider_id is not None:
+                identifier(provider_id)
+            target_provider = provider_id if provider_id in available_providers else available_providers[0]
+        with self.lock:
+            if self.closed:
+                return dict(status='stopping')
+            self._reap()
+            target_path = Path(root_path)
+            for tid, (_, _, _, active_root_json) in self.worker_targets.items():
+                if tid in self.workers:
+                    active_root = Path(json.loads(active_root_json)['path'])
+                    if target_path == active_root or target_path in active_root.parents or active_root in target_path.parents:
+                        return dict(status='busy')
+            warm_map = getattr(self, 'warm_workers', None)
+            if warm_map is None:
+                return dict(status='unsupported')
+            def _valid_deadline(w):
+                return (self.deployment.mode != 'restricted' or w.sandbox_deadline == 0.0
+                        or w.sandbox_deadline - time.time() > self.deployment.limits.turn_seconds + 60)
+            if not reserved:
+                existing = warm_map.get(target_sid)
+                if (existing is not None and not existing.dead and existing.process.poll() is None
+                        and existing.policy_hash == revision and existing.provider == target_provider
+                        and existing.root_path == root_path and _valid_deadline(existing)):
+                    return dict(status='ready' if existing.idle else 'warming', session_id=target_sid)
+            else:
+                for existing in warm_map.values():
+                    if (existing.reserved and not existing.dead and existing.process.poll() is None
+                            and existing.workspace == workspace and existing.policy_hash == revision
+                            and existing.provider == target_provider and existing.root_path == root_path
+                            and _valid_deadline(existing)):
+                        return dict(status='ready' if existing.idle else 'warming', standby=True)
+            try:
+                self.deployment.validate_runtime(admit=True)
+                if (self.root / 'storage-pressure').exists():
+                    return dict(status='skipped')
+                fs = os.statvfs(self.root)
+                if fs.f_bavail * fs.f_frsize < self.deployment.limits.provider_bytes + self.deployment.limits.output_bytes:
+                    return dict(status='skipped')
+                homes = private_directory_bytes(self.root, entries=self.deployment.limits.sessions + 64)
+                used = sum(homes.values())
+                allowance = self.deployment.limits.provider_bytes
+                reserved_bytes = sum(max(0, allowance - homes.get(t['session'], 0)) for t in self.store.unresolved())
+                if used + reserved_bytes + max(0, allowance - homes.get(target_sid or '', 0)) > self.deployment.limits.private_total_bytes:
+                    return dict(status='skipped')
+            except Exception:
+                return dict(status='skipped')
+            # Keep at most one warm/standby worker in memory at a time.
+            to_retire = []
+            for sid, old in list(warm_map.items()):
+                if old.busy_tid is None:
+                    warm_map.pop(sid, None)
+                    to_retire.append(old)
+            for old in to_retire:
+                same_root = Path(old.root_path) == target_path
+                self._retire_warm(old, wait_s=0.5 if same_root else 0.0)
+            coding_fd = self._ensure_coding_catalog() if project['kind'] == 'pipeline' else None
+            if reserved:
+                target_sid = 'd' + secrets.token_hex(16)
+            parent_sock = worker_sock = None
+            try:
+                parent_sock, worker_sock = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+                worker = Path(__file__).with_name('worker.py')
+                env = self._worker_env(deployment)
+                meta = json.dumps(dict(workspace=workspace, root_path=root_path, session_id=target_sid,
+                                       provider=target_provider, policy_hash=revision), separators=(',', ':'))
+                command = [sys.executable, '-I', '-B', str(worker), '--standby',
+                           str(self.root / (revision + '.json')), meta, str(worker_sock.fileno())]
+                inherited = (worker_sock.fileno(),)
+                if coding_fd is not None:
+                    command.append(str(coding_fd))
+                    inherited += (coding_fd,)
+                process = subprocess.Popen(command, cwd=self.root, env=env,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    pass_fds=inherited, start_new_session=True)
+                warm = _WarmWorker(target_sid, revision, target_provider, root_path, process, parent_sock,
+                                   workspace=workspace, standby=True, reserved=reserved)
+                warm_map[target_sid] = warm
+                parent_sock = None
+                threading.Thread(target=self._watch_worker, args=(warm,), name='demiflow-dev-watch', daemon=True).start()
+            finally:
+                if worker_sock is not None:
+                    worker_sock.close()
+                if parent_sock is not None:
+                    self._close_life(parent_sock)
+            return dict(status='warming', standby=True, session_id=None if reserved else target_sid)
 
     def sessions(self, workspace, root, offset=0, limit=20):
         self.project(workspace, root)
@@ -258,10 +413,23 @@ class Service:
             return
         self._close_life(life)
 
+    def _cleanup_reserved(self, warm):
+        if warm is None or not warm.reserved or warm.process.poll() is None:
+            return
+        try:
+            with self.store.connect() as db:
+                exists = db.execute('SELECT 1 FROM sessions WHERE id=?', (warm.session_id,)).fetchone()
+            if not exists:
+                shutil.rmtree(self.root / warm.session_id, ignore_errors=True)
+            warm.reserved = False
+        except Exception:
+            pass
+
     def _retire_warm(self, warm, *, wait_s=3.0):
         if warm is None:
             return
         warm.idle = False
+        warm.standby = False
         warm.dead = True
         sock = warm.sock
         warm.sock = None
@@ -275,6 +443,7 @@ class Service:
             except subprocess.TimeoutExpired:
                 try: warm.process.terminate()
                 except OSError: pass
+        self._cleanup_reserved(warm)
 
     def _retire_conflicting_warm(self, session_id, root_path):
         warm_map = getattr(self, 'warm_workers', None)
@@ -348,6 +517,7 @@ class Service:
         finally:
             warm.dead = True
             warm.idle = False
+            warm.standby = False
             warm.accepted_event.set()
             with self.lock:
                 if getattr(self, 'warm_workers', None) and self.warm_workers.get(warm.session_id) is warm:
@@ -357,6 +527,7 @@ class Service:
                 if sock is not None:
                     try: sock.close()
                     except OSError: pass
+                self._cleanup_reserved(warm)
             self.notify()
 
     def _launch_provider(self, value, session):
@@ -371,18 +542,7 @@ class Service:
                 root_path = json.loads(session['root'])['path']
                 project = policy.project(workspace, root_path)
                 if value.get('operation') == 'message' and project['kind'] == 'pipeline':
-                    if self.coding_catalog is None:
-                        from demiflow.forge.api_reference import REFERENCE_BYTES, build_reference
-                        raw = wire(build_reference(), REFERENCE_BYTES)
-                        catalog = tempfile.TemporaryFile(dir=self.root)
-                        try:
-                            catalog.write(raw)
-                            catalog.flush()
-                        except BaseException:
-                            catalog.close()
-                            raise
-                        self.coding_catalog = catalog
-                    coding_fd = self.coding_catalog.fileno()
+                    coding_fd = self._ensure_coding_catalog()
                 # Admission durably says no spawn has been attempted. All
                 # allocation failures before spawning are safely recoverable.
                 lease.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -396,19 +556,23 @@ class Service:
                 ownership = dict(unit_path=str(lease), unit_identity=dict(device=info.st_dev, inode=info.st_ino), nonce=value['epoch'])
                 self.store.update(tid, process=wire(ownership).decode())
 
-                # Try reusing a matching idle warm worker for normal message turns.
+                # Try reusing a matching idle or standby warm worker for normal message turns.
                 warm_map = getattr(self, 'warm_workers', None)
                 warm = warm_map.get(session_id) if (warm_map is not None and value.get('operation') == 'message') else None
-                if (warm is not None and warm.idle and not warm.dead and warm.process.poll() is None
+                if (warm is not None and (warm.idle or warm.standby) and warm.busy_tid is None
+                        and not warm.dead and warm.process.poll() is None
                         and warm.sock is not None
                         and warm.policy_hash == session['policy_hash']
                         and warm.provider == session['provider']
                         and warm.root_path == root_path
                         and (self.deployment.mode != 'restricted'
+                             or warm.sandbox_deadline == 0.0
                              or warm.sandbox_deadline - time.time() > self.deployment.limits.turn_seconds + 60)):
                     self.store.update(tid, launch_phase='spawning')
                     self.worker_targets[tid] = (workspace, session_id, value['epoch'], session['root'])
                     warm.idle = False
+                    warm.standby = False
+                    warm.reserved = False
                     warm.busy_tid = tid
                     warm.accepted_tid = None
                     warm.accepted_event.clear()
@@ -430,14 +594,7 @@ class Service:
                 self._retire_conflicting_warm(session_id, root_path)
                 parent_sock, worker_sock = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
                 worker = Path(__file__).with_name('worker.py')
-                env = dict(PATH='/usr/bin:/bin', LANG='C.UTF-8', PYTHONDONTWRITEBYTECODE='1')
-                env['DEMIFLOW_INPUT_DENIED_PATHS'] = wire(list(self.input_denied_paths), 65536).decode()
-                if self.deployment.value.get('runtime_domain'):
-                    env['DEMIFLOW_FORGE_DOMAIN'] = self.deployment.value['runtime_domain']
-                for config in policy.providers.values():
-                    if config.get('credential_env') and config['credential_env'] in os.environ:
-                        env[config['credential_env']] = os.environ[config['credential_env']]
-                    env.update(proxy_environment(config))
+                env = self._worker_env(policy)
                 # Must commit uncertainty before Popen: absence of a returned
                 # Popen object does not prove absence of a real child.
                 self.store.update(tid, launch_phase='spawning')
@@ -513,6 +670,7 @@ class Service:
                     warm_map.pop(sid, None)
                     self._close_life(warm.sock)
                     warm.sock = None
+                    self._cleanup_reserved(warm)
 
     def show(self, workspace, sid):
         with self.lock:
@@ -628,7 +786,7 @@ class Service:
                 for sid, warm in list(warm_map.items()):
                     warm_map.pop(sid, None)
                     warm_to_wait.append(warm)
-                    if warm.idle:
+                    if warm.idle or warm.standby:
                         self._retire_warm(warm, wait_s=0.0)
         deadline = time.monotonic() + 12
         while time.monotonic() < deadline:

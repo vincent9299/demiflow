@@ -334,7 +334,20 @@ SOFTWARE.
       status.textContent=unsupportedNew?'当前开发服务不支持新建独立会话，请从左侧打开已有会话。':state.historyOnly?'正在查看更早的历史记录，回到最新记录后可继续提问':readonly?'当前服务为只读模式':t?(terminalClean?'':(t.operation==='compact'?(t.cleanup!=='complete'?'正在归档历史…':t.state==='completed'?'归档处理完成':'归档未完成'):(labels[t.state]||t.state))+(t.dispatch==='unknown'?' · 发送结果未知，请先核对':'')):
         provider?.available?'':ForgeDevelopmentComposer.connectionStatus(capabilities).label;
     }
-    providers.onchange=availability;
+    let prewarmKey='';
+    function requestPrewarm(){
+      if(state.disposed||!capabilities.enabled||capabilities.read_only||capabilities.prewarm_api!==true)return;
+      const sid=state.session?.id||null;
+      if(state.session&&sessionReadonly(state.session))return;
+      if(state.session?.turn&&state.session.turn.cleanup!=='complete')return;
+      const providerId=state.session?.provider||providers.value||'';
+      if(!providerId)return;
+      const key=(sid||'new')+':'+providerId;
+      if(key===prewarmKey)return;
+      prewarmKey=key;
+      api('dev-prewarm',{},{...(sid?{session_id:sid}:{}),provider_id:providerId}).catch(()=>{if(prewarmKey===key)prewarmKey='';});
+    }
+    providers.onchange=()=>{availability();requestPrewarm();};
     function trackDialog(dialog){state.dialogs.add(dialog);dialog.addEventListener('close',()=>{state.dialogs.delete(dialog);dialog.remove();},{once:true});}
     function output(item){
       const d=el('dialog'),bar=el('div',undefined,'toolbar'),close=el('button','关闭'),next=el('button','下一页原文'),content=el('pre');let cursor=0;
@@ -502,6 +515,7 @@ SOFTWARE.
         renderConversations();availability();resizeInput();
       }
       state.listAt=0;
+      requestPrewarm();
       if(!state.refreshing)await refresh();
       else state.timer=setTimeout(refresh,0);
     }
@@ -524,7 +538,7 @@ SOFTWARE.
         if(drafts.get(draftKey)===drafts.get(legacy)){drafts.delete(legacy);draftRevisions.delete(legacy);}
         saveDrafts(true);
       }
-      input.value=drafts.get(draftKey)||'';await refresh();
+      input.value=drafts.get(draftKey)||'';requestPrewarm();await refresh();
     }
     if(state.disposed)return handle;state.initializing=false;renderConversations();availability();resizeInput();
     return handle;
