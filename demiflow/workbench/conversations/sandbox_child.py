@@ -132,7 +132,7 @@ def main():
     host_pid = int(next(line for line in status.splitlines() if line.startswith('NSpid:')).split()[1])
     prctl(4, 0, 0, 0, 0)  # trusted PID 1 memory/FDs are not dumpable
     channels = []
-    if spec.get('channels'):
+    if spec.get('channels') and not spec.get('direct_network'):
         loopback()
     for name, fd in spec.get('channels', {}).items():
         listener = namespace_listener()
@@ -158,7 +158,7 @@ def main():
             close_except({0, 1, 2, write_error})
             landlock(spec['read_paths'], spec['write_paths'], spec['runtime_paths'], spec['identities'])
             drop_capabilities()
-            seccomp()
+            seccomp(direct_network=bool(spec.get('direct_network', False)))
             os.execve(spec['command'][0], spec['command'], spec['env'])
         except BaseException as error:
             os.write(write_error, (type(error).__name__ + ': ' + str(error))[:2048].encode())
