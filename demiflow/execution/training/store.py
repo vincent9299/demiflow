@@ -90,7 +90,7 @@ class ModelStore:
 
     def verify(self, ref):
         path = self._path(ref.sha256)
-        if local_path(ref.uri) != path or ref.size_bytes > self.index.binding.max_model_bytes:
+        if local_path(ref.uri) != path or ref.size_bytes > self.index.model_byte_limit():
             raise RecoveryContractError("Object is outside this project's immutable model store")
         with open_regular_file(path) as stream:
             _transfer(stream, ref.sha256, ref.size_bytes, check_stop=self.check_stop)

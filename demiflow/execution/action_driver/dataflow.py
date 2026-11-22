@@ -1443,7 +1443,6 @@ class DataflowExecution:
         if self._publication_future is not None:
             raise DataflowError('INVALID_CONTRACT', 'only one checkpoint publication may run')
         self._publication_frontiers = (*self._checkpoint_frontiers(), *self._exchange.snapshot_acks())
-        future = self._publication_future = Future()
         self._publication_resumed = False
         self._source_credit_needs_rotation = False
         cut_id, context = self._cut.cut_id, copy_context()
@@ -1457,6 +1456,8 @@ class DataflowExecution:
                 spec = next(p.value for p in self._request.programs if p.name == 'write_lance')
                 self._fit.retain_table(spec.uri)
 
+        future = Future()
+
         def publish():
             try:
                 image = context.run(self._checkpoint.commit, cut_id, sinks=self._sinks,
@@ -1466,9 +1467,11 @@ class DataflowExecution:
             else:
                 future.set_result(image)
 
-        self._publication_thread = Thread(target=publish, name='demiflow-checkpoint-publication', daemon=True)
-        track_owned_thread(self._publication_thread)
-        self._publication_thread.start()
+        thread = Thread(target=publish, name='demiflow-checkpoint-publication', daemon=True)
+        track_owned_thread(thread)
+        thread.start()
+        # Only a started publisher can complete the future drained by this driver.
+        self._publication_thread, self._publication_future = thread, future
 
     def _poll_publication(self):
         future = self._publication_future

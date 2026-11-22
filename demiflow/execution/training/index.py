@@ -16,7 +16,7 @@ class FitConflict(RecoveryContractError):
 
 
 class TrainingIndex:
-    def __init__(self, binding: FitBinding, *, readonly=False):
+    def __init__(self, binding: FitBinding, *, readonly=False, quotas='sealed'):
         self.readonly = readonly
         self.binding = binding
         directory = Path(binding.project_dir)
@@ -24,11 +24,50 @@ class TrainingIndex:
                 or directory.resolve() != directory or (directory / 'fit.sqlite').is_symlink()):
             raise ValueError("A training project requires an existing absolute control directory")
         self.path = directory / 'fit.sqlite'
-        if readonly:
-            if not self.path.is_file():
-                raise FitConflict("No project training index exists")
-            return
-        with closing(self._open()) as db:
+        if quotas not in ('apply', 'match', 'sealed') or readonly and quotas == 'apply':
+            raise ValueError("Invalid project quota admission")
+        apply_deployment = quotas == 'apply'
+        if apply_deployment:
+            self._initialize()
+        elif not self.path.is_file():
+            raise FitConflict("No project training index exists")
+        machine_id = Path('/etc/machine-id')
+        host = machine_id.read_text().strip() if machine_id.is_file() else socket.gethostname()
+        settings = {'control_host': host, 'model_store': binding.model_store_uri}
+        requested_quotas = dict(model_bytes=binding.max_model_bytes, files=binding.max_files,
+                                instances=binding.max_instances, references=binding.max_references)
+        with closing(self._open()) as db, db:
+            db.execute('BEGIN IMMEDIATE' if apply_deployment else 'BEGIN')
+            for name, value in settings.items():
+                if apply_deployment:
+                    self._bind_setting(db, name, value)
+                else:
+                    row = db.execute('SELECT value FROM fit_settings WHERE name=?', (name,)).fetchone()
+                    if row is None or row[0] != document(value).decode():
+                        raise FitConflict("Training deployment disagrees with the project setting " + name)
+            # Only an actual paid reservation establishes its currency ceiling.
+            if binding.max_charge:
+                name = 'charge_limit/' + binding.currency
+                row = db.execute('SELECT value FROM fit_settings WHERE name=?', (name,)).fetchone()
+                if row is not None and row[0] != document(binding.project_charge_limit).decode():
+                    raise FitConflict("Training deployment disagrees with the project setting " + name)
+            for name, requested in requested_quotas.items():
+                row = db.execute('SELECT value FROM fit_settings WHERE name=?', (name,)).fetchone()
+                if row is None and apply_deployment:
+                    db.execute('INSERT INTO fit_settings VALUES (?,?)', (name, document(requested).decode()))
+                    continue
+                approved = self._quota(row, name)
+                if quotas == 'match' and requested != approved:
+                    raise FitConflict("First fit admission requires the current project quota " + name)
+                if apply_deployment and requested < approved:
+                    raise FitConflict("Cannot decrease project training quota " + name)
+                if requested > approved:
+                    if not apply_deployment:
+                        raise FitConflict("Training binding exceeds approved project quota " + name)
+                    db.execute('UPDATE fit_settings SET value=? WHERE name=?', (document(requested).decode(), name))
+
+    def _initialize(self):
+        with closing(sqlite3.connect(self.path, timeout=1.0)) as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS fit_settings (name TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS fit_instances (
@@ -59,15 +98,20 @@ class TrainingIndex:
                 );
             """)
 
-        # A local controller owns this SQLite admission domain. Do not infer
-        # cross-host fencing from locks on a network-mounted project directory.
-        machine_id = Path('/etc/machine-id')
-        control_host = machine_id.read_text().strip() if machine_id.is_file() else socket.gethostname()
-        with self._write() as db:
-            for name, setting in dict(control_host=control_host, model_store=binding.model_store_uri,
-                                      model_bytes=binding.max_model_bytes, files=binding.max_files,
-                                      instances=binding.max_instances, references=binding.max_references).items():
-                self._bind_setting(db, name, setting)
+    @staticmethod
+    def _quota(row, name):
+        value = json.loads(row[0]) if row is not None else None
+        if type(value) is not int or not 1 <= value < 2**63:
+            raise FitConflict("Missing or invalid project training quota " + name)
+        return value
+
+    def _approved(self, db, name):
+        row = db.execute('SELECT value FROM fit_settings WHERE name=?', (name,)).fetchone()
+        return self._quota(row, name)
+
+    def model_byte_limit(self):
+        with closing(self._open()) as db:
+            return self._approved(db, 'model_bytes')
 
     @staticmethod
     def _bind_setting(db, name, value):
@@ -78,8 +122,8 @@ class TrainingIndex:
             raise FitConflict("Training deployment disagrees with the project setting " + name)
 
     def _open(self):
-        location = self.path.as_uri() + '?mode=ro' if self.readonly else self.path
-        db = sqlite3.connect(location, timeout=1.0, isolation_level=None, uri=self.readonly)
+        location = self.path.as_uri() + ('?mode=ro' if self.readonly else '?mode=rw')
+        db = sqlite3.connect(location, timeout=1.0, isolation_level=None, uri=True)
         db.row_factory = sqlite3.Row
         return db
 
@@ -123,7 +167,7 @@ class TrainingIndex:
         with self._write() as db:
             row = self._row(db, instance)
             if row is None:
-                if db.execute('SELECT count(*) FROM fit_instances').fetchone()[0] >= self.binding.max_instances:
+                if db.execute('SELECT count(*) FROM fit_instances').fetchone()[0] >= self._approved(db, 'instances'):
                     raise FitConflict("Project training instance quota exceeded")
                 request_key = self.request_key(instance, 0, scope, run_id)
                 db.execute('''INSERT INTO fit_instances
@@ -177,7 +221,7 @@ class TrainingIndex:
                     raise FitConflict("Model object length changed")
                 return True
             total, files = db.execute('SELECT COALESCE(SUM(bytes),0),COUNT(*) FROM fit_objects').fetchone()
-            if total + size > self.binding.max_model_bytes or files >= self.binding.max_files:
+            if total + size > self._approved(db, 'model_bytes') or files >= self._approved(db, 'files'):
                 return False
             db.execute('INSERT INTO fit_objects VALUES (?,?,?,0)', (store, digest, size))
             return True
@@ -305,7 +349,7 @@ class TrainingIndex:
             existing = db.execute('SELECT kind,target FROM fit_holds WHERE owner=? AND instance=?',
                                   (owner,instance)).fetchone()
             if existing is None:
-                if db.execute('SELECT count(*) FROM fit_holds').fetchone()[0] >= self.binding.max_references:
+                if db.execute('SELECT count(*) FROM fit_holds').fetchone()[0] >= self._approved(db, 'references'):
                     raise FitConflict('Training reference quota exceeded')
                 db.execute('INSERT INTO fit_holds VALUES (?,?,?,?)',(owner,instance,kind,locator))
             elif (existing['kind'] == 'pending_table' and kind == 'table' and locator

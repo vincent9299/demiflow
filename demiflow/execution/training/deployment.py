@@ -7,7 +7,8 @@ import os
 from pathlib import Path
 
 from ..contracts.training import FitBinding, FitJobProvider
-from ..recovery_contract import document, identifier
+from ..recovery_contract import document, identifier, identity
+from .index import TrainingIndex
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,26 @@ class TrainingDeployment:
                 raise TypeError("ProviderManaged deployment needs a complete job provider")
         elif self.provider is not None:
             raise ValueError("EngineManaged deployment selects its host through the scheduler")
+
+    def apply_project_quotas(self):
+        """Apply the four nondecreasing project storage/admission limits as one operation."""
+        TrainingIndex(self.binding, quotas='apply')
+
+
+def bind_action_deployment(action, project_id, binding):
+    run = action.context
+    key = identity(['training-deployment', action.action_id])
+    original = {'project': project_id, 'binding_digest': identity(binding.to_dict())}
+    # The original lease serializes this decision against fence replacement.
+    # Domain changes commit independently and a retry rechecks the same proposal.
+    with run.journal.publication_guard(run.fence):
+        if run.journal.source_binding(key) is None:
+            if run.attempt == 1:
+                TrainingIndex(binding, quotas='apply')
+            else:
+                # No prior fit admission authorizes a stale proposal on resume.
+                TrainingIndex(binding, readonly=True, quotas='match')
+        run.journal.bind_source(run.fence, key, original)
 
 
 def resolve_training_deployment(context):

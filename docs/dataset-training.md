@@ -41,6 +41,38 @@ scores.write_lance(scores_uri, mode="create")
 
 Python 可将 `TrainingDeployment(project_id, binding, provider)` 传入 `RunContext.start(..., training=...)`。工作台通过环境变量 `DEMIFLOW_TRAINING_DEPLOYMENT` 读取部署 JSON 的绝对路径，配置声明 `project_root`、`project_id` 和 `binding`，第三方可以指定受信的 `provider_factory`。项目索引使用同一控制主机上的 SQLite，当前模型导入使用本机可访问的项目持久目录。引擎托管作业的 allocated_gpu_seconds 来自原设备池的实际分配至确认释放时间，包含同一实例历次训练启动的占卡时间。详见[部署配置](../demiflow/execution/training/deployment.py)。
 
+## 模型配额用满后
+
+四项额度由部署指向的项目控制目录统一审批。共用同一 `fit.sqlite` 的多个 `project_id` 共用额度。需要隔离时，各自配置独立的控制目录和模型存储。
+
+| 部署字段 | 计量 |
+|---|---|
+| `max_model_bytes`、`max_files` | 按内容去重后的模型文件和清单的总字节数、对象数，含正在导入的预留量。 |
+| `max_instances` | 索引中所有状态的训练实例总数。复用同一实例无需新增名额。 |
+| `max_references` | 评分表的待确认或已确认引用、父快照引用和仍在使用的引用总数。 |
+
+管理员保留原受信部署文件，另存一份提高额度的新部署，给后续 run 使用。首次使用该部署的新 run 会在训练 action 登记时应用额度。管理员也可以提前应用，随后直接恢复符合条件的原 run。
+
+```python
+from demiflow.execution.training.deployment import load_training_deployment
+
+deployment = load_training_deployment(deployment_v2_path, project_root=project_root)
+deployment.apply_project_quotas()
+```
+
+四项额度在同一个项目索引事务中逐项比较，允许持平或提高。任一项下降，整次变更回滚。原控制主机、模型存储和已登记币种的费用上限继续严格核对。已有实例、权重、评分表和引用继续保留。
+
+扩容后先检查原 run 和实例状态。工作台恢复仍校验原部署文件的路径和 SHA-256。
+
+| 已记录的状态 | 后续操作 |
+|---|---|
+| 已登记 fit，原训练仍可接管，评分表允许恢复 | 恢复原 run，用原请求键、原训练和模型身份使用已批准额度。 |
+| 原 run 在首次登记 fit 前中断 | 原部署四项额度须与已建立的项目索引完全一致。若已变化，用当前部署开启新 run。 |
+| 训练实例已取消或失败，且没有已发布清单 | 如需重新训练，新 run 显式指定新的 `retrain_id`。 |
+| 模型已发布，评分表因引用名额不足而失败 | 提高引用额度后，用相同训练键启动新的评分 action，复用原模型。评分目标仍须符合原有写表规则。 |
+
+旧版可能已登记部署摘要，但在首次创建 `fit.sqlite` 前退出。仅当确认该控制目录从未建立索引、从未提交训练时，管理员可用原受信部署执行 `apply_project_quotas()` 首建后恢复。已使用的索引或权重丢失时，应先从备份恢复原库和原模型对象。
+
 ## 复用、重训与恢复
 
 - 同一项目内，由固定训练/监控数据、配方代码、环境、基础模型、有效训练参数、预算、保存步数、数值拓扑以及显式父快照确定训练身份。并发消费者共用一个生产者，只有生产者申请训练资源。选取未保存步数会报错。显式重训使用稳定的 `retrain_id`，显式续训传 `resume_from` 并在配方中声明新的总更新预算。

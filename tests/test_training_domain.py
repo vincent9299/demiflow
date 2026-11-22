@@ -14,6 +14,7 @@ from demiflow.execution.contracts.training import (
 )
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
 from demiflow.execution.run_context import RunAction, RunContext
+from demiflow.execution.training.deployment import TrainingDeployment, bind_action_deployment
 from demiflow.execution.training.index import FitConflict, TrainingIndex
 from demiflow.execution.training.runtime import FitRuntime, read_parent
 
@@ -39,7 +40,9 @@ def prepared_runtime(run, name, request, binding, provider):
     run.journal.bind_execution_action(run.fence, name, declaration)
     run.journal.bind_source(run.fence, name+'-dataflow-sealed', dict(
         schema='demiflow.dataflow_seal.v4', run_id=run.ref.run_id, action_id=name, plan_id=identity('plan'), dag_id=identity('dag'), plan_revision=0, fit_occurrences=[identity('fit1')]))
-    return FitRuntime(RunAction(run, name, declaration), identity('fit1'), request, binding, provider)
+    action = RunAction(run, name, declaration)
+    bind_action_deployment(action, request.project_id, binding)
+    return FitRuntime(action, identity('fit1'), request, binding, provider)
 
 
 class Provider:
@@ -194,7 +197,9 @@ def test_lost_ack_scoped_lookup_and_budget(tmp_path):
     provider.lose_reply = True
     with RunContext.start(tmp_path/'run') as run:
         original = prepared_runtime(run,'fit',req,binding,provider)
+        assert 'charge_limit/USD' not in _project_settings(binding)
         assert original.advance() is None
+        assert _project_settings(binding)['charge_limit/USD'] == binding.project_charge_limit
         provider.answer = 'unknown'
         assert original.advance() is None
         provider.answer = 'wrong'
@@ -274,6 +279,7 @@ def _claim_one(args):
 
 def test_project_elects_one_owner_across_processes(tmp_path):
     req,binding = setup_request(tmp_path)
+    TrainingIndex(binding, quotas='apply')
     with ProcessPoolExecutor(3) as pool:
         answers = list(pool.map(_claim_one, [(req.to_dict(),binding.to_dict(),i) for i in range(10)]))
     assert len(set(answers)) == 1
@@ -443,7 +449,7 @@ def test_dead_import_returns_quota_but_a_live_import_and_published_inode_are_ret
     from demiflow.execution.training.store import ModelStore
     _, binding = setup_request(tmp_path)
     binding = replace(binding,max_model_bytes=4,max_files=1)
-    store = ModelStore(TrainingIndex(binding))
+    store = ModelStore(TrainingIndex(binding, quotas='apply'))
     ctx = mp.get_context('spawn')
     ready, stop = ctx.Event(),ctx.Event()
     process = ctx.Process(target=_interrupted_import,args=(binding.to_dict(),ready,stop))
@@ -613,7 +619,7 @@ def test_model_import_contention_honors_consumers_deadline(tmp_path):
         if time.monotonic() - start > .1:
             raise TimeoutError('model consumer deadline')
 
-    store = ModelStore(TrainingIndex(binding), check_stop=check_stop)
+    store = ModelStore(TrainingIndex(binding, quotas='apply'), check_stop=check_stop)
     content = b'original'
     digest = hashlib.sha256(content).hexdigest()
     directory = store.objects / digest[:2]
@@ -627,3 +633,293 @@ def test_model_import_contention_honors_consumers_deadline(tmp_path):
         assert not list(directory.iterdir())
     finally:
         os.close(fd)
+
+
+def _project_settings(binding):
+    import json
+    import sqlite3
+    from contextlib import closing
+    with closing(sqlite3.connect(Path(binding.project_dir) / 'fit.sqlite')) as db:
+        return {key: json.loads(value) for key, value in db.execute('SELECT name,value FROM fit_settings')}
+
+
+def test_legacy_quota_settings_upgrade_atomically(tmp_path):
+    import json
+    import socket
+    import sqlite3
+    from contextlib import closing
+    request, binding = setup_request(tmp_path, paid=True)
+    binding = replace(binding, max_model_bytes=100, max_files=10, max_instances=8, max_references=12)
+    machine_id = Path('/etc/machine-id')
+    old = dict(control_host=machine_id.read_text().strip() if machine_id.is_file() else socket.gethostname(),
+               model_store=binding.model_store_uri, model_bytes=100, files=10, instances=8, references=12)
+    old['charge_limit/USD'] = binding.project_charge_limit
+    # Existing v1 settings use JSON values stored as TEXT in this exact table.
+    with closing(sqlite3.connect(Path(binding.project_dir) / 'fit.sqlite')) as db, db:
+        db.execute('CREATE TABLE fit_settings (name TEXT PRIMARY KEY, value TEXT NOT NULL)')
+        db.executemany('INSERT INTO fit_settings VALUES (?,?)', [(k,json.dumps(v)) for k,v in old.items()])
+    larger = replace(binding, max_model_bytes=110, max_files=11, max_instances=9, max_references=13)
+    for field in ('max_model_bytes','max_files','max_instances','max_references'):
+        mixed = replace(larger, **{field: getattr(binding,field)-1})
+        with pytest.raises(FitConflict, match='decrease'):
+            TrainingDeployment(request.project_id,mixed,Provider()).apply_project_quotas()
+        assert _project_settings(binding) == old
+    for changed in (replace(larger, project_charge_limit=6),
+                    replace(larger, model_store_uri=str(tmp_path/'wrong'))):
+        with pytest.raises(FitConflict, match='project setting'):
+            TrainingDeployment(request.project_id,changed,Provider()).apply_project_quotas()
+        assert _project_settings(binding) == old
+    for readonly in (True, False):
+        with pytest.raises(FitConflict,match='exceeds approved'):
+            TrainingIndex(larger,readonly=readonly)
+    assert _project_settings(binding) == old
+    TrainingDeployment(request.project_id,larger,Provider()).apply_project_quotas()
+    assert _project_settings(binding) == {**old,'model_bytes':110,'files':11,'instances':9,'references':13}
+
+
+def test_sealed_consumers_observe_raised_byte_and_file_limits(tmp_path):
+    import io
+    from demiflow.execution.training.store import ModelStore
+    request, binding = setup_request(tmp_path)
+    binding = replace(binding, max_model_bytes=4, max_files=1)
+    index = TrainingIndex(binding, quotas='apply')
+    writer = ModelStore(index)
+    reader = ModelStore(TrainingIndex(binding,readonly=True))
+    def put(raw):
+        return writer._put(io.BytesIO(raw),hashlib.sha256(raw).hexdigest(),len(raw))
+    before = put(b'abcd')
+    with pytest.raises(FitConflict, match='quota'):
+        put(b'z')
+    expanded = replace(binding, max_model_bytes=10, max_files=2)
+    TrainingDeployment(request.project_id,expanded,Provider()).apply_project_quotas()
+    after = put(b'123456')
+    reader.verify(before)
+    reader.verify(after)
+    assert Path(before.uri).read_bytes() == b'abcd'
+    assert Path(after.uri).read_bytes() == b'123456'
+    with pytest.raises(FitConflict,match='quota'):
+        put(b'!')
+
+
+def _offer_project_quotas(binding, ready, start, result):
+    binding = FitBinding.from_dict(binding)
+    ready.put(True)
+    assert start.wait(20)
+    try:
+        TrainingDeployment('project',binding,Provider()).apply_project_quotas()
+    except FitConflict as exc:
+        result.put(str(exc))
+    else:
+        result.put((binding.max_instances,binding.max_references))
+
+
+def test_concurrent_incomparable_quota_proposals_never_combine(tmp_path):
+    import multiprocessing as mp
+    _, binding = setup_request(tmp_path)
+    binding = replace(binding,max_instances=1,max_references=1)
+    TrainingIndex(binding,quotas='apply')
+    ctx = mp.get_context('spawn')
+    ready, start, done = ctx.Queue(), ctx.Event(), ctx.Queue()
+    offers = ((2,3),(3,2))
+    workers = [ctx.Process(target=_offer_project_quotas,args=(
+        replace(binding,max_instances=i,max_references=r).to_dict(),ready,start,done)) for i,r in offers]
+    for worker in workers:
+        worker.start()
+    try:
+        for worker in workers:
+            assert ready.get(timeout=20)
+        start.set()
+        results = [done.get(timeout=20) for worker in workers]
+        accepted, = [item for item in results if type(item) is tuple]
+        refused, = [item for item in results if type(item) is str]
+        assert accepted in offers and 'decrease' in refused
+        settings = _project_settings(binding)
+        assert (settings['instances'],settings['references']) == accepted
+    finally:
+        start.set()
+        for worker in workers:
+            worker.join(5)
+            if worker.is_alive():
+                worker.kill()
+                worker.join(5)
+            assert worker.exitcode == 0
+
+
+def test_quota_raise_preserves_published_training_and_scoring_table_hold(tmp_path):
+    request, binding = setup_request(tmp_path)
+    binding = replace(binding,max_instances=1,max_references=1)
+    enlarged = replace(binding,max_instances=2,max_references=2)
+    provider = Provider()
+    with RunContext.start(tmp_path/'first') as run:
+        fit = prepared_runtime(run,'fit',request,binding,provider)
+        result = finish(fit)
+        row = fit.index.read(request.instance_id)
+        import pyarrow as pa
+        from demiflow.execution.commit import CommitCoordinator
+        from demiflow.execution.lance_sink import LanceSink
+        from demiflow.execution.recovery_contract import SourcePosition
+        from demiflow.execution.training.runtime import confirm_table_consumption
+        from demiflow.lance.model import LanceWriteSpec
+        uri = str(tmp_path/'scores.lance')
+        provenance = {'uri':uri, 'selection':[{'step':1}]}
+        fit.retain_table('fit',provenance)
+        sink = LanceSink(fit.action,LanceWriteSpec(uri=uri,mode='create'))
+        fact = CommitCoordinator(fit.action).commit(1,outputs={'lance':(sink,[pa.table({'score':[3]})])},
+                                                   position=SourcePosition('holdout',1))
+        receipt = fact['receipts']['lance']
+        confirm_table_consumption(fit.action,fit.occurrence,binding,receipt)
+        def other_instance():
+            return fit.index.claim_or_get(replace(request,project_id='second-project'),run_id=run.ref.run_id,
+                run_dir=str(run.directory),action='next',occurrence=fit.occurrence,attempt=run.attempt)
+        with pytest.raises(FitConflict,match='instance quota'):
+            other_instance()
+        with pytest.raises(FitConflict,match='reference quota'):
+            fit.hold_active()
+        TrainingDeployment(request.project_id,enlarged,provider).apply_project_quotas()
+        fit.hold_active()
+        other_instance()
+        with pytest.raises(FitConflict,match='reference quota'):
+            fit.index.hold('third',request.instance_id,kind='active')
+        confirm_table_consumption(fit.action,fit.occurrence,binding,receipt)
+        assert fit.index.read(request.instance_id) == row
+        assert read_parent(request.project_id,binding,row['manifest_digest'],1) == result.snapshots[0]
+        fit.action.complete({})
+
+
+def _quota_lance_action(root, resume):
+    from demiflow import data
+    from demiflow.execution.recovery_contract import RunRef
+    from demiflow.execution.run_journal import RunJournal
+    from test_training_dataset_action import recipe
+    from training_action_programs import waiting_trainer
+    _, binding = setup_request(root,managed=True)
+    original = replace(binding,max_files=1,provider_options={'cpu_millis':100,'memory_bytes':16<<20})
+    deployment = TrainingDeployment('project',original)
+    directory = root/'run'
+    if resume:
+        ref = RunRef(str(directory),RunJournal(directory).recovery_identity()['run_id'])
+        context = RunContext.resume(ref,training=deployment)
+    else:
+        context = RunContext.start(directory,training=deployment)
+    with context:
+        model = data.read_lance(str(root/'input.lance'),version=1).fit(recipe=replace(recipe(),trainer=waiting_trainer))
+        model.checkpoints.select(steps=[1,3]).predict(on=data.from_items([{'x':7}])).write_lance(
+            str(root/'scored.lance'),mode='create')
+
+
+def test_original_submitted_action_recovers_using_raised_storage_quota(tmp_path):
+    import subprocess
+    import sys
+    import lance
+    import pyarrow as pa
+    from demiflow.execution.run_journal import RunJournal
+    lance.write_dataset(pa.table({'x':[1]}),str(tmp_path/'input.lance'))
+    _, binding = setup_request(tmp_path,managed=True)
+    original = replace(binding,max_files=1,provider_options={'cpu_millis':100,'memory_bytes':16<<20})
+    raised = replace(original,max_files=3)
+    env = dict(os.environ,PYTHONPATH=os.pathsep.join(p for p in sys.path if p))
+    command = [sys.executable,'-B','-c',
+        'import sys; from pathlib import Path; from test_training_domain import _quota_lance_action; '
+        '_quota_lance_action(Path(sys.argv[1]),sys.argv[2]=="resume")',str(tmp_path)]
+    started, proceed = tmp_path/'project'/'started', tmp_path/'project'/'proceed'
+    with subprocess.Popen(command+['start'],env=env) as driver:
+        try:
+            until = time.monotonic()+80
+            while not started.exists():
+                assert driver.poll() is None and time.monotonic()<until
+                time.sleep(.03)
+            driver.kill()
+            driver.wait(timeout=10)
+            journal = RunJournal(tmp_path/'run')
+            assert journal.latest_execution_commit('action-1') is None
+            assert _project_settings(original)['files'] == 1
+            pin = journal.source_binding(identity(['training-deployment','action-1']))
+            assert pin == {'project':'project','binding_digest':identity(original.to_dict())}
+            TrainingDeployment('project',raised).apply_project_quotas()
+            proceed.touch()
+            subprocess.run(command+['resume'],env=env,check=True,timeout=100)
+            assert journal.execution_status()['attempt'] == 2
+            assert journal.source_binding(identity(['training-deployment','action-1'])) == pin
+            original_launch, = (tmp_path/'run'/'training').glob('*/launch.json')
+            assert original_launch.parent.name == started.read_text()
+            artifacts = list((Path(binding.model_store_uri)/'objects').glob('*/*'))
+            assert len(artifacts) == 3
+            assert sorted(lance.dataset(str(tmp_path/'scored.lance')).to_table().to_pylist(),
+                          key=lambda row:row['step']) == [{'x':7,'step':1},{'x':7,'step':3}]
+            assert _project_settings(original)['files'] == 3
+        finally:
+            proceed.touch()
+            if driver.poll() is None:
+                driver.kill()
+
+
+def test_prepared_action_without_original_deployment_must_match_current_quotas(tmp_path):
+    request, original = setup_request(tmp_path)
+    current = replace(original,max_instances=original.max_instances+1)
+    provider = Provider()
+    original_deploy = TrainingDeployment('project',original,provider)
+    current_deploy = TrainingDeployment('project',current,provider)
+    current_deploy.apply_project_quotas()
+    directory = tmp_path/'run'
+    with pytest.raises(RuntimeError,match='before fit admission'):
+        with RunContext.start(directory) as run:
+            ref = run.ref
+            run.journal.bind_execution_action(run.fence,'action-1',{'kind':'count'})
+            raise RuntimeError('before fit admission')
+    with RunContext.resume(ref) as run:
+        action = RunAction(run,'action-1',{'kind':'count'})
+        key = identity(['training-deployment','action-1'])
+        for candidate in (original_deploy, TrainingDeployment('project',replace(current,max_files=999),provider)):
+            with pytest.raises(FitConflict,match='first fit admission|First fit admission'):
+                bind_action_deployment(action,candidate.project_id,candidate.binding)
+            assert run.journal.source_binding(key) is None
+        bind_action_deployment(action,current_deploy.project_id,current_deploy.binding)
+        with pytest.raises(RecoveryContractError,match='binding differs'):
+            bind_action_deployment(action,'project',replace(current,max_files=999))
+        assert _project_settings(original)['files']==current.max_files
+        action.complete({})
+
+
+def _score_after_reference_quota_failure(tmp_path):
+    import lance
+    import pyarrow as pa
+    from demiflow import data
+    from test_training_dataset_action import recipe
+    _, original = setup_request(tmp_path)
+    original = replace(original,max_references=1)
+    provider = Provider()
+    source = str(tmp_path/'training.lance')
+    scores = str(tmp_path/'scores.lance')
+    lance.write_dataset(pa.table({'x':[1]}),source)
+    class DeploymentWithHooks(TrainingDeployment):
+        def bind_action(self, action):
+            raise AssertionError('The driver must own deployment binding')
+
+        def apply_project_quotas(self):
+            raise AssertionError('The driver must own first fit admission')
+
+    def score(directory, binding):
+        with RunContext.start(directory,training=DeploymentWithHooks('project',binding,provider)):
+            fitted = data.read_lance(source,version=1).fit(recipe=recipe())
+            fitted.checkpoints.select(steps=[1]).predict(on=data.from_items([{'x':2}])).write_lance(
+                scores,mode='create')
+    with pytest.raises(FitConflict,match='reference quota'):
+        score(tmp_path/'limited',original)
+    (request, _), = provider.jobs.values()
+    produced = TrainingIndex(original,readonly=True).read(request.instance_id)
+    assert produced['state'] == 'published' and not Path(scores).exists()
+    score(tmp_path/'expanded',replace(original,max_references=2))
+    assert lance.dataset(scores).to_table().to_pylist() == [{'x':2,'step':1}]
+    assert len(provider.sends) == 1
+    assert TrainingIndex(original,readonly=True).read(request.instance_id) == produced
+
+
+def test_new_scoring_action_reuses_published_model_after_reference_quota_failure(tmp_path):
+    import subprocess
+    import sys
+    # A failed retention check must return to the caller before an unstarted publisher can hang cleanup.
+    command = [sys.executable, '-B', '-c',
+        'import sys; from pathlib import Path; from test_training_domain import _score_after_reference_quota_failure; '
+        '_score_after_reference_quota_failure(Path(sys.argv[1]))', str(tmp_path)]
+    subprocess.run(command, env=dict(os.environ, PYTHONPATH=os.pathsep.join(p for p in sys.path if p)),
+                   check=True, timeout=90)

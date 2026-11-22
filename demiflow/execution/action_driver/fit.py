@@ -6,7 +6,7 @@ from ..contracts.dataflow_errors import DataflowError
 from ..contracts.training import FitRequest
 from ..recovery_contract import identity
 from ..seal.plan import load_sealed_dataflow
-from ..training.deployment import resolve_training_deployment
+from ..training.deployment import bind_action_deployment, resolve_training_deployment
 from ..training.inputs import fix_input
 from ..training.runtime import FitRuntime, confirm_table_consumption, consumed_model_digest, read_consumed_fit, read_parent
 
@@ -24,9 +24,7 @@ class FitDependencies:
         self.sources = set(graph.sources)
         self.controls, self.results, self.bindings = {}, {}, {}
         self.fixed = {}
-        self.action.context.journal.bind_source(self.action.context.fence,
-            identity(['training-deployment', self.action.action_id]),
-            {'project': self.deployment.project_id, 'binding_digest': identity(self.deployment.binding.to_dict())})
+        bind_action_deployment(action, self.deployment.project_id, self.deployment.binding)
 
     def _control(self, job, parents, image):
         conf = job.configuration
