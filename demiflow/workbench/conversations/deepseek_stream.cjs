@@ -100,7 +100,7 @@ exports.apply = function(ctx, config) {
     }
   }
   function schedule() {
-    if(!timer) timer=setTimeout(()=>{try{flush();}catch{fail();}},150);
+    if(!timer) timer=setTimeout(()=>{try{flush();}catch{fail();}},40);
   }
   function complete(index,block,status='complete') {
     write({phase:'completed',attemptId:current.id,blockIndex:index,channel:block.channel,

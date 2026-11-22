@@ -55,6 +55,7 @@ class Service:
             reject('Development state is outside the declared disk device partition')
         self.store = Store(self.root, self.deployment.limits, initialize=True)
         self.lock, self.workers, self.closed = threading.RLock(), {}, False
+        self.wakeup = threading.Condition()
         self.worker_targets = {}
         self.coding_catalog = None
         self.policy_hash, self.config_path = self.seal_policy(self.deployment)
@@ -190,6 +191,22 @@ class Service:
                                              operation=operation)
             if not fresh: return self.store.public_turn(value)
             return self._launch_provider(value, session)
+
+    def notify(self):
+        wakeup = getattr(self, 'wakeup', None)
+        if wakeup is not None:
+            with wakeup:
+                wakeup.notify_all()
+
+    def wait_update(self, timeout):
+        if timeout <= 0:
+            return
+        wakeup = getattr(self, 'wakeup', None)
+        if wakeup is not None:
+            with wakeup:
+                wakeup.wait(timeout)
+        else:
+            time.sleep(timeout)
 
     def _unit_path(self, turn):
         return self.root / turn['session'] / (turn['id'] + '.unit')

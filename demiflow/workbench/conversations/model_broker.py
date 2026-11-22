@@ -185,7 +185,7 @@ def validate_responses(value, config):
 
 
 class ModelBroker:
-    def __init__(self, deployment, turn, session, home):
+    def __init__(self, deployment, turn, session, home, *, defer_handshake=False):
         self.name = session['provider']; self.config = deployment.providers[self.name]
         if not capabilities(self.name, self.config)['available']:
             reject('Configured provider has no qualified fixed model channel')
@@ -195,6 +195,7 @@ class ModelBroker:
         self.input_bytes = self.output_bytes = 0; self.failure = None
         self.maximum = deployment.limits.output_bytes
         self.process = self.transport = self.listener = self.thread = self.client = self.quota = self.http_process = None
+        self._init_thread = None; self._ready = threading.Event(); self._init_error = None
         self.output_reserved = 0
         self.socket_dir = Path(tempfile.mkdtemp(prefix='df-model-'))
         self.socket_path = self.socket_dir / 'channel'
@@ -212,11 +213,13 @@ class ModelBroker:
                     cwd=self.home, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     close_fds=True, start_new_session=True)
                 self.transport = Transport(self.process, deployment.limits)
-                reply = self._rpc('initialize', {}, lambda _: None, timeout=30)
-                expected = dict(protocol='demiflow-model-channel-v1',
-                    provider=self.config.get('model_provider', 'deepseek-official'), model=self.config['model'])
-                if reply != expected: reject('Native model broker handshake differs')
                 self.child_config['_boundary'] = dict(token=self.token)
+                if defer_handshake:
+                    self._init_thread = threading.Thread(target=self._run_handshake, name='development-model-init', daemon=True)
+                    self._init_thread.start()
+                else:
+                    self._finish_deepseek_handshake()
+                    self._ready.set()
             else:
                 url = urllib.parse.urlsplit(self.config['base_url'])
                 if (url.username or url.password or url.query or url.fragment or not url.hostname or
@@ -224,12 +227,33 @@ class ModelBroker:
                     reject('Fixed model endpoint must use HTTPS or explicit local test transport')
                 if not os.environ.get(self.config['credential_env']): reject('Configured model authentication is unavailable')
                 self.child_config['_boundary'] = dict(token=self.token)
+                self._ready.set()
             self.listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self.listener.bind(str(self.socket_path)); self.listener.listen(4); self.listener.settimeout(.2)
             self.thread = threading.Thread(target=self._serve, name='development-model-channel', daemon=True)
             self.thread.start()
         except BaseException:
             self.close(); raise
+
+    def _finish_deepseek_handshake(self):
+        reply = self._rpc('initialize', {}, lambda _: None, timeout=30)
+        expected = dict(protocol='demiflow-model-channel-v1',
+            provider=self.config.get('model_provider', 'deepseek-official'), model=self.config['model'])
+        if reply != expected: reject('Native model broker handshake differs')
+
+    def _run_handshake(self):
+        try:
+            self._finish_deepseek_handshake()
+        except BaseException as exc:
+            self._init_error = exc
+        finally:
+            self._ready.set()
+
+    def wait_ready(self, timeout=35):
+        if not self._ready.wait(timeout):
+            raise TimeoutError('Native model broker handshake timed out')
+        if self._init_error is not None:
+            raise self._init_error
 
     def _check(self):
         if self.closed.is_set() or time.time() >= self.deadline:
@@ -280,6 +304,7 @@ class ModelBroker:
         self._check(); client.sendall(raw)
 
     def _handle_json(self, client):
+        self.wait_ready()
         request = self._receive(client)
         if (set(request) != {'token', 'method', 'options'} or type(request['token']) is not str
                 or not hmac.compare_digest(request['token'], self.token)):
@@ -406,11 +431,13 @@ class ModelBroker:
             try: self.process.wait(timeout=3)
             except subprocess.TimeoutExpired: self.process.kill(); self.process.wait(timeout=2)
         if self.thread and self.thread is not threading.current_thread(): self.thread.join(timeout=3)
+        if self._init_thread and self._init_thread is not threading.current_thread(): self._init_thread.join(timeout=3)
         if self.thread and self.thread.is_alive(): raise TimeoutError('Model channel has not drained')
+        if self._init_thread and self._init_thread.is_alive(): raise TimeoutError('Model handshake has not drained')
         if self.transport: self.transport.close()
         if self.quota and (not self.thread or not self.thread.is_alive()): self.quota.close()
         if not self.thread or not self.thread.is_alive(): shutil.rmtree(self.socket_dir, ignore_errors=True)
 
 
-def start_model_broker(deployment, turn, session, home):
-    return ModelBroker(deployment, turn, session, home)
+def start_model_broker(deployment, turn, session, home, *, defer_handshake=False):
+    return ModelBroker(deployment, turn, session, home, defer_handshake=defer_handshake)

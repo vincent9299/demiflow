@@ -67,7 +67,8 @@
     const dock=el('div','dc-dock');dock.setAttribute('aria-label','会话统计');dock.hidden=true;
     tools.append(add,access);trailing.append(model,send,stop);row.append(tools,trailing);card.append(input,row,providers,file);form.append(notice,card,dock);
 
-    function resize(){if(state.disposed)return;input.style.height='auto';input.style.height=Math.min(Math.max(input.scrollHeight,parseFloat(getComputedStyle(input).minHeight)||36),220)+'px';}
+    let cachedMinHeight=null,statsFingerprint='';
+    function resize(){if(state.disposed)return;if(cachedMinHeight===null)cachedMinHeight=parseFloat(getComputedStyle(input).minHeight)||36;input.style.height='auto';input.style.height=Math.min(Math.max(input.scrollHeight,cachedMinHeight),220)+'px';}
     function inform(message,error=false){notice.textContent=message;notice.hidden=!message;notice.setAttribute('role',error?'alert':'status');notice.classList.toggle('dc-notice-error',error);}
     function place(menu,trigger){
       if(menu.hidden)return;
@@ -172,8 +173,11 @@
       }
     }
     function renderStats(){
-      dock.replaceChildren();const stats=state.stats;
-      if(!stats||(stats.session_id&&stats.session_id!==state.session?.id)){dock.hidden=true;return;}
+      const stats=state.stats,active=(!stats||(stats.session_id&&stats.session_id!==state.session?.id))?null:stats;
+      const fingerprint=active?JSON.stringify(active):'';
+      if(fingerprint===statsFingerprint)return;statsFingerprint=fingerprint;
+      dock.replaceChildren();
+      if(!active){dock.hidden=true;return;}
       if(stats.coverage?.state==='partial'){
         dock.hidden=false;dock.append(el('span','dc-stat-pending','正在读取会话统计…'));dock.title='统计尚未覆盖全部记录，不将未知值当作 0。';return;
       }

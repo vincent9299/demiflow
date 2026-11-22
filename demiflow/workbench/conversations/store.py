@@ -397,6 +397,17 @@ class Store:
             t = db.execute('SELECT session,epoch FROM turns WHERE id=?', (tid,)).fetchone()
             return self._event(db, t['session'], tid, t['epoch'], kind, data, control=control)
 
+    def events_batch(self, tid, items):
+        """Persist a bounded batch of events for one turn in a single transaction."""
+        if not items:
+            return []
+        with self.connect(write=True) as db:
+            t = db.execute('SELECT session,epoch FROM turns WHERE id=?', (tid,)).fetchone()
+            if t is None:
+                reject('Unknown turn', 'not_found')
+            sid, epoch = t['session'], t['epoch']
+            return [self._event(db, sid, tid, epoch, kind, data, control=control) for kind, data, control in items]
+
     def update(self, tid, **changes):
         with self.connect(write=True) as db:
             self._update(db, tid, changes)
@@ -483,6 +494,144 @@ class Store:
                 if used + row['size'] > 256 * 1024: break
                 rows.append(json.loads(row['body'])); used += row['size']
             return dict(events=rows, next_sequence=rows[-1]['sequence'] if rows else after, last_sequence=session['sequence'])
+
+    def replay(self, workspace, sid, *, limit=200, max_turns=12):
+        """Return a bounded, display-compacted tail of recent turns without altering history."""
+        integer(limit, 1, 200); integer(max_turns, 1, 32)
+        with self.connect() as db:
+            session = self._session(db, workspace, sid)
+            last_seq = session['sequence']
+            archived = db.execute("""SELECT e.sequence FROM events e JOIN turns t ON t.id=e.turn
+                WHERE e.session=? AND t.operation='compact' AND t.state='completed' AND t.cleanup='complete'
+                  AND json_extract(e.body,'$.type')='compaction.completed'
+                  AND json_extract(e.body,'$.data.status')='compacted'
+                ORDER BY e.sequence DESC LIMIT 1""", (sid,)).fetchone()
+            archive_seq = archived['sequence'] if archived else 0
+            turns = db.execute('SELECT id,cleanup FROM turns WHERE session=? ORDER BY created DESC,id DESC LIMIT ?',
+                               (sid, max_turns + 1)).fetchall()
+            older_turns = len(turns) > max_turns
+            selected = turns[:max_turns]
+            if not selected or last_seq == 0:
+                return dict(events=[], first_sequence=last_seq, next_sequence=last_seq,
+                            last_sequence=last_seq, has_earlier=bool(archive_seq > 0))
+            active_turns = {row['id'] for row in selected if row['cleanup'] != 'complete'}
+            oldest_seq_row = db.execute('SELECT min(sequence) FROM events WHERE turn=?', (selected[-1]['id'],)).fetchone()
+            turn_start = oldest_seq_row[0] if oldest_seq_row and oldest_seq_row[0] is not None else 1
+            start_after = max(archive_seq - 1 if archive_seq > 0 else 0, turn_start - 1, max(0, last_seq - 4096))
+            truncated_scan = start_after > 0
+            raw_rows = [(row['sequence'], row['size'], json.loads(row['body']))
+                        for row in db.execute('SELECT sequence,size,body FROM events WHERE session=? AND sequence>? ORDER BY sequence LIMIT 4096',
+                                              (sid, start_after))]
+        # Compact display-redundant events in completed turns only; keep active turns verbatim.
+        # 1) Identify message spans terminated by message.completed without intervening tool events.
+        completed_msg_final = {}
+        span_id = {}
+        tool_first = {}
+        tool_last = {}
+        tool_has_delta = set()
+        last_turn_state = {}
+        span_counter = 0
+        for seq, _, ev in raw_rows:
+            tid = ev.get('turn_id')
+            if tid in active_turns:
+                continue
+            kind = ev.get('type')
+            data = ev.get('data') or {}
+            epoch = ev.get('provider_epoch') or ''
+            if kind in ('message.delta', 'message.completed'):
+                mkey = (tid, epoch, data.get('channel') or 'answer', data.get('item_id'))
+                sid_span = span_id.setdefault(mkey, span_counter)
+                if kind == 'message.completed':
+                    completed_msg_final[(mkey, sid_span)] = (seq, bool(data.get('paged')))
+            else:
+                if kind.startswith('item.') or kind == 'output.delta':
+                    span_counter += 1
+                    span_id.clear()
+                if kind == 'item.updated':
+                    tkey = (tid, epoch, data.get('id'))
+                    tool_first.setdefault(tkey, seq)
+                    tool_last[tkey] = seq
+                elif kind == 'output.delta':
+                    tool_has_delta.add((tid, epoch, data.get('item_id')))
+                elif kind == 'turn.state':
+                    last_turn_state[tid] = seq
+
+        compacted = []
+        span_id.clear()
+        span_counter = 0
+        for seq, size, ev in raw_rows:
+            tid = ev.get('turn_id')
+            if tid in active_turns:
+                compacted.append((seq, size, ev))
+                continue
+            kind = ev.get('type')
+            data = ev.get('data') or {}
+            epoch = ev.get('provider_epoch') or ''
+            if kind in ('usage.observed', 'context.bound', 'provider.bound'):
+                continue
+            if kind in ('message.delta', 'message.completed'):
+                mkey = (tid, epoch, data.get('channel') or 'answer', data.get('item_id'))
+                sid_span = span_id.setdefault(mkey, span_counter)
+                final_info = completed_msg_final.get((mkey, sid_span))
+                if final_info is not None:
+                    final_seq, is_paged = final_info
+                    if kind == 'message.delta':
+                        continue
+                    if seq != final_seq and not is_paged:
+                        continue
+                compacted.append((seq, size, ev))
+                continue
+            if kind.startswith('item.') or kind == 'output.delta':
+                span_counter += 1
+                span_id.clear()
+            if kind == 'item.updated':
+                tkey = (tid, epoch, data.get('id'))
+                if tkey in tool_has_delta:
+                    if seq != tool_first[tkey] and seq != tool_last[tkey]:
+                        continue
+                elif seq != tool_last[tkey]:
+                    continue
+            elif kind == 'turn.state' and seq != last_turn_state.get(tid):
+                continue
+            compacted.append((seq, size, ev))
+
+        # Fit within limit and 256 KiB. If over budget, first drop non-latest completed
+        # turns' process/tool rows while preserving each turn's user prompt & final answer.
+        newest_tid = selected[0]['id']
+        budget_bytes = 256 * 1024
+        if len(compacted) > limit or sum(s for _, s, _ in compacted) > budget_bytes:
+            final_answer_seq = {}
+            for seq, _, ev in compacted:
+                tid = ev.get('turn_id')
+                data = ev.get('data') or {}
+                if ev.get('type') in ('message.completed', 'message.delta') and data.get('channel') not in ('process', 'summary'):
+                    final_answer_seq[tid] = seq
+            pruned = []
+            for entry in compacted:
+                seq, _, ev = entry
+                tid = ev.get('turn_id')
+                kind = ev.get('type')
+                data = ev.get('data') or {}
+                if tid != newest_tid and tid not in active_turns:
+                    if kind in ('item.updated', 'item.started', 'output.delta'):
+                        continue
+                    if kind in ('message.delta', 'message.completed') and (
+                            data.get('channel') in ('process', 'summary') or seq != final_answer_seq.get(tid)):
+                        continue
+                pruned.append(entry)
+            compacted = pruned
+
+        kept, used, omitted = [], 0, False
+        for seq, size, ev in reversed(compacted):
+            if len(kept) >= limit or used + size > budget_bytes:
+                omitted = True
+                break
+            kept.append(ev); used += size
+        kept.reverse()
+        first_seq = kept[0]['sequence'] if kept else last_seq
+        has_earlier = bool(older_turns or truncated_scan or omitted or archive_seq > 0)
+        return dict(events=kept, first_sequence=first_seq, next_sequence=last_seq,
+                    last_sequence=last_seq, has_earlier=has_earlier)
 
     def cancel(self, workspace, sid, tid):
         with self.connect(write=True) as db:

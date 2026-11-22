@@ -411,7 +411,7 @@
   function markdownResult(reason, tree) {
     const run = markdownRun; markdownRun = null; clearTimeout(markdownTimer);
     if (run && !run.view.disposed && run.version === run.view.version) run.view.deliver(reason, tree);
-    if (!markdownQueue.size) markdownIdle = setTimeout(stopMarkdownWorker, 1000);
+    if (!markdownQueue.size) markdownIdle = setTimeout(stopMarkdownWorker, 15000);
     else pumpMarkdown();
   }
   function markdownFailure(reason) {

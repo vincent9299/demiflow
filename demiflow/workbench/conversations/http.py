@@ -17,7 +17,8 @@ GET_FIELDS = {
     'dev-session': ({'session_id'}, set()),
     'dev-stats': ({'session_id'}, set()),
     'dev-context': ({'session_id', 'turn_id'}, set()),
-    'dev-events': ({'session_id'}, {'after_sequence', 'limit', 'wait_ms'}),
+    'dev-events': ({'session_id'}, {'after_sequence', 'limit', 'wait_ms', 'include_session'}),
+    'dev-replay': ({'session_id'}, {'limit', 'max_turns'}),
     'dev-output': ({'session_id', 'item_id'}, {'after_sequence', 'turn_id', 'provider_epoch', 'from_sequence', 'through_sequence'}),
 }
 POST_FIELDS = {
@@ -38,9 +39,11 @@ def disabled():
 
 
 def get(server, workspace, root, name, query, *, consumer_closed=None):
-    for key in ('offset', 'limit', 'after_sequence', 'wait_ms', 'from_sequence', 'through_sequence'):
+    for key in ('offset', 'limit', 'after_sequence', 'wait_ms', 'from_sequence', 'through_sequence', 'max_turns'):
         if key in query and (type(query[key]) is not str or not re.fullmatch(r'[0-9]{1,16}', query[key])):
             reject('Invalid integer query field: ' + key, 'invalid_request')
+    if 'include_session' in query and query['include_session'] not in {'0', '1'}:
+        reject('include_session must be 0 or 1', 'invalid_request')
     service = server.development
     if name == 'dev-capabilities':
         if service is not None and getattr(service, 'remote', False):
@@ -70,6 +73,9 @@ def get(server, workspace, root, name, query, *, consumer_closed=None):
             value.pop('binding', None)
             value['delivery'] = turn['delivery']
         return dict(context=value)
+    if name == 'dev-replay':
+        return service.store.replay(workspace, sid, limit=int(query.get('limit', 100)),
+                                    max_turns=int(query.get('max_turns', 12)))
     after = int(query.get('after_sequence', 0))
     if name == 'dev-output':
         selected_turn=query.get('turn_id')
@@ -109,13 +115,18 @@ def get(server, workspace, root, name, query, *, consumer_closed=None):
         return dict(chunks=chunks, next_sequence=min(page['next_sequence'],last) if last is not None else page['next_sequence'],
                     last_sequence=last if last is not None else page['last_sequence'])
     wait_ms = integer(int(query.get('wait_ms', 0)), 0, 1500)
+    include_session = query.get('include_session') == '1'
     if not server.development_readers.acquire(blocking=False): reject('Development subscriptions are full', 'busy')
     try:
         until = time.monotonic() + wait_ms / 1000
         while True:
             result = service.store.events(workspace, sid, after, int(query.get('limit', 50)))
-            if result['events'] or time.monotonic() >= until: return result
-            time.sleep(.1)
+            now = time.monotonic()
+            if result['events'] or now >= until or (consumer_closed and consumer_closed()):
+                if include_session:
+                    result['session'] = service.show(workspace, sid)
+                return result
+            service.wait_update(min(.025, until - now))
     finally:
         server.development_readers.release()
 
@@ -132,4 +143,6 @@ def post(server, workspace, root, name, request, *, consumer_closed=None):
     actions = {'dev-session-create': service.create_project, 'dev-turn-start': service.start_project, 'dev-compact': service.compact, 'dev-input': service.input, 'dev-notebook-claim': service.claim_cell_command,
                'dev-cancel': service.cancel, 'dev-recover': service.recover}
     with service.lock:
-        return actions[name](workspace, root, **request)
+        result = actions[name](workspace, root, **request)
+    service.notify()
+    return result

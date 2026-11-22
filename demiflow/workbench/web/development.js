@@ -200,9 +200,11 @@ SOFTWARE.
   };
   const el=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;};
   const bytes=s=>new TextEncoder().encode(s).byteLength;
-  const drafts=new Map(),draftRevisions=new Map(),active=new Set();let draftSerial=0;
+  const drafts=new Map(),draftRevisions=new Map(),active=new Set();let draftSerial=0,draftTimer=null;
   try { const saved=sessionStorage.getItem('forge-development-drafts'); if(saved&&bytes(saved)<=2*1024*1024){const entries=JSON.parse(saved);if(Array.isArray(entries)&&entries.length<=64)for(const pair of entries)if(Array.isArray(pair)&&pair.length===2&&typeof pair[0]==='string'&&typeof pair[1]==='string'&&bytes(pair[1])<=32768)drafts.set(pair[0],pair[1]);}}catch{}
-  const saveDrafts=()=>{try{sessionStorage.setItem('forge-development-drafts',JSON.stringify([...drafts]));}catch{}};
+  const flushDrafts=()=>{if(draftTimer){clearTimeout(draftTimer);draftTimer=null;}try{sessionStorage.setItem('forge-development-drafts',JSON.stringify([...drafts]));}catch{}};
+  const saveDrafts=(immediate=false)=>{if(immediate){flushDrafts();return;}if(draftTimer)clearTimeout(draftTimer);draftTimer=setTimeout(flushDrafts,250);};
+  window.addEventListener('pagehide',flushDrafts);
   const labels={preparing:'准备开发依据',starting:'正在连接',running:'正在开发',waiting_input:'等待回答',waiting_approval:'等待许可',stopping:'已请求停止，正在清理',completed:'本轮已完成',failed:'本轮失败',interrupted:'连接中断',cancelled:'已停止'};
   const uid=()=>crypto.randomUUID();
   const iconButton=(label,path,viewBox='0 0 24 24',filled=false)=>{const b=el('button',undefined,'development-icon');b.type='button';b.title=label;b.setAttribute('aria-label',label);const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',viewBox);svg.setAttribute('aria-hidden','true');if(filled)svg.classList.add('development-filled-icon');const p=document.createElementNS(svg.namespaceURI,typeof path==='string'?'path':'rect');for(const [key,value]of Object.entries(typeof path==='string'?{d:path}:path))p.setAttribute(key,value);svg.append(p);b.append(svg);return b;};
@@ -210,7 +212,7 @@ SOFTWARE.
     const state={disposed:false,navigationEpoch:0,initializing:true,timer:null,session:null,sequence:0,items:new Map(),pending:new Set(),submission:null,dialogs:new Set(),stats:null,statsAt:0,newDraft:view?.kind==='development_new',listOffset:0,listAt:0,writerBusy:false,activeSession:null};
     const layout=el('section',undefined,'development-layout'),body=el('div',undefined,'development-conversation');
     layout.append(body);main.append(layout);main.classList.add('development-main');active.add(state);
-    const handle={get sessionId(){return state.session?.id;},dispose(){if(state.disposed)return;state.disposed=true;clearTimeout(state.timer);state.observer?.disconnect();state.releaseViewport?.();state.navigationResize?.dispose();state.rail?.dispose();state.files?.dispose();state.composer?.dispose();state.chat?.dispose();active.delete(state);main.classList.remove('development-main');disposeReaders(layout);for(const dialog of state.dialogs)dialog.remove();state.dialogs.clear();}};register(handle);
+    const handle={get sessionId(){return state.session?.id;},dispose(){if(state.disposed)return;flushDrafts();state.disposed=true;clearTimeout(state.timer);state.observer?.disconnect();state.releaseViewport?.();state.navigationResize?.dispose();state.rail?.dispose();state.files?.dispose();state.composer?.dispose();state.chat?.dispose();active.delete(state);main.classList.remove('development-main');disposeReaders(layout);for(const dialog of state.dialogs)dialog.remove();state.dialogs.clear();}};register(handle);
     const sidebar=el('aside',undefined,'development-session-sidebar'),sideHeading=el('div',undefined,'development-session-heading');
     const createNew=el('button',undefined,'development-new-conversation');createNew.type='button';createNew.append(el('span','＋'),el('span','新会话'));createNew.disabled=true;
     const navigation=ForgeNavigation.header({title:'会话',searchLabel:'搜索会话',placeholder:'筛选当前页会话',onSearch:()=>{if(!state.initializing)renderConversations();}});
@@ -234,6 +236,10 @@ SOFTWARE.
     const running=value=>!!(value?.turn&&value.turn.cleanup!=='complete');
     const sessionReadonly=value=>!!value&&(value.writable===false||value.writable!==true&&(capabilities.multiple_conversations===true||!state.createdHere&&value.id!==state.primaryId));
     function renderConversations(){
+      const term=navigation.search.value.trim().toLocaleLowerCase();
+      const fingerprint=JSON.stringify([capabilities.multiple_conversations,capabilities.enabled,capabilities.read_only,state.newDraft,state.session?.id,state.session?.title,state.session?.revision,state.session?.turn?.id,state.session?.turn?.state,state.session?.turn?.cleanup,state.historyOnly,state.listOffset,state.nextListOffset,!!state.listing,term,(state.sessionRows||[]).map(s=>[s.id,s.title,s.revision,s.writable,s.turn?.id,s.turn?.state,s.turn?.cleanup])]);
+      if(fingerprint===state.conversationsFingerprint)return;
+      state.conversationsFingerprint=fingerprint;
       sessionList.replaceChildren();sessionPages.replaceChildren();
       createNew.disabled=capabilities.multiple_conversations!==true||!capabilities.enabled||capabilities.read_only===true||typeof openNew!=='function';
       createNew.title=capabilities.multiple_conversations===true?'新建一个空白会话':'当前开发服务仅支持一个项目会话';
@@ -246,14 +252,14 @@ SOFTWARE.
         const progress=running(row)&&turn.cleanup==='complete'?'处理中':turn?(labels[turn.state]||turn.state):row.revision?'已有记录':'尚无消息';
         const stateText=(readonly?'只读历史 · ':'')+progress;
         button.append(el('span',title,'development-session-title'),el('span',stateText,'development-session-state'));button.title=title+' · '+stateText;
-        button.hidden=!(title+' '+stateText).toLocaleLowerCase().includes(navigation.search.value.trim().toLocaleLowerCase());
+        button.hidden=!(title+' '+stateText).toLocaleLowerCase().includes(term);
         button.onclick=()=>{if(row.id!==state.session?.id||state.historyOnly)openSession(row.id);};sessionList.append(button);
       }
       const pageButton=(label,offset)=>{const button=el('button',label);button.type='button';button.disabled=!!state.listing;button.onclick=()=>{state.listOffset=offset;loadConversations(true).catch(e=>error(body,e));};sessionPages.append(button);};
       if(state.listOffset>0)pageButton('较新的会话',Math.max(0,state.listOffset-20));
       if(state.nextListOffset!==null&&state.nextListOffset!==undefined)pageButton('更早的会话',state.nextListOffset);
       sessionNote.textContent=!capabilities.enabled?ForgeDevelopmentComposer.connectionStatus(capabilities).label:capabilities.multiple_conversations!==true?'当前服务仅支持一个项目会话':!(state.sessionRows||[]).length?'还没有会话，从新会话开始。':'';
-      if(navigation.search.value.trim()&&!sessionList.querySelector('button:not([hidden])'))sessionNote.textContent='当前页没有匹配的会话';
+      if(term&&!sessionList.querySelector('button:not([hidden])'))sessionNote.textContent='当前页没有匹配的会话';
     }
     async function loadConversations(force=false){
       if(state.disposed||!capabilities.enabled)return;
@@ -310,7 +316,7 @@ SOFTWARE.
     state.chat=chat;state.items=chat.items;
     let draftKey=workspaceId+':new';input.value='';
     const resizeInput=()=>composer.resize();
-    input.oninput=()=>{resizeInput();if(bytes(input.value)>32768){input.setCustomValidity('要求不能超过 32 KiB');return;}input.setCustomValidity('');if(!drafts.has(draftKey)&&drafts.size>=64){input.setCustomValidity('已保存 64 份草稿，请先清空不再需要的草稿。');return;}if(input.value){drafts.set(draftKey,input.value);draftRevisions.set(draftKey,++draftSerial);}else{drafts.delete(draftKey);draftRevisions.delete(draftKey);}saveDrafts();availability();};
+    input.oninput=()=>{if(bytes(input.value)>32768){input.setCustomValidity('要求不能超过 32 KiB');return;}input.setCustomValidity('');if(!drafts.has(draftKey)&&drafts.size>=64){input.setCustomValidity('已保存 64 份草稿，请先清空不再需要的草稿。');return;}if(input.value){drafts.set(draftKey,input.value);draftRevisions.set(draftKey,++draftSerial);}else{drafts.delete(draftKey);draftRevisions.delete(draftKey);}saveDrafts();availability();};
     let composing=false,composingUntil=0;
     input.addEventListener('compositionstart',()=>{composing=true;});input.addEventListener('compositionend',()=>{composing=false;composingUntil=Date.now()+10;});
     input.onkeydown=e=>{if(composing||Date.now()<composingUntil||e.isComposing||e.keyCode===229)return;if(e.key==='Enter'&&!e.shiftKey&&!e.altKey){e.preventDefault();if(!e.repeat)form.requestSubmit();}if(e.key==='Escape'&&!stop.disabled)stop.click();};
@@ -361,6 +367,13 @@ SOFTWARE.
       async function respond(answer){submit.disabled=deny.disabled=true;try{await api('dev-input',{}, {session_id:state.session.id,turn_id:state.session.turn.id,pending_request_id:request.id,expected_digest:request.digest,answer});card.replaceChildren(el('p','回答已保存，等待代理接收。'));}catch(e){error(card,e);submit.disabled=!r.allow_once;deny.disabled=false;}}
       submit.onclick=()=>respond(r.method.endsWith('requestUserInput')?Object.fromEntries([...fields].map(([k,v])=>[k,v.value])):'allow_once');deny.onclick=()=>respond('deny');card.append(submit);if(!r.method.endsWith('requestUserInput'))card.append(deny);pendingHost.append(card);
     }
+    function applySession(current){
+      state.session=current;chat.updateSession(current);renderConversations();availability();
+      const revisionKey=current.revision+':'+current.turn?.cleanup;
+      if(state.railRevision!==revisionKey){state.railRevision=revisionKey;rail.load(api,current.id,capabilities.multiple_conversations).catch(()=>{state.railRevision=null;});}
+      if(capabilities.enabled&&!capabilities.read_only&&!sessionReadonly(current)&&!state.historyOnly)for(const request of current.pending||[])pending(request);
+      for(const node of pendingHost.children)if(state.historyOnly||capabilities.read_only||sessionReadonly(current)||!(current.pending||[]).some(p=>p.id===node.dataset.request))node.remove();
+    }
     function refresh(){
       if(state.disposed)return Promise.resolve();
       if(state.refreshing)return state.refreshing;
@@ -376,14 +389,26 @@ SOFTWARE.
           }
           await loadConversations();if(state.disposed)return;
           if(!state.session){availability();return;}
-          const current=await api('dev-session',{session_id:state.session.id});if(state.disposed)return;state.session=current;chat.updateSession(current);renderConversations();availability();const revisionKey=current.revision+':'+current.turn?.cleanup;if(state.railRevision!==revisionKey){state.railRevision=revisionKey;rail.load(api,current.id,capabilities.multiple_conversations).catch(()=>{state.railRevision=null;});}
-          if(capabilities.enabled&&!capabilities.read_only&&!sessionReadonly(current)&&!state.historyOnly)for(const request of current.pending||[])pending(request);
-          for(const node of pendingHost.children)if(state.historyOnly||capabilities.read_only||sessionReadonly(current)||!(current.pending||[]).some(p=>p.id===node.dataset.request))node.remove();
-          if(!state.historyOnly){
+          let current=state.session;
+          if(!state.historyOnly&&capabilities.events_include_session===true){
             const busy=current.turn&&current.turn.cleanup!=='complete';
-            const epoch=state.feedEpoch;const page=await api('dev-events',{session_id:current.id,after_sequence:state.sequence,limit:50,wait_ms:busy?1500:0});if(state.disposed||epoch!==state.feedEpoch)return;
-            for(const event of page.events)project(event);state.sequence=page.next_sequence;chat.updateSession(current);
-            delay=state.sequence<page.last_sequence||busy?25:1500;
+            const epoch=state.feedEpoch;
+            const page=await api('dev-events',{session_id:current.id,after_sequence:state.sequence,limit:50,wait_ms:busy?1500:0,include_session:1});
+            if(state.disposed||epoch!==state.feedEpoch)return;
+            if(page.session){current=page.session;applySession(current);}
+            for(const event of page.events)project(event);
+            state.sequence=page.next_sequence;chat.updateSession(current);
+            const stillBusy=current.turn&&current.turn.cleanup!=='complete';
+            delay=state.sequence<page.last_sequence||stillBusy?25:1500;
+          }else{
+            current=await api('dev-session',{session_id:state.session.id});if(state.disposed)return;
+            applySession(current);
+            if(!state.historyOnly){
+              const busy=current.turn&&current.turn.cleanup!=='complete';
+              const epoch=state.feedEpoch;const page=await api('dev-events',{session_id:current.id,after_sequence:state.sequence,limit:50,wait_ms:busy?1500:0});if(state.disposed||epoch!==state.feedEpoch)return;
+              for(const event of page.events)project(event);state.sequence=page.next_sequence;chat.updateSession(current);
+              delay=state.sequence<page.last_sequence||busy?25:1500;
+            }
           }
           if(capabilities.conversation_stats&&Date.now()-state.statsAt>=3000){state.statsAt=Date.now();try{const stats=await api('dev-stats',{session_id:current.id});if(!state.disposed&&state.session?.id===stats.session_id){state.stats=stats;availability();}}catch{}}
           state.connectionError?.remove();state.connectionError=null;
@@ -395,12 +420,27 @@ SOFTWARE.
     form.onsubmit=async e=>{e.preventDefault();if(send.disabled||!input.reportValidity()||!input.value.trim())return;send.disabled=true;
       const message=input.value,sentDraftRevision=draftRevisions.get(draftKey)||0,submission=state.submission||{text:message,id:uid()};if(submission.text!==message){error(body,new Error('上次发送结果未确认，请先核对记录后再编辑要求。'));return;}state.submission=submission;
       state.sending=true;availability();
-      try{if(!state.session){state.creation||={request_id:uid(),provider_id:providers.value,...(state.newDraft?{new_conversation:true}:{})};state.session=await api('dev-session-create',{},state.creation);state.createdHere=true;}if(state.disposed)return;await api('dev-turn-start',{}, {session_id:state.session.id,submission_id:submission.id,expected_revision:state.session.revision,text:message});state.submission=null;if(drafts.get(draftKey)===message&&(draftRevisions.get(draftKey)||0)===sentDraftRevision){drafts.delete(draftKey);draftRevisions.delete(draftKey);saveDrafts();}if(state.disposed)return;input.value='';resizeInput();if(state.createdHere){await openSession(state.session.id);return;}state.listAt=0;clearTimeout(state.timer);await refresh();}
+      try{if(!state.session){state.creation||={request_id:uid(),provider_id:providers.value,...(state.newDraft?{new_conversation:true}:{})};state.session=await api('dev-session-create',{},state.creation);state.createdHere=true;}if(state.disposed)return;const started=await api('dev-turn-start',{}, {session_id:state.session.id,submission_id:submission.id,expected_revision:state.session.revision,text:message});state.submission=null;if(drafts.get(draftKey)===message&&(draftRevisions.get(draftKey)||0)===sentDraftRevision){drafts.delete(draftKey);draftRevisions.delete(draftKey);saveDrafts(true);}if(state.disposed)return;input.value='';resizeInput();if(state.createdHere){await openSession(state.session.id);return;}if(started&&state.session){state.session={...state.session,turn:started};}state.listAt=0;clearTimeout(state.timer);const inflight=!!state.refreshing;await refresh();if(inflight&&!state.disposed)await refresh();}
       catch(err){if(!state.disposed){error(body,err);await refresh().catch(()=>{});}}
       finally{state.sending=false;if(!state.disposed)availability();}
     };
     stop.onclick=async()=>{stop.disabled=true;try{await api('dev-cancel',{}, {session_id:state.session.id,turn_id:state.session.turn.id,request_id:uid()});status.textContent='已请求停止，等待所属工具清理。';}catch(e){error(body,e);stop.disabled=false;}};
     function clearTimeline(){state.feedEpoch=(state.feedEpoch||0)+1;chat.reset();newContent.hidden=true;}
+    async function loadLatestReplay(){
+      if(!state.session)return;
+      if(capabilities.history_replay_api===true&&state.session.sequence>0){
+        const epoch=state.feedEpoch||0;
+        const replay=await api('dev-replay',{session_id:state.session.id});
+        if(state.disposed||epoch!==(state.feedEpoch||0))return;
+        for(const event of replay.events)project(event);
+        state.sequence=replay.next_sequence;
+        state.windowStart=Math.max(0,(replay.first_sequence||1)-1);
+        earlier.hidden=!replay.has_earlier;
+      }else{
+        state.sequence=Math.max(0,state.session.sequence-50,(state.session.archive_sequence||0)-1);
+        state.windowStart=state.sequence;earlier.hidden=state.sequence===0;
+      }
+    }
     async function loadWindow(sid,after){
       const request=++state.navigationEpoch;
       const page=await api('dev-events',{session_id:sid,after_sequence:after,limit:50});
@@ -412,7 +452,7 @@ SOFTWARE.
       timeline.scrollTop=0;rail.update();
     }
     earlier.onclick=()=>loadWindow(state.displaySession||state.session.id,Math.max(0,(state.windowStart||0)-50)).catch(e=>error(body,e));
-    latest.onclick=async()=>{state.navigationEpoch++;follow.setFollowing(true);clearTimeline();state.historyOnly=false;state.displaySession=null;state.sequence=Math.max(0,state.session.sequence-50,(state.session.archive_sequence||0)-1);state.windowStart=state.sequence;earlier.hidden=state.sequence===0;latest.hidden=true;clearTimeout(state.timer);await refresh();};
+    latest.onclick=async()=>{state.navigationEpoch++;follow.setFollowing(true);clearTimeline();state.historyOnly=false;state.displaySession=null;latest.hidden=true;clearTimeout(state.timer);await loadLatestReplay();await refresh();};
     if(capabilities.enabled){
       const primary=(await api('dev-conversation')).session;if(state.disposed)return handle;state.primaryId=primary?.id||null;
       if(view?.session_id){
@@ -423,13 +463,14 @@ SOFTWARE.
       if(state.disposed)return handle;
       if(state.session){
         draftKey=workspaceId+':'+state.session.id;
-        providers.value=state.session.provider;state.sequence=Math.max(0,state.session.sequence-50,(state.session.archive_sequence||0)-1);state.windowStart=state.sequence;earlier.hidden=state.sequence===0;
+        providers.value=state.session.provider;
+        await loadLatestReplay();if(state.disposed)return handle;
       }
       const legacy=workspaceId+':project',defaultDraft=state.session?.id===state.primaryId&&!!state.session||!state.primaryId&&!state.newDraft&&!view?.session_id;
       if(defaultDraft&&drafts.has(legacy)){
         if(!drafts.has(draftKey))drafts.set(draftKey,drafts.get(legacy));
         if(drafts.get(draftKey)===drafts.get(legacy)){drafts.delete(legacy);draftRevisions.delete(legacy);}
-        saveDrafts();
+        saveDrafts(true);
       }
       input.value=drafts.get(draftKey)||'';await refresh();
     }
