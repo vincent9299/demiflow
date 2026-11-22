@@ -599,6 +599,9 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                 if current['delivery'] == 'sent': store.update(tid, delivery='unknown')
                 if current['dispatch'] == 'sent': store.update(tid, dispatch='unknown')
 
+            compaction_metadata = getattr(provider, 'compaction_result', None)
+            assurance = (getattr(process, 'execution_assurance', 'host_permissions')
+                         if process is not None else (effective_bound or {}).get('execution_assurance', 'not_started'))
             keep_warm = (
                 parent_sock is not None
                 and not compact and not notebook
@@ -640,8 +643,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
             try:
                 result = dict(reason=reason, peaks=peaks, changed_files=len(changes), evidence='stale' if changes else 'missing',
                               cleanup='complete' if drained else 'unknown', provider_completed=completed)
-                result['execution_assurance'] = (getattr(process, 'execution_assurance', 'host_permissions')
-                                                 if process is not None else (effective_bound or {}).get('execution_assurance', 'not_started'))
+                result['execution_assurance'] = assurance
                 if (coding is not None and changes and drained and completed and final == 'completed'
                         and not saved['stop_at'] and saved['dispatch'] == saved['delivery'] == 'acknowledged'):
                     from demiflow.forge.pipeline_check import check_project, result as check_result
@@ -660,7 +662,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                         result['pipeline_checks'] = dict(native_flow=incomplete, project_layout=incomplete)
                 if revision: result['revision'] = revision
                 if compact and completed and final == 'completed':
-                    metadata = getattr(provider, 'compaction_result', None)
+                    metadata = compaction_metadata
                     if metadata is None:
                         final, result['reason'] = 'failed', 'Provider did not confirm a context compaction item'
                     else:
