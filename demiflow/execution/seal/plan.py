@@ -21,7 +21,7 @@ from time import time_ns
 
 from ...data.datasink import Datasink
 from ...data.plan import CallableSpec, LogicalPlan, MapOp
-from ..chain import _stable_code_identity, plan_code_pin
+from .business_sources import stable_code_identity, plan_code_pin
 from ..contracts.dataflow import (
     ArtifactRef, Bounds, CompiledDataflow, DataflowGraph, LoadedProgram,
     PhysicalDataflow, ProgramDeclaration, SealedExecution,
@@ -193,7 +193,7 @@ def _base_code_identity_from_value(kind: str, value):
             except NotImplementedError as exc:
                 raise DataflowError("INVALID_CONTRACT",
                                     "Sink program lacks a durable recovery identity") from exc
-            return {"sink": _stable_code_identity(describe(type(value))),
+            return {"sink": stable_code_identity(describe(type(value))),
                     "declaration": declaration}
     except RecoveryContractError as exc:
         raise DataflowError("INVALID_CONTRACT", "Program code-pin refused: " + str(exc)) from exc
@@ -201,7 +201,7 @@ def _base_code_identity_from_value(kind: str, value):
 
 
 def _code_identity_from_value(kind, value, *, sources=None):
-    from ..dataflow_code import business_sources, source_identity
+    from .business_sources import business_sources, source_identity
     return {**_base_code_identity_from_value(kind, value),
             'imports': source_identity(business_sources(kind, value) if sources is None else sources)}
 
@@ -237,7 +237,7 @@ def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds
         literal = literal_reference(value, bounds)
         if literal is not None:
             value = literal
-    from ..dataflow_code import business_sources, stage_sources
+    from .business_sources import business_sources, stage_sources
     sources = business_sources(kind, value)
     code_identity = _code_identity_from_value(kind, value, sources=sources)
     manifest = {"schema": PROGRAM_SCHEMA, "occurrence_id": declaration.occurrence_id,
@@ -321,7 +321,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
         if binding is None or binding['owner'] in shared_payloads:
             continue
         from ..dataflow_program_pickle import stage_payload
-        from ..dataflow_code import business_sources, source_identity, stage_sources, MAX_SOURCES
+        from .business_sources import business_sources, source_identity, stage_sources, MAX_SOURCES
         sources = {}
         for occ in binding['members']:
             member = declarations[occ]
@@ -408,7 +408,7 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
     if 'shared_actor' in manifest and (type(shared_sources) is not dict or set(shared_sources) != {'refs', 'imports'}):
         raise DataflowError('CORRUPT_ARTIFACT', 'Shared actor program has no complete source bundle')
     if cache is not None:
-        from ..dataflow_code import mount_sources
+        from .business_sources import mount_sources
         if shared_sources is not None:
             mount_sources(shared_sources['refs'], shared_sources['imports'], store=store, cache=cache)
         mount_sources(manifest.get('business_sources', {}), code_identity.get('imports', {}),
@@ -448,7 +448,7 @@ def verify_completed_live_program(ref, *, expected_pin, declaration, store, boun
     original final ACKed cut before using it to read an already published result.
     Current declarations are inspected, never instantiated or invoked.
     """
-    from ..dataflow_code import MAX_SOURCES, source_media
+    from .business_sources import MAX_SOURCES, source_media
     from ..dataflow_thread_programs import marker
     manifest = _read_json(store, ref, max_bytes=bounds.max_control_bytes, media_type=PROGRAM_MEDIA)
     if type(manifest) is not dict:

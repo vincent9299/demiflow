@@ -35,7 +35,8 @@ def test_method_closure_code_edit_rejected_before_call(tmp_path, monkeypatch, fo
 
 @pytest.mark.parametrize('member', ['method', 'staticmethod', 'classmethod', 'property', 'inherited'])
 def test_serialized_actor_members_pin_same_sources_as_archive(tmp_path, monkeypatch, member):
-    from demiflow.execution.chain import plan_code_pin, snapshot_code_sources
+    from demiflow.execution.chain import snapshot_code_sources
+    from demiflow.execution.seal.business_sources import plan_code_pin
     from demiflow.execution.run_context import RunContext
     helper, paths, name = _helper_graph(tmp_path, monkeypatch, 'actor_' + member)
 
@@ -89,7 +90,7 @@ def test_serialized_actor_members_pin_same_sources_as_archive(tmp_path, monkeypa
 
 
 def test_actor_dependency_walk_never_invokes_instance_or_class_descriptors(tmp_path, monkeypatch):
-    from demiflow.execution.chain import _by_value_business_modules
+    from demiflow.execution.seal.business_sources import _by_value_business_modules
     helper, _, name = _helper_graph(tmp_path, monkeypatch, 'passive_actor')
     touched = []
 
@@ -118,7 +119,7 @@ def test_actor_dependency_walk_never_invokes_instance_or_class_descriptors(tmp_p
 
 @pytest.mark.parametrize('declaration', ['dict', 'private'])
 def test_actual_actor_slots_pin_modules_without_getattribute(tmp_path, monkeypatch, declaration):
-    from demiflow.execution.chain import _by_value_business_modules
+    from demiflow.execution.seal.business_sources import _by_value_business_modules
     helper, _, name = _helper_graph(tmp_path, monkeypatch, 'passive_slots')
     touched = []
     if declaration == 'dict':
@@ -139,7 +140,7 @@ def test_actual_actor_slots_pin_modules_without_getattribute(tmp_path, monkeypat
 
 
 def test_importable_static_method_retains_by_reference_source_pin(tmp_path, monkeypatch):
-    from demiflow.execution.chain import _is_by_reference_udf, _business_dependency_manifest
+    from demiflow.execution.seal.business_sources import _is_by_reference_udf, _business_dependency_manifest
     from test_stage2_unified_plan import _load_modules
     name = 'static_reference_fixture'
     source = "class Actor:\n    @staticmethod\n    def transform(row):\n        return {'x': row['x'] + 1}\n"

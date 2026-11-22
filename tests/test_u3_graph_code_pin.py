@@ -105,8 +105,8 @@ def _graph_spec(ancestor_fn, target_fns, *, n, cut_rows, mode, source_id, fixtur
 # --- worker load gate: graph seal mirrors recompute; edited business code refuses ---
 
 def test_graph_worker_load_gate_refuses_edited_code(sealed, tmp_path, monkeypatch):
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, stage_plan_artifact, verify_loaded_plan)
+    from demiflow.execution.chain import stage_plan_artifact, verify_loaded_plan
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     from demiflow.execution.graph import _sealed_operators
     from demiflow.planning.dag import _operation_semantics
     helper_mod, paths, helper = _helper(tmp_path, monkeypatch, "gcpload")

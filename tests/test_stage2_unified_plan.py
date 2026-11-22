@@ -708,8 +708,8 @@ def _direct_graph(tmp_path, monkeypatch, prefix):
 
 # F7-a: helper-only edit -> worker LOAD gate recomputes from its own imports -> refuse.
 def test_f7a_helper_only_edit_worker_load_gate_refuses(sealed, tmp_path, monkeypatch):
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, stage_plan_artifact, verify_loaded_plan)
+    from demiflow.execution.chain import stage_plan_artifact, verify_loaded_plan
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     biz, paths, helper = _direct_graph(tmp_path, monkeypatch, "f7a")
     plan = _map_plan(biz.transform)
     assert helper in _business_dependency_manifest(plan)
@@ -763,8 +763,8 @@ def test_f7b_helper_only_edit_same_run_resume_refuses(tmp_path, monkeypatch):
 
 # F7-transitive: edit ONLY the transitive leaf helper2 -> load + resume refuse.
 def test_f7_transitive_helper2_edit_refuses(sealed, tmp_path, monkeypatch):
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, stage_plan_artifact, verify_loaded_plan)
+    from demiflow.execution.chain import stage_plan_artifact, verify_loaded_plan
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     biz, paths, (biz_name, dep_name, h2_name) = _f7_graph(tmp_path, monkeypatch)
     plan = _map_plan(biz.transform)
     manifest = _business_dependency_manifest(plan)
@@ -786,8 +786,7 @@ def test_f7_transitive_helper2_edit_refuses(sealed, tmp_path, monkeypatch):
 def test_f7_boundary_classification(tmp_path, monkeypatch):
     import pytest as third_party
     import demiflow.objects as platform_mod
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, _classify_dependency_module)
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest, _classify_dependency_module
     assert _classify_dependency_module(os) is None                 # stdlib
     assert _classify_dependency_module(platform_mod) is None       # platform demiflow.*
     assert _classify_dependency_module(third_party) is None        # site-packages
@@ -810,8 +809,7 @@ def test_f7_boundary_classification(tmp_path, monkeypatch):
 # F7-e: module count over-run and dynamic no-source business dep fail-closed.
 def test_f7e_budget_and_dynamic_fail_closed(tmp_path, monkeypatch):
     import types
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, _classify_dependency_module)
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest, _classify_dependency_module
     dynamic = types.ModuleType("f7_dynamic_" + uuid.uuid4().hex[:8])
     with pytest.raises(RecoveryContractError, match="no resolvable source"):
         _classify_dependency_module(dynamic)

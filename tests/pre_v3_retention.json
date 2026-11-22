@@ -61,70 +61,6 @@
       "demiflow.execution.native_plan"
      ]
     },
-    "_business_dependency_manifest": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
-    "_business_dependency_modules": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
-    "_by_value_business_modules": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
-    "_by_value_reachable": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
-    "_class_module": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
-    "_class_mro": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
-    "_class_namespace": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
-    "_classify_dependency_module": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
-    "_code_global_names": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
-    "_declared_slots": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
-    "_instance_namespace": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
-    "_instance_slots": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
-    "_is_by_reference_class": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
-    "_is_by_reference_udf": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
-    "_is_walkable_value": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
-    "_module_registered_by_value": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
     "_seal_chain_bindings": {
      "status": "old",
      "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
@@ -142,14 +78,6 @@
      "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
      "batch": 4,
      "users": []
-    },
-    "_stable_code_identity": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
-    "_static_reference_member": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
     },
     "_worker_failure": {
      "status": "old",
@@ -182,10 +110,6 @@
      "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
      "batch": 4,
      "users": []
-    },
-    "plan_code_pin": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
     },
     "run_local_chain": {
      "status": "compat_entry",
@@ -226,10 +150,6 @@
      "batch": 4,
      "users": []
     },
-    "source_callable_roots": {
-     "status": "live",
-     "reason": "v3 封存计划和 worker 启动时计算代码固定与业务依赖清单（dataflow_seal、dataflow_code、kernels/task_scope 调用）。"
-    },
     "stage_plan_artifact": {
      "status": "old",
      "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
@@ -237,12 +157,6 @@
      "users": [
       "demiflow.execution.graph"
      ]
-    },
-    "unified_chain_eligible": {
-     "status": "old",
-     "reason": "2026-11-20 P8批次3 D1单符号评估后保留：当前跨进程产品测量、删后封存/代码固定历史与真实Ray门槛未齐；chain仍含活工具和兼容入口，不为该可选清理新建测量体系。原批次4归组保留作历史，详见docs/architecture-upgrade-20261120/D/D1-UNIFIED-CHAIN-ELIGIBLE.md。",
-     "batch": 4,
-     "users": []
     },
     "validate_commit_cut": {
      "status": "old",

@@ -10,7 +10,7 @@ from demiflow import data
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.recovery_identity import plan_identity
-from demiflow.execution.chain import plan_code_pin
+from demiflow.execution.seal.business_sources import plan_code_pin
 from demiflow.execution.plan_facts import operation_facts
 from test_embeddings import server as embedding_server
 

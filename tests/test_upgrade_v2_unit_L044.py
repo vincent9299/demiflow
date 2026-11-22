@@ -23,9 +23,8 @@ import pytest
 import demiflow.data as data
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp
 from demiflow.data.sources import ItemsSource
-from demiflow.execution.chain import (
-    plan_code_pin, seal_write_plan_ref, snapshot_code_sources,
-)
+from demiflow.execution.chain import seal_write_plan_ref, snapshot_code_sources
+from demiflow.execution.seal.business_sources import plan_code_pin
 from demiflow.execution.recovery_contract import RecoveryContractError, document, identity
 from demiflow.execution.run_context import RunContext, RunAction
 

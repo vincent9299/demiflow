@@ -10,7 +10,7 @@ pickle roundtrip alone:
   only) made the driver walk the full module namespace (pinning the UDF's own
   module via its siblings) while the worker reached the minimal carried subset ->
   ``code-pin differs`` on an UNCHANGED first run. ``_module_registered_by_value``
-  (public registry, parent-package aware) + the opcode-exact ``_code_global_names``
+  (public registry, parent-package aware) + the opcode-exact ``code_global_names``
   (mirrors cloudpickle ``_extract_code_globals``) unify both sides. Bound by a REAL
   workbench prepare/start/show run (fixed-version Lance -> normalize_question
   map(concurrency=1) -> materialize -> write_lance) through an independent managed
@@ -167,7 +167,7 @@ def run(*, source, target):
 
 def test_f9_by_value_registration_roundtrip(tmp_path, monkeypatch):
     import cloudpickle
-    from demiflow.execution.chain import plan_code_pin, _is_by_reference_udf
+    from demiflow.execution.seal.business_sources import plan_code_pin, _is_by_reference_udf
     suffix = uuid.uuid4().hex[:8]
     helper_name, rules_name = "f9rt_helper_" + suffix, "f9rt_rules_" + suffix
     sources = {
@@ -249,8 +249,8 @@ def test_f7c_default_edit_same_run_resume_refuses(tmp_path, monkeypatch, form):
 
 @pytest.mark.parametrize("form", FORMS)
 def test_f7c_default_edit_worker_load_gate_refuses(sealed, tmp_path, monkeypatch, form):
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, stage_plan_artifact, verify_loaded_plan)
+    from demiflow.execution.chain import stage_plan_artifact, verify_loaded_plan
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7cg3_" + form)
     transform = FACTORIES[form](helper_mod)
     plan = _map_plan(transform)
@@ -268,7 +268,7 @@ def test_f7c_default_edit_worker_load_gate_refuses(sealed, tmp_path, monkeypatch
 
 @pytest.mark.parametrize("form", FORMS)
 def test_f7c_default_unedited_manifest_stable(tmp_path, monkeypatch, form):
-    from demiflow.execution.chain import _business_dependency_manifest
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7cg2_" + form)
     plan = _map_plan(FACTORIES[form](helper_mod))
     first = _business_dependency_manifest(plan)
@@ -294,7 +294,7 @@ def test_f7c_default_clean_run_succeeds(tmp_path, monkeypatch, form):
 # === Regression guards: F7b cell capture still pinned; no-capture stays empty ===
 
 def test_regression_cell_capture_still_pinned(tmp_path, monkeypatch):
-    from demiflow.execution.chain import _business_dependency_manifest
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7creg_cell")
 
     def transform(row):
@@ -304,8 +304,8 @@ def test_regression_cell_capture_still_pinned(tmp_path, monkeypatch):
 
 
 def test_regression_no_capture_by_value_dependencies_empty(sealed):
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, stage_plan_artifact, verify_loaded_plan)
+    from demiflow.execution.chain import stage_plan_artifact, verify_loaded_plan
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
 
     def v1(row):
         return {**row, "score": row["x"] + 1}

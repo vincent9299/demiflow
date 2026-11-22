@@ -93,7 +93,7 @@ def verify_native_programs(source, plan, *, programs, action_id):
     keys. ``sealed_operators`` is the sub-program's linear local order, checked
     exactly as ``verify_loaded_plan`` does — never the renumbered full-graph ids.
     """
-    from .chain import plan_code_pin
+    from .seal.business_sources import plan_code_pin
     from ..planning.dag import _operation_semantics
     if source is None:
         raise PlanContractError("invalid_contract", "native verification requires a fixed source")
