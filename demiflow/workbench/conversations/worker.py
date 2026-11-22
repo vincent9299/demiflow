@@ -255,9 +255,15 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                 history_boundary = db.execute('SELECT min(sequence)-1 FROM events WHERE turn=?', (tid,)).fetchone()[0] or 0
             project = deployment.project(session['workspace'], json.loads(session['root'])['path'])
             guided = not (compact or notebook) and project['kind'] == 'pipeline'
+            delivery_review = None
+            if guided and session['provider'] == 'deepseek' and project['phase'] == 'implementation':
+                from demiflow.workbench.conversations.pipeline_review import DeliveryReview
+                delivery_review = DeliveryReview(store, turn, project)
             watched = [] if notebook else project['watch']
             excluded = project.get('protected', ()) if guided else ()
             home = deployment.state / session['id']; scratch = home / turn['id']; scratch.mkdir(mode=0o700, exist_ok=True)
+            broker_home = (home / 'control' / (tid + '-' + turn['epoch']) / 'model'
+                           if deployment.mode == 'restricted' else None)
             final, reason, completed = 'failed', None, False
             requested = False
             deadline = turn['created'] + limits.turn_seconds
@@ -415,8 +421,11 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                                              if value.get('native_credentials'))
                         input_access = InputAccess(store, tid, project, scratch, denied_paths=denied_inputs,
                             runtime_paths=runtime_paths(deployment.providers[session['provider']]), deadline=deadline)
+                    from demiflow.workbench.conversations.pipeline_review import recent_review
                     manifest, prompt = assemble(project, turn['text'], limits,
-                        execution_mode=deployment.mode, input_access=input_access is not None, coding=coding)
+                        execution_mode=deployment.mode, input_access=input_access is not None, coding=coding,
+                        delivery_review=delivery_review is not None,
+                        previous_review=recent_review(store, session['id']) if guided else None)
                     store.update(tid, context=wire(manifest).decode(), delivery='prepared')
                     store.event(tid, 'context.bound', {'digest': manifest['digest'], 'kind': manifest['kind'],
                         'sources': len(manifest['sources']), 'bytes': manifest['bytes'], 'delivery': 'prepared'})
@@ -428,7 +437,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                     if model_broker is not None:
                         model_broker.begin_turn(turn, limits)
                     if control_bridge is not None and input_access is not None:
-                        control_bridge.set_turn(input_access)
+                        control_bridge.set_turn(input_access, delivery_review=delivery_review)
                     transport.frame_count = 0
                     transport.output_bytes = 0
                     provider.items.clear()
@@ -444,12 +453,11 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                     adapter = adapter_for(session['provider'], turn.get('operation', 'message'))
                     acp = getattr(adapter, 'acp', False)
                     if acp and guided:
-                        control_bridge = BridgeServer(input_access)
+                        control_bridge = BridgeServer(input_access, delivery_review=delivery_review)
                     provider_home = home / 'provider' if deployment.mode == 'restricted' else home
                     provider_home.mkdir(mode=0o700, exist_ok=True)
-                    if deployment.mode == 'restricted':
-                        broker_home = home / 'control' / (tid + '-' + turn['epoch']) / 'model'
-                        broker_home.mkdir(mode=0o700, exist_ok=True)
+                    if broker_home is not None:
+                        broker_home.mkdir(mode=0o700, parents=True, exist_ok=True)
                     warm_sandbox_secs = (min(3600, max(limits.turn_seconds, WARM_SANDBOX_SECONDS))
                                          if (parent_sock is not None and not compact and not notebook) else None)
                     confined = (sandbox_spec(deployment, project, session, turn, manifest, config, provider_home, seconds=warm_sandbox_secs)
@@ -602,15 +610,19 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
             compaction_metadata = getattr(provider, 'compaction_result', None)
             assurance = (getattr(process, 'execution_assurance', 'host_permissions')
                          if process is not None else (effective_bound or {}).get('execution_assurance', 'not_started'))
+            if guided and control_bridge is not None:
+                control_bridge.set_turn(None)
+            review_requested = delivery_review is not None and delivery_review.selection is not None
             keep_warm = (
                 parent_sock is not None
-                and not compact and not notebook
+                and not compact and not notebook and not review_requested
                 and final == 'completed' and completed and not requested
                 and process is not None and process.poll() is None
                 and transport is not None and not transport.closed
                 and (deployment.mode != 'restricted' or sandbox_deadline - time.time() > limits.turn_seconds + 60)
             )
             drained = True
+            author_process = process
             if not keep_warm:
                 drained, cleanup_err = _teardown_provider(process, transport, provider, model_broker, control_bridge)
                 if cleanup_err and not reason:
@@ -668,7 +680,39 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                     else:
                         result['compaction'] = dict(metadata, history_through_sequence=history_boundary)
                         store.event(tid, 'compaction.completed', result['compaction'])
-                store.finish_provider(tid, state=final if drained else 'stopping', cleanup='complete' if drained else 'unknown', result=result)
+                report = None
+                if review_requested:
+                    if drained and final == 'completed' and saved['dispatch'] == saved['delivery'] == 'acknowledged':
+                        # The author's process and model connection have drained. The
+                        # reviewer can use the same host slot even on single-slot hosts.
+                        def check_review_cancel():
+                            tick(force=True)
+                            if requested:
+                                raise InterruptedError(reason)
+                        try:
+                            from functools import partial
+                            from demiflow.workbench.conversations.pipeline_review import run_deployment_reviewer
+                            reviewer = partial(run_deployment_reviewer, deployment=deployment, turn=turn,
+                                session=session, scratch=scratch, broker_home=broker_home, author_spec=confined, lease_fd=lease_fd,
+                                deadline=min(deadline, time.time()+180), check_cancel=check_review_cancel)
+                            store.event(tid, 'review.started', {'request_id': tid})
+                            send_parent('notify')
+                            report = delivery_review.run(reviewer, result.get('pipeline_checks'), check_review_cancel)
+                        except (ValueError, OSError, TimeoutError) as exc:
+                            report = dict(status='incomplete', diagnostics=[dict(detail=str(exc)[:2048])])
+                        finally:
+                            if descendants(os.getpid()):
+                                signal_owned(os.getpid(), signal.SIGKILL)
+                                drained = drain_owned(author_process, timeout_s=5)
+                                if not drained:
+                                    report = dict(status='incomplete', diagnostics=[dict(detail='评审进程尚未清理。')])
+                            if requested:
+                                final = 'cancelled'
+                    else:
+                        report = dict(status='incomplete', diagnostics=[dict(detail='开发回合未完成，评审尚未执行。')])
+                result['cleanup'] = 'complete' if drained else 'unknown'
+                store.finish_provider(tid, state=final if drained else 'stopping', cleanup=result['cleanup'],
+                                      result=result, review=report)
                 send_parent('notify')
             except BaseException:
                 try: store.update(tid, state='stopping', cleanup='unknown')
@@ -688,8 +732,6 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
             warm_ready = True
             if model_broker is not None:
                 model_broker.park_idle()
-            if control_bridge is not None:
-                control_bridge.set_turn(None)
             if not send_parent('idle', reliable=True, tid=tid, sandbox_deadline=sandbox_deadline):
                 break
             next_work = _wait_next_turn(

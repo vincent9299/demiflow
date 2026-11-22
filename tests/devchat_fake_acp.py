@@ -21,12 +21,26 @@ for line in sys.stdin:
                       agentCapabilities=dict(sessionCapabilities=dict(resume={}, close={})))
     elif method in {'session/new', 'session/resume'}:
         root = Path(params['cwd'])
+        servers = params['mcpServers']
         result = dict(sessionId='acp-fixture', configOptions=[dict(id='model', currentValue='["deepseek-official","fixture"]')])
     elif method == 'session/compact':
         if (root/'compact-fail').exists():
             send(dict(id=value['id'],error=dict(code=-32603,message='fixture compaction failed')));continue
         result=dict(status='compacted',compaction_id='fixture-summary',shadowed_items=4,estimated_tokens_before=1200)
     elif method == 'session/prompt':
+        if params['prompt'][0]['text'].endswith('request delivery review fixture'):
+            (root / 'flows/fixture.py').write_text('def sample():\n    return 1\n')
+            review = dict(method='tools/call', params=dict(name='request_pipeline_review', arguments={}))
+            requests = [dict(method='tools/list', params={}), review, review]
+            bridge = servers[0]
+            response = subprocess.run([bridge['command'], *bridge['args']], check=True, capture_output=True,
+                input=''.join(json.dumps(dict(jsonrpc='2.0', id=i, **r))+'\n' for i,r in enumerate(requests)),
+                text=True, timeout=5)
+            listed, first, retry = (json.loads(line)['result'] for line in response.stdout.splitlines())
+            assert 'request_pipeline_review' in {tool['name'] for tool in listed['tools']}
+            assert first == retry and not first['isError']
+            send(dict(id=value['id'],result=dict(stopReason='end_turn')))
+            continue
         if params['prompt'][0]['text'].rsplit('当前请求：\n', 1)[-1].startswith('public process fixture'):
             for kind,body in [('agent_thought_chunk','公开过程：先检查现有数据。'),('agent_message_chunk','正在查找数据来源。')]:
                 send(dict(method='session/update',params=dict(sessionId='acp-fixture',update=dict(
