@@ -154,7 +154,6 @@ class BridgeServer:
                 self.bound_identity = (input_access.tid, input_access.epoch)
 
     def _answer(self, request):
-        from .pipeline_review import REVIEW_TOOL
         with self.lock:
             active = self.input_access
             if (active is None or type(request) is not dict or set(request) != {'token', 'turn_id', 'epoch', 'method', 'params'}
@@ -162,7 +161,13 @@ class BridgeServer:
                     or (request['turn_id'], request['epoch']) not in {(active.tid, active.epoch), self.bound_identity}):
                 reject('Development control capability does not match this turn', 'not_found')
             active.require_active()
-            method, params = request['method'], request['params']
+        return self.dispatch(request['method'], request['params'], active)
+
+    def dispatch(self, method, params, active):
+        from .pipeline_review import REVIEW_TOOL
+        with self.lock:
+            if active is not self.input_access:
+                reject('Development control capability does not match this turn', 'not_found')
             if method == 'tools/list' and params == {}:
                 return dict(tools=[INPUT_TOOL, REVIEW_TOOL] if self.delivery_review is not None else [INPUT_TOOL])
             if method != 'tools/call' or type(params) is not dict or set(params) != {'name', 'arguments'}:
