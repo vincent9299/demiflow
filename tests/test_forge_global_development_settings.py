@@ -177,3 +177,43 @@ def test_project_reregistration_does_not_broaden_original_grant(tmp_path):
         grant=service.project('wreregistered',root)
         assert grant['writes']==['code.py'] and grant['kind']=='platform'
     finally:service.close()
+
+
+def test_automatic_scope_allows_more_than_128_split_writable_paths(tmp_path):
+    root, path, service, settings, inventory = setup(tmp_path)
+    try:
+        big = tmp_path / 'big_project'
+        big.mkdir()
+        (big / 'workspace.json').write_text('{"entries":[]}\n')
+        prompts = big / 'prompts'
+        prompts.mkdir()
+        (prompts / '.probe_write').write_text('')
+        cache = prompts / '__pycache__'
+        cache.mkdir()
+        (cache / 'x.pyc').write_bytes(b'cache')
+        for idx in range(160):
+            (prompts / f'p_{idx:03d}.md').write_text(f'# prompt {idx}\n')
+        grant = automatic_project(big)
+        assert len(grant['writes']) == 160
+        assert set(grant['protected']) == {'prompts/.probe_write', 'prompts/__pycache__'}
+        inventory['projects']['wbig'] = {'root': str(big)}
+        caps = service.capabilities('wbig', big)
+        assert caps['enabled'] and caps['start']
+        _, revision, config_path = settings.binding('wbig', big, seal=True)
+        assert revision and config_path.is_file()
+        from demiflow.workbench.conversations.sandbox import SandboxSpec, specification
+        home = tmp_path / 'big_private'
+        home.mkdir(mode=0o700)
+        spec = SandboxSpec(
+            read_paths=(str(big),),
+            runtime_paths=('/usr', '/lib', '/lib64'),
+            write_paths=tuple(str(big / p) for p in grant['writes']),
+            protected_paths=tuple(str(big / p) for p in grant['protected']),
+            private_home=str(home),
+        )
+        launched = specification(spec, ['/usr/bin/true'], {}, big)
+        assert len(launched['source_roots']) == 160
+        assert str(prompts / '.probe_write') not in launched['write_paths']
+        assert str(cache) not in launched['write_paths']
+    finally:
+        service.close()

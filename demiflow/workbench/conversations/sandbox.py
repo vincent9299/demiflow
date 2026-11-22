@@ -60,9 +60,12 @@ class SandboxSpec:
     private_bytes: int = 256 * 1024**2
 
 
+SPEC_BYTES = 2 * 1024 * 1024
+
+
 def _paths(values, *, existing=True):
-    if type(values) not in (list, tuple) or len(values) > 128:
-        raise ValueError('Sandbox paths exceed the fixed scope budget')
+    if type(values) not in (list, tuple):
+        raise ValueError('Sandbox paths must be a list or tuple')
     result = []
     for value in values:
         path = Path(value)
@@ -203,7 +206,7 @@ def launch_sandbox(command, *, spec, env, cwd, lease_fd=None, control_socket=Non
         pairs.append((host, child, str(path)))
         value['channels'][name] = child.fileno()
     raw = json.dumps(value, separators=(',', ':')).encode()
-    if len(raw) > 131072:
+    if len(raw) > SPEC_BYTES:
         for host, child, _ in pairs:
             host.close(); child.close()
         raise ValueError('Sandbox specification exceeds launch byte budget')

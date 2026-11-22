@@ -55,7 +55,6 @@ def automatic_project(root):
                 if not entry.name.startswith('.') and entry.is_file(follow_symlinks=False) and Path(entry.name).suffix in {'.py', '.js', '.ts', '.yaml', '.yml', '.json', '.md'}:
                     scopes.add(entry.name)
     scopes.difference_update({'AGENTS.md', 'PIPELINE_SPEC.md', 'workspace.json', 'runs', 'datasets', 'data', 'notebooks', 'results', 'outputs'})
-    if len(scopes) > 128: reject('项目代码范围超过 128 项。', 'resource_limit')
     grant['watch'] = sorted(scopes)
     # Landlock write grants are additive. Grant only existing subtrees with no
     # protected descendants, so logs, notebooks and caches stay read-only.
@@ -76,11 +75,9 @@ def automatic_project(root):
                 for entry in entries:
                     if seen + len(pending) >= 4096: reject('项目代码范围扫描超过预算。', 'resource_limit')
                     pending.append(name + '/' + entry.name)
-    if len(protected)>128: reject('项目受保护路径超过预算。', 'resource_limit')
     blocked = {parent.as_posix() for name in protected for parent in Path(name).parents}
     eligible = existing - blocked
     grant['writes'] = sorted(name for name in eligible if Path(name).parent.as_posix() not in eligible)
-    if len(grant['writes']) > 128: reject('项目安全可写路径超过 128 项。', 'resource_limit')
     if protected: grant['protected'] = sorted(protected)
     return grant
 
