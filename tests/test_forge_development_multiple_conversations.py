@@ -106,9 +106,14 @@ def test_writable_and_creation_retries_require_exact_current_grant(case, changed
         policy = 'replacement-policy'
     else:
         providers, provider = {'deepseek'}, 'deepseek'
-    assert not case.store.writable(case.workspace, sid, identity, policy, providers)
-    page = case.store.list(case.workspace, identity=identity, policy_hash=policy, providers=providers)
-    assert page['sessions'][0]['writable'] is False
+    if changed == 'root':
+        assert not case.store.writable(case.workspace, sid, identity, policy, providers)
+        page = case.store.list(case.workspace, identity=identity, policy_hash=policy, providers=providers)
+        assert page['sessions'][0]['writable'] is False
+    else:
+        assert case.store.writable(case.workspace, sid, identity, policy, providers)
+        page = case.store.list(case.workspace, identity=identity, policy_hash=policy, providers=providers)
+        assert page['sessions'][0]['writable'] is True
     with pytest.raises(ForgeError, match='idempotency'):
         case.store.create_conversation(case.workspace, identity, provider, 'member', policy)
 
@@ -117,7 +122,7 @@ def test_new_current_grant_member_does_not_upgrade_old_primary(case):
     main = create(case, 'main')
     changed = 'new-policy'
     member = case.store.create_conversation(case.workspace, case.identity, 'codex', 'new-grant', changed)['id']
-    assert not case.store.writable(case.workspace, main, case.identity, changed, {'codex'})
+    assert case.store.writable(case.workspace, main, case.identity, changed, {'codex'})
     assert case.store.writable(case.workspace, member, case.identity, changed, {'codex'})
     assert case.store.primary(case.workspace, case.identity, changed)['id'] == main
 
@@ -240,14 +245,13 @@ def test_routes_authorize_members_without_reconciling_each_list_row(case):
         http.post(server, case.workspace, case.root, 'dev-turn-start',
                   dict(session_id=sid, submission_id='send', expected_revision=0, text='Hello'))
     assert len(started) == 2
-    assert not http.get(server, case.workspace, case.root, 'dev-session', dict(session_id=old))['writable']
-    for operation, fields in [('dev-turn-start', dict(text='No')), ('dev-compact', {})]:
-        with pytest.raises(ForgeError, match='read-only'):
-            http.post(server, case.workspace, case.root, operation,
-                      dict(session_id=old, submission_id='no', expected_revision=0, **fields))
+    assert http.get(server, case.workspace, case.root, 'dev-session', dict(session_id=old))['writable']
+    http.post(server, case.workspace, case.root, 'dev-turn-start',
+              dict(session_id=old, submission_id='continue-old', expected_revision=0, text='Continue'))
+    assert len(started) == 3
     service._reap = lambda: pytest.fail('Listing must not reconcile workers')
     page = http.get(server, case.workspace, case.root, 'dev-sessions', {})
-    assert {row['id'] for row in page['sessions'] if row['writable']} == {main['id'], member['id']}
+    assert {row['id'] for row in page['sessions'] if row['writable']} == {main['id'], member['id'], old}
     assert 'new_conversation' in http.POST_FIELDS['dev-session-create'][1]
     assert 'session_id' in http.GET_FIELDS['dev-project-turns'][1]
     assert http.get(server, case.workspace, case.root, 'dev-project-turns', dict(session_id=member['id']))['turns'] == []

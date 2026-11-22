@@ -39,7 +39,7 @@ main.development-main{max-width:none;padding:0;background:#fff}
 .development-session{display:flex;flex-direction:column;gap:2px;width:100%;flex:none;min-width:0;text-align:left;border:0;background:none;padding:6px 10px;border-radius:8px;cursor:pointer;color:#444851}
 .development-session:hover,.development-session[aria-current=page]{background:#e9edf5}.development-session[aria-current=page]{color:#242933}
 .development-session-title{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;line-height:20px}
-.development-session-state{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;font-size:11px;line-height:16px;color:#8a8f99}.development-session[aria-current=page] .development-session-state{color:#707785}
+.development-session-state{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;font-size:11px;line-height:16px;color:#8a8f99}.development-session-state:empty{display:none}.development-session[aria-current=page] .development-session-state{color:#707785}
 .development-session-pages{display:flex;justify-content:space-between;flex-wrap:wrap;gap:5px;margin-top:10px}.development-session-pages button{border:0;background:none;font-size:11px;padding:4px;color:#858b96}
 .development-session-note{font-size:11px;line-height:18px;color:#9398a1;margin:8px 6px 0}.development-session-note:empty{display:none}
 .development-sidebar-backdrop{display:none}

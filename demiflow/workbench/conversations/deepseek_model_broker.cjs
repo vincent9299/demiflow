@@ -7,7 +7,18 @@ exports.name='demiflow-model-broker';
 exports.inject=['acpAppStartup','llm'];
 exports.apply=function(ctx,config) {
   let active=null,busy=false,buffer='',closing=false;
-  const maximum=1024*1024;
+  const maximum=4*1024*1024;
+  function safeError(err) {
+    const status=Number(err?.status??err?.statusCode);
+    if(Number.isInteger(status)&&status>=400&&status<600)return 'Upstream model HTTP '+status;
+    const code=typeof err?.code==='string'&&/^[A-Za-z0-9_.-]{1,40}$/.test(err.code)?err.code:'';
+    if(code)return 'Upstream model error ('+code+')';
+    const name=typeof err?.name==='string'&&/^[A-Za-z0-9_]{1,40}$/.test(err.name)?err.name:'';
+    if(name==='AbortError')return 'Model request timed out or aborted';
+    const msg=typeof err?.message==='string'?err.message:'';
+    if(/^(Model |Unsupported |Native )/.test(msg))return msg.slice(0,160);
+    return 'Configured model request failed'+(name?' ('+name+')':'');
+  }
   async function send(value) {
     if(closing)return;
     const raw=JSON.stringify({jsonrpc:'2.0',...value})+'\n';
@@ -37,7 +48,7 @@ exports.apply=function(ctx,config) {
     busy=true;active=new AbortController();
     const timer=setTimeout(()=>active?.abort(),180000);
     dispatch(message.id,message.method,message.params||{}).then(result=>send({id:message.id,result}),
-      ()=>send({id:message.id,error:{code:-32000,message:'Configured model request failed or exceeded its budget'}}))
+      err=>send({id:message.id,error:{code:-32000,message:safeError(err)}}))
       .finally(()=>{clearTimeout(timer);active=null;busy=false;});
   }
   function data(chunk) {

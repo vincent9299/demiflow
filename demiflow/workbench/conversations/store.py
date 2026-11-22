@@ -227,15 +227,12 @@ class Store:
     def writable(self, workspace, sid, identity, policy_hash, providers, *, pin=False):
         with self.connect(write=pin) as db:
             session = self._session(db, workspace, sid)
-            primary = self._primary(db, workspace, identity, policy_hash)
-            current = (session['policy_hash'] == policy_hash and json.loads(session['root']) == identity
-                       and session['provider'] in providers)
-            member = db.execute("""SELECT 1 FROM project_conversation_members WHERE workspace=? AND session=?
-                UNION ALL SELECT 1 FROM project_conversations WHERE workspace=? AND session=?""",
-                (workspace, sid, workspace, sid)).fetchone()
-            allowed = bool(current and (member or primary and primary['id'] == sid))
-            if allowed and pin and primary:
-                self._pin_development(db, workspace, primary['id'])
+            allowed = bool(json.loads(session['root']) == identity and bool(providers))
+            if allowed and pin and session['session_kind'] == 'development':
+                db.execute('INSERT OR IGNORE INTO project_conversation_members(workspace,session) VALUES(?,?)', (workspace, sid))
+                primary = self._primary(db, workspace, identity, policy_hash)
+                if primary:
+                    self._pin_development(db, workspace, primary['id'])
             return allowed
 
     def project_turns(self, workspace, offset=0, limit=20, kind="all", session_id=None):
@@ -275,9 +272,7 @@ class Store:
             sessions = []
             for row in rows[:limit]:
                 value = {k: row[k] for k in ('id', 'title', 'provider', 'created', 'revision')}
-                value['writable'] = bool(identity is not None and json.loads(row['root']) == identity
-                    and row['policy_hash'] == policy_hash and row['provider'] in providers
-                    and (row['member'] or primary and primary['id'] == row['id']))
+                value['writable'] = bool(identity is not None and json.loads(row['root']) == identity and bool(providers))
                 value['turn'] = dict(id=row['turn_id'], state=row['state'], cleanup=row['cleanup']) if row['turn_id'] else None
                 sessions.append(value)
             busy, active_session_id = False, None
@@ -337,7 +332,7 @@ class Store:
             row = db.execute('SELECT * FROM turns WHERE session=? AND submission=?', (sid, identifier(key))).fetchone()
             return dict(row) if row else None
 
-    def submit(self, workspace, sid, submission_id, expected_revision, message, identity, policy_hash, operation="message"):
+    def submit(self, workspace, sid, submission_id, expected_revision, message, identity, policy_hash, operation="message", provider=None):
         text(message); identifier(submission_id); integer(expected_revision, 0, 2**31)
         if operation not in {'message','compact','notebook_cell','notebook_cell_cli'}:reject('Unknown conversation operation')
         hashed = digest({'text': message, **({'operation':operation} if operation!='message' else {})})
@@ -347,8 +342,15 @@ class Store:
             if old:
                 if old['body_hash'] != hashed: reject('Submission key has different text', 'conflict')
                 return dict(old), False
-            if session['revision'] != expected_revision or session['policy_hash'] != policy_hash or json.loads(session['root']) != identity:
-                reject('Session policy, root or revision changed', 'conflict')
+            if session['revision'] != expected_revision or json.loads(session['root']) != identity:
+                reject('Session root or revision changed', 'conflict')
+            if provider is not None and session['provider'] != provider:
+                db.execute('UPDATE sessions SET policy_hash=?,provider=?,provider_session=? WHERE id=?',
+                           (policy_hash, provider, '', sid))
+            elif session['policy_hash'] != policy_hash:
+                db.execute('UPDATE sessions SET policy_hash=? WHERE id=?', (policy_hash, sid))
+            if session['session_kind'] == 'development':
+                db.execute('INSERT OR IGNORE INTO project_conversation_members(workspace,session) VALUES(?,?)', (workspace, sid))
             cell_turn = operation in ('notebook_cell', 'notebook_cell_cli')
             if cell_turn and session['session_kind'] == 'development' and session['revision']:
                 reject('请从目标卡片开启独立会话。', 'conflict')

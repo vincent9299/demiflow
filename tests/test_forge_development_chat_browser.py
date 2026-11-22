@@ -83,7 +83,7 @@ def test_browser_conversation_navigation_refresh_and_mobile(tmp_path):
         page.get_by_role('button',name='开发',exact=True).click()
         page.get_by_label('开发要求').fill('A small normal task')
         page.get_by_role('button',name='发送',exact=True).click()
-        try: page.locator('.development-status').filter(has_text='本轮已完成').wait_for()
+        try: page.locator('.development-status[data-turn-state="completed"][data-turn-cleanup="complete"]').wait_for(state='attached')
         except Exception:
             print('PAGE_ERRORS',errors);print('PAGE_TEXT',page.locator('body').inner_text()[:5000]);raise
         page.locator('.dfc-message').filter(has_text='fixture answer').wait_for()
@@ -94,7 +94,7 @@ def test_browser_conversation_navigation_refresh_and_mobile(tmp_path):
         page.screenshot(path=str(shots/'development-desktop.png'),full_page=True)
         sid=server.development.store.list(workspace)['sessions'][0]['id']
         assert server.development.store.show(workspace,sid)['revision']==1
-        page.reload();page.locator('.development-status').filter(has_text='本轮已完成').wait_for()
+        page.reload();page.locator('.development-status[data-turn-state="completed"][data-turn-cleanup="complete"]').wait_for(state='attached')
         assert server.development.store.show(workspace,sid)['revision']==1
         page.get_by_label('开发要求').fill('draft kept')
         page.get_by_role('button',name='Readme',exact=True).click()
@@ -139,7 +139,7 @@ def test_acp_permission_diff_markdown_and_dialog_lifecycle(tmp_path):
         assert 'code.py' in permission.inner_text()
         assert '# fixture addition' in permission.inner_text()
         permission.get_by_role('button', name='允许一次').click()
-        page.locator('.development-status').filter(has_text='本轮已完成').wait_for()
+        page.locator('.development-status[data-turn-state="completed"][data-turn-cleanup="complete"]').wait_for(state='attached')
         page.get_by_role('heading', name='Fixture result', exact=True).wait_for()
         changed = page.locator('.dfc-system').filter(has_text='Changed files')
         changed.wait_for()
@@ -205,7 +205,7 @@ def test_first_message_ime_idempotent_creation_and_stop(tmp_path):
         assert server.development.store.show(workspace,sessions[0]['id'])['revision']==0
         page.get_by_role('button',name='发送',exact=True).click()
         page.wait_for_url('**/*development_session*')
-        page.locator('.development-status').filter(has_text='本轮已完成').wait_for()
+        page.locator('.development-status[data-turn-state="completed"][data-turn-cleanup="complete"]').wait_for(state='attached')
         sessions=server.development.store.list(workspace)['sessions'];assert len(sessions)==1
         assert len(creates)==2 and creates[0]==creates[1]
         assert server.development.store.show(workspace,sessions[0]['id'])['revision']==1
@@ -289,7 +289,7 @@ def test_acp_stream_visible_before_completion_and_reconnect(tmp_path):
         page.route('**/dev-events?*',disconnect)
         page.locator('.development-status').filter(has_text='连接中断，正在重新连接…').wait_for()
         (root/'release-stream').write_text('release')
-        page.locator('.development-status').filter(has_text='本轮已完成').wait_for()
+        page.locator('.development-status[data-turn-state="completed"][data-turn-cleanup="complete"]').wait_for(state='attached')
         expect(first).to_contain_text('Second streamed paragraph.')
         assert first.inner_text().count('First streamed paragraph.')==1
         assert timeline.evaluate('(e)=>e.scrollTop')<100
@@ -336,8 +336,8 @@ def test_legacy_same_message_ids_stay_in_turn_and_tool_order(tmp_path,remote_com
             nodes=page.locator('.dfc-answer,.dfc-tool').evaluate_all('(nodes)=>nodes.map(node=>node.textContent)')
             assert len(nodes)==len(expected)
             assert all(text in node for text,node in zip(expected,nodes)),nodes
-        page.locator('.development-status').filter(has_text='本轮已完成').wait_for();ordered()
-        page.reload();page.locator('.development-status').filter(has_text='本轮已完成').wait_for();ordered()
+        page.locator('.development-status[data-turn-state="completed"][data-turn-cleanup="complete"]').wait_for(state='attached');ordered()
+        page.reload();page.locator('.development-status[data-turn-state="completed"][data-turn-cleanup="complete"]').wait_for(state='attached');ordered()
         final=page.locator('.dfc-answer').filter(has_text='第二轮结果')
         final.get_by_role('button',name='View original').click()
         dialog=page.get_by_role('dialog');expect(dialog).to_contain_text('第二轮结果')
@@ -375,7 +375,7 @@ def test_public_acp_process_visible_while_running_and_after_reload(tmp_path):
         process.locator(':scope>summary').click()
         assert process.inner_text().count('公开过程：先检查现有数据。')==1
         (root/'release-process').write_text('release')
-        page.locator('.development-status').filter(has_text='本轮已完成').wait_for()
+        page.locator('.development-status[data-turn-state="completed"][data-turn-cleanup="complete"]').wait_for(state='attached')
         expect(page.locator('.dfc-answer')).to_have_count(2)
         nodes=page.locator('.dfc-think,.dfc-answer,.dfc-tool').evaluate_all('(nodes)=>nodes.map(node=>node.textContent)')
         expected=['公开过程：先检查现有数据。','正在查找数据来源。','读取输入信息','已找到输入，下一步可以开发过滤流程。']
@@ -404,7 +404,7 @@ def test_large_public_summary_and_final_keep_message_role_without_duplication(tm
         page.get_by_role('button',name='开发',exact=True).click()
         page.get_by_label('开发要求').fill('public summary fixture')
         page.get_by_role('button',name='发送',exact=True).click()
-        page.locator('.development-status').filter(has_text='本轮已完成').wait_for()
+        page.locator('.development-status[data-turn-state="completed"][data-turn-cleanup="complete"]').wait_for(state='attached')
         def check():
             process=page.locator('.dfc-think');answer=page.locator('.dfc-answer')
             expect(process).to_have_count(1);expect(answer).to_have_count(1)
@@ -422,7 +422,7 @@ def test_large_public_summary_and_final_keep_message_role_without_duplication(tm
             expect(actual_tool.locator('.dfc-row-content')).to_contain_text('fixture inspection')
             expect(actual_tool.locator('.dfc-row-content')).to_contain_text('Actual tool output.')
             assert 'PRIVATE REASONING' not in page.locator('body').text_content()
-        check();page.reload();page.locator('.development-status').filter(has_text='本轮已完成').wait_for();check()
+        check();page.reload();page.locator('.development-status[data-turn-state="completed"][data-turn-cleanup="complete"]').wait_for(state='attached');check()
         page.locator('.dfc-answer').get_by_role('button',name='View original').click()
         dialog=page.get_by_role('dialog');expect(dialog).to_contain_text('Final answer end.')
         assert dialog.inner_text().count('Long final answer start.')==1
@@ -485,7 +485,7 @@ def test_process_disclosure_streams_compactly_and_keeps_reader_choice(tmp_path):
         # Native block-end and canonical commit may both complete the same item.
         for _ in range(2):store.event(turn['id'],'message.completed',dict(item_id='answer',text='开始开发过滤流程。正在补齐算子。'))
         store.finish_provider(turn['id'],state='completed',cleanup='complete',result={})
-        page.locator('.development-status').filter(has_text='本轮已完成').wait_for()
+        page.locator('.development-status[data-turn-state="completed"][data-turn-cleanup="complete"]').wait_for(state='attached')
         assert process.evaluate('(node)=>node.open')
         process.get_by_role('button',name='View original').click()
         dialog=page.get_by_role('dialog');expect(dialog).to_contain_text('已找到输入结构')

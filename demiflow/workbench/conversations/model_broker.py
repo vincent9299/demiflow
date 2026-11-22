@@ -22,13 +22,14 @@ import sys
 import tempfile
 import threading
 import time
+from dataclasses import replace as _replace_dataclass
 import urllib.parse
 
 from .common import identifier, reject, wire
 from .transport import Transport, decode
 
-FRAME = 1024 * 1024
-REQUESTS = 64
+FRAME = 4 * 1024 * 1024
+REQUESTS = 256
 OPTION_FIELDS = {'provider', 'model', 'reasoningEffort', 'messages', 'system', 'tools',
                  'toolHistory', 'temperature', 'maxTokens', 'stop', 'sessionId', 'purpose'}
 
@@ -119,7 +120,8 @@ class _Quota:
             self.close(); raise
 
     def charge(self, **amounts):
-        limits = dict(requests=REQUESTS, connections=256, input=self.maximum, output=self.maximum)
+        input_limit = max(self.maximum, 64 * 1024 * 1024) if self.maximum >= 1024 * 1024 else self.maximum
+        limits = dict(requests=REQUESTS, connections=1024, input=input_limit, output=self.maximum)
         value = dict(self.value)
         for key, amount in amounts.items():
             value[key] += amount
@@ -212,7 +214,7 @@ class ModelBroker:
                 self.process = subprocess.Popen([sys.executable, '-I', '-B', str(launcher), str(os.getpid()), *command],
                     cwd=self.home, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     close_fds=True, start_new_session=True)
-                self.transport = Transport(self.process, deployment.limits)
+                self.transport = Transport(self.process, _replace_dataclass(deployment.limits, frame_bytes=FRAME))
                 self.child_config['_boundary'] = dict(token=self.token)
                 if defer_handshake:
                     self._init_thread = threading.Thread(target=self._run_handshake, name='development-model-init', daemon=True)
@@ -406,8 +408,11 @@ class ModelBroker:
                     client.settimeout(.2 if self.name == 'deepseek' else 5)
                     if self.name == 'deepseek': self._handle_json(client)
                     else: Handler(client, ('127.0.0.1', 0), self)
-                except BaseException:
-                    self.failure = 'Configured model request failed or exceeded its budget'
+                except BaseException as exc:
+                    safe = str(exc) if isinstance(exc, (TimeoutError, ConnectionError, PermissionError)) or getattr(exc, 'code', None) else ''
+                    if safe and any(word in safe.lower() for word in ('http://', 'https://', 'bearer ', 'token', 'sk-')):
+                        safe = ''
+                    self.failure = safe[:180] if safe else 'Configured model request failed or exceeded its budget'
                     try: self._send(client, dict(error=self.failure))
                     except BaseException: pass
                     # Never retry a dispatched request with an uncertain result.

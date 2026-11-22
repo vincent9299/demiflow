@@ -22,13 +22,20 @@
     picker.hidden = true;
     host.append(slot);
     const root = createRoot(slot);
-    let rows = [], frame = 0, disposed = false, lastKey = '', items = [];
+    let rows = [], frame = 0, disposed = false, lastKey = '', lastRenderKey = '', items = [];
     let controller;
     const land = item => navigate(rows[item.turn - 1]);
     picker.onchange = () => land(items[picker.selectedIndex]);
     function paint() {
       frame = 0;
       if (disposed) return;
+      if (!rows.length) {
+        if (lastRenderKey !== 'empty') {
+          lastRenderKey = 'empty';
+          root.render(h(TurnNavigator, {items: [], activeTurn: null, busyTurn: null, onNavigate: land, t: railText}));
+        }
+        return;
+      }
       const top = timeline.getBoundingClientRect().top;
       const loaded = new Map();
       let activeId;
@@ -50,6 +57,9 @@
       }
       const index = rows.findIndex(row => row.id === activeId);
       picker.selectedIndex = index;
+      const renderKey = key + ':' + index + ':' + items.length;
+      if (renderKey === lastRenderKey) return;
+      lastRenderKey = renderKey;
       root.render(h(TurnNavigator, {items, activeTurn:index < 0 ? null : index + 1,
         busyTurn:null, onNavigate:land, t:railText}));
     }
@@ -68,12 +78,18 @@
         offset = page.next_offset;
       }
       rows = [...known.values()].sort((a,b) => a.sequence - b.sequence);
-      items = []; lastKey = '';
+      items = []; lastKey = ''; lastRenderKey = '';
       picker.replaceChildren(...rows.map((row, i) => new Option('第 '+(i+1)+' 轮 · '+(row.title || '归档记录'), row.id)));
       picker.hidden = rows.length < 2;
       update();
     }
-    return {picker, update, load, dispose() {
+    function clear() {
+      controller = {};
+      rows = []; items = []; lastKey = ''; lastRenderKey = '';
+      picker.replaceChildren(); picker.hidden = true;
+      update();
+    }
+    return {picker, update, load, clear, dispose() {
       disposed = true; cancelAnimationFrame(frame); root.unmount();
     }};
   }
