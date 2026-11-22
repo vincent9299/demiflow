@@ -614,8 +614,7 @@
    "status": "undecided",
    "reason": "旧流式驱动的零件；stream_barrier._CheckpointBarrier 经 stream 被 request_limits.ObservedQueue 引用。随批次 5 评审。",
    "importers": [
-    "demiflow.execution.stream",
-    "demiflow.execution.stream_materialize"
+    "demiflow.execution.stream"
    ],
    "measured": {
     "at": "74d2f99",
@@ -747,8 +746,7 @@
    "status": "undecided",
    "reason": "旧流式驱动的零件；stream_barrier._CheckpointBarrier 经 stream 被 request_limits.ObservedQueue 引用。随批次 5 评审。",
    "importers": [
-    "demiflow.execution.stream",
-    "demiflow.execution.stream_materialize"
+    "demiflow.execution.stream"
    ],
    "measured": {
     "at": "74d2f99",
@@ -761,34 +759,6 @@
     "called_only_by_tests": 9,
     "ran_only_at_import": 0,
     "never_ran": 3
-   }
-  },
-  "demiflow.execution.stream_materialize": {
-   "status": "mixed",
-   "reason": "旧对齐屏障基准仍直接构造 StreamMaterialization；v3 和公开队列没有该写入路径。",
-   "symbols": {
-    "StreamMaterialization": {
-     "status": "old",
-     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
-     "users": []
-    },
-    "StreamStageProgress": {
-     "status": "old",
-     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
-     "users": []
-    }
-   },
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 148,
-     "historical_set_139_files": 68
-    },
-    "functions": 21,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 2,
-    "ran_only_at_import": 0,
-    "never_ran": 19
    }
   },
   "demiflow.execution.target": {
@@ -986,6 +956,11 @@
    "symbol": "bounded_stream_batches",
    "batch": 5,
    "reason": "退役旧队列 datasink 后为空的流式物化入口。公开 v3 迭代保留其分批、额度与错误。"
+  },
+  {
+   "module": "demiflow.execution.stream_materialize",
+   "batch": 5,
+   "reason": "公开物化、恢复和发布已由 v3 负责。旧队列写入口退役后，运行中的阶段进度与终端只剩测试直接构造；旧封存没有保存这两类对象。"
   }
  ]
 }

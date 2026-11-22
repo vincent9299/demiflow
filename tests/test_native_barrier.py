@@ -590,64 +590,6 @@ def test_native_inflight_cut_allows_free_slots_past_slow_call(tmp_path, monkeypa
 
 
 
-def test_checkpoint_deadline_begins_before_blocked_insertion():
-    from types import SimpleNamespace
-    from demiflow.execution.stream_barrier import CheckpointControl
-    async def scenario():
-        stage = SimpleNamespace(concurrency=1, native_recovery=None)
-        queue = asyncio.Queue(maxsize=1)
-        await queue.put({'id': 0})
-        progress = SimpleNamespace(inputs=0, ordinal=1, batch_rows=1,
-            run=SimpleNamespace(limits={'checkpoint_timeout_s': 1, 'checkpoint_interval_ms': 60000,
-                'checkpoint_unconfirmed_rows': 2, 'checkpoint_unconfirmed_bytes': 100}))
-        control = CheckpointControl(progress, [stage], [queue], lambda task: None)
-        control.accepted(1, 10)
-        task = asyncio.create_task(control.run())
-        try:
-            await asyncio.sleep(1.1)
-            assert control.pending.status == 'failed'
-            with pytest.raises(TimeoutError, match='Checkpoint coordination'):
-                await control.pending.wait()
-            assert control.pending.local[0].is_set()
-        finally:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-    asyncio.run(scenario())
-
-
-def test_unconfirmed_byte_quota_requests_cut_before_row_trigger():
-    from types import SimpleNamespace
-    from demiflow.execution.stream_barrier import CheckpointControl
-    async def scenario():
-        stage = SimpleNamespace(concurrency=1, native_recovery=None)
-        queue = asyncio.Queue(maxsize=2)
-        progress = SimpleNamespace(inputs=0, ordinal=1, batch_rows=512,
-            run=SimpleNamespace(limits={'checkpoint_timeout_s': 2, 'checkpoint_interval_ms': 60000,
-                'checkpoint_unconfirmed_rows': 10, 'checkpoint_unconfirmed_bytes': 100}),
-            group_ends=[0])
-        async def align(*args):
-            pass
-        def seal(barrier):
-            async def publish():
-                progress.inputs = barrier.next_ordinal
-            return publish
-        progress.align, progress.seal = align, seal
-        control = CheckpointControl(progress, [stage], [queue], lambda task: None)
-        control.accepted(1, 80)
-        task = asyncio.create_task(control.run())
-        waiter = asyncio.create_task(control.admit(30))
-        try:
-            marker = await asyncio.wait_for(queue.get(), 1)
-            assert not waiter.done()
-            await marker.arrive(stage)
-            await asyncio.wait_for(waiter, 1)
-            assert control.bytes == 0
-        finally:
-            task.cancel()
-            await asyncio.gather(task, waiter, return_exceptions=True)
-    asyncio.run(scenario())
-
-
 class RecoveryEmitter:
     def __init__(self):
         self.pending = [{'id': 101}, {'id': 102}]
@@ -807,31 +749,3 @@ def test_temporary_hot_path_does_not_scan_tenfold_history(tmp_path, monkeypatch)
                 assert db.execute('SELECT items FROM runtime_storage').fetchone()[0] == history
             results.append(instructions[0])
     assert results[1] < results[0] * 1.5, results
-
-
-def test_cancelled_local_write_drains_under_repeated_cancellation(tmp_path):
-    from demiflow.execution.run_context import current_run
-    from demiflow.execution.stream_materialize import StreamMaterialization
-    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
-    with RunContext.start(tmp_path/'run') as run:
-        def write(*, expected):
-            assert current_run() is expected
-            entered.set()
-            assert release.wait(5)
-            finished.set()
-
-        async def scenario():
-            task = asyncio.create_task(StreamMaterialization._io(write, expected=run))
-            try:
-                assert await asyncio.to_thread(entered.wait, 2)
-                task.cancel()
-                await asyncio.sleep(0)
-                task.cancel()
-                await asyncio.sleep(0)
-                assert not task.done() and not finished.is_set()
-            finally:
-                release.set()
-            with pytest.raises(asyncio.CancelledError):
-                await task
-            assert finished.is_set()
-        asyncio.run(scenario())

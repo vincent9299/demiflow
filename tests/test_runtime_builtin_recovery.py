@@ -89,22 +89,16 @@ def collect_graph(root, family):
 
 def run_collect(root, family, window=None):
     import demiflow.execution.commit as protocol
-    import demiflow.execution.stream_materialize as materialize
 
-    # Five rows exercise three real durable boundaries without hundreds of
-    # image subprocesses. Same internal batch size in both test processes.
     root = Path(root)
     directory = root / "run"
     original = protocol.fault_point
 
     def fault(name, commit_id):
-        fact = RunJournal(directory).execution_commit(commit_id)
-        if (
-            name == window
-            and fact["intent"]["sinks"] == ["output"]
-            and fact["sequence"] == 1
-        ):
-            os._exit(37)
+        if name == window:
+            fact = RunJournal(directory).execution_commit(commit_id)
+            if fact["intent"]["sinks"] == ["materialize"] and fact["sequence"] == 1:
+                os._exit(37)
 
     protocol.fault_point = fault
     try:
@@ -155,9 +149,9 @@ def child(root, function, *arguments):
 
 @pytest.mark.parametrize("family", ["document", "image", "wiki", "lookup"])
 def test_builtin_partial_receipts_restore_without_serializing_resources(
-    tmp_path, monkeypatch, family
+    tmp_path, family
 ):
-    import demiflow.execution.stream_materialize as materialize
+    from demiflow.execution.kernels import state_codec
 
     if family == "lookup":
         lance.write_dataset(
@@ -172,7 +166,13 @@ def test_builtin_partial_receipts_restore_without_serializing_resources(
     assert crashed.returncode == 37, crashed.stdout + crashed.stderr
     journal = RunJournal(tmp_path / "run")
     before = journal.execution_commits("action-1")
-    assert len(before) == 1 and before[0]["intent"]["position"]["next_ordinal"] == 2
+    assert len(before) == 1
+    first_ref = before[0]["prepared"]["state"]["dataflow-cut-v3"]
+    first_bytes = (journal.directory / first_ref["path"]).read_bytes()
+    first_cut = json.loads(first_bytes)
+    assert not first_cut["cut"]["final"]
+    assert [source["next_sequence"] for part in first_cut["contributions"]
+            for source in part["sources"]] == [2]
     if family == "lookup":
         lance.write_dataset(
             pa.table({"id": ["a", "b"], "value": ["new-a", "new-b"]}),
@@ -182,17 +182,24 @@ def test_builtin_partial_receipts_restore_without_serializing_resources(
     result, reference = run_collect(tmp_path, family)
     assert len(result) == 5 and journal.execution_status()["attempt"] == 2
     facts = journal.execution_commits("action-1")
-    assert [f["intent"]["position"]["next_ordinal"] for f in facts] == [2, 4, 5]
-    assert all(f["status"] == "acked" for f in facts)
+    assert len(facts) >= 2 and all(f["status"] == "acked" for f in facts)
     assert facts[0]["commit_id"] == before[0]["commit_id"]
-    for fact in facts:
-        assert fact["prepared"]["state"]
-        for key, ref in fact["prepared"]["state"].items():
-            if key == "stream-progress":
-                continue
-            assert (
-                json.loads((Path(reference.directory) / ref["path"]).read_text()) == {}
-            )
+    assert facts[0]["prepared"]["state"]["dataflow-cut-v3"] == first_ref
+    assert (journal.directory / first_ref["path"]).read_bytes() == first_bytes
+    last_ref = facts[-1]["prepared"]["state"]["dataflow-cut-v3"]
+    last_cut = json.loads((journal.directory / last_ref["path"]).read_bytes())
+    assert last_cut["cut"]["final"]
+    sources = [source for part in last_cut["contributions"] for source in part["sources"]]
+    assert [(source["next_sequence"], source["end_of_input"]) for source in sources] == [(5, True)]
+    kernel_states = []
+    for part in last_cut["contributions"]:
+        for ref in part["operator_states"].values():
+            if ref["media_type"] == "application/x-demiflow-kernel-image-v3":
+                path = Path(reference.directory) / ".dataflow-store" / ref["store_id"] / "objects" / ref["key"]
+                raw = path.read_bytes()
+                assert hashlib.sha256(raw).hexdigest() == ref["digest"]
+                kernel_states.append(state_codec.loads(raw, max_bytes=ref["size_bytes"])["state"])
+    assert kernel_states and all(state == {"mode": "hooks", "value": {}} for state in kernel_states)
     if family == "lookup":
         assert [r["matches"] for r in result] == [
             [{"value": "pinned-a"}],
