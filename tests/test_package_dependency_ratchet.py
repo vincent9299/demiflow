@@ -53,8 +53,7 @@ P1_ASSEMBLY_IMPORTS = {
 # Listing a module here does not say it can be deleted. It says: do not build new
 # code on it without deciding that on purpose. Value: today's importers.
 PRE_V3_MODULES = {
-    'demiflow.execution.chain': {
-        'demiflow.execution.graph', 'demiflow.execution.native_plan'},
+    'demiflow.execution.chain': {'demiflow.execution.graph'},
     'demiflow.execution.stream': {
         'demiflow.data.dataset',
         'demiflow.data.execution_contract',  # TYPE_CHECKING only: original StreamStats identity
@@ -63,9 +62,9 @@ PRE_V3_MODULES = {
         'demiflow.execution.worker.graph_execution', 'demiflow.execution.worker.queue_transform'},
     'demiflow.execution.plan_interpreter': {
         'demiflow.execution.chain', 'demiflow.execution.dataflow_history',
-        'demiflow.execution.graph', 'demiflow.execution.native_plan', 'demiflow.execution.seal.plan',
+        'demiflow.execution.graph', 'demiflow.execution.seal.plan',
         'demiflow.execution.sealed_plan_facts', 'demiflow.execution.sealed_plans',
-        'demiflow.execution.worker.layout', 'demiflow.planning.dataset_dag',
+        'demiflow.planning.dataset_dag',
         'demiflow.workbench.runs.facts'},
     'demiflow.execution.local_tasks': {
         'demiflow.execution.arrow_batch_sink', 'demiflow.execution.dataset_native'},

@@ -41,25 +41,11 @@
      "batch": 4,
      "users": []
     },
-    "_ChainBlocks": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "_WriteSeal": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
     "_build_sealed_manifest": {
      "status": "old",
      "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
      "batch": 4,
-     "users": [
-      "demiflow.execution.native_plan"
-     ]
+     "users": []
     },
     "_seal_chain_bindings": {
      "status": "old",
@@ -74,12 +60,6 @@
      "users": []
     },
     "_seal_plan_code": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": []
-    },
-    "_worker_failure": {
      "status": "old",
      "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
      "batch": 4,
@@ -114,19 +94,10 @@
      "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
      "batch": 4,
      "users": [
-      "demiflow.execution.graph",
-      "demiflow.execution.native_plan"
+      "demiflow.execution.graph"
      ]
     },
     "seal_write_plan_ref": {
-     "status": "old",
-     "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
-     "batch": 4,
-     "users": [
-      "demiflow.execution.native_plan"
-     ]
-    },
-    "seal_write_topology": {
      "status": "old",
      "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
      "batch": 4,
@@ -408,26 +379,6 @@
     "called_only_by_tests": 0,
     "ran_only_at_import": 0,
     "never_ran": 9
-   }
-  },
-  "demiflow.execution.native_plan": {
-   "status": "old",
-   "reason": "旧的原生写入封存路径；调用方只有 chain.py 里的 _WriteSeal 和 seal_write_topology（都待退役）。批次 4。",
-   "batch": 4,
-   "importers": [
-    "demiflow.execution.chain"
-   ],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 3,
-     "historical_set_139_files": 6
-    },
-    "functions": 10,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 9,
-    "ran_only_at_import": 0,
-    "never_ran": 1
    }
   },
   "demiflow.execution.notebook": {
@@ -794,26 +745,6 @@
     "never_ran": 3
    }
   },
-  "demiflow.execution.worker.layout": {
-   "status": "old",
-   "reason": "只被旧执行器和 chain.py 的旧实现使用。批次 4。",
-   "batch": 4,
-   "importers": [
-    "demiflow.execution.chain"
-   ],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 3
-    },
-    "functions": 1,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 1,
-    "ran_only_at_import": 0,
-    "never_ran": 0
-   }
-  },
   "demiflow.execution.hosts.ray_worker_host": {
    "status": "undecided",
    "reason": "v3 的 DataflowRayConnector 继承这里的 RayControlConnector；_RayWorkerHost 属于 11-09 那一代。需要在 Ray 环境里测量后细化到符号。",
@@ -961,6 +892,40 @@
    "module": "demiflow.execution.stream_materialize",
    "batch": 5,
    "reason": "公开物化、恢复和发布已由 v3 负责。旧队列写入口退役后，运行中的阶段进度与终端只剩测试直接构造；旧封存没有保存这两类对象。"
+  },
+  {
+   "module": "demiflow.execution.chain",
+   "symbol": "_worker_failure",
+   "batch": 4,
+   "reason": "真实运行由 v3 的工作进程、原始封存与持久结果读取负责，旧图与写执行入口均已退出。"
+  },
+  {
+   "module": "demiflow.execution.chain",
+   "symbol": "_WriteSeal",
+   "batch": 4,
+   "reason": "真实运行由 v3 的工作进程、原始封存与持久结果读取负责，旧图与写执行入口均已退出。"
+  },
+  {
+   "module": "demiflow.execution.chain",
+   "symbol": "seal_write_topology",
+   "batch": 4,
+   "reason": "真实运行由 v3 的工作进程、原始封存与持久结果读取负责，旧图与写执行入口均已退出。"
+  },
+  {
+   "module": "demiflow.execution.chain",
+   "symbol": "_ChainBlocks",
+   "batch": 4,
+   "reason": "真实运行由 v3 的工作进程、原始封存与持久结果读取负责，旧图与写执行入口均已退出。"
+  },
+  {
+   "module": "demiflow.execution.native_plan",
+   "batch": 4,
+   "reason": "原生旧入口的执行分派和写封存退役；原件只读函数在06 seal/plan，旧 writer 使用已发布安装生成测试样本。"
+  },
+  {
+   "module": "demiflow.execution.worker.layout",
+   "batch": 4,
+   "reason": "旧 launch execution 分派已完整退休；K3 和 v3 执行使用现行入口，历史原 group/stage 通过不可变布局读取。"
   }
  ]
 }

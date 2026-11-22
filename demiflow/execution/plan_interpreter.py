@@ -584,7 +584,7 @@ def _validate_program_binding(binding, execution_stage_ids):
     sealed_operators stay in the sub-program's linear LOCAL order (the namespace
     verify_loaded_plan expects); operator_bindings map local indices to full-DAG
     occurrence stages. The local logical_node_id is deliberately not cross-checked
-    against the full dag here -- verify_native_programs owns that semantic mapping.
+    against the full DAG. The original writer assigned each local identity.
     """
     _require(type(binding) is dict and _PROGRAM_BINDING_KEYS <= set(binding)
              <= _PROGRAM_BINDING_KEYS | {'source_stage_id'},
@@ -592,8 +592,8 @@ def _validate_program_binding(binding, execution_stage_ids):
     _check_identifier(binding["program_id"], "program_id")
     input_path = binding["input_path"]
     _require(type(input_path) is list
-             and all(type(part) is str or type(part) is int for part in input_path),
-             "invalid_contract", "input_path must be a list of fields/indices")
+             and all(type(part) is str or (type(part) is int and part >= 0) for part in input_path),
+             "invalid_contract", "input_path must be a list of fields or nonnegative indices")
     _validate_program_ref(binding["plan_ref"])
     _check_identifier(binding["source_identity_ref"], "source_identity_ref")
     sealed_operators = binding["sealed_operators"]

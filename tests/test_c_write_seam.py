@@ -17,7 +17,6 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution.chain import seal_write_topology
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.execution.sealed_plans import load_execution_bindings, load_sealed_plan
@@ -148,32 +147,21 @@ def test_streamed_write_seals_executed_plan(tmp_path):
 # --- Relational counterexamples: the binding gate fail-closes -----------------
 
 def test_relational_structure_drift_fail_closed(tmp_path):
-    """R1 (layer 2): identical executed code-pin, divergent sealed operator order.
+    from dataclasses import replace
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.seal.plan import verify_action_programs
+    from test_runtime_v3_real_seams import prepared
 
-    The executed plan is unchanged so its code-pin still matches the seal; only
-    the sealed logical_dag operator sequence is perturbed. The structure recheck
-    must fail-close independently of the code-pin gate.
-    """
-    ds = relational_dataset()
-    with RunContext.start(tmp_path / "run") as run:
-        action = RunAction(run, "rel-action", {"kind": "write_table"})
-        handle = seal_write_topology(action, ds._source, ds._plan)
-        handle.verify(ds._plan)  # the honest plan passes both bindings
-        handle.topology["operators"] = list(reversed(handle.topology["operators"]))
-        with pytest.raises(RecoveryContractError, match="operator identity differs"):
-            handle.verify(ds._plan)
-
-
-def test_relational_code_pin_drift_fail_closed(tmp_path):
-    """R2 (layer 1): business code edited since seal changes the code-pin."""
-    ds = relational_dataset()
-    drifted = drifted_relational_dataset()
-    with RunContext.start(tmp_path / "run") as run:
-        action = RunAction(run, "rel-action", {"kind": "write_table"})
-        handle = seal_write_topology(action, ds._source, ds._plan)
-        handle.verify(ds._plan)
-        with pytest.raises(RecoveryContractError, match="code-pin differs"):
-            handle.verify(drifted._plan)
+    with prepared(tmp_path, relational_dataset()) as (execution, services):
+        sealed = execution._sealed
+        assert len(sealed.programs) > 1
+        verify_action_programs(services.action, execution._graph, execution._physical, sealed,
+                               store=services.store, bounds=services.bounds)
+        changed = replace(sealed, programs=tuple(reversed(sealed.programs)))
+        with pytest.raises(DataflowError, match='membership differs'):
+            verify_action_programs(services.action, execution._graph, execution._physical, changed,
+                                   store=services.store, bounds=services.bounds)
+        assert not services.action.context.journal.execution_commits(services.action.action_id)
 
 
 def test_relational_drift_fail_closed_before_publication(tmp_path, monkeypatch):

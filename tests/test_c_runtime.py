@@ -91,25 +91,6 @@ class TestScenario1Interpretation:
         assert layout.supported_slice == "chain_v1"
         assert layout.bindings_ref == bindings["ref"]
 
-    def test_load_worker_layout_real(self, workdir):
-        from demiflow.execution.worker.layout import load_worker_layout
-        sc = _sealed_chain(workdir)
-        sp = load_sealed_plan(sc.root, sc.action_id)
-        bindings = load_execution_bindings(sc.root, sc.action_id, sealed_plan=sp)
-        authority = MagicMock()
-        authority.directory = sc.root
-        launch_spec = {"execution_plan": {
-            "action_id": sc.action_id, "group_id": "g0",
-            "bindings_ref": bindings["ref"]}}
-        placement, policy, limits = load_worker_layout(launch_spec, authority, {})
-        assert placement.group_id == "g0"
-        assert isinstance(policy, CheckpointPolicy)
-        assert policy.checkpoint_rows == sc.fx.doc["checkpoint_rows"]
-        assert len(limits) == len(sc.fx.operation_nodes)
-        for idx, budget in limits.items():
-            assert set(budget) == {"inflight_rows", "inflight_bytes", "output_bytes"}
-
-
 # ---------------------------------------------------------------------------
 # Scenario 2: placement profile drives ResourceProfile
 # ---------------------------------------------------------------------------
@@ -385,12 +366,6 @@ class TestScenario8AssignmentValidation:
 # ---------------------------------------------------------------------------
 
 class TestScenario9LegacyPath:
-    def test_no_execution_plan_returns_none(self, workdir):
-        from demiflow.execution.worker.layout import load_worker_layout
-        authority = MagicMock()
-        authority.directory = workdir
-        assert load_worker_layout({}, authority, {}) is None
-
     def test_run_stream_default_no_limits(self):
         from demiflow.data.plan import AsyncMapOp, CallableSpec, LogicalPlan
         from demiflow.execution.stream import run_stream

@@ -10,7 +10,7 @@ from demiflow.execution.run_context import RunContext
 from demiflow.execution.seal.plan import load_native_execution
 from demiflow.execution.sealed_plans import load_execution_bindings, load_sealed_plan
 from runtime_v3_history_scenarios import OriginalCarrierReader
-from test_runtime_v3_sealed_version_selection import dual_seal, published_writer
+from test_runtime_v3_sealed_version_selection import dual_seal
 
 
 def test_read_published_native_placement_without_executing_or_replacing_it(dual_seal):
