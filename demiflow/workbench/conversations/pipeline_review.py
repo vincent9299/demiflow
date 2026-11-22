@@ -152,4 +152,3 @@ def recent_review(store, session):
                 break
             notes.append(item)
         return {'turn_id': row[0], 'status': row[1], 'details': notes}
-

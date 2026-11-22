@@ -178,4 +178,3 @@ def test_browser_restores_terminal_review_from_parent_receipt():
                        result=dict(pipeline_review='invalid')),turn='truncated')])
         expect(page.locator('.dfc-answers .dfc-summary').last).to_have_text('需要修改')
         assert not errors
-
