@@ -1,12 +1,12 @@
 # DemiFlow Dataset 引擎项目架构规约
 
-适用于 Dataset API、编译器、Local 与 Ray Core 运行时、平台算子库，以及受管 pipeline 进入引擎的接口。引擎改动在设计评审和固定提交的代码评审中均按本规约裁定。第一节规定模块所有权，第二节规定调用次序，第三节规定依赖方向和评审证据。合入和发版仍按[仓库发版规范](repository-rules.md)执行。
+适用于 Dataset API、编译器、Local 与 Ray Core 运行时、平台算子实现，以及受管 pipeline 进入引擎的接口。引擎改动在设计评审和固定提交的代码评审中均按本规约裁定。第一节规定模块所有权，第二节规定调用次序，第三节规定依赖方向和评审证据。合入和发版仍按[仓库发版规范](repository-rules.md)执行。
 
 **适用顺序。** 同一事项有冲突时，依次适用最新真人明确决定、仓库发版规范、本规约、已批准的具体设计。决定或例外仅覆盖点名的对象和范围。P1、P2、P4、F2 等设计仍提供对应契约的细节和验收依据。修改本规约须在隔离任务分支提出，列明受影响的模块、调用方及既有契约，经评审后按发版规范合入。
 
 ## 一　模块职责与输入输出
 
-每项职责由一个模块负责。一个 run 可含多个 action。编译器决定计划，数据源确定实际分片，封存模块固定这一 action 使用的程序和计划。driver 编排 action，调度器放置并准入任务，主机和资源后端负责实际分配。worker 驱动分区执行，算子库负责逐行、批次和关系计算，Exchange 持有跨分区投递状态。Local 和 Ray 使用同一套计划、任务、提交和恢复契约。
+每项职责由一个模块负责。一个 run 可含多个 action。编译器决定计划，数据源确定实际分片，封存模块固定这一 action 使用的程序和计划。driver 编排 action，调度器放置并准入任务，主机和资源后端负责实际分配。worker 驱动分区执行，算子实现定义逐行、批次和关系计算的语义与算法，Exchange 持有跨分区投递状态。Local 和 Ray 使用同一套计划、任务、提交和恢复契约。
 
 **新增一级模块。** 提议者须在详细设计前说明现有模块为何无法承担该独立职责，在下表末尾追加稳定编号、职责、输入、输出、代码目录，并按第三节核对与现有模块的依赖。已有编号不重排。已有职责内拆文件或增加内部函数沿用原模块编号。
 
@@ -21,9 +21,9 @@
 | 07 | 调度器 | 负责整批可行性、选机、单项准入及租约、运行和发布预留、退役等待。03 持有整批的重试与截止时间 | ReadyWork、stage profile、已探测主机、有效 worker/内存上限、当前占用 | 每项 host、WorkerLease、等待/不可行原因、退出观察结果 | [DataflowScheduler](../demiflow/execution/scheduler/placement.py) |
 | 08 | 主机适配与资源管理 | 适配器在选定主机准备连接/派发任务；ResourceManager 对 provider 申请、核对和收回物理资源 | 选机、WorkerAssignment、租约与资源计划 | 可激活的 endpoint、实际分配状态、退出或待清理证据 | [主机端点](../demiflow/execution/dataflow_hosts.py)、[ResourceManager](../demiflow/resources/manager.py) |
 | 09 | Worker 与分区执行 | 按物理计划驱动分区循环，绑定并调用算子，管理批次成员、进度和取消 | WorkerAssignment、源或通道输入、算子绑定、控制命令 | 行/批、进度、控制事件、分区 checkpoint 贡献 | [分区执行](../demiflow/execution/worker/dataflow_execution.py)、[图推进](../demiflow/execution/worker/dataflow_graph_runner.py)、[kernel](../demiflow/execution/kernels/) |
-| 10 | 算子库 | 负责算子的计算语义和算法实现，包括 join 键匹配、DataFusion 查询、Arrow 批变换及模型调用。同一算子的不同算法遵守相同的输入输出契约。受管模型服务负责自身就绪和生命周期 | 输入行、批或左右分区数据，算子参数、业务函数及获准的账本或服务接口 | 结果行、批、聚合状态或外部调用结果（含失败或结果未明） | [关系计算](../demiflow/execution/kernels/relational.py)、[DataFusion 查询](../demiflow/execution/dataset_native.py)、[Prompt](../demiflow/operator_llm/runtime.py)、[Embedding](../demiflow/embeddings/)、[SearchWeb](../demiflow/collect/operators.py)、[模型装配](../demiflow/execution/dataflow_models.py) |
+| 10 | 算子实现 | 负责算子的计算语义和算法实现，包括 join 键匹配、DataFusion 查询、Arrow 批变换及模型调用。同一算子的不同算法遵守相同的输入输出契约。受管模型服务负责自身就绪和生命周期 | 输入行、批或左右分区数据，算子参数、业务函数及获准的账本或服务接口 | 结果行、批、聚合状态或外部调用结果（含失败或结果未明） | [关系计算](../demiflow/execution/kernels/relational.py)、[DataFusion 查询](../demiflow/execution/dataset_native.py)、[Prompt](../demiflow/operator_llm/runtime.py)、[Embedding](../demiflow/embeddings/)、[SearchWeb](../demiflow/collect/operators.py)、[模型装配](../demiflow/execution/dataflow_models.py) |
 | 11 | Exchange | 管跨分区投递登记、路由、额度、确认与通道恢复状态；driver 进程负责中转通知 | ExchangeSpec、发送/接收端标识、记录定位、ACK | 下游投递、额度归还、可用于 cut 的通道进度 | [通道与传输](../demiflow/execution/exchange/)、[投递状态](../demiflow/execution/exchange/deliveries.py) |
-| 12 | 终端结果与业务 sink | terminal 交付 count/take/流式读等结果；sink 按目标协议准备和发布，Lance 写者负责查重、目标版本核对和事务提交 | 终端记录、发布事实，或分区待写结果 | 标量、行/批、物化句柄、WriteResult 或 sink 回执 | [终端](../demiflow/execution/dataflow_terminals.py)、[sink](../demiflow/execution/dataflow_sinks.py)、[Lance 写出](../demiflow/execution/lance_sink.py) |
+| 12 | 终端结果交付与写出 | 向调用方交付 count、take 或流式读取的结果。需要写出时，对应的 sink 按目标协议准备输出、检查发布状态并提交 | 终端记录及其发布事实，或分区待写结果与写出上下文 | 标量、行/批、物化句柄、WriteResult 或 sink 回执 | [终端](../demiflow/execution/dataflow_terminals.py)、[sink](../demiflow/execution/dataflow_sinks.py)、[写出契约](../demiflow/data/datasink.py) |
 | 13 | Checkpoint 与提交 | 收齐参与者状态，协调一致恢复点，按 sink 协议提交/对账 | CutRequest、源位置、核与缓冲状态、通道进度、sink 准备结果 | RecoveryImage、确认的输出与原生提交事实 | [checkpoint 协调](../demiflow/execution/checkpoint/coordinator.py)、[提交](../demiflow/execution/commit.py) |
 | 14 | 运行产物存储 | 保存、校验、保留、释放引用、安全回收 | 有界字节流或 ArtifactRef、owner | ArtifactRef、已校验字节、引用变更或回收结果 | [对象存储](../demiflow/execution/storage/objects.py)、[引用与租约](../demiflow/execution/storage/lease.py)、[回收](../demiflow/execution/storage/gc.py) |
 | 15 | 运行账本、观测与历史接口 | 按原事务记录运行事实；写观测；按指定运行和 attempt 只读解释 | 状态变更与授权、运行事件或查询条件 | 持久事实、观测指标、只读视图 | [账本](../demiflow/execution/run_journal.py)、[观测](../demiflow/execution/run_telemetry.py)、[历史读取](../demiflow/execution/run_reader.py)、[P4 端口](../demiflow/execution/host/) |
@@ -40,7 +40,7 @@
 
 ## 二　模块调用时序
 
-三张图沿同一次 action 展开。假设 ds 是有界输入，pack 已声明 item 和 summary。这里 take 限制交付行数，max_requests 限制本节点跨 worker 的新请求数；并发和受支持的重试会影响实际请求数。纯计算的 filter/count 跳过模型调用，写 Lance 时终端改走 sink。
+三张图沿同一次 action 展开。假设 ds 是有界输入，pack 已声明 item 和 summary。这里 take 限制交付行数，max_requests 限制本节点跨 worker 的新请求数；并发和受支持的重试会影响实际请求数。纯计算的 filter/count 跳过模型调用，需要写出时使用对应目标的 sink。
 
 ```python
 rows = ds.map_prompt("enrich", config=pack, inputs={"item": "text"},
@@ -102,12 +102,12 @@ sequenceDiagram
 sequenceDiagram
     participant D as Action driver
     participant W as Worker（09）
-    participant O as 算子库（10）
+    participant O as 算子实现（10）
     participant J as 原账本或对应的具名接口
     participant X as driver 内的 exchange
-    participant T as 终端订阅
+    participant T as 终端订阅（12）
     participant C as Checkpoint 与 CommitCoordinator
-    participant K as 业务 sink
+    participant K as 写出目标的 sink（12）
     participant S as 原制品与状态存储
     D->>W: 激活后开放本阶段
     W->>O: 按计划传入行、批或左右分区输入及已绑定的节点接口
@@ -215,7 +215,7 @@ sequenceDiagram
 
 ### D2　通用抽象依赖契约，具体算子由装配处选择
 
-**适用模块**　02 Dataset API、04 编译器、06 封存、09 Worker 与分区执行、10 算子库、15 观测。
+**适用模块**　02 Dataset API、04 编译器、06 封存、09 Worker 与分区执行、10 算子实现、15 观测。
 
 **允许。** 编译、调度、分区执行等通用模块依赖完成本职工作所需的契约。具体实现依该契约提供能力，装配处选择实现。编译器处理声明种类和已登记的 lowering，通用 worker 按执行规格调用已绑定的算子。具体工厂可以导入并构造 `PromptActor`；专用绑定可以核对受支持的精确类型后，注入本 action/node 的账本、请求额度和恢复能力。算子拥有字段映射、请求与响应处理、领域重放语义。领域到引擎的依赖逐符号使用已有合同、注入服务或已批准的原生装配。[算子服务契约](architecture-upgrade-20261120/F/F2-SERVICE-CONTRACTS.txt)
 
@@ -231,7 +231,7 @@ sequenceDiagram
 |---|---|---|
 | “这个对象的类型恰好是受支持的原生 PromptActor” | 原生算子的类型识别与专用装配 | 相同的精确类型谓词可共用。缓存、路由、图像等调用方仍各自核验本用途的条件。外观相似的对象和子类沿原路径处理。 |
 | “创建哪种 actor，绑定哪个账本” | 工厂与模型装配 | 工厂保留具体构造。绑定方按 spec、节点及受支持场景选择原有适配器。普通算子不会因此得到 Prompt 权限。 |
-| “封存哪些算子事实” | 算子库提供领域事实；06 负责封存表示与校验 | 复用精确身份判断，保留 Prompt/agent 的环境校验、各自事实和原有字节。 |
+| “封存哪些算子事实” | 具体算子提供封存所需的算子事实；06 负责封存表示与校验 | 复用精确身份判断，保留 Prompt/agent 的环境校验、各自事实和原有字节。 |
 | “是否计入已发生的用量或观测” | 15 观测与各指标生产者 | 保留已有 `isinstance`、路由子项和缓存解包语义。观测不能授予执行资格、扣费或证明提交。 |
 
 **评审批据。** 给出“声明 → 工厂 → 已绑定实例 → 行结果”的一条真实链路；改哪种判断，就比较其真例、子类、伪同名类和不相关 callable 的原有结果。涉及缓存时检查 Prompt/agent 的绑定、普通缓存及重复扣费；涉及观测时检查用量；涉及封存时按 D8 验证。按实际行为裁定，无需以直接导入类的文件数作为合格线。[算子事实](../demiflow/operator_llm/flow_contract.py) · [原生模型观测](../demiflow/execution/dataflow_model_observations.py) · [用量](../demiflow/execution/dataflow_usage.py)
