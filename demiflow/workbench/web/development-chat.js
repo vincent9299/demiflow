@@ -91,7 +91,18 @@
       turns.set(key,turn);const prior=latestTurn;latestTurn=turn;if(prior)paintTurn(prior);paintTurn(turn);return turn;
     }
     function trimOne(){
-      const [key,item]=items.entries().next().value;item.view?.dispose();item.node.remove();textBytes-=item.bytes;items.delete(key);item.turn.ids.delete(key);
+      let victim=null;
+      for(const pair of items.entries()){
+        const item=pair[1];
+        if(item.inProcess&&item.turn!==latestTurn&&!item.turn.process.node.open){victim=pair;break;}
+      }
+      if(!victim){
+        for(const pair of items.entries()){
+          const item=pair[1];
+          if(item.inProcess&&item.turn!==latestTurn){victim=pair;break;}
+        }
+      }
+      const [key,item]=victim||items.entries().next().value;item.view?.dispose();item.node.remove();textBytes-=item.bytes;items.delete(key);item.turn.ids.delete(key);
       if(item.textKey&&textItems.get(item.textKey)===key)textItems.delete(item.textKey);
       if(item.toolKey&&toolItems.get(item.toolKey)===key)toolItems.delete(item.toolKey);
       if(item.turn.candidate===item)item.turn.candidate=null;
@@ -151,7 +162,12 @@
       }
       changed();
     }
-    function queueRender(){if(!disposed&&renderTimer===null)renderTimer=setTimeout(renderVisible,60);}
+    function queueRender(){
+      if(disposed||renderTimer!==null)return;
+      let streaming=false;
+      for(const item of items.values())if(item.dirty&&item.running){streaming=true;break;}
+      renderTimer=setTimeout(renderVisible,streaming?120:35);
+    }
     function finishText(){if(!lastText)return;const item=items.get(lastText.id);if(item){item.running=false;item.node.classList.remove('dfc-streaming');if(item.preview)item.preview.textContent=excerpt(item.text);item.dirty=true;}lastText=null;queueRender();}
     function archiveCandidate(turn){
       const item=turn.candidate;if(!item||item.inProcess)return;item.inProcess=true;item.node.classList.add('dfc-progress');turn.step.body.append(item.node);turn.processCount++;turn.candidate=null;paintTurn(turn);
@@ -224,10 +240,12 @@
     }
     function updateSession(session){
       if(disposed||!session?.turn)return;const value=session.turn,turn=turns.get(JSON.stringify([session.id,value.id]));if(!turn)return;
-      turn.started=timestamp(value.created)??turn.started;turn.state=value.state||turn.state;
+      const nextStarted=timestamp(value.created)??turn.started,nextState=value.state||turn.state,nextDone=turn.done||value.cleanup==='complete';
+      if(nextStarted===turn.started&&nextState===turn.state&&nextDone===turn.done)return;
+      turn.started=nextStarted;turn.state=nextState;
       // A current session receipt can close a truncated history window, but no
       // duration is invented when the terminal event is outside that window.
-      if(value.cleanup==='complete')turn.done=true;paintTurn(turn);queueRender();changed();
+      turn.done=nextDone;paintTurn(turn);queueRender();changed();
     }
     function reset(){clearTimeout(renderTimer);renderTimer=null;for(const item of items.values())item.view?.dispose();items.clear();turns.clear();textItems.clear();toolItems.clear();seen.clear();flow.replaceChildren();textBytes=0;lastText=pagedText=latestTurn=null;changed();}
     const timer=setInterval(()=>{if(!disposed)for(const turn of turns.values())if(!turn.done)paintTurn(turn);},1000);

@@ -113,6 +113,9 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
     deadline = turn['created'] + limits.turn_seconds
     stop_started = None
     last_sample, peaks = 0, {'rss_bytes': 0, 'private_bytes': 0, 'processes': 0}
+    last_turn_check, cached_turn = 0.0, turn
+    provider_turn_bound = bool(turn.get('provider_turn'))
+    pending_events, pending_bytes, last_flush = [], 0, time.monotonic()
     outstanding = {}
     input_access = None
     control_bridge = None
@@ -127,24 +130,39 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
     unit = os.fstat(lease_fd)
     store.claim_worker(tid, turn['epoch'], dict(device=unit.st_dev, inode=unit.st_ino), process_identity(os.getpid()))
 
-    def tick():
-        nonlocal last_sample, requested, stop_started, reason
-        current = store.turn(tid)
+    def flush_events():
+        nonlocal pending_bytes, last_flush
+        if not pending_events:
+            return
+        batch = list(pending_events)
+        pending_events.clear()
+        pending_bytes = 0
+        last_flush = time.monotonic()
+        store.events_batch(tid, batch)
+
+    def tick(*, force=False):
+        nonlocal last_sample, last_turn_check, cached_turn, requested, stop_started, reason
+        now = time.monotonic()
+        if force or now - last_turn_check >= 0.08:
+            cached_turn = store.turn(tid)
+            last_turn_check = now
+        current = cached_turn
         try: parent_gone = os.read(parent_fd, 1) == b''
         except BlockingIOError: parent_gone = False
         stop = bool(current['stop_at'] or parent_gone or stopping_signal[0] or time.time() > deadline)
         if stop and not requested:
-            requested = True; stop_started = time.monotonic()
+            requested = True; stop_started = now
             reason = 'parent_closed' if parent_gone else 'deadline' if time.time() > deadline else 'stop_requested'
+            flush_events()
             store.update(tid, state='stopping')
             if provider is not None: provider.interrupt()
-        if requested and time.monotonic() - stop_started >= 5:
+        if requested and now - stop_started >= 5:
             signal_owned(os.getpid(), signal.SIGTERM)
-            if time.monotonic() - stop_started >= 7:
+            if now - stop_started >= 7:
                 signal_owned(os.getpid(), signal.SIGKILL)
                 raise InterruptedError(reason)
-        if time.monotonic() - last_sample >= 0.2:
-            last_sample = time.monotonic()
+        if now - last_sample >= 0.2:
+            last_sample = now
             rows = descendants(os.getpid(), include_owner=True)
             rss = sum(r['rss_bytes'] for r in rows.values())
             peaks['rss_bytes'] = max(peaks['rss_bytes'], rss); peaks['processes'] = max(peaks['processes'], len(rows))
@@ -169,19 +187,42 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
             # They are processed in order after the turn identity is acknowledged.
 
     def emit(kind, data):
+        nonlocal pending_bytes
         # Text is chunked before database/HTTP copies. Other indivisible records
         # are rejected by the store rather than truncated into a false result.
         if kind in {'message.delta', 'message.completed', 'output.delta'}:
             content = data.get('text', '')
-            if len(content.encode()) > 32768:
+            encoded_len = len(content.encode())
+            if encoded_len > 32768:
                 if kind == 'message.completed':
                     # Completion text can duplicate deltas; mark a paged body.
-                    store.event(tid, 'message.completed', dict(data, text='', paged=True))
+                    pending_events.append(('message.completed', dict(data, text='', paged=True), False))
                     kind = 'output.delta'
                 for offset in range(0, len(content), 8000):
-                    store.event(tid, kind, dict(data, text=content[offset:offset + 8000]))
+                    part = content[offset:offset + 8000]
+                    pending_events.append((kind, dict(data, text=part), False))
+                    pending_bytes += len(part.encode())
+                flush_events()
                 return
-        store.event(tid, kind, data)
+            if kind in {'message.delta', 'output.delta'} and pending_events:
+                prev_kind, prev_data, _ = pending_events[-1]
+                if prev_kind == kind and {k: v for k, v in prev_data.items() if k != 'text'} == {k: v for k, v in data.items() if k != 'text'}:
+                    prev_text = prev_data.get('text', '')
+                    if len(prev_text.encode()) + encoded_len <= 16384:
+                        pending_events[-1] = (prev_kind, dict(prev_data, text=prev_text + content), False)
+                        pending_bytes += encoded_len
+                        if pending_bytes >= 4096 or time.monotonic() - last_flush >= 0.04:
+                            flush_events()
+                        return
+            pending_events.append((kind, data, False))
+            pending_bytes += encoded_len
+            if kind == 'message.completed' or pending_bytes >= 4096 or time.monotonic() - last_flush >= 0.04:
+                flush_events()
+            return
+        pending_events.append((kind, data, False))
+        pending_bytes += 256
+        if kind != 'usage.observed' or len(pending_events) >= 16 or time.monotonic() - last_flush >= 0.04:
+            flush_events()
 
     try:
         tick()
@@ -259,7 +300,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
             from demiflow.workbench.conversations.sandbox import specification
             specification(confined, [sys.executable], {}, project['root'])
             from demiflow.workbench.conversations.model_broker import start_model_broker
-            model_broker = start_model_broker(deployment, turn, session, broker_home)
+            model_broker = start_model_broker(deployment, turn, session, broker_home, defer_handshake=True)
             config = model_broker.child_config
             if cell_cli:
                 config = {**config, '_cell_bin': str(control_bridge.bin)}
@@ -289,7 +330,9 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
         # Compare again after context preparation and handshake; no baseline reset.
         if watched and capture(project['root'], watched, exclude=excluded) != baseline:
             reject('Watched sources changed during preparation; no model turn sent', 'conflict')
-        tick()
+        if model_broker is not None:
+            model_broker.wait_ready()
+        tick(force=True)
         if requested: raise InterruptedError(reason)
         # Persist unknown BEFORE writing to the provider pipe: a crash cannot
         # turn an uncertain paid request into a supposedly safe automatic retry.
@@ -298,28 +341,35 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
         if acp:
             native_turn = provider.turn
             store.update(tid, dispatch='sent', delivery='not_applicable' if compact else 'sent', provider_turn=native_turn, state='running')
+            provider_turn_bound = bool(native_turn)
         else:
             started = wait(start_key)
             native_turn = provider.started(started)
             store.update(tid, dispatch='acknowledged', provider_turn=native_turn, state='running')
+            provider_turn_bound = bool(native_turn)
         while not completed:
             current = tick()
-            transport.poll()
+            transport.poll(0.03 if pending_events else 0.1)
             while transport.events:
                 event = transport.pop()
                 notifications = provider.event(event)
-                if provider.turn and not store.turn(tid)['provider_turn']:
-                    store.update(tid,provider_turn=provider.turn)
+                if provider.turn and not provider_turn_bound:
+                    flush_events()
+                    store.update(tid, provider_turn=provider.turn)
+                    provider_turn_bound = True
                 for kind, data in notifications:
                     if kind == 'activity':
                         if not provider.acknowledged:
                             provider.acknowledged = True
+                            flush_events()
                             store.update(tid, delivery='not_applicable' if compact else 'acknowledged', dispatch='acknowledged')
                     elif kind == 'done':
+                        flush_events()
                         final = data['status']; completed = True
                         if data.get('error'): reason = str(data['error'])[:2048]
                     elif kind == 'request':
-                        tick()
+                        flush_events()
+                        tick(force=True)
                         if requested: continue
                         if automatic_approval(project, data, assurance=getattr(process, 'execution_assurance', 'host_permissions')):
                             reply = dict(id=data['rpc_id'], result=provider.answer(data, 'allow_once'))
@@ -329,7 +379,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                         key = store.request(tid, data); outstanding[key] = data
                         store.update(tid, state='waiting_input' if data['method'].endswith('requestUserInput') else 'waiting_approval')
                     elif kind == 'bridge':
-                        tick()
+                        flush_events()
+                        tick(force=True)
                         if requested: continue
                         try:
                             if input_access is None or data['tool'] != INPUT_TOOL['name']:
@@ -340,21 +391,25 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                             result = dict(success=False, contentItems=[dict(type='inputText', text=str(exc)[:2048])])
                         transport.send(dict(id=data['rpc_id'], result=result))
                     else: emit(kind, data)
-            for pending in store.pending(tid):
-                if cell_cli and json.loads(pending['request']).get('method') == 'notebook/command':
-                    continue
-                tick()
-                if requested: break
-                request = outstanding.get(pending['id'])
-                if request is None: reject('Pending request belongs to a lost provider connection')
-                if pending['expires'] < time.time(): raise TimeoutError('Input request expired without approval')
-                if pending['answer'] is not None:
-                    answer = provider.answer(request, json.loads(pending['answer']))
-                    if not store.dispatch_provider_reply(tid, turn['epoch'], lambda: transport.send(dict(id=request['rpc_id'], result=answer))):
-                        break
-                    store.resolved(pending['id']); del outstanding[pending['id']]
-                    store.update(tid, state='running' if not outstanding else 'waiting_input')
+            if pending_events and time.monotonic() - last_flush >= 0.04:
+                flush_events()
+            if outstanding:
+                for pending in store.pending(tid):
+                    if cell_cli and json.loads(pending['request']).get('method') == 'notebook/command':
+                        continue
+                    tick(force=True)
+                    if requested: break
+                    request = outstanding.get(pending['id'])
+                    if request is None: reject('Pending request belongs to a lost provider connection')
+                    if pending['expires'] < time.time(): raise TimeoutError('Input request expired without approval')
+                    if pending['answer'] is not None:
+                        answer = provider.answer(request, json.loads(pending['answer']))
+                        if not store.dispatch_provider_reply(tid, turn['epoch'], lambda: transport.send(dict(id=request['rpc_id'], result=answer))):
+                            break
+                        store.resolved(pending['id']); del outstanding[pending['id']]
+                        store.update(tid, state='running' if not outstanding else 'waiting_input')
             if acp and start_key in transport.responses:
+                flush_events()
                 response = transport.take(start_key)
                 outcome = provider.completion(response)
                 final, completed = outcome['status'], True
@@ -363,8 +418,11 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
             # Interrupt has its own RPC result; it is not proof of child cleanup.
             for key in list(transport.responses):
                 transport.take(key)
+        flush_events()
         if requested: final = 'cancelled'
     except BaseException as exc:
+        try: flush_events()
+        except Exception: pass
         reason = reason or (type(exc).__name__ + ': ' + str(exc))[:2048]
         final = 'cancelled' if requested else 'interrupted' if isinstance(exc, (ConnectionError, TimeoutError)) else 'failed'
         current = store.turn(tid)

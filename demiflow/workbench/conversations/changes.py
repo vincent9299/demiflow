@@ -1,37 +1,84 @@
 """Bounded source previews supplement full-byte hashes, never truncate results."""
 import difflib
+import hashlib
+import os
 from pathlib import Path
+import stat
+import time
 
-from demiflow.workbench.conversations.common import read_file
+from demiflow.workbench.conversations.common import plain_path
+from demiflow.workbench.conversations.common import reject
 from demiflow.workbench.conversations.common import safe_path
-from demiflow.workbench.conversations.common import snapshot
 
 TEXT_SUFFIXES = {'.py', '.md', '.json', '.yaml', '.yml', '.toml', '.js', '.css', '.html', '.txt'}
 
 
-def capture(root, paths, *, exclude=()):
-    facts = snapshot(root, paths, exclude=exclude)
-    remaining = 128 * 1024
-    for name, fact in facts.items():
-        if fact is None: continue
-        if Path(name).suffix not in TEXT_SUFFIXES:
-            fact['preview_unavailable'] = 'not_plain_source'
-        elif fact['bytes'] > 16384 or fact['bytes'] > remaining:
-            fact['preview_unavailable'] = 'preview_byte_budget'
+def capture(root, paths, *, exclude=(), max_files=4096, max_bytes=64 * 1024**2):
+    """Hash exact watched bytes and collect bounded text previews in a single read pass."""
+    facts, total, visited = {}, 0, 0
+    remaining_preview = 128 * 1024
+    deadline = time.monotonic() + 10
+    pending = [plain_path(p) for p in paths]
+    excluded = set(exclude)
+    while pending:
+        rel = pending.pop()
+        if rel in facts or rel in excluded:
+            continue
+        visited += 1
+        if visited > max_files or time.monotonic() > deadline:
+            reject('Source snapshot count/time budget exceeded', 'resource_limit')
+        path = safe_path(root, rel, missing=True)
+        if not path.exists():
+            facts[rel] = None
+        elif path.is_dir():
+            with os.scandir(path) as entries:
+                for entry in entries:
+                    child = rel + '/' + entry.name
+                    if child in excluded:
+                        continue
+                    if len(pending) + visited >= max_files:
+                        reject('Source snapshot entry budget exceeded', 'resource_limit')
+                    pending.append(child)
         else:
-            try:
-                raw = read_file(safe_path(root, name), 16384)
-                import hashlib
-                if hashlib.sha256(raw).hexdigest() != fact['sha256']:
-                    from demiflow.workbench.conversations.common import reject
-                    reject('Source changed between hash and preview', 'conflict')
-                value = raw.decode('utf-8')
-                if len(value.splitlines()) > 512:
-                    fact['preview_unavailable'] = 'preview_line_budget'
-                else:
-                    fact['preview'] = value; remaining -= len(raw)
-            except UnicodeError:
-                fact['preview_unavailable'] = 'not_utf8'
+            size = path.stat().st_size
+            if total + size > max_bytes:
+                reject('Source snapshot byte budget exceeded', 'resource_limit')
+            want_preview = Path(rel).suffix in TEXT_SUFFIXES and size <= 16384 and size <= remaining_preview
+            hashed = hashlib.sha256()
+            buf = bytearray() if want_preview else None
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(fd, 'rb') as stream:
+                before = os.fstat(fd)
+                if not stat.S_ISREG(before.st_mode) or before.st_size != size:
+                    reject('Source replaced during snapshot', 'conflict')
+                left = size
+                while left:
+                    chunk = stream.read(min(65536, left))
+                    if not chunk:
+                        reject('Source truncated during snapshot', 'conflict')
+                    hashed.update(chunk)
+                    if buf is not None:
+                        buf.extend(chunk)
+                    left -= len(chunk)
+                after = os.fstat(fd)
+                if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+                    reject('Source changed during snapshot', 'conflict')
+            total += size
+            fact = dict(bytes=size, sha256=hashed.hexdigest())
+            if Path(rel).suffix not in TEXT_SUFFIXES:
+                fact['preview_unavailable'] = 'not_plain_source'
+            elif not want_preview:
+                fact['preview_unavailable'] = 'preview_byte_budget'
+            else:
+                try:
+                    value = bytes(buf).decode('utf-8')
+                    if len(value.splitlines()) > 512:
+                        fact['preview_unavailable'] = 'preview_line_budget'
+                    else:
+                        fact['preview'] = value; remaining_preview -= len(buf)
+                except UnicodeError:
+                    fact['preview_unavailable'] = 'not_utf8'
+            facts[rel] = fact
     return facts
 
 
