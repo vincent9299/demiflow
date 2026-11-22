@@ -249,9 +249,11 @@ SOFTWARE.
         const button=el('button',undefined,'development-session');button.type='button';button.dataset.sessionId=row.id;
         button.setAttribute('aria-current',state.session?.id===row.id?'page':'false');
         const title=row.title||'未命名会话',turn=row.turn;
-        const stateText=running(row)?(turn.cleanup==='complete'?'处理中':(labels[turn.state]||turn.state)):'';
-        button.append(el('span',title,'development-session-title'),el('span',stateText,'development-session-state'));button.title=stateText?title+' · '+stateText:title;
-        button.hidden=!(title+' '+stateText).toLocaleLowerCase().includes(term);
+        button.title=title;button.append(el('span',title,'development-session-title'));
+        const activeState=running(row)&&['preparing','starting','running','waiting_input','waiting_approval','stopping'].includes(turn.state)
+          ?labels[turn.state]:'';
+        if(activeState)button.append(el('span',activeState,'development-session-state'));
+        button.hidden=!(title+' '+activeState).toLocaleLowerCase().includes(term);
         button.onclick=()=>{if(row.id!==state.session?.id||state.historyOnly)openSession(row.id);};sessionList.append(button);
       }
       const pageButton=(label,offset)=>{const button=el('button',label);button.type='button';button.disabled=!!state.listing;button.onclick=()=>{state.listOffset=offset;loadConversations(true).catch(e=>error(body,e));};sessionPages.append(button);};
@@ -302,7 +304,16 @@ SOFTWARE.
       close.onclick=()=>dialog.close();add.onclick=()=>{if(!field.value.trim())return;input.value+=(input.value?'\n':'')+'引用文件或目录：'+field.value.trim();input.dispatchEvent(new Event('input',{bubbles:true}));dialog.close();input.focus();};
       dialog.append(el('h2','引用文件或目录'),el('p','可以引用项目外的数据，也可以直接在对话中描述；无需预先配置。'),field,add,close);document.body.append(dialog);trackDialog(dialog);dialog.showModal();field.focus();
     }
-    const composer=globalThis.ForgeDevelopmentComposer.create({onProviderChange:()=>availability(),onReference:addReference});
+    const composer=globalThis.ForgeDevelopmentComposer.create({onProviderChange:()=>availability(),onReference:addReference,
+      async onQueueAction(submission_id,action){
+        try {
+          if(action==='steer'){
+            const message=state.session.queued_messages.find(row=>row.submission===submission_id);
+            if(message)await steerQueued([message]);
+          }else await api('dev-queue-change',{}, {session_id:state.session.id,submission_id,action});
+          await refresh();
+        } catch(err){if(!state.disposed)error(body,err);}
+      }});
     state.composer=composer;
     const {form,input,send,stop,providers}=composer;
     composer.update({capabilities,session:null,readonly:capabilities.read_only===true,historyOnly:false,sending:true,stats:null});
@@ -316,10 +327,23 @@ SOFTWARE.
     state.chat=chat;state.items=chat.items;
     let draftKey=workspaceId+':new';input.value='';
     const resizeInput=()=>composer.resize();
-    input.oninput=()=>{if(bytes(input.value)>32768){input.setCustomValidity('要求不能超过 32 KiB');return;}input.setCustomValidity('');if(!drafts.has(draftKey)&&drafts.size>=64){input.setCustomValidity('已保存 64 份草稿，请先清空不再需要的草稿。');return;}if(input.value){drafts.set(draftKey,input.value);draftRevisions.set(draftKey,++draftSerial);}else{drafts.delete(draftKey);draftRevisions.delete(draftKey);}saveDrafts();availability();};
-    let composing=false,composingUntil=0;
+    input.oninput=()=>{resizeInput();if(bytes(input.value)>32768){input.setCustomValidity('要求不能超过 32 KiB');return;}input.setCustomValidity('');if(!drafts.has(draftKey)&&drafts.size>=64){input.setCustomValidity('已保存 64 份草稿，请先清空不再需要的草稿。');return;}if(input.value){drafts.set(draftKey,input.value);draftRevisions.set(draftKey,++draftSerial);}else{drafts.delete(draftKey);draftRevisions.delete(draftKey);}saveDrafts();availability();};
+    async function steerQueued(messages){
+      const session_id=state.session.id,turn_id=state.session.turn.id;
+      for(const item of messages){
+        await api('dev-steer',{}, {session_id,turn_id,submission_id:item.submission,text:item.text,from_queue:true});
+      }
+    }
+    let composing=false,composingUntil=0,steerGesture=false;
     input.addEventListener('compositionstart',()=>{composing=true;});input.addEventListener('compositionend',()=>{composing=false;composingUntil=Date.now()+10;});
-    input.onkeydown=e=>{if(composing||Date.now()<composingUntil||e.isComposing||e.keyCode===229)return;if(e.key==='Enter'&&!e.shiftKey&&!e.altKey){e.preventDefault();if(!e.repeat)form.requestSubmit();}if(e.key==='Escape'&&!stop.disabled)stop.click();};
+    input.onkeydown=e=>{if(composing||Date.now()<composingUntil||e.isComposing||e.keyCode===229)return;if(e.key==='Enter'&&!e.shiftKey&&!e.altKey){e.preventDefault();if(!e.repeat){
+        steerGesture=(e.metaKey||e.ctrlKey)&&running(state.session)&&capabilities.message_steering===true;
+        try{
+          if(steerGesture&&!input.value.trim()&&state.session.queued_messages?.length&&!input.disabled){
+            steerQueued(state.session.queued_messages).catch(err=>{if(!state.disposed)error(body,err);}).finally(refresh);
+          }else form.requestSubmit();
+        }finally{steerGesture=false;}
+      }}if(e.key==='Escape'&&!stop.disabled)stop.click();};
     function availability(){
       const t=state.session?.turn;
       const provider=(capabilities.providers||[]).find(p=>p.id===(state.session?.provider||providers.value))||(capabilities.providers||[]).find(p=>p.available);
@@ -390,7 +414,7 @@ SOFTWARE.
       for(const node of pendingHost.children)if(state.historyOnly||capabilities.read_only||sessionReadonly(current)||!(current.pending||[]).some(p=>p.id===node.dataset.request))node.remove();
     }
     function refresh(){
-      if(state.disposed)return Promise.resolve();
+      if(state.disposed||(state.sending&&state.createdHere))return Promise.resolve();
       if(state.refreshing)return state.refreshing;
       clearTimeout(state.timer);
       const startEpoch=state.feedEpoch||0;
@@ -433,12 +457,51 @@ SOFTWARE.
       })();
       return state.refreshing;
     }
-    form.onsubmit=async e=>{e.preventDefault();if(send.disabled||!input.reportValidity()||!input.value.trim())return;send.disabled=true;
-      const message=input.value,sentDraftRevision=draftRevisions.get(draftKey)||0,submission=state.submission||{text:message,id:uid()};if(submission.text!==message){error(body,new Error('上次发送结果未确认，请先核对记录后再编辑要求。'));return;}state.submission=submission;
-      state.sending=true;availability();
-      try{if(!state.session){state.creation||={request_id:uid(),provider_id:providers.value,...(state.newDraft?{new_conversation:true}:{})};state.session=await api('dev-session-create',{},state.creation);state.createdHere=true;}if(state.disposed)return;const started=await api('dev-turn-start',{}, {session_id:state.session.id,submission_id:submission.id,expected_revision:state.session.revision,text:message});state.submission=null;if(drafts.get(draftKey)===message&&(draftRevisions.get(draftKey)||0)===sentDraftRevision){drafts.delete(draftKey);draftRevisions.delete(draftKey);saveDrafts(true);}if(state.disposed)return;input.value='';resizeInput();if(state.createdHere){await openSession(state.session.id);return;}if(started&&state.session){state.session={...state.session,turn:started};}state.listAt=0;clearTimeout(state.timer);const inflight=!!state.refreshing;await refresh();if(inflight&&!state.disposed)await refresh();}
-      catch(err){if(!state.disposed){error(body,err);await refresh().catch(()=>{});}}
-      finally{state.sending=false;if(!state.disposed)availability();}
+    form.onsubmit=async event=>{
+      event.preventDefault();
+      if(send.disabled||!input.reportValidity()||!input.value.trim())return;
+      const message=input.value, sentDraftRevision=draftRevisions.get(draftKey)||0;
+      const queue=running(state.session)||!!state.session?.queued_messages?.length;
+      const submission=state.submission||{text:message,id:uid(),after:queue?state.session.turn.id:null,steer:steerGesture};
+      if(submission.text!==message){
+        error(body,new Error('上次发送结果未确认，请先核对记录后再编辑要求。'));return;
+      }
+      const returnFocus=submission.after && (document.activeElement===input || document.activeElement===send);
+      state.submission=submission;state.sending=true;availability();
+      try{
+        if(!state.session){
+          state.creation||={request_id:uid(),provider_id:providers.value,...(state.newDraft?{new_conversation:true}:{})};
+          state.session=await api('dev-session-create',{},state.creation);state.createdHere=true;
+        }
+        if(state.disposed)return;
+        const payload={session_id:state.session.id,submission_id:submission.id,text:message};
+        let started=null;
+        if(submission.after)await api(submission.steer?'dev-steer':'dev-enqueue',{}, {...payload,turn_id:submission.after});
+        else started=await api('dev-turn-start',{}, {...payload,expected_revision:state.session.revision});
+        state.submission=null;
+        if(drafts.get(draftKey)===message&&(draftRevisions.get(draftKey)||0)===sentDraftRevision){
+          drafts.delete(draftKey);draftRevisions.delete(draftKey);saveDrafts(true);
+        }
+        if(state.disposed)return;
+        input.value='';resizeInput();
+        if(state.createdHere){await openSession(state.session.id);return;}
+        if(started&&state.session){state.session={...state.session,turn:started};}
+        state.listAt=0;clearTimeout(state.timer);
+        // The message is already durable. Long polling must not keep the
+        // composer locked while the user types or promotes the next message.
+        if(submission.after)refresh();
+        else{const inflight=!!state.refreshing;await refresh();if(inflight&&!state.disposed)await refresh();}
+      }catch(err){
+        if(err.operationStarted===false||['invalid_request','conflict','resource_limit','forbidden'].includes(err.code))state.submission=null;
+        if(!state.disposed){error(body,err);await refresh().catch(()=>{});}
+      }
+      finally{
+        state.sending=false;
+        if(!state.disposed){
+          availability();
+          if(returnFocus&&document.activeElement===document.body&&!input.disabled)input.focus({preventScroll:true});
+        }
+      }
     };
     stop.onclick=async()=>{stop.disabled=true;try{await api('dev-cancel',{}, {session_id:state.session.id,turn_id:state.session.turn.id,request_id:uid()});status.textContent='已请求停止，等待所属工具清理。';}catch(e){error(body,e);stop.disabled=false;}};
     function clearTimeline(){state.feedEpoch=(state.feedEpoch||0)+1;chat.reset();newContent.hidden=true;}

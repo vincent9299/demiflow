@@ -239,6 +239,17 @@
       const data=event.data,bodyChunk=event.type==='output.delta'&&pagedText===scope(event,'message:'+(data.channel||'answer'),data.item_id);if(!bodyChunk)pagedText=null;
       if(event.type==='message.user'){
         finishText();const key=scope(event,'user',event.turn_id),item=addItem(key,'user',event,event.turn_id+':user');write(item,data.text);item.turn.started=timestamp(event.observed_at);paintTurn(item.turn);
+      }else if(event.type==='message.steer'||event.type==='message.steer_status'){
+        const key=scope(event,'steer',data.item_id);
+        let item=items.get(key);
+        if(!item){
+          finishText();item=addItem(key,'user',event,data.item_id);
+          item.turn.step.body.append(item.node);item.inProcess=true;item.turn.processCount++;
+          item.steerStatus=el('small',undefined,'dfc-steer-status');item.actions.prepend(item.steerStatus);
+          write(item,data.text||'本轮插话');paintTurn(item.turn);
+        }
+        source(item,event,data.item_id);
+        item.steerStatus.textContent=({accepted:'本轮已接收',missed:'本轮未接收',unknown:'接收情况未确认'})[data.status]||'等待本轮接收';
       }else if(event.type==='message.delta'||event.type==='message.completed')message(event);
       else if(bodyChunk)message({...event,type:'message.delta'});
       else if(event.type==='output.delta')tool(event,true);

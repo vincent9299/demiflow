@@ -82,6 +82,9 @@ class CellCommands(BridgeServer):
             return {'done': False}
         fields = {'catalog.list': {'group', 'offset'}, 'catalog.show': {'group', 'id', 'offset'},
                   'cell.show': set(), 'cell.edit': {'source'}, 'cell.run': set()}
+        if method == 'catalog.show' and type(params) is dict and 'version' in params:
+            integer(params['version'], 1, 2**63-1)
+            fields[method].add('version')
         if method not in fields or type(params) is not dict or set(params) != fields[method]:
             reject('Unsupported notebook command')
         if method.startswith('catalog.') and params['group'] not in ('dictionary', 'tools'):
@@ -89,7 +92,7 @@ class CellCommands(BridgeServer):
         if 'offset' in params:
             integer(params['offset'], 0, 4096)
         if 'id' in params:
-            text(params['id'], 256)
+            text(params['id'], 4096)
         if 'source' in params:
             text(params['source'], 12000)
         key = self.store.request(self.tid, dict(rpc_id=secrets.token_hex(12), method=METHOD,

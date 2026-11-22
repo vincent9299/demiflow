@@ -140,6 +140,7 @@
       if(!Array.isArray(draft.document?.cells)||draft.document.cells.length>64)throw Error('旧 Notebook 草稿单元无法恢复。');
       const hash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(draft))))].map(x=>x.toString(16).padStart(2,'0')).join('').slice(0,16);
       const path='恢复草稿-'+hash+'.ipynb';
+      if(opened.deleted_drafts?.includes(path))continue;
       const url=opened.base_url+'api/contents/'+encodeURIComponent(path);
       const exists=await fetch(url+'?content=0',{credentials:'same-origin'});
       if(exists.ok)continue;
@@ -205,7 +206,11 @@
     const controls=node('div',undefined,'df-book-controls');
     strip.append(bookTabs,create);header.append(strip,enableRun,controls);
     const notice=node('p',undefined,'df-book-notice');notice.setAttribute('role','status');notice.hidden=true;
-    documentPane.append(header,notice,native);desk.append(documentPane);root.append(dictionary,desk);
+    const confirmation=node('div',undefined,'df-book-confirm');confirmation.hidden=true;
+    const question=node('span'),cancel=node('button','取消'),confirm=node('button','确认删除');
+    confirm.className='df-confirm-delete';cancel.type=confirm.type='button';
+    confirmation.append(question,cancel,confirm);
+    documentPane.append(header,confirmation,notice,native);desk.append(documentPane);root.append(dictionary,desk);
     const dictionaryNavigation=ForgeNavigation.collapsible({layout:root,sidebar:dictionary,header:navigation,label:'数据字典目录'});
     let disposed=false,session=null;
     const alive=()=>!disposed&&root.isConnected;
@@ -282,15 +287,7 @@
       const fixedVersion=item.original?result.version:result.binding.reference.ref.lance_version;
       const rows=item.original?result.row_count:result.binding.reference.ref.row_count;
       const binding=item.original?result.binding:result.binding.digest;
-      const columns=Object.keys(fields).slice(0,16);
-      const encoded=JSON.stringify;
-      let code;
-      if(item.original){
-        code='from demiflow.workbench.notebooks.data import project_sample\n\ndf = project_sample('+encoded(item.original.id)+', expected='+encoded(expected)+', version='+fixedVersion+', binding='+encoded(binding)+', columns='+encoded(columns)+', limit=20)\ndf';
-      }else{
-        const historical=request.alias===item.alias&&!!request.version;
-        code='from demiflow.workbench.notebooks.data import sample\n\ndf = sample('+encoded(item.alias)+', binding='+encoded(historical?request.alias_binding:binding)+(historical?', version='+fixedVersion+', version_binding='+encoded(binding):'')+', columns='+encoded(columns)+', limit=20)\ndf';
-      }
+      const code='from demiflow.workbench.notebooks.data import sample\n\ndf = sample('+JSON.stringify(item.label)+', version='+fixedVersion+', limit=20)\ndf';
       return {fields,fixedVersion,rows,binding,code};
     }
     async function catalogCommand(command,args){
@@ -298,19 +295,22 @@
       if(dictionary)await scanning;
       const tools=dictionary?[]:(await api('project-data-tools')).definitions;
       if(command==='catalog.list'){
-        const values=dictionary?[...tables.values()].map(({item})=>({id:item.key,name:item.label,version:item.version})):
-          tools.map(item=>({id:item.id,name:item.symbol,module:item.module,origin:item.origin,kind:item.tool_kind}));
+        const values=dictionary?[...tables.values()].map(({item})=>({name:item.label,version:item.version})):
+          tools.map(item=>({name:item.module?item.module+'.'+item.symbol:item.path+'::'+item.symbol,origin:item.origin,kind:item.tool_kind}));
         const offset=args.offset,items=values.slice(offset,offset+12);
         return {items,next_offset:offset+items.length<values.length?offset+items.length:null};
       }
       if(dictionary){
-        const entry=tables.get(args.id);if(!entry)throw Error('数据目录已变化，请重新查询。');
-        const {fields,fixedVersion,rows,binding,code}=await tableDetail(entry.item);
+        const matches=[...tables.values()].filter(({item})=>item.label===args.id&&(args.version==null||item.version==null||item.version===args.version));
+        const entry=matches.find(({item})=>args.version!=null&&item.version===args.version)||matches[0];
+        if(!entry)throw Error('数据字典中没有这张表。');
+        if(matches.length>1&&args.version==null)throw Error('这张表有多个版本，请指定 --version。');
+        const {fields,fixedVersion,rows,code}=await tableDetail(entry.item);
         const names=Object.keys(fields),offset=args.offset||0;
-        return {version:fixedVersion,rows,binding,read:code,fields:names.slice(offset,offset+12).map(name=>[name,fields[name]?.type?.kind||fields[name]?.type||'']),
+        return {version:fixedVersion,rows,read:code,fields:names.slice(offset,offset+12).map(name=>[name,fields[name]?.type?.kind||fields[name]?.type||'']),
           next_offset:offset+12<names.length?offset+12:null};
       }
-      const item=tools.find(i=>i.id===args.id);if(!item)throw Error('未找到此工具。');
+      const item=tools.find(i=>(i.module?i.module+'.'+i.symbol:i.path+'::'+i.symbol)===args.id);if(!item)throw Error('未找到此工具。');
       const info=await api('data-tool-definition',{id:item.id});
       return {symbol:info.symbol,module:info.module,origin:info.origin,kind:info.tool_kind,
         signature:info.signature,description:(info.description||'').slice(0,2000),
@@ -394,6 +394,39 @@
       const prefix=base+'notebooks/';
       return url?.startsWith(prefix)?decodeURIComponent(url.slice(prefix.length)):null;
     }
+    let deletion=null;
+    function cancelDelete(){deletion=null;confirmation.hidden=true;}
+    cancel.onclick=()=>{cancelDelete();bookTabs.querySelector('[aria-selected=true]')?.focus();};
+    confirmation.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();cancel.click();}};
+    function askDelete(path){
+      if(busy||!context.capabilities?.analysis_write||path!==pathFrom(session?.url))return;
+      if(!session.readyPanel||cards?.pending()){fail(Error('请等当前卡片准备好后再删除。'));return;}
+      deletion={path,owner:session};
+      question.textContent='删除「'+path.replace(/\.ipynb$/,'')+'」及其中的全部卡片？';
+      confirmation.hidden=false;cancel.focus();
+    }
+    confirm.onclick=async()=>{
+      if(!deletion||busy)return;
+      const {path,owner}=deletion;cancelDelete();
+      if(session!==owner||owner.readyPanel?.context.path!==path||!context.capabilities?.analysis_write)return;
+      if(cards?.pending()||['busy','starting','restarting'].includes(owner.readyPanel.sessionContext.kernelDisplayStatus)){
+        fail(Error('请等待当前分析运行结束后再删除。'));return;
+      }
+      const index=documents.indexOf(path),app=owner.frame.contentWindow.jupyterapp;
+      busy=true;accessState();detach();
+      try{
+        await app.commands.execute('docmanager:delete-file',{path});
+      }catch(error){
+        busy=false;if(alive()){activate(owner.url,true);fail(error);}return;
+      }
+      owner.storage?.forget();owner.frame.remove();sessions.delete(owner);
+      documents=documents.filter(item=>item!==path);
+      try{if(sessionStorage.getItem('demiflow-jupyter:'+project)===owner.url)sessionStorage.removeItem('demiflow-jupyter:'+project);}catch{}
+      busy=false;
+      if(!alive())return;
+      if(documents.length)activate(documentUrl(documents[Math.min(index,documents.length-1)]),true);
+      else{paintTabs();accessState();status.hidden=false;status.textContent='点击上方 ＋ 新建第一份 Notebook。';create.focus();}
+    };
     function paintTabs(focus=false){
       bookTabs.replaceChildren();
       const activePath=pathFrom(session?.url);
@@ -407,9 +440,17 @@
           if(!(event.key in offsets))return;
           event.preventDefault();
           const index=(documents.indexOf(path)+offsets[event.key]+documents.length)%documents.length;
-          bookTabs.children[index].click();
+          bookTabs.querySelectorAll('[role=tab]')[index].click();
         };
-        bookTabs.append(tab);if(selected&&focus){tab.focus();tab.scrollIntoView({block:'nearest',inline:'nearest'});}
+        bookTabs.append(tab);
+        if(selected&&context.capabilities?.analysis_write){
+          const remove=node('button',undefined,'df-delete-book');remove.type='button';
+          remove.title='删除「'+tab.textContent+'」';remove.setAttribute('aria-label',remove.title);
+          const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'),line=document.createElementNS(svg.namespaceURI,'path');
+          svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');line.setAttribute('d','M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7');
+          svg.append(line);remove.append(svg);remove.onclick=()=>askDelete(path);bookTabs.append(remove);
+        }
+        if(selected&&focus){tab.focus();tab.scrollIntoView({block:'nearest',inline:'nearest'});}
       }
     }
     function accessState(){
@@ -420,7 +461,7 @@
       enableRun.disabled=busy;
     }
     function detach(){
-      ++cardsEpoch;cards?.dispose();cards=null;
+      cancelDelete();++cardsEpoch;cards?.dispose();cards=null;
       if(session){session.onPanel=null;session.onPath=null;session.onReady=null;session.host=null;position(session);session=null;}
     }
     function activate(url,focus=false){
@@ -443,15 +484,17 @@
         if(!panel?.content?.activeCellChanged)return;
         try{
           const {mountCards}=await import('./notebook-cards.js');
+          const {cellStorage}=await import('./notebook-cell-save.js');
+          const storage=await cellStorage(panel,project,base);
           if(!alive()||epoch!==cardsEpoch)return;
           const kernel=panel.sessionContext;
           if(context.capabilities?.analysis_execute && kernel.kernelPreference.shouldStart===false)
             kernel.kernelPreference={...kernel.kernelPreference,shouldStart:true,autoStartDefault:true};
-          cards=mountCards({desk,controls,panel,app:session.frame.contentWindow.jupyterapp,api,project,alive,
+          session.storage=storage;
+          cards=mountCards({desk,controls,panel,storage,app:session.frame.contentWindow.jupyterapp,api,project,alive,
             permissions:()=>context.capabilities||{},tables:()=>[...tables.values()].map(({item,fieldNames})=>({
-              table:item.original?item.original.id:item.alias,version:item.version,binding:item.binding,
-              expected:item.expected,fields:fieldNames,
-              reader:item.original?'demiflow.workbench.notebooks.data.project_sample':'demiflow.workbench.notebooks.data.sample'})),
+              table:item.label,version:item.version,fields:fieldNames,
+              reader:'demiflow.workbench.notebooks.data.sample'})),
             catalogCommand,layout:resize});
           session.frame.removeAttribute('data-loading');session.onReady?.();
         }catch(error){status.hidden=true;fail(error);}
@@ -461,7 +504,7 @@
     }
     async function connect(createNew=false){
       if(busy)return;
-      busy=true;accessState();notice.hidden=true;
+      cancelDelete();busy=true;accessState();notice.hidden=true;
       if(createNew&&!session){status.textContent='正在新建 Notebook…';status.hidden=false;}
       try{
         if(createNew||![...sessions].some(item=>item.project===project))makeRoom();
@@ -509,7 +552,7 @@
     };
     enableRun.onclick=async()=>{
       if(busy)return;
-      busy=true;accessState();notice.hidden=true;
+      cancelDelete();busy=true;accessState();notice.hidden=true;
       try{
         context=await notebookAccess.enable({analysis_execute:true});
         if(!alive())return;
@@ -521,7 +564,7 @@
     if(context.native_notebook)connect();else status.textContent='此服务尚未启用原生 Jupyter Notebook。';
     return {
       canLeave:()=>true,
-      updateContext(fresh){if(alive()){context=fresh;accessState();populate(fresh);scanning=scanDirectory();}},
+      updateContext(fresh){if(alive()){context=fresh;if(!fresh.capabilities?.analysis_write)cancelDelete();paintTabs();accessState();populate(fresh);scanning=scanDirectory();}},
       dispose(){if(disposed)return;disposed=true;if(toolsDialog?.open)toolsDialog.close();detach();dictionaryNavigation.dispose();observer.disconnect();window.removeEventListener('resize',resize);window.removeEventListener('scroll',resize,true);parent.classList.remove('native-data-active');}
     };
   }

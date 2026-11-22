@@ -189,12 +189,14 @@ def open_notebook(handler, project, *, create=False):
         no_symlinks(instance.notebooks)
         selected = service.new_document(instance.notebooks) if create else None
         documents = service.documents(instance.notebooks)
+        trash = no_symlinks(instance.notebooks/'.demiflow-trash')
+        deleted_drafts = [p.name for p in trash.glob('恢复草稿-*.ipynb') if p.is_dir()] if trash.is_dir() else []
         selected = selected or next(iter(documents), None)
         url = instance.base_url + ('notebooks/' + quote(selected) if selected else 'tree')
     cookie = 'demiflow_notebook=' + service.credentials(project, instance.root)
     cookie += '; Path=' + instance.base_url + '; HttpOnly; SameSite=Strict'
     if handler._request_origin().startswith('https:'):
         cookie += '; Secure'
-    handler._send(dict(url=url, documents=documents, base_url=instance.base_url,
+    handler._send(dict(url=url, documents=documents, deleted_drafts=deleted_drafts, base_url=instance.base_url,
         root=str(instance.root), notebooks=str(instance.notebooks), permissions=permissions),
         headers={'Set-Cookie': cookie})

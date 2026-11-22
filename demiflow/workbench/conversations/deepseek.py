@@ -79,11 +79,12 @@ class DeepSeek:
             overlay += [dict(id='acp',disabled=True),dict(id='llm-retry',disabled=True),dict(insert=[dict(id='demiflow-model-broker',
                 name=str(Path(__file__).with_name('deepseek_model_broker.cjs')),
                 config=dict(provider=route,model=config['model'],reasoningEffort=config.get('effort','high')))])]
-        if not any(config.get(key) for key in ('_compaction', '_model_broker')):
+        if not any(config.get(key) for key in ('_compaction', '_review', '_model_broker')):
             next(row for row in overlay if row.get('id')=='acp')['inject']=[
                 'acpAppStartup','demiflowAssistantStreamReady']
             overlay.append(dict(insert=[dict(id='demiflow-assistant-stream',
-                name=str(Path(__file__).with_name('deepseek_stream.cjs')), config=dict(cwd=root))]))
+                name=str(Path(__file__).with_name('deepseek_stream.cjs')), config=dict(cwd=root,
+                    llmModule=str(package/'node_modules/@deepseek-ai/dsh-llm/lib/index.js') if package else None))]))
         if boundary:
             if package is None: reject('Restricted model transport requires the pinned installed Harness')
             overlay += [dict(id='llm-deepseek',disabled=True),dict(insert=[dict(id='demiflow-model-proxy',
@@ -158,6 +159,10 @@ class DeepSeek:
         self.metrics_sequence=-1
         return self.prompt_key
 
+    def steer(self, message, submission):
+        self.transport.send(dict(method='demiflow/steer',params=dict(sessionId=self.thread,
+            promptId=self.prompt_key,submission=submission,text=message)))
+
     def interrupt(self):
         self.transport.send(dict(method='session/cancel',params=dict(sessionId=self.thread)))
 
@@ -176,6 +181,10 @@ class DeepSeek:
             allowed=bool(item and item.get('rawInput'))
             return [('request',dict(rpc_id=event['id'],method=method,params=dict(params,known_tool=item),allow_once=allowed))]
         if 'id' in event:reject('Unsupported ACP server request')
+        if method=='demiflow/steer-result':
+            if params.get('promptId')!=self.prompt_key or params.get('status') not in ('accepted','missed','unknown'):
+                reject('Invalid steering acknowledgement')
+            return [('steer.result',dict(submission=params['submission'],status=params['status']))]
         if method=='demiflow/metrics':
             from .stats import validate_metric
             if not self.message_scope or set(params)!={'sessionId','metrics'}:reject('Invalid native metric scope')

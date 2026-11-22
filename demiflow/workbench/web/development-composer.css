@@ -78,3 +78,10 @@ form.development-composer-native:focus-within{box-shadow:none}
 @container (max-width:460px){.development-composer-native .dc-access-label{display:none}.development-composer-native .dc-row{gap:8px}.development-composer-native .dc-model-trigger{max-width:min(360px,60cqw)}}
 @media(max-width:480px){.development-composer-native .dc-input{font-size:16px}.development-composer-native .dc-dock{font-size:11px;gap:3px 8px}.development-composer-native .dc-menu-option{min-height:40px}}
 @media(prefers-reduced-motion:reduce){.development-composer-native *{transition:none!important}}
+
+.development-composer-native .dc-queue{max-height:132px;overflow:auto;padding:4px 14px 8px;color:#5e6572}
+.dc-queue small{display:block;margin-bottom:2px}
+.dc-queue-row{display:flex;align-items:center;gap:10px;font-size:13px;line-height:22px}
+.dc-queue-row span{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.dc-queue-action{flex:none;border:0;background:none;color:inherit;font:inherit;cursor:pointer}
+.dc-queue-action:hover,.dc-queue-action:focus-visible{color:#3855c7}

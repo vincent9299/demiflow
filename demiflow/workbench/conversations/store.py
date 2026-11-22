@@ -85,6 +85,12 @@ class Store:
                 PRAGMA user_version=1;
                 COMMIT;
                 ''')
+                db.execute("""CREATE TABLE IF NOT EXISTS followups(
+                    session TEXT NOT NULL, submission TEXT NOT NULL, origin_turn TEXT NOT NULL,
+                    text TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', PRIMARY KEY(session,submission))""")
+                db.execute("""CREATE TABLE IF NOT EXISTS steers(
+                    turn TEXT NOT NULL, submission TEXT NOT NULL, sequence INTEGER NOT NULL,
+                    status TEXT NOT NULL, PRIMARY KEY(turn,submission))""")
             os.chmod(self.path, 0o600)
             reserve = self.root / 'control.reserve'
             if not reserve.exists() and not (self.root / 'storage-pressure').exists():
@@ -313,12 +319,14 @@ class Store:
                   AND json_extract(e.body,'$.data.status')='compacted'
                 ORDER BY e.sequence DESC LIMIT 1""",(sid,)).fetchone()
             row['archive_sequence'] = archived['sequence'] if archived else 0
+            row['queued_messages'] = [dict(item) for item in db.execute(
+                'SELECT submission,text,error FROM followups WHERE session=? ORDER BY rowid', (sid,))]
             row.pop('provider_session', None)
             return row
 
     @staticmethod
     def public_turn(turn):
-        value = {k: v for k, v in turn.items() if k not in {'text', 'process', 'baseline', 'context'}}
+        value = {k: v for k, v in turn.items() if k not in {'text', 'process', 'baseline', 'context','has_steer'}}
         return value
 
     def session(self, sid):
@@ -329,7 +337,8 @@ class Store:
 
     def turn(self, tid):
         with self.connect() as db:
-            row = db.execute('SELECT * FROM turns WHERE id=?', (identifier(tid),)).fetchone()
+            row = db.execute("""SELECT t.*, EXISTS(SELECT 1 FROM steers WHERE turn=t.id AND status='pending')
+                AS has_steer FROM turns t WHERE t.id=?""", (identifier(tid),)).fetchone()
             if row is None: reject('Unknown turn', 'not_found')
             return dict(row)
 
@@ -395,6 +404,108 @@ class Store:
             row = db.execute('SELECT * FROM turns WHERE session=? AND submission=?', (sid, identifier(key))).fetchone()
             return dict(row) if row else None
 
+    def steer(self, workspace, sid, tid, submission, message, *, from_queue=False):
+        if type(from_queue) is not bool:
+            reject('Invalid steering source','invalid_request')
+        identifier(submission)
+        text(message)
+        with self.connect(write=True) as db:
+            session = self._session(db, workspace, sid)
+            turn = db.execute('SELECT * FROM turns WHERE session=? AND id=?', (sid,identifier(tid))).fetchone()
+            if not turn or session['session_kind'] != 'development' or turn['operation'] != 'message':
+                reject('此轮不属于当前开发会话。', 'conflict')
+            old = db.execute("""SELECT e.body FROM steers s JOIN events e ON e.turn=s.turn AND e.sequence=s.sequence
+                                WHERE s.turn=? AND s.submission=?""",(tid,submission)).fetchone()
+            if old:
+                if json.loads(old[0])['data']['text'] != message:
+                    reject('Submission key has different text','conflict')
+                return
+            if from_queue:
+                removed = db.execute('DELETE FROM followups WHERE session=? AND submission=? AND text=?',
+                                     (sid,submission,message)).rowcount
+                if not removed:
+                    reject('这条消息已离开队列，请核对会话。','conflict')
+            if turn['stop_at'] or turn['cleanup']=='complete' or turn['state'] not in (
+                    'preparing','starting','running','waiting_approval','waiting_input'):
+                reject('这一轮已经结束，请用 Enter 继续会话。', 'conflict')
+            if db.execute('SELECT count(*) FROM steers WHERE turn=?',(tid,)).fetchone()[0]>=8:
+                reject('本轮插话已达八条，可用 Enter 排队。', 'resource_limit')
+            event = self._event(db,sid,tid,turn['epoch'],'message.steer',{'item_id':'steer:'+submission,'text':message})
+            db.execute('INSERT INTO steers VALUES(?,?,?,?)',(tid,submission,event['sequence'],'pending'))
+
+    def claim_steer(self, tid, epoch):
+        with self.connect(write=True) as db:
+            row = db.execute("""SELECT s.submission,e.body FROM steers s JOIN turns t ON t.id=s.turn
+                JOIN events e ON e.turn=s.turn AND e.sequence=s.sequence
+                WHERE t.id=? AND t.epoch=? AND t.stop_at IS NULL AND t.state='running'
+                AND t.cleanup!='complete' AND s.status='pending' ORDER BY s.sequence LIMIT 1""", (tid,epoch)).fetchone()
+            if row:
+                db.execute("UPDATE steers SET status='sending' WHERE turn=? AND submission=?", (tid,row[0]))
+                return row[0], json.loads(row[1])['data']['text']
+
+    def finish_steer(self, tid, submission, status):
+        with self.connect(write=True) as db:
+            turn = db.execute('SELECT session,epoch FROM turns WHERE id=?',(tid,)).fetchone()
+            if db.execute("UPDATE steers SET status=? WHERE turn=? AND submission=? AND status='sending'",
+                          (status,tid,submission)).rowcount:
+                self._event(db,turn['session'],tid,turn['epoch'],'message.steer_status',
+                            {'item_id':'steer:'+submission,'status':status},control=True)
+
+    def enqueue(self, workspace, sid, turn_id, submission, message):
+        identifier(submission)
+        identifier(turn_id)
+        text(message)
+        with self.connect(write=True) as db:
+            session = self._session(db, workspace, sid)
+            if session['session_kind'] != 'development':
+                reject('此会话属于 Notebook 卡片。', 'conflict')
+            sent = db.execute('SELECT text FROM turns WHERE session=? AND submission=?', (sid, submission)).fetchone()
+            old = db.execute('SELECT origin_turn,text FROM followups WHERE session=? AND submission=?',
+                             (sid, submission)).fetchone()
+            steered = db.execute('''SELECT e.body FROM steers s JOIN events e ON e.turn=s.turn AND e.sequence=s.sequence
+                WHERE e.session=? AND s.submission=? LIMIT 1''',(sid,submission)).fetchone()
+            if steered:
+                if json.loads(steered[0])['data']['text'] != message:
+                    reject('Submission key has different text', 'conflict')
+                return
+            if old or sent:
+                if (old and old['origin_turn'] != turn_id) or (old or sent)['text'] != message:
+                    reject('Submission key has different content', 'conflict')
+                return
+            latest = db.execute('SELECT id,operation,state FROM turns WHERE session=? ORDER BY created DESC LIMIT 1',
+                                (sid,)).fetchone()
+            if not latest or latest['id'] != turn_id or latest['operation'] != 'message':
+                reject('会话已进入下一轮，请核对后重新发送。', 'conflict')
+            if latest['state'] in ('stopping','cancelled','failed','interrupted'):
+                reject('上一轮已停止，请核对后重新发送。', 'conflict')
+            if db.execute('SELECT count(*) FROM followups WHERE session=?', (sid,)).fetchone()[0] >= 8:
+                reject('此会话已有八条待发送消息。', 'resource_limit')
+            # Only active conversations normally queue. Bound retained messages
+            # too, including paused queues from earlier grants or restarts.
+            if db.execute('SELECT count(*) FROM followups').fetchone()[0] >= 128:
+                reject('待发送消息已满，请稍后重试。', 'resource_limit')
+            db.execute('INSERT INTO followups(session,submission,origin_turn,text) VALUES(?,?,?,?)',
+                       (sid, submission, turn_id, message))
+
+    def hold_queue(self, sid, reason):
+        with self.connect(write=True) as db:
+            db.execute('UPDATE followups SET error=? WHERE session=?', (reason[:220], sid))
+
+    def change_queue(self, workspace, sid, submission, action):
+        identifier(submission)
+        with self.connect(write=True) as db:
+            self._session(db, workspace, sid)
+            if action == 'remove':
+                db.execute('DELETE FROM followups WHERE session=? AND submission=?', (sid, submission))
+            elif action == 'resume':
+                head = db.execute('SELECT submission FROM followups WHERE session=? ORDER BY rowid LIMIT 1',
+                                  (sid,)).fetchone()
+                if not head or head[0] != submission:
+                    reject('排队内容已变化，请刷新。', 'conflict')
+                db.execute("UPDATE followups SET error='' WHERE session=?", (sid,))
+            else:
+                reject('Invalid queue action', 'invalid_request')
+
     def submit(self, workspace, sid, submission_id, expected_revision, message, identity, policy_hash, operation="message", provider=None):
         text(message); identifier(submission_id); integer(expected_revision, 0, 2**31)
         if operation not in {'message','compact','notebook_cell','notebook_cell_cli'}:reject('Unknown conversation operation')
@@ -419,6 +530,11 @@ class Store:
                 reject('请从目标卡片开启独立会话。', 'conflict')
             if not cell_turn and session['session_kind'] == 'notebook':
                 reject('此会话属于 Notebook 卡片。', 'conflict')
+            queued = db.execute('SELECT submission,text,error FROM followups WHERE session=? ORDER BY rowid LIMIT 1',
+                                (sid,)).fetchone()
+            if queued and (queued['submission'] != submission_id or queued['text'] != message
+                           or queued['error'] or operation != 'message'):
+                reject('请先发送或移除当前会话的排队消息。', 'conflict')
             active = db.execute("SELECT t.*,s.root FROM turns t JOIN sessions s ON s.id=t.session WHERE t.cleanup != 'complete'").fetchall()
             if len(active) >= self.limits.active: reject('Development capacity reserved', 'busy')
             root = Path(identity['path'])
@@ -439,6 +555,7 @@ class Store:
                        (tid, sid, submission_id, hashed, message, 'preparing', 'not_sent', 'pending', epoch, time.time(), reserve, 'admitted', operation))
             db.execute('UPDATE sessions SET revision=revision+1,title=CASE WHEN title=\'\' THEN ? ELSE title END WHERE id=?', (message[:80], sid))
             db.execute('UPDATE sessions SET metadata_bytes=metadata_bytes+? WHERE id=?', (len(message.encode()), sid))
+            db.execute('DELETE FROM followups WHERE session=? AND submission=?', (sid, submission_id))
             self._event(db,sid,tid,epoch,'compaction.requested' if operation=='compact' else 'message.user',{'text':message})
             return dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone()), True
 
@@ -497,6 +614,14 @@ class Store:
             db.execute('UPDATE sessions SET metadata_bytes=metadata_bytes+? WHERE id=?', (delta, old['session']))
         if 'state' in changes or 'delivery' in changes:
             self._event(db, old['session'], tid, old['epoch'], 'turn.state', {k: v for k, v in changes.items() if k not in {'context', 'baseline', 'process'}}, control=True)
+        if changes.get('cleanup') in ('complete','unknown'):
+            for row in db.execute("SELECT submission,status FROM steers WHERE turn=? AND status IN ('pending','sending')",(tid,)).fetchall():
+                status = 'missed' if row['status']=='pending' else 'unknown'
+                db.execute('UPDATE steers SET status=? WHERE turn=? AND submission=?',(status,tid,row['submission']))
+                self._event(db,old['session'],tid,old['epoch'],'message.steer_status',
+                            {'item_id':'steer:'+row['submission'],'status':status},control=True)
+        if changes.get('state') in ('failed','interrupted','cancelled','stopping'):
+            db.execute("UPDATE followups SET error='上一轮未完成，排队已暂停。' WHERE session=?", (old['session'],))
         if changes.get('cleanup') == 'complete':
             db.execute("UPDATE pending SET status='expired' WHERE turn=? AND status IN ('waiting','claimed','responding')", (tid,))
 

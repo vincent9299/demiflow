@@ -8,7 +8,7 @@ exports.apply = function(ctx, config) {
   const FRAME=1024*1024, TOTAL=16*1024*1024, BLOCK=128*1024, ATTEMPT=1024*1024;
   let input='', decoder=new StringDecoder('utf8'), agent, session, current, timer;
   let closed=false, failed=false, sent=0, frames=0, attempts=0, revision=0;
-  let metricStep, metricSequence=-1;
+  let metricStep, metricSequence=-1, promptId;
   const calls=new Map();
   const identity=value=>typeof value==='string' && value.length>0 && Buffer.byteLength(value)<=256;
   const validIndex=value=>Number.isSafeInteger(value) && value>=0 && value<65536;
@@ -213,6 +213,22 @@ exports.apply = function(ctx, config) {
         const raw=input.slice(0,end);input=input.slice(end+1);
         if(!raw.trim()) continue;
         const value=JSON.parse(raw);
+        if(value.method==='demiflow/steer'){
+          const p=value.params;
+          if(!session || p?.sessionId!==session.id || p.promptId!==promptId || !identity(p.submission)
+              || typeof p.text!=='string' || !p.text.trim() || Buffer.byteLength(p.text)>32768) continue;
+          let status='missed';
+          if(ctx.agents.get(session.id)===agent && agent.session===session && agent.status==='running'){
+            try {
+              const {createUserMessage}=require(config.llmModule);
+              const message=createUserMessage({content:[{type:'text',text:p.text}],source:{kind:'user',rpcId:p.submission}});
+              agent.steer(message);
+              status='accepted';
+            } catch { status='unknown'; }
+          }
+          write({promptId,submission:p.submission,status},'demiflow/steer-result');
+          continue;
+        }
         if(value.method!=='session/prompt') continue;
         const id=value.params?.sessionId;
         if(!identity(id)) throw new Error('prompt identity');
@@ -221,7 +237,7 @@ exports.apply = function(ctx, config) {
             bound.header?.origin==='subagent' || bound.header?.parentSession!==undefined ||
             agent && (agent!==target || session!==bound)) throw new Error('prompt root identity');
         if(agent && !current) {sent=0;frames=0;attempts=0;}
-        agent=target;session=bound;
+        agent=target;session=bound;promptId=value.id;
       }
     } catch {fail();}
   };

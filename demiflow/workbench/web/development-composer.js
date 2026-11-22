@@ -65,7 +65,35 @@
     stop.append(svg('M5 3h6a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z',16,true));
     const file=el('input','dc-text-file');file.type='file';file.hidden=true;file.accept='text/*,.md,.txt,.csv,.json,.jsonl,.yaml,.yml,.py,.js,.ts,.sql,.log,.toml,.ini';file.setAttribute('aria-label','选择文本附件');
     const dock=el('div','dc-dock');dock.setAttribute('aria-label','会话统计');dock.hidden=true;
-    tools.append(add,access);trailing.append(model,send,stop);row.append(tools,trailing);card.append(input,row,providers,file);form.append(notice,card,dock);
+    const queue=el('section','dc-queue');queue.hidden=true;queue.setAttribute('aria-label','待发送消息');
+    let queueKey='';
+    function renderQueue(){
+      const messages=state.historyOnly?[]:state.session?.queued_messages||[];
+      const turn=state.session?.turn;
+      const canSteer=state.capabilities.message_steering && turn?.operation==='message' && turn.cleanup!=='complete'
+        && ['starting','preparing','running','waiting_input','waiting_approval'].includes(turn.state);
+      const key=JSON.stringify([state.session?.id,messages,state.readonly,canSteer]);
+      if(queueKey===key)return;
+      queueKey=key;queue.hidden=!messages.length;queue.replaceChildren();
+      if(!messages.length)return;
+      queue.append(el('small',null,messages[0].error||'待发送 · '+messages.length));
+      messages.forEach((message,index)=>{
+        const line=el('div','dc-queue-row'),preview=el('span',null,message.text);
+        preview.title=message.text;line.append(preview);
+        if(!state.readonly){
+          const action=(label,kind)=>{
+            const control=button(label,'dc-queue-action');control.textContent=label;
+            control.onclick=()=>options.onQueueAction?.(message.submission,kind);
+            line.append(control);
+          };
+          if(!index&&message.error)action('继续发送','resume');
+          if(canSteer&&!message.error)action('本轮插话','steer');
+          action('撤回','remove');
+        }
+        queue.append(line);
+      });
+    }
+    tools.append(add,access);trailing.append(model,send,stop);row.append(tools,trailing);card.append(input,row,providers,file);form.append(notice,queue,card,dock);
 
     let cachedMinHeight=null,statsFingerprint='';
     function resize(){if(state.disposed)return;if(cachedMinHeight===null)cachedMinHeight=parseFloat(getComputedStyle(input).minHeight)||36;input.style.height='auto';input.style.height=Math.min(Math.max(input.scrollHeight,cachedMinHeight),220)+'px';}
@@ -143,8 +171,21 @@
       const busy=!!(turn&&turn.cleanup!=='complete');
       const provider=(caps.providers||[]).find(value=>value.id===(session?.provider||providers.value))||(caps.providers||[]).find(value=>value.available);
       input.disabled=readonly||state.historyOnly||unavailable||state.sending;
-      send.disabled=input.disabled||!caps.start||!provider?.available||busy||!input.value.trim()||bytes(input.value)>32768;
-      stop.disabled=readonly||state.historyOnly||unavailable||!busy;stop.hidden=!busy||state.historyOnly;send.hidden=busy&&!state.historyOnly;
+      const waiting=!!session?.queued_messages?.length;
+      const queueable=caps.message_queue===true && (busy||waiting) && turn?.operation==='message'
+        && ['preparing','starting','running','waiting_input','waiting_approval','completed'].includes(turn.state)
+        && !session.queued_messages?.[0]?.error;
+      const hasText=!!input.value.trim();
+      const label=queueable?'追加消息':'发送';
+      const modifier=navigator.platform?.startsWith('Mac')?'⌘':'Ctrl';
+      send.title=queueable?'Enter 排队发送'+(caps.message_steering&&busy?' · '+modifier+'+Enter 本轮插话':''):label;
+      input.title=queueable?send.title:'';
+      input.setAttribute('aria-keyshortcuts',queueable&&busy&&caps.message_steering?'Enter Meta+Enter Control+Enter':'Enter');
+      send.setAttribute('aria-label',label);
+      send.disabled=input.disabled||!caps.start||!provider?.available||((busy||waiting)&&!queueable)||!hasText||bytes(input.value)>32768;
+      stop.disabled=readonly||state.historyOnly||unavailable||!busy;
+      stop.hidden=!busy||state.historyOnly||queueable&&hasText;
+      send.hidden=busy&&!state.historyOnly&&!(queueable&&hasText);
       providers.disabled=readonly||state.historyOnly||unavailable||!!session||state.creation||state.sending;
       modelTrigger.disabled=providers.disabled||!(caps.providers||[]).length;
       const displayed=session?.model?{...provider,model:session.model,effort:session.effort}:provider;
@@ -203,7 +244,7 @@
       dock.hidden=!dock.childElementCount;dock.title=partial+(stats.unavailable?.length?'部分指标尚无记录。':'');
     }
     function update(values={}){
-      if(state.disposed)return;Object.assign(state,values);renderProviders();renderAvailability();
+      if(state.disposed)return;Object.assign(state,values);renderProviders();renderAvailability();renderQueue();
       for(const item of modelMenu.querySelectorAll('[data-provider]'))item.setAttribute('aria-checked',String(item.dataset.provider===(state.session?.provider||providers.value)));
       renderStats();reposition();
     }

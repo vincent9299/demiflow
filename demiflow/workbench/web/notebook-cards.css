@@ -105,3 +105,6 @@ body.df-card-mode #main-panel .jp-Notebook .jp-WindowedPanel-outer { padding: 0 
 .df-output-grip::after { content: ''; width: 34px; height: 3px; border-radius: 2px; background: transparent; }
 .jp-CodeCell:hover .df-output-grip::after, .df-output-grip:focus-visible::after { background: #a9b2c2; }
 @media (hover: none) { .df-output-grip::after { background: #c4cad4; } }
+
+.df-save-state{color:var(--df-muted);font:11px/1.4 var(--sans-serif)}
+.jp-Cell:is(:hover,:focus-within,.jp-mod-active) .df-cell-tools button{opacity:1}

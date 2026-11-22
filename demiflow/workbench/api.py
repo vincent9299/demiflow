@@ -45,6 +45,7 @@ STATIC_ASSETS = {
     '/operator-browser.js': ('operator-browser.js', 'text/javascript; charset=utf-8'),
     '/definition-reader.js': ('definition-reader.js', 'text/javascript; charset=utf-8'),
     "/notebook-dataframe.js": ("notebook-dataframe.js", "text/javascript; charset=utf-8"),
+    '/notebook-cell-save.js': ('notebook-cell-save.js', 'text/javascript; charset=utf-8'),
     '/notebook-cards.js': ('notebook-cards.js', 'text/javascript; charset=utf-8'),
     '/notebook-transcript.js': ('notebook-transcript.js', 'text/javascript; charset=utf-8'),
     '/notebook-assistant.js': ('notebook-assistant.js', 'text/javascript; charset=utf-8'),

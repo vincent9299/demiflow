@@ -301,3 +301,37 @@ def test_real_service_protocol_fixture_keeps_member_history_and_compaction_separ
         assert service.conversation(workspace, root)['session']['id'] == primary
     finally:
         service.close()
+
+
+def test_followup_retries_and_turn_boundaries(case):
+    store, workspace = case.store, case.workspace
+    sid, other = create(case, 'original'), create(case, 'another', new=True)
+    turn = submit(case, sid)
+    tid = turn['id']
+    with pytest.raises(ForgeError):
+        store.enqueue(workspace, other, tid, 'q1', 'first')
+    with pytest.raises(ForgeError):
+        store.steer(workspace, other, tid, 's1', 'one')
+    for _ in range(2):
+        store.enqueue(workspace, sid, tid, 'q1', 'first')
+    assert len(store.show(workspace,sid)['queued_messages'])==1
+    for _ in range(2):
+        store.steer(workspace, sid, tid, 'q1', 'first', from_queue=True)
+    store.enqueue(workspace, sid, tid, 'q1', 'first')
+    assert not store.show(workspace,sid)['queued_messages']
+    with pytest.raises(ForgeError):
+        store.steer(workspace, sid, tid, 'q1', 'changed', from_queue=True)
+    store.update(tid, state='running')
+    assert store.claim_steer(tid, turn['epoch'])==('q1', 'first')
+    assert store.claim_steer(tid, turn['epoch']) is None
+    store.steer(workspace, sid, tid, 's2', 'two')
+    store.enqueue(workspace, sid, tid, 'q2', 'later')
+    store.cancel(workspace, sid, tid)
+    store.finish_provider(tid,state='cancelled',cleanup='complete',result={})
+    messages=store.show(workspace,sid)['queued_messages']
+    assert len(messages)==1 and messages[0]['error']
+    statuses = {e['data']['item_id']:e['data']['status'] for e in store.events(workspace,sid)['events']
+                if e['type']=='message.steer_status'}
+    assert statuses=={'steer:q1':'unknown','steer:s2':'missed'}
+    with pytest.raises(ForgeError):
+        store.steer(workspace, sid, tid, 's3', 'too late')

@@ -525,6 +525,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
             provider_turn_bound = bool(turn.get('provider_turn'))
             pending_events, pending_bytes, last_flush = [], 0, time.monotonic()
             outstanding = {}
+            steering = steer_rpc = None
             input_access = None
 
             if already_claimed:
@@ -835,7 +836,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     provider_turn_bound = bool(native_turn)
                 send_parent('notify')
                 while not completed:
-                    tick()
+                    current = tick()
                     transport.poll(0.01 if pending_events else 0.05)
                     while transport.events:
                         event = transport.pop()
@@ -851,6 +852,12 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                                     flush_events()
                                     store.update(tid, delivery='not_applicable' if compact else 'acknowledged', dispatch='acknowledged')
                                     send_parent('notify')
+                            elif kind == 'steer.result':
+                                if steering and data['submission'] == steering:
+                                    flush_events()
+                                    store.finish_steer(tid, steering, data['status'])
+                                    send_parent('notify')
+                                    steering = None
                             elif kind == 'done':
                                 flush_events()
                                 final = data['status']; completed = True
@@ -905,6 +912,22 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         outcome = provider.completion(response)
                         final, completed = outcome['status'], True
                         store.update(tid, delivery='not_applicable' if compact else 'acknowledged', dispatch='acknowledged')
+                    if steer_rpc and steer_rpc in transport.responses:
+                        try:
+                            reply = transport.take(steer_rpc)
+                            accepted = reply.get('turnId') == provider.turn
+                        except ValueError:
+                            accepted = False
+                        flush_events()
+                        store.finish_steer(tid, steering, 'accepted' if accepted else 'missed')
+                        send_parent('notify')
+                        steering = steer_rpc = None
+                    if (not steering and not completed and not requested and current.get('has_steer')
+                            and (not acp or provider.acknowledged or provider.metrics_sequence >= 0)):
+                        pending_steer = store.claim_steer(tid, turn['epoch'])
+                        if pending_steer:
+                            steering, message = pending_steer
+                            steer_rpc = provider.steer(message, steering)
                     if transport.closed and not completed: raise ConnectionError('Provider connection lost')
                     # Interrupt has its own RPC result; it is not proof of child cleanup.
                     for key in list(transport.responses):
