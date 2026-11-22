@@ -51,3 +51,47 @@ def test_stream_progress_comes_from_intermediate_business_frontiers():
     assert stats.emitted == 25
     assert list(stats.stages) == ['actual']
     assert stats.metrics['committed_output']['rows'] == 25
+
+
+def test_stream_cleanup_preserves_primary_failure_and_runs_each_owner(monkeypatch):
+    from types import SimpleNamespace
+    from demiflow.execution import dataflow_api, dataflow_model_observations
+    from demiflow.execution import dataflow_operator_observations, dataflow_stream
+
+    events = []
+    failure = RuntimeError('worker failed')
+
+    def pump(*, deadline_ms):
+        raise failure
+
+    def observe(execution, stats):
+        events.append('observe')
+        raise ValueError('observation failed')
+
+    def metadata(request, execution):
+        events.append('metadata')
+        raise OSError('metadata failed')
+
+    action = SimpleNamespace(context=SimpleNamespace(check_stop=lambda: None))
+    execution = SimpleNamespace(pump=pump)
+    handle = SimpleNamespace(_execution=execution, close=lambda: events.append('close'))
+    callbacks = SimpleNamespace(resolve=lambda *args, **kwargs: None,
+                                close=lambda: events.append('callbacks.close'))
+    monkeypatch.setattr(dataflow_stream, 'AsyncInstance', lambda *args: callbacks)
+    monkeypatch.setattr(dataflow_stream, 'execute_action', lambda *args, **kwargs: handle)
+    monkeypatch.setattr(dataflow_api, 'resolve_action_runtime', lambda request: (None, None))
+    monkeypatch.setattr(dataflow_api, 'record_execution_metadata', metadata)
+    monkeypatch.setattr(dataflow_operator_observations, 'stream_observations', observe)
+    monkeypatch.setattr(dataflow_model_observations, 'finish_journal_audit',
+                        lambda execution, stats: events.append('audit'))
+
+    with pytest.raises(RuntimeError) as raised:
+        dataflow_stream.run_stream_action(SimpleNamespace(action=action),
+                                          on_drain=lambda stats: events.append('drain'))
+
+    assert raised.value is failure
+    assert events == ['observe', 'close', 'observe', 'metadata', 'audit', 'drain', 'callbacks.close']
+    assert any('observation failed' in note for note in failure.__notes__)
+    assert any('metadata failed' in note for note in failure.__notes__)
+    assert action._observation_rows == 0
+    assert execution._observe_progress is None
