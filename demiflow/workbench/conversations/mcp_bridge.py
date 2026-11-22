@@ -17,7 +17,7 @@ from demiflow.workbench.conversations.control_client import call
 
 
 def main(endpoint, token, turn_id, epoch):
-    for _ in range(128):
+    for _ in range(4096):
         raw = sys.stdin.buffer.readline(65537)
         if not raw: return
         if len(raw) > 65536 or not raw.endswith(b'\n'): raise ValueError('MCP frame limit')

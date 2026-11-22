@@ -166,7 +166,7 @@
       if(disposed||renderTimer!==null)return;
       let streaming=false;
       for(const item of items.values())if(item.dirty&&item.running){streaming=true;break;}
-      renderTimer=setTimeout(renderVisible,streaming?120:35);
+      renderTimer=setTimeout(renderVisible,streaming?33:25);
     }
     function finishText(){if(!lastText)return;const item=items.get(lastText.id);if(item){item.running=false;item.node.classList.remove('dfc-streaming');if(item.preview)item.preview.textContent=excerpt(item.text);item.dirty=true;}lastText=null;queueRender();}
     function archiveCandidate(turn){

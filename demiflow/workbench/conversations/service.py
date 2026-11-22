@@ -1,10 +1,13 @@
 """Project binding, bounded admission, persistent intent and owned workers."""
 from __future__ import annotations
 
+import array
 import fcntl
 import json
 import os
 from pathlib import Path
+import select
+import socket
 import subprocess
 import sys
 import tempfile
@@ -25,6 +28,22 @@ from demiflow.workbench.conversations.store import Store
 from demiflow.workbench.conversations.store import StorageUnavailable
 from demiflow.workbench.conversations.provider import adapter_for
 from demiflow.resources.process_observation import unit_stopped
+
+
+class _WarmWorker:
+    def __init__(self, session_id, policy_hash, provider, root_path, process, sock):
+        self.session_id = session_id
+        self.policy_hash = policy_hash
+        self.provider = provider
+        self.root_path = root_path
+        self.process = process
+        self.sock = sock
+        self.idle = False
+        self.dead = False
+        self.busy_tid = None
+        self.sandbox_deadline = 0.0
+        self.accepted_tid = None
+        self.accepted_event = threading.Event()
 
 
 class Service:
@@ -58,29 +77,13 @@ class Service:
         self.lock, self.workers, self.closed = threading.RLock(), {}, False
         self.wakeup = threading.Condition()
         self.worker_targets = {}
+        self._worker_socks = {}
+        self.warm_workers = {}
+        self._policy_meta_cache = {}
         self.coding_catalog = None
         self.policy_hash, self.config_path = self.seal_policy(self.deployment)
         for t in self.store.unresolved():
             self.store.interrupt_unresolved(t['id'])
-        threading.Thread(target=self._prewarm_coding_catalog, name='demiflow-dev-catalog', daemon=True).start()
-
-    def _prewarm_coding_catalog(self):
-        try:
-            from demiflow.forge.api_reference import REFERENCE_BYTES, build_reference
-            raw = wire(build_reference(), REFERENCE_BYTES)
-            with self.lock:
-                if self.closed or self.coding_catalog is not None:
-                    return
-                catalog = tempfile.TemporaryFile(dir=self.root)
-                try:
-                    catalog.write(raw)
-                    catalog.flush()
-                except BaseException:
-                    catalog.close()
-                    return
-                self.coding_catalog = catalog
-        except Exception:
-            pass
 
     def seal_policy(self, deployment):
         """Persist the exact bounded non-secret policy before creating a session."""
@@ -235,16 +238,138 @@ class Service:
     def _unit_path(self, turn):
         return self.root / turn['session'] / (turn['id'] + '.unit')
 
+    @staticmethod
+    def _close_life(life):
+        if life is None or life == -1:
+            return
+        if isinstance(life, socket.socket):
+            try: life.close()
+            except OSError: pass
+        elif isinstance(life, int) and life >= 0:
+            try: os.close(life)
+            except OSError: pass
+
+    def _close_turn_life(self, tid, life):
+        sock_map = getattr(self, '_worker_socks', None)
+        sock = sock_map.pop(tid, None) if sock_map is not None else None
+        if sock is not None:
+            try: sock.close()
+            except OSError: pass
+            return
+        self._close_life(life)
+
+    def _retire_warm(self, warm, *, wait_s=3.0):
+        if warm is None:
+            return
+        warm.idle = False
+        warm.dead = True
+        sock = warm.sock
+        warm.sock = None
+        if sock is not None:
+            try: sock.sendall(b'{"cmd":"shutdown"}\n')
+            except OSError: pass
+            try: sock.close()
+            except OSError: pass
+        if wait_s > 0 and warm.process.poll() is None:
+            try: warm.process.wait(timeout=wait_s)
+            except subprocess.TimeoutExpired:
+                try: warm.process.terminate()
+                except OSError: pass
+
+    def _retire_conflicting_warm(self, session_id, root_path):
+        warm_map = getattr(self, 'warm_workers', None)
+        if not warm_map:
+            return
+        target = Path(root_path)
+        to_retire = []
+        for sid, warm in list(warm_map.items()):
+            if warm.dead or warm.process.poll() is not None:
+                warm_map.pop(sid, None)
+                continue
+            other = Path(warm.root_path)
+            if sid == session_id or target == other or target in other.parents or other in target.parents:
+                warm_map.pop(sid, None)
+                to_retire.append(warm)
+        for warm in to_retire:
+            self._retire_warm(warm, wait_s=2.0)
+
+    def _watch_worker(self, warm):
+        buf = bytearray()
+        try:
+            while True:
+                sock = warm.sock
+                if sock is None or sock.fileno() < 0:
+                    break
+                try:
+                    ready, _, _ = select.select([sock], [], [], 0.2)
+                except (OSError, ValueError):
+                    break
+                if not ready:
+                    if warm.process.poll() is not None:
+                        break
+                    continue
+                try:
+                    chunk = sock.recv(4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                buf.extend(chunk)
+                while b'\n' in buf:
+                    line, rest = bytes(buf).split(b'\n', 1)
+                    buf = bytearray(rest)
+                    if not line.strip():
+                        continue
+                    try:
+                        msg = json.loads(line)
+                    except ValueError:
+                        continue
+                    event = msg.get('event')
+                    if event == 'notify':
+                        self.notify()
+                    elif event == 'accepted':
+                        warm.accepted_tid = msg.get('tid')
+                        warm.accepted_event.set()
+                    elif event == 'idle':
+                        finished_tid = msg.get('tid')
+                        dl = float(msg.get('sandbox_deadline') or 0.0)
+                        with self.lock:
+                            warm.idle = True
+                            warm.busy_tid = None
+                            warm.sandbox_deadline = dl
+                            if finished_tid:
+                                self.workers.pop(finished_tid, None)
+                                self._worker_socks.pop(finished_tid, None)
+                                self.worker_targets.pop(finished_tid, None)
+                            if self.closed:
+                                self.warm_workers.pop(warm.session_id, None)
+                                self._retire_warm(warm, wait_s=0.0)
+                        self.notify()
+        finally:
+            warm.dead = True
+            warm.idle = False
+            warm.accepted_event.set()
+            with self.lock:
+                if getattr(self, 'warm_workers', None) and self.warm_workers.get(warm.session_id) is warm:
+                    self.warm_workers.pop(warm.session_id, None)
+                sock = warm.sock
+                warm.sock = None
+                if sock is not None:
+                    try: sock.close()
+                    except OSError: pass
+            self.notify()
+
     def _launch_provider(self, value, session):
         workspace, session_id = session['workspace'], session['id']
         policy = self.session_policy(session)
         tid = value['id']
         lease = self._unit_path(value)
-        fd = read_fd = write_fd = None
+        fd = worker_sock = parent_sock = None
         try:
             try:
                 coding_fd = None
-                project = policy.project(workspace, json.loads(session['root'])['path'])
+                root_path = json.loads(session['root'])['path']
+                project = policy.project(workspace, root_path)
                 if value.get('operation') == 'message' and project['kind'] == 'pipeline':
                     if self.coding_catalog is None:
                         from demiflow.forge.api_reference import REFERENCE_BYTES, build_reference
@@ -270,7 +395,40 @@ class Service:
                 fsync_directory(self.root)
                 ownership = dict(unit_path=str(lease), unit_identity=dict(device=info.st_dev, inode=info.st_ino), nonce=value['epoch'])
                 self.store.update(tid, process=wire(ownership).decode())
-                read_fd, write_fd = os.pipe()
+
+                # Try reusing a matching idle warm worker for normal message turns.
+                warm_map = getattr(self, 'warm_workers', None)
+                warm = warm_map.get(session_id) if (warm_map is not None and value.get('operation') == 'message') else None
+                if (warm is not None and warm.idle and not warm.dead and warm.process.poll() is None
+                        and warm.sock is not None
+                        and warm.policy_hash == session['policy_hash']
+                        and warm.provider == session['provider']
+                        and warm.root_path == root_path
+                        and (self.deployment.mode != 'restricted'
+                             or warm.sandbox_deadline - time.time() > self.deployment.limits.turn_seconds + 60)):
+                    self.store.update(tid, launch_phase='spawning')
+                    self.worker_targets[tid] = (workspace, session_id, value['epoch'], session['root'])
+                    warm.idle = False
+                    warm.busy_tid = tid
+                    warm.accepted_tid = None
+                    warm.accepted_event.clear()
+                    handoff_ok = False
+                    try:
+                        payload = (json.dumps({'cmd': 'turn', 'tid': tid}, separators=(',', ':')) + '\n').encode()
+                        warm.sock.sendmsg([payload], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [fd]))])
+                        if warm.accepted_event.wait(2.0) and warm.accepted_tid == tid:
+                            self.workers[tid] = (warm.process, warm.sock.fileno())
+                            self._worker_socks[tid] = warm.sock
+                            handoff_ok = True
+                    except OSError:
+                        handoff_ok = False
+                    if handoff_ok:
+                        return self.store.public_turn(self.store.turn(tid))
+                    warm_map.pop(session_id, None)
+                    self._retire_warm(warm, wait_s=1.0)
+
+                self._retire_conflicting_warm(session_id, root_path)
+                parent_sock, worker_sock = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
                 worker = Path(__file__).with_name('worker.py')
                 env = dict(PATH='/usr/bin:/bin', LANG='C.UTF-8', PYTHONDONTWRITEBYTECODE='1')
                 env['DEMIFLOW_INPUT_DENIED_PATHS'] = wire(list(self.input_denied_paths), 65536).decode()
@@ -284,25 +442,34 @@ class Service:
                 # Popen object does not prove absence of a real child.
                 self.store.update(tid, launch_phase='spawning')
                 self.worker_targets[tid] = (workspace, session_id, value['epoch'], session['root'])
-                command = [sys.executable, '-I', '-B', str(worker), str(self.root / (session['policy_hash'] + '.json')), tid, str(fd), str(read_fd)]
-                inherited = (fd, read_fd)
+                command = [sys.executable, '-I', '-B', str(worker), str(self.root / (session['policy_hash'] + '.json')), tid, str(fd), str(worker_sock.fileno())]
+                inherited = (fd, worker_sock.fileno())
                 if coding_fd is not None:
                     command.append(str(coding_fd))
                     inherited += (coding_fd,)
                 process = subprocess.Popen(command,
                     cwd=self.root, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     pass_fds=inherited, start_new_session=True)
-                self.workers[tid] = (process, write_fd)
+                warm = _WarmWorker(session_id, session['policy_hash'], session['provider'], root_path, process, parent_sock)
+                warm.busy_tid = tid
+                if warm_map is not None and value.get('operation') == 'message':
+                    warm_map[session_id] = warm
+                self.workers[tid] = (process, parent_sock.fileno())
+                self._worker_socks[tid] = parent_sock
+                parent_sock = None
+                threading.Thread(target=self._watch_worker, args=(warm,), name='demiflow-dev-watch', daemon=True).start()
             finally:
                 try:
-                    if read_fd is not None: os.close(read_fd)
+                    if worker_sock is not None: worker_sock.close()
                 finally:
                     if fd is not None: os.close(fd)
         except BaseException:
-            if write_fd is not None:
-                os.close(write_fd)
-                if tid in self.workers:
-                    self.workers[tid] = (self.workers[tid][0], -1)
+            if parent_sock is not None:
+                self._close_life(parent_sock)
+            if tid in self.workers:
+                proc, life = self.workers[tid]
+                self._close_turn_life(tid, life)
+                self.workers[tid] = (proc, -1)
             if tid not in self.workers: self.worker_targets.pop(tid, None)
             # A lost constructor return closes the parent pipe, so a real
             # child drains itself. Until then the inherited unit stays held.
@@ -333,12 +500,19 @@ class Service:
     def _reap(self):
         for tid, (process, life) in list(self.workers.items()):
             if process.poll() is not None:
-                if life >= 0: os.close(life)
+                self._close_turn_life(tid, life)
                 del self.workers[tid]
                 self.worker_targets.pop(tid, None)
                 if self.store.turn(tid)['cleanup'] != 'complete':
                     if not self._finish_unstarted(self.store.turn(tid)):
                         self.store.update(tid, state='interrupted', cleanup='unknown')
+        warm_map = getattr(self, 'warm_workers', None)
+        if warm_map:
+            for sid, warm in list(warm_map.items()):
+                if warm.dead or warm.process.poll() is not None:
+                    warm_map.pop(sid, None)
+                    self._close_life(warm.sock)
+                    warm.sock = None
 
     def show(self, workspace, sid):
         with self.lock:
@@ -360,11 +534,21 @@ class Service:
             # Public policy metadata belongs to this session's immutable grant,
             # including busy turns and history read after a policy replacement.
             try:
-                from .common import read_file, strict_json
-                policy = strict_json(read_file(self.root / (session['policy_hash'] + '.json'), POLICY_BYTES))
-                if digest(policy) == session['policy_hash']:
-                    provider=policy['providers'].get(session['provider'],{})
-                    value.update(model=provider.get('model'),effort=provider.get('effort'))
+                phash = session['policy_hash']
+                cache = getattr(self, '_policy_meta_cache', None)
+                providers = cache.get(phash) if cache is not None else None
+                if providers is None:
+                    from .common import read_file, strict_json
+                    policy = strict_json(read_file(self.root / (phash + '.json'), POLICY_BYTES))
+                    if digest(policy) == phash:
+                        providers = policy['providers']
+                        if cache is not None:
+                            if len(cache) >= 64:
+                                cache.pop(next(iter(cache)))
+                            cache[phash] = providers
+                if providers is not None:
+                    provider = providers.get(session['provider'], {})
+                    value.update(model=provider.get('model'), effort=provider.get('effort'))
             except Exception:
                 pass  # Historical events remain readable if the grant is missing.
         return value
@@ -399,8 +583,8 @@ class Service:
                 # Only a confirmed immutable owned target and a persistence
                 # failure may use the independent stop channel. Rejections do not.
                 owned = self.workers.get(turn_id)
-                if target and owned and owned[1] >= 0:
-                    os.close(owned[1])
+                if target and owned and owned[1] not in (None, -1):
+                    self._close_turn_life(turn_id, owned[1])
                     self.workers[turn_id] = (owned[0], -1)
                 raise
 
@@ -425,20 +609,27 @@ class Service:
 
     def close(self):
         failure = None
+        warm_to_wait = []
         with self.lock:
             if self.closed:
                 return
             self.closed = True
-            for tid, (_, life) in self.workers.items():
+            for tid, (_, life) in list(self.workers.items()):
                 try:
                     t = self.store.turn(tid); s = self.store.session(t['session'])
                     self.store.cancel(s['workspace'], s['id'], tid)
                 except Exception:
                     # The parent pipe is an independent stop path when control
                     # persistence is unavailable. Do not abandon live workers.
-                    if life >= 0:
-                        os.close(life)
-                        self.workers[tid] = (self.workers[tid][0], -1)
+                    self._close_turn_life(tid, life)
+                    self.workers[tid] = (self.workers[tid][0], -1)
+            warm_map = getattr(self, 'warm_workers', None)
+            if warm_map:
+                for sid, warm in list(warm_map.items()):
+                    warm_map.pop(sid, None)
+                    warm_to_wait.append(warm)
+                    if warm.idle:
+                        self._retire_warm(warm, wait_s=0.0)
         deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
             with self.lock:
@@ -446,11 +637,15 @@ class Service:
                     self._reap()
                 except Exception as exc:
                     failure = exc
-                if not self.workers: break
+                all_warm_done = all(w.process.poll() is not None for w in warm_to_wait)
+                if not self.workers and all_warm_done: break
             time.sleep(0.05)
-        for _, life in self.workers.values():
-            if life >= 0: os.close(life)
+        for tid, (_, life) in list(self.workers.items()):
+            self._close_turn_life(tid, life)
+        for warm in warm_to_wait:
+            self._retire_warm(warm, wait_s=0.5)
         self.workers.clear()
+        self._worker_socks.clear()
         self.worker_targets.clear()
         with self.lock:
             if self.coding_catalog is not None:

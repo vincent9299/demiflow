@@ -17,9 +17,10 @@ exports.apply = function(ctx, config) {
   function write(value,method='demiflow/assistant-stream') {
     const raw=JSON.stringify({jsonrpc:'2.0',method,params:{sessionId:session.id,...value}})+'\n';
     const size=Buffer.byteLength(raw);
-    if(size>FRAME || sent+size>TOTAL || ++frames>20000 || process.stdout.writableLength+size>2*FRAME)
+    if(size>FRAME || process.stdout.writableLength+size>2*FRAME)
       throw new Error('stream budget');
     sent+=size;
+    frames++;
     process.stdout.write(raw);
   }
   function metric(event,kind,turn,fields={}) {
@@ -66,7 +67,7 @@ exports.apply = function(ctx, config) {
       } else if(event.type==='llm/retry-started' && count(data?.turn) && count(data.step)) {
         metric(event,'retry_started',data.turn,{native_step:data.step});
       } else if(event.type==='tool/call' && identity(data?.callId) && count(data.turn) && time(event.time)) {
-        if(calls.size>=128 && !calls.has(data.callId)) throw new Error('tool timing budget');
+        if(calls.size>=512 && !calls.has(data.callId)) calls.delete(calls.keys().next().value);
         calls.set(data.callId,{turn:data.turn,time:event.time});
       } else if(event.type==='tool/result') {
         const id=data?.message?.source?.callId, call=calls.get(id);
@@ -100,7 +101,7 @@ exports.apply = function(ctx, config) {
     }
   }
   function schedule() {
-    if(!timer) timer=setTimeout(()=>{try{flush();}catch{fail();}},40);
+    if(!timer) timer=setTimeout(()=>{try{flush();}catch{fail();}},16);
   }
   function complete(index,block,status='complete') {
     write({phase:'completed',attemptId:current.id,blockIndex:index,channel:block.channel,
@@ -121,7 +122,8 @@ exports.apply = function(ctx, config) {
         throw new Error('invalid frame identity');
       revision=frame.revision;
       if(frame.type==='start') {
-        if(current || ++attempts>128) throw new Error('attempt boundary');
+        if(current) throw new Error('attempt boundary');
+        ++attempts;
         current={id:frame.attemptId,turn:frame.turn,step:frame.step,index:0,blocks:new Map(),bytes:0};
         write({phase:'start',attemptId:current.id});return;
       }
@@ -218,6 +220,7 @@ exports.apply = function(ctx, config) {
         if(!target || target.id!==id || bound?.id!==id || bound.header?.cwd!==config.cwd ||
             bound.header?.origin==='subagent' || bound.header?.parentSession!==undefined ||
             agent && (agent!==target || session!==bound)) throw new Error('prompt root identity');
+        if(agent && !current) {sent=0;frames=0;attempts=0;}
         agent=target;session=bound;
       }
     } catch {fail();}
