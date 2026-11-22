@@ -285,7 +285,7 @@ def _queue_sink(c):
 
 
 def _graph(c, routing, **options):
-    """A routed graph exactly as execution.graph._graph_action_request builds it."""
+    """A routed graph exactly as execution.executors.graph.materialize_graph builds it."""
     from demiflow.data.plan import LogicalPlan
     from demiflow.planning.dataflow_graph_adapter import translate_graph
     base = options.pop('base', None) or c.rows()

@@ -17,8 +17,6 @@ from demiflow.execution.admission import FairTurns, RoleDemand, plan_activation
 from demiflow.execution.exchange.carriage_local import (
     LocalSegmentStore, channel_pair, inline_records,
 )
-from demiflow.execution.graph import _activation_order
-from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.planning.dag import build_channel_plan
 from demiflow.planning.graph_channels import RouteTable
 from demiflow.resources.capacity import LocalCapacityPool
@@ -133,17 +131,12 @@ def test_plan_and_describe_are_pure_no_reservation(tmp_path):
     assert devices.snapshot() == before_devices
 
 
-# ---------------- graph driver activation seam ----------------
-
-def test_activation_order_targets_first_and_static_minimum():
-    order = _activation_order("ancestor", {"c1": "alloc-c1", "c0": "alloc-c0"},
-                              capacity=_capacity())
-    assert order == ["alloc-c0", "alloc-c1", "ancestor"]
-    # The static graph minimum is every worker: a shortfall fails before staging.
-    with pytest.raises(RecoveryContractError) as exc:
-        _activation_order("ancestor", {"c0": "alloc-c0", "c1": "alloc-c1"},
-                          capacity=_capacity(2000, 2 * GIB))
-    assert "shortfall" in str(exc.value)
+def test_fanout_roles_have_deterministic_target_order_and_report_shortfall():
+    demands = [_demand("ancestor", "produce"), _demand("alloc-c1", "consume", fairness_key="c1"),
+               _demand("alloc-c0", "consume", fairness_key="c0")]
+    assert plan_activation(demands, capacity=_capacity())["admitted"] == [
+        "alloc-c0", "alloc-c1", "ancestor"]
+    assert plan_activation(demands, capacity=_capacity(2000, 2 * GIB))["shortfall"] == ["ancestor"]
 
 
 # ---------------- reader-side fairness over real socketpairs ----------------
