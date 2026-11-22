@@ -54,13 +54,12 @@ P1_ASSEMBLY_IMPORTS = {
 # code on it without deciding that on purpose. Value: today's importers.
 PRE_V3_MODULES = {
     'demiflow.execution.chain': {
-        'demiflow.execution.graph', 'demiflow.execution.native_plan',
-        'demiflow.execution.worker.execution'},
+        'demiflow.execution.graph', 'demiflow.execution.native_plan'},
     'demiflow.execution.stream': {
         'demiflow.data.dataset',
         'demiflow.data.execution_contract',  # TYPE_CHECKING only: original StreamStats identity
         'demiflow.execution.dataflow_stream',
-        'demiflow.execution.request_limits', 'demiflow.execution.worker.execution',
+        'demiflow.execution.request_limits',
         'demiflow.execution.worker.graph_execution', 'demiflow.execution.worker.queue_transform'},
     'demiflow.execution.plan_interpreter': {
         'demiflow.execution.chain', 'demiflow.execution.dataflow_history',

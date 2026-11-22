@@ -209,26 +209,10 @@ def test_workbench_unified_chain_kill_recovers_acked_prefix_exactly_once(tmp_pat
 
 
 
-def test_unified_chain_shares_legacy_recovery_gate_and_fail_closes_unknown(tmp_path):
-    # R4 "unknown paid call never auto-replayed" half, bound onto the unified chain
-    # seam without re-proving the frozen journal units. Two facts secure no-regression:
-    #   (1) the chain worker (WorkerStreamProgress) and the legacy in-driver terminal
-    #       (StreamMaterialization) bind stages through the IDENTICAL StreamStageProgress
-    #       method, so flipping unified_chain cannot regress the native_stream_recovery
-    #       -> NativePromptRecovery -> check_recovery gate (stream_materialize.py:235);
-    #   (2) that production gate (RunPromptJournal.check_recovery, stream_recovery.py:57)
-    #       fail-closes a persisted unknown effect on resume rebind, before any dispatch.
-    # The journal write uses a synchronous run-level shard for deterministic durability;
-    # the async transport/S2 reservation budget is orthogonal to the fail-closed gate,
-    # which is invoked here as the exact production method over the durable journal.
-    from demiflow.execution.stream_materialize import StreamStageProgress, StreamMaterialization
-    from demiflow.execution.worker.progress import WorkerStreamProgress
+def test_paid_call_with_unknown_effect_refuses_new_dispatch_after_restart(tmp_path):
     from demiflow.operator_llm.journal import UncertainPromptCall
     from demiflow.operator_llm.sqlite_journal import _SQLiteJournalShard
     from demiflow.operator_llm.stream_recovery import RunPromptJournal
-
-    assert WorkerStreamProgress.bind_stages is StreamStageProgress.bind_stages
-    assert StreamMaterialization.bind_stages is StreamStageProgress.bind_stages
 
     def bind_gate(run):
         # Mirrors bind_stages' native_stream_recovery rebind: bind the run-level durable

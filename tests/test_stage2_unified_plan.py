@@ -394,12 +394,6 @@ def test_real_chain_kill_recovers_per_record_equality(tmp_path, monkeypatch):
             owner = db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()
         assert owner == (run2.attempt, run2.fence)              # crash never moved ownership
     assert before_processes.keys() < process_records(root).keys()
-    # unknown-not-replayed: the chain worker shares the legacy recovery gate whose
-    # production check_recovery fail-closes a persisted unknown paid effect (the
-    # representative chain's fake model produces none, so the gate is bound structurally).
-    from demiflow.execution.stream_materialize import StreamStageProgress
-    from demiflow.execution.worker.progress import WorkerStreamProgress
-    assert WorkerStreamProgress.bind_stages is StreamStageProgress.bind_stages
     assert_released(tmp_path / "run")
 
 
@@ -632,8 +626,8 @@ def test_chain_success_releases_capacity(tmp_path, monkeypatch):
 # --- Gate 4: worker zero CommitCoordinator (AST) + driver single journal (spy) ---
 
 def test_worker_constructs_zero_commit_coordinator():
-    import demiflow.execution.worker.execution as chain_worker
-    for module in (chain_worker,):
+    from demiflow.execution.worker import dataflow_execution, dataflow_graph_runner, dataflow_host
+    for module in (dataflow_execution, dataflow_graph_runner, dataflow_host):
         tree = ast.parse(Path(module.__file__).read_text())
         referenced, imported_modules = set(), set()
         for node in ast.walk(tree):
@@ -1009,8 +1003,4 @@ def test_s4c_two_row_types_execute_recover_equality(tmp_path, monkeypatch):
         for commit_id, before in pre_by_id.items():
             assert post_by_id[commit_id]["receipts"] == before["receipts"]
         assert len(post_by_id) > len(pre_by_id)
-    # unknown-not-replayed is bound structurally (the fake model produces no paid effect).
-    from demiflow.execution.stream_materialize import StreamStageProgress
-    from demiflow.execution.worker.progress import WorkerStreamProgress
-    assert WorkerStreamProgress.bind_stages is StreamStageProgress.bind_stages
     assert_released(tmp_path / "run")

@@ -89,9 +89,7 @@
      "status": "old",
      "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
      "batch": 4,
-     "users": [
-      "demiflow.execution.worker.execution"
-     ]
+     "users": []
     },
     "build_commit_receipt": {
      "status": "old",
@@ -168,17 +166,13 @@
      "status": "old",
      "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
      "batch": 4,
-     "users": [
-      "demiflow.execution.worker.execution"
-     ]
+     "users": []
     },
     "verify_loaded_plan": {
      "status": "old",
      "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
      "batch": 4,
-     "users": [
-      "demiflow.execution.worker.execution"
-     ]
+     "users": []
     }
    },
    "measured": {
@@ -746,8 +740,7 @@
      "status": "old",
      "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
      "users": [
-      "demiflow.data.dataset",
-      "demiflow.execution.worker.execution"
+      "demiflow.data.dataset"
      ]
     }
    },
@@ -815,9 +808,7 @@
     "StreamStageProgress": {
      "status": "old",
      "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
-     "users": [
-      "demiflow.execution.worker.progress"
-     ]
+     "users": []
     },
     "bounded_stream_batches": {
      "status": "old",
@@ -884,31 +875,12 @@
     "never_ran": 3
    }
   },
-  "demiflow.execution.worker.execution": {
-   "status": "old",
-   "reason": "旧 worker 执行循环已经从 Local 和 Ray 的启动路径退出。剩余直接调用仅在旧执行循环的故障与回执测试中。",
-   "batch": 4,
-   "importers": [],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 148,
-     "historical_set_139_files": 64
-    },
-    "functions": 14,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 5,
-    "ran_only_at_import": 0,
-    "never_ran": 9
-   }
-  },
   "demiflow.execution.worker.layout": {
    "status": "old",
    "reason": "只被旧执行器和 chain.py 的旧实现使用。批次 4。",
    "batch": 4,
    "importers": [
-    "demiflow.execution.chain",
-    "demiflow.execution.worker.execution"
+    "demiflow.execution.chain"
    ],
    "measured": {
     "at": "74d2f99",
@@ -921,26 +893,6 @@
     "called_only_by_tests": 1,
     "ran_only_at_import": 0,
     "never_ran": 0
-   }
-  },
-  "demiflow.execution.worker.progress": {
-   "status": "old",
-   "reason": "只被 worker/execution.py 使用。批次 4。",
-   "batch": 4,
-   "importers": [
-    "demiflow.execution.worker.execution"
-   ],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 148,
-     "historical_set_139_files": 65
-    },
-    "functions": 2,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 2
    }
   },
   "demiflow.execution.hosts.ray_worker_host": {
@@ -1034,6 +986,16 @@
    "symbol": "unified_queue_chain_eligible",
    "batch": 2,
    "reason": "旧载体的准入判断；没有产品调用方。批次 2。"
+  },
+  {
+   "module": "demiflow.execution.worker.execution",
+   "batch": 4,
+   "reason": "两个后端都在分配前拒绝旧业务 launch。v3 worker 在原确认之后推进，K3 控制壳继续以真实 grant 和 fence 工作。"
+  },
+  {
+   "module": "demiflow.execution.worker.progress",
+   "batch": 4,
+   "reason": "旧 chain worker 是唯一产品导入方。现行 cut contributor 和 v3 运行账本持有原始回执，观测不参与确认。"
   }
  ]
 }

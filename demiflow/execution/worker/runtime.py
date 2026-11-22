@@ -126,7 +126,6 @@ class WorkerRuntime:
         self.plan_revision = 0
         self.assignment = None
         self.authority = None
-        self.progress = None
         self._control = control
         self._manifest_loader = manifest_loader
         self._restored = {}

@@ -148,23 +148,6 @@ class TestScenario3CheckpointPolicy:
         assert layout.checkpoint.checkpoint_rows == sc.fx.doc["checkpoint_rows"]
         assert layout.checkpoint.interval_ms == sc.fx.pp["recovery"]["checkpoint_interval_ms"]
 
-    def test_progress_uses_policy_rows(self):
-        from demiflow.execution.worker.progress import WorkerStreamProgress
-        action = MagicMock()
-        action.context.limits = {"checkpoint_rows": 999, "max_row_bytes": 4096,
-                                 "checkpoint_interval_ms": 1000,
-                                 "checkpoint_unconfirmed_rows": 2,
-                                 "checkpoint_unconfirmed_bytes": 1024}
-        action.context.directory = Path("/tmp/demiflow-c-test")
-        policy = CheckpointPolicy(checkpoint_rows=42, interval_ms=5000,
-                                  unconfirmed_rows=4, unconfirmed_bytes=64 * 1024 ** 2)
-        progress = WorkerStreamProgress.__new__(WorkerStreamProgress)
-        progress.run = action.context
-        progress.checkpoint_policy = policy
-        progress.batch_rows = (policy.checkpoint_rows if policy is not None
-                               else progress.run.limits["checkpoint_rows"])
-        assert progress.batch_rows == 42
-
     def test_barrier_interval_from_policy(self):
         from demiflow.execution.stream_barrier import CheckpointControl
         progress = MagicMock()

@@ -2,8 +2,8 @@
 
 Single-host Ray Core (env-ray, ray 2.60.0 Core only, no ray[data]) is semantic-
 adaptation evidence only (design §8): no multi-host/GPU/performance claim. The
-whole operator chain runs in one named Ray actor hosting the *same* WorkerRuntime
-+ WorkerChainExecutor + WorkerStreamProgress as the Local process worker; the
+operator chain runs in a named Ray actor hosting the same sealed DataflowWorkerExecutor
+as the Local process worker; the
 driver owns the control plane, the fixed source capture and the single commit
 authority. Control is actor methods (driver->worker) plus a bounded outbox pull
 (worker->driver); result blocks hand off as staging descriptors on the shared
