@@ -765,7 +765,7 @@
   },
   "demiflow.execution.stream_materialize": {
    "status": "mixed",
-   "reason": "旧流式物化；其中 stream_view 被冻结文件 queue_execution.py 里没有调用方的 write_queue_datasink 引用。",
+   "reason": "旧对齐屏障基准仍直接构造 StreamMaterialization；v3 和公开队列没有该写入路径。",
    "symbols": {
     "StreamMaterialization": {
      "status": "old",
@@ -776,24 +776,6 @@
      "status": "old",
      "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
      "users": []
-    },
-    "bounded_stream_batches": {
-     "status": "old",
-     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
-     "users": []
-    },
-    "has_stream": {
-     "status": "live",
-     "reason": "execution/capabilities.py 调用。"
-    },
-    "prepare_stream_blocks": {
-     "status": "old",
-     "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
-     "users": []
-    },
-    "stream_view": {
-     "status": "frozen",
-     "reason": "冻结文件 execution/queue_execution.py 的 write_queue_datasink 引用它（该函数本身没有调用方）。到流式退役批次统一裁决。"
     }
    },
    "measured": {
@@ -887,7 +869,7 @@
    "module": "demiflow.data.dataset",
    "name": "_run_stream",
    "status": "old",
-   "reason": "旧流式驱动的入口（Dataset._run_stream）。调用方只剩冻结文件里没有调用方的 write_queue_datasink、没有调用方的 prepare_stream_blocks 和两个测试基准脚本。其中还留着对已删除的 _apply_plan 的调用。批次 5。"
+   "reason": "固定旧运行捕获了 Dataset 类。直接删除该方法会让真实 routed 非最终 cut 以不同程序身份拒绝恢复；其旧内部 benchmark 单独迁移。"
   },
   {
    "module": "demiflow.execution.worker.bootstrap",
@@ -980,6 +962,30 @@
    "module": "demiflow.execution.queue_chain",
    "batch": 4,
    "reason": "公开 Dataset 写端直接走并仅走 v3 写 action。真实领取后、确认前和确认后的队列恢复已另外验证。"
+  },
+  {
+   "module": "demiflow.execution.stream_materialize",
+   "symbol": "has_stream",
+   "batch": 5,
+   "reason": "退役旧队列 datasink 后为空的流式物化入口。公开 v3 迭代保留其分批、额度与错误。"
+  },
+  {
+   "module": "demiflow.execution.stream_materialize",
+   "symbol": "stream_view",
+   "batch": 5,
+   "reason": "退役旧队列 datasink 后为空的流式物化入口。公开 v3 迭代保留其分批、额度与错误。"
+  },
+  {
+   "module": "demiflow.execution.stream_materialize",
+   "symbol": "prepare_stream_blocks",
+   "batch": 5,
+   "reason": "退役旧队列 datasink 后为空的流式物化入口。公开 v3 迭代保留其分批、额度与错误。"
+  },
+  {
+   "module": "demiflow.execution.stream_materialize",
+   "symbol": "bounded_stream_batches",
+   "batch": 5,
+   "reason": "退役旧队列 datasink 后为空的流式物化入口。公开 v3 迭代保留其分批、额度与错误。"
   }
  ]
 }

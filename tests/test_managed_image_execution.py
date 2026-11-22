@@ -390,18 +390,15 @@ def test_native_iterator_batches_keep_requested_grouping_and_readable_images(tmp
 
 
 def test_terminal_batch_byte_budget_checked_before_arrow_allocation(tmp_path,monkeypatch):
-    from demiflow.execution.stream_materialize import bounded_stream_batches
-    from demiflow.execution.executors.local import LocalDatasetExecutor
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
     import pyarrow as pa
-    # Two legal rows cannot fit one requested batch. No native allocation is
-    # allowed before this check, including when the requested row count is huge.
+
     calls=[]
     monkeypatch.setattr(pa,'Table',type('Table',(),{'from_pylist':staticmethod(lambda rows:calls.append(rows))}))
-    executor=LocalDatasetExecutor()
-    with RunContext.start(tmp_path/'run',limits={'max_row_bytes':1024,'max_batch_bytes':1024}):
-        with pytest.raises(RecoveryContractError,match='terminal batch'):
-            list(bounded_stream_batches(executor,iter([{'payload':'x'*400}]*2),batch_size=1000000))
+    with pytest.raises(DataflowError, match='batch byte budget'):
+        with RunContext.start(tmp_path/'run', limits={'max_row_bytes':1024, 'max_batch_bytes':1024}):
+            items=data.from_items([{'payload':'x'*650}, {'payload':'y'*650}])
+            list(items.iter_batches(batch_size=1000000, batch_format='pyarrow'))
     assert calls==[]
 
 
