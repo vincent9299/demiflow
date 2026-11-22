@@ -19,6 +19,7 @@ from demiflow.forge.platform import bounded_json
 from demiflow.forge.platform import content_digest
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.schema import ForgeError
+from demiflow.workbench.python_sources import read_source_bytes
 
 FORMAT = 'demiflow_forge_project_discovery_v1'
 PARAMETERS = {'demiflow_forge_flow_parameters_v1', 'demiflow_forge_flow_parameters_v2'}
@@ -60,10 +61,13 @@ def discover(root, control=None):
     def read(path, maximum=1024**2):
         nonlocal total
         path = ws.no_symlinks(Path(path))
-        if len(evidence) >= MAX_FILES or total >= MAX_BYTES:
+        if len(evidence) >= MAX_FILES or maximum is not None and total >= MAX_BYTES:
             raise ForgeError('Project declaration read budget exhausted', code='resource_limit')
-        raw = read_bounded(path, min(maximum, MAX_BYTES - total))
-        total += len(raw)
+        if maximum is None:
+            raw = read_source_bytes(path)
+        else:
+            raw = read_bounded(path, min(maximum, MAX_BYTES - total))
+            total += len(raw)
         digest = hashlib.sha256(raw).hexdigest()
         if str(path) in evidence and evidence[str(path)] != digest:
             raise ForgeError('Project declaration changed during discovery', code='conflict')
@@ -95,7 +99,7 @@ def discover(root, control=None):
             if before != previous:
                 raise ForgeError('Entry source changed during discovery', code='conflict')
             return facts
-        raw = read(target)
+        raw = read(target, maximum=None)
         tree = ast.parse(raw, filename=relative)
         if sum(1 for _ in ast.walk(tree)) > 50000:
             raise ForgeError('Entry AST exceeds discovery budget', code='resource_limit')

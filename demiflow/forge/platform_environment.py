@@ -1,6 +1,7 @@
 """Bounded distribution metadata inventory, not an installed-file attestation."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 from email.parser import BytesParser
 from importlib import metadata
@@ -20,7 +21,8 @@ from .platform import bounded_json, content_digest
 from .schema import ForgeError
 
 
-def read_bounded(path, maximum):
+@contextmanager
+def _regular_file(path, maximum):
     from .io import directory_handle, no_symlinks
     path = no_symlinks(Path(path))
     with directory_handle(path.parent) as parent:
@@ -29,21 +31,36 @@ def read_bounded(path, maximum):
             before = os.fstat(source.fileno())
             if not stat.S_ISREG(before.st_mode):
                 raise ForgeError("Metadata must be a regular file")
-            if maximum < 0 or before.st_size > maximum:
+            if maximum is not None and before.st_size > maximum:
                 raise ForgeError(f"Metadata exceeds byte budget: {path.name}", code='resource_limit')
-            # The limit is an admission ceiling, not a buffer reservation. A large
-            # read(n) can allocate n bytes even for a tiny regular file. Probe one
-            # byte past the observed size, then reject any concurrent change.
-            raw = source.read(before.st_size + 1)
+            yield source, before.st_size
             after = os.fstat(source.fileno())
-        if len(raw) > maximum:
-            raise ForgeError(f"Metadata exceeds byte budget: {path.name}", code='resource_limit')
         current = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
         def identity(info):
             return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
-        if (len(raw) != before.st_size or identity(before) != identity(after)
-                or not stat.S_ISREG(current.st_mode)
-                or (after.st_dev, after.st_ino) != (current.st_dev, current.st_ino)):
+        if identity(before) != identity(after) or identity(after) != identity(current):
+            raise ForgeError("Metadata changed while reading", code='conflict')
+
+
+def regular_file_chunks(path, maximum=None):
+    """Yield a stable regular file through anchored descriptors."""
+    with _regular_file(path, maximum) as (source, remaining):
+        while remaining:
+            chunk = source.read(min(remaining, 65536))
+            if not chunk:
+                raise ForgeError("Metadata changed while reading", code='conflict')
+            remaining -= len(chunk)
+            yield chunk
+        if source.read(1):
+            raise ForgeError("Metadata changed while reading", code='conflict')
+
+
+def read_bounded(path, maximum):
+    with _regular_file(path, maximum) as (source, size):
+        raw = source.read(size + 1)
+        if len(raw) > maximum:
+            raise ForgeError(f"Metadata exceeds byte budget: {Path(path).name}", code='resource_limit')
+        if len(raw) != size:
             raise ForgeError("Metadata changed while reading", code='conflict')
     return raw
 

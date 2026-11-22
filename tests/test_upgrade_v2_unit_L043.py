@@ -100,7 +100,7 @@ def test_archive_covers_the_source_files_and_the_pin_set(sealed, tmp_path, monke
     _assert_refs(sealed.run, refs)
     archived = {ref["source"] for ref in refs}
     assert archived == {str(paths["l043_entry"].resolve()), str(paths["l043_helper"].resolve())}
-    pinned = {str(path) for path, _ in _business_dependency_modules(plan, source=source).values()}
+    pinned = {str(file.path) for file in _business_dependency_modules(plan, source=source).values()}
     assert pinned <= archived
 
 
@@ -115,7 +115,7 @@ def test_archive_and_pin_collect_the_identical_dependency_set(sealed, tmp_path, 
     source = _source(entry)
     refs = snapshot_code_sources(sealed.action, plan, source=source)
     _assert_refs(sealed.run, refs)
-    pinned = {str(path) for path, _ in _business_dependency_modules(plan, source=source).values()}
+    pinned = {str(file.path) for file in _business_dependency_modules(plan, source=source).values()}
     archived = {ref["source"] for ref in refs}
     assert pinned <= archived
     assert archived == pinned | {str(paths["l043_planentry"].resolve()),

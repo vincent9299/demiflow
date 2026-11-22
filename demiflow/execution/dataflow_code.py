@@ -1,4 +1,5 @@
 """Bounded, content-pinned business imports delivered with each program."""
+from dataclasses import dataclass
 import hashlib
 import inspect
 import os
@@ -11,7 +12,6 @@ from .recovery_contract import identity
 
 SOURCE_MEDIA = 'text/x-python'
 MAX_SOURCES = 64
-MAX_SOURCE_BYTES = 8 * 1024**2
 
 
 def source_media(name):
@@ -33,7 +33,7 @@ def _relative_member(value):
     return path
 
 
-def _read_member(path, limit):
+def _member_chunks(path):
     # Anchor every directory descriptor before opening the next component.
     flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY
     fd = os.open(path.anchor, flags)
@@ -47,16 +47,48 @@ def _read_member(path, limit):
             info = os.fstat(leaf)
             if not stat.S_ISREG(info.st_mode):
                 raise DataflowError('INVALID_CONTRACT', 'Package member must be a regular file')
-            if info.st_size > limit:
-                raise DataflowError('BUDGET_EXCEEDED', 'Package member exceeds the remaining source budget')
-            data = stream.read(limit + 1)
-            if len(data) != info.st_size:
+            remaining = info.st_size
+            while remaining:
+                chunk = stream.read(min(65536, remaining))
+                if not chunk:
+                    raise DataflowError('CODE_MISMATCH', 'Package member changed during sealing')
+                remaining -= len(chunk)
+                yield chunk
+            if stream.read(1):
                 raise DataflowError('CODE_MISMATCH', 'Package member changed during sealing')
-            return data
     except OSError as exc:
         raise DataflowError('CODE_MISMATCH', 'Cannot read a direct declared package member: ' + str(path)) from exc
     finally:
         os.close(fd)
+
+
+@dataclass(frozen=True)
+class SourceFile:
+    path: Path
+    digest: str
+    size: int
+
+    @classmethod
+    def capture(cls, path):
+        digest = hashlib.sha256()
+        size = 0
+        for chunk in _member_chunks(path):
+            digest.update(chunk)
+            size += len(chunk)
+        return cls(path, digest.hexdigest(), size)
+
+    def chunks(self):
+        """Recheck the pinned bytes before the receiver publishes the file."""
+        digest = hashlib.sha256()
+        size = 0
+        for chunk in _member_chunks(self.path):
+            size += len(chunk)
+            if size > self.size:
+                raise DataflowError('CODE_MISMATCH', 'Business source changed during sealing')
+            digest.update(chunk)
+            yield chunk
+        if size != self.size or digest.hexdigest() != self.digest:
+            raise DataflowError('CODE_MISMATCH', 'Business source changed during sealing')
 
 
 def _add_declared_members(target, sources):
@@ -65,7 +97,6 @@ def _add_declared_members(target, sources):
         return
     if type(declared) is not dict or len(declared) > MAX_SOURCES:
         raise DataflowError('INVALID_CONTRACT', 'Package files require a bounded package-to-tuple mapping')
-    total = sum(len(raw) for _, raw in sources.values())
     for package, files in declared.items():
         _package_name(package)
         module = sys.modules.get(package)
@@ -93,13 +124,10 @@ def _add_declared_members(target, sources):
             if name not in sources and len(sources) >= MAX_SOURCES:
                 raise DataflowError('BUDGET_EXCEEDED', 'Package files exceed the source count budget')
             old = sources.get(name)
-            remaining = MAX_SOURCE_BYTES - total + (len(old[1]) if old is not None else 0)
-            raw = _read_member(member, remaining)
-            if old is not None and (old[0] != member or old[1] != raw):
+            source = SourceFile.capture(member)
+            if old is not None and old != source:
                 raise DataflowError('CODE_MISMATCH', 'One package member has conflicting source bytes')
-            if old is None:
-                total += len(raw)
-            sources[name] = (member, raw)
+            sources[name] = source
 
 
 def business_sources(kind, value):
@@ -117,7 +145,7 @@ def business_sources(kind, value):
         if ':' in name:
             continue
         parts = name.split('.')
-        source_path = sources[name][0]
+        source_path = sources[name].path
         folder = source_path.parent
         for length in range(1, len(parts)):
             parent = '.'.join(parts[:length])
@@ -129,34 +157,29 @@ def business_sources(kind, value):
                 directory = directory.parent
             path = directory / '__init__.py'
             if path.is_file() and parent not in sources:
-                if path.name != '__init__.py' or path.stat().st_size > MAX_SOURCE_BYTES:
-                    raise DataflowError('CODE_MISMATCH', 'Business package has no bounded Python source')
-                remaining = MAX_SOURCE_BYTES - sum(len(raw) for _, raw in sources.values())
-                sources[parent] = (path, _read_member(path, remaining))
-    if len(sources) > MAX_SOURCES or sum(len(raw) for _, raw in sources.values()) > MAX_SOURCE_BYTES:
-        raise DataflowError('BUDGET_EXCEEDED', 'Business imports exceed their source budget')
+                if len(sources) >= MAX_SOURCES:
+                    raise DataflowError('BUDGET_EXCEEDED', 'Business imports exceed their source count budget')
+                sources[parent] = SourceFile.capture(path)
     return sources
 
 
 def source_identity(sources):
-    return {name: {'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw),
-                   'package': path.name == '__init__.py'}
-            for name, (path, raw) in sorted(sources.items())}
+    return {name: {'sha256': source.digest, 'bytes': source.size,
+                   'package': source.path.name == '__init__.py'}
+            for name, source in sorted(sources.items())}
 
 
 def stage_sources(sources, *, store):
     from dataclasses import asdict
-    return {name: asdict(store.put(iter((raw,)), max_bytes=max(1, len(raw)), media_type=source_media(name)))
-            for name, (_, raw) in sorted(sources.items())}
+    return {name: asdict(store.put(source.chunks(), max_bytes=max(1, source.size), media_type=source_media(name)))
+            for name, source in sorted(sources.items())}
 
 
 def mount_sources(refs, expected, *, store, cache):
     """Populate the managed worker cache only from sealed, hash-verified bytes."""
-    from .seal.plan import _artifact_from_json, _read_bytes
-    from .state_artifacts import atomic_bytes
-    if (not isinstance(refs, dict) or set(refs) != set(expected)
-            or len(refs) > MAX_SOURCES
-            or sum(fact['bytes'] for fact in expected.values()) > MAX_SOURCE_BYTES):
+    from .seal.plan import _artifact_from_json, _artifact_chunks
+    from .state_artifacts import atomic_chunks
+    if not isinstance(refs, dict) or set(refs) != set(expected) or len(refs) > MAX_SOURCES:
         raise DataflowError('CORRUPT_ARTIFACT', 'Business import membership differs')
     if not refs:
         return
@@ -177,13 +200,15 @@ def mount_sources(refs, expected, *, store, cache):
         ref = _artifact_from_json(refs[name])
         if ref.digest != fact['sha256'] or ref.size_bytes != fact['bytes']:
             raise DataflowError('CODE_MISMATCH', 'Business source differs from the program pin')
-        raw = _read_bytes(store, ref, max_bytes=MAX_SOURCE_BYTES, media_type=source_media(name))
+        chunks = _artifact_chunks(store, ref, media_type=source_media(name))
         if target.exists():
-            if target.stat().st_size != len(raw) or target.read_bytes() != raw:
+            for _ in chunks:
+                pass
+            cached = SourceFile.capture(target)
+            if cached.size != ref.size_bytes or cached.digest != ref.digest:
                 raise DataflowError('CODE_MISMATCH', 'Cached business code differs')
         else:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            atomic_bytes(target, raw)
+            atomic_chunks(target, chunks)
     # Existing imports are deliberately not replaced: recomputing the loaded
     # program pin detects stale modules. Fresh workers import this exact bundle.
     if str(root) not in sys.path:

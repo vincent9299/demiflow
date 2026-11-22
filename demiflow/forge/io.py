@@ -52,6 +52,10 @@ def ensure_directory(path):
 
 
 def publish_bytes(path, raw, *, create=True):
+    publish_chunks(path, (raw,), create=create)
+
+
+def publish_chunks(path, chunks, *, create=True):
     """Publish a complete file using relative names on one open directory."""
     path = Path(path)
     with directory_handle(path.parent) as parent:
@@ -59,7 +63,7 @@ def publish_bytes(path, raw, *, create=True):
         handle = os.open(temp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600, dir_fd=parent)
         try:
             with os.fdopen(handle, 'wb') as out:
-                out.write(raw)
+                out.writelines(chunks)
                 out.flush()
                 os.fsync(out.fileno())
             if create:

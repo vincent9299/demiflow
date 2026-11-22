@@ -48,7 +48,7 @@ def test_native_submit_seal_monitor_and_fixed_results(root):
 def test_nested_package_preview_and_managed_run_use_same_sources(root):
     package = root.parent.name + '.' + root.name
     (root.parent / '__init__.py').write_text('raise AssertionError("must not import the parent")\n')
-    (root / 'operators/local_input.py').write_text('value = 41\n')
+    (root / 'operators/local_input.py').write_text('value = 41\n' + '#' + 'x' * (4 * 1024**2) + '\n')
     prepared = native_flow(root, f'from {package}.operators.local_input import value\n', 'value')
     run_id = prepared['run_id']
     from demiflow.workbench.graph.preview import preview
@@ -81,7 +81,7 @@ def test_shared_source_preview_and_run_pin_explicit_modules(root, monkeypatch):
         f'    from {namespace}.metrics.settings import increment\n'
         '    return {"x": row["x"] + increment}\n')
     setting = external / 'settings.py'
-    setting.write_text('increment = 20\n')
+    setting.write_text('increment = 20\n' + '#' + 'x' * (8 * 1024**2) + '\n')
     policy = root.parent / 'python-sources.json'
     policy.write_text(json.dumps(dict(format=FORMAT, workspaces={str(root): {
         namespace: str(external / '__init__.py'),
@@ -104,7 +104,7 @@ def test_shared_source_preview_and_run_pin_explicit_modules(root, monkeypatch):
     setting.write_text('increment = 40\n')
     with pytest.raises(Exception, match='prepared shared source changed: ' + namespace + r'\.metrics\.settings'):
         runs.start(root, run_id, expected=prepared['digest'])
-    setting.write_text('increment = 20\n')
+    setting.write_text('increment = 20\n' + '#' + 'x' * (8 * 1024**2) + '\n')
     monkeypatch.delenv(ENVIRONMENT)
     result = execute(root, prepared)
     assert result['status'] == 'succeeded', (result, runs.logs(root, run_id))

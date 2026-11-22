@@ -12,7 +12,7 @@ import sys
 from types import FunctionType
 import weakref
 
-from demiflow.forge.platform_environment import read_bounded
+from demiflow.workbench.python_sources import read_source_bytes
 from demiflow.workbench.projects import workspace as ws
 from .plan_details import material, safe_json, unavailable
 
@@ -202,7 +202,7 @@ class PlanCallsites:
         if relative not in self.files:
             path = self.root / relative
             ws.no_symlinks(path)
-            raw = read_bounded(path, 4 * 1024**2)
+            raw = read_source_bytes(path)
             expected = self.sources[relative]
             if hashlib.sha256(raw).hexdigest() != expected:
                 return unavailable('调用源码在解析期间发生变化。')
@@ -263,7 +263,7 @@ def pipeline_material(root, target, sources):
     """Snapshot the declared entry file, including code after the first action."""
     relative = target.relative_to(root).as_posix()
     ws.no_symlinks(target)
-    raw = read_bounded(target, 4 * 1024**2)
+    raw = read_source_bytes(target)
     expected = sources[relative]
     if hashlib.sha256(raw).hexdigest() != expected:
         return unavailable('入口源码在解析期间发生变化。')

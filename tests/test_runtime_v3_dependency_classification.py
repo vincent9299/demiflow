@@ -142,8 +142,8 @@ def _captured_plan(module):
     return data.from_items([{'x': 1}]).map(transform)._plan
 
 
-def test_original_module_and_byte_guards_remain_fail_closed(tmp_path):
-    assert chain._DEP_MAX_MODULES == 64 and chain._DEP_MAX_BYTES == 8*1024**2
+def test_module_count_limit_is_independent_of_source_size(tmp_path):
+    assert chain._DEP_MAX_MODULES == 64
     modules = []
     for index in range(65):
         path = tmp_path/f'business_{index}.py'; path.write_text('VALUE = 1\n')
@@ -156,5 +156,5 @@ def test_original_module_and_byte_guards_remain_fail_closed(tmp_path):
     with path.open('wb') as stream:
         for _ in range(129):
             stream.write(b'#' + b'x'*65534 + b'\n')
-    with pytest.raises(RecoveryContractError, match='manifest exceeds budget'):
-        chain.plan_code_pin(_captured_plan(_module('owned_wide_business', path)))
+    pin = chain.plan_code_pin(_captured_plan(_module('owned_wide_business', path)))
+    assert pin['dependencies']['owned_wide_business']['bytes'] == path.stat().st_size

@@ -51,14 +51,33 @@ def test_package_files_refuse_unowned_paths(recipe, tmp_path, filename):
         sources(entry)
 
 
-def test_package_files_share_the_existing_source_byte_budget(recipe, monkeypatch):
-    from demiflow.execution import dataflow_code
+def test_large_package_member_stages_and_mounts(recipe, tmp_path, monkeypatch):
+    from demiflow.execution.dataflow_code import mount_sources, stage_sources
+    from test_runtime_v3_d import FakeStore
     entry, parent = recipe
-    (parent / 'extra').write_bytes(b'x' * 4097)
-    monkeypatch.setattr(dataflow_code, 'MAX_SOURCE_BYTES', 4096)
+    member = parent / 'extra'
+    with member.open('wb') as stream:
+        stream.truncate(8 * 1024**2 + 1)
     entry.__demiflow_package_files__ = {'pinned_training_project': ('extra',)}
-    with pytest.raises(DataflowError, match='source budget'):
-        sources(entry)
+    files = business_sources('callable', CallableSpec.create(entry))
+    pin = source_identity(files)
+    name = 'pinned_training_project:extra'
+    assert pin[name]['bytes'] == member.stat().st_size
+    store = FakeStore(tmp_path / 'store')
+    refs = stage_sources(files, store=store)
+    monkeypatch.setattr(sys, 'path', sys.path.copy())
+    cache = tmp_path / 'cache'
+    mount_sources(refs, pin, store=store, cache=cache)
+    cached, = cache.rglob('extra')
+    assert cached.stat().st_size == member.stat().st_size
+    with cached.open('r+b') as stream:
+        stream.write(b'X')
+    with pytest.raises(DataflowError, match='Cached business code differs'):
+        mount_sources(refs, pin, store=store, cache=cache)
+    with member.open('r+b') as stream:
+        stream.write(b'Y')
+    with pytest.raises(DataflowError, match='changed during sealing'):
+        stage_sources(files, store=store)
 
 
 def test_inherited_package_root_is_classified_by_the_active_interpreter(tmp_path, monkeypatch):

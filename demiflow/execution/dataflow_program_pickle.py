@@ -5,7 +5,7 @@ Cloudpickle's dynamic class state omits the type's qualified name on Python
 whitelist. Only the already serialized exception class state is augmented;
 failure messages remain data-only and never select an import or a constructor.
 """
-import io
+from tempfile import TemporaryFile
 
 import cloudpickle
 
@@ -24,7 +24,32 @@ class ProgramPickler(cloudpickle.CloudPickler):
         return reduced
 
 
-def dumps(value):
-    stream = io.BytesIO()
-    ProgramPickler(stream).dump(value)
-    return stream.getvalue()
+def stage_payload(value, *, store, media_type, allow_live=False,
+                  serialization_error="Program carries a live handle (connection/lock/FD); "
+                                      "task/process scope requires a serializable declaration"):
+    """Serialize once. Store limits apply to actual bytes written."""
+    from .contracts.dataflow_errors import DataflowError
+    with TemporaryFile() as stream:
+        try:
+            ProgramPickler(stream).dump(value)
+        except (OSError, MemoryError, DataflowError):
+            raise
+        except Exception as exc:
+            if allow_live:
+                return None
+            raise DataflowError("INVALID_CONTRACT", serialization_error + ": " + str(exc)) from exc
+        size = stream.tell()
+        stream.seek(0)
+        return store.put(iter(lambda: stream.read(65536), b""), max_bytes=size, media_type=media_type)
+
+
+def load_payload(chunks):
+    """Finish verification before executing any pickle opcode."""
+    from .contracts.dataflow_errors import DataflowError
+    with TemporaryFile() as stream:
+        stream.writelines(chunks)
+        stream.seek(0)
+        try:
+            return cloudpickle.load(stream)
+        except Exception as exc:
+            raise DataflowError("CORRUPT_ARTIFACT", "Program payload failed to load: " + str(exc)) from exc

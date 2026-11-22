@@ -208,9 +208,9 @@ def test_expired_copy_does_not_begin_a_new_file(tmp_path, monkeypatch):
 
     def read(*args):
         clock.now = 161
-        return b'checked-source'
+        yield b'checked-source'
 
-    monkeypatch.setattr(runs, 'read_bounded', read)
+    monkeypatch.setattr(runs, 'regular_file_chunks', read)
     target = tmp_path / 'new-seal'
     with budget.scope(), pytest.raises(ForgeError, match='deadline exceeded'):
         runs._copy_checked(tmp_path / 'source', target, 'unused', 4096)

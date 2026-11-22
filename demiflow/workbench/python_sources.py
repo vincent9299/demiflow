@@ -10,14 +10,12 @@ import sys
 from pathlib import Path
 
 from demiflow.forge.io import no_symlinks
-from demiflow.forge.platform_environment import read_bounded
+from demiflow.forge.platform_environment import read_bounded, regular_file_chunks
 from demiflow.forge.schema import ForgeError
 
 FORMAT = 'demiflow_workbench_shared_sources_v1'
 ENVIRONMENT = 'DEMIFLOW_WORKBENCH_SHARED_SOURCES'
 MAX_MODULES = 128
-MAX_MODULE_BYTES = 1024**2
-MAX_SOURCE_BYTES = 8 * 1024**2
 
 
 def deployment_modules(root):
@@ -72,8 +70,20 @@ def bound_files(binding):
         yield name, Path(row['path']), sealed_path(name, row['path']), row['sha256']
 
 
+def read_source_bytes(path):
+    path = no_symlinks(Path(path))
+    return read_bounded(path, path.stat().st_size)
+
+
+def source_digest(path):
+    digest = hashlib.sha256()
+    for chunk in regular_file_chunks(path):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
 def read_sealed(name, path, digest):
-    raw = read_bounded(no_symlinks(path), MAX_MODULE_BYTES)
+    raw = read_source_bytes(path)
     if hashlib.sha256(raw).hexdigest() != digest:
         raise ForgeError('Sealed shared Python source differs: ' + name, code='conflict')
     return raw
@@ -139,7 +149,6 @@ class SharedSources:
         if len(set(self.paths.values())) != len(self.paths):
             raise ForgeError('A shared Python file must have one module name')
         self.digests = {}
-        self.total = 0
         local = set()
         for name in {name.split('.')[0] for name in self.paths}:
             if (root / name).is_dir() or (root / (name + '.py')).is_file():
@@ -147,23 +156,21 @@ class SharedSources:
         self.importer = SharedSourceImports(self.paths, read=self.read, project_roots=local)
 
     def read(self, name):
-        raw = read_bounded(no_symlinks(self.paths[name]), MAX_MODULE_BYTES)
+        raw = read_source_bytes(self.paths[name])
         digest = hashlib.sha256(raw).hexdigest()
-        if name in self.digests:
-            if self.digests[name] != digest:
-                raise ForgeError('Shared Python source changed: ' + name, code='conflict')
-        else:
-            self.total += len(raw)
-            if self.total > MAX_SOURCE_BYTES:
-                raise ForgeError('Shared Python sources exceed the byte budget', code='resource_limit')
-            self.digests[name] = digest
+        if name in self.digests and self.digests[name] != digest:
+            raise ForgeError('Shared Python source changed: ' + name, code='conflict')
+        self.digests[name] = digest
         return raw
 
     def binding(self):
         # Include declared lazy imports used only by the eventual row callback.
         # This also rechecks every import the compiler actually executed.
         for name in sorted(self.paths):
-            self.read(name)
+            digest = source_digest(self.paths[name])
+            if name in self.digests and self.digests[name] != digest:
+                raise ForgeError('Shared Python source changed: ' + name, code='conflict')
+            self.digests[name] = digest
         return {name: dict(path=str(self.paths[name]), sha256=self.digests[name]) for name in sorted(self.paths)}
 
 
@@ -190,19 +197,16 @@ class PythonSources(importlib.abc.MetaPathFinder):
         self.shared_imports = shared_imports
         self.package = ()
         self.digests = {}
-        self.total = 0
 
     def read(self, path):
         path = no_symlinks(Path(path))
         name = path.relative_to(self.root).as_posix()
-        raw = read_bounded(path, 4 * 1024**2)
+        raw = read_source_bytes(path)
         digest = hashlib.sha256(raw).hexdigest()
         if name in self.digests and self.digests[name] != digest:
             raise ForgeError('Source changed during plan construction', code='conflict')
-        if name not in self.digests:
-            self.total += len(raw)
-            if len(self.digests) >= 256 or self.total > 32 * 1024**2:
-                raise ForgeError('Plan source closure exceeds budget', code='resource_limit')
+        if name not in self.digests and len(self.digests) >= 256:
+            raise ForgeError('Plan source closure exceeds module count budget', code='resource_limit')
         self.digests[name] = digest
         return raw
 
@@ -296,5 +300,6 @@ class PythonSources(importlib.abc.MetaPathFinder):
         return None
 
     def verify(self):
-        for name in tuple(self.digests):
-            self.read(self.root / name)
+        for name, digest in self.digests.items():
+            if source_digest(self.root / name) != digest:
+                raise ForgeError('Source changed during plan construction', code='conflict')
