@@ -597,10 +597,6 @@ def test_unified_queue_carrier_business_error_raises_original_promptly(tmp_path,
     # 120s wait. A bounded 30s control wait caps regression runtime; the fix
     # returns in seconds, so elapsed must stay well below the wait.
     import time
-    import demiflow.execution.queue_chain as qc
-    original = qc.run_local_queue_chain
-    monkeypatch.setattr(qc, 'run_local_queue_chain',
-                        lambda *a, **k: original(*a, **k, control_timeout_s=30))
     cfg, root = _config(tmp_path, 'err'), tmp_path / 'errrun'
     with origin_server() as (url, calls):
         seed(QueueChannel(cfg), tmp_path / 'err-seed', url)
@@ -624,10 +620,6 @@ def test_unified_queue_carrier_business_error_raises_original_promptly(tmp_path,
 def test_unified_queue_carrier_releases_quota_on_business_failure_no_helper(tmp_path, monkeypatch):
     # N3: after a business failure returns, this-task capacity is auto-released
     # through the unified close+reconcile terminal — NO manual _release_orphans.
-    import demiflow.execution.queue_chain as qc
-    original = qc.run_local_queue_chain
-    monkeypatch.setattr(qc, 'run_local_queue_chain',
-                        lambda *a, **k: original(*a, **k, control_timeout_s=30))
     cfg, root = _config(tmp_path, 'fail'), tmp_path / 'failrun'
     with origin_server() as (url, calls):
         seed(QueueChannel(cfg), tmp_path / 'fail-seed', url)
@@ -732,10 +724,6 @@ def test_unified_queue_carrier_unpicklable_business_error_fallback_conveys_type(
     # TimeoutError) and still releases capacity through the unified terminal.
     import time
     import threading
-    import demiflow.execution.queue_chain as qc
-    original = qc.run_local_queue_chain
-    monkeypatch.setattr(qc, 'run_local_queue_chain',
-                        lambda *a, **k: original(*a, **k, control_timeout_s=30))
     cfg, root = _config(tmp_path, 'unpick'), tmp_path / 'unpickrun'
 
     def suffix(row):
@@ -769,11 +757,7 @@ def test_unified_queue_carrier_close_failure_does_not_mask_business_error(tmp_pa
     # Guardrail 4: if the resource terminal itself fails (close/reconcile raises),
     # it is logged but must NOT mask the original business exception; the backstop
     # kill still reaps the worker. The driver surfaces the original ValueError.
-    import demiflow.execution.queue_chain as qc
     from demiflow.resources.manager import ResourceManager
-    original = qc.run_local_queue_chain
-    monkeypatch.setattr(qc, 'run_local_queue_chain',
-                        lambda *a, **k: original(*a, **k, control_timeout_s=30))
 
     def broken_close(self, *a, **k):
         raise RuntimeError('injected resource terminal failure')

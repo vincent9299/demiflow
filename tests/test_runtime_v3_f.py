@@ -492,38 +492,26 @@ def test_f012(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 # F013-F017 chain/graph/queue wiring
 # ---------------------------------------------------------------------------
-def _dataset():
-    from demiflow.data.api import DataAPI
-    return DataAPI(_FakeExecutor()).from_items([{"id": 1}])
+@pytest.mark.parametrize('name,provider', [('local','local'),('ray','ray_core')])
+def test_p1_materialize_uses_one_action_on_the_original_provider(monkeypatch, name, provider):
+    from contextlib import nullcontext
+    from demiflow.data.execution_contract import Materialize
+    from demiflow.data.plan import LogicalPlan
+    from demiflow.data.sources import ItemsSource
+    from demiflow.execution import checked
+    from demiflow.execution.executors import dataset_runtime
 
-
-def test_f013(fake_action):
-    _binding_assertion()
-    from demiflow.execution.chain import run_local_chain
-    from demiflow.execution.dataflow_api import declare_action_v3
-    dataset = _dataset()
-    fake_action.__class__.declaration = declare_action_v3(dataset._source, dataset._plan,
-        kind='materialize', arguments={}, sink_declaration=None)
-    STATE.run_result = "materialized-handle"
-    out = run_local_chain(_FakeExecutor(), dataset)
-    assert out == "materialized-handle"
-    assert len(STATE.run_calls) == 1
-    assert STATE.run_calls[0].kind == "materialize"
-    assert STATE.run_calls[0].provider == "local"
-
-
-def test_f014(fake_action):
-    _binding_assertion()
-    from demiflow.execution.chain import run_ray_chain
-    from demiflow.execution.dataflow_api import declare_action_v3
-    dataset = _dataset()
-    fake_action.__class__.declaration = declare_action_v3(dataset._source, dataset._plan,
-        kind='materialize', arguments={}, sink_declaration=None)
-    STATE.run_result = "ray-handle"
-    out = run_ray_chain(_FakeExecutor("ray"), dataset)
-    assert out == "ray-handle"
-    assert len(STATE.run_calls) == 1
-    assert STATE.run_calls[0].provider == "ray_core"
+    source, plan = ItemsSource([{'id': 1}]), LogicalPlan()
+    completed = []
+    monkeypatch.setattr(checked, 'action', lambda *a: nullcontext(types.SimpleNamespace(
+        source=source, plan=plan, materialized=completed.append)))
+    monkeypatch.setattr(dataset_runtime, 'observe_action', lambda *a: nullcontext(
+        types.SimpleNamespace(complete=lambda **_: None)))
+    expected = STATE.run_result = types.SimpleNamespace(row_count=1)
+    assert _FakeExecutor(name).execute(Materialize(source, plan)) is expected
+    assert completed == [expected]
+    assert [r.kind for r in STATE.run_calls] == ['materialize']
+    assert STATE.run_calls[0].provider == provider
 
 
 def _graph_spec():
@@ -571,18 +559,6 @@ def test_f016(fake_action, monkeypatch):
     assert graph.run_ray_graph(declaration, _executor=executor) == {"native_graph_result": True}
     assert seen == [(declaration, executor, 120)]
     assert seen[0][0] is declaration
-
-
-def test_f017(fake_action):
-    _binding_assertion()
-    from demiflow.execution.queue_chain import run_local_queue_chain
-    from demiflow.data.plan import LogicalPlan
-    from demiflow.data.sources import ItemsSource
-    STATE.handle = _FakeActionHandle(result_value="write-result")
-    out = run_local_queue_chain(_FakeExecutor(), ItemsSource([{"id": 1}]), LogicalPlan(),
-                                sink=None, action=fake_action)
-    assert out == "write-result"
-    assert STATE.execute_calls[0]["request"].kind == "write_datasink"
 
 
 # ---------------------------------------------------------------------------

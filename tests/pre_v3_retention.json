@@ -25,7 +25,7 @@
   },
   "demiflow.execution.chain": {
    "status": "mixed",
-   "reason": "代码固定工具（在用）、两个兼容入口（保留）和旧链式执行实现（待退役）在同一个文件里。",
+   "reason": "旧拓扑写入与旧执行的测试仍使用部分实现；当前公开入口和 v3 封存已独立。",
    "symbols": {
     "ChainResultSink": {
      "status": "old",
@@ -108,16 +108,6 @@
      "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
      "batch": 4,
      "users": []
-    },
-    "run_local_chain": {
-     "status": "compat_entry",
-     "reason": "MIGRATION「替换与退出」：chain 公开兼容入口保留，翻译成一次 v3 动作。",
-     "translates_through": "run_dataset_action"
-    },
-    "run_ray_chain": {
-     "status": "compat_entry",
-     "reason": "MIGRATION「替换与退出」：chain 公开兼容入口保留，翻译成一次 v3 动作。",
-     "translates_through": "run_dataset_action"
     },
     "seal_plan_facts": {
      "status": "old",
@@ -540,32 +530,9 @@
     "never_ran": 9
    }
   },
-  "demiflow.execution.queue_chain": {
-   "status": "mixed",
-   "reason": "只剩兼容入口；旧转换载体和它的准入判断已在批次 2 按符号清掉（GPT 评审 2026-11-18：按符号清理，不整删）。",
-   "symbols": {
-    "run_local_queue_chain": {
-     "status": "compat_entry",
-     "reason": "MIGRATION「替换与退出」：chain/graph/queue_chain 公开兼容入口保留，翻译请求交 execute_action。tests/test_runtime_v3_f.py::test_f017 验证。",
-     "translates_through": "execute_action"
-    }
-   },
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 1,
-     "historical_set_139_files": 3
-    },
-    "functions": 5,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 2,
-    "ran_only_at_import": 0,
-    "never_ran": 3
-   }
-  },
   "demiflow.execution.queue_execution": {
    "status": "frozen",
-   "reason": "七个冻结文件之一，不改。其中 write_queue_datasink 没有调用方（产品和测试都没有）。",
+   "reason": "受保护的原生队列结算、确认和恢复入口。按授权删除了无调用方的 write_queue_datasink。",
    "measured": {
     "at": "74d2f99",
     "test_files_that_load_it": {
@@ -996,6 +963,23 @@
    "module": "demiflow.execution.worker.progress",
    "batch": 4,
    "reason": "旧 chain worker 是唯一产品导入方。现行 cut contributor 和 v3 运行账本持有原始回执，观测不参与确认。"
+  },
+  {
+   "module": "demiflow.execution.chain",
+   "symbol": "run_local_chain",
+   "batch": 4,
+   "reason": "P1 的真实 Dataset materialize 直接运行 v3，保同一 provider 和同一 action。"
+  },
+  {
+   "module": "demiflow.execution.chain",
+   "symbol": "run_ray_chain",
+   "batch": 4,
+   "reason": "P1 的真实 Dataset materialize 直接运行 v3，保同一 provider 和同一 action。"
+  },
+  {
+   "module": "demiflow.execution.queue_chain",
+   "batch": 4,
+   "reason": "公开 Dataset 写端直接走并仅走 v3 写 action。真实领取后、确认前和确认后的队列恢复已另外验证。"
   }
  ]
 }
