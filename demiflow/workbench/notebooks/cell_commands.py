@@ -37,7 +37,7 @@ class CellCommands(BridgeServer):
         if record['epoch'] != self.epoch or record['stop_at'] or record['cleanup'] != 'pending' or time.time() >= self.deadline:
             reject('Notebook turn is no longer active', 'conflict')
 
-    def dispatch(self, method, params):
+    def dispatch(self, method, params, active):
         if method == 'result' and type(params) is dict and set(params) == {'id'}:
             with self.store.connect() as db:
                 row = db.execute('SELECT request,answer,expires FROM pending WHERE id=? AND turn=? AND epoch=?',
