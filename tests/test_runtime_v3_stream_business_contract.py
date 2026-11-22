@@ -53,7 +53,8 @@ def test_stream_progress_comes_from_intermediate_business_frontiers():
     assert stats.metrics['committed_output']['rows'] == 25
 
 
-def test_stream_cleanup_preserves_primary_failure_and_runs_each_owner(monkeypatch):
+@pytest.mark.parametrize('drain_failure', ['same', 'unprintable'])
+def test_stream_cleanup_preserves_primary_failure_and_runs_each_owner(monkeypatch, drain_failure):
     from types import SimpleNamespace
     from demiflow.execution import dataflow_api, dataflow_model_observations
     from demiflow.execution import dataflow_operator_observations, dataflow_stream
@@ -67,6 +68,16 @@ def test_stream_cleanup_preserves_primary_failure_and_runs_each_owner(monkeypatc
     def observe(execution, stats):
         events.append('observe')
         raise ValueError('observation failed')
+
+    class UnprintableError(Exception):
+        def __str__(self):
+            raise ValueError('failed to format error')
+
+    def drain(stats):
+        events.append('drain')
+        if drain_failure == 'same':
+            raise failure
+        raise UnprintableError()
 
     def metadata(request, execution):
         events.append('metadata')
@@ -87,11 +98,12 @@ def test_stream_cleanup_preserves_primary_failure_and_runs_each_owner(monkeypatc
 
     with pytest.raises(RuntimeError) as raised:
         dataflow_stream.run_stream_action(SimpleNamespace(action=action),
-                                          on_drain=lambda stats: events.append('drain'))
+                                          on_drain=drain)
 
     assert raised.value is failure
     assert events == ['observe', 'close', 'observe', 'metadata', 'audit', 'drain', 'callbacks.close']
-    assert any('observation failed' in note for note in failure.__notes__)
-    assert any('metadata failed' in note for note in failure.__notes__)
+    if hasattr(BaseException, 'add_note'):
+        assert any('observation failed' in note for note in failure.__notes__)
+        assert any('metadata failed' in note for note in failure.__notes__)
     assert action._observation_rows == 0
     assert execution._observe_progress is None

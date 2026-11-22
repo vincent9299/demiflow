@@ -66,6 +66,16 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
             callbacks.resolve(on_progress(stats))
             reported = frontier
 
+    def note_cleanup_error(label, error):
+        if error is failure:
+            return
+        try:
+            failure.add_note(label + str(error))
+        except BaseException:
+            # Diagnostics are optional. Exceptions may fail to format and Python
+            # 3.10 does not provide add_note. All remaining owners must still close.
+            pass
+
     try:
         if stop_file is not None and Path(stop_file).exists():
             raise ServiceStopped('operator_stop_file')
@@ -104,7 +114,7 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
             try:
                 handle._execution.cancel(COOPERATIVE_STOP_REASON)
             except BaseException as cleanup:
-                failure.add_note('cooperative stop: ' + str(cleanup))
+                note_cleanup_error('cooperative stop: ', cleanup)
         raise
     finally:
         if handle is not None:
@@ -117,8 +127,8 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
             except BaseException as exc:
                 if failure is None:
                     failure = exc
-                elif exc is not failure:
-                    failure.add_note('stream cleanup: ' + str(exc))
+                else:
+                    note_cleanup_error('stream cleanup: ', exc)
 
         if handle is not None:
             def record_metadata():
