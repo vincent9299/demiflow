@@ -111,7 +111,8 @@ def dataset_session(executor, directory, *, prefer_hash_join=False, lance_merge=
         max_scratch_bytes=128 * 2**30, threads=threads, partitions=min(2, threads),
         prefer_hash_join=prefer_hash_join, timeout_s=3600, admission_timeout_s=3600,
         cgroup_headroom_bytes=min(2 * 2**30, rss // 4))
-    budget = getattr(getattr(executor, '_local_kernel', None), 'native_resources', None)
+    local = getattr(executor, '_local_kernel', None)
+    budget = getattr(local, 'native_resources', None)
     if budget is not None:
         limits = dict(parse_native_resources(budget))
         for name, number in limits.items():
@@ -134,7 +135,8 @@ def dataset_session(executor, directory, *, prefer_hash_join=False, lance_merge=
         effective_rss = min(options.max_rss_bytes, max(1, limits['max_rss_bytes'] // 2))
         effective_pool = min(options.memory_bytes, limits['memory_bytes'], max(1, effective_rss // 2))
         row_ceiling = min(options.max_row_bytes, limits['max_row_bytes'], limits['max_batch_bytes'])
-        explicit_row = 'max_row_bytes' in run.explicit_limits or 'max_row_bytes' in dict(budget or ())
+        explicit_row = ('max_row_bytes' in run.explicit_limits or
+                        'max_row_bytes' in dict(budget or ()) and not getattr(local, 'native_resources_inherited', False))
         row_limit = row_ceiling if explicit_row else native_row_limit(effective_pool, effective_rss, row_ceiling)
         options = replace(options, memory_bytes=effective_pool, max_rss_bytes=effective_rss,
             max_row_bytes=row_limit,

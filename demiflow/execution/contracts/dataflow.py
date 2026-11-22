@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping as _RuntimeMapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import (
     TYPE_CHECKING,
@@ -32,6 +32,8 @@ from demiflow.data.plan import LogicalOp
 from demiflow.resources.contracts import ResourceProfile
 
 from .dataflow_errors import DATAFLOW_ERROR_CODES, DataflowError
+
+TERMINAL_WORKSPACE = 'demiflow.terminal_workspace.v1'
 
 if TYPE_CHECKING:
     from demiflow.data.datasource import Datasource, ReadTask
@@ -264,6 +266,15 @@ def _float_map(value, label: str) -> Mapping[str, float]:
     return MappingProxyType(frozen)
 
 
+def thaw_json(value):
+    """Return JSON containers for a contract's deep-frozen configuration."""
+    if isinstance(value, _RuntimeMapping):
+        return {key: thaw_json(item) for key, item in value.items()}
+    if type(value) in (tuple, list):
+        return [thaw_json(item) for item in value]
+    return value
+
+
 class _FrozenRowList(tuple):
     """Immutable list payload retaining its business type across decoding."""
 
@@ -454,6 +465,37 @@ class KernelSpec:
         _profile(self.profile, "KernelSpec.profile")
         _int(self.output_bound_bytes, "KernelSpec.output_bound_bytes")
         _bool(self.mergeable, "KernelSpec.mergeable")
+
+    def uses_measured_workspace(self, sealed_bounds):
+        """Did this physical grant select actual occupancy for codec and task state?"""
+        if 'codec_min_bytes' not in self.configuration:
+            return False
+        full = sealed_bounds.max_batch_bytes + sealed_bounds.max_row_bytes
+        if 'task_batch_rows' in self.configuration and self.state != 'none':
+            full += sealed_bounds.max_state_bytes
+        return self.profile.requests['memory_bytes'] < full
+
+    def with_memory_bytes(self, memory_bytes, *, sealed_bounds=None):
+        """Bind the codec and terminal workspace to this kernel's selected grant."""
+        preferred = self.profile.requests['memory_bytes']
+        minimum = self.configuration.get('codec_min_bytes', preferred)
+        _int(memory_bytes, 'kernel memory window', minimum=1)
+        if not minimum <= memory_bytes <= preferred:
+            raise _err('physical codec window exceeds declared range')
+        config = thaw_json(self.configuration)
+        terminal = config.get('terminal_memory')
+        if terminal is not None:
+            if 'payload_bytes' in terminal:
+                payload = memory_bytes - terminal['metadata_bytes']
+                if (sealed_bounds is not None and 'carrier' not in terminal and
+                        payload < sealed_bounds.max_batch_bytes + sealed_bounds.max_row_bytes):
+                    config['terminal_memory'] = {'schema': TERMINAL_WORKSPACE, 'resident_bytes': memory_bytes}
+                else:
+                    terminal['payload_bytes'] = payload
+            elif 'resident_bytes' in terminal:
+                terminal['resident_bytes'] = memory_bytes
+        profile = replace(self.profile, requests={**self.profile.requests, 'memory_bytes': memory_bytes})
+        return replace(self, profile=profile, configuration=config)
 
 
 def _is_input_port(value, label):
@@ -735,6 +777,8 @@ class StageSpec:
     state_bytes: int
     kernel_refs: tuple[ArtifactRef, ...]
 
+    kernel_memory_bytes: Mapping[str, int] | None = None
+
     def __post_init__(self):
         _ident(self.stage_id, "StageSpec.stage_id")
         object.__setattr__(self, "occurrences", _str_tuple(self.occurrences, "StageSpec.occurrences"))
@@ -749,6 +793,13 @@ class StageSpec:
         _int(self.output_bytes, "StageSpec.output_bytes")
         _int(self.state_bytes, "StageSpec.state_bytes")
         object.__setattr__(self, "kernel_refs", _ref_tuple(self.kernel_refs, "StageSpec.kernel_refs"))
+        if self.kernel_memory_bytes is not None:
+            windows = _json_map(self.kernel_memory_bytes, "StageSpec.kernel_memory_bytes")
+            if not windows or not windows.keys() <= set(self.occurrences):
+                raise _err("kernel memory windows must name assigned occurrences")
+            for value in windows.values():
+                _int(value, "kernel memory window", minimum=1)
+            object.__setattr__(self, "kernel_memory_bytes", windows)
 
 
 @dataclass(frozen=True)
@@ -1715,6 +1766,9 @@ class LoadedProgram:
     value: object
     digest: str
 
+    # Worker-local access to a private copy of the verified executable.
+    load_private: Callable[[], object] | None = None
+
     def __post_init__(self):
         _enum(self.kind, "LoadedProgram.kind", _PROGRAM_KINDS)
         _sha256(self.digest, "LoadedProgram.digest")
@@ -1894,6 +1948,7 @@ class ArtifactStore(Protocol):
     def scratch(self, *, max_bytes: int, max_io_bytes: int) -> Any: ...
     def put(self, chunks: Iterator[bytes], *, max_bytes: int, media_type: str) -> ArtifactRef: ...
     def read(self, ref: ArtifactRef, *, max_bytes: int) -> Iterator[bytes]: ...
+    def read_into(self, ref: ArtifactRef, destination: bytearray) -> None: ...
     def inspect(self, ref: ArtifactRef) -> bool: ...
     def retain(self, ref: ArtifactRef, *, owner: str) -> None: ...
     def release(self, ref: ArtifactRef, *, owner: str) -> None: ...

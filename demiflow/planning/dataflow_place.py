@@ -38,6 +38,16 @@ _DURABLE_MODES = frozenset({"durable_incremental", "finite_sealed"})
 
 
 def _error(code: str, message: str, **context: object) -> DataflowError:
+    # Managed runs persist the exception message. Include the same measured
+    # quantities as the SDK diagnostic without serializing arbitrary context.
+    if 'required' in context and 'available' in context and 'resource' in context:
+        detail = f"{context['resource']} required={context['required']}, available={context['available']}"
+        stage = context.get('group_first_stage', context.get('stage_id'))
+        if stage is not None:
+            detail += f", stage={stage}"
+        if 'group_size' in context:
+            detail += f", stages={context['group_size']}"
+        message = f"{message} ({detail})"
     return DataflowError(code, message, context=context)
 
 
@@ -155,6 +165,10 @@ def partition_stages(
         # Per-replica working set: one input batch, the declared output bound
         # and any state ceiling co-reside inside the provisioned worker.
         resident = bounds.max_batch_bytes + kernel.output_bound_bytes + state_bytes
+        # A selected one-row worker may carry a measured codec workspace
+        # below the full pair of maximum business rows.
+        if 'codec_min_bytes' in kernel.configuration and kernel.state == 'none':
+            resident = min(resident, kernel.profile.requests['memory_bytes'])
         from ..execution.dataflow_publication_budget import REF_CARRIER, TERMINAL_WORKSPACE
         memory = kernel.configuration.get('terminal_memory', {})
         if node.kind == 'terminal' and (kernel.configuration.get('input_carrier') == REF_CARRIER
@@ -169,6 +183,32 @@ def partition_stages(
         replica_min, replica_target, replica_max = _replica_bounds(node, count, policy)
         from ..execution.dataflow_managed_devices import service_profile
         profile = service_profile(kernel, policy=policy, bounds=bounds)
+        # Task-scoped opaque declarations are reloaded synchronously once per
+        # worker. The sealed payload size accounts its decode buffer; Python
+        # object heap is not inferred from a pickle's length.
+        startup = kernel.configuration.get('task_load_bytes', 0)
+        measured_state = (kernel.state != 'none' and 'task_batch_rows' in kernel.configuration
+            and kernel.uses_measured_workspace(bounds)
+            and not kernel.configuration.get('shared_actor'))
+        if measured_state:
+            # The private reload and the measured state/payload use one grant.
+            # Keep the decoder's known peak aside from the working allowance.
+            resident = profile.requests['memory_bytes']
+            if resident <= startup:
+                raise _error('RESOURCE_INFEASIBLE', 'private task load exhausts its worker memory',
+                             stage_id=stage_id, resource='memory_bytes', required=startup, available=resident)
+            state_bytes = min(state_bytes, resident - startup)
+        elif startup:
+            fixed = kernel.configuration.get('fixed_worker_min_bytes')
+            resident = max(resident, fixed or 0) + startup
+            if fixed is not None:
+                granted = profile.requests['memory_bytes']
+                if resident > granted:
+                    raise _error('RESOURCE_INFEASIBLE', 'private task load exceeds its declared worker memory',
+                                 stage_id=stage_id, resource='memory_bytes', required=resident, available=granted)
+            else:
+                profile = replace(profile, requests={**profile.requests,
+                    'memory_bytes': profile.requests['memory_bytes'] + startup})
         stages.append(StageSpec(
             stage_id=stage_id,
             occurrences=(occ,),
@@ -403,7 +443,8 @@ def _share_exchange_storage(exchanges, bounds):
         return exchanges
     share = bounds.max_spill_bytes // len(durable)
     if share < 1:
-        raise _error('BUDGET_EXCEEDED', 'spill budget cannot admit every durable edge')
+        raise _error('BUDGET_EXCEEDED', 'spill budget cannot admit every durable edge',
+                     resource='max_spill_bytes', required=len(durable), available=bounds.max_spill_bytes)
     return tuple(replace(edge, storage_bytes=min(edge.storage_bytes, share),
                          credit_bytes=min(edge.credit_bytes, share))
                  if edge.mode in _DURABLE_MODES else edge for edge in exchanges)
@@ -431,7 +472,8 @@ def solve_residency(
     if not stages:
         raise _error("INVALID_CONTRACT", "physical plan has no stages")
     if not hosts:
-        raise _error("RESOURCE_INFEASIBLE", "no host can run the plan")
+        raise _error("RESOURCE_INFEASIBLE", "no host can run the plan",
+                     resource="hosts", required=1, available=0)
     control_reserved = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
     if type(publication_workspace_bytes) is not int or publication_workspace_bytes < 0:
         raise _error('INVALID_CONTRACT', 'publication workspace must be nonnegative')
@@ -440,7 +482,9 @@ def solve_residency(
         control_reserved = publication_reservation.maximum
     available = bounds.max_resident_bytes - control_reserved
     if available <= 0:
-        raise _error("RESOURCE_INFEASIBLE", "control reservation leaves no working memory")
+        raise _error("RESOURCE_INFEASIBLE", "control reservation leaves no working memory",
+                     resource="memory_bytes", required=control_reserved + min(s.resident_bytes for s in stages),
+                     available=bounds.max_resident_bytes)
 
     partition_owner = _partition_owner(stages)
     producer_ids: set[str] = set()
@@ -483,7 +527,9 @@ def solve_residency(
         count = lambda s: min(len(s.partitions), s.replica_target) if len(group) == 1 else len(s.partitions)
         if max_active_workers is not None and sum(count(s) for s in group) > max_active_workers:
             raise _error("RESOURCE_INFEASIBLE", "memory-connected group exceeds active worker budget",
-                         resource="max_active_workers", max_active_workers=max_active_workers)
+                         resource="max_active_workers", required=sum(count(s) for s in group),
+                         available=max_active_workers, group_first_stage=group[0].stage_id, group_size=len(group),
+                         max_active_workers=max_active_workers)
         footprint = sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes'])
                         * count(stage) for stage in group)
         group_available = (bounds.max_resident_bytes - publication_reservation.reserved(s.stage_id for s in group)
@@ -492,7 +538,8 @@ def solve_residency(
             raise _error(
                 "RESOURCE_INFEASIBLE",
                 "a memory-connected stage group exceeds the resident budget and cannot be staged",
-                resident_bytes=footprint,
+                resource="memory_bytes", required=footprint, resident_bytes=footprint, available=group_available,
+                group_first_stage=group[0].stage_id, group_size=len(group),
             )
         simultaneous.append(tuple(stage.stage_id for stage in group))
 
@@ -501,11 +548,14 @@ def solve_residency(
     smallest = min(stage.resident_bytes for stage in stages)
     if smallest > (bounds.max_resident_bytes - publication_reservation.base
                    if publication_reservation is not None else available):
-        raise _error("RESOURCE_INFEASIBLE", "even the smallest stage cannot start within the resident budget")
+        raise _error("RESOURCE_INFEASIBLE", "even the smallest stage cannot start within the resident budget",
+                     resource="memory_bytes", required=smallest, available=(
+                         bounds.max_resident_bytes - publication_reservation.base if publication_reservation else available))
 
     required_spill = sum(ex.storage_bytes for ex in exchanges if ex.mode in _DURABLE_MODES)
     if required_spill > bounds.max_spill_bytes:
-        raise _error("BUDGET_EXCEEDED", "durable channel storage exceeds the spill budget", spill_bytes=required_spill)
+        raise _error("BUDGET_EXCEEDED", "durable channel storage exceeds the spill budget",
+                     resource="max_spill_bytes", required=required_spill, spill_bytes=required_spill, available=bounds.max_spill_bytes)
 
     cpu_capacity = sum(host.logical_resources.get(
         "cpu_millis", host.logical_resources.get("cpu", 0.0) * 1000) for host in hosts)
@@ -524,11 +574,14 @@ def solve_residency(
         for stage in group:
             isolation.update(_isolation_tokens(stage.profile))
         if cpu_needed > cpu_capacity:
-            raise _error("RESOURCE_INFEASIBLE", "insufficient CPU capacity for resident group", cpu_millis=cpu_needed)
+            raise _error("RESOURCE_INFEASIBLE", "insufficient CPU capacity for resident group", resource="cpu_millis", required=cpu_needed, cpu_millis=cpu_needed,
+                         available=cpu_capacity, group_first_stage=group[0].stage_id, group_size=len(group))
         if memory_needed > memory_capacity:
-            raise _error("RESOURCE_INFEASIBLE", "insufficient host memory for resident group", memory_bytes=memory_needed)
+            raise _error("RESOURCE_INFEASIBLE", "insufficient host memory for resident group", resource="host_memory_bytes", required=memory_needed, memory_bytes=memory_needed,
+                         available=memory_capacity, group_first_stage=group[0].stage_id, group_size=len(group))
         if gpu_needed > gpu_capacity:
-            raise _error("RESOURCE_INFEASIBLE", "insufficient GPU capacity", gpu=gpu_needed)
+            raise _error("RESOURCE_INFEASIBLE", "insufficient GPU capacity", resource="gpu", required=gpu_needed, gpu=gpu_needed,
+                         available=gpu_capacity, group_first_stage=group[0].stage_id, group_size=len(group))
     supported_isolation: set[str] = set()
     for host in hosts:
         supported_isolation.update(host.isolation_capabilities)
@@ -630,6 +683,9 @@ def validate_physical_dataflow(graph: DataflowGraph, physical: PhysicalDataflow)
             if occ in seen_occ:
                 raise _error("INVALID_CONTRACT", "occurrence has two stage owners", occurrence_id=occ)
             seen_occ[occ] = stage.stage_id
+            window = (stage.kernel_memory_bytes or {}).get(occ)
+            if window is not None:
+                nodes[occ].kernel.with_memory_bytes(window, sealed_bounds=physical.bounds)
     from .dataflow_training import physical_values, reference_only_sources
     refs = reference_only_sources(graph)
     if set(seen_occ) != set(nodes) - refs:
@@ -805,11 +861,21 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
                       and owners[e.producer_partitions[0]].stage_id != owners[e.consumer_partitions[0]].stage_id]
         if not eligible or not candidates or bounds.max_spill_bytes <= 0:
             raise _error("RESOURCE_INFEASIBLE",
-                         "memory group cannot fit and its source/state cannot safely park") from original
+                         "memory group cannot fit and its source/state cannot safely park", **original.context) from original
         reason = ("active_worker_budget" if original.context.get('resource') == 'max_active_workers'
                   else "resident_budget")
         nodes = _node_map(graph)
         edges = {edge.edge_id: edge for edge in graph.edges}
+        # For a finite, fully materialized action a shared actor can finish
+        # one lifetime between two bounded spools. Parking its worker per
+        # window would repeatedly close and recreate the same declared owner.
+        shared_stages = {stage.stage_id for stage in stages if any(
+            nodes[occ].kernel.configuration.get('shared_actor') for occ in stage.occurrences)}
+        terminals = (nodes[occ].kernel for occ in graph.terminals)
+        complete_action = all(s.finite for s in snapshots) and all(
+            kernel.kind == 'materialize' or (
+                kernel.kind == 'take_all' and kernel.configuration['arguments'].get('limit') is None)
+            for kernel in terminals)
         upgraded = []
         for exchange in exchanges:
             if exchange not in candidates:
@@ -824,11 +890,16 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
             # checkpoint/ACK protocol. Only newly compiled plans select here.
             finite = (producer.effect == "pure" and bool(producer.inputs)
                       and all(port.requirement == "finite_complete" for port in producer.inputs))
+            if complete_action and shared_stages.intersection((
+                    owners[exchange.producer_partitions[0]].stage_id,
+                    owners[exchange.consumer_partitions[0]].stage_id)):
+                finite = True
             mode = "finite_sealed" if finite else "durable_incremental"
             upgraded.append(replace(exchange, mode=mode,
                 scope_id="scope-" + exchange.edge_id if finite else None,
                 credit_rows=min(256, bounds.max_pending_events, ceilings.get('inflight_rows', 256)),
-                storage_bytes=min(bounds.max_spill_bytes, exchange.credit_bytes * 8),
+                storage_bytes=(bounds.max_spill_bytes if finite else
+                               min(bounds.max_spill_bytes, exchange.credit_bytes * 8)),
                 reason=f"{mode}:{reason}_requires_" +
                        ("finite_completion;" if finite else "checkpointed_parking;") + exchange.reason))
         upgraded = tuple(upgraded)
@@ -856,6 +927,10 @@ def compile_physical_dataflow(
         if split.source_id not in snapshot_ids:
             raise _error("SOURCE_CHANGED", "split references an unknown source", split_id=split.split_id)
 
+    from .dataflow_budget import minimum_workspace_graph, allocate_workspace_slack
+    declared_graph = graph
+    graph = minimum_workspace_graph(graph, bounds, allow_measured_terminal=any(
+        s.replay == "attempt_only" for s in snapshots))
     from .dataflow_training import physical_values, reference_only_sources
     refs = reference_only_sources(graph)
     splits = tuple(split for split in splits if split.source_id not in refs)
@@ -911,6 +986,14 @@ def compile_physical_dataflow(
         residency = solve_residency(stages, exchanges, hosts=hosts, bounds=bounds,
             max_active_workers=policy.max_active_workers, max_cpu_millis=cpu_ceiling,
             publication_reservation=PublicationReservation(graph, stages, bounds))
+    stages, reserved = allocate_workspace_slack(declared_graph, graph, stages, residency,
+                                                hosts=hosts, bounds=bounds)
+    # Validate the exact grants and the original (not floor) publication contract.
+    from ..execution.dataflow_publication_budget import PublicationReservation
+    residency = solve_residency(stages, exchanges, hosts=hosts, bounds=bounds,
+        max_active_workers=policy.max_active_workers, max_cpu_millis=cpu_ceiling,
+        publication_reservation=PublicationReservation(declared_graph, stages, bounds, declared=reserved))
+    graph = declared_graph
     capability = infer_recovery(graph, snapshots, policy=policy)
     if not capability.supported:
         raise _error(

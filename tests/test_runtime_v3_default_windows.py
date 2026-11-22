@@ -8,7 +8,7 @@ from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.run_context import RunContext
 from demiflow.planning.dataflow_compile import lower_action
 from demiflow.planning.dataflow_place import partition_stages
-from demiflow.planning.dataflow_policy import fit_default_stream_windows, resolve_runtime_policy
+from demiflow.planning.dataflow_policy import resolve_runtime_policy
 from test_runtime_v3_real_seams import PreparationOnly
 
 
@@ -31,15 +31,12 @@ def test_default_profile_windows_fit_without_constructing_actor(tmp_path):
         with RunContext.start(tmp_path/'run') as run:
             request = _request(LocalDatasetExecutor(workers=2))
             policy, old = resolve_runtime_policy({'max_active_workers':2},run.limits,provider='local')
-            resolved = fit_default_stream_windows(request,policy=policy,bounds=old)
-            assert resolved.max_resident_bytes == old.max_resident_bytes
-            assert resolved.max_row_bytes < old.max_row_bytes
-            graph = lower_action(request,bounds=resolved).graph
-            stages = partition_stages(graph,policy=policy,bounds=resolved)
-            resident = sum(max(s.resident_bytes,s.profile.requests['memory_bytes']) for s in stages)
-            assert resident <= resolved.max_resident_bytes - min(resolved.max_control_bytes,resolved.max_resident_bytes//8)
-            assert fit_default_stream_windows(request,policy=policy,bounds=old,
-                explicit_limits=('max_row_bytes','max_batch_bytes','max_state_bytes')) == old
+            from test_runtime_v3_codec_profile_groups import physical
+            policy, bounds = resolve_action_runtime(request)
+            graph = lower_action(request, bounds=bounds).graph
+            selected = physical(graph, policy, bounds)
+            assert selected.bounds == old
+            assert selected.bounds.max_state_bytes == run.limits['max_state_bytes']
             raise PreparationOnly()
 
 
@@ -60,7 +57,7 @@ def test_unconfigured_public_stream_uses_adjusted_profile_and_zero_actor_instanc
 def test_finite_inputs_still_fit_the_downstream_streaming_component():
     from demiflow import data
     from test_runtime_v3_codec_profile_groups import request
-    from demiflow.planning.dataflow_budget import incremental_components
+    from test_runtime_v3_codec_profile_groups import physical
     from demiflow.execution.dataflow_publication_budget import PublicationReservation
 
     def source():
@@ -71,21 +68,14 @@ def test_finite_inputs_still_fit_the_downstream_streaming_component():
                .reduce_by_key('id', lambda acc, row: row))
     action = request(dataset)
     policy, original = resolve_runtime_policy({'max_active_workers': 2}, {}, provider='local')
-    bounds = fit_default_stream_windows(action, policy=policy, bounds=original)
-    assert bounds.max_row_bytes < original.max_row_bytes
-    assert bounds.max_resident_bytes == original.max_resident_bytes
-    assert fit_default_stream_windows(action, policy=policy, bounds=original,
-        explicit_limits=('max_row_bytes', 'max_batch_bytes', 'max_state_bytes')) == original
-    graph = lower_action(action, bounds=bounds).graph
+    graph = lower_action(action, bounds=original).graph
+    selected = physical(graph, policy, original)
+    assert selected.bounds == original
     assert any(port.requirement == 'finite_complete' for node in graph.nodes for port in node.kernel.inputs)
-    stages = partition_stages(graph, policy=policy, bounds=bounds)
-    owners = {stage.occurrences[0]: stage for stage in stages}
-    indices = {node.occurrence_id: i for i, node in enumerate(graph.nodes)}
-    groups = incremental_components(graph.nodes, [(indices[edge.producer], edge.output_port,
-        indices[edge.consumer], edge.input_port) for edge in graph.edges])
-    reservation = PublicationReservation(graph, stages, bounds)
-    for group in groups.values():
-        members = [owners[graph.nodes[i].occurrence_id] for i in group]
-        resident = sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes'])
-                       * len(stage.partitions) for stage in members)
-        assert resident + reservation.reserved(stage.stage_id for stage in members) <= bounds.max_resident_bytes
+    stages = {stage.stage_id: stage for stage in selected.stages}
+    reservation = PublicationReservation(graph, selected.stages, original,
+                                         declared=selected.residency.control_reserved_bytes)
+    for ids in selected.residency.simultaneous_groups:
+        resident = sum(max(stages[i].resident_bytes, stages[i].profile.requests['memory_bytes'])
+                       * stages[i].replica_target for i in ids)
+        assert resident + reservation.reserved(ids) <= original.max_resident_bytes

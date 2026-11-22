@@ -41,3 +41,28 @@ def test_capture_rejects_unbounded_append_before_effect(tmp_path):
         capture_managed_pipeline(lambda: data.from_items([{'x': 1}]).write_lance(
             str(tmp_path / 'append.lance'), schema=pa.schema([('x', pa.int64())])), {}, limits=DEFAULT_LIMITS)
     assert not (tmp_path / 'append.lance').exists()
+
+
+@pytest.mark.parametrize('inherited', [True, False])
+def test_native_forwarding_preserves_actual_sdk_declarations(monkeypatch, inherited):
+    from demiflow.execution import dataflow_api
+    from demiflow.execution.host.inspection import capture_pipeline
+    calls = []
+    original = dataflow_api.resolve_runtime_policy
+
+    def observe(options, limits, *, provider, explicit_limits=()):
+        calls.append(set(explicit_limits))
+        return original(options, limits, provider=provider, explicit_limits=explicit_limits)
+
+    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', observe)
+    native = {'max_row_bytes': DEFAULT_LIMITS['max_row_bytes'], 'batch_rows': 8}
+
+    def construct():
+        kwargs = {'inherited_native_resources' if inherited else 'native_resources': native}
+        with local_execution(worker_mode='thread', **kwargs):
+            return data.range(1).take_all()
+
+    captured = capture_pipeline(construct, {}, limits=DEFAULT_LIMITS, explicit_limits=[])
+    assert calls == [set() if inherited else set(native)]
+    assert captured.policy.native_limits['batch_rows'] == 8
+    assert captured.bounds.max_row_bytes <= native['max_row_bytes']

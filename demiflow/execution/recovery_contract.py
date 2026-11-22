@@ -87,7 +87,7 @@ def document(value, maximum=MAX_DOCUMENT_BYTES):
         raw = part.encode("utf-8")
         size += len(raw)
         if size > maximum:
-            raise RecoveryContractError("Execution metadata exceeds byte budget")
+            raise RecoveryContractError(f"Execution metadata exceeds byte budget (encoded_prefix_bytes={size}, limit_bytes={maximum})")
         chunks.append(raw)
     return b"".join(chunks)
 

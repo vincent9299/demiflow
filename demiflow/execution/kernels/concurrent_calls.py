@@ -19,9 +19,11 @@ class ConcurrentCalls:
     Completed results drain without waiting for slower calls. Slow consumers backpressure the producing
     invocation itself; a generator result is never collected into a list.
     """
-    def __init__(self, count, *, check_stop):
+    def __init__(self, count, *, check_stop, input_limit=None):
         self.count = count
         self.check_stop = check_stop
+        self.input_limit = input_limit
+        self.input_bytes = 0
         self.slots = deque(range(count))
         self.jobs = deque()
         self.stop = threading.Event()
@@ -32,7 +34,10 @@ class ConcurrentCalls:
         return bool(self.jobs)
 
     def submit(self, compute, *, scope, input=None):
-        while not self.slots:
+        size = input.encoded_bytes if self.input_limit is not None else 0
+        if self.input_limit is not None and size > self.input_limit:
+            raise DataflowError('BUDGET_EXCEEDED', 'async input exceeds the sealed worker input window')
+        while not self.slots or (self.input_limit is not None and self.input_bytes + size > self.input_limit):
             yield from self.poll(wait_for=True, max_records=1)
         slot = self.slots.popleft()
         self._launch(slot, compute, input=input, scope=scope(slot), emitted=0)
@@ -76,6 +81,8 @@ class ConcurrentCalls:
         for thread in tuple(self.pool._threads):
             track_owned_thread(thread)
         self.jobs.append((slot, output, future, metadata))
+        if self.input_limit is not None:
+            self.input_bytes += input.encoded_bytes
 
     def snapshot(self):
         # Only the business thread changes membership/delivery counters. Futures
@@ -101,6 +108,9 @@ class ConcurrentCalls:
         if (any(type(slot) is not int for slot in slots)
                 or sorted(slots + occupied) != list(range(self.count))):
             raise DataflowError('INCOMPATIBLE_HISTORY', 'Invocation slot membership differs')
+        if self.input_limit is not None and (any(not isinstance(item['input'], Record) for item in images)
+                or sum(item['input'].encoded_bytes for item in images) > self.input_limit):
+            raise DataflowError('CORRUPT_ARTIFACT', 'pending async inputs exceed their sealed worker window')
         self.slots = deque(slots)
         for item in images:
             self._launch(item['slot'], lambda slot, input=item['input']: compute(slot, input),
@@ -120,6 +130,8 @@ class ConcurrentCalls:
                 available = True
                 if value is _END:
                     self.jobs.remove(job)
+                    if self.input_limit is not None:
+                        self.input_bytes -= metadata['input'].encoded_bytes
                     self.slots.append(slot)
                     # Refill released capacity before blocking on another call.
                     return
@@ -147,3 +159,4 @@ class ConcurrentCalls:
         if pending:
             raise DataflowError('DEADLINE_EXCEEDED', 'Kernel invocations did not drain before actor cleanup')
         self.jobs.clear()
+        self.input_bytes = 0

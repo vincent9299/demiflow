@@ -97,6 +97,28 @@ def _json_shape(value, maximum, *, depth=0, count=None):
     return size, resident
 
 
+def json_encoding_shape(value):
+    """Python tree cost, exact compact UTF-8 length and Unicode text width."""
+    def width(item):
+        if type(item) is str:
+            if item.isascii():
+                return 1
+            return max((1 if ord(c) < 256 else 2 if ord(c) <= 65535 else 4 for c in item), default=1)
+        if type(item) is dict:
+            return max((max(width(key), width(child)) for key, child in item.items()), default=1)
+        if type(item) in (list, tuple):
+            return max(map(width, item), default=1)
+        return 1
+    encoded, resident = _json_shape(value, sys.maxsize)
+    return resident, encoded, width(value)
+
+
+def json_copy_workspace(value):
+    """UTF-8 input, decoded Python text and newly reconstructed containers."""
+    resident, encoded, width = json_encoding_shape(value)
+    return encoded + width * encoded + resident
+
+
 def _typed_shape(value, maximum, *, depth=0, count=None):
     """Measure the existing tagged format before constructing its JSON tree."""
     from .contracts.dataflow import _FrozenRowList, _FrozenRowSet
@@ -216,6 +238,21 @@ def _record_metadata(record):
     if record.schema_ref is not None: metadata['s'] = _ref_document(record.schema_ref)
     if record.block_partition is not None: metadata['bp'] = asdict(record.block_partition)
     return metadata
+
+
+def retained_record_bytes(record, bounds):
+    native = _typed_shape(record.inline, bounds.max_row_bytes)[1] if record.inline is not None else 0
+    return (native + sys.getsizeof(record) + sys.getsizeof(vars(record))
+            + _json_shape(record.source_position, bounds.max_control_bytes)[1]
+            + metadata_bytes((record.record_id, record.sequence, record.encoded_bytes,
+                              record.payload_ref, record.schema_ref)))
+
+
+def admit_row_copies(value, bounds, *, services, retained=0):
+    """Check the actual input/frozen copy and the native typed row codec peak."""
+    size, native, tree = _typed_shape(value, bounds.max_row_bytes)
+    _admit(retained + max(2 * native, native + tree + 2 * size), resident_limit(bounds, services))
+    return native
 
 
 def admit_encoded_record(record, raw, bounds, *, services=None, retained=0):

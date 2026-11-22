@@ -109,19 +109,9 @@ def resolve_runtime_policy(
         ceiling = dict(native)
         native["memory_bytes"] = _tighten(options["memory_bytes"], native["memory_bytes"], "memory_bytes")
         explicit = set(explicit_limits)
-        native.update(resolve_payload_bounds(native, {k: native[k] for k in explicit if k in native},
-                                             ceiling=ceiling))
-        # Input, output, mutable state, and control/temporary copies share the
-        # declared memory. Defaults adapt to that envelope; explicit ceilings
-        # remain explicit and may be rejected by physical placement.
-        workers = _positive_int(options.get("max_active_workers", 1), "max_active_workers")
-        window = max(1, native["memory_bytes"] // (4 * workers))
-        if "max_row_bytes" not in explicit:
-            native["max_row_bytes"] = min(native["max_row_bytes"], window)
-        if "max_batch_bytes" not in explicit:
-            native["max_batch_bytes"] = max(native["max_row_bytes"], min(native["max_batch_bytes"], window))
-        if "max_state_bytes" not in explicit:
-            native["max_state_bytes"] = min(native["max_state_bytes"], window)
+        if native['memory_bytes'] < ceiling['memory_bytes']:
+            native.update(resolve_payload_bounds(native, {k: native[k] for k in explicit if k in native},
+                                                 ceiling=ceiling, local_memory=True))
 
     structural = {
         name: _tighten(options[name], default, name) if name in options else default
@@ -194,79 +184,6 @@ def resolve_runtime_policy(
                             if "max_active_workers" in options else None),
     )
     return policy, bounds
-
-
-def fit_default_stream_windows(request, *, policy, bounds, explicit_limits=()):
-    """Size implicit streaming windows from the actual simultaneous workload.
-
-    This runs before staging programs or starting actors. Explicit payload
-    ceilings and the caller's total Local memory envelope are never rewritten.
-    Finite-input graphs retain independent phases except a one-worker DAG,
-    whose synchronous kernels must coexist with all original state windows.
-    The allocator still makes the admission decision on the resulting profiles.
-    """
-    from dataclasses import replace
-    from fractions import Fraction
-    from .dataflow_compile import lower_action
-    from .dataflow_configuration import _PROBE
-    from .dataflow_place import partition_stages
-    adjustable = {'max_row_bytes', 'max_batch_bytes', 'max_state_bytes'} - set(explicit_limits)
-    if not adjustable:
-        return bounds
-    for _ in range(8):
-        graph = lower_action(request, bounds=bounds, _configuration_purpose=_PROBE).graph
-        stages = partition_stages(graph, policy=policy, bounds=bounds)
-        by_occurrence = {stage.occurrences[0]: stage for stage in stages}
-        if policy.max_active_workers == 1:
-            groups = [tuple(graph.nodes)]
-        else:
-            from .dataflow_budget import incremental_components
-            indices = {node.occurrence_id: index for index, node in enumerate(graph.nodes)}
-            edges = [(indices[edge.producer], edge.output_port,
-                      indices[edge.consumer], edge.input_port) for edge in graph.edges]
-            groups = [tuple(graph.nodes[index] for index in members)
-                      for members in incremental_components(graph.nodes, edges).values()]
-        from ..execution.dataflow_publication_budget import PublicationReservation
-        reservation = PublicationReservation(graph, stages, bounds)
-        # A finite input releases its producer before its consumer runs, but
-        # each incremental component must still fit. Returning on the first
-        # finite edge left downstream reducers and streaming suffixes with
-        # oversized implicit windows and forced otherwise avoidable parking.
-        demands = []
-        for group in groups:
-            members = [by_occurrence[node.occurrence_id] for node in group]
-            resident = sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes'])
-                           * len(stage.partitions) for stage in members)
-            available = bounds.max_resident_bytes - reservation.reserved(
-                stage.stage_id for stage in members)
-            demands.append((resident, available))
-        resident, available = max(demands, key=lambda pair: Fraction(pair[0], max(1, pair[1])))
-        if resident <= available or available < 1:
-            return bounds
-        # Leave bounded slack for fixed parts and integer rounding. An explicit
-        # large row must still fit its batch, and may correctly make it infeasible.
-        changes = {name: max(1, getattr(bounds, name) * available * 9 // (resident * 10))
-                   for name in adjustable}
-        if 'max_state_bytes' in changes and all(node.kernel.state == 'none' for node in graph.nodes):
-            # Pure kernels still publish recovery images. Their aggregate cut
-            # ceiling is not per-worker payload slack and must not shrink with
-            # row/batch windows when no live mutable state needs that space.
-            changes.pop('max_state_bytes')
-        if 'max_state_bytes' in changes:
-            # A terminal needs its first block/root even when no actor owns
-            # state. Shrinking an unused default state ceiling below that
-            # irreducible 3-KiB index cannot fix a payload/codec admission gap.
-            changes['max_state_bytes'] = min(bounds.max_state_bytes,
-                                             max(3072, changes['max_state_bytes']))
-        changes['max_batch_bytes'] = max(changes.get('max_batch_bytes', bounds.max_batch_bytes),
-                                        changes.get('max_row_bytes', bounds.max_row_bytes))
-        if 'max_batch_bytes' not in adjustable:
-            changes.pop('max_batch_bytes')
-        revised = replace(bounds, **changes)
-        if revised == bounds:
-            return bounds
-        bounds = revised
-    return bounds
 
 
 # Semantic native options that carry business meaning and map onto the unified

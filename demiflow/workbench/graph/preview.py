@@ -64,6 +64,7 @@ def preview(root, *, entry, params=None, table_resolver=None, source_modules=Non
     from contextlib import redirect_stdout
     from demiflow.execution.host.inspection import capture_pipeline, build_logical_plan_view
     from demiflow.workbench.projects.discovery import discover
+    from demiflow.workbench.pipeline_policy import limits_with
     from demiflow.workbench.python_sources import PythonSources, SharedSources
     from demiflow.workbench.graph.preview_guard import enter_readonly
 
@@ -108,7 +109,9 @@ def preview(root, *, entry, params=None, table_resolver=None, source_modules=Non
                 return function(**arguments)
             from demiflow.workbench.graph.plan_callsite import PlanCallsites, pipeline_material
             with PlanCallsites(root, sources.digests) as callsites:
-                result = capture_pipeline(construct, {}, on_compiled=callsites.bind_compilation)
+                budgets = control.get('budgets') or {}
+                result = capture_pipeline(construct, {}, on_compiled=callsites.bind_compilation,
+                                          limits=limits_with(policy=budgets), explicit_limits=budgets.keys())
             from demiflow.workbench.graph.plan_details import build_plan_details
             shared_binding = shared.binding()
             details = build_plan_details(result.compiled, sources=sources.digests, root=root, callsites=callsites,

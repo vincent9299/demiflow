@@ -6,13 +6,15 @@ Old sealed kernels without this declaration keep their original budget behavior.
 """
 from collections.abc import Mapping
 
+from .contracts.dataflow import TERMINAL_WORKSPACE
 from .contracts.dataflow_errors import DataflowError
 
 FIELD = 'publication_workspace'
 SCHEMA = 'demiflow.native_publication_workspace.v1'
 PHASE_SCHEMA = 'demiflow.native_publication_workspace.v2'
 REF_CARRIER = 'stored_typed_row.v1'
-TERMINAL_WORKSPACE = 'demiflow.terminal_workspace.v1'
+MIN_TERMINAL_WORKSPACE = 8192
+MIN_TERMINAL_INDEX = 3072  # First block and its first forest root.
 
 
 def workspace_bytes(configuration):
@@ -24,6 +26,20 @@ def workspace_bytes(configuration):
             or value['resident_bytes'] <= 0):
         raise DataflowError('INVALID_CONTRACT', 'invalid native publication workspace')
     return value['resident_bytes']
+
+
+def with_publication_workspace(kernel, publication_bytes):
+    """Bind the terminal's selected workspace for serial publication."""
+    from dataclasses import replace
+    if FIELD not in kernel.configuration:
+        return kernel
+    from .contracts.dataflow import thaw_json
+    config = thaw_json(kernel.configuration)
+    maximum = workspace_bytes(config)
+    if not config.get('publication_min_bytes', maximum) <= publication_bytes <= maximum:
+        raise DataflowError('INVALID_CONTRACT', 'physical publication workspace exceeds declared range')
+    config[FIELD]['resident_bytes'] = publication_bytes
+    return replace(kernel, configuration=config)
 
 
 def phased(configuration):
@@ -45,6 +61,11 @@ class PublicationReservation:
         occurrences = {n.occurrence_id for n in terminals}
         self.stages = frozenset(s.stage_id for s in stages if occurrences.intersection(s.occurrences))
         base = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
+        if declared is not None and self.bytes:
+            # The selected layout seals its driver grant inside control_reserved_bytes.
+            self.bytes = declared - base
+            for node in terminals:
+                with_publication_workspace(node.kernel, self.bytes)
         self.maximum = base + self.bytes if declared is None else declared
         if self.bytes and self.maximum < base + self.bytes:
             raise DataflowError('INVALID_CONTRACT', 'publication workspace lacks its original reservation')

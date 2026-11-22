@@ -162,7 +162,8 @@
    "arguments": [
     "execution/dataflow_native_limits.py",
     "execution/worker/dataflow_graph_runner.py",
-    "planning/dataflow_graph_adapter.py"
+    "planning/dataflow_graph_adapter.py",
+    "planning/dataflow_place.py"
    ],
    "batch_size": [
     "execution/dataflow_batch_membership.py",
@@ -179,6 +180,12 @@
    "callable_scope": [
     "execution/kernels/operator.py",
     "planning/dataflow_shared.py"
+   ],
+   "codec_min_bytes": [
+    "execution/contracts/dataflow.py",
+    "execution/kernels/operator.py",
+    "planning/dataflow_place.py",
+    "planning/dataflow_thread_fusion.py"
    ],
    "concurrency": [
     "execution/dataflow_model_observations.py",
@@ -203,6 +210,9 @@
     "execution/kernels/operator.py",
     "execution/seal/plan.py",
     "planning/dataflow_graph_adapter.py"
+   ],
+   "fixed_worker_min_bytes": [
+    "planning/dataflow_place.py"
    ],
    "flush_interval": [
     "execution/kernels/operator.py",
@@ -361,6 +371,12 @@
    "predict_input_schema": [
     "planning/dataflow_training.py"
    ],
+   "predict_inputs": [
+    "execution/dataflow_services.py"
+   ],
+   "predict_parameters": [
+    "execution/dataflow_services.py"
+   ],
    "predict_step": [
     "execution/dataflow_services.py",
     "execution/seal/plan.py",
@@ -379,6 +395,9 @@
    ],
    "prompt_name": [
     "execution/plan_capture.py"
+   ],
+   "publication_workspace": [
+    "planning/dataflow_budget.py"
    ],
    "query": [
     "execution/program_materials.py"
@@ -414,7 +433,8 @@
    "shared_actor": [
     "execution/dataflow_shared.py",
     "execution/kernels/operator.py",
-    "planning/dataflow_configuration.py"
+    "planning/dataflow_configuration.py",
+    "planning/dataflow_place.py"
    ],
    "shuffle": [
     "execution/kernels/block_partition.py"
@@ -460,12 +480,19 @@
     "planning/dataflow_graph_adapter.py"
    ],
    "task_batch_rows": [
+    "execution/contracts/dataflow.py",
     "execution/kernels/operator.py",
+    "planning/dataflow_budget.py",
+    "planning/dataflow_compile.py",
     "planning/dataflow_place.py"
    ],
    "task_group": [
     "execution/kernels/operator.py",
     "planning/dataflow_compile.py"
+   ],
+   "task_load_bytes": [
+    "execution/worker/dataflow_execution.py",
+    "planning/dataflow_place.py"
    ],
    "task_origin": [
     "execution/kernels/operator.py"
@@ -562,6 +589,9 @@
    ],
    "task_group": [
     "planning/dataflow_compile.py"
+   ],
+   "task_load_bytes": [
+    "execution/seal/plan.py"
    ],
    "task_origin": [
     "planning/dataflow_compile.py"
