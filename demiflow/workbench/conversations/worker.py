@@ -102,6 +102,10 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
         history_boundary = db.execute('SELECT min(sequence)-1 FROM events WHERE turn=?',(tid,)).fetchone()[0] or 0
     project = deployment.project(session['workspace'], json.loads(session['root'])['path'])
     guided = not (compact or notebook) and project['kind'] == 'pipeline'
+    delivery_review = None
+    if guided and session['provider'] == 'deepseek' and project['phase'] == 'implementation':
+        from demiflow.workbench.conversations.pipeline_review import DeliveryReview
+        delivery_review = DeliveryReview(store, turn, project)
     watched = [] if notebook else project['watch']
     excluded = project.get('protected', ()) if guided else ()
     coding = None
@@ -120,6 +124,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
     input_access = None
     control_bridge = None
     model_broker = None
+    broker_home = None
     os.set_blocking(parent_fd, False)
     stopping_signal = [False]
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -275,8 +280,11 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                                      if value.get('native_credentials'))
                 input_access = InputAccess(store, tid, project, scratch, denied_paths=denied_inputs,
                     runtime_paths=runtime_paths(deployment.providers[session['provider']]), deadline=deadline)
+            from demiflow.workbench.conversations.pipeline_review import recent_review
             manifest, prompt = assemble(project, turn['text'], limits,
-                execution_mode=deployment.mode, input_access=input_access is not None, coding=coding)
+                execution_mode=deployment.mode, input_access=input_access is not None, coding=coding,
+                delivery_review=delivery_review is not None,
+                previous_review=recent_review(store, session['id']) if guided else None)
             store.update(tid, context=wire(manifest).decode(), delivery='prepared')
             store.event(tid, 'context.bound', {'digest': manifest['digest'], 'kind': manifest['kind'],
                 'sources': len(manifest['sources']), 'bytes': manifest['bytes'], 'delivery': 'prepared'})
@@ -286,7 +294,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
         adapter = adapter_for(session['provider'],turn.get('operation','message'))
         acp = getattr(adapter, 'acp', False)
         if acp and guided:
-            control_bridge = BridgeServer(input_access)
+            control_bridge = BridgeServer(input_access, delivery_review=delivery_review)
         provider_home = home / 'provider' if deployment.mode == 'restricted' else home
         provider_home.mkdir(mode=0o700, exist_ok=True)
         if deployment.mode == 'restricted':
@@ -503,7 +511,39 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                 else:
                     result['compaction'] = dict(metadata,history_through_sequence=history_boundary)
                     store.event(tid,'compaction.completed',result['compaction'])
-            store.finish_provider(tid, state=final if drained else 'stopping', cleanup='complete' if drained else 'unknown', result=result)
+            report = None
+            if delivery_review is not None and delivery_review.selection is not None:
+                if drained and final == 'completed' and saved['dispatch'] == saved['delivery'] == 'acknowledged':
+                    # The author's process and model connection have drained. The
+                    # reviewer can use the same host slot even on single-slot hosts.
+                    provider = None
+                    def check_review_cancel():
+                        tick(force=True)
+                        if requested:
+                            raise InterruptedError(reason)
+                    try:
+                        from functools import partial
+                        from demiflow.workbench.conversations.pipeline_review import run_deployment_reviewer
+                        reviewer = partial(run_deployment_reviewer, deployment=deployment, turn=turn,
+                            session=session, scratch=scratch, broker_home=broker_home, author_spec=confined, lease_fd=lease_fd,
+                            deadline=deadline, check_cancel=check_review_cancel)
+                        store.event(tid, 'review.started', {'request_id': tid})
+                        report = delivery_review.run(reviewer, result.get('pipeline_checks'), check_review_cancel)
+                    except (ValueError, OSError, TimeoutError) as exc:
+                        report = dict(status='incomplete', diagnostics=[dict(detail=str(exc)[:2048])])
+                    finally:
+                        if descendants(os.getpid()):
+                            signal_owned(os.getpid(), signal.SIGKILL)
+                            drained = drain_owned(process, timeout_s=5)
+                            if not drained:
+                                report = dict(status='incomplete', diagnostics=[dict(detail='评审进程尚未清理。')])
+                        if requested:
+                            final = 'cancelled'
+                else:
+                    report = dict(status='incomplete', diagnostics=[dict(detail='开发回合未完成，评审尚未执行。')])
+            result['cleanup'] = 'complete' if drained else 'unknown'
+            store.finish_provider(tid, state=final if drained else 'stopping', cleanup=result['cleanup'],
+                                  result=result, review=report)
         except BaseException:
             # No false cleanup receipt on disk-full, observation or descendant
             # ownership failure. The persistent reservation remains held.

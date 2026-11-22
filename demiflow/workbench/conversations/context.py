@@ -18,7 +18,8 @@ from demiflow.workbench.conversations.common import safe_path
 from demiflow.workbench.conversations.common import wire
 
 
-def assemble(project, requirement, limits, *, execution_mode='trusted_local', input_access=False, coding=None):
+def assemble(project, requirement, limits, *, execution_mode='trusted_local', input_access=False,
+             coding=None, delivery_review=False, previous_review=None):
     root = Path(project['root'])
     sources, pages, used = [], [], 0
 
@@ -64,6 +65,10 @@ def assemble(project, requirement, limits, *, execution_mode='trusted_local', in
                                  for item in facts['sources']])
         append('forge-authoring-context', root, render_context(facts), binding=digest(facts),
                origin='forge_authoring_context')
+        if previous_review:
+            append('forge-pipeline-review', root,
+                   '本会话上次独立评审，当时的源码及报告仅供本轮复核：\n'
+                   + wire(previous_review).decode(), origin='forge_review_result')
     grant = {key: project[key] for key in ('kind', 'phase', 'writes', 'watch', 'non_goals', 'authorization')}
     header = (
         '你正在 DemiFlow 中执行一个明确授权的项目开发任务。\n'
@@ -83,6 +88,11 @@ def assemble(project, requirement, limits, *, execution_mode='trusted_local', in
         '工作台按实际源码呈现检查结果。'
         + ('使用所附 API 与目录规则。项目资料仅供参考。工作台将在源码改动后检查原生流程和目录。'
            if coding is not None else '使用项目现有验证入口。')
+        + ('交付新增或实质修改的业务流程、算子、Prompt、跨管道输入或输出语义前，'
+           '以及用户明确要求独立评审时，调用工作台工具 request_pipeline_review。'
+           '它由宿主在本轮结束后执行，结果显示在本会话。修正发现的问题后再提请复核。'
+           '只做解读或文字调整可直接回答。'
+           if delivery_review else ('当前工作台会话未配置独立 Pipeline 评审。' if coding is not None else ''))
         + ('\n输入数据可通过 read_input 工具自行发现和读取，不要求用户先指定路径或登记数据目录。'
            'action 可为 list、find、read、inspect；path 可省略以开始发现，也可指定项目外的绝对路径。'
            'find 用 pattern 文件名通配符和 depth 限定本次查找；list 用 offset 翻页；read 用 offset/bytes 读取文本。'
@@ -119,8 +129,9 @@ class BridgeServer:
     B1 may relay this Unix endpoint into its isolated network namespace; the same
     token, epoch, active-turn and fixed-operation checks apply on this side.
     """
-    def __init__(self, input_access):
+    def __init__(self, input_access, *, delivery_review=None):
         self.input_access = input_access
+        self.delivery_review = delivery_review
         self.token = secrets.token_urlsafe(32)
         self.directory = Path(tempfile.mkdtemp(prefix='demiflow-dev-control-'))
         self.path = self.directory / 'bridge.sock'
@@ -142,9 +153,21 @@ class BridgeServer:
 
     def dispatch(self, method, params):
         if method == 'tools/list' and params == {}:
-            return dict(tools=[INPUT_TOOL])
-        if method == 'tools/call' and type(params) is dict and set(params) == {'name', 'arguments'} and params['name'] == INPUT_TOOL['name']:
-            answer = self.input_access.invoke(params['arguments'])
+            tools = [INPUT_TOOL]
+            if self.delivery_review is not None:
+                from .pipeline_review import REVIEW_TOOL
+                tools.append(REVIEW_TOOL)
+            return dict(tools=tools)
+        if method == 'tools/call' and type(params) is dict and set(params) == {'name', 'arguments'}:
+            if params['name'] == INPUT_TOOL['name']:
+                answer = self.input_access.invoke(params['arguments'])
+            elif self.delivery_review is not None:
+                from .pipeline_review import REVIEW_TOOL
+                if params['name'] != REVIEW_TOOL['name']:
+                    reject('Unsupported development control operation')
+                answer = self.delivery_review.request(params['arguments'])
+            else:
+                reject('Unsupported development control operation')
             return dict(content=[dict(type='text', text=wire(answer, 60000).decode())], isError=False)
         reject('Unsupported development control operation')
 

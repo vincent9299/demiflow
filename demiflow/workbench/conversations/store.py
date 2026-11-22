@@ -327,6 +327,59 @@ class Store:
         with self.connect() as db:
             return db.execute("SELECT 1 FROM turns WHERE session=? AND dispatch!='not_sent' LIMIT 1", (sid,)).fetchone() is not None
 
+    def review_inputs(self, sid, *, include_paths):
+        """Only actual user turns and observed changes from this development session."""
+        with self.connect() as db:
+            boundary = db.execute("""SELECT coalesce(max(t.created),0) FROM events e JOIN turns t ON t.id=e.turn
+                    WHERE e.session=? AND t.state='completed' AND t.cleanup='complete'
+                      AND json_extract(e.body,'$.type')='review.completed'
+                      AND json_extract(e.body,'$.data.status')='passed'
+                      AND json_extract(e.body,'$.data.scope.mode')='observed_changes'""", (sid,)).fetchone()[0]
+            goals, size = [], 0
+            for message, reason in db.execute("""SELECT text,json_extract(result,'$.reason') FROM turns
+                    WHERE session=? AND created>? AND operation='message' ORDER BY created DESC,id DESC""",
+                    (sid, boundary)):
+                if include_paths and (reason or '').startswith('Change observation incomplete:'):
+                    reject('一次源码观察没有完整记录，请指定 Flow 入口评审当前实现。')
+                size += len(message.encode()) + (2 if goals else 0)
+                if size > 8192:
+                    if include_paths or not goals:
+                        reject('交付目标超出预算，请简述当前目标并指定 Flow 入口。', 'resource_limit')
+                    break
+                goals.append(message)
+            goal = '\n\n'.join(reversed(goals))
+            if not include_paths:
+                return goal, {}
+            changes = {}
+            current_turn = None
+            for turn, path, before, after in db.execute("""SELECT t.id, json_extract(file.value,'$.path'),
+                    json_extract(file.value,'$.before.sha256'), json_extract(file.value,'$.after.sha256')
+                    FROM events e JOIN turns t ON t.id=e.turn,
+                    json_each(e.body,'$.data.files') file
+                    WHERE e.session=? AND t.created>? AND t.operation='message'
+                      AND json_extract(e.body,'$.type')='change.observed' ORDER BY e.sequence""", (sid,boundary)):
+                if path in changes:
+                    if changes[path]['after_sha256'] != before:
+                        reject('两轮之间的源码记录不连续，请指定 Flow 入口评审当前实现。')
+                    changes[path]['after_sha256'] = after
+                    continue
+                if len(changes) >= 48:
+                    reject('会话改动超出评审范围，请按 Flow 入口拆分。', 'resource_limit')
+                original = None
+                if before is not None:
+                    if current_turn != turn:
+                        record = db.execute('SELECT baseline FROM turns WHERE id=?', (turn,)).fetchone()
+                        baseline = json.loads(record[0]) if record and record[0] else {}
+                        current_turn = turn
+                    fact = baseline.get(path) or {}
+                    if fact.get('sha256') != before or 'preview' not in fact:
+                        reject('缺少改动前的完整源码，请指定 Flow 入口评审当前实现。')
+                    original = fact['preview']
+                changes[path] = dict(before=original, before_sha256=before, after_sha256=after)
+        sources = {path: dict(before=change['before'], after_sha256=change['after_sha256'])
+                   for path, change in changes.items() if change['before_sha256'] != change['after_sha256']}
+        return goal, sources
+
     def submission(self, sid, key):
         with self.connect() as db:
             row = db.execute('SELECT * FROM turns WHERE session=? AND submission=?', (sid, identifier(key))).fetchone()
@@ -448,13 +501,29 @@ class Store:
             ownership['supervisor'] = supervisor
             self._update(db, tid, dict(process=wire(ownership).decode(), launch_phase='claimed', state='starting'))
 
-    def finish_provider(self, tid, *, state, cleanup, result):
+    def finish_provider(self, tid, *, state, cleanup, result, review=None):
         """Commit the drain receipt and any source checks in the same state transition."""
         with self.connect(write=True) as db:
             turn = dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone())
-            if turn['stop_at'] and 'pipeline_checks' in result:
+            if turn['stop_at'] and ('pipeline_checks' in result or review is not None):
                 result = {key: value for key, value in result.items() if key != 'pipeline_checks'}
                 state = 'cancelled'
+                if review is not None:
+                    result.update(pipeline_review='incomplete', review_reason='评审已停止。')
+            elif review is not None:
+                from .pipeline_review import report_events
+                # Close the review and turn in one transaction. A response observed
+                # after cancellation cannot become a completed delivery review.
+                db.execute('SAVEPOINT review_report')
+                try:
+                    for kind, data in report_events(review):
+                        self._event(db, turn['session'], tid, turn['epoch'], kind, data)
+                    result['pipeline_review'] = review['status']
+                except ValueError:
+                    db.execute('ROLLBACK TO review_report')
+                    result.update(pipeline_review='incomplete', review_reason='评审报告超出会话记录的限制。')
+                finally:
+                    db.execute('RELEASE review_report')
             changes = dict(state=state, cleanup=cleanup, result=wire(result).decode())
             self._update(db, tid, changes)
 
