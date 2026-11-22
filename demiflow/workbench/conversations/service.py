@@ -33,7 +33,7 @@ from demiflow.resources.process_observation import unit_stopped
 
 
 class _WarmWorker:
-    def __init__(self, session_id, policy_hash, provider, root_path, process, sock, *, workspace=None, standby=False, reserved=False):
+    def __init__(self, session_id, policy_hash, provider, root_path, process, sock, *, workspace=None, standby=False, reserved=False, operation='message'):
         self.session_id = session_id
         self.workspace = workspace
         self.policy_hash = policy_hash
@@ -44,6 +44,7 @@ class _WarmWorker:
         self.idle = False
         self.standby = standby
         self.reserved = reserved
+        self.operation = operation
         self.dead = False
         self.busy_tid = None
         self.sandbox_deadline = 0.0
@@ -160,9 +161,12 @@ class Service:
         root_path = identity['path']
         reserved_warm = None
         warm_map = getattr(self, 'warm_workers', None)
-        if session_kind == 'development' and warm_map:
+        if warm_map:
+            expected_op = 'message' if session_kind == 'development' else (
+                'notebook_cell_cli' if self.capabilities(workspace, root).get('notebook_cli') else 'notebook_cell')
             for warm in list(warm_map.values()):
                 if (warm.reserved and not warm.dead and warm.process.poll() is None
+                        and warm.operation == expected_op
                         and warm.workspace == workspace and warm.root_path == root_path
                         and warm.provider == provider_id and warm.policy_hash == revision):
                     reserved_warm = warm
@@ -202,8 +206,10 @@ class Service:
             env.update(proxy_environment(config))
         return env
 
-    def prewarm(self, workspace, root, *, session_id=None, provider_id=None):
+    def prewarm(self, workspace, root, *, session_id=None, provider_id=None, session_kind='development'):
         """Best-effort standby pre-warming so Turn 1 skips cold CLI startup."""
+        if session_kind not in ('development', 'notebook'):
+            reject('Invalid project conversation kind', 'invalid_request')
         warm_map = getattr(self, 'warm_workers', None)
         if warm_map is None:
             return dict(status='unsupported')
@@ -213,6 +219,12 @@ class Service:
         available_providers = [p['id'] for p in caps['providers'] if p['available']]
         if not caps['start'] or not available_providers:
             return dict(status='unavailable')
+        if session_kind == 'notebook':
+            if not caps.get('notebook_cells'):
+                return dict(status='unavailable')
+            operation = 'notebook_cell_cli' if caps.get('notebook_cli') else 'notebook_cell'
+        else:
+            operation = 'message'
         identity = root_identity(root)
         root_path = identity['path']
         reserved = session_id is None
@@ -220,7 +232,7 @@ class Service:
         if not reserved:
             identifier(session_id)
             session = self.store.show(workspace, session_id)
-            if (session.get('session_kind') != 'development'
+            if (session.get('session_kind') != session_kind
                     or not self.store.writable(workspace, session_id, identity, revision, deployment.providers)):
                 return dict(status='skipped')
             target_provider = session['provider'] if session['provider'] in available_providers else available_providers[0]
@@ -248,12 +260,14 @@ class Service:
             if not reserved:
                 existing = warm_map.get(target_sid)
                 if (existing is not None and not existing.dead and existing.process.poll() is None
+                        and existing.operation == operation
                         and existing.policy_hash == revision and existing.provider == target_provider
                         and existing.root_path == root_path and _valid_deadline(existing)):
                     return dict(status='ready' if existing.idle else 'warming', session_id=target_sid)
             else:
                 for existing in warm_map.values():
                     if (existing.reserved and not existing.dead and existing.process.poll() is None
+                            and existing.operation == operation
                             and existing.workspace == workspace and existing.policy_hash == revision
                             and existing.provider == target_provider and existing.root_path == root_path
                             and _valid_deadline(existing)):
@@ -282,7 +296,7 @@ class Service:
             for old in to_retire:
                 same_root = Path(old.root_path) == target_path
                 self._retire_warm(old, wait_s=0.5 if same_root else 0.0)
-            coding_fd = self._ensure_coding_catalog() if project['kind'] == 'pipeline' else None
+            coding_fd = self._ensure_coding_catalog() if (operation == 'message' and project['kind'] == 'pipeline') else None
             if reserved:
                 target_sid = 'd' + secrets.token_hex(16)
             parent_sock = worker_sock = None
@@ -291,7 +305,7 @@ class Service:
                 worker = Path(__file__).with_name('worker.py')
                 env = self._worker_env(deployment)
                 meta = json.dumps(dict(workspace=workspace, root_path=root_path, session_id=target_sid,
-                                       provider=target_provider, policy_hash=revision), separators=(',', ':'))
+                                       provider=target_provider, policy_hash=revision, operation=operation), separators=(',', ':'))
                 command = [sys.executable, '-I', '-B', str(worker), '--standby',
                            str(self.root / (revision + '.json')), meta, str(worker_sock.fileno())]
                 inherited = (worker_sock.fileno(),)
@@ -302,7 +316,7 @@ class Service:
                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     pass_fds=inherited, start_new_session=True)
                 warm = _WarmWorker(target_sid, revision, target_provider, root_path, process, parent_sock,
-                                   workspace=workspace, standby=True, reserved=reserved)
+                                   workspace=workspace, standby=True, reserved=reserved, operation=operation)
                 warm_map[target_sid] = warm
                 parent_sock = None
                 threading.Thread(target=self._watch_worker, args=(warm,), name='demiflow-dev-watch', daemon=True).start()
@@ -556,12 +570,16 @@ class Service:
                 ownership = dict(unit_path=str(lease), unit_identity=dict(device=info.st_dev, inode=info.st_ino), nonce=value['epoch'])
                 self.store.update(tid, process=wire(ownership).decode())
 
-                # Try reusing a matching idle or standby warm worker for normal message turns.
+                # Try reusing a matching idle or standby warm worker for message / notebook turns
+                # (strictly matching operation so readonly notebook workers and developer workers never mix).
+                turn_op = value.get('operation', 'message')
+                warmable_op = turn_op in {'message', 'notebook_cell', 'notebook_cell_cli'}
                 warm_map = getattr(self, 'warm_workers', None)
-                warm = warm_map.get(session_id) if (warm_map is not None and value.get('operation') == 'message') else None
+                warm = warm_map.get(session_id) if (warm_map is not None and warmable_op) else None
                 if (warm is not None and (warm.idle or warm.standby) and warm.busy_tid is None
                         and not warm.dead and warm.process.poll() is None
                         and warm.sock is not None
+                        and warm.operation == turn_op
                         and warm.policy_hash == session['policy_hash']
                         and warm.provider == session['provider']
                         and warm.root_path == root_path
@@ -607,9 +625,10 @@ class Service:
                 process = subprocess.Popen(command,
                     cwd=self.root, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     pass_fds=inherited, start_new_session=True)
-                warm = _WarmWorker(session_id, session['policy_hash'], session['provider'], root_path, process, parent_sock)
+                warm = _WarmWorker(session_id, session['policy_hash'], session['provider'], root_path, process, parent_sock,
+                                   workspace=workspace, operation=turn_op)
                 warm.busy_tid = tid
-                if warm_map is not None and value.get('operation') == 'message':
+                if warm_map is not None and warmable_op:
                     warm_map[session_id] = warm
                 self.workers[tid] = (process, parent_sock.fileno())
                 self._worker_socks[tid] = parent_sock

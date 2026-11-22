@@ -416,3 +416,120 @@ print('direct_ok')
     assert (src / 'written.txt').read_text() == 'ok'
     assert ro.read_text() == 'keep'
     assert cred.read_text() == 'token: test\n'
+
+
+def test_notebook_cell_commands_standby_set_turn_and_role_isolation(tmp_path):
+    from demiflow.workbench.notebooks.cell_commands import CellCommands
+    from demiflow.workbench.conversations.service import Service
+    from demiflow.workbench.conversations.store import Store
+    from demiflow.workbench.conversations.policy import Limits
+    from demiflow.workbench.conversations.control_client import call as control_call
+    from test_forge_development_chat import configuration
+
+    # 1. CellCommands standby -> set_turn -> park_idle lifecycle
+    store = Store(tmp_path / 'cell_state', Limits(), initialize=True)
+    bridge = CellCommands(store, None, 0.0)
+    try:
+        assert json.loads((bridge.bin / 'binding.json').read_text()) == ['', '', '']
+        with pytest.raises(Exception):
+            control_call(str(bridge.path), bridge.token, 't1', 'e1', 'cell.show', {})
+
+        session = store.create_conversation('w1', {'path': str(tmp_path), 'device': 1, 'inode': 1},
+                                            'deepseek', 'nb-req-1', 'h' * 64, session_kind='notebook')
+        turn, _ = store.submit('w1', session['id'], 'sub-1', 0, 'show cell',
+                               {'path': str(tmp_path), 'device': 1, 'inode': 1}, 'h' * 64, operation='notebook_cell_cli')
+        bridge.set_turn(turn, time.time() + 60)
+        assert json.loads((bridge.bin / 'binding.json').read_text()) == [bridge.token, turn['id'], turn['epoch']]
+        res = control_call(str(bridge.path), bridge.token, turn['id'], turn['epoch'], 'cell.show', {})
+        assert 'id' in res
+
+        bridge.park_idle()
+        assert json.loads((bridge.bin / 'binding.json').read_text()) == ['', '', '']
+        with pytest.raises(Exception):
+            control_call(str(bridge.path), bridge.token, turn['id'], turn['epoch'], 'cell.show', {})
+    finally:
+        bridge.close()
+
+    # 2. Developer standby worker is never adopted by a notebook session (and vice versa).
+    root, path, _ = configuration(tmp_path)
+    service = Service(path)
+    try:
+        st = service.prewarm('wfixture', root, provider_id='codex', session_kind='development')
+        assert st['status'] in ('warming', 'ready')
+        dev_warm = next(w for w in service.warm_workers.values() if w.reserved)
+        assert dev_warm.operation == 'message'
+        # Notebook session must NOT adopt the developer standby worker's reserved session_id.
+        nb_session = service.create_project('wfixture', root, 'nb-iso-1', 'codex', new_conversation=True, session_kind='notebook')
+        assert nb_session['id'] != dev_warm.session_id
+        assert dev_warm.reserved is True
+        # Trusted-local deployment has notebook_cells=False -> notebook prewarm returns unavailable cleanly.
+        nb_pw = service.prewarm('wfixture', root, provider_id='codex', session_kind='notebook')
+        assert nb_pw['status'] == 'unavailable'
+    finally:
+        service.close()
+
+
+def test_restricted_notebook_cell_cli_standby_prewarm_and_warm_reuse(tmp_path, monkeypatch):
+    from demiflow.workbench.conversations.service import Service
+    from test_forge_development_chat import configuration, wait_turn
+
+    monkeypatch.setenv('DEMIFLOW_FAKE_KEY', 'sk-test-notebook-direct')
+    root, path, cfg = configuration(tmp_path)
+    cfg['mode'] = 'restricted'
+    cfg['direct_model'] = True
+    cfg['providers']['codex']['base_url'] = 'http://127.0.0.1:1'
+    cfg['providers']['codex']['credential_env'] = 'DEMIFLOW_FAKE_KEY'
+    Path(path).write_text(json.dumps(cfg))
+
+    service = Service(path)
+    try:
+        caps = service.capabilities('wfixture', root)
+        assert caps['notebook_cells'] is True and caps['notebook_cli'] is True
+        st = service.prewarm('wfixture', root, provider_id='codex', session_kind='notebook')
+        assert st['status'] in ('warming', 'ready') and st.get('standby') is True
+        deadline = time.monotonic() + 10.0
+        warm = None
+        while time.monotonic() < deadline:
+            warm = next((w for w in service.warm_workers.values() if w.reserved and w.operation == 'notebook_cell_cli'), None)
+            if warm is not None and warm.idle:
+                break
+            time.sleep(0.05)
+        assert warm is not None and warm.idle and warm.process.poll() is None
+        standby_pid = warm.process.pid
+        reserved_sid = warm.session_id
+
+        # Development session must NOT adopt this readonly notebook standby worker.
+        dev_sess = service.create_project('wfixture', root, 'dev-not-nb', 'codex', new_conversation=True, session_kind='development')
+        assert dev_sess['id'] != reserved_sid and warm.reserved is True
+
+        # Notebook session DOES adopt it!
+        nb_sess = service.create_project('wfixture', root, 'nb-adopt-1', 'codex', new_conversation=True, session_kind='notebook')
+        assert nb_sess['id'] == reserved_sid and warm.reserved is False
+
+        t1 = service.start_project('wfixture', root, reserved_sid, 'nb-t1', 0, 'Cell turn 1', operation='notebook_cell_cli')['id']
+        r1 = wait_turn(service, t1)
+        assert r1['state'] == 'completed' and r1['cleanup'] == 'complete'
+        events1 = service.store.events('wfixture', reserved_sid, 0, 50)['events']
+        bound1 = [e for e in events1 if e['turn_id'] == t1 and e['type'] == 'provider.bound']
+        assert bound1 and bound1[0]['data'].get('standby_prewarmed') is True
+        assert bound1[0]['data'].get('warm_reused') is True
+        assert bound1[0]['data'].get('execution_assurance') == 'enforced'
+        assert service.warm_workers[reserved_sid].process.pid == standby_pid
+
+        # Wait until parked, then Turn 2 reuses the exact same readonly Landlock worker PID!
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not service.warm_workers[reserved_sid].idle:
+            time.sleep(0.05)
+        assert service.warm_workers[reserved_sid].idle
+        t2 = service.start_project('wfixture', root, reserved_sid, 'nb-t2', 1, 'Cell turn 2', operation='notebook_cell_cli')['id']
+        r2 = wait_turn(service, t2)
+        assert r2['state'] == 'completed' and r2['cleanup'] == 'complete'
+        events2 = service.store.events('wfixture', reserved_sid, 0, 50)['events']
+        bound2 = [e for e in events2 if e['turn_id'] == t2 and e['type'] == 'provider.bound']
+        assert bound2 and bound2[0]['data'].get('warm_reused') is True
+        assert not bound2[0]['data'].get('standby_prewarmed')
+        assert service.warm_workers[reserved_sid].process.pid == standby_pid
+        warm_proc = service.warm_workers[reserved_sid].process
+    finally:
+        service.close()
+    assert warm_proc.poll() is not None
