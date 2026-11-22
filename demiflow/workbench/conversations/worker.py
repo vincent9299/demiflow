@@ -526,7 +526,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                         from demiflow.workbench.conversations.pipeline_review import run_deployment_reviewer
                         reviewer = partial(run_deployment_reviewer, deployment=deployment, turn=turn,
                             session=session, scratch=scratch, broker_home=broker_home, author_spec=confined, lease_fd=lease_fd,
-                            deadline=deadline, check_cancel=check_review_cancel)
+                            deadline=min(deadline, time.time()+180), check_cancel=check_review_cancel)
                         store.event(tid, 'review.started', {'request_id': tid})
                         report = delivery_review.run(reviewer, result.get('pipeline_checks'), check_review_cancel)
                     except (ValueError, OSError, TimeoutError) as exc:

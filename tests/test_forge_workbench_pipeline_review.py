@@ -1,6 +1,10 @@
 """Review delivery through the normal author channel, durable session and chat projection."""
 import hashlib
 import json
+import os
+import sys
+import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -33,6 +37,73 @@ def test_author_requests_one_independent_review_and_replays_unavailable_model(tm
         assert '凭证' in str(recent_review(service.store, session))
         other = service.create_project(workspace, root, 'another', 'deepseek', new_conversation=True)['id']
         assert recent_review(service.store, other) is None
+
+
+def test_admission_failure_closes_broker_and_preserves_completed_turn_checks(tmp_path, monkeypatch):
+    from demiflow.workbench.conversations import execution, model_broker
+    from demiflow.workbench.conversations.pipeline_review import DeliveryReview, run_deployment_reviewer
+    from demiflow.workbench.conversations.sandbox import SandboxSpec
+
+    with app(tmp_path, acp=True, guided=True) as (server, workspace, root):
+        service = server.development
+        session = service.create_project(workspace, root, 'new', 'deepseek')['id']
+        store = service.store
+        turn, _ = store.submit(workspace, session, 'r', 0, 'Inspect entry', root_identity(root), service.policy_hash)
+        (root/'flows/entry.py').write_text('def run(): return 1')
+        review = DeliveryReview(store, turn, {'root':root})
+        review.request({'entry':'flows/entry.py:run'})
+        closed = []
+        broker = SimpleNamespace(socket_path='/unused', child_config={'model':'fake'}, close=lambda:closed.append(True))
+        monkeypatch.setattr(model_broker, 'start_model_broker', lambda *a, **k:broker)
+        def deny(**kwargs):
+            assert kwargs['sandbox_spec'].role == 'readonly'
+            raise RuntimeError('Sandbox admission timed out')
+        monkeypatch.setattr(execution,'launch_provider',deny)
+        deployment = SimpleNamespace(mode='restricted',providers={'deepseek':dict(model_provider='deepseek-account')})
+        spec = SandboxSpec((),(),(),(),str(tmp_path/'author'))
+        def invoke(prompt):
+            return run_deployment_reviewer(prompt, deployment=deployment, turn=turn, session={'provider':'deepseek'},
+                scratch=tmp_path/'scratch', broker_home=tmp_path/'model', author_spec=spec,lease_fd=3,
+                deadline=time.time()+5,check_cancel=lambda:None)
+        checks = {'native_flow':{'status':'passed','diagnostic_count':0}}
+        report = review.run(invoke,checks,lambda:None)
+        assert closed == [True] and 'admission timed out' in str(report['diagnostics'])
+        store.finish_provider(turn['id'], state='completed', cleanup='complete', result={'pipeline_checks':checks},
+                              review=report)
+        done=store.turn(turn['id'])
+        assert done['state']=='completed' and done['cleanup']=='complete'
+        assert json.loads(done['result'])==dict(pipeline_review='incomplete',pipeline_checks=checks)
+
+
+def test_trusted_reviewer_inherits_turn_lease_and_parent_death_signal(tmp_path, monkeypatch):
+    from demiflow.forge import review_deepseek
+    from demiflow.workbench.conversations.execution import UNIT_ENV
+    from demiflow.workbench.conversations.pipeline_review import run_deployment_reviewer
+
+    script = '''
+import ctypes,json,os,sys
+sys.stdin.read()
+sig=ctypes.c_int()
+assert ctypes.CDLL(None).prctl(2,ctypes.byref(sig),0,0,0)==0
+for row in [
+    dict(type='session',sessionId='session-12345678-0000-1111-2222-abcdef123456',cwd=os.getcwd()),
+    dict(type='status',phase='turn_end',reason=dict(kind='completed')),
+    dict(type='final',text=json.dumps(dict(inode=os.fstat(int(os.environ[sys.argv[1]])).st_ino, sig=sig.value)))
+]:
+    print(json.dumps(row),flush=True)
+'''
+    def launch(config, home, *, model_channel):
+        assert model_channel is None
+        return [sys.executable,'-c',script,UNIT_ENV], dict(HOME=str(home))
+    monkeypatch.setattr(review_deepseek, 'prepare_launch', launch)
+    deployment = SimpleNamespace(mode='trusted_local', providers={'deepseek':{'model':'fixture',
+                                     'model_provider':'deepseek-account'}})
+    scratch = tmp_path/'turn'; scratch.mkdir()
+    with (tmp_path/'lease').open('wb') as lease:
+        result = run_deployment_reviewer('test', deployment=deployment, session={'provider':'deepseek'}, turn={},
+            scratch=scratch, broker_home=None, author_spec=None, lease_fd=lease.fileno(),
+            deadline=time.time()+10, check_cancel=lambda:None)
+        assert result['report'] == dict(inode=os.fstat(lease.fileno()).st_ino, sig=9)
 
 
 def test_real_observations_across_turns_and_only_whole_delivery_closes_scope(tmp_path):

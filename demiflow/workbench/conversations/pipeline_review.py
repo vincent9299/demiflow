@@ -1,7 +1,9 @@
 """Submit delivery reviews from an author turn and run them after the author drains."""
+from contextlib import ExitStack
 from dataclasses import replace
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import time
 
@@ -74,44 +76,51 @@ class DeliveryReview:
 def run_deployment_reviewer(prompt, *, deployment, turn, session, scratch, broker_home, author_spec,
                             lease_fd, deadline, check_cancel):
     """The host owns model transport, reviewer credentials and the turn's one slot."""
-    from demiflow.forge.review_deepseek import run_reviewer
+    from demiflow.forge.review_deepseek import prepare_launch, collect_review
+    from .execution import launch_provider
     config = deployment.providers[session['provider']]
     timeout = min(180, deadline - time.time())
     check_cancel()
     if config.get('model_provider', 'deepseek-official') == 'deepseek-official' and not config.get('credential_env'):
         reject('工作台未提供独立评审所需的 DeepSeek API 凭证配置。')
-    if deployment.mode == 'trusted_local':
-        return run_reviewer(prompt, timeout=timeout, config=config, check_cancel=check_cancel)
-    if deployment.mode != 'restricted':
+    if deployment.mode not in ('restricted', 'trusted_local'):
         reject('当前部署未提供独立只读评审。')
 
-    from demiflow.forge.review_deepseek import prepare_launch, collect_review
-    from .model_broker import start_model_broker
-    from .sandbox import launch_sandbox
-    with tempfile.TemporaryDirectory(dir=scratch.parent, prefix='review-') as temporary:
+    with tempfile.TemporaryDirectory(dir=scratch.parent, prefix='review-') as temporary, ExitStack() as cleanup:
         home = Path(temporary)
-        spec = replace(author_spec, role='readonly', seconds=timeout, private_home=temporary, write_paths=(),
-            denied_paths=(*author_spec.denied_paths, author_spec.private_home),
-            read_paths=tuple(path for path in author_spec.read_paths if path == '/etc/ssl/openssl.cnf'))
-        # The control directory's parent is the same epoch as the author's
-        # model broker, so both charges use that turn's existing quota.
-        broker = start_model_broker(deployment, turn, session, broker_home.with_name('review-model'),
-                                    defer_handshake=True)
+        spec = broker = channel = None
+        if deployment.mode == 'restricted':
+            from .model_broker import start_model_broker
+            spec = replace(author_spec, role='readonly', seconds=timeout, private_home=temporary, write_paths=(),
+                denied_paths=(*author_spec.denied_paths, author_spec.private_home),
+                read_paths=tuple(path for path in author_spec.read_paths if path == '/etc/ssl/openssl.cnf'))
+            # Both brokers debit the existing turn quota under this control directory.
+            broker = start_model_broker(deployment, turn, session, broker_home.with_name('review-model'),
+                                        defer_handshake=True)
+            cleanup.callback(broker.close)
+            config = broker.child_config
+            channel = Path(__file__).with_name('deepseek_model_proxy.cjs')
+
+        class Reviewer:
+            name = 'deepseek'
+
+            @staticmethod
+            def launch(config, home, root):
+                return prepare_launch(config, home, model_channel=channel)
+
+        check_cancel()
         try:
-            check_cancel()
-            command, env = prepare_launch(broker.child_config, home,
-                                          model_channel=Path(__file__).with_name('deepseek_model_proxy.cjs'))
-            process = launch_sandbox(command, spec=spec, env=env, cwd=home, lease_fd=lease_fd,
-                                     model_socket=broker.socket_path)
-            try:
-                return collect_review(process, prompt, cwd=home, model=config['model'], timeout=timeout,
-                                      check_cancel=check_cancel)
-            except ValueError:
-                if broker.failure:
-                    reject('DeepSeek 模型通道：' + broker.failure)
-                raise
-        finally:
-            broker.close()
+            process = launch_provider(mode=deployment.mode, adapter=Reviewer, config=config, home=home, root=home,
+                lease_fd=lease_fd, sandbox_spec=spec, model_socket=broker.socket_path if broker else None)
+        except (RuntimeError, subprocess.SubprocessError) as exc:
+            reject('独立评审进程未能启动：' + str(exc)[:512], 'inspection_incomplete')
+        try:
+            return collect_review(process, prompt, cwd=home, model=config['model'], timeout=timeout,
+                                  check_cancel=check_cancel)
+        except ValueError:
+            if broker and broker.failure:
+                reject('DeepSeek 模型通道：' + broker.failure)
+            raise
 
 
 def report_events(report):
