@@ -19,7 +19,7 @@ from .capacity import ENVELOPE_ENV, write_envelope
 from .contracts import ResourceError, document, identifier
 from .process_observation import (
     UNIT_ENV, _pidfd, _read, _signal_fd, descendants, require_pidfds,
-    signal_owned, unit_stopped,
+    signal_owned, unit_lock_status, unit_stopped,
 )
 
 OWNER_ENV = "DEMIFLOW_RESOURCE_OWNER_PID"
@@ -237,11 +237,11 @@ class ManagedProcessUnit:
         identity = record["identity"]
         pid, start = identity["pid"], identity["start"]
         live = _live(pid, start)
-        stopped = unit_stopped(directory / "unit.lock", identity["unit"])
-        if live and not stopped:
+        lock = unit_lock_status(directory / "unit.lock", identity["unit"])
+        if live and lock == "held":
             return {"phase": "RUNNING", "observation": "FRESH", "identity": identity,
                     "evidence_ref": self.evidence_ref(scope_id, allocation_id, 'process.json')}
-        if not live and stopped:
+        if not live and lock == "released":
             return {"phase": "TERMINATED", "observation": "FRESH", "identity": identity,
                     "evidence_ref": self.evidence_ref(scope_id, allocation_id, 'process.json')}
         # PID reused, lock busy, or unreadable proc: unknown is not terminal.

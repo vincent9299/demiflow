@@ -208,15 +208,30 @@ def remove_attempt_work(work, *, deadline):
         os.close(parent)
 
 
-def clean_stopped(run, *, expected_revision=None, confirm_stopped, deadline):
+def _resource_domain(run, manifest):
+    from contextlib import nullcontext
+    from demiflow.execution.host.control import local_capacity_domain
+    from .native_resources import environment
+    domain = manifest.get('capacity_domain')
+    if domain is None:
+        return nullcontext()
+    env = environment(run.directory, manifest.get('native_execution'))
+    return local_capacity_domain(domain, device_inventory=env.get('DEMIFLOW_DEVICE_INVENTORY', ''))
+
+
+def reconcile_training(run, manifest, **control):
+    from demiflow.execution.host.control import reconcile_stopped_fits
+    with _resource_domain(run, manifest):
+        return reconcile_stopped_fits(run, deployment_ref=manifest.get('training_deployment'), **control)
+
+
+def clean_stopped(run, *, expected_revision=None, confirm_stopped, deadline, preserve_jobs=False):
     """Delegate native ownership and GC exclusively to their original owner."""
     from demiflow.execution.host.control import clean_stopped_execution
-    from demiflow.execution.host.control import local_capacity_domain
     from demiflow.execution.host.inspection import read_run
-    from contextlib import nullcontext
     with read_run(run.directory, deadline=deadline) as reader:
         manifest = reader.execution_view(detail='identity')['manifest']
-    domain = manifest.get('capacity_domain')
-    with local_capacity_domain(domain) if domain is not None else nullcontext():
+    with _resource_domain(run, manifest):
         return clean_stopped_execution(run, expected_attempt=run.attempt,
-            expected_revision=expected_revision, confirm_stopped=confirm_stopped, deadline=deadline)
+            expected_revision=expected_revision, confirm_stopped=confirm_stopped, deadline=deadline,
+            preserve_jobs=preserve_jobs)

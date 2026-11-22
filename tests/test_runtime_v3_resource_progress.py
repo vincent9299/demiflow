@@ -24,7 +24,7 @@ def test_runs_share_one_capacity_domain(tmp_path, monkeypatch):
             policy, _ = resolve_runtime_policy({}, run.limits, provider='local')
             class Action:
                 context = run
-            pools.append(_driver_resources(Action(), policy).provider.pool)
+            pools.append(_driver_resources(Action(), policy)[0].provider.pool)
     assert pools[0].root == pools[1].root
     pools[0].reserve('occupied', 'a' * 64, capacity, 1000)
     with pytest.raises(ResourceError) as error:

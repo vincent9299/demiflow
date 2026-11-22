@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # The registered names, in order. Sealing admits a node without a user program by
 # membership in these registries, so a change here changes what a sealed plan may omit.
 OPERATORS = (
-    'MapOp', 'FlatMapOp', 'MapBatchesOp', 'BoundMapOp', 'OperatorLLMMapOp', 'FilterOp', 'AsyncMapOp', 'DeduplicateOp',
+    'MapOp', 'FlatMapOp', 'PredictOp', 'MapBatchesOp', 'BoundMapOp', 'OperatorLLMMapOp', 'FilterOp', 'AsyncMapOp', 'DeduplicateOp',
     'AgentMapOp', 'BatchMapOp', 'EmbeddingMapOp', 'StreamGroupBatchesOp', 'StreamPrependOp', 'LimitOp',
     'SelectColumnsOp', 'DropColumnsOp', 'RenameColumnsOp', 'AddColumnOp', 'RandomSampleOp', 'SortOp', 'RepartitionOp',
     'RandomShuffleOp', 'RandomizeBlockOrderOp', 'VectorSearchOp', 'SearchWebOp', 'RegisterDocumentsOp',
@@ -32,14 +32,14 @@ TERMINALS = ('take', 'take_all', 'take_batch', 'iter_rows', 'iter_batches', 'cou
 
 def test_registry_keys_and_their_order_are_unchanged():
     from demiflow.planning.dataflow_registry import operator_registry, source_registry, terminal_registry
-    assert tuple(operator_registry()) == OPERATORS and len(OPERATORS) == 50
+    assert tuple(operator_registry()) == OPERATORS and len(OPERATORS) == 51
     assert tuple(source_registry()) == SOURCES and tuple(terminal_registry()) == TERMINALS
     assert tuple(name for name, record in kind_records().items() if record.operator is not None) == OPERATORS
 
 
 def test_rows_are_well_formed():
     records = kind_records()
-    assert len(records) == 58
+    assert len(records) == 59
     for name, record in records.items():
         assert record.name == name and record.roles <= set(ROLES)
         assert (record.entry is None) == (record.operator is None) == (record.traits is None), name
@@ -51,7 +51,7 @@ def test_rows_are_well_formed():
             assert role in {'cpu', 'io', 'remote_api'} and type(mergeable) is bool, name
     typed = [name for name, record in records.items() if record.entry == TYPED]
     native = [name for name, record in records.items() if record.entry == NATIVE]
-    assert tuple(typed + native) == OPERATORS and len(typed) == 29 and len(native) == 21
+    assert tuple(typed + native) == OPERATORS and len(typed) == 30 and len(native) == 21
     assert all(name[:1].isupper() for name in typed) and all(name[:1].islower() for name in native)
 
 
@@ -79,7 +79,9 @@ def test_what_the_table_makes_visible():
     records = kind_records()
     from demiflow.planning.dataflow_registry import source_registry, terminal_registry
     without_kernel = [name for name, record in records.items() if record.operator is not None and not record.roles]
-    assert without_kernel == list(OPERATORS[32:]) and len(without_kernel) == 18    # registered, never a kernel kind
+    native_declarations = OPERATORS[OPERATORS.index('raw_fetch'):]
+    assert len(native_declarations) == 18
+    assert without_kernel == ['PredictOp', *native_declarations]
     not_registered = [name for name, record in records.items() if record.operator is None]
     assert not_registered == ['fetch', 'document', 'join', 'exclude_keys', 'reduce', 'groups', 'union', 'aggregate']
     assert kinds_with('relational') <= set(source_registry()) and kinds_with('aggregate') <= set(terminal_registry())
@@ -144,7 +146,7 @@ def test_the_literal_tables_are_gone():
 
 def test_the_table_loads_without_the_engine():
     script = ("import sys\nimport demiflow.execution.contracts.dataflow_kinds as kinds\n"
-              "assert len(kinds.kind_records()) == 58\n"
+              "assert len(kinds.kind_records()) == 59\n"
               "heavy = [name for name in sys.modules if name.startswith('demiflow.planning') or name in ("
               "'pyarrow', 'lance', 'demiflow.execution.kernels.operator', 'demiflow.data.plan')]\n"
               "assert not heavy, heavy\n")
@@ -161,4 +163,40 @@ def test_the_loaded_matrix_is_self_consistent():
                        if name not in ('port_main', 'port_prefix', 'port_left', 'sealable_as'))
                for kind in compile_contract_matrix.UNKNOWN)
     assert cells['EmbeddingMapOp']['batch_call'] and not cells['EmbeddingMapOp']['row_call']
+    assert not cells['PredictOp']['admitted'] and not any(cells['PredictOp']['sealable_as'].values())
+    assert cells['MapBatchesOp']['admitted'] and cells['MapBatchesOp']['batch_call']
+    assert not any(any(cells[kind]['sealable_as'].values()) for kind in compile_contract_matrix.UNKNOWN)
     assert cells['OperatorLLMMapOp']['row_call'] and cells['MapOp']['task_scoped'] and not cells['LimitOp']['task_scoped']
+
+
+def test_prediction_expands_into_model_bound_batch_kernels(tmp_path):
+    import compile_contract_corpus as corpus
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.seal.plan import _builtin_node
+    from demiflow.planning.dataflow_compile import compile_kernel_spec
+
+    compiled, budget, _, plan = corpus.lower_case('fit_predict', corpus.Context(tmp_path))
+    with pytest.raises(DataflowError, match='prediction requires graph capture'):
+        compile_kernel_spec(plan.operations[-1], program_ref=None, bounds=budget)
+    graph = compiled.graph
+    job, = graph.jobs
+    edges = [edge for edge in graph.value_edges if edge.input_port == 'model']
+    by_id = {node.occurrence_id: node for node in graph.nodes}
+    assert [edge.step for edge in edges] == [1, 2]
+    for edge in edges:
+        node = by_id[edge.consumer]
+        assert edge.producer == job.occurrence_id and node.kernel.kind == 'MapBatchesOp'
+        assert node.kernel.configuration['predict_step'] == edge.step
+        assert not _builtin_node(node)  # the predictor's sealed program is mandatory
+
+
+def test_fixed_dataset_is_sealable_only_as_an_internal_terminal():
+    from dataclasses import replace
+    from demiflow.execution.seal.plan import _builtin_node
+    from test_runtime_v3_c import make
+
+    node = make('GraphNode', kind='terminal')
+    node = replace(node, kernel=replace(node.kernel, kind='fixed_dataset', configuration={'sink_id': node.occurrence_id}))
+    assert _builtin_node(node)
+    for role in ('source', 'transform', 'relational'):
+        assert not _builtin_node(replace(node, kind=role))

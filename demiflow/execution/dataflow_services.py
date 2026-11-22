@@ -58,6 +58,7 @@ def _driver_resources(action: "RunAction", policy: RuntimePolicy):
     state = RunResourceState(run.journal)
     from .dataflow_devices import device_configuration
     devices, device_topology = device_configuration(policy.provider)
+    job_resources, job_gpu = None, 0
     if policy.provider == "local":
         from .dataflow_capacity import local_capacity
         from ..resources.capacity import LocalCapacityPool
@@ -67,6 +68,10 @@ def _driver_resources(action: "RunAction", policy: RuntimePolicy):
         domain, capacity = local_capacity()
         pool = LocalCapacityPool(domain / "capacity", capacity=capacity)
         unit = ManagedProcessUnit(root / "units")
+        job_gpu = len(devices.inventory) if devices is not None else 0
+        def job_resources(scope_id):
+            provider = LocalResourceProvider(pool, unit, device_pool=devices)
+            return ResourceManager(provider, RunResourceState(run.journal, operation_scope=scope_id))
         if policy.worker_mode == "thread":
             from ..resources.thread import ThreadResourceProvider
             from .dataflow_thread_host import DataflowThreadConnector
@@ -84,7 +89,24 @@ def _driver_resources(action: "RunAction", policy: RuntimePolicy):
             allocation_reader=state.read_allocation_identity)
     else:
         raise DataflowError("INVALID_CONTRACT", "unsupported provider: " + str(policy.provider))
-    return ResourceManager(provider, state, bounds=ManagerBounds())
+    return ResourceManager(provider, state, bounds=ManagerBounds()), job_resources, job_gpu
+
+
+def original_job_resources(run, scope_id):
+    """Reopen the resource domain recorded by this run, for original-job observation."""
+    from ..resources.capacity import LocalCapacityPool
+    from ..resources.local import LocalResourceProvider
+    from ..resources.manager import ResourceManager
+    from ..resources.process_unit import ManagedProcessUnit
+    from .dataflow_capacity import local_capacity
+    from .dataflow_devices import device_configuration
+    from .resource_state import RunResourceState
+    state = RunResourceState(run.journal, operation_scope=scope_id)
+    domain, capacity = local_capacity()
+    units = run.directory.with_name(run.directory.name + '-driver-resources') / 'units'
+    devices, _ = device_configuration('local')
+    return ResourceManager(LocalResourceProvider(LocalCapacityPool(domain / 'capacity', capacity=capacity),
+                        ManagedProcessUnit(units), device_pool=devices), state)
 
 
 def _driver_hosts(action: "RunAction", policy: RuntimePolicy, store: RunArtifactStore,
@@ -153,12 +175,12 @@ def make_driver_services(action: "RunAction", *, policy: RuntimePolicy, bounds: 
             from .seal.plan import load_dataflow
             _, physical, _ = load_dataflow(run.directory, action.action_id, store=store, bounds=bounds)
             policy = replace(policy, worker_mode=physical.policy.worker_mode)
-        resources = _driver_resources(action, policy)
+        resources, job_resources, job_gpu = _driver_resources(action, policy)
         hosts = _driver_hosts(action, policy, store, bounds, provider=resources.provider)
         journal_service = DriverJournalService(action, store=store, bounds=bounds)
         return DriverServices(action=action, journal_service=journal_service, store=store,
                               resources=resources, policy=policy, bounds=bounds, hosts=hosts,
-                              clock_ms=_now_ms)
+                              clock_ms=_now_ms, job_resources=job_resources, job_gpu=job_gpu)
     except BaseException as failure:
         try:
             if journal_service is not None:
@@ -203,6 +225,27 @@ def _load_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bou
             store=store, bounds=bounds, cache=cache, shared_cache=shared_cache,
             live_binding={"run_id": assignment.run_id, "action_id": assignment.action_id,
                           "attempt": assignment.attempt, "fence": assignment.fence})
+    if graph.jobs:
+        from dataclasses import replace
+        from .contracts.dataflow import thaw_record_value
+        from ..data.plan import CallableSpec
+        predictors = {n.occurrence_id: n.kernel.configuration for n in graph.nodes
+                      if n.occurrence_id in owned and 'predict_step' in n.kernel.configuration}
+        bindings = assignment.model_bindings
+        if bindings is None or bindings.keys() != predictors.keys():
+            raise DataflowError('INVALID_CONTRACT', 'Prediction assignment model membership differs from seal')
+        for occurrence, config in predictors.items():
+            model = thaw_record_value(bindings[occurrence])
+            program = programs[occurrence]
+            if (model['step'] != config['predict_step'] or model['snapshot']['step'] != model['step']
+                    or model['predictor_digest'] != program.digest
+                    or model['snapshot']['model_format'] != config['predict_model_format']
+                    or not isinstance(program.value, CallableSpec) or not program.value.is_class):
+                raise DataflowError('CODE_MISMATCH', 'Prediction assignment differs from sealed actor or selector')
+            declaration = replace(program.value, constructor_kwargs={'model': model,
+                'inputs': thaw_record_value(config['predict_inputs']),
+                'parameters': thaw_record_value(config['predict_parameters'])})
+            programs[occurrence] = replace(program, value=declaration)
     return programs
 
 

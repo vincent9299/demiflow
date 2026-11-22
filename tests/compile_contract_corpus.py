@@ -306,6 +306,20 @@ def _routed_prompt(c, **options):
         routes={'first': {'concurrency': 1}, 'second': {'concurrency': 1}}, route='which', **options)
 
 
+def _fit_predict(c):
+    from demiflow import data
+    from training_action_programs import StepPredictor, managed_trainer
+
+    predictor = data.PredictorSpec(factory=StepPredictor, inputs={'x': 'x'}, input_schema={'x': 'int64'},
+                                   output_schema={'x': 'int64', 'step': 'int64'}, batch_format='pyarrow')
+    recipe = data.TrainingRecipe(trainer=managed_trainer, predictor=predictor, train_schema={'x': 'int64'},
+                                 base_model_digest='a' * 64, environment_digest='b' * 64, model_format='native.test',
+                                 budget={'optimizer_updates': 2}, save_steps=(1, 2),
+                                 topology={'nodes': 1, 'world_size': 1, 'gpus_per_node': 0})
+    fitted = c.lance(version=1).fit(recipe=recipe)
+    return case(fitted.checkpoints.select(steps=[1, 2]).predict(on=c.rows()))
+
+
 CASES = {
     # -- typed operations ---------------------------------------------------
     'map': lambda c: case(c.rows().map(identity)),
@@ -314,6 +328,7 @@ CASES = {
     'map_fn_args': lambda c: case(c.rows().map(identity, fn_kwargs={})),
     'flat_map': lambda c: case(c.rows().flat_map(many)),
     'filter': lambda c: case(c.rows().filter(keep)),
+    'fit_predict': _fit_predict,
     'map_batches': lambda c: case(c.rows().map_batches(batch)),
     'map_batches_sized': lambda c: case(c.rows().map_batches(batch, batch_size=4)),
     'map_stateful_instance': lambda c: case(c.rows().map(Counter())),

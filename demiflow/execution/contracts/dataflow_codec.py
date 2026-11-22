@@ -37,6 +37,9 @@ from .dataflow import (
     CutRequest,
     DataLocation,
     DataflowGraph,
+    FitJobNode,
+    FitJobStage,
+    ValueEdge,
     DomainProof,
     EffectCommand,
     EffectReply,
@@ -213,6 +216,14 @@ _WIRE_TYPES = {
     )),
     "GraphEdge": (GraphEdge, (
         ("edge_id", _S), ("producer", _S), ("output_port", _I), ("consumer", _S), ("input_port", _I),
+    )),
+    "FitJobNode": (FitJobNode, (
+        ("occurrence_id", _S), ("semantic_id", _S), ("configuration", _JM), ("program_ref", _OR),
+    )),
+    "FitJobStage": (FitJobStage, (("stage_id", _I), ("occurrence_id", _S))),
+    "ValueEdge": (ValueEdge, (
+        ("producer", _I), ("output_port", _I), ("consumer", _I), ("input_port", _I),
+        ("kind", _e({"fixed_dataset", "model_manifest"})), ("step", _oi(1)),
     )),
     "DataflowGraph": (DataflowGraph, (
         ("schema", ("lit", "demiflow.dataflow_graph.v3")), ("action_id", _I), ("dag_id", _S),
@@ -610,13 +621,42 @@ def _validate_reservation(value, label):
         _check_int(amount[1], label + " limit", 0)
 
 
+_V4_FIELDS = {
+    "DataflowGraph": ("demiflow.dataflow_graph.v4", (("jobs", _dtos("FitJobNode")), ("value_edges", _dtos("ValueEdge")))),
+    "PhysicalDataflow": ("demiflow.physical_dataflow.v4", (("jobs", _dtos("FitJobStage")), ("value_edges", _dtos("ValueEdge")))),
+    "WorkerAssignment": ("demiflow.dataflow_assignment.v4", (("model_bindings", _JM),)),
+    "RecoveryImage": (None, (("model_bindings", _JM),)),
+}
+
+
+def _wire_fields(type_name, payload):
+    original = _WIRE_TYPES[type_name][1]
+    variant = _V4_FIELDS.get(type_name)
+    if variant is None:
+        return original
+    schema, extra = variant
+    if schema is None:
+        return original + extra if payload.get("model_bindings") is not None else original
+    if payload.get("schema") != schema:
+        return original
+    return (("schema", ("lit", schema)), *original[1:], *extra)
+
+
+def _frame_schema(type_name, payload):
+    if type_name in {"FitJobNode", "FitJobStage", "ValueEdge"}:
+        return "demiflow.runtime_wire.v4"
+    if type(payload) is dict and type_name in _V4_FIELDS and _wire_fields(type_name, payload) != _WIRE_TYPES[type_name][1]:
+        return "demiflow.runtime_wire.v4"
+    return WIRE_SCHEMA
+
+
 def _validate_payload(payload, type_name):
     entry = _WIRE_TYPES.get(type_name)
     if entry is None:
         raise _err("unknown wire type " + str(type_name))
     if type(payload) is not dict:
         raise _err(type_name + " payload must be an object")
-    fields = entry[1]
+    fields = _wire_fields(type_name, payload)
     expected = {name for name, _ in fields}
     if type_name == "Record" and "schema_ref" not in payload:
         # The optional typed-row sidecar does not rewrite legacy row frames.
@@ -774,7 +814,8 @@ def _construct_profile(value, label):
 
 def _construct_payload(payload, type_name):
     entry = _WIRE_TYPES[type_name]
-    cls, fields = entry
+    cls = entry[0]
+    fields = _wire_fields(type_name, payload)
     kwargs = {}
     for name, spec in fields:
         optional = (type_name, name) in {("Record", "schema_ref"), ("Record", "block_partition"), ("RuntimePolicy", "max_active_workers"), ("RuntimePolicy", "native_limits"), ("RuntimePolicy", "worker_mode"), ("WorkerAssignment", "native_limits")}
@@ -832,7 +873,7 @@ def _project_field(value, spec):
 
 def _project_payload(value, type_name):
     entry = _WIRE_TYPES[type_name]
-    fields = entry[1]
+    fields = _wire_fields(type_name, vars(value))
     payload = {}
     for name, spec in fields:
         if type_name == "Record" and name in ("schema_ref", "block_partition") and getattr(value, name) is None:
@@ -949,7 +990,7 @@ def encode_wire(value: object, *, type_name: str, bounds: Bounds) -> bytes:
     if state[1] > bounds.max_control_bytes:
         raise _budget_err("wire frame exceeds control byte budget")
     _validate_payload(payload, type_name)
-    frame = {"schema": WIRE_SCHEMA, "type": type_name, "payload": payload}
+    frame = {"schema": _frame_schema(type_name, payload), "type": type_name, "payload": payload}
     raw = json.dumps(
         frame, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
     ).encode("utf-8")
@@ -961,7 +1002,7 @@ def encode_wire(value: object, *, type_name: str, bounds: Bounds) -> bytes:
 def _frame_payload(frame, type_name):
     if type(frame) is not dict or set(frame) != {"schema", "type", "payload"}:
         raise _err("wire frame must have closed schema/type/payload")
-    if type(frame["schema"]) is not str or frame["schema"] != WIRE_SCHEMA:
+    if type(frame["schema"]) is not str or frame["schema"] != _frame_schema(type_name, frame["payload"]):
         raise _err("unsupported wire schema")
     if type(frame["type"]) is not str or frame["type"] != type_name:
         raise _err("wire type mismatch: expected " + type_name)
@@ -1132,6 +1173,10 @@ def _identity_project(value):
                     and getattr(value, field.name) is None)
             and not (isinstance(value, WorkerAssignment) and field.name == "native_limits"
                      and value.native_limits is None)
+            and not (isinstance(value, (WorkerAssignment, RecoveryImage)) and field.name == "model_bindings"
+                     and value.model_bindings is None)
+            and not (isinstance(value, (PhysicalDataflow, DataflowGraph)) and field.name in {"jobs", "value_edges"}
+                     and not value.jobs)
             and not (isinstance(value, Record) and field.name == "block_partition"
                      and value.block_partition is None)
         }
@@ -1167,6 +1212,10 @@ def compute_graph_digest(graph: DataflowGraph) -> str:
         list(graph.terminals),
         list(graph.sources),
     ]
+    if graph.jobs:
+        document[0] = "dataflow-dag-v4"
+        document.extend(([[j.occurrence_id, j.semantic_id, _identity_project(j.configuration)] for j in graph.jobs],
+                         _identity_project(graph.value_edges)))
     return _canonical_sha(document)
 
 
@@ -1176,9 +1225,9 @@ def compute_physical_digest(physical: PhysicalDataflow) -> str:
     projection = {
         field.name: _identity_project(getattr(physical, field.name))
         for field in dataclasses.fields(physical)
-        if field.name != "plan_id"
+        if field.name != "plan_id" and (physical.jobs or field.name not in {"jobs", "value_edges"})
     }
-    return _canonical_sha(["dataflow-physical-v3", projection])
+    return _canonical_sha(["dataflow-physical-v4" if physical.jobs else "dataflow-physical-v3", projection])
 
 
 def compute_participant_id(stage_id: str, partition_id: str) -> str:

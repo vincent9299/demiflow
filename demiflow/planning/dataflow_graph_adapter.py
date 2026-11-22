@@ -498,10 +498,10 @@ def validate_graph_replay(request, *, bounds):
         return
     from ..execution.sealed_plans import load_sealed_plan
     from .dataflow_compile import _plain
-    bundle = load_sealed_plan(action.context.directory, action.action_id, version='v3')
+    bundle = load_sealed_plan(action.context.directory, action.action_id)
     graph, physical = bundle['graph'], bundle['physical']
     declaration = request.source.declaration
-    originals = [node.kernel.configuration['arguments'].get('graph') for node in graph.nodes if node.kind == 'terminal']
+    originals = [node.kernel.configuration['arguments'].get('graph') for node in graph.nodes if node.occurrence_id in graph.terminals]
     if [_plain(value) for value in originals] != [declaration]:
         raise DataflowError('INCOMPATIBLE_HISTORY', 'graph declaration differs from the sealed routing')
     credit = graph_credit(declaration, bounds=bounds)

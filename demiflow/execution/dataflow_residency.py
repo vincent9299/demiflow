@@ -9,6 +9,30 @@ from .contracts.dataflow_codec import compute_participant_id
 SCHEMA = 'demiflow.finite_residency.v1'
 
 
+def value_predecessors(physical):
+    """Row stage prerequisites across job edges; jobs never become cut participants."""
+    row_stages = {stage.stage_id for stage in physical.stages}
+    jobs = {job.stage_id for job in physical.jobs}
+    inputs = {}
+    for edge in physical.value_edges:
+        inputs.setdefault(edge.consumer, []).append(edge.producer)
+    resolved = {}
+    def row_producers(job, visiting):
+        if job in visiting:
+            raise DataflowError('INVALID_CONTRACT', 'cycle in physical model dependencies')
+        if job not in resolved:
+            result = set()
+            for owner in inputs.get(job, ()):
+                if owner in jobs:
+                    result.update(row_producers(owner, visiting | {job}))
+                elif owner in row_stages:
+                    result.add(owner)
+            resolved[job] = result
+        return resolved[job]
+    return {stage: set().union(*(row_producers(job, set()) for job in inputs[stage]))
+            for stage in row_stages & inputs.keys()}
+
+
 def finite_phases(physical, *, split_durable=False):
     stages = {s.stage_id: s for s in physical.stages}
     owners = {p: s.stage_id for s in physical.stages for p in s.partitions}
@@ -28,6 +52,8 @@ def finite_phases(physical, *, split_durable=False):
         a, b = find(owners[edge.producer_partitions[0]]), find(owners[edge.consumer_partitions[0]])
         if a != b:
             dependencies[b].add(a)
+    for consumer, producers in value_predecessors(physical).items():
+        dependencies[find(consumer)].update(find(p) for p in producers)
     result = []
     while dependencies:
         ready = next((key for key, deps in dependencies.items() if not deps), None)
@@ -59,6 +85,9 @@ def pack_finite_phases(physical, *, fits, prior=None):
         producer, consumer = owners[edge.producer_partitions[0]], owners[edge.consumer_partitions[0]]
         if producer != consumer:
             dependencies[consumer].add(producer)
+    model_dependencies = value_predecessors(physical)
+    for consumer, producers in model_dependencies.items():
+        dependencies[consumer].update(producers)
     completed = set(prior['completed_stages']) if prior is not None else set()
     active = tuple(prior['active_stages']) if prior is not None else ()
     if prior is not None and prior['phase_complete']:
@@ -82,6 +111,8 @@ def pack_finite_phases(physical, *, fits, prior=None):
             raise DataflowError('RESOURCE_INFEASIBLE', 'finite placement has no ready cohort')
         selected = ()
         for group in ready:
+            if selected and (model_dependencies.keys() & set(group) or model_dependencies.keys() & set(selected)):
+                continue
             if fits(selected + group):
                 selected += group
         if not selected:

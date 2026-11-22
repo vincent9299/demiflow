@@ -78,6 +78,7 @@ def test_every_key_a_reader_asks_for_is_explained():
     import dataclasses
     import compile_contract_inventory as inventory
     from demiflow.data import plan
+    from demiflow.planning.dataflow_training import FIT_CONFIGURATION_FIELDS
     access = inventory.configuration_access()
     read = set(access['literal']) | set(access['accessor'])
     declared = set()
@@ -87,7 +88,7 @@ def test_every_key_a_reader_asks_for_is_explained():
             declared |= {field.name for field in dataclasses.fields(operation)}
     written = (set(schema.COMPILER_KEYS) | set().union(*schema.SOURCE_KEYS.values())
                | set().union(*schema.MODEL_KEYS.values()) | schema.TERMINAL_KEYS | schema.STREAM_KEYS
-               | {schema.SCHEMA_KEY} | declared | schema.SEAL_KEYS)
+               | {schema.SCHEMA_KEY} | declared | schema.SEAL_KEYS | FIT_CONFIGURATION_FIELDS)
     unexplained = read - written - set(schema.READ_WITHOUT_WRITER)
     # What remains is not a kernel configuration: the scan also sees other objects' '.configuration'
     # (the run record, a sink declaration) and the inner mapping of graph_result.

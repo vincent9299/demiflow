@@ -155,10 +155,10 @@ def _bridge_node_map(entries):
 
 
 def _sealed_entry(result, *, bridge=None):
-    if result.get('version') == 'v3':
+    if result.get('version') in ('v3','v4'):
         view = result['plan_view']
         entry = dict(action_id=result['action_id'], status='sealed', binding_level='sealed',
-                     version='v3', dag=view['dag'], node_map=dict(view.get('node_map') or {}),
+                     version=result['version'], dag=view['dag'], node_map=dict(view.get('node_map') or {}),
                      plan_id=result['plan_id'], sealed_at=result.get('sealed_at'),
                      physical=view['physical'],
                      node_observations=view['node_observations'],
@@ -174,7 +174,7 @@ def _sealed_entry(result, *, bridge=None):
         entry['recovery_restriction'] = result['recovery_restriction']
     if bridge is not None and bridge.get('available'):
         entry['node_map'] = _bridge_node_map(bridge['bridge']['entries'])
-        if result.get('version') == 'v3':
+        if result.get('version') in ('v3','v4'):
             entry['node_map'].update({e['occurrence_id']: e['report_node_id'] for e in bridge['bridge']['entries']})
         entry['identity_bridge'] = bridge
     else:

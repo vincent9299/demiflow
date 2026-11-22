@@ -399,30 +399,33 @@ def test_real_committed_cut_inside_arrow_batch_resumes_once(tmp_path, monkeypatc
 
 def test_real_store_sha_failure_precedes_native_publication(tmp_path, monkeypatch):
     import json
-    from demiflow.execution.dataflow_sinks import NativeTerminalSink, _artifact_from_json
+    from demiflow.execution import dataflow_sinks
     from demiflow.execution.dataflow_segments import block_chunks
     from demiflow.execution.dataflow_handles import _ChunkStream
     from demiflow.execution.exchange.dataflow_bridge import _decode_record_document
     table = source_table(8)
     uri, target = str(tmp_path/'input.lance'), str(tmp_path/'output.lance')
     lance.write_dataset(table, uri)
-    original = NativeTerminalSink._blocks
-    tampered=[]
-    def corrupt(sink, manifest):
-        stream = _ChunkStream(block_chunks(sink._store, _artifact_from_json(manifest['partitions'][0]['data_ref']), sink._bounds))
-        item=json.loads(stream.readline(sink._bounds.max_row_bytes+1))
+    original = dataflow_sinks.publication_blocks
+    tampered = []
+
+    def corrupt(manifest, *, store, bounds, **options):
+        data_ref = dataflow_sinks._artifact_from_json(manifest['partitions'][0]['data_ref'])
+        stream = _ChunkStream(block_chunks(store, data_ref, bounds))
+        item = json.loads(stream.readline(bounds.max_row_bytes + 1))
         record=_decode_record_document(item['document'].encode(), record_id=item['record_id'],
-            sequence=item['sequence'], max_bytes=sink._bounds.max_row_bytes)
+            sequence=item['sequence'], max_bytes=bounds.max_row_bytes)
         assert is_arrow_record(record)
-        path=sink._store._object_path(record.payload_ref)
+        path = store._object_path(record.payload_ref)
         with path.open('r+b') as file:
             file.seek(-1,2)
             original_byte=file.read(1)
             file.seek(-1,2)
             file.write(bytes([original_byte[0]^1]))
         tampered.append(record.payload_ref.digest)
-        yield from original(sink, manifest)
-    monkeypatch.setattr(NativeTerminalSink, '_blocks', corrupt)
+        yield from original(manifest, store=store, bounds=bounds, **options)
+
+    monkeypatch.setattr(dataflow_sinks, 'publication_blocks', corrupt)
     with pytest.raises(DataflowError, match='artifact bytes do not match'):
         with RunContext.start(tmp_path/'run', limits=LIMITS) as run, data.local_execution(batch_rows=8, workers=2):
             data.read_lance(uri, version=1, batch_size=8).write_lance(target, mode='create')

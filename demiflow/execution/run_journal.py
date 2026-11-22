@@ -765,7 +765,7 @@ class RunJournal:
                 pass
             yield None
 
-    def claim_execution(self, configuration, fence, *, recover_resources=False):
+    def claim_execution(self, configuration, fence, *, recover_resources=False, preserve_jobs=False):
         with self._publication_lease(configuration['limits'].get('admission_timeout_s', 30)):
             self._check_maintenance_deadline()
             attempt = self._claim_execution(configuration, fence)
@@ -774,7 +774,7 @@ class RunJournal:
             # physical workers must retire before their object leases can let
             # published GC finish, including receipt-only action replay.
             from .dataflow_resource_recovery import recover_execution_resources
-            recover_execution_resources(self, configuration, fence)
+            recover_execution_resources(self, configuration, fence, preserve_jobs=preserve_jobs)
         self._reconcile_published_gc(fence)
         return attempt
 
@@ -1449,6 +1449,8 @@ class RunJournal:
             row = db.execute('SELECT document FROM runtime_effects WHERE action_id=? AND effect_id=?',
                              (action_id, command.effect_id)).fetchone()
             record = json.loads(row[0]) if row else None
+            if record and record.get('kind') in ('training_submission','training_input_copy'):
+                raise DataflowError('INVALID_CONTRACT', 'Fit submissions are owned by the sealed driver')
             if record and (record['request_digest'] != command.request_digest or record['actor_id'] != command.actor_id):
                 raise DataflowError('INVALID_CONTRACT', 'Effect identity reused for a different actor/request')
             state = record['state'] if record else 'absent'
@@ -1485,6 +1487,99 @@ class RunJournal:
                     record['result_ref'] = result_ref
             db.execute('INSERT OR REPLACE INTO runtime_effects VALUES (?,?,?)',
                        (action_id, command.effect_id, document(record).decode()))
+            return record
+
+    @contextmanager
+    def fit_guard(self, fence, action_id, occurrence, *, admitting=False):
+        from .recovery_contract import RecoveryContractError
+        with self.execution_guard(fence) as db:
+            row = db.execute('SELECT document FROM runtime_sources WHERE action_id=?',
+                             (action_id + '-dataflow-sealed',)).fetchone()
+            seal = json.loads(row[0]) if row else {}
+            run_id = json.loads(db.execute('SELECT document FROM runtime_identity').fetchone()[0])['run_id']
+            if (seal.get('schema') != 'demiflow.dataflow_seal.v4' or seal.get('action_id') != action_id
+                    or seal.get('run_id') != run_id or occurrence not in seal.get('fit_occurrences', ())):
+                raise RecoveryContractError('Fit submit requires the original sealed action and occurrence')
+            if admitting:
+                state = json.loads(db.execute('SELECT document FROM execution_state').fetchone()[0])
+                if state['status'] not in ('starting','running'):
+                    raise ExecutionConflict('Stopped producer cannot admit or activate training')
+            yield db
+
+    def fit_submission(self, fence, action_id, occurrence, *, instance, request_key,
+                       digest, scope, operation='observe', job=None, evidence=None,
+                       idempotent=False, input_copy=False):
+        """Authorize a single original fit dispatch against its sealed occurrence.
+
+        Only this fenced driver path may reconcile sent/unknown. The reservation
+        is per launch, across driver attempts; grant is returned once per send.
+        """
+        from .recovery_contract import document, identifier, identity, RecoveryContractError
+        for item in (action_id, occurrence, instance, request_key, digest):
+            identifier(item)
+        kind = 'training_input_copy' if input_copy else 'training_submission'
+        effect = identity([kind, occurrence, instance, request_key])
+        original = dict(kind=kind, actor_id=occurrence, instance=instance,
+                        request_digest=digest, request_key=request_key, provider_scope=scope)
+        admitting = operation in ('reserve', 'send', 'redeliver')
+        with self.fit_guard(fence, action_id, occurrence, admitting=admitting) as db:
+            row = db.execute('SELECT document FROM runtime_effects WHERE action_id=? AND effect_id=?',
+                             (action_id, effect)).fetchone()
+            record = json.loads(row[0]) if row else dict(original, state='absent', sends=0)
+            if any(record.get(k) != v for k, v in original.items()):
+                raise RecoveryContractError('Recorded training request identity differs')
+            state = record['state']
+            if operation == 'observe':
+                return record
+            if operation == 'reserve' and state == 'absent':
+                if db.execute('SELECT count(*) FROM runtime_effects').fetchone()[0] >= 100000:
+                    raise RecoveryContractError('Native effect count exceeds budget')
+                record['state'] = 'reserved'
+            elif operation == 'send' and state == 'reserved':
+                record.update(state='sent', sends=1)
+            elif operation == 'reject_unsent' and state == 'sent' and not input_copy:
+                if (type(evidence) is not dict or evidence.get('scope') != scope
+                        or evidence.get('request_key') != request_key or evidence.get('admitted') is not False):
+                    raise RecoveryContractError('Managed rejection has no original admission evidence')
+                document(evidence, 8192)
+                record.update(state='unsent', rejection=evidence)
+            elif operation == 'unknown' and state in ('sent', 'unknown'):
+                record.update(state='unknown', was_unknown=True)
+            elif operation == 'release_unsent' and state in ('absent', 'reserved'):
+                record['state'] = 'unsent'
+            elif operation in ('redeliver', 'confirm', 'confirm_absent') and state in ('sent', 'unknown'):
+                if (type(evidence) is not dict or evidence.get('scope') != scope
+                        or evidence.get('request_key') != request_key):
+                    raise RecoveryContractError('Lookup evidence belongs to a different provider or request')
+                document(evidence, 8192)
+                if operation == 'confirm':
+                    if input_copy:
+                        if (type(job) is not dict or job.get('scope') != scope
+                                or job.get('request_key') != request_key):
+                            raise RecoveryContractError('Input copy receipt identity differs')
+                        document(job, 65536)
+                        record['copy'] = job
+                    else:
+                        if (type(job) is not dict or set(job) != {'scope', 'job_id'}
+                                or job['scope'] != scope or not job['job_id']):
+                            raise RecoveryContractError('Submission receipt belongs to another provider')
+                        record['job'] = job
+                    record.update(state='confirmed', evidence=evidence)
+                else:
+                    expires = evidence.get('idempotency_expires_at')
+                    if (idempotent is not True or evidence.get('authoritative') is not True
+                            or type(expires) not in (float, int) or not expires > time.time()):
+                        raise RecoveryContractError('No live authoritative absence proof')
+                    if operation == 'confirm_absent':
+                        record.update(state='unsent', absent_evidence=evidence)
+                    elif record['sends'] == 1:
+                        record.update(state='sent', sends=2, absent_evidence=evidence)
+                    else:
+                        raise RecoveryContractError('Same-key redelivery already used')
+            else:
+                raise RecoveryContractError('Training submission state does not grant this transition')
+            db.execute('INSERT OR REPLACE INTO runtime_effects VALUES (?,?,?)',
+                       (action_id, effect, document(record).decode()))
             return record
 
     def reserve_budget(self, fence, name, reservation_id, amount, ceiling):

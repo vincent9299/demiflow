@@ -30,6 +30,10 @@ __all__ = [
     'read_lance',
     'read_document_receipts',
     'vector_search_lance',
+    "FitRef",
+    "ModelSelection",
+    "TrainingRecipe",
+    "PredictorSpec",
     "Dataset",
     "MaterializedDataset",
     "BlockMetadata",
@@ -49,6 +53,7 @@ __all__ = [
 
 
 _EXPORTS = {
+    **{name: (".training", name) for name in ("TrainingRecipe", "PredictorSpec", "FitRef", "ModelSelection")},
     **{name: (".dataset", name) for name in ("Dataset", "MaterializedDataset")},
     **{name: (".datasource", name) for name in ("BlockMetadata", "Datasource", "ReadTask")},
     **{name: (".datasink", name) for name in ("Datasink", "WriteResult")},

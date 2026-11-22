@@ -130,7 +130,7 @@ class NodeConfigurationMaterial:
     reason: str | None
     engine_configuration: Any = None
     arguments: Any = None
-    argument_kind: Literal['read', 'kernel'] | None = None
+    argument_kind: Literal['read', 'kernel', 'fit'] | None = None
 
 
 @dataclass(frozen=True)
@@ -248,12 +248,13 @@ def compiled_node_materials(compiled, *, bounds):
     if bounds is not None and type(bounds) is not Bounds:
         raise TypeError('compiled_node_materials bounds must be Bounds or None')
     graph = compiled.graph
-    if len(graph.nodes) > 256:
+    if len(graph.nodes) + len(graph.jobs) > 256:
         raise ValueError('Plan materials exceed node budget')
-    nodes = {node.occurrence_id: node for node in graph.nodes}
+    nodes = {node.occurrence_id for node in graph.nodes}
+    jobs = {job.occurrence_id for job in graph.jobs}
     declarations = {d.occurrence_id: d for d in compiled.declarations}
-    if len(nodes) != len(graph.nodes) or len(declarations) != len(compiled.declarations) \
-            or not set(declarations) <= set(nodes):
+    if (len(nodes | jobs) != len(graph.nodes) + len(graph.jobs)
+            or len(declarations) != len(compiled.declarations) or not set(declarations) <= nodes | jobs):
         raise ValueError('Material compilation identities differ')
     reason = 'schema_bounds_absent' if bounds is None else None
     schemas = {}
@@ -326,4 +327,16 @@ def compiled_node_materials(compiled, *, bounds):
         prompts = program_prompt_materials(declaration) if declaration is not None else None
         implementation = _implementation_material(declaration, prompts)
         result[key] = CompiledNodeMaterials(key, node.kind, schema_material, config_material, implementation, prompts)
+    for job in graph.jobs:
+        key = job.occurrence_id
+        try:
+            config = _display_json(job.configuration, total)
+            config_material = NodeConfigurationMaterial('available', None, config, config, 'fit')
+        except ValueError as exc:
+            config_material = NodeConfigurationMaterial('unavailable', str(exc))
+        declaration = declarations.get(key)
+        prompts = program_prompt_materials(declaration) if declaration is not None else None
+        result[key] = CompiledNodeMaterials(key, 'fit', NodeSchemaMaterial(
+            'unavailable', 'model_manifest_value', None), config_material,
+            _implementation_material(declaration, prompts), prompts)
     return result

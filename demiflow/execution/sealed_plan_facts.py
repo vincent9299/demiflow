@@ -48,7 +48,7 @@ def sealed_plan_view(directory, action_id, *, journal=None):
     from .dataflow_history import build_plan_view
     bundle = load_sealed_plan(directory, action_id)
     view = build_plan_view(bundle['graph'], bundle['sealed'], bundle['physical'], observations=())
-    return dict(version='v3', action_id=action_id,
+    return dict(version=bundle['version'], action_id=action_id,
                 dag_id=bundle['graph'].dag_id, plan_id=bundle['physical'].plan_id,
                 sealed_at=marker.get('sealed_at') if type(marker) is dict else None,
                 plan_view=view,
@@ -179,10 +179,10 @@ def read_action_plan(directory, action_id, *, max_bytes, deadline=None):
                 raise PlanContractError('invalid_contract', 'Invalid v3 carrier size')
             if ref['size_bytes'] > max_bytes:
                 raise PlanContractError('artifact_too_large', 'V3 carrier exceeds read budget')
-        bundle = load_sealed_plan(directory, action_id, version='v3', _reader=journal,
+        bundle = load_sealed_plan(directory, action_id, _reader=journal,
                                   _max_carrier_bytes=max_bytes, _deadline=deadline)
         view = build_plan_view(bundle['graph'], bundle['sealed'], bundle['physical'], observations=())
-        result = dict(version='v3', action_id=action_id, engine_run_id=(identity or {}).get('run_id'),
+        result = dict(version=bundle['version'], action_id=action_id, engine_run_id=(identity or {}).get('run_id'),
                       dag_id=bundle['graph'].dag_id, plan_id=bundle['physical'].plan_id,
                       sealed_at=marker.get('sealed_at'), plan_view=view, artifact_manifest_ref=None,
                       identity_bridge_ref=view.get('identity_bridge_ref'), code_pin_ref=view.get('code_pin_ref'),

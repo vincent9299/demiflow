@@ -84,7 +84,7 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits, sourc
     for index, path in enumerate(captured.submission['object_roots']):
         resources['objects-' + str(index)] = dict(kind='objects', root=path, access='write')
     result = dict(format=FORMAT, status='compiled', entry=entry,
-        **{k: view[k] for k in ('nodes', 'edges', 'actions', 'operators')},
+        **{k: view[k] for k in ('nodes', 'edges', 'value_edges', 'actions', 'operators') if k in view},
         native_contract=captured.submission, native_dag=view['dag'], native_details=details,
         pipeline_detail=pipeline,
         observation_instances=view['observations'], diagnostics=[],

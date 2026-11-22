@@ -30,6 +30,7 @@ DATA_EXPORTS = {
     'MaterializedDataset', 'BlockMetadata', 'Datasource', 'ReadTask', 'Datasink',
     'WriteResult', 'AbsMax', 'AggregateFnV2', 'Count', 'Max', 'Mean', 'Min',
     'Std', 'Sum', 'require', 'schema', 'open_checkpoint', 'read_checkpoint',
+    'FitRef', 'ModelSelection', 'TrainingRecipe', 'PredictorSpec',
 }
 PIPELINE_EXPORTS = {
     'PIPELINE_BACKENDS', 'PIPELINE_DEFAULT_DATASET_WORKERS',

@@ -59,6 +59,8 @@ class DataflowScheduler:
         self._policy = policy if policy is not None else physical.policy
         self._bounds = bounds if bounds is not None else physical.bounds
         self._hosts = tuple(hosts)
+        self._job_budget = None
+        self._job_hosts = ()
         self.scope_id = scope_id or ("df-" + physical.plan_id)
         identifier(self.scope_id)
         self._stages = {stage.stage_id: stage for stage in physical.stages}
@@ -159,28 +161,53 @@ class DataflowScheduler:
         Summing cluster capacity cannot prove that any individual worker fits.
         Bind each partition to a host whose runtime/store were actually probed.
         """
+        return self._place_demands([(stage.stage_id, stage.profile, work.operation_id, work.resident_bytes)
+                                    for stage, work in pending])
+
+    def bind_job_capacity(self, budget, gpu):
+        if self._job_budget is not None:
+            raise DataflowError('INVALID_CONTRACT', 'Job capacity is already bound')
+        self._job_budget = dict(budget)
+        if gpu:
+            self._job_budget['accelerator_gpu'] = gpu
+        self._job_hosts = tuple(replace(h, logical_resources={**h.logical_resources, 'gpu': gpu})
+                                for h in self._hosts if h.provider == 'local')
+
+    def place_job(self, occurrence, profile, operation_id):
+        stage = next((job for job in self._physical.jobs if job.occurrence_id == occurrence), None)
+        if stage is None or self._resident_by_allocation:
+            raise DataflowError('INVALID_CONTRACT', 'A sealed job needs an available placement phase')
+        demand = (stage.stage_id, profile, operation_id, profile.requests['memory_bytes'])
+        if self._job_budget is None or any(profile.requests[k] > self._job_budget[k]
+                                           for k in ('cpu_millis', 'memory_bytes')):
+            raise DataflowError('RESOURCE_INFEASIBLE', 'Training job exceeds admitted action resources')
+        if gpu_count(profile) > self._job_budget.get('accelerator_gpu', 0):
+            raise DataflowError('RESOURCE_INFEASIBLE', 'Training GPU group exceeds the authorized inventory')
+        return self._place_demands([demand], hosts=self._job_hosts)[operation_id], dict(self._job_budget)
+
+    def _place_demands(self, pending, *, hosts=None):
         if len(pending) > self._lease_limit:
             raise DataflowError('RESOURCE_INFEASIBLE', 'resident group exceeds partition limit')
         if len(pending) > self._worker_limit:
             raise DataflowError('RESOURCE_INFEASIBLE', 'resident group exceeds active worker budget')
-        resident = sum(work.resident_bytes for _, work in pending)
-        if not self._fits_resident(resident, {stage.stage_id for stage, _ in pending}):
+        resident = sum(amount for _, _, _, amount in pending)
+        if not self._fits_resident(resident, {stage_id for stage_id, _, _, _ in pending}):
             raise DataflowError('RESOURCE_INFEASIBLE', 'resident group exceeds admitted memory budget')
-        remaining = {h.host_id: dict(h.logical_resources) for h in self._hosts}
+        remaining = {h.host_id: dict(h.logical_resources) for h in (self._hosts if hosts is None else hosts)}
         assigned = {}
-        for stage, work in sorted(pending, key=lambda pair:
-                (pair[0].profile.requests['memory_bytes'], pair[0].profile.requests['cpu_millis']), reverse=True):
-            need = {key: stage.profile.requests[key] for key in ('cpu_millis', 'memory_bytes')}
-            need['gpu'] = gpu_count(stage.profile)
+        for stage_id, profile, operation_id, amount in sorted(pending, key=lambda pair:
+                (pair[1].requests['memory_bytes'], pair[1].requests['cpu_millis']), reverse=True):
+            need = {key: profile.requests[key] for key in ('cpu_millis', 'memory_bytes')}
+            need['gpu'] = gpu_count(profile)
             feasible = [host for host, capacity in remaining.items()
                         if all(need[key] <= capacity.get(key, 0) for key in need)
                         and (not need['gpu'] or not hasattr(self._resources.provider, 'device_host_feasible')
-                             or self._resources.provider.device_host_feasible(host, stage.profile))]
+                             or self._resources.provider.device_host_feasible(host, profile))]
             if not feasible:
                 raise DataflowError('RESOURCE_INFEASIBLE',
                     'No verified host has capacity for this worker placement')
             host = max(feasible, key=lambda key: remaining[key]['cpu_millis'])
-            assigned[work.operation_id] = host
+            assigned[operation_id] = host
             for key, amount in need.items():
                 remaining[host][key] = remaining[host].get(key, 0) - amount
         return assigned

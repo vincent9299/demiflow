@@ -64,6 +64,10 @@ class DurableResidency:
         self.completed = set()
         self.epoch = 0
         self.active_index = 0
+        from .dataflow_residency import value_predecessors
+        members = {s.stage_id: s.partitions for s in physical.stages}
+        self._value_inputs = {s: {p for predecessor in predecessors for p in members[predecessor]}
+                              for s, predecessors in value_predecessors(physical).items()}
         phases = partition_phases(physical)
         self.groups = tuple(group for group, _ in phases)
         self.partition_groups = tuple(parts for _, parts in phases)
@@ -97,6 +101,8 @@ class DurableResidency:
         # A ready consumer runs promptly, before admitting another source window.
         for index in reversed(range(len(self.groups))):
             group = set(self.partition_groups[index])
+            if any(self._value_inputs.get(s, set()) - self.completed for s in self.groups[index]):
+                continue
             if group <= self.completed:
                 continue
             inputs = [edge for edge in self._physical.exchanges

@@ -28,6 +28,10 @@
     "read_lance",
     "read_document_receipts",
     "vector_search_lance",
+    "FitRef",
+    "ModelSelection",
+    "TrainingRecipe",
+    "PredictorSpec",
     "Dataset",
     "MaterializedDataset",
     "BlockMetadata",
@@ -216,6 +220,22 @@
     "Sum": [
       "demiflow.data.aggregate",
       "Sum"
+    ],
+    "FitRef": [
+      "demiflow.data.training",
+      "FitRef"
+    ],
+    "ModelSelection": [
+      "demiflow.data.training",
+      "ModelSelection"
+    ],
+    "TrainingRecipe": [
+      "demiflow.data.training",
+      "TrainingRecipe"
+    ],
+    "PredictorSpec": [
+      "demiflow.data.training",
+      "PredictorSpec"
     ]
   }
 }

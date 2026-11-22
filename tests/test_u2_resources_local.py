@@ -110,7 +110,16 @@ def test_process_unit_spawn_inspect_stop_confirmed(tmp_path):
         found = unit.inspect("scope-1", "alloc-a", process=process)
         assert found["phase"] == "RUNNING" and found["observation"] == "FRESH"
         assert pid_alive(identity["pid"])
-        assert not unit_stopped(unit.directory("scope-1", "alloc-a") / "unit.lock", identity["unit"])
+        lock = unit.directory("scope-1", "alloc-a") / "unit.lock"
+        assert not unit_stopped(lock, identity["unit"])
+        saved = lock.rename(lock.with_name("original.lock"))
+        try:
+            lock.touch()
+            changed = unit.inspect("scope-1", "alloc-a", process=process)
+            assert changed["observation"] == "STALE_UNKNOWN"
+            assert not unit_stopped(lock, identity["unit"])
+        finally:
+            saved.replace(lock)
         evidence = unit.stop("scope-1", "alloc-a", terminate_deadline_ms=3000, process=process)
         assert evidence["confirmed"] is True
         assert evidence["evidence_ref"].endswith("cleanup.json")

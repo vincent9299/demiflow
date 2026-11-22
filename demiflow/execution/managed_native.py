@@ -41,23 +41,32 @@ def native_submission_view(captured):
         raise ValueError('An admitted native capture is required')
     graph = captured.compiled.graph
     action = contract['action_id']
-    keys = {n.occurrence_id: action if n.occurrence_id in graph.terminals else n.occurrence_id for n in graph.nodes}
+    keys = {n.occurrence_id: action if n.occurrence_id in graph.terminals else n.occurrence_id for n in (*graph.nodes, *graph.jobs)}
     targets = {o['node_id']: o for o in contract['outputs']}
     nodes = []
     for n in graph.nodes:
         key = keys[n.occurrence_id]
         output = targets.get(key)
-        kind = 'write_table' if n.kind == 'terminal' else 'save_lance' if output else n.kernel.kind
+        kind = 'write_table' if n.occurrence_id in graph.terminals else 'save_lance' if output else n.kernel.kind
         parameters = thaw_record_value(n.kernel.configuration)
         if output:
             parameters.update(uri=output['uri'], mode=output.get('writer_mode', 'create'))
             if 'stage' in output:
                 parameters.update(stage=output['stage'], max_index_bytes=output['max_index_bytes'])
-        nodes.append(dict(id=key, kind=kind, role='action' if n.kind == 'terminal' else 'source' if n.kind == 'source' else 'transform',
+        gpu = sum(device['count'] for device in n.kernel.profile.requests.get('accelerators', ())
+                  if device['type'] == 'gpu')
+        capabilities = {'capability_fact': {'resource_declaration': {'gpu': gpu}}} if gpu else {}
+        nodes.append(dict(id=key, kind=kind, role='action' if n.occurrence_id in graph.terminals else 'source' if n.kind == 'source' else 'transform',
             parameters=parameters, normalized_parameters={'schema': {'identity': output['schema_identity']}} if output else {},
-            analysis={}, contract={}, source=None, operator=None, api=n.kernel.kind))
+            analysis={}, contract={}, source=None, operator=None, api=n.kernel.kind, **capabilities))
     edges = [dict(**{'from': keys[e.producer], 'to': keys[e.consumer]}, port=i) for i, e in enumerate(graph.edges)]
-    return dict(nodes=nodes, edges=edges, actions=[action], operators=[],
+    for job in graph.jobs:
+        nodes.append(dict(id=job.occurrence_id, kind="fit", role="value", parameters=thaw_record_value(job.configuration),
+                          normalized_parameters={}, analysis={"topology": thaw_record_value(job.configuration["semantics"]["topology"])},
+                          contract={}, source=None, operator=None, api="fit"))
+    values = [dict(**{'from': keys[e.producer], 'to': keys[e.consumer]}, port=e.input_port,
+                   kind=e.kind, step=e.step) for e in graph.value_edges]
+    return dict(nodes=nodes, edges=edges, actions=[action], operators=[], **({'value_edges': values} if values else {}),
         observations=[dict(action_id=action, node_id=n['id'], occurrence=0) for n in nodes],
         dag=build_logical_plan_view(graph, declarations=captured.compiled.declarations,
                                     observation_labels=captured.compiled.observation_labels))
@@ -188,7 +197,8 @@ class NativeExecution(CheckedExecution):
         terminal = compiled.graph.terminals[0]
         bindings = tuple(dict(occurrence_id=node.occurrence_id,
             report_node_id=request.action.action_id if node.occurrence_id == terminal else node.occurrence_id,
-            report_occurrence=0, logical_node_id=node.semantic_id, mode='execute') for node in compiled.graph.nodes)
+            report_occurrence=0, logical_node_id=node.semantic_id, mode='execute')
+            for node in (*compiled.graph.nodes, *compiled.graph.jobs))
         return replace(compiled, report_bindings=bindings)
 
     def native_save_policy(self, execution, node, writer):

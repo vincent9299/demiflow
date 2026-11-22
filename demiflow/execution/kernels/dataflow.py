@@ -533,7 +533,37 @@ def invoke_batch(
     if any(record.schema_ref != records[0].schema_ref for record in records):
         raise _err('INVALID_CONTRACT', 'one business batch cannot mix declared schemas')
     output_ref = [None]
+    expected = cfg.get("predict_output_schema")
+    keyed = expected is not None and cfg.get('batch_size', 1) > 1
+    if expected is not None:
+        import pyarrow as pa
+        from ...data.training_schema import PREDICTION_ROW_ID, validate_columns
+        required = cfg['predict_input_schema']
+        if schema is not None:
+            validate_columns(schema, required)
+        else:
+            for row in rows:
+                validate_columns(pa.RecordBatch.from_pylist([row]).schema, required)
+        if keyed:
+            if any(PREDICTION_ROW_ID in row for row in rows):
+                raise _err('INVALID_CONTRACT', 'Predictor input contains the reserved correlation column')
+            input_bytes += sum(len(record.record_id) + len(PREDICTION_ROW_ID) + 64 for record in records)
+            if input_bytes > services.bounds.max_batch_bytes:
+                raise _err('BUDGET_EXCEEDED', 'Prediction input identities exceed the batch budget')
+            # Union can deliver the same source record through two branches.
+            # Include its position in this call so both results have to echo
+            # their own occurrence even when their source identities match.
+            prediction_ids = tuple(_hash_id([rec.record_id, i]) for i, rec in enumerate(records))
+            rows = [{**row, PREDICTION_ROW_ID: key} for row, key in zip(rows, prediction_ids)]
+            if schema is not None:
+                schema = schema.append(pa.field(PREDICTION_ROW_ID, pa.string()))
+
     def output_schema(value):
+        if expected is not None and value is not None:
+            validate_columns(value, expected)
+            if keyed:
+                validate_columns(value, {PREDICTION_ROW_ID: 'string'})
+                value = value.remove(value.get_field_index(PREDICTION_ROW_ID))
         output_ref[0] = schemas.put(value)
 
     if kind == "MapBatchesOp":
@@ -599,9 +629,16 @@ def invoke_batch(
         raise _err("INVALID_CONTRACT", "kind is not a batch kernel", kind=kind)
 
     occurrence = spec.configuration.get("occurrence_id")
+    count = 0
     try:
         for index, out_row in enumerate(out_rows):
             _check_stop(services)
+            if expected is not None:
+                if index >= len(records):
+                    raise _err('INVALID_CONTRACT', 'Predictor returned more rows than its input batch')
+                if keyed and out_row.pop(PREDICTION_ROW_ID, None) != prediction_ids[index]:
+                    raise _err('INVALID_CONTRACT', 'Predictor changed the input occurrence order')
+                count += 1
             if index < len(records):
                 source = records[index]
                 record_id = source.record_id
@@ -610,10 +647,14 @@ def invoke_batch(
                 source = records[-1]
                 record_id = _hash_id([RECORD_DOMAIN, source.record_id, occurrence, index])
                 position = source.source_position
+            if expected is not None and output_ref[0] is None:
+                validate_columns(pa.RecordBatch.from_pylist([out_row]).schema, expected)
             out = _output_record(record_id, position, out_row, source.sequence, services,
                                  schema_ref=output_ref[0])
             budget.charge(out)
             yield out
+        if expected is not None and count != len(records):
+            raise _err('INVALID_CONTRACT', 'Predictor must return one result row for every input')
     finally:
         close = getattr(out_rows, 'close', None)
         if close is not None:

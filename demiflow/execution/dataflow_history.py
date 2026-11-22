@@ -38,7 +38,7 @@ from .run_journal import RunJournal
 # Original sealed-plan facts schema for the native v1/v2 chain/graph generation.
 SEALED_PLAN_FACTS_SCHEMA = "demiflow.sealed_plan_facts.v1"
 # v3 native seal marker bound by seal_dataflow through the same journal slot family.
-from .seal.plan import SEAL_SCHEMA as DATAFLOW_SEALED_SCHEMA, _validate_seal_marker
+from .seal.plan import SEAL_SCHEMA as DATAFLOW_SEALED_SCHEMA, TRAINING_SEAL_SCHEMA, _validate_seal_marker, verify_fit_membership
 # The only listed native checkpoint format translated into an in-memory image.
 CHECKPOINT_MANIFEST_SCHEMA = "demiflow.checkpoint_manifest.v1"
 PLAN_VIEW_SCHEMA = "demiflow.plan_view.v3"
@@ -188,6 +188,7 @@ def _load_v3(journal, directory, action_id, marker):
     from .seal.plan import load_sealed_dataflow
     store, bounds = _v3_read_store(directory, store_id=sealed.physical_ref.store_id)
     graph, physical, _ = load_sealed_dataflow(sealed, action_id=action_id, store=store, bounds=bounds)
+    verify_fit_membership(marker, graph)
     if "observation_labels" in marker:
         labels = marker["observation_labels"]
         if (type(labels) is not dict
@@ -482,7 +483,7 @@ def validate_resume_compatibility(binding: HistoricalBinding, *, current_runtime
         reasons.append(binding.reason or "historical binding is marked incompatible")
         return CapabilityReport(supported=False, reasons=tuple(reasons), recovery="attempt_only",
                                 required_domains=(), required_profiles=())
-    if binding.schema_version not in (SEALED_PLAN_FACTS_SCHEMA, DATAFLOW_SEALED_SCHEMA):
+    if binding.schema_version not in (SEALED_PLAN_FACTS_SCHEMA, DATAFLOW_SEALED_SCHEMA, TRAINING_SEAL_SCHEMA):
         reasons.append("unsupported historical schema: " + binding.schema_version)
     # Original code must still be available; never substitute current code.
     try:
@@ -500,7 +501,7 @@ def validate_resume_compatibility(binding: HistoricalBinding, *, current_runtime
     except DataflowError as exc:
         reasons.append("original sealed plan unreadable: " + exc.code)
     if plan is not None:
-        if binding.schema_version == DATAFLOW_SEALED_SCHEMA:
+        if binding.schema_version in {DATAFLOW_SEALED_SCHEMA, TRAINING_SEAL_SCHEMA}:
             from .contracts.dataflow_codec import decode_wire, compute_physical_digest
             try:
                 from .sealed_plans import _v3_read_bounds
@@ -622,7 +623,10 @@ def build_plan_view(graph: DataflowGraph, sealed: SealedExecution, physical: Phy
     dag = {"schema_version": graph.schema, "dag_id": graph.dag_id, "action_id": graph.action_id,
            "nodes": nodes, "edges": edges, "shared_ancestors": shared,
            "sources": list(graph.sources), "terminals": list(graph.terminals)}
-    stage_by_occurrence = {}
+    if graph.jobs:
+        from .plan_capture import project_training_ports
+        project_training_ports(graph, dag)
+    stage_by_occurrence = {job.occurrence_id: {"stage_id": job.stage_id, "kind": "fit"} for job in physical.jobs}
     for stage in physical.stages:
         for occ in stage.occurrences:
             stage_by_occurrence[occ] = {
@@ -656,8 +660,10 @@ def build_plan_view(graph: DataflowGraph, sealed: SealedExecution, physical: Phy
                     "membership": list(s.membership), "completion_condition": s.completion_condition}
                    for s in physical.scopes],
     }
+    if physical.jobs:
+        physical_view["value_edges"] = [vars(edge).copy() for edge in physical.value_edges]
     node_observations = []
-    for node in graph.nodes:
+    for node in (*graph.nodes, *graph.jobs):
         obs = obs_by_occurrence.get(node.occurrence_id)
         if obs is None:
             node_observations.append({"occurrence_id": node.occurrence_id, "observed": False,

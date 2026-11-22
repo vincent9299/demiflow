@@ -26,7 +26,7 @@
   fields.logical_node_id = fields.occurrence_id = text(64, '^[0-9a-f]{64}$');
   fields.dag_id = fields.plan_id = fields.binding_digest;
   fields.plan_revision = {type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER};
-  fields.plan_format = {type: 'string', minLength: 2, maxLength: 6, pattern: '^(?:legacy|v3)$'};
+  fields.plan_format = {type: 'string', minLength: 2, maxLength: 6, pattern: '^(?:legacy|v3|v4)$'};
   const kinds = {
     development: [[], []], development_new: [[], []], development_session: [['session_id'], []],
     overview: [[], ['document']], tables: [[], []], runs: [[], []], checks: [[], []],
@@ -109,7 +109,7 @@
       const plan=['dag_id','plan_id','plan_revision','plan_format'].filter(has);
       if (plan.length&&plan.length<4) throw new Error('计划定位必须完整提供 dag_id/plan_id/plan_revision/plan_format');
       if (plan.length===4&&(!has('action_id')||!has('attempt'))) throw new Error('计划定位必须绑定 action_id 与明确 attempt');
-      if (value.plan_format==='v3'&&has('logical_node_id')&&!has('occurrence_id')) throw new Error('v3 实例定位必须提供 occurrence_id');
+      if (['v3','v4'].includes(value.plan_format)&&has('logical_node_id')&&!has('occurrence_id')) throw new Error('执行实例定位必须提供 occurrence_id');
     }
     if (value.row_id !== undefined && BigInt(value.row_id) > 18446744073709551615n) throw new Error('行定位值超出 uint64 范围');
     if (value.kind === 'run' && (Object.hasOwn(value, 'node_id') !== Object.hasOwn(value, 'report_digest'))) throw new Error('运行节点必须绑定报告');

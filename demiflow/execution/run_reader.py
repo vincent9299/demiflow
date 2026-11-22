@@ -138,6 +138,11 @@ def read_run(directory, *, timeout=1.0, deadline=None, transaction=True):
             raise RunReadError('Run journal identity changed while reading')
 
 
+def fit_table_prefix(attempt, action_id):
+    from .recovery_contract import identity
+    return 'fit-table-' + identity([attempt, action_id]) + '-'
+
+
 class RunReader:
     """Typed reads over an open read-only journal connection.
 
@@ -147,6 +152,89 @@ class RunReader:
 
     def __init__(self, db):
         self.db = db
+
+    def fit_routes(self):
+        """Original producer routes for an authorized stopped-run control operation."""
+        if not self.has_table('runtime_sources'):
+            return []
+        rows = self.db.execute('SELECT ' + _TEXT_BYTES + """ FROM runtime_sources
+            WHERE action_id >= 'fit-route-' AND action_id < 'fit-route-~'
+            ORDER BY action_id LIMIT 1025""",(8193,)).fetchall()
+        if len(rows) > 1024 or any(type(raw) is not bytes or len(raw)>8192 for raw, in rows):
+            raise RunReadError("Fit maintenance routing exceeds budget")
+        return [_bounded_object(raw) for raw, in rows]
+
+    def fit_publication(self, run_id, parent, scope, commit_id):
+        """Read the original model publication in this one journal snapshot."""
+        if not self.has_table('runtime_commit_scopes'):
+            return None
+        row = self.db.execute('SELECT ' + _TEXT_BYTES + ' FROM runtime_identity LIMIT 1',
+                              (MAX_DOCUMENT_BYTES + 1,)).fetchone()
+        if (not row or type(row[0]) is not bytes or len(row[0]) > MAX_DOCUMENT_BYTES
+                or _bounded_object(row[0]).get('run_id') != run_id):
+            raise RunReadError('Training producer journal identity differs')
+        row = self.db.execute('SELECT parent_action_id FROM runtime_commit_scopes WHERE scope_id=?',
+                              (scope,)).fetchone()
+        if not row or row[0] != parent:
+            raise RunReadError('Training publication has no original parent scope')
+        fact = _ReadonlyJournal._commit(self.db, commit_id)
+        if not fact or fact['action_id'] != scope or fact['sequence'] != 1:
+            raise RunReadError('Training publication commit identity differs')
+        if fact['status'] != 'acked':
+            return None
+        if set(fact['receipts']) != {'model_manifest'}:
+            raise RunReadError('Training publication receipt set differs')
+        return fact['receipts']['model_manifest']
+
+    def training_outputs(self, attempt, action_id):
+        """Small attempt-scoped scoring-table facts, with no project/provider access."""
+        _check_attempt(attempt)
+        if not self.has_table('runtime_sources'):
+            return None
+        prefix = fit_table_prefix(attempt, action_id)
+        rows = self.db.execute('SELECT ' + _TEXT_BYTES + """
+            FROM runtime_sources WHERE action_id >= ? AND action_id < ?
+            ORDER BY action_id LIMIT 9""", (8193, prefix, prefix + '~')).fetchall()
+        if not rows:
+            return None
+        items = []
+        for raw, in rows[:8]:
+            if type(raw) is not bytes or len(raw) > 8192:
+                raise RunReadError("Scoring provenance record exceeds budget")
+            value = _bounded_object(raw)
+            if value.get('attempt') != attempt or value.get('action_id') != action_id:
+                raise RunReadError("Scoring provenance belongs to another action or attempt")
+            items.append(value)
+        return dict(models=items, has_more=len(rows)>len(items))
+
+    def training_provenance(self, attempt, action_id, occurrence):
+        """One bounded original version reference. Never opens weights or another project's index."""
+        _check_attempt(attempt)
+        if not self.has_table('runtime_sources'):
+            return None
+        from .recovery_contract import identifier
+        identifier(action_id)
+        identifier(occurrence)
+        def source(key):
+            row = self.db.execute('SELECT ' + _TEXT_BYTES + ' FROM runtime_sources WHERE action_id=?',
+                                  (MAX_DOCUMENT_BYTES + 1,key)).fetchone()
+            if row is None:
+                return None
+            if type(row[0]) is not bytes or len(row[0]) > MAX_DOCUMENT_BYTES:
+                raise RunReadError('Training provenance exceeds history read budget')
+            return _bounded_object(row[0])
+        selected = source(fit_table_prefix(attempt, action_id)+occurrence)
+        if not selected:
+            return None
+        if (selected['attempt'],selected['action_id'],selected['occurrence']) != (attempt,action_id,occurrence):
+            raise RunReadError('Training provenance scope differs')
+        original = source(selected['provenance_id'])
+        if not original or (original['instance'],original['manifest']) != (
+                selected['instance'], selected['manifest_digest']):
+            raise RunReadError('Original scoring-table ownership differs')
+        result = dict(table=selected, provenance=original['provenance'])
+        _compact(result, MAX_DOCUMENT_BYTES)
+        return result
 
     # -- shape -------------------------------------------------------------
     def tables(self, limit=33):
