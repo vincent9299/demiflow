@@ -191,14 +191,14 @@ class ModelBroker:
         self.name = session['provider']; self.config = deployment.providers[self.name]
         if not capabilities(self.name, self.config)['available']:
             reject('Configured provider has no qualified fixed model channel')
-        self.deadline = turn['created'] + deployment.limits.turn_seconds
+        self.deadline = (turn['created'] + deployment.limits.turn_seconds) if turn is not None else (time.time() + 3600)
         self.token = secrets.token_hex(32)
         self.closed = threading.Event(); self.requests = self.connections = 0
         self.input_bytes = self.output_bytes = 0; self.failure = None
         self.maximum = deployment.limits.output_bytes
         self.process = self.transport = self.listener = self.thread = self.client = self.quota = self.http_process = None
         self._init_thread = None; self._ready = threading.Event(); self._init_error = None
-        self._turn_lock = threading.Lock(); self.idle = False
+        self._turn_lock = threading.Lock(); self.idle = (turn is None); self._initializing = True
         self.output_reserved = 0
         self.socket_dir = Path(tempfile.mkdtemp(prefix='df-model-'))
         self.socket_path = self.socket_dir / 'channel'
@@ -206,8 +206,9 @@ class ModelBroker:
         self.child_config = {k: v for k, v in self.config.items()
                              if k not in {'native_credentials', 'credential_env', 'base_url', 'inherit_proxy'}}
         try:
-            self.quota = _Quota(self.home.parent.parent / (identifier(turn['id']) + '.model-budget.json'),
-                                turn['id'], self.maximum)
+            if turn is not None:
+                self.quota = _Quota(self.home.parent.parent / (identifier(turn['id']) + '.model-budget.json'),
+                                    turn['id'], self.maximum)
             if self.name == 'deepseek':
                 from .deepseek import DeepSeek
                 command, env = DeepSeek.launch(dict(self.config, _model_broker=True), self.home, str(self.home))
@@ -221,7 +222,10 @@ class ModelBroker:
                     self._init_thread = threading.Thread(target=self._run_handshake, name='development-model-init', daemon=True)
                     self._init_thread.start()
                 else:
-                    self._finish_deepseek_handshake()
+                    try:
+                        self._finish_deepseek_handshake()
+                    finally:
+                        self._initializing = False
                     self._ready.set()
             else:
                 url = urllib.parse.urlsplit(self.config['base_url'])
@@ -230,6 +234,7 @@ class ModelBroker:
                     reject('Fixed model endpoint must use HTTPS or explicit local test transport')
                 if not os.environ.get(self.config['credential_env']): reject('Configured model authentication is unavailable')
                 self.child_config['_boundary'] = dict(token=self.token)
+                self._initializing = False
                 self._ready.set()
             self.listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self.listener.bind(str(self.socket_path)); self.listener.listen(4); self.listener.settimeout(.2)
@@ -239,7 +244,7 @@ class ModelBroker:
             self.close(); raise
 
     def _finish_deepseek_handshake(self):
-        reply = self._rpc('initialize', {}, lambda _: None, timeout=30)
+        reply = self._rpc('initialize', {}, lambda _: None, timeout=30, allow_init=True)
         expected = dict(protocol='demiflow-model-channel-v1',
             provider=self.config.get('model_provider', 'deepseek-official'), model=self.config['model'])
         if reply != expected: reject('Native model broker handshake differs')
@@ -250,6 +255,7 @@ class ModelBroker:
         except BaseException as exc:
             self._init_error = exc
         finally:
+            self._initializing = False
             self._ready.set()
 
     def wait_ready(self, timeout=35):
@@ -283,16 +289,16 @@ class ModelBroker:
                                 turn['id'], self.maximum)
             self.idle = False
 
-    def _check(self):
-        if self.closed.is_set() or self.idle or time.time() >= self.deadline:
+    def _check(self, *, allow_init=False):
+        if self.closed.is_set() or (self.idle and not (allow_init and self._initializing)) or time.time() >= self.deadline:
             raise TimeoutError('Development model channel has expired')
 
-    def _rpc(self, method, params, on_chunk, *, timeout=180):
-        self._check()
+    def _rpc(self, method, params, on_chunk, *, timeout=180, allow_init=False):
+        self._check(allow_init=allow_init)
         key = self.transport.request(method, params)
         until = min(self.deadline, time.time() + timeout)
         while True:
-            self._check()
+            self._check(allow_init=allow_init)
             if time.time() >= until: raise TimeoutError('Model request exceeded its deadline')
             self.transport.poll(.05)
             while self.transport.events:

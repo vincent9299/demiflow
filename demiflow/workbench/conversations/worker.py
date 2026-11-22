@@ -13,6 +13,7 @@ import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 
 # Executed by absolute path with -I: no imports from the business cwd.
@@ -35,6 +36,7 @@ from demiflow.workbench.conversations.store import Store
 from demiflow.workbench.conversations.transport import Transport
 from demiflow.workbench.conversations.provider import adapter_for
 from demiflow.workbench.conversations.context import assemble
+from demiflow.workbench.conversations.context import authoritative_source_paths
 from demiflow.workbench.conversations.context import BridgeServer, INPUT_TOOL
 from demiflow.workbench.conversations.changes import capture
 from demiflow.workbench.conversations.changes import differences
@@ -135,58 +137,85 @@ def _teardown_provider(process, transport, provider, model_broker, control_bridg
     return drained, reason
 
 
-def _wait_next_turn(parent_sock, *, process, transport, stopping_signal, idle_deadline, sandbox_deadline, min_remaining):
-    """Park a warm worker until the next turn arrives or idle/shutdown triggers."""
-    buf = bytearray()
-    fds = []
+def _sandbox_compatible(standby_spec, actual_spec):
+    if standby_spec is None or actual_spec is None:
+        return standby_spec is actual_spec
+    return (
+        standby_spec.read_paths == actual_spec.read_paths
+        and standby_spec.write_paths == actual_spec.write_paths
+        and standby_spec.runtime_paths == actual_spec.runtime_paths
+        and standby_spec.protected_paths == actual_spec.protected_paths
+        and standby_spec.private_home == actual_spec.private_home
+        and standby_spec.role == actual_spec.role
+    )
+
+
+def _poll_parent_cmd(parent_sock, buf, fds, *, timeout=0.0):
+    """Non-blocking or bounded read of one parent command (+ optional SCM_RIGHTS fd)."""
+    def _pop_cmd():
+        while b'\n' in buf:
+            line, rest = bytes(buf).split(b'\n', 1)
+            buf[:] = rest
+            if not line.strip():
+                continue
+            msg = json.loads(line)
+            if msg.get('cmd') == 'turn' and isinstance(msg.get('tid'), str) and fds:
+                next_lease = fds.pop(0)
+                return ('turn', msg['tid'], next_lease)
+            if msg.get('cmd') == 'shutdown':
+                return ('shutdown',)
+        return None
+
+    cmd = _pop_cmd()
+    if cmd is not None:
+        return cmd
+    if parent_sock is None:
+        return ('closed',)
+    ready, _, _ = select.select([parent_sock], [], [], timeout)
+    if not ready:
+        return None
     try:
-        while True:
-            if stopping_signal[0]:
-                return None
-            if process is None or process.poll() is not None:
-                return None
-            if transport is None or transport.closed:
-                return None
-            now = time.time()
-            if now >= idle_deadline or (sandbox_deadline > 0 and sandbox_deadline - now <= min_remaining):
-                return None
-            ready, _, _ = select.select([parent_sock], [], [], 0.1)
-            if not ready:
-                continue
-            try:
-                data, ancdata, _, _ = parent_sock.recvmsg(4096, socket.CMSG_SPACE(array.array('i').itemsize * 4))
-            except BlockingIOError:
-                continue
-            except OSError:
-                return None
-            for cmsg_level, cmsg_type, cmsg_data in ancdata:
-                if cmsg_level == socket.SOL_SOCKET and cmsg_type == socket.SCM_RIGHTS:
-                    received = array.array('i')
-                    received.frombytes(cmsg_data[:len(cmsg_data) - (len(cmsg_data) % received.itemsize)])
-                    fds.extend(received)
-            if not data:
-                return None
-            buf.extend(data)
-            if len(buf) > 65536:
-                return None
-            while b'\n' in buf:
-                line, rest = bytes(buf).split(b'\n', 1)
-                buf = bytearray(rest)
-                if not line.strip():
-                    continue
-                msg = json.loads(line)
-                if msg.get('cmd') == 'turn' and isinstance(msg.get('tid'), str) and fds:
-                    next_lease = fds.pop(0)
-                    return msg['tid'], next_lease
-                if msg.get('cmd') == 'shutdown':
-                    return None
-    finally:
-        for leftover in fds:
-            try: os.close(leftover)
-            except OSError: pass
+        data, ancdata, _, _ = parent_sock.recvmsg(4096, socket.CMSG_SPACE(array.array('i').itemsize * 4))
+    except BlockingIOError:
+        return None
+    except OSError:
+        return ('closed',)
+    for cmsg_level, cmsg_type, cmsg_data in ancdata:
+        if cmsg_level == socket.SOL_SOCKET and cmsg_type == socket.SCM_RIGHTS:
+            received = array.array('i')
+            received.frombytes(cmsg_data[:len(cmsg_data) - (len(cmsg_data) % received.itemsize)])
+            fds.extend(received)
+    if not data:
+        return ('closed',)
+    buf.extend(data)
+    if len(buf) > 65536:
+        return ('closed',)
+    return _pop_cmd()
 
 
-def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
+def _wait_next_turn(parent_sock, *, process, transport, stopping_signal, idle_deadline, sandbox_deadline, min_remaining, buf=None, fds=None):
+    """Park a warm worker until the next turn arrives or idle/shutdown triggers."""
+    buf = buf if buf is not None else bytearray()
+    fds = fds if fds is not None else []
+    while True:
+        if stopping_signal[0]:
+            return None
+        if process is None or process.poll() is not None:
+            return None
+        if transport is None or transport.closed:
+            return None
+        now = time.time()
+        if now >= idle_deadline or (sandbox_deadline > 0 and sandbox_deadline - now <= min_remaining):
+            return None
+        cmd = _poll_parent_cmd(parent_sock, buf, fds, timeout=0.1)
+        if cmd is None:
+            continue
+        if cmd[0] == 'turn':
+            return cmd[1], cmd[2]
+        return None
+
+
+def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
     deployment = Deployment.load(config_path)
     store = Store(deployment.state, deployment.limits)
     limits = deployment.limits
@@ -241,11 +270,195 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
 
     process = transport = provider = model_broker = control_bridge = coding = None
     effective_bound = None
+    standby_spec = None
+    confined = None
     sandbox_deadline = 0.0
     warm_ready = False
+    provider_opened = False
+    already_claimed = False
     acp = False
+    parent_buf = bytearray()
+    parent_fds = []
 
     try:
+        if standby is not None:
+            standby_info = json.loads(standby)
+            st_project = deployment.project(standby_info['workspace'], standby_info['root_path'])
+            st_guided = st_project['kind'] == 'pipeline'
+            if st_guided and coding_fd is not None:
+                from demiflow.forge.api_reference import REFERENCE_BYTES
+                try:
+                    raw_coding = os.pread(coding_fd, REFERENCE_BYTES + 1, 0)
+                finally:
+                    os.close(coding_fd)
+                    coding_fd = None
+                if len(raw_coding) <= REFERENCE_BYTES:
+                    coding = json.loads(raw_coding)
+            st_home = deployment.state / standby_info['session_id']
+            st_home.mkdir(mode=0o700, exist_ok=True)
+            st_provider_home = st_home / 'provider' if deployment.mode == 'restricted' else st_home
+            st_provider_home.mkdir(mode=0o700, exist_ok=True)
+            st_broker_home = (st_home / 'control' / 'standby' / 'model'
+                              if deployment.mode == 'restricted' else None)
+            if st_broker_home is not None:
+                st_broker_home.mkdir(mode=0o700, parents=True, exist_ok=True)
+            st_config = deployment.providers[standby_info['provider']]
+            st_adapter = adapter_for(standby_info['provider'], 'message')
+            acp = getattr(st_adapter, 'acp', False)
+            if acp and st_guided:
+                control_bridge = BridgeServer(None)
+            st_manifest = dict(sources=[dict(origin='authoritative_file', canonical_path=str(p))
+                                        for p in authoritative_source_paths(st_project)])
+            st_session = dict(id=standby_info['session_id'], workspace=standby_info['workspace'],
+                              provider=standby_info['provider'], policy_hash=standby_info['policy_hash'])
+            warm_sandbox_secs = min(3600, max(limits.turn_seconds, WARM_SANDBOX_SECONDS))
+            standby_spec = (sandbox_spec(deployment, st_project, st_session,
+                                         {'operation': 'message', 'created': time.time()},
+                                         st_manifest, st_config, st_provider_home, seconds=warm_sandbox_secs)
+                            if deployment.mode == 'restricted' else None)
+            standby_lease = None
+            try:
+                if standby_spec is not None:
+                    sandbox_deadline = time.time() + standby_spec.seconds
+                    from demiflow.workbench.conversations.sandbox import specification
+                    specification(standby_spec, [sys.executable], {}, st_project['root'])
+                    from demiflow.workbench.conversations.model_broker import start_model_broker
+                    model_broker = start_model_broker(deployment, None, st_session, st_broker_home, defer_handshake=True)
+                    st_config = model_broker.child_config
+                else:
+                    standby_lease = tempfile.TemporaryFile(dir=st_home)
+                process = launch_provider(
+                    mode=deployment.mode, adapter=st_adapter, config=st_config,
+                    home=st_provider_home, root=st_project['root'],
+                    lease_fd=standby_lease.fileno() if standby_lease is not None else None,
+                    sandbox_spec=standby_spec,
+                    control_socket=control_bridge.path if control_bridge is not None else None,
+                    model_socket=model_broker.socket_path if model_broker is not None else None,
+                )
+            finally:
+                if standby_lease is not None:
+                    standby_lease.close()
+            transport = Transport(process, limits, acp=acp)
+            provider = st_adapter(transport, st_config, st_project, None)
+
+            def _check_standby_parent():
+                nonlocal tid, lease_fd, already_claimed
+                if stopping_signal[0]:
+                    return 'stop'
+                cmd = _poll_parent_cmd(parent_sock, parent_buf, parent_fds, timeout=0.0)
+                if cmd is None:
+                    return None
+                if cmd[0] == 'turn' and tid is None:
+                    next_tid, next_lease = cmd[1], cmd[2]
+                    if not send_parent('accepted', reliable=True, tid=next_tid):
+                        try: os.close(next_lease)
+                        except OSError: pass
+                        return 'stop'
+                    tid, lease_fd = next_tid, next_lease
+                    try:
+                        turn_row = store.turn(tid)
+                        unit = os.fstat(lease_fd)
+                        store.claim_worker(tid, turn_row['epoch'], dict(device=unit.st_dev, inode=unit.st_ino), process_identity(os.getpid()))
+                        already_claimed = True
+                        send_parent('notify')
+                    except BaseException:
+                        pass
+                    return None
+                return 'stop'
+
+            def _wait_standby(key, timeout=40):
+                until = time.monotonic() + timeout
+                while True:
+                    status = _check_standby_parent()
+                    if status == 'stop':
+                        return None
+                    if tid is not None:
+                        try:
+                            if store.turn(tid)['stop_at']:
+                                raise InterruptedError('stop_requested')
+                        except BaseException:
+                            raise
+                    if time.monotonic() > until:
+                        raise TimeoutError('Standby provider handshake timeout')
+                    transport.poll(0.05)
+                    response = transport.take(key)
+                    if response is not None:
+                        return response
+                    if transport.closed:
+                        raise ConnectionError('Standby provider stdout closed before acknowledgement')
+
+            standby_aborted = False
+            try:
+                handshake = _wait_standby(provider.initialize(), timeout=40)
+                if handshake is None:
+                    standby_aborted = True
+                else:
+                    configuration_key = provider.initialized(handshake)
+                    cfg_resp = _wait_standby(configuration_key, timeout=30) if configuration_key else {}
+                    if cfg_resp is None:
+                        standby_aborted = True
+                    else:
+                        effective = provider.verify_config(cfg_resp)
+                        effective['execution_assurance'] = getattr(process, 'execution_assurance', 'host_permissions')
+                        effective_bound = dict(effective)
+                        if model_broker is not None:
+                            broker_until = time.monotonic() + 35
+                            while not model_broker._ready.wait(0.05):
+                                if _check_standby_parent() == 'stop':
+                                    standby_aborted = True
+                                    break
+                                if tid is not None and store.turn(tid)['stop_at']:
+                                    raise InterruptedError('stop_requested')
+                                if time.monotonic() > broker_until:
+                                    raise TimeoutError('Standby model broker handshake timed out')
+                            if not standby_aborted:
+                                model_broker.wait_ready(timeout=1)
+                        if not standby_aborted:
+                            warm_ready = True
+                            provider_opened = False
+            except BaseException:
+                _teardown_provider(process, transport, provider, model_broker, control_bridge)
+                process = transport = provider = model_broker = control_bridge = None
+                effective_bound = None
+                standby_spec = None
+                warm_ready = False
+                provider_opened = False
+                if tid is None:
+                    return
+                # A real turn was already accepted mid-boot; fall through into the
+                # main turn loop so it either cancels cleanly or falls back to cold spawn.
+
+            if standby_aborted:
+                if tid is None:
+                    return
+                _teardown_provider(process, transport, provider, model_broker, control_bridge)
+                process = transport = provider = model_broker = control_bridge = None
+                warm_ready = False
+                provider_opened = False
+
+            if tid is None:
+                if not send_parent('idle', reliable=True, tid=None, standby=True, sandbox_deadline=sandbox_deadline):
+                    return
+                next_work = _wait_next_turn(
+                    parent_sock,
+                    process=process,
+                    transport=transport,
+                    stopping_signal=stopping_signal,
+                    idle_deadline=time.time() + WARM_IDLE_SECONDS,
+                    sandbox_deadline=sandbox_deadline if deployment.mode == 'restricted' else 0.0,
+                    min_remaining=limits.turn_seconds + 60,
+                    buf=parent_buf,
+                    fds=parent_fds,
+                )
+                if next_work is None:
+                    return
+                next_tid, next_lease = next_work
+                if not send_parent('accepted', reliable=True, tid=next_tid):
+                    try: os.close(next_lease)
+                    except OSError: pass
+                    return
+                tid, lease_fd = next_tid, next_lease
+
         while True:
             turn = store.turn(tid); session = store.session(turn['session'])
             compact = turn.get('operation') == 'compact'
@@ -275,9 +488,12 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
             outstanding = {}
             input_access = None
 
-            unit = os.fstat(lease_fd)
-            store.claim_worker(tid, turn['epoch'], dict(device=unit.st_dev, inode=unit.st_ino), process_identity(os.getpid()))
-            send_parent('notify')
+            if already_claimed:
+                already_claimed = False
+            else:
+                unit = os.fstat(lease_fd)
+                store.claim_worker(tid, turn['epoch'], dict(device=unit.st_dev, inode=unit.st_ino), process_identity(os.getpid()))
+                send_parent('notify')
 
             def flush_events():
                 nonlocal pending_bytes, last_flush
@@ -433,6 +649,25 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                 tick()
                 if requested: raise InterruptedError(reason)
 
+                if warm_ready and not provider_opened:
+                    compatible = not (compact or notebook)
+                    if compatible and deployment.mode == 'restricted':
+                        provider_home = home / 'provider'
+                        provider_home.mkdir(mode=0o700, exist_ok=True)
+                        actual_spec = sandbox_spec(deployment, project, session, turn, manifest,
+                            deployment.providers[session['provider']], provider_home,
+                            seconds=max(.1, sandbox_deadline - time.time()))
+                        from demiflow.workbench.conversations.sandbox import specification
+                        specification(actual_spec, [sys.executable], {}, project['root'])
+                        compatible = _sandbox_compatible(standby_spec, actual_spec)
+                        confined = standby_spec
+                    if not compatible:
+                        _teardown_provider(process, transport, provider, model_broker, control_bridge)
+                        process = transport = provider = model_broker = control_bridge = None
+                        effective_bound = None
+                        standby_spec = None
+                        warm_ready = False
+
                 if warm_ready:
                     if model_broker is not None:
                         model_broker.begin_turn(turn, limits)
@@ -442,12 +677,30 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                     transport.output_bytes = 0
                     provider.items.clear()
                     provider.turn = None
-                    if acp:
-                        provider.acknowledged = False
-                        provider.prompt = prompt
-                    store.event(tid, 'provider.bound', dict(effective_bound or {}, warm_reused=True))
-                    store.update(tid, delivery='prepared' if acp else 'acknowledged')
-                    send_parent('notify')
+                    if not provider_opened:
+                        saved_session = session['provider_session'] if acp or store.has_dispatched(session['id']) else None
+                        provider.thread = saved_session
+                        if acp and guided:
+                            provider.mcp_servers = [dict(name='development-protocol', command=sys.executable,
+                                args=['-I', '-B', str(Path(__file__).with_name('mcp_bridge.py')), '--connect', str(control_bridge.path),
+                                      control_bridge.token, tid, turn['epoch']], env=[])]
+                        store.event(tid, 'provider.bound', dict(effective_bound or {}, warm_reused=True, standby_prewarmed=True))
+                        store.update(tid, delivery='sent')
+                        send_parent('notify')
+                        open_key = provider.open(prompt) if acp else provider.open(prompt, tools=(INPUT_TOOL,) if guided else ())
+                        thread = provider.opened(wait(open_key))
+                        store.bind_provider(session['id'], thread)
+                        store.update(tid, delivery='prepared' if acp else 'acknowledged')
+                        if acp and session['provider_session']:
+                            store.event(tid, 'history.gap', dict(reason='ACP resume does not replay provider transcript; saved application events remain authoritative'))
+                        provider_opened = True
+                    else:
+                        if acp:
+                            provider.acknowledged = False
+                            provider.prompt = prompt
+                        store.event(tid, 'provider.bound', dict(effective_bound or {}, warm_reused=True))
+                        store.update(tid, delivery='prepared' if acp else 'acknowledged')
+                        send_parent('notify')
                 else:
                     config = deployment.providers[session['provider']]
                     adapter = adapter_for(session['provider'], turn.get('operation', 'message'))
@@ -501,6 +754,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                         store.event(tid, 'history.gap', dict(reason='ACP resume does not replay provider transcript; saved application events remain authoritative'))
                     if model_broker is not None:
                         model_broker.wait_ready()
+                    provider_opened = True
 
                 # Compare again after context preparation and handshake; no baseline reset.
                 if watched and capture(project['root'], watched, exclude=excluded) != baseline:
@@ -742,6 +996,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                 idle_deadline=time.time() + WARM_IDLE_SECONDS,
                 sandbox_deadline=sandbox_deadline if deployment.mode == 'restricted' else 0.0,
                 min_remaining=limits.turn_seconds + 60,
+                buf=parent_buf,
+                fds=parent_fds,
             )
             if next_work is None:
                 break
@@ -752,6 +1008,9 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
                 break
             tid, lease_fd = next_tid, next_lease
     finally:
+        for leftover in parent_fds:
+            try: os.close(leftover)
+            except OSError: pass
         if process is not None or transport is not None or model_broker is not None or control_bridge is not None:
             _teardown_provider(process, transport, provider, model_broker, control_bridge)
         if coding_fd is not None:
@@ -769,4 +1028,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None):
 
 
 if __name__ == '__main__':
-    run(sys.argv[1], sys.argv[2], *(int(fd) for fd in sys.argv[3:]))
+    if len(sys.argv) >= 5 and sys.argv[1] == '--standby':
+        run(sys.argv[2], None, None, int(sys.argv[4]), int(sys.argv[5]) if len(sys.argv) > 5 else None, standby=sys.argv[3])
+    else:
+        run(sys.argv[1], sys.argv[2], *(int(fd) for fd in sys.argv[3:]))

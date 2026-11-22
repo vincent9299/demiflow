@@ -247,3 +247,99 @@ plugin.apply({effect(){},llm:{
         assert len(rows) < 1000
     finally:
         channel.close()
+
+
+def test_standby_prewarm_accelerates_new_session_first_turn_and_subsequent_turns(tmp_path):
+    from demiflow.workbench.conversations.service import Service
+    from test_forge_development_chat import configuration, wait_turn
+
+    root, path, _ = configuration(tmp_path)
+    service = Service(path)
+    try:
+        status = service.prewarm('wfixture', root, provider_id='codex')
+        assert status['status'] in ('warming', 'ready') and status.get('standby') is True
+        deadline = time.monotonic() + 10.0
+        warm = None
+        while time.monotonic() < deadline:
+            warm = next((w for w in service.warm_workers.values() if w.reserved), None)
+            if warm is not None and warm.idle:
+                break
+            time.sleep(0.05)
+        assert warm is not None and warm.idle and warm.process.poll() is None
+        standby_pid = warm.process.pid
+        reserved_sid = warm.session_id
+
+        session = service.create_project('wfixture', root, 'prewarm-new-1', 'codex', new_conversation=True)
+        assert session['id'] == reserved_sid
+        assert warm.reserved is False
+
+        t1 = service.start_project('wfixture', root, reserved_sid, 'pw-1', 0, 'First standby turn')['id']
+        r1 = wait_turn(service, t1)
+        assert r1['state'] == 'completed' and r1['cleanup'] == 'complete'
+        events = service.store.events('wfixture', reserved_sid, 0, 50)['events']
+        bound_t1 = [e for e in events if e['turn_id'] == t1 and e['type'] == 'provider.bound']
+        assert bound_t1 and bound_t1[0]['data'].get('standby_prewarmed') is True
+        assert bound_t1[0]['data'].get('warm_reused') is True
+        assert service.warm_workers[reserved_sid].process.pid == standby_pid
+
+        # Wait until warm worker parks again and verify Turn 2 still reuses exact same PID.
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not service.warm_workers[reserved_sid].idle:
+            time.sleep(0.05)
+        t2 = service.start_project('wfixture', root, reserved_sid, 'pw-2', 1, 'Second turn after standby')['id']
+        r2 = wait_turn(service, t2)
+        assert r2['state'] == 'completed' and r2['cleanup'] == 'complete'
+        events2 = service.store.events('wfixture', reserved_sid, 0, 50)['events']
+        bound_t2 = [e for e in events2 if e['turn_id'] == t2 and e['type'] == 'provider.bound']
+        assert bound_t2 and bound_t2[0]['data'].get('warm_reused') is True
+        assert not bound_t2[0]['data'].get('standby_prewarmed')
+        assert service.warm_workers[reserved_sid].process.pid == standby_pid
+        warm_proc = service.warm_workers[reserved_sid].process
+    finally:
+        service.close()
+    assert warm_proc.poll() is not None
+
+
+def test_standby_prewarm_existing_session_and_unused_reserved_cleanup(tmp_path):
+    from demiflow.workbench.conversations.service import Service
+    from test_forge_development_chat import configuration, wait_turn
+
+    root, path, _ = configuration(tmp_path)
+    service = Service(path)
+    try:
+        sid = service.create_project('wfixture', root, 'existing-pw', 'codex')['id']
+        st = service.prewarm('wfixture', root, session_id=sid)
+        assert st['status'] in ('warming', 'ready') and st['session_id'] == sid
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            w = service.warm_workers.get(sid)
+            if w is not None and w.idle:
+                break
+            time.sleep(0.05)
+        w = service.warm_workers.get(sid)
+        assert w is not None and w.idle
+        pid = w.process.pid
+
+        t1 = service.start_project('wfixture', root, sid, 'epw-1', 0, 'Existing session turn 1')['id']
+        r1 = wait_turn(service, t1)
+        assert r1['state'] == 'completed' and r1['cleanup'] == 'complete'
+        events = service.store.events('wfixture', sid, 0, 50)['events']
+        bound = [e for e in events if e['turn_id'] == t1 and e['type'] == 'provider.bound']
+        assert bound and bound[0]['data'].get('standby_prewarmed') is True
+        assert service.warm_workers[sid].process.pid == pid
+
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not service.warm_workers[sid].idle:
+            time.sleep(0.05)
+        st2 = service.prewarm('wfixture', root, provider_id='codex')
+        assert st2['status'] in ('warming', 'ready')
+        reserved = next((x for x in service.warm_workers.values() if x.reserved), None)
+        assert reserved is not None
+        reserved_dir = service.root / reserved.session_id
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline and not reserved.idle:
+            time.sleep(0.05)
+        assert reserved.idle and reserved_dir.is_dir()
+    finally:
+        service.close()
+    assert not reserved_dir.exists()
