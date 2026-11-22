@@ -232,7 +232,9 @@ class RunReader:
         if not original or (original['instance'],original['manifest']) != (
                 selected['instance'], selected['manifest_digest']):
             raise RunReadError('Original scoring-table ownership differs')
-        return dict(table=selected, provenance=original['provenance'])
+        result = dict(table=selected, provenance=original['provenance'])
+        _compact(result, MAX_DOCUMENT_BYTES)
+        return result
 
     # -- shape -------------------------------------------------------------
     def tables(self, limit=33):
