@@ -116,9 +116,16 @@ def main():
     if os.getpid() != 1:
         raise RuntimeError('Sandbox launcher did not become namespace PID 1')
     spec_fd, status_fd = map(int, sys.argv[1:3])
-    raw = os.read(spec_fd, 131073)
-    if len(raw) > 131072:
-        raise RuntimeError('Sandbox launch specification exceeded byte budget')
+    chunks, total = [], 0
+    while True:
+        chunk = os.read(spec_fd, 65536)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > 2 * 1024 * 1024:
+            raise RuntimeError('Sandbox launch specification exceeded byte budget')
+        chunks.append(chunk)
+    raw = b''.join(chunks)
     spec = json.loads(raw)
     os.close(spec_fd)
     status = bounded_read('/proc/self/status').decode()

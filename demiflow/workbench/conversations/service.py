@@ -19,6 +19,7 @@ from demiflow.workbench.conversations.common import reject
 from demiflow.workbench.conversations.common import root_identity
 from demiflow.workbench.conversations.common import wire
 from demiflow.workbench.conversations.policy import Deployment
+from demiflow.workbench.conversations.policy import POLICY_BYTES
 from demiflow.workbench.conversations.policy import proxy_environment
 from demiflow.workbench.conversations.store import Store
 from demiflow.workbench.conversations.store import StorageUnavailable
@@ -68,7 +69,7 @@ class Service:
         value = json.loads(wire(deployment.value))
         for p in value['projects'].values(): p.pop('identity', None)
         revision = digest(value); path = self.root / (revision + '.json')
-        raw = wire(value, 65536)
+        raw = wire(value, POLICY_BYTES)
         if not path.exists():
             total = count = policies = 0
             with os.scandir(self.root) as entries:
@@ -96,7 +97,7 @@ class Service:
 
     def session_policy(self, session):
         from .common import read_file, strict_json
-        value=strict_json(read_file(self.root/(session['policy_hash']+'.json'),65536))
+        value=strict_json(read_file(self.root/(session['policy_hash']+'.json'),POLICY_BYTES))
         if digest(value)!=session['policy_hash']: reject('Conversation policy snapshot changed','conflict')
         return Deployment(value)
 
@@ -337,7 +338,7 @@ class Service:
             # including busy turns and history read after a policy replacement.
             try:
                 from .common import read_file, strict_json
-                policy = strict_json(read_file(self.root / (session['policy_hash'] + '.json'), 65536))
+                policy = strict_json(read_file(self.root / (session['policy_hash'] + '.json'), POLICY_BYTES))
                 if digest(policy) == session['policy_hash']:
                     provider=policy['providers'].get(session['provider'],{})
                     value.update(model=provider.get('model'),effort=provider.get('effort'))
@@ -441,7 +442,7 @@ def connect(config_path, *, input_denied_paths=()):
     from demiflow.workbench.conversations.common import strict_json
     from demiflow.workbench.conversations.existing_http import ExistingHTTP
     from demiflow.workbench.conversations.existing_http import FORMAT
-    value = strict_json(read_file(config_path, 65536))
+    value = strict_json(read_file(config_path, POLICY_BYTES))
     if type(value) is not dict:
         reject('Invalid development deployment fields')
     return ExistingHTTP(config_path) if value.get('format') == FORMAT else Service(

@@ -19,6 +19,7 @@ from demiflow.workbench.conversations.execution import execution_facts
 from demiflow.workbench.conversations.versions import is_qualified
 
 PROXY_ENVIRONMENT = ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'NO_PROXY', 'no_proxy')
+POLICY_BYTES = 1024 * 1024
 
 
 def proxy_environment(config):
@@ -109,8 +110,8 @@ class Deployment:
                 reject('Explicit development phase required')
             text(project['authorization'], 4096)
             for name in ('writes', 'watch', 'sources', 'non_goals'):
-                if type(project[name]) is not list or len(project[name]) > 128:
-                    reject('Scope list exceeds budget')
+                if type(project[name]) is not list:
+                    reject('Scope list must be a list')
             for goal in project['non_goals']: text(goal, 4096)
             if project['phase'] == 'design' and any(not p.endswith('.md') for p in project['writes']):
                 reject('Design phase permits only explicitly scoped Markdown documents')
@@ -123,8 +124,8 @@ class Deployment:
                 if not any(path == w or path.startswith(w + '/') for w in project['watch']):
                     reject('Writable scope must be watched')
             protected = project.get('protected', [])
-            if type(protected) is not list or len(protected) > 128:
-                reject('Protected source list exceeds budget')
+            if type(protected) is not list:
+                reject('Protected source list must be a list')
             for name in protected: safe_path(root, name, missing=True)
         if type(self.providers) is not dict or not 1 <= len(self.providers) <= 2:
             reject('Configure at most two providers')
@@ -187,7 +188,7 @@ class Deployment:
 
     @classmethod
     def load(cls, path):
-        return cls(strict_json(read_file(path, 65536)))
+        return cls(strict_json(read_file(path, POLICY_BYTES)))
 
     def validate_runtime(self, *, required=False, admit=False):
         domain = self.value.get('runtime_domain')

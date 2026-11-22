@@ -28,6 +28,7 @@ from demiflow.workbench.conversations.common import root_identity
 from demiflow.workbench.conversations.common import strict_json
 from demiflow.workbench.conversations.common import wire
 from demiflow.workbench.conversations.policy import Deployment
+from demiflow.workbench.conversations.policy import POLICY_BYTES
 from demiflow.workbench.process import process_identity
 
 FORMAT = 'demiflow_development_existing_http_v1'
@@ -117,7 +118,7 @@ class ExistingHTTP:
             reject('A fixed original development policy reference is required')
         self.policy_path = self._physical(source['path'])
         self.policy_sha = source['sha256']
-        if hashlib.sha256(read_file(self.policy_path, REQUEST_BYTES)).hexdigest() != self.policy_sha:
+        if hashlib.sha256(read_file(self.policy_path, POLICY_BYTES)).hexdigest() != self.policy_sha:
             reject('Existing development policy changed', 'conflict')
         # Declaration validation is read-only. In particular, do not construct
         # Service/Store, lock service.lock, reserve disk or recover old turns.
