@@ -75,12 +75,12 @@ def test_each_mature_stage_rejects_before_the_next_phase(monkeypatch, stage):
             return result
         monkeypatch.setattr(adapter, 'decorate_graph_capture', decorate)
     elif stage == 'budget':
-        original = compiler.fit_codec_windows
+        original = compiler.declare_codec_windows
         def fit(nodes, *args, **kwargs):
             result = original(nodes, *args, **kwargs)
             nodes[:] = change(nodes, 'MapOp', {'task_origin': {}})
             return result
-        monkeypatch.setattr(compiler, 'fit_codec_windows', fit)
+        monkeypatch.setattr(compiler, 'declare_codec_windows', fit)
     else:
         from demiflow.planning import dataflow_shared as shared
         original = shared.bind_shared_actors
@@ -129,16 +129,6 @@ def test_typed_field_shape_priority_is_preserved(monkeypatch):
 def test_purpose_cannot_be_supplied_as_persistent_values(purpose):
     with pytest.raises(DataflowError, match='Unknown internal'):
         compiler.lower_action(None, bounds=None, _configuration_purpose=purpose)
-
-
-@reports_on_purpose
-def test_internal_probe_reports_but_final_new_compile_cannot_inherit_bypass(monkeypatch):
-    corrupt_capture(monkeypatch)
-    req = request()
-    compiled = compiler.lower_action(req, bounds=corpus.bounds(), _configuration_purpose=schema._PROBE)
-    assert any('shape' in f for f in schema.configuration_findings(compiled.graph))
-    with pytest.raises(DataflowError, match='task_origin'):
-        compiler.lower_action(req, bounds=corpus.bounds())
 
 
 @reports_on_purpose
@@ -259,7 +249,7 @@ def test_real_completed_live_revalidation_warns_without_reexecuting_callback(tmp
 
 
 @reports_on_purpose
-def test_actual_window_probe_reports_then_public_capture_rejects(monkeypatch):
+def test_public_capture_rejects_on_first_lowering(monkeypatch):
     from demiflow.execution.plan_capture import capture_pipeline
     purposes=[]
     original=schema.report_configuration_stage
@@ -271,7 +261,7 @@ def test_actual_window_probe_reports_then_public_capture_rejects(monkeypatch):
     with pytest.raises(DataflowError, match='task_origin'):
         capture_pipeline(lambda: data.from_items([{'id':1}]).map(identity).take_all(), {},
                          on_compiled=lambda _:pytest.fail('callback ran'))
-    assert schema._PROBE in purposes and purposes[-1] is schema._NEW
+    assert purposes == [schema._NEW]
 
 
 @reports_on_purpose

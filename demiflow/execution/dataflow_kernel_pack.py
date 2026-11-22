@@ -166,6 +166,10 @@ def iter_kernel_images(store, ref, bounds):
 def read_kernel_image(store, ref, bounds, *, occurrence, partition):
     """Single bounded compatibility reader shared by runtime and observations."""
     if ref.media_type != PACK_MEDIA:
+        if ref.size_bytes > bounds.max_state_bytes:
+            from .kernels.state_codec import size_error
+            raise size_error('kernel image exceeds state byte budget', bounds.max_state_bytes,
+                             actual=ref.size_bytes, occurrence=occurrence)
         return b''.join(store.read(ref, max_bytes=bounds.max_state_bytes))
     selected = None
     for key, raw in iter_kernel_images(store, ref, bounds):
@@ -175,7 +179,7 @@ def read_kernel_image(store, ref, bounds, *, occurrence, partition):
     if selected is None:
         raise DataflowError('INCOMPATIBLE_HISTORY', 'kernel pack has no matching occurrence/partition')
     from .kernels import state_codec
-    image = state_codec.loads(selected, max_bytes=bounds.max_state_bytes)
+    image = state_codec.loads(selected, max_bytes=bounds.max_state_bytes, occurrence=occurrence)
     if (type(image) is not dict or image.get('schema_version') != 'demiflow-kernel-image-v3'
             or image.get('occurrence_id') != occurrence or image.get('partition_id') != partition):
         raise DataflowError('INCOMPATIBLE_HISTORY', 'kernel pack header differs from original image identity')

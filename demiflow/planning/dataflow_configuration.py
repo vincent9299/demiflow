@@ -54,12 +54,11 @@ _REJECT_BINDINGS = frozenset({'occurrence_binding', 'program_binding', 'terminal
 _REJECT_SHAPES = frozenset({'actor_binding_version', 'occurrence_id', 'program',
     'publication_workspace', 'task_batch_rows', 'task_group', 'task_origin', 'terminal_memory'})
 _NEW = object()
-_PROBE = object()
 _HISTORY_REVALIDATION = object()
 
 
 def _check_purpose(purpose):
-    if not any(purpose is allowed for allowed in (_NEW, _PROBE, _HISTORY_REVALIDATION)):
+    if not any(purpose is allowed for allowed in (_NEW, _HISTORY_REVALIDATION)):
         from ..execution.contracts.dataflow_errors import DataflowError
         raise DataflowError('INVALID_CONTRACT', 'Unknown internal configuration inspection purpose')
 
@@ -154,6 +153,7 @@ COMPILER_KEYS: Mapping[str, ConfigurationKey] = {key.name: key for key in (
     _key('lance_key_source', 'capture', _text, 'the key-only source occurrence an exclude_keys node reads its left side from'),
     _key('payload_columns', 'capture', _sequence, 'the columns the excluded side originally selected'),
     _key('default_batch_size', 'capture', _count, 'map_batches batch size taken from the executor when none is declared; rows'),
+    _key('task_load_bytes', 'seal', _count, 'peak input buffer bytes for private task program loading'),
     _key('task_batch_rows', 'capture', _count, 'rows per task of a task-scoped kernel; from the executor, else 8192'),
     _key('task_group', 'capture', _text, 'the task group a kernel runs in; a kernel either starts one or joins its producer'),
     _key('task_origin', 'capture', _flag, 'whether this kernel started its task group'),
@@ -162,6 +162,9 @@ COMPILER_KEYS: Mapping[str, ConfigurationKey] = {key.name: key for key in (
     _key('callable_scope', 'lowering', _text, 'stream option: one callable per stage or per worker'),
     _key('native_operation', 'lowering', lambda v: _text(v) and v in NATIVE_OPERATIONS, 'the service a recognised declaration performs'),
     _key('native_key', 'lowering', _text, 'declaration key of an acquire or search service'),
+    _key('fixed_worker_min_bytes', 'budget', _count, 'mandatory task working set within its declared worker grant; bytes'),
+    _key('codec_min_bytes', 'budget', _count, 'smallest supported kernel workspace; bytes'),
+    _key('publication_min_bytes', 'budget', _count, 'smallest supported native publication workspace; bytes'),
     _key('terminal_memory', 'budget', _terminal_memory, 'terminal index and payload windows, or one bounded workspace; bytes'),
     _key('publication_workspace', 'budget', _publication, 'resident window of a native publication; bytes'),
     _key('input_carrier', 'budget', _text, 'the terminal consumes stored row references from its producer'),
@@ -272,11 +275,11 @@ def _admitted(node) -> frozenset | None:
     """Every key this node may carry, or ``None`` when its kind is not known to the schema."""
     kind = node.kernel.kind
     if node.kind == 'terminal':
-        return TERMINAL_KEYS | {'occurrence_id'} | ({'sink_id'} if kind == 'fixed_dataset' else set())
+        return TERMINAL_KEYS | {'occurrence_id', 'codec_min_bytes', 'publication_min_bytes'} | ({'sink_id'} if kind == 'fixed_dataset' else set())
     if node.kind in ('source', 'relational'):
         keys = SOURCE_KEYS.get(kind)
-        return None if keys is None else keys | {'occurrence_id', SCHEMA_KEY, 'graph_observe'}
-    common = {'occurrence_id', 'program'} | GRAPH_MARKS | SHARED_KEYS
+        return None if keys is None else keys | {'occurrence_id', SCHEMA_KEY, 'graph_observe', 'codec_min_bytes'}
+    common = {'occurrence_id', 'program', 'codec_min_bytes'} | GRAPH_MARKS | SHARED_KEYS
     if kind in MODEL_KEYS:
         return MODEL_KEYS[kind] | common
     declared = declared_fields(kind)
@@ -292,7 +295,7 @@ def _admitted(node) -> frozenset | None:
     if kind == 'RandomShuffleOp':
         keys |= {'shuffle_order_version'}
     if kind in TASK_KINDS:
-        keys |= set(TASK_KEYS)
+        keys |= {*TASK_KEYS, 'task_load_bytes', 'fixed_worker_min_bytes'}
     if kind in TASK_FOLLOWERS:
         keys |= {'task_group'}
     return frozenset(keys)

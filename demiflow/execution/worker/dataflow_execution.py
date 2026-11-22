@@ -198,6 +198,9 @@ class DataflowWorkerExecutor:
                     raise _dataflow_error("CODE_MISMATCH", "loaded plan_id differs from assignment")
                 if physical.plan_revision != assignment.plan_revision:
                     raise _dataflow_error("FENCED", "loaded plan_revision differs from assignment")
+                sealed_stages = {s.stage_id: s for s in physical.stages}
+                if any(sealed_stages.get(stage.stage_id) != stage for stage in assignment.stages):
+                    raise _dataflow_error("CODE_MISMATCH", "worker stage differs from its sealed physical plan")
                 programs = self._services.programs
                 owned = {occurrence for stage in assignment.stages for occurrence in stage.occurrences}
                 if set(programs) != set(pin["programs"]).intersection(owned):
@@ -237,12 +240,15 @@ class DataflowWorkerExecutor:
     def _prepare_factories(self, assignment, graph, physical):
         if bool(graph.jobs) != (assignment.model_bindings is not None):
             raise _dataflow_error("INVALID_CONTRACT", "worker assignment version differs from sealed graph")
-        assigned = set()
-        for stage in assignment.stages:
-            assigned.update(stage.occurrences)
+        assigned = {occ: stage for stage in assignment.stages for occ in stage.occurrences}
         node_specs = {}
         for node in graph.nodes:
             if node.occurrence_id in assigned:
+                windows = assigned[node.occurrence_id].kernel_memory_bytes or {}
+                memory = windows.get(node.occurrence_id)
+                if memory is not None:
+                    from dataclasses import replace
+                    node = replace(node, kernel=node.kernel.with_memory_bytes(memory))
                 node_specs[node.occurrence_id] = node
         if not node_specs:
             raise _dataflow_error("INVALID_CONTRACT", "no assigned occurrences found in graph")

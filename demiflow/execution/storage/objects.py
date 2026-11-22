@@ -395,7 +395,16 @@ class RunArtifactStore:
         with self.file_slots(self.READ_FILES), shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
             yield from self._read(ref, max_bytes=max_bytes, chunk_bytes=chunk_bytes)
 
-    def _read(self, ref, *, max_bytes, chunk_bytes=None):
+    def read_into(self, ref: ArtifactRef, destination: bytearray) -> None:
+        """Verify one artifact in its caller's admitted buffer, including on resume."""
+        from .lease import shared_access
+        if type(destination) is not bytearray or len(destination) != ref.size_bytes:
+            raise DataflowError("INVALID_CONTRACT", "Artifact destination must match its sealed size")
+        with self.file_slots(self.READ_FILES), shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
+            for _ in self._read(ref, max_bytes=max(1, ref.size_bytes), destination=destination):
+                pass
+
+    def _read(self, ref, *, max_bytes, chunk_bytes=None, destination=None):
         if type(max_bytes) is not int or max_bytes <= 0:
             raise DataflowError("INVALID_CONTRACT", "max_bytes must be a positive int")
         if ref.size_bytes > max_bytes:
@@ -414,12 +423,21 @@ class RunArtifactStore:
             raise DataflowError("UNKNOWN_EFFECT", "artifact cannot be inspected: " + type(exc).__name__)
         if stat.st_size != ref.size_bytes:
             raise DataflowError("INVALID_CONTRACT", "artifact size differs from its reference")
-        stream = open(path, "rb")
+        target = memoryview(destination) if destination is not None else None
+        stream = open(path, "rb", buffering=0 if target is not None else -1)
         try:
             digest = hashlib.sha256()
             total = 0
             while True:
-                chunk = stream.read(chunk_bytes)
+                # Never allocate a full read window for a smaller sealed
+                # extent. The one-byte EOF probe still detects growth.
+                remaining = ref.size_bytes - total
+                count = min(chunk_bytes, remaining) if remaining else 1
+                if target is None or not remaining:
+                    chunk = stream.read(count)
+                else:
+                    part = target[total:total + count]
+                    chunk = part[:stream.readinto(part)]
                 if not chunk:
                     break
                 total += len(chunk)
@@ -427,6 +445,7 @@ class RunArtifactStore:
                     raise DataflowError("INVALID_CONTRACT", "artifact grew beyond its reference")
                 digest.update(chunk)
                 yield chunk
+                del chunk
             if total != ref.size_bytes or digest.hexdigest() != ref.digest:
                 raise DataflowError("INVALID_CONTRACT", "artifact bytes do not match its reference")
         finally:

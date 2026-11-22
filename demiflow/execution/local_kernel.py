@@ -24,6 +24,7 @@ class LocalKernelOptions:
     temp_directory: str | None = None
     native_resources: Any = None
     worker_mode_explicit: bool = True
+    native_resources_inherited: bool = False
 
     def __post_init__(self):
         for name in ("workers", "partitions", "batch_rows", "memory_bytes"):
@@ -60,7 +61,7 @@ class LocalExecutionSession:
 @contextmanager
 def local_execution(*, workers=4, worker_mode=None, partitions=None,
                     batch_rows=8192, memory_bytes=256 * 1024 * 1024,
-                    temp_directory=None, native_resources=None, unified_chain=True,
+                    temp_directory=None, native_resources=None, inherited_native_resources=None, unified_chain=True,
                     unified_queue_chain=True, planning=None, resource_root=None,
                     diagnostics_root=None, block_size=256):
     """Bind existing Dataset readers to a single-machine partition executor.
@@ -75,6 +76,8 @@ def local_execution(*, workers=4, worker_mode=None, partitions=None,
     omitting planning retains the platform defaults, including 32 workers.
     native_resources optionally tightens native query limits separately from
     Python workers/memory_bytes; shared admission and sampled guards remain.
+    A host can instead forward its admitted envelope using inherited_native_resources.
+    This preserves the original budget declarations in its RunContext.
     resource_root resolves relative Dataset/Prompt resources (default: cwd).
     diagnostics_root overrides native diagnostics placement; None retains the
     current run's diagnostics fallback. Neither option creates a directory here.
@@ -102,10 +105,14 @@ def local_execution(*, workers=4, worker_mode=None, partitions=None,
         raise ValueError("local_execution block_size must be a positive integer")
     if _current_executor.get() is not None:
         raise ValueError("local_execution cannot replace a bound Pipeline or nested executor")
+    if native_resources is not None and inherited_native_resources is not None:
+        raise ValueError("Choose declared or inherited native resources for this executor")
+    inherited = inherited_native_resources is not None
     options = LocalKernelOptions(workers, "process" if worker_mode is None else worker_mode,
                                  workers * 4 if partitions is None else partitions,
-                                 batch_rows, memory_bytes, temp_directory, native_resources,
-                                 worker_mode_explicit=worker_mode is not None)
+                                 batch_rows, memory_bytes, temp_directory,
+                                 inherited_native_resources if inherited else native_resources,
+                                 worker_mode_explicit=worker_mode is not None, native_resources_inherited=inherited)
     try:
         import cloudpickle  # noqa: F401
     except ImportError as exc:

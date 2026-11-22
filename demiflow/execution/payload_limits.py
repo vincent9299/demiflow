@@ -26,10 +26,15 @@ def run_row_limit(limits):
     return native_row_limit(pool, native_rss)
 
 
-def resolve_payload_bounds(limits, overrides=None, *, inherited_explicit=(), ceiling=None):
+def resolve_payload_bounds(limits, overrides=None, *, inherited_explicit=(), ceiling=None, local_memory=False):
     """Default estimates never replace an explicitly declared finite ceiling."""
     explicit = set(overrides or ()) | set(inherited_explicit)
     derived = run_row_limit(limits)
+    # A separately tightened local executor has historically shared this pool
+    # between driver/worker payload and codec. Changing a worker-count ceiling
+    # does not change which rows the action is allowed to accept.
+    if local_memory and ceiling is not None and limits['memory_bytes'] < ceiling['memory_bytes']:
+        derived = min(derived, max(1, limits['memory_bytes'] // 4))
     row = limits['max_row_bytes'] if 'max_row_bytes' in explicit else derived
     row = min(row, MAX_NATIVE_ROW_BYTES, limits['memory_bytes'], max(1, limits['max_rss_bytes'] // 4))
     batch = limits['max_batch_bytes'] if 'max_batch_bytes' in explicit else max(derived, row)

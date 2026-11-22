@@ -137,29 +137,35 @@ def classify_operator_state(target, *, phase, ownership="none"):
     return StatePolicy("auto_json", _resolved_ownership("auto_json", ownership), True, None)
 
 
-def _charge_container(fields, max_bytes):
+def _state_budget(max_bytes, occurrence):
+    return f"limit_bytes={max_bytes}" + (f", occurrence_id={occurrence}" if occurrence is not None else "")
+
+
+def _encode_auto_state(fields, max_bytes, occurrence):
+    budget = _state_budget(max_bytes, occurrence)
     try:
         check_size(fields, max_bytes)
     except RuntimeContractError as error:
-        raise RecoveryContractError("auto_state exceeds byte budget") from error
+        raise RecoveryContractError(f"auto_state rejected before encoding ({budget}): {error}") from error
+    try:
+        return document(fields, max_bytes)
+    except RecoveryContractError as error:
+        raise RecoveryContractError(f"auto_state encoding failed ({budget}): {error}") from error
 
 
-def snapshot_auto_state(owner, *, max_bytes):
+def snapshot_auto_state(owner, *, max_bytes, occurrence=None):
     """Bounded, detached strict-JSON copy of a plain instance's fields."""
     if type(max_bytes) is not int or max_bytes < 1:
         raise RecoveryContractError("auto_state max_bytes must be a positive integer")
     eligible, reason = _auto_json_eligible(owner)
     if not eligible:
-        raise RecoveryContractError("auto_json snapshot rejected: " + reason)
+        raise RecoveryContractError(f"auto_json snapshot rejected ({_state_budget(max_bytes, occurrence)}): {reason}")
     fields = vars(owner)
-    _charge_container(fields, max_bytes)
-    raw = document(fields, max_bytes)
-    if len(raw) > max_bytes:
-        raise RecoveryContractError("auto_state exceeds byte budget")
+    raw = _encode_auto_state(fields, max_bytes, occurrence)
     return {"schema": AUTO_STATE_SCHEMA, "fields": json.loads(raw)}
 
 
-def restore_auto_state(owner, state, *, max_bytes):
+def restore_auto_state(owner, state, *, max_bytes, occurrence=None):
     """Validate schema/budget/fields fully, then atomically replace instance fields."""
     if type(max_bytes) is not int or max_bytes < 1:
         raise RecoveryContractError("auto_state max_bytes must be a positive integer")
@@ -175,14 +181,11 @@ def restore_auto_state(owner, state, *, max_bytes):
             raise RecoveryContractError("auto_state refuses prototype/dunder field injection")
     valid, reason = _json_fields(fields, max_bytes)
     if not valid:
-        raise RecoveryContractError("auto_state restore rejected: " + reason)
+        raise RecoveryContractError(f"auto_state restore rejected ({_state_budget(max_bytes, occurrence)}): {reason}")
     eligible, reason = _auto_json_eligible(owner)
     if not eligible:
-        raise RecoveryContractError("auto_state restore rejected: " + reason)
-    _charge_container(fields, max_bytes)
-    raw = document(fields, max_bytes)
-    if len(raw) > max_bytes:
-        raise RecoveryContractError("auto_state exceeds byte budget")
+        raise RecoveryContractError(f"auto_state restore rejected ({_state_budget(max_bytes, occurrence)}): {reason}")
+    raw = _encode_auto_state(fields, max_bytes, occurrence)
     detached = json.loads(raw)
     # Owner is untouched until every check above has passed; the swap preserves
     # exactly the restored field set with no shared mutable aliases.

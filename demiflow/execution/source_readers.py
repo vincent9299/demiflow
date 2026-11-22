@@ -70,6 +70,9 @@ class _BaseReader:
     def __init__(self, snapshot: SourceSnapshot, *, services: RuntimeServices) -> None:
         self._snapshot = snapshot
         self._services = services
+        from .dataflow_record_frames import resident_limit
+        bounds = services.bounds
+        self._measure_row_copies = resident_limit(bounds, services) < bounds.max_batch_bytes + bounds.max_row_bytes
         self._split: SourceSplit | None = None
         self._offset: dict[str, Any] = {}
         self._next_sequence = 0
@@ -157,6 +160,14 @@ class _BaseReader:
             encoded_bytes = getattr(self, '_decoded_row_bytes', None)
             self._decoded_row_bytes = None
             if encoded_bytes is None:
+                if self._measure_row_copies:
+                    from .dataflow_record_frames import admit_row_copies
+                    bounds = self._services.bounds
+                    shared = getattr(self, '_shared_frame_call', None)
+                    if shared is not None:
+                        shared(admit_row_copies, row, bounds)
+                    else:
+                        admit_row_copies(row, bounds, services=self._services)
                 encoded_bytes = _encoded_size(row, max_bytes=self._services.bounds.max_row_bytes)
             else:
                 # The decoded immutable row and the source Record's frozen

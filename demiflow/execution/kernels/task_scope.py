@@ -68,7 +68,7 @@ def function_has_state(function):
     return bool(reason or function.__closure__ or function.__defaults__ or function.__kwdefaults__ or function.__dict__)
 
 
-def snapshot_function(function, *, max_bytes):
+def snapshot_function(function, *, max_bytes, occurrence=None):
     fields, reason = function_fields(function)
     if reason:
         return {'mode': 'nonrecoverable', 'reason': reason}
@@ -88,12 +88,13 @@ def snapshot_function(function, *, max_bytes):
         return {'mode': 'nonrecoverable', 'reason': reason}
     raw = json.dumps(fields, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()
     if len(raw) > max_bytes:
-        raise DataflowError('BUDGET_EXCEEDED', 'task closure state exceeds max_state_bytes')
+        from .state_codec import size_error
+        raise size_error('task closure state exceeds max_state_bytes', max_bytes, actual=len(raw), occurrence=occurrence)
     return {'mode': 'task_function', 'value': json.loads(raw)}
 
 
-def restore_function(function, state, *, max_bytes):
-    expected = snapshot_function(function, max_bytes=max_bytes)
+def restore_function(function, state, *, max_bytes, occurrence=None):
+    expected = snapshot_function(function, max_bytes=max_bytes, occurrence=occurrence)
     fields = state.get('value')
     if expected['mode'] != 'task_function' or type(fields) is not dict or set(fields) != set(expected['value']):
         raise DataflowError('INCOMPATIBLE_HISTORY', 'task closure state shape changed')
@@ -102,7 +103,8 @@ def restore_function(function, state, *, max_bytes):
         raise DataflowError('CORRUPT_ARTIFACT', 'invalid task closure state: ' + str(reason))
     raw = json.dumps(fields, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()
     if len(raw) > max_bytes:
-        raise DataflowError('BUDGET_EXCEEDED', 'task closure state exceeds max_state_bytes')
+        from .state_codec import size_error
+        raise size_error('task closure state exceeds max_state_bytes', max_bytes, actual=len(raw), occurrence=occurrence)
     fields = json.loads(raw)
     for name, cell in zip(function.__code__.co_freevars, function.__closure__ or ()):
         if 'cell:' + name in fields:
@@ -113,7 +115,7 @@ def restore_function(function, state, *, max_bytes):
     function.__dict__.update(fields.get('attributes', {}))
 
 
-def _resident_slots(target, *, call_args=(), call_kwargs=None):
+def _resident_slots(target, *, call_args=(), call_kwargs=None, task_private=False):
     """Owned function data, with declaration dependencies left in their slots.
 
     This is deliberately narrower than serializing a callable: no module state,
@@ -148,10 +150,10 @@ def _resident_slots(target, *, call_args=(), call_kwargs=None):
         if depth > 16:
             return False
         if type(value) in (str, bytes, int, float, bool, type(None), PurePath,
-                           PurePosixPath, PureWindowsPath, PosixPath, WindowsPath, types.ModuleType):
+                           PurePosixPath, PureWindowsPath, PosixPath, WindowsPath):
             return True
-        if inspect.isclass(value):
-            return True
+        if type(value) is types.ModuleType or inspect.isclass(value):
+            return not task_private
         if inspect.isbuiltin(value):
             return value.__self__ is None or type(value.__self__) is types.ModuleType
         if inspect.isfunction(value):
@@ -159,7 +161,9 @@ def _resident_slots(target, *, call_args=(), call_kwargs=None):
             # task_message(..., pool='default'). They do not make its caller
             # own mutable helper state. Mutable defaults/closures/attributes
             # still need an explicit owner and cannot silently be restored.
-            return (not value.__closure__ and not value.__dict__
+            # A helper can own further globals. Rehydrate its sealed graph for
+            # a private task, including any aliases inside those dependencies.
+            return (not task_private and not value.__closure__ and not value.__dict__
                     and all(dependency(item, depth + 1) for item in value.__defaults__ or ())
                     and all(dependency(item, depth + 1) for item in (value.__kwdefaults__ or {}).values()))
         if type(value) is tuple:
@@ -278,22 +282,43 @@ def function_residency_kind(function, *, call_args=(), call_kwargs=None):
     return 'nonrecoverable' if reason else 'adapter' if fields else 'none'
 
 
-def snapshot_resident_function(function, *, max_bytes, call_args=(), call_kwargs=None):
-    fields, _, reason = _resident_slots(function, call_args=call_args, call_kwargs=call_kwargs)
-    if reason:
-        return {'mode': 'nonrecoverable', 'reason': reason}
+def task_uses_function_slots(declaration):
+    """Can this task share its program and isolate state through declared slots?
+
+    A helper or class can itself own mutable globals or defaults. Reconstruct
+    opaque dependency graphs from the sealed payload to preserve their aliases.
+    """
+    from ...data.plan import CallableSpec
+    if not isinstance(declaration, CallableSpec) or not inspect.isfunction(declaration.target):
+        return False
+    _, _, reason = _resident_slots(declaration.target, call_args=declaration.call_args,
+                                  call_kwargs=declaration.call_kwargs, task_private=True)
+    return reason is None
+
+
+def _copy_resident_fields(fields, max_bytes, occurrence):
     from ...data.runtime_contract import check_size, RuntimeContractError
+    from .state_codec import size_error
     try:
         check_size(fields, max_bytes)
     except RuntimeContractError as exc:
-        raise DataflowError('BUDGET_EXCEEDED', 'function state exceeds max_state_bytes') from exc
+        raise size_error(f'function state rejected before encoding: {exc}', max_bytes, occurrence=occurrence) from exc
     raw = json.dumps(fields, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()
     if len(raw) > max_bytes:
-        raise DataflowError('BUDGET_EXCEEDED', 'function state exceeds max_state_bytes')
-    return {'mode': 'function_slots_v1', 'value': json.loads(raw)}
+        raise size_error('function state exceeds max_state_bytes', max_bytes, actual=len(raw), occurrence=occurrence)
+    return json.loads(raw)
 
 
-def restore_resident_function(function, state, *, max_bytes, call_args=(), call_kwargs=None):
+def snapshot_resident_function(function, *, max_bytes, call_args=(), call_kwargs=None, occurrence=None):
+    fields, _, reason = _resident_slots(function, call_args=call_args, call_kwargs=call_kwargs)
+    if reason:
+        return {'mode': 'nonrecoverable', 'reason': reason}
+    if not fields:
+        return {'mode': 'function_slots_v1', 'value': {}}
+    return {'mode': 'function_slots_v1', 'value': _copy_resident_fields(fields, max_bytes, occurrence)}
+
+
+def restore_resident_function(function, state, *, max_bytes, call_args=(), call_kwargs=None, occurrence=None):
     expected, bindings, reason = _resident_slots(function, call_args=call_args, call_kwargs=call_kwargs)
     fields = state.get('value')
     if (reason or state.get('mode') != 'function_slots_v1' or type(fields) is not dict
@@ -302,15 +327,7 @@ def restore_resident_function(function, state, *, max_bytes, call_args=(), call_
     valid, reason = _json_fields(fields, max_bytes)
     if not valid:
         raise DataflowError('CORRUPT_ARTIFACT', 'invalid function state: ' + str(reason))
-    from ...data.runtime_contract import check_size, RuntimeContractError
-    try:
-        check_size(fields, max_bytes)
-    except RuntimeContractError as exc:
-        raise DataflowError('BUDGET_EXCEEDED', 'function state exceeds max_state_bytes') from exc
-    raw = json.dumps(fields, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()
-    if len(raw) > max_bytes:
-        raise DataflowError('BUDGET_EXCEEDED', 'function state exceeds max_state_bytes')
-    detached = json.loads(raw)
+    detached = _copy_resident_fields(fields, max_bytes, occurrence)
     # Read-only partial.args cannot be replaced: only its owned mutable value
     # may change. Validate these slots before changing ANY callable state.
     for name, (kind, owner, key) in bindings.items():
@@ -342,7 +359,7 @@ def restore_resident_function(function, state, *, max_bytes, call_args=(), call_
                 current.update(value)
 
 
-def clone_resident_callable(target, *, max_bytes, call_args=(), call_kwargs=None):
+def clone_resident_callable(target, *, max_bytes, call_args=(), call_kwargs=None, occurrence=None):
     """Create one state owner per kernel/slot without changing a sealed program.
 
     Only admitted data slots are copied. Code and readonly declared dependencies
@@ -358,7 +375,8 @@ def clone_resident_callable(target, *, max_bytes, call_args=(), call_kwargs=None
         partials.append(function)
         function = function.func
     call_kwargs = {} if call_kwargs is None else call_kwargs
-    state = snapshot_resident_function(target, max_bytes=max_bytes, call_args=call_args, call_kwargs=call_kwargs)
+    state = snapshot_resident_function(target, max_bytes=max_bytes, call_args=call_args, call_kwargs=call_kwargs,
+                                       occurrence=occurrence)
     if state['mode'] != 'function_slots_v1':
         raise DataflowError('INCOMPATIBLE_HISTORY', 'function has no data-only residency adapter')
     values = state['value']

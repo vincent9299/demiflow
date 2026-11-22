@@ -142,6 +142,7 @@ class LoadedProgram:
     kind: str
     value: Any
     digest: str
+    load_private: Any = None
 
 
 class DataflowError(Exception):
@@ -384,7 +385,9 @@ def rows_of(records):
 
 
 def program(value, kind="callable"):
-    return LoadedProgram(kind, value, hashlib.sha256(repr(value).encode()).hexdigest())
+    import cloudpickle
+    return LoadedProgram(kind, value, hashlib.sha256(repr(value).encode()).hexdigest(),
+                         load_private=lambda: cloudpickle.loads(cloudpickle.dumps(value)))
 
 
 # ---------------------------------------------------------------------------

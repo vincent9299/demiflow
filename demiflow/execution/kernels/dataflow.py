@@ -143,7 +143,7 @@ def _input_row_bytes(record: Record) -> int:
     raise _err("INVALID_CONTRACT", "record carries neither inline nor payload_ref")
 
 
-def _materialize_row(record: Record, services: RuntimeServices) -> object:
+def _materialize_row(record: Record, services: RuntimeServices, *, measured=False) -> object:
     if (record.inline is None) == (record.payload_ref is None):
         raise _err("INVALID_CONTRACT", "record must carry exactly one of inline/payload_ref")
     if record.inline is not None:
@@ -155,7 +155,12 @@ def _materialize_row(record: Record, services: RuntimeServices) -> object:
     limit = services.bounds.max_row_bytes
     if ref.size_bytes > limit:
         raise _err("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", size=ref.size_bytes)
+    if measured:
+        from ..dataflow_record_frames import admit_receive, admit_workspace, raw_workspace
+        admit_receive(ref.size_bytes, services.bounds, services=services)
     data = b"".join(services.store.read(ref, max_bytes=limit))
+    if measured:
+        admit_workspace(raw_workspace(data), services.bounds, services=services)
     if len(data) > limit:
         raise _err("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", size=len(data))
     return _loads_row(data)
@@ -304,7 +309,16 @@ def invoke_unary(
     if kind == 'LimitOp':
         yield record
         return
-    row = _materialize_row(record, services)
+    low_memory = (kind in ('MapOp', 'BoundMapOp') and 'codec_min_bytes' in cfg
+                  and spec.profile.requests['memory_bytes'] < services.bounds.max_row_bytes + services.bounds.max_batch_bytes)
+    retained = 0
+    if low_memory and record.inline is not None:
+        from ..dataflow_record_frames import admit_row_copies
+        retained = admit_row_copies(record.inline, services.bounds, services=services)
+    row = _materialize_row(record, services, measured=low_memory)
+    if low_memory and record.inline is None:
+        from ..dataflow_record_frames import admit_row_copies
+        retained = admit_row_copies(row, services.bounds, services=services)
     position = record.source_position
     sequence = record.sequence
     if schemas is None:
@@ -324,6 +338,9 @@ def invoke_unary(
                 from ..recovery_contract import RecoveryContractError
                 raise RecoveryContractError('Task map must preserve exactly one row')
             raise _err("INVALID_CONTRACT", "map callable must return a mapping row")
+        if low_memory:
+            from ..dataflow_record_frames import admit_row_copies
+            admit_row_copies(result, services.bounds, services=services, retained=2 * retained)
         yield _output_record(record.record_id, position, result, sequence, services)
     elif kind == "FilterOp":
         if instance(row):

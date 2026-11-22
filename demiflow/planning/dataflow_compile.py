@@ -50,7 +50,7 @@ from ..execution.contracts.dataflow_kinds import NATIVE, TYPED, kinds_with, trai
 from ..execution.recovery_contract import identity
 from ..execution.recovery_identity import describe
 from .dataflow_budget import (
-    codec_window, default_profile, fit_codec_windows, relational_profile, terminal_budget,
+    codec_window, default_profile, declare_codec_windows, relational_profile, terminal_budget,
 )
 from .dataflow_registry import operator_registry, source_registry, terminal_registry
 from .dataflow_configuration import _NEW, _check_purpose
@@ -573,6 +573,18 @@ class _Capture:
         self.publication_windows: dict[int, tuple[int, int]] = {}
 
     def _remember_codec_window(self, index, operation=None):
+        node = self.nodes[index]
+        native = getattr(operation, 'native_options', None)
+        resources = getattr(native, 'worker_resources', None) or {}
+        if 'memory_bytes' in resources and 'task_batch_rows' in node.kernel.configuration:
+            # A sealed task may later need a private program-loading buffer.
+            # Preserve both the operator's fixed working set and the exact
+            # worker grant so preparation can fit the real bytes within it.
+            logical = replace(operation, native_options=None)
+            floor = default_profile(logical, bounds=self.bounds, state=node.kernel.state,
+                                    codec_workspace=False).requests['memory_bytes']
+            config = {**_plain(node.kernel.configuration), 'fixed_worker_min_bytes': floor}
+            self.nodes[index] = replace(node, kernel=replace(node.kernel, configuration=config))
         window = codec_window(self.nodes[index].kernel, operation, self.bounds)
         if window is not None:
             self.codec_windows[index] = window
@@ -784,8 +796,10 @@ class _Capture:
                 if isinstance(callable_spec, CallableSpec) else {}
             )
             new_index = self._add_node("transform", kernel, semantic, {}, code_identity, None)
-            if native_declaration is None or kernel.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
-                self._remember_codec_window(new_index, operation)
+            # The provenance check in codec_window compares the actual profile
+            # and retains specialized/fixed demands. A passive native factory
+            # can still use the generic kernel workspace (e.g. save_lance).
+            self._remember_codec_window(new_index, operation)
             options = getattr(operation, 'stream_options', None)
             base = (getattr(options, 'label', None) or getattr(operation, 'label', None)
                     or getattr(callable_spec, 'name', None) or kernel.kind)
@@ -891,7 +905,7 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None, on_com
     from .dataflow_graph_adapter import decorate_graph_capture
     terminal = decorate_graph_capture(capture, request, terminal=captured_terminal)
     report_stage('graph')
-    fit_codec_windows(capture.nodes, capture.edges, capture.codec_windows, capture.publication_windows, bounds)
+    declare_codec_windows(capture.nodes, capture.codec_windows, capture.publication_windows)
     report_stage('budget')
     # DTO constructors validate identities. Keep integer graph indices private;
     # never construct invalid public DTOs merely to replace their IDs later.

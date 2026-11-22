@@ -38,3 +38,11 @@ def limits_with(values=None, *, policy=None):
     if result['memory_bytes'] >= result['max_rss_bytes'] // 2:
         raise ForgeError('RSS budget must leave room for the driver and native query process')
     return result
+
+
+def native_limits(limits):
+    """Native query's share of the already admitted host envelope."""
+    return dict(memory_bytes=limits['memory_bytes'], max_rss_bytes=limits['max_rss_bytes'] // 2,
+                max_scratch_bytes=limits['max_scratch_bytes'], max_row_bytes=limits['max_row_bytes'],
+                batch_rows=limits['batch_rows'], threads=2, partitions=1,
+                timeout_s=min(3600, limits['timeout_s']), admission_timeout_s=limits['admission_timeout_s'])

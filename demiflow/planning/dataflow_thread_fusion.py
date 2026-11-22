@@ -125,6 +125,24 @@ def fuse_thread_suffix(graph, stages, *, policy, bounds, hosts):
                            or prepend_tail and nodes[o].kernel.kind == 'StreamPrependOp' for o in suffix))):
             continue
         resident = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) for s in members)
+        # GraphRunner passes the very same immutable Record directly into a
+        # co-located synchronous consumer. Count that handoff once: upstream
+        # already owns it while consumer.push is on the same business stack.
+        # Fixed/custom grants, queued calls and finite spools have no such proof.
+        discounted_inputs = set()
+        for edge in graph.edges:
+            if (edge.producer not in selected or edge.consumer not in selected
+                    or edge.consumer in discounted_inputs):
+                continue
+            endpoints = (nodes[edge.producer].kernel, nodes[edge.consumer].kernel)
+            if all(k.state == 'none' and k.effect == 'pure' and k.resource_role == 'cpu'
+                   and not k.configuration.get('streaming_map')
+                   and k.kind != 'AsyncMapOp'
+                   and k.configuration.get('concurrency', 1) == 1
+                   and 'codec_min_bytes' in k.configuration for k in endpoints):
+                discounted_inputs.add(edge.consumer)
+                resident -= min(bounds.max_row_bytes, bounds.max_batch_bytes,
+                                endpoints[0].output_bound_bytes)
         if resident > bounds.max_resident_bytes - max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8)):
             continue
         # All pure synchronous kernels share one business thread: their CPU

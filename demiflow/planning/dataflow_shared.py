@@ -137,6 +137,16 @@ def colocate_shared_actors(graph, stages, *, bounds, hosts):
         cpu = sum(s.profile.requests.get('cpu_millis', 0) for s in members)
         resident = sum(max(s.resident_bytes, s.profile.requests.get('memory_bytes', 0)) for s in members)
         state_bytes = sum(s.state_bytes for s in members)
+        # The shared original holds one actor and emits a single state image.
+        # Remove its duplicated default allowance only; explicit worker
+        # requests, per-occurrence invocation slots and fixed costs still add.
+        for stage in members:
+            for occ in stage.occurrences:
+                config = by_occ[occ].kernel.configuration
+                binding = shared_binding(config, occ)
+                if binding and occ != binding['state_owner'] and 'codec_min_bytes' in config:
+                    resident -= stage.state_bytes
+                    state_bytes -= stage.state_bytes
         if resident > bounds.max_resident_bytes - max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8)) or not any(
                 cpu <= h.logical_resources.get('cpu_millis', h.logical_resources.get('cpu', 0)*1000)
                 and resident <= h.logical_resources.get('memory_bytes', 0) for h in hosts):

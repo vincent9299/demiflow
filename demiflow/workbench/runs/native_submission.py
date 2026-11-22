@@ -15,11 +15,12 @@ from demiflow.workbench.projects import workspace as ws
 FORMAT = 'demiflow_forge_native_inspection_v1'
 
 
-def inspect_submission(root, *, table_resolver, entry, parameters, limits, source_modules=None):
+def inspect_submission(root, *, table_resolver, entry, parameters, limits, explicit_limits=None, source_modules=None):
     """Fixed disposable worker: original code construction is read-only."""
     from contextlib import redirect_stdout
     from demiflow.execution.host.inspection import capture_managed_pipeline, native_submission_view
     from demiflow.workbench.graph.preview import _Discard
+    from demiflow.workbench.pipeline_policy import native_limits
     from demiflow.workbench.python_sources import PythonSources, SharedSources
     from demiflow.workbench.graph.preview_guard import enter_readonly
     from demiflow.workbench.projects.discovery import discover
@@ -62,7 +63,8 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits, sourc
             from demiflow.workbench.graph.plan_callsite import PlanCallsites, pipeline_material
             from demiflow.workbench.graph.plan_details import build_plan_details
             with PlanCallsites(root, sources.digests) as callsites:
-                captured = capture_managed_pipeline(function, arguments, limits=limits, on_compiled=callsites.bind_compilation)
+                captured = capture_managed_pipeline(function, arguments, limits=limits, explicit_limits=explicit_limits,
+                    inherited_native_resources=native_limits(limits), on_compiled=callsites.bind_compilation)
             shared_binding = shared.binding()
             details = build_plan_details(captured.compiled, sources=sources.digests, root=root,
                                          callsites=callsites, bounds=captured.bounds, shared_sources=shared_binding)
@@ -103,10 +105,10 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits, sourc
     return result
 
 
-def prepare(root, entry, *, parameters, limits, metadata, source_modules=None):
+def prepare(root, entry, *, parameters, limits, metadata, explicit_limits=None, source_modules=None):
     from demiflow.workbench.worker import operation
     report = operation('native_submission_inspect', root, entry=entry, parameters=parameters,
-                       limits=limits, _source_modules=source_modules)
+                       limits=limits, explicit_limits=explicit_limits, _source_modules=source_modules)
     outputs = {}
     for index, output in enumerate(report['native_contract']['outputs']):
         uri = ws.no_symlinks(Path(output['uri']))

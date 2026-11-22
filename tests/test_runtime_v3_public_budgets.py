@@ -50,9 +50,17 @@ def test_memory_option_tightens_defaults_without_erasing_explicit_limits():
                                            run, provider='local')
     assert policy.max_active_workers == 1
     assert limits.max_resident_bytes == 64 * 1024
-    assert limits.max_row_bytes == limits.max_batch_bytes == limits.max_state_bytes == 16 * 1024
-    _, larger = resolve_runtime_policy({'memory_bytes': 1024 * 1024}, run, provider='local')
-    assert larger.max_resident_bytes == 512 * 1024
+    assert limits.max_row_bytes == limits.max_batch_bytes == 16 * 1024
+    assert limits.max_state_bytes == run['max_state_bytes']
+    for memory in (512 * 1024, 1024 * 1024):
+        _, inherited = resolve_runtime_policy({'memory_bytes': memory, 'max_active_workers': 8},
+                                             run, provider='local')
+        assert inherited.max_resident_bytes == run['memory_bytes']
+        assert inherited.max_row_bytes == run['max_row_bytes']
+        assert inherited.max_batch_bytes == run['max_batch_bytes']
+    _, parallel = resolve_runtime_policy({'memory_bytes': 64 * 1024, 'max_active_workers': 8},
+                                         run, provider='local')
+    assert parallel == limits
     _, explicit = resolve_runtime_policy({'memory_bytes': 64 * 1024},
         execution_limits({'max_row_bytes': 48 * 1024, 'max_batch_bytes': 48 * 1024}), provider='local',
         explicit_limits=('max_row_bytes', 'max_batch_bytes'))
@@ -194,3 +202,26 @@ def test_resume_tightens_live_worker_envelope_without_rewriting_sealed_plan(tmp_
             assert pipeline().take_all() == [{'n': n} for n in range(1, 9)]
 
         assert session.stats['admitted_bounds']['max_active_workers'] == 1
+
+
+@pytest.mark.parametrize('workers', (1, 8))
+def test_public_worker_count_keeps_one_legal_wide_row(tmp_path, workers):
+    # 48 KiB of content fits the 1-MiB executor codec, even when up to eight
+    # workers are allowed. Only the final physical layout has to be resident.
+    value = 'x' * (48 * 1024)
+    with RunContext.start(tmp_path / 'run'), data.local_execution(workers=workers, memory_bytes=1024**2):
+        rows = data.from_items([{'value': value}]).map(lambda row: row).take_all()
+    assert rows == [{'value': value}]
+
+
+def test_equal_small_run_and_executor_keep_the_run_row_contract(tmp_path):
+    from demiflow.execution.runtime_limits import execution_limits
+    memory = 1024**2
+    inherited = execution_limits({'memory_bytes': memory})
+    with RunContext.start(tmp_path / 'equal', limits={'memory_bytes': memory}), data.local_execution(
+            workers=2, memory_bytes=memory):
+        assert data.from_items([{'i': 1}]).map(lambda r: {'i': r['i'] + 1}).take_all() == [{'i': 2}]
+        assert data.range(1).take_all() == [{'id': 0}]
+    _, bounds = resolve_runtime_policy({'memory_bytes': memory, 'max_active_workers': 2},
+                                        inherited, provider='local')
+    assert bounds.max_row_bytes == inherited['max_row_bytes'] == memory

@@ -14,7 +14,7 @@ import time
 import uuid
 
 from .recovery_contract import RunRef, RecoveryContractError, identity
-from .runtime_limits import execution_limits
+from .runtime_limits import execution_limits, declared_limit_keys
 from .run_journal import RunJournal
 
 _CURRENT = ContextVar("demiflow_run_context", default=None)
@@ -310,7 +310,7 @@ class RunContext:
     """Platform control scope. Pipeline/operator arguments never carry this."""
 
     def __init__(self, directory, *, entry_identity=None, limits=None, resume=False,
-                 journal=None, check_stop=None, training=None):
+                 journal=None, check_stop=None, training=None, explicit_limits=None):
         from .plan_capture import current_capture
         if current_capture() is not None:
             from .contracts.dataflow_errors import DataflowError
@@ -322,6 +322,7 @@ class RunContext:
         self.directory = raw
         self.entry_identity = entry_identity
         self.requested_limits = limits
+        self.explicit_limits = declared_limit_keys(limits, explicit_limits)
         self.resuming = resume
         self.training_project_root = None
         self.training = training
@@ -388,15 +389,18 @@ class RunContext:
         return journal.transition({'running', 'starting'}, 'stopping')
 
     @classmethod
-    def attach(cls, journal, *, entry_identity=None, limits=None, check_stop=None, training_project_root=None):
+    def attach(cls, journal, *, entry_identity=None, limits=None, explicit_limits=None, check_stop=None, training_project_root=None):
         """Adopt a supervisor's existing run/attempt; do not invent another run."""
         state = journal.execution_status()
         resuming = state is not None and state['attempt'] > 1
+        binding = journal.recovery_identity() if resuming else None
+        if binding is not None and limits is not None and explicit_limits is None:
+            # Older manifests recorded provenance only in the original run identity.
+            explicit_limits = binding.get('limits_explicit', ())
         context = cls(journal.directory, journal=journal, entry_identity=entry_identity,
-                      limits=limits, check_stop=check_stop, resume=resuming)
+                      limits=limits, explicit_limits=explicit_limits, check_stop=check_stop, resume=resuming)
         context.training_project_root = training_project_root
         if resuming:
-            binding = journal.recovery_identity()
             context.expected_run_id = binding['run_id'] if binding is not None else None
         return context
 
@@ -417,7 +421,7 @@ class RunContext:
                     raise RecoveryContractError("Run entry identity changed")
                 if self.requested_limits is not None and execution_limits(self.requested_limits) != old["limits"]:
                     raise RecoveryContractError("Run limits changed on resume")
-                if self.requested_limits is not None and sorted(self.requested_limits) != old.get('limits_explicit', []):
+                if self.requested_limits is not None and sorted(self.explicit_limits) != old.get('limits_explicit', []):
                     raise RecoveryContractError('Run limits semantics changed on resume')
                 configuration = old
             else:
@@ -426,7 +430,7 @@ class RunContext:
                 configuration = dict(format=1, stream_protocol="aligned-barrier-v2", run_id=uuid.uuid4().hex,
                     entry_identity=self.entry_identity, limits=execution_limits(self.requested_limits),
                     platform_revision=revision, started_at=time.time(),
-                    limits_explicit=sorted((self.requested_limits or {}).keys()))
+                    limits_explicit=sorted(self.explicit_limits))
             self.ref = RunRef(str(self.directory), configuration["run_id"])
             if self.resuming and self.ref.run_id != self.expected_run_id:
                 raise RecoveryContractError("RunRef identity does not match its directory")

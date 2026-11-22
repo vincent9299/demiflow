@@ -218,6 +218,13 @@ def _record_metadata(record):
     return metadata
 
 
+def admit_row_copies(value, bounds, *, services, retained=0):
+    """Check the actual input/frozen copy and the native typed row codec peak."""
+    size, native, tree = _typed_shape(value, bounds.max_row_bytes)
+    _admit(retained + max(2 * native, native + tree + 2 * size), resident_limit(bounds, services))
+    return native
+
+
 def admit_encoded_record(record, raw, bounds, *, services=None, retained=0):
     """Re-admit a same-invocation validated document after other owners grew."""
     if type(raw) is not bytes or len(raw) > document_limit(bounds):

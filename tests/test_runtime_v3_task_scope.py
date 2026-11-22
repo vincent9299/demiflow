@@ -266,3 +266,98 @@ def test_task_provenance_is_separate_and_cannot_be_forged_at_a_follower():
     with pytest.raises(DataflowError, match='out of order'):
         list(follower.push('input', rec({'i': 1}, position={'dataflow_task': {'group': 'group-1', 'ordinal': 1}})))
     follower.close()
+
+
+@pytest.mark.parametrize("form", ["function", "class"])
+def test_private_task_rejects_oversize_mutable_checkpoint(form):
+    from dataclasses import replace
+    from test_runtime_v3_k import services, spec, program, InputPort, rec
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.kernels.operator import OperatorKernel
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+
+    owned = []
+    def grow(row):
+        owned.append('x' * row['n'])
+        return row
+
+    class Grow:
+        def __init__(self):
+            self.value = ''
+
+        def __call__(self, row):
+            self.value = 'x' * row['n']
+            return row
+
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    target = grow if form == "function" else Grow
+    svc = services(programs={'fn': program(CallableSpec.create(target))})
+    svc.bounds = replace(svc.bounds, max_state_bytes=4096)
+    policy = spec('MapOp', {'program': 'fn', 'task_batch_rows': 2}, state='adapter',
+                  inputs=[InputPort('input', 'incremental')])
+    kernel = OperatorKernel(policy, services=svc, partition_id='p0')
+    try:
+        kernel.start()
+        list(kernel.push('input', rec({'n': 16384})))
+        error_type = DataflowError if form == 'function' else RecoveryContractError
+        with pytest.raises(error_type, match='before encoding') as failed:
+            kernel.snapshot()
+        assert 'limit_bytes=4096' in str(failed.value) and 'occurrence_id=occ-MapOp' in str(failed.value)
+        assert 'visited_python_bytes=' in str(failed.value) and 'actual_bytes' not in str(failed.value)
+    finally:
+        kernel.close()
+    assert not owned
+
+
+def test_private_task_reopens_original_whole_function_image(monkeypatch):
+    from test_runtime_v3_k import services, spec, program, InputPort, rec, rows_of
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.kernels.operator import OperatorKernel
+    from demiflow.execution.kernels.task_scope import snapshot_function
+
+    owner = closure()
+    svc = services(programs={'fn': program(CallableSpec.create(owner))})
+    policy = spec('MapOp', {'program': 'fn', 'task_batch_rows': 3}, state='adapter',
+                  inputs=[InputPort('input', 'incremental')])
+    first = OperatorKernel(policy, services=svc, partition_id='p0')
+    first.start()
+    try:
+        assert rows_of(first.push('input', rec({'i': 0}))) == [{'i': 0, 'within_task': 1}]
+        # Exercise the original writer's image shape through the real reader.
+        monkeypatch.setattr(first, '_snapshot_state', lambda instance=None: snapshot_function(
+            first._state_owner(instance), max_bytes=svc.bounds.max_state_bytes))
+        ref = first.snapshot()
+    finally:
+        first.close()
+    second = OperatorKernel(policy, services=svc, partition_id='p0')
+    try:
+        second.restore(ref)
+        second.start()
+        assert rows_of(second.push('input', rec({'i': 1}, sequence=1))) == [{'i': 1, 'within_task': 2}]
+    finally:
+        second.close()
+
+def test_task_checkpoint_reports_measured_bytes_and_owner():
+    from dataclasses import replace
+    from test_runtime_v3_k import services, spec, program, InputPort, rec
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.kernels.operator import OperatorKernel
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+
+    svc = services(programs={'fn': program(CallableSpec.create(closure()))})
+    policy = spec('MapOp', {'program': 'fn', 'task_batch_rows': 3}, state='adapter',
+                  inputs=[InputPort('input', 'incremental')])
+    kernel = OperatorKernel(policy, services=svc, partition_id='p0')
+    try:
+        kernel.start()
+        list(kernel.push('input', rec({'i': 0})))
+        valid = kernel.snapshot()
+        limit = valid.size_bytes - 1
+        svc.bounds = replace(svc.bounds, max_state_bytes=limit)
+        for operation in (kernel.snapshot, lambda: kernel.restore(valid)):
+            with pytest.raises(DataflowError, match='actual_bytes=') as error:
+                operation()
+            assert error.value.context == {'limit_bytes': limit, 'actual_bytes': valid.size_bytes,
+                                           'occurrence_id': 'occ-MapOp'}
+    finally:
+        kernel.close()

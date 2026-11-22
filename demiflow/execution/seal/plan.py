@@ -121,6 +121,7 @@ def _artifact_chunks(store, ref: ArtifactRef, *, media_type: str, max_bytes=None
             raise DataflowError("CORRUPT_ARTIFACT", "Sealed artifact length differs")
         digest.update(chunk)
         yield chunk
+        del chunk
     if size != ref.size_bytes or digest.hexdigest() != ref.digest:
         raise DataflowError("CORRUPT_ARTIFACT", "Sealed artifact length or digest differs")
 
@@ -380,6 +381,11 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
             from ...planning.dataflow_compile import _plain
             node = replace(node, kernel=replace(node.kernel, state='nonrecoverable',
                 configuration={**_plain(config), 'thread_attempt': True}))
+        elif config.get('task_batch_rows') and not config.get('shared_actor'):
+            from ..kernels.task_scope import task_uses_function_slots
+            if not task_uses_function_slots(_program_value(declaration)):
+                node = replace(node, kernel=replace(node.kernel, configuration={
+                    **_thaw_json(config), 'task_load_bytes': manifest['payload_ref']['size_bytes']}))
         nodes.append(replace(node, program_ref=ref))
     jobs = []
     for job in graph.jobs:
@@ -413,6 +419,7 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
             mount_sources(shared_sources['refs'], shared_sources['imports'], store=store, cache=cache)
         mount_sources(manifest.get('business_sources', {}), code_identity.get('imports', {}),
                       store=store, cache=cache)
+    load_private = None
     if 'thread_attempt' in manifest:
         if 'payload_ref' in manifest:
             raise DataflowError('CORRUPT_ARTIFACT', 'live program cannot also claim a pickle payload')
@@ -429,6 +436,15 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
         from ..dataflow_program_pickle import load_payload
         value = cached[2] if cached is not None else load_payload(
             _artifact_chunks(store, payload_ref, media_type=PAYLOAD_MEDIA))
+        if kind == 'callable' and not binding:
+            occurrence = manifest['occurrence_id']
+            def load_private():
+                from ..dataflow_program_pickle import load_private_payload
+                if payload_ref.size_bytes > bounds.max_resident_bytes:
+                    raise DataflowError('RESOURCE_INFEASIBLE', 'Private task program exceeds resident memory',
+                                        context={'occurrence_id': occurrence, 'required_bytes': payload_ref.size_bytes,
+                                                 'available_bytes': bounds.max_resident_bytes})
+                return load_private_payload(store, payload_ref)
         if binding:
             if type(value) is not tuple or len(value) != len(binding['members']):
                 raise DataflowError('CORRUPT_ARTIFACT', 'Invalid shared actor program membership')
@@ -438,7 +454,7 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
     if not _matches_original_program(kind, value, code_identity):
         raise DataflowError("INVALID_CONTRACT",
                             "Loaded program code differs from the sealed pin (edited code or wrong module)")
-    return LoadedProgram(kind=kind, value=value, digest=identity(code_identity))
+    return LoadedProgram(kind=kind, value=value, digest=identity(code_identity), load_private=load_private)
 
 
 def verify_completed_live_program(ref, *, expected_pin, declaration, store, bounds):

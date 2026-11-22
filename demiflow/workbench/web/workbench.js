@@ -54,7 +54,7 @@
     const can=key=>!!(ctx.run_permissions?.[key]??(key==='run_submit'&&ctx.runs_enabled));
     const configWrite=()=>!!ctx.capabilities?.config_write;
     const draftKey=()=>project+'|'+(working?.entry||'')+'|'+(working?.params||'');
-    const getDraft=()=>ForgeWorkbenchState.drafts.get(draftKey())||{values:{},inputs:{},timeout:String(ctx.run_limits.timeout_s)};
+    const getDraft=()=>ForgeWorkbenchState.drafts.get(draftKey())||{values:{},inputs:{}};
     function storeDraft(value){ForgeWorkbenchState.drafts.put(draftKey(),value);if(Object.keys(value.values||{}).length)clearPlanPreview(true);updateActions();}
     function message(text,tone='notice',ticket=state.capture()) {if(!current(ticket))return;notice.textContent=text;notice.className='wb-notice '+tone;notice.hidden=!text;delete notice.dataset.observationError;}
     function button(label,action,parent,{disabled=false,cls=''}={}) {
@@ -756,9 +756,9 @@
         if(!choices.some(c=>c.value===chosen))choices.push({value:chosen,label:chosen+' · 需核对'});
         const input=select('本次输入 '+name,choices,chosen);input.disabled=!can('run_submit');input.onchange=()=>{if(disposed||run||!input.isConnected||key!==draftKey())return;const next=getDraft();next.inputs[name]=input.value;storeDraft(next);};field(name,input,box);
       }
-      const timeout=$('input');timeout.type='number';timeout.min=1;timeout.max=ctx.run_limits.timeout_s;timeout.value=d.timeout;timeout.setAttribute('aria-label','本次运行秒数上限');
+      const timeout=$('input');timeout.type='number';timeout.min=1;timeout.max=ctx.run_limits.timeout_s;timeout.value=d.timeout??ctx.run_limits.timeout_s;timeout.setAttribute('aria-label','本次运行秒数上限');
       timeout.oninput=()=>{if(disposed||run||!timeout.isConnected||key!==draftKey())return;const next=getDraft();next.timeout=timeout.value;storeDraft(next);};field('秒数上限',timeout,box);
-      button('重置本次运行设置',()=>{const next=getDraft();next.inputs={};next.timeout=String(ctx.run_limits.timeout_s);storeDraft(next);paintConfiguration(inspectorWhole?null:data().graph.nodes.find(n=>n.id===data().node)||null);},box);
+      button('重置本次运行设置',()=>{const next=getDraft();next.inputs={};delete next.timeout;storeDraft(next);paintConfiguration(inspectorWhole?null:data().graph.nodes.find(n=>n.id===data().node)||null);},box);
       box.append($('p','这些设置只作用本次运行。提交时核对实际写出目标，保留已有结果。','wb-caption'));
       if(options.continueInput)box.append($('p','可在输入槽中选择上次结果：'+options.continueInput,'wb-caption'));
     }
@@ -1128,15 +1128,19 @@
       if(admission.status!=='requires_prepare'){message(admission.message||'当前流程尚未接入受管提交。');return;}
       runUI.confirmation(runConfirmation,{title:'运行 '+runUI.flowName(ctx,working.entry),
         description:admission.output_binding==='compiled_targets'?'编译并封存当前流程和业务参数，写入参数指定的目标。已有目标会拒绝写入；需要另一次运行时，请先指定新目标。':'检查并封存当前流程和唯一业务参数，再提交运行。创建模式的声明输出使用本次独立目标；覆盖模式仍需要固定版本校验。',
-        rows:[['流程',working.entry],['业务参数',working.params||'未绑定'],['累计时长上限',getDraft().timeout+' 秒']],confirmLabel:'确认运行',
+        rows:[['流程',working.entry],['业务参数',working.params||'未绑定'],['累计时长上限',(getDraft().timeout??ctx.run_limits.timeout_s)+' 秒']],confirmLabel:'确认运行',
         cancel:()=>{runConfirmation.hidden=true;},confirm:async()=>{if(!current(ticket))return;runConfirmation.hidden=true;await submit();}});
     }
     async function submit(){
       if(busy||run)return;
       if(working&&Object.keys(getDraft().values).length)throw new Error('先保存当前配置草稿，再提交运行。');
       if(data().graph&&data().graph.freshness.current===false)throw new Error('检查依据已变化，请先重新检查，再提交运行。');
-      const d=getDraft(),body={entry:working.entry,params:working.params,inputs:{...d.inputs},limits:{timeout_s:Number(d.timeout)},new_outputs:true};
-      if(!Number.isInteger(body.limits.timeout_s)||body.limits.timeout_s<1||body.limits.timeout_s>ctx.run_limits.timeout_s)throw new Error('运行秒数上限超出项目预算');
+      const d=getDraft(),body={entry:working.entry,params:working.params,inputs:{...d.inputs},limits:{},new_outputs:true};
+      if(d.timeout!=null){
+        const timeout=Number(d.timeout);
+        if(!Number.isInteger(timeout)||timeout<1||timeout>ctx.run_limits.timeout_s)throw new Error('运行秒数上限超出项目预算');
+        body.limits.timeout_s=timeout;
+      }
       const ticket=state.capture();busy=true;updateActions();let intent=null;
       try{
         runButton.textContent='正在准备…';

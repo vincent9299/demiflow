@@ -13,9 +13,8 @@ decides the sizes:
 * ``relational_profile``                       join copy and reducer working sets;
 * ``terminal_budget``                          the terminal index, payload, native
                                                publication and carrier windows;
-* ``codec_window`` / ``fit_codec_windows``     the optional slack of each node and
-                                               its redistribution inside each
-                                               incremental component.
+* ``codec_window`` / ``declare_codec_windows``     the proven working range of a kernel;
+* ``allocate_workspace_slack``                    grants within each selected physical group.
 """
 from __future__ import annotations
 
@@ -148,10 +147,13 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
     # solver/provider still admit the resulting profile and historical
     # sealed profiles are never recalculated here.
     control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
-    metadata = min(bounds.max_state_bytes, max(3072, payload // 2),
-                   bounds.max_resident_bytes - control - payload)
-    if metadata < 3072:
-        raise _error("RESOURCE_INFEASIBLE", "terminal state budget cannot hold one block and root")
+    minimum_metadata = 3072
+    metadata = min(bounds.max_state_bytes, max(minimum_metadata, payload // 2),
+                   max(minimum_metadata, bounds.max_resident_bytes - control - payload))
+    if metadata < minimum_metadata:
+        raise DataflowError("RESOURCE_INFEASIBLE", "terminal state budget cannot hold one block and root "
+            f"(max_state_bytes required={minimum_metadata}, available={metadata})",
+            context={'resource': 'max_state_bytes', 'required': minimum_metadata, 'available': metadata})
     # Retain the already promised index capacity. Codec room uses only
     # remaining capacity, never space borrowed from that index or control.
     payload = payload_workspace(bounds, metadata_bytes=metadata)
@@ -232,6 +234,16 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
             configuration['terminal_memory'] = {'schema': TERMINAL_WORKSPACE,
                                                    'resident_bytes': terminal_space}
             profile = replace(profile, requests={**profile.requests, 'memory_bytes': terminal_space})
+    elif not native_publication and payload + metadata > bounds.max_resident_bytes - control:
+        # Keep the original row contract. The terminal already measures codec,
+        # index and flush peaks against one worker grant on each real append.
+        from ..execution.dataflow_publication_budget import TERMINAL_WORKSPACE
+        available = bounds.max_resident_bytes - control
+        if available < 8192:
+            raise _error('RESOURCE_INFEASIBLE', 'terminal cannot fit its bounded workspace')
+        configuration['terminal_memory'] = {'schema': TERMINAL_WORKSPACE, 'resident_bytes': available}
+        profile = replace(profile, requests={**profile.requests, 'memory_bytes': available})
+        bounded_workspace = True
     publication_window = None
     if native_publication:
         publication_window = (publication_min if bounded_workspace else
@@ -264,88 +276,129 @@ def codec_window(kernel, operation, bounds):
         minimum = default_profile(operation, bounds=bounds, state=kernel.state,
                                    codec_workspace=False).requests['memory_bytes']
         matches = kernel.profile == expected
+        # The native literal/range reader and synchronous row map measure their
+        # actual input and output codec peaks. When even one hypothetical
+        # maximum-sized pair cannot fit, give them the full available worker
+        # and admit each real value there, retaining the original row bound.
+        if (kernel.kind in {'items', 'range', 'materialized', 'literal_empty', 'MapOp', 'BoundMapOp'}
+                and minimum == bounds.max_batch_bytes + bounds.max_row_bytes
+                and kernel.state == 'none' and not kernel.configuration.get('streaming_map')
+                and kernel.configuration.get('concurrency', 1) == 1):
+            control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
+            minimum = min(minimum, bounds.max_resident_bytes - control)
+        calls = kernel.configuration.get('concurrency', 1)
+        if kernel.kind == 'AsyncMapOp' and calls > 1:
+            # Unary calls keep one full output per slot. Their input credit
+            # can shrink to a single row; another row may already be in push
+            # waiting for that credit. State and fixed costs still coexist.
+            minimum -= calls * bounds.max_batch_bytes - 2 * bounds.max_row_bytes
     if not matches:
         return None  # Native models, reducers and other specialized grants retain their authority.
     target = kernel.profile.requests['memory_bytes']
     return (minimum, target) if target > minimum else None
 
 
-def incremental_components(nodes, edges):
-    """Node-index groups that must coexist; finite inputs split natural phases."""
-    parents = list(range(len(nodes)))
-    def owner(index):
-        while parents[index] != index:
-            parents[index] = parents[parents[index]]
-            index = parents[index]
-        return index
-    for producer, _, consumer, port in edges:
-        spec = next(p for p in nodes[consumer].kernel.inputs if p.name == port)
-        if spec.requirement == 'incremental':
-            parents[owner(consumer)] = owner(producer)
-    groups = {}
-    for index in range(len(nodes)):
-        groups.setdefault(owner(index), []).append(index)
-    return groups
+def declare_codec_windows(nodes, codec_windows, publication_windows):
+    """Capture proven elastic parts of the compiler's preferred kernel grants.
 
-
-def fit_codec_windows(nodes, edges, codec_windows, publication_windows, bounds):
-    """Share only optional codec slack inside each incremental component.
-
-    Input/output/state and terminal index minima remain fully additive.
-    Finite-complete edges separate natural phases; no source is upgraded to
-    checkpointable and no existing sealed graph is passed through this code.
-    The physical solver still accounts for replicas, hosts and real grants;
-    actual typed codec allocations must still pass the runtime peak guard.
+    An explicit or specialized worker grant has no optional codec component.
+    Decorating a node may have replaced its profile; only the original target
+    can carry the corresponding minimum into physical planning.
     """
-    from .dataflow_compile import _plain
-    groups = incremental_components(nodes, edges)
-    control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
-    available = bounds.max_resident_bytes - control
-    phased_publication = False
-    if publication_windows:
-        from fractions import Fraction
-        from ..execution.dataflow_publication_budget import FIELD
-        publication_min = max(v[0] for v in publication_windows.values())
-        publication_target = max(v[1] for v in publication_windows.values())
-        from ..execution.dataflow_publication_budget import phased
-        phased_publication = all(phased(nodes[i].kernel.configuration)
-                                 for i in publication_windows)
-        factor = Fraction(1)
-        for members in groups.values():
-            if phased_publication and not set(members).intersection(publication_windows):
-                continue
-            targets = {i: nodes[i].kernel.profile.requests['memory_bytes'] for i in members}
-            minima = {i: codec_windows.get(i, (target, target))[0]
-                      for i, target in targets.items()}
-            demand = sum(targets.values()) - sum(minima.values()) + publication_target - publication_min
+    from ..execution.contracts.dataflow_codec import _thaw_json
+    from ..execution.dataflow_publication_budget import FIELD, workspace_bytes
+    for index, node in enumerate(nodes):
+        fields = {}
+        codec = codec_windows.get(index)
+        if codec and codec[1] == node.kernel.profile.requests['memory_bytes']:
+            fields['codec_min_bytes'] = codec[0]
+        publication = publication_windows.get(index)
+        if publication and FIELD in node.kernel.configuration and workspace_bytes(node.kernel.configuration) == publication[1]:
+            fields['publication_min_bytes'] = publication[0]
+        if fields:
+            config = {**_thaw_json(node.kernel.configuration), **fields}
+            nodes[index] = replace(node, kernel=replace(node.kernel, configuration=config))
+
+
+def minimum_workspace_graph(graph):
+    """Use real, indivisible demands when testing a physical layout."""
+    from ..execution.dataflow_publication_budget import with_publication_workspace
+    nodes = []
+    for node in graph.nodes:
+        config = node.kernel.configuration
+        kernel = node.kernel
+        if 'codec_min_bytes' in config:
+            kernel = kernel.with_memory_bytes(config['codec_min_bytes'])
+        if 'publication_min_bytes' in config:
+            kernel = with_publication_workspace(kernel, config['publication_min_bytes'])
+        nodes.append(replace(node, kernel=kernel))
+    return replace(graph, nodes=tuple(nodes))
+
+
+def allocate_workspace_slack(graph, floor_graph, stages, residency, *, hosts, bounds):
+    """Expand optional codec capacity inside each selected co-resident group.
+
+    A worker in a phased group need not share its slack with unrelated phases.
+    Publication is a single driver grant, shared across the phases that use it.
+    """
+    from fractions import Fraction
+    from ..execution.dataflow_publication_budget import PublicationReservation, graph_workspace_bytes
+    reservation = PublicationReservation(floor_graph, stages, bounds)
+    publication_extra = graph_workspace_bytes(graph) - reservation.bytes
+    nodes = {n.occurrence_id: n.kernel for n in graph.nodes}
+    by_id = {stage.stage_id: stage for stage in stages}
+    extras = {}
+    for stage in stages:
+        values = {}
+        for occ in stage.occurrences:
+            kernel = nodes[occ]
+            target = kernel.profile.requests['memory_bytes']
+            minimum = kernel.configuration.get('codec_min_bytes', target)
+            if target > minimum:
+                values[occ] = target - minimum
+        extras[stage.stage_id] = values
+
+    smallest_host = min(int(host.logical_resources.get('memory_bytes', 0)) for host in hosts)
+    shares = {}
+    publication_share = Fraction(1)
+    for ids in residency.simultaneous_groups:
+        group = [by_id[name] for name in ids]
+        def replicas(stage):
+            return min(len(stage.partitions), stage.replica_target) if len(group) == 1 else len(stage.partitions)
+        footprint = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) * replicas(s) for s in group)
+        # Aggregate cluster headroom may strand an indivisible worker. Only
+        # grow optional windows from room safe under any existing placement.
+        capacity = min(bounds.max_resident_bytes - reservation.reserved(ids), smallest_host)
+        remaining = max(0, capacity - footprint)
+        optional = sum(sum(extras[s.stage_id].values()) * replicas(s) for s in group)
+        publishing = not reservation.scoped or bool(reservation.stages.intersection(ids))
+        if publishing:
+            optional += publication_extra
+        share = min(Fraction(1), Fraction(remaining, optional)) if optional else Fraction(1)
+        if publishing:
+            publication_share = min(publication_share, share)
+        for stage in group:
+            demand = sum(extras[stage.stage_id].values())
             if demand:
-                factor = min(factor, Fraction(max(0, available - sum(minima.values()) - publication_min), demand))
-        publication = publication_min + int((publication_target - publication_min) * factor)
-        for index in publication_windows:
-            node = nodes[index]
-            configuration = _plain(node.kernel.configuration)
-            configuration[FIELD]['resident_bytes'] = publication
-            nodes[index] = replace(node, kernel=replace(node.kernel, configuration=configuration))
-    for members in groups.values():
-        group_available = available - (publication if publication_windows and
-            (not phased_publication or set(members).intersection(publication_windows)) else 0)
-        targets = {i: nodes[i].kernel.profile.requests['memory_bytes'] for i in members}
-        adjustable = {i: codec_windows[i] for i in members if i in codec_windows
-                      and codec_windows[i][1] == targets[i]}
-        minima = {i: adjustable[i][0] if i in adjustable else targets[i] for i in members}
-        floor, desired = sum(minima.values()), sum(targets.values())
-        if not adjustable or desired <= group_available or floor > group_available:
-            continue
-        slack, demand = group_available - floor, desired - floor
-        for index, (minimum, target) in adjustable.items():
-            memory = minimum + (target - minimum) * slack // demand
-            node = nodes[index]
-            kernel = node.kernel
-            configuration = _plain(kernel.configuration)
-            if node.kind == 'terminal' and 'terminal_memory' in configuration:
-                contract = configuration['terminal_memory']
-                contract['payload_bytes'] = memory - contract['metadata_bytes']
-            nodes[index] = replace(node, kernel=replace(kernel,
-                configuration=configuration,
-                profile=replace(kernel.profile, requests={**kernel.profile.requests,
-                    'memory_bytes': memory})))
+                shares[stage.stage_id] = share
+
+    selected = []
+    for stage in stages:
+        share = shares.get(stage.stage_id, 1)
+        overrides = {}
+        growth = 0
+        for occ, extra in extras[stage.stage_id].items():
+            increment = int(share * extra)
+            if increment < extra:
+                overrides[occ] = nodes[occ].configuration['codec_min_bytes'] + increment
+            growth += increment
+        if growth:
+            # Store the exact grant consumed by the existing worker codec guard.
+            total = max(stage.resident_bytes, stage.profile.requests['memory_bytes']) + growth
+            stage = replace(stage, resident_bytes=total, profile=replace(stage.profile,
+                requests={**stage.profile.requests, 'memory_bytes': total}))
+        if overrides:
+            stage = replace(stage, kernel_memory_bytes=overrides)
+        selected.append(stage)
+    publication = reservation.bytes + int(publication_share * publication_extra)
+    return tuple(selected), reservation.base + publication

@@ -16,16 +16,17 @@ from .recovery_contract import identity
 FORMAT = 'demiflow.managed_native_submission.v1'
 
 
-def capture_managed_pipeline(entry, arguments, *, limits, on_compiled=None):
+def capture_managed_pipeline(entry, arguments, *, limits, explicit_limits=None, inherited_native_resources=None, on_compiled=None):
     from .plan_capture import capture_pipeline
     from .local_kernel import local_execution
     def construct():
         with local_execution(worker_mode='thread', partitions=1, batch_rows=limits['batch_rows'],
-                block_size=limits['batch_rows'], memory_bytes=limits['memory_bytes']):
+                block_size=limits['batch_rows'], memory_bytes=limits['memory_bytes'],
+                inherited_native_resources=inherited_native_resources):
             return entry(**arguments)
     try:
         return capture_pipeline(construct, {}, on_compiled=on_compiled,
-                                _submission=True, _limits=limits)
+                                _submission=True, limits=limits, explicit_limits=explicit_limits)
     except DataflowError as exc:
         # Host inspection returns a bounded admission rejection. It has not
         # started data/model execution; do not lose it as a worker crash.

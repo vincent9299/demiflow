@@ -554,3 +554,35 @@ def test_control_cancel_wakes_waiter_without_confirming_unknown_effect(tmp_path)
         thread.join(timeout=1)
         assert not thread.is_alive() and outcomes[1] == reply
         mailbox.close()
+
+
+class CountingTask:
+    def __call__(self, row):
+        return row
+
+
+def test_explicit_worker_grant_includes_exact_private_load_buffer(tmp_path):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+
+    def task(grant):
+        return data.from_items([{'k': 1}]).map(CountingTask, backend_options={
+            'ray': {'worker_resources': {'memory_bytes': grant}}})
+
+    def measured(ex):
+        node = next(n for n in ex._graph.nodes if n.kind == 'transform')
+        stage = next(s for s in ex._physical.stages if node.occurrence_id in s.occurrences)
+        return node.kernel.configuration, stage.profile.requests['memory_bytes']
+
+    grant = 128 * 1024**2
+    with prepared(tmp_path / 'initial', task(grant)) as (execution, _):
+        config, selected = measured(execution)
+        assert selected == grant
+        exact = config['fixed_worker_min_bytes'] + config['task_load_bytes']
+    with prepared(tmp_path / 'exact', task(exact)) as (execution, _):
+        assert measured(execution)[1] == exact
+    with pytest.raises(DataflowError, match='private task load') as rejected, prepared(
+            tmp_path / 'short', task(exact - 1)):
+        pytest.fail('an undersized explicit grant was accepted')
+    # The workbench persists this message for a failed run.
+    assert f'memory_bytes required={exact}, available={exact - 1}' in str(rejected.value)
+    assert rejected.value.context['stage_id'] in str(rejected.value)

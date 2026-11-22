@@ -13,7 +13,7 @@ from test_forge_resume import stopped
 from test_forge_runs import wait
 
 
-def native_flow(root, imports='', value='1', transform=''):
+def native_flow(root, imports='', value='1', transform='', *, limits=None):
     (root / 'flows/native.py').write_text('''from demiflow import data
 import pyarrow as pa
 ''' + imports + f'''
@@ -26,7 +26,7 @@ def run(*, target, stage):
     arguments = dict(target=str(root / 'native-output.lance'), stage=str(root / 'native-stage.lance'))
     (root / 'flows/native.json').write_text(json.dumps(dict(format='demiflow_forge_flow_parameters_v1', arguments=arguments)))
     declare_existing_flow(root, 'flows/native.py:run', params='flows/native.json')
-    return runs.prepare(root, 'flows/native.py:run', params='flows/native.json')
+    return runs.prepare(root, 'flows/native.py:run', params='flows/native.json', limits=limits)
 
 
 def test_native_submit_seal_monitor_and_fixed_results(root):
@@ -43,6 +43,24 @@ def test_native_submit_seal_monitor_and_fixed_results(root):
     from demiflow.workbench.graph.model import get
     graph = get(root, basis_kind='run', run_id=result['run_id'], attempt=1)
     assert graph['logical']['actions'][0]['status'] == 'sealed'
+
+
+@pytest.mark.parametrize('project,overrides', [
+    ({}, {}),
+    ({'max_row_bytes': runs.DEFAULT_LIMITS['max_row_bytes']}, {'batch_rows': 128}),
+])
+def test_managed_budget_declarations_reach_the_native_run(root, project, overrides):
+    from demiflow.forge.platform import content_digest
+    ws.set_budgets(root, project, expected=content_digest(ws.read_control(root / 'workspace.json')))
+    prepared = native_flow(root, limits=overrides)
+    expected = sorted(project.keys() | overrides.keys())
+    _, record = runs._load(root, prepared['run_id'])
+    assert record['manifest']['limits_explicit'] == expected
+    result = execute(root, prepared)
+    assert result['status'] == 'succeeded', (result, runs.logs(root, result['run_id']))
+    identity = runs.journal(root, result['run_id']).recovery_identity()
+    assert identity['limits_explicit'] == expected
+    assert all(identity['limits'][name] == value for name, value in record['manifest']['limits'].items())
 
 
 def test_nested_package_preview_and_managed_run_use_same_sources(root):

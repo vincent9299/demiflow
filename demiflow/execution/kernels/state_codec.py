@@ -11,13 +11,24 @@ RECORD_LIST_PREFIX = b'["demiflow.kernel-state.v3",["list",['
 RECORD_LIST_SUFFIX = b']]]'
 
 
+def size_error(message, limit, *, actual=None, occurrence=None):
+    context = {'limit_bytes': limit}
+    if actual is not None:
+        context['actual_bytes'] = actual
+    if occurrence is not None:
+        context['occurrence_id'] = occurrence
+    detail = ', '.join(f'{name}={value}' for name, value in context.items())
+    return DataflowError('BUDGET_EXCEEDED', f'{message} ({detail})', context=context)
+
+
 def record_fragment(record, *, max_bytes):
     """One original list element, reusable for byte admission and publication."""
     raw = json.dumps(['record', record.record_id, record.sequence,
         _encode_record_document(record, max_bytes=max_bytes).decode()],
         separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()
-    if len(raw) + len(RECORD_LIST_PREFIX) + len(RECORD_LIST_SUFFIX) > max_bytes:
-        raise DataflowError('BUDGET_EXCEEDED', 'kernel image exceeds state byte budget')
+    size = len(raw) + len(RECORD_LIST_PREFIX) + len(RECORD_LIST_SUFFIX)
+    if size > max_bytes:
+        raise size_error('kernel image exceeds state byte budget', max_bytes, actual=size)
     return raw
 
 
@@ -30,7 +41,7 @@ def record_list_chunks(fragments):
     yield RECORD_LIST_SUFFIX
 
 
-def dumps(value, *, max_bytes):
+def dumps(value, *, max_bytes, occurrence=None):
     def pack(v):
         if isinstance(v, Record):
             return ['record', v.record_id, v.sequence,
@@ -47,13 +58,13 @@ def dumps(value, *, max_bytes):
     raw = json.dumps(['demiflow.kernel-state.v3', pack(value)], separators=(',', ':'),
                      ensure_ascii=False, allow_nan=False).encode()
     if len(raw) > max_bytes:
-        raise DataflowError('BUDGET_EXCEEDED', 'kernel image exceeds state byte budget')
+        raise size_error('kernel image exceeds state byte budget', max_bytes, actual=len(raw), occurrence=occurrence)
     return raw
 
 
-def loads(raw, *, max_bytes):
+def loads(raw, *, max_bytes, occurrence=None):
     if len(raw) > max_bytes:
-        raise DataflowError('BUDGET_EXCEEDED', 'kernel image exceeds state byte budget')
+        raise size_error('kernel image exceeds state byte budget', max_bytes, actual=len(raw), occurrence=occurrence)
     def unpack(v):
         kind = v[0]
         if kind == 'record':
