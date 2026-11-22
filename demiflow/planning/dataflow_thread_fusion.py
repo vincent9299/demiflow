@@ -139,7 +139,9 @@ def fuse_thread_suffix(graph, stages, *, policy, bounds, hosts):
                    and not k.configuration.get('streaming_map')
                    and k.kind != 'AsyncMapOp'
                    and k.configuration.get('concurrency', 1) == 1
-                   and 'codec_min_bytes' in k.configuration for k in endpoints):
+                   and 'codec_min_bytes' in k.configuration
+                   and k.profile.requests['memory_bytes'] >= bounds.max_row_bytes + bounds.max_batch_bytes
+                   for k in endpoints):
                 discounted_inputs.add(edge.consumer)
                 resident -= min(bounds.max_row_bytes, bounds.max_batch_bytes,
                                 endpoints[0].output_bound_bytes)

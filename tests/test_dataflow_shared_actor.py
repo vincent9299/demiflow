@@ -127,6 +127,20 @@ def test_shared_actor_default_public_entry_fits_original_budget(tmp_path):
     assert events[-1] == {'event': 'close', 'count': 24}
 
 
+def test_shared_actor_limited_collection_stops_its_live_upstream(tmp_path):
+    class Observed(Counter):
+        async def __call__(self, row):
+            self.record('call', row=row['id'])
+            return await super().__call__(row)
+    actor = Observed(tmp_path/'events')
+    with pytest.raises(ValueError, match='more than the take_all limit'):
+        with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 4}):
+            build(actor).take_all(limit=1)
+    events = [json.loads(v) for v in Path(actor.log).read_text().splitlines()]
+    seen = {event['row'] for event in events if event['event'] == 'call'}
+    assert 0 < len(seen) < 12
+
+
 @pytest.mark.parametrize('worker_mode', ['thread', 'process'])
 def test_shared_actor_resumes_original_cut_once(tmp_path, monkeypatch, worker_mode):
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator

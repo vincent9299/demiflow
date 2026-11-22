@@ -56,11 +56,11 @@ class TerminalBlocks:
         self.columns = None
         stages = getattr(getattr(services, 'assignment', None), 'stages', ())
         granted = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) for s in stages) if stages else self.bounds.max_resident_bytes
-        from ..dataflow_publication_budget import TERMINAL_WORKSPACE
+        from ..dataflow_publication_budget import MIN_TERMINAL_INDEX, MIN_TERMINAL_WORKSPACE, TERMINAL_WORKSPACE
         if isinstance(budget, Mapping) and budget.get('schema') == TERMINAL_WORKSPACE:
             if (set(budget) != {'schema', 'resident_bytes'}
                     or type(budget['resident_bytes']) is not int
-                    or not 8192 <= budget['resident_bytes'] <= granted):
+                    or not MIN_TERMINAL_WORKSPACE <= budget['resident_bytes'] <= granted):
                 raise DataflowError('INVALID_CONTRACT', 'invalid bounded terminal workspace')
             self._workspace_limit = budget['resident_bytes']
             self._metadata_limit = min(self.bounds.max_state_bytes, self._workspace_limit)
@@ -80,7 +80,7 @@ class TerminalBlocks:
             # grant; historical plans retain their original batch/row window.
             minimum = 4096 if self._reference_only else self.bounds.max_batch_bytes + self.bounds.max_row_bytes
             if (payload < minimum
-                    or not 3072 <= metadata <= self.bounds.max_state_bytes
+                    or not MIN_TERMINAL_INDEX <= metadata <= self.bounds.max_state_bytes
                     or payload + metadata > granted):
                 raise DataflowError('RESOURCE_INFEASIBLE', 'terminal payload and metadata exceed the original grant')
             self._metadata_limit = metadata

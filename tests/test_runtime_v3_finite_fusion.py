@@ -24,7 +24,7 @@ def compiled(*, asynchronous=False):
         arguments={}, sink=None, programs=(), provider='local', action=action)
     policy, bounds = resolve_runtime_policy({}, {}, provider='local')
     from demiflow.planning.dataflow_budget import minimum_workspace_graph
-    graph = minimum_workspace_graph(lower_action(request, bounds=bounds).graph)
+    graph = minimum_workspace_graph(lower_action(request, bounds=bounds).graph, bounds)
     return graph, partition_stages(graph, policy=policy, bounds=bounds), policy, bounds
 
 

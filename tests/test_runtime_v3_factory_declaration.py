@@ -5,7 +5,7 @@ import pytest
 
 from demiflow import data
 from demiflow.data.plan import CallableSpec
-from demiflow.execution.seal.plan import _owned_factory_declaration
+from demiflow.execution.kernels.task_scope import owned_factory_declaration
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.sealed_plans import load_sealed_plan
 
@@ -39,7 +39,7 @@ def _arguments(shared, keyword):
 def test_new_only_factory_constructor_state_is_checked_without_user_code(keyword):
     shared = []
     specification = CallableSpec.create(NewOnlyFactory, **_arguments(shared, keyword))
-    assert _owned_factory_declaration(specification) is False
+    assert owned_factory_declaration(specification) is False
     assert shared == []
 
 
@@ -71,5 +71,17 @@ def test_factory_classification_never_iterates_unknown_constructor_mapping():
             calls.append('len')
             raise AssertionError('classification executed user mapping')
     specification = CallableSpec(NewOnlyFactory, constructor_kwargs=UnknownMapping())
-    assert _owned_factory_declaration(specification) is False
+    assert owned_factory_declaration(specification) is False
     assert calls == []
+
+
+def test_measurable_factory_does_not_invoke_business_descriptors():
+    from unittest.mock import PropertyMock
+    from demiflow.execution.kernels.task_scope import task_has_measurable_state
+    descriptor = PropertyMock(side_effect=AssertionError('passive query executed a descriptor'))
+    class Factory:
+        __getattribute__ = descriptor
+        def __call__(self, row):
+            return row
+    assert not task_has_measurable_state(CallableSpec(Factory))
+    descriptor.assert_not_called()

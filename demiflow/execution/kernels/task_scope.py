@@ -5,7 +5,7 @@ import dis
 import inspect
 import json
 from pathlib import PurePath, PurePosixPath, PureWindowsPath, PosixPath, WindowsPath
-from types import ModuleType
+from types import FunctionType, ModuleType
 
 from ..contracts.dataflow_errors import DataflowError
 from ..contracts.dataflow_kinds import kinds_with
@@ -289,11 +289,81 @@ def task_uses_function_slots(declaration):
     opaque dependency graphs from the sealed payload to preserve their aliases.
     """
     from ...data.plan import CallableSpec
-    if not isinstance(declaration, CallableSpec) or not inspect.isfunction(declaration.target):
+    if type(declaration) is not CallableSpec or type(declaration.target) is not FunctionType:
         return False
     _, _, reason = _resident_slots(declaration.target, call_args=declaration.call_args,
                                   call_kwargs=declaration.call_kwargs, task_private=True)
     return reason is None
+
+
+def owned_factory_declaration(spec):
+    """A class blueprint is durable only when it borrows no mutable state.
+
+    Reuse the existing passive function-state policy for methods and constructor
+    arguments. A serializable external list is still shared caller state; pickle
+    success alone cannot justify replacing it with a disconnected copy.
+    """
+    import types
+    if spec is None or not spec.is_class:
+        return False
+    immutable = (str, bytes, int, float, bool, type(None))
+    classes = type.__getattribute__(spec.target, '__mro__')
+    if len(classes) > 32:
+        return False
+    visited = 0
+    for cls in classes:
+        if cls is object:
+            continue
+        fields = type.__getattribute__(cls, '__dict__')
+        visited += len(fields)
+        if visited > 1024:
+            return False
+        for name, value in fields.items():
+            if name in {'__dict__', '__weakref__', '__module__', '__doc__', '__qualname__'}:
+                continue
+            if type(value) in (classmethod, staticmethod):
+                value = value.__func__
+            if type(value) is types.FunctionType:
+                args, kwargs = (spec.constructor_args, spec.constructor_kwargs) if name in {'__new__', '__init__'} else (
+                    (spec.call_args, spec.call_kwargs) if name == '__call__' else ((), {}))
+                if function_residency_kind(value, call_args=args, call_kwargs=kwargs) != 'none':
+                    return False
+            elif type(value) not in immutable:
+                return False
+    return True
+
+
+def task_has_measurable_state(declaration):
+    """Whether a private task can account its own plain data without callbacks."""
+    from ...data.plan import CallableSpec
+    if type(declaration) is not CallableSpec:
+        return False
+    target = declaration.target
+    if type(target) is FunctionType:
+        return task_uses_function_slots(declaration)
+    if (type(target) is not type
+            or inspect.getattr_static(target, '__getattribute__') is not object.__getattribute__
+            or inspect.getattr_static(target, '__new__') is not object.__new__
+            or any(inspect.getattr_static(target, name, None) is not None for name in
+                   ('snapshot_state', 'restore_state', '__demiflow_snapshot__', '__demiflow_restore__',
+                    '__slots__', '__getattr__'))):
+        return False
+    return owned_factory_declaration(declaration)
+
+
+def measurable_task_fields(target, args, kwargs, occurrence):
+    """Borrow the current task-owned plain data, never reconstruct an instance."""
+    if inspect.isfunction(target):
+        fields, _, reason = _resident_slots(target, call_args=args, call_kwargs=kwargs)
+    else:
+        fields = vars(target)
+        from ..recovery_contract import MAX_DOCUMENT_BYTES
+        _, reason = _json_fields(fields, MAX_DOCUMENT_BYTES)
+    if reason is not None:
+        raise DataflowError('RESOURCE_INFEASIBLE',
+            f'task state cannot be measured inside the stage grant: {reason} (occurrence_id={occurrence})',
+            context={'occurrence_id': occurrence})
+    return fields
 
 
 def _copy_resident_fields(fields, max_bytes, occurrence):

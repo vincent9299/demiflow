@@ -225,3 +225,17 @@ def test_equal_small_run_and_executor_keep_the_run_row_contract(tmp_path):
     _, bounds = resolve_runtime_policy({'memory_bytes': memory, 'max_active_workers': 2},
                                         inherited, provider='local')
     assert bounds.max_row_bytes == inherited['max_row_bytes'] == memory
+
+
+
+def test_small_worker_fuses_a_long_map_chain_without_discounting_unreserved_rows(tmp_path):
+    def increment(row):
+        return {'i': row['i'] + 1}
+
+    memory = 1024**2
+    with RunContext.start(tmp_path / 'run', limits={'memory_bytes': memory}), data.local_execution(
+            workers=2, worker_mode='thread', memory_bytes=memory):
+        ds = data.from_items([{'i': 1}])
+        for _ in range(16):
+            ds = ds.map(increment)
+        assert ds.take_all() == [{'i': 17}]

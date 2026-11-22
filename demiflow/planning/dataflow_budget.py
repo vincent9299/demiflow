@@ -137,6 +137,7 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
     reference carrier is selected the producer node in ``nodes`` is rewritten in place.
     """
     from .dataflow_compile import _plain
+    from ..execution.dataflow_publication_budget import MIN_TERMINAL_INDEX, MIN_TERMINAL_WORKSPACE
     # The first terminal block and its first forest root occupy 3 KiB
     # while the input/output payload is still resident. Seal both windows
     # into the original profile; do not borrow half of that payload grant.
@@ -147,13 +148,12 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
     # solver/provider still admit the resulting profile and historical
     # sealed profiles are never recalculated here.
     control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
-    minimum_metadata = 3072
-    metadata = min(bounds.max_state_bytes, max(minimum_metadata, payload // 2),
-                   max(minimum_metadata, bounds.max_resident_bytes - control - payload))
-    if metadata < minimum_metadata:
+    metadata = min(bounds.max_state_bytes, max(MIN_TERMINAL_INDEX, payload // 2),
+                   max(MIN_TERMINAL_INDEX, bounds.max_resident_bytes - control - payload))
+    if metadata < MIN_TERMINAL_INDEX:
         raise DataflowError("RESOURCE_INFEASIBLE", "terminal state budget cannot hold one block and root "
-            f"(max_state_bytes required={minimum_metadata}, available={metadata})",
-            context={'resource': 'max_state_bytes', 'required': minimum_metadata, 'available': metadata})
+            f"(max_state_bytes required={MIN_TERMINAL_INDEX}, available={metadata})",
+            context={'resource': 'max_state_bytes', 'required': MIN_TERMINAL_INDEX, 'available': metadata})
     # Retain the already promised index capacity. Codec room uses only
     # remaining capacity, never space borrowed from that index or control.
     payload = payload_workspace(bounds, metadata_bytes=metadata)
@@ -196,7 +196,7 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
                 for n in nodes if n.kind == 'source'))
     if compact:
         from ..execution.dataflow_publication_budget import PHASE_SCHEMA, REF_CARRIER
-        metadata = min(bounds.max_state_bytes, max(3072, bounds.max_resident_bytes // 128))
+        metadata = min(bounds.max_state_bytes, max(MIN_TERMINAL_INDEX, bounds.max_resident_bytes // 128))
         payload = min(128 * 1024, max(4096, bounds.max_resident_bytes // 64))
         configuration['terminal_memory'] = {'payload_bytes': payload, 'metadata_bytes': metadata,
                                              'carrier': REF_CARRIER}
@@ -227,7 +227,7 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
         terminal_space = bounds.max_resident_bytes - control - publication_min
         legacy_floor = 2 * (bounds.max_batch_bytes + bounds.max_row_bytes) + metadata
         if (legacy_floor > bounds.max_resident_bytes - control
-                and 8192 <= terminal_space < profile.requests['memory_bytes']):
+                and MIN_TERMINAL_WORKSPACE <= terminal_space < profile.requests['memory_bytes']):
             from ..execution.dataflow_publication_budget import PHASE_SCHEMA, TERMINAL_WORKSPACE
             bounded_workspace = True
             configuration[FIELD]['schema'] = PHASE_SCHEMA
@@ -239,10 +239,13 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
         # index and flush peaks against one worker grant on each real append.
         from ..execution.dataflow_publication_budget import TERMINAL_WORKSPACE
         available = bounds.max_resident_bytes - control
-        if available < 8192:
-            raise _error('RESOURCE_INFEASIBLE', 'terminal cannot fit its bounded workspace')
-        configuration['terminal_memory'] = {'schema': TERMINAL_WORKSPACE, 'resident_bytes': available}
-        profile = replace(profile, requests={**profile.requests, 'memory_bytes': available})
+        if available < MIN_TERMINAL_WORKSPACE:
+            raise DataflowError('RESOURCE_INFEASIBLE',
+                f'terminal workspace cannot fit (memory_bytes required={MIN_TERMINAL_WORKSPACE}, available={available})',
+                context={'resource': 'memory_bytes', 'required': MIN_TERMINAL_WORKSPACE, 'available': available})
+        preferred = min(payload + metadata, available)
+        configuration['terminal_memory'] = {'schema': TERMINAL_WORKSPACE, 'resident_bytes': preferred}
+        profile = replace(profile, requests={**profile.requests, 'memory_bytes': preferred})
         bounded_workspace = True
     publication_window = None
     if native_publication:
@@ -251,6 +254,12 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
             payload_workspace(bounds) + bounds.max_batch_bytes)
     minimum = (payload if compact else bounds.max_batch_bytes + bounds.max_row_bytes) + metadata
     codec = (minimum, payload + metadata) if not bounded_workspace and payload + metadata > minimum else None
+    if not native_publication:
+        # Both existing contracts are feasible alternatives: fixed payload/index
+        # windows can themselves be smaller than the measured codec's minimum.
+        floor = MIN_TERMINAL_WORKSPACE if bounded_workspace else min(minimum, MIN_TERMINAL_WORKSPACE)
+        if profile.requests['memory_bytes'] > floor:
+            codec = (floor, profile.requests['memory_bytes'])
     return TerminalBudget(configuration, profile, phased_publication, publication_window, codec)
 
 
@@ -276,13 +285,19 @@ def codec_window(kernel, operation, bounds):
         minimum = default_profile(operation, bounds=bounds, state=kernel.state,
                                    codec_workspace=False).requests['memory_bytes']
         matches = kernel.profile == expected
-        # The native literal/range reader and synchronous row map measure their
-        # actual input and output codec peaks. When even one hypothetical
-        # maximum-sized pair cannot fit, give them the full available worker
-        # and admit each real value there, retaining the original row bound.
-        if (kernel.kind in {'items', 'range', 'materialized', 'literal_empty', 'MapOp', 'BoundMapOp'}
-                and minimum == bounds.max_batch_bytes + bounds.max_row_bytes
-                and kernel.state == 'none' and not kernel.configuration.get('streaming_map')
+        # A stateless one-slot worker with no fixed workspace can bind the
+        # existing kernel, spool and codec guards to its actual physical grant.
+        # Keep business row/batch ceilings independent of these working windows.
+        measured = kernel.state == 'none'
+        if not measured and 'task_batch_rows' in kernel.configuration and operation is not None:
+            from .dataflow_configuration import TASK_KINDS
+            from ..execution.kernels.task_scope import task_has_measurable_state
+            measured = (kernel.kind in TASK_KINDS
+                        and task_has_measurable_state(getattr(operation, 'callable', None)))
+        baseline = bounds.max_batch_bytes + bounds.max_row_bytes
+        if kernel.state != 'none':
+            baseline += bounds.max_state_bytes
+        if (measured and minimum == baseline and kernel.effect == 'pure'
                 and kernel.configuration.get('concurrency', 1) == 1):
             control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
             minimum = min(minimum, bounds.max_resident_bytes - control)
@@ -305,7 +320,7 @@ def declare_codec_windows(nodes, codec_windows, publication_windows):
     Decorating a node may have replaced its profile; only the original target
     can carry the corresponding minimum into physical planning.
     """
-    from ..execution.contracts.dataflow_codec import _thaw_json
+    from ..execution.contracts.dataflow import thaw_json
     from ..execution.dataflow_publication_budget import FIELD, workspace_bytes
     for index, node in enumerate(nodes):
         fields = {}
@@ -316,11 +331,11 @@ def declare_codec_windows(nodes, codec_windows, publication_windows):
         if publication and FIELD in node.kernel.configuration and workspace_bytes(node.kernel.configuration) == publication[1]:
             fields['publication_min_bytes'] = publication[0]
         if fields:
-            config = {**_thaw_json(node.kernel.configuration), **fields}
+            config = {**thaw_json(node.kernel.configuration), **fields}
             nodes[index] = replace(node, kernel=replace(node.kernel, configuration=config))
 
 
-def minimum_workspace_graph(graph):
+def minimum_workspace_graph(graph, bounds, *, allow_measured_terminal=False):
     """Use real, indivisible demands when testing a physical layout."""
     from ..execution.dataflow_publication_budget import with_publication_workspace
     nodes = []
@@ -328,7 +343,14 @@ def minimum_workspace_graph(graph):
         config = node.kernel.configuration
         kernel = node.kernel
         if 'codec_min_bytes' in config:
-            kernel = kernel.with_memory_bytes(config['codec_min_bytes'])
+            minimum = config['codec_min_bytes']
+            terminal = config.get('terminal_memory', {})
+            if terminal and not allow_measured_terminal and 'publication_workspace' not in config:
+                # A source that can pause may use a later phase. Prefer full
+                # row/batch and index room to an unnecessarily small codec.
+                minimum = (bounds.max_row_bytes + bounds.max_batch_bytes + terminal['metadata_bytes']
+                           if 'metadata_bytes' in terminal else kernel.profile.requests['memory_bytes'])
+            kernel = kernel.with_memory_bytes(minimum, sealed_bounds=bounds)
         if 'publication_min_bytes' in config:
             kernel = with_publication_workspace(kernel, config['publication_min_bytes'])
         nodes.append(replace(node, kernel=kernel))
@@ -347,13 +369,19 @@ def allocate_workspace_slack(graph, floor_graph, stages, residency, *, hosts, bo
     publication_extra = graph_workspace_bytes(graph) - reservation.bytes
     nodes = {n.occurrence_id: n.kernel for n in graph.nodes}
     by_id = {stage.stage_id: stage for stage in stages}
+    floors = {n.occurrence_id: n.kernel.profile.requests['memory_bytes'] for n in floor_graph.nodes}
     extras = {}
+    priority = {}
     for stage in stages:
         values = {}
         for occ in stage.occurrences:
             kernel = nodes[occ]
             target = kernel.profile.requests['memory_bytes']
-            minimum = kernel.configuration.get('codec_min_bytes', target)
+            minimum = floors[occ]
+            terminal = kernel.configuration.get('terminal_memory')
+            if terminal and 'publication_workspace' not in kernel.configuration:
+                conventional = bounds.max_row_bytes + bounds.max_batch_bytes + terminal.get('metadata_bytes', 0)
+                priority[occ] = max(0, min(target, conventional) - minimum)
             if target > minimum:
                 values[occ] = target - minimum
         extras[stage.stage_id] = values
@@ -361,6 +389,7 @@ def allocate_workspace_slack(graph, floor_graph, stages, residency, *, hosts, bo
     smallest_host = min(int(host.logical_resources.get('memory_bytes', 0)) for host in hosts)
     shares = {}
     publication_share = Fraction(1)
+    priority_growth = {}
     for ids in residency.simultaneous_groups:
         group = [by_id[name] for name in ids]
         def replicas(stage):
@@ -370,7 +399,17 @@ def allocate_workspace_slack(graph, floor_graph, stages, residency, *, hosts, bo
         # grow optional windows from room safe under any existing placement.
         capacity = min(bounds.max_resident_bytes - reservation.reserved(ids), smallest_host)
         remaining = max(0, capacity - footprint)
-        optional = sum(sum(extras[s.stage_id].values()) * replicas(s) for s in group)
+        # Fill the terminal's normal codec/index workspace before using slack
+        # for extra buffering in other stages. This matters when a producer
+        # cannot park and its terminal has to use measured occupancy.
+        primary = sum(sum(priority.get(occ, 0) for occ in s.occurrences) * replicas(s) for s in group)
+        primary_share = min(Fraction(1), Fraction(remaining, primary)) if primary else 0
+        for s in group:
+            for occ in s.occurrences:
+                priority_growth[occ] = int(primary_share * priority.get(occ, 0))
+        assigned = sum(sum(priority_growth[occ] for occ in s.occurrences) * replicas(s) for s in group)
+        remaining -= assigned
+        optional = sum(sum(extras[s.stage_id].values()) * replicas(s) for s in group) - assigned
         publishing = not reservation.scoped or bool(reservation.stages.intersection(ids))
         if publishing:
             optional += publication_extra
@@ -388,9 +427,10 @@ def allocate_workspace_slack(graph, floor_graph, stages, residency, *, hosts, bo
         overrides = {}
         growth = 0
         for occ, extra in extras[stage.stage_id].items():
-            increment = int(share * extra)
+            first = priority_growth.get(occ, 0)
+            increment = first + int(share * (extra - first))
             if increment < extra:
-                overrides[occ] = nodes[occ].configuration['codec_min_bytes'] + increment
+                overrides[occ] = floors[occ] + increment
             growth += increment
         if growth:
             # Store the exact grant consumed by the existing worker codec guard.

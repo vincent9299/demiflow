@@ -1399,7 +1399,11 @@ def test_private_task_loads_large_program_with_small_checkpoint(env, opaque):
         _code_error(denied.load_private, "RESOURCE_INFEASIBLE")
         raw = env.store._path(payload.key).read_bytes()
         env.store.tamper(payload, raw[:-1] + bytes([raw[-1] ^ 1]))
-        _code_error(program.load_private, "CORRUPT_ARTIFACT")
+        with pytest.raises(DataflowError, match=payload.digest) as corrupted:
+            program.load_private()
+        assert corrupted.value.code == 'CORRUPT_ARTIFACT'
+        assert corrupted.value.context['occurrence_id'] == key
+        assert corrupted.value.__cause__ is not None
 
 
 def test_private_payload_reuses_sealed_buffer_at_tighter_live_windows(tmp_path):

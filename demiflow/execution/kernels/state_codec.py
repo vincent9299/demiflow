@@ -21,11 +21,29 @@ def size_error(message, limit, *, actual=None, occurrence=None):
     return DataflowError('BUDGET_EXCEEDED', f'{message} ({detail})', context=context)
 
 
-def record_fragment(record, *, max_bytes):
+def record_fragment(record, *, max_bytes, services=None, retained=0):
     """One original list element, reusable for byte admission and publication."""
-    raw = json.dumps(['record', record.record_id, record.sequence,
-        _encode_record_document(record, max_bytes=max_bytes).decode()],
-        separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()
+    if services is None:
+        raw = json.dumps(['record', record.record_id, record.sequence,
+            _encode_record_document(record, max_bytes=max_bytes).decode()],
+            separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()
+    else:
+        from ..dataflow_record_frames import admit_workspace, encode_document, retained_record_bytes
+        bounds = services.bounds
+        document = encode_document(record, bounds, services=services, retained=retained)
+        # The document is already valid compact JSON, so embedding its UTF-8
+        # in a JSON string escapes only quotes and backslashes. Check the
+        # complete encoded fragment and its copy peak before building either.
+        prefix = json.dumps(['record', record.record_id, record.sequence],
+                            separators=(',', ':'), ensure_ascii=False).encode()[:-1] + b',"'
+        escaped = len(document) + document.count(b'\\') + document.count(b'"')
+        size = len(prefix) + escaped + 2
+        total = size + len(RECORD_LIST_PREFIX) + len(RECORD_LIST_SUFFIX)
+        if total > max_bytes:
+            raise size_error('kernel image exceeds state byte budget', max_bytes, actual=total)
+        live = retained + retained_record_bytes(record, bounds) + len(prefix) + len(document)
+        admit_workspace(live + 2 * size, bounds, services=services)
+        raw = b''.join((prefix, document.replace(b'\\', b'\\\\').replace(b'"', b'\\"'), b'"]'))
     size = len(raw) + len(RECORD_LIST_PREFIX) + len(RECORD_LIST_SUFFIX)
     if size > max_bytes:
         raise size_error('kernel image exceeds state byte budget', max_bytes, actual=size)
@@ -41,21 +59,62 @@ def record_list_chunks(fragments):
     yield RECORD_LIST_SUFFIX
 
 
-def dumps(value, *, max_bytes, occurrence=None):
-    def pack(v):
-        if isinstance(v, Record):
-            return ['record', v.record_id, v.sequence,
-                    _encode_record_document(v, max_bytes=max_bytes).decode()]
-        if isinstance(v, ArtifactRef):
-            return ['ref', asdict(v)]
-        if isinstance(v, AggregateState):
-            return ['aggregate', pack(asdict(v))]
-        if isinstance(v, Mapping):
-            return ['dict', [[pack(k), pack(x)] for k, x in v.items()]]
-        if isinstance(v, (tuple, list)):
-            return ['tuple' if isinstance(v, tuple) else 'list', [pack(x) for x in v]]
-        return ['value', _encode_value(v)]
-    raw = json.dumps(['demiflow.kernel-state.v3', pack(value)], separators=(',', ':'),
+def dumps(value, *, max_bytes, occurrence=None, admit=None):
+    def document(array, literal):
+        def pair(tag, item):
+            return array(2, (literal(tag), item))
+
+        def pack(v):
+            if isinstance(v, Record):
+                return array(4, (literal('record'), literal(v.record_id), literal(v.sequence),
+                    literal(_encode_record_document(v, max_bytes=max_bytes).decode())))
+            if isinstance(v, ArtifactRef):
+                return pair('ref', literal(asdict(v)))
+            if isinstance(v, AggregateState):
+                return pair('aggregate', pack(asdict(v)))
+            if isinstance(v, Mapping):
+                entries = (array(2, (pack(k), pack(x))) for k, x in v.items())
+                return pair('dict', array(len(v), entries))
+            if isinstance(v, (tuple, list)):
+                return pair('tuple' if isinstance(v, tuple) else 'list',
+                            array(len(v), (pack(x) for x in v)))
+            return pair('value', literal(_encode_value(v)))
+
+        return pair('demiflow.kernel-state.v3', pack(value))
+
+    if admit is not None:
+        import sys
+        from ..dataflow_record_frames import json_encoding_shape
+
+        header = sys.getsizeof([])
+        pointer = sys.getsizeof([None]) - header
+        def array_shape(count, parts):
+            resident = header + pointer * count
+            encoded, width = 2 + max(0, count - 1), 1
+            for child_bytes, child_encoded, child_width in parts:
+                resident += child_bytes
+                encoded += child_encoded
+                width = max(width, child_width)
+            return resident, encoded, width
+
+        # The first pass folds the SAME format one child at a time. No packed
+        # container or complete output exists until its full cost is admitted.
+        resident, encoded, width = document(array_shape, json_encoding_shape)
+        if encoded > max_bytes:
+            raise size_error('kernel image exceeds state byte budget', max_bytes, actual=encoded,
+                             occurrence=occurrence)
+        # C JSON encoding builds text chunks, then their joined string, then
+        # the UTF-8 image. Encoded length bounds the character count.
+        admit(resident + max(2 * width, width + 1) * encoded)
+
+    def array(count, parts):
+        result = [None] * count
+        for index, item in enumerate(parts):
+            result[index] = item
+        return result
+
+    envelope = document(array, lambda item: item)
+    raw = json.dumps(envelope, separators=(',', ':'),
                      ensure_ascii=False, allow_nan=False).encode()
     if len(raw) > max_bytes:
         raise size_error('kernel image exceeds state byte budget', max_bytes, actual=len(raw), occurrence=occurrence)

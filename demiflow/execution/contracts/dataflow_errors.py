@@ -30,7 +30,7 @@ DATAFLOW_ERROR_CODES = frozenset({
     "INTERNAL_PROTOCOL",
 })
 
-_MAX_MESSAGE_CHARS = 2048
+MAX_MESSAGE_CHARS = 2048
 _MAX_CONTEXT_KEYS = 32
 _MAX_CONTEXT_KEY_CHARS = 128
 _MAX_CONTEXT_STRING_CHARS = 512
@@ -143,7 +143,7 @@ class DataflowError(Exception):
     ) -> None:
         if type(code) is not str or code not in DATAFLOW_ERROR_CODES:
             raise ValueError("unknown dataflow error code: " + repr(code))
-        if type(message) is not str or not 1 <= len(message) <= _MAX_MESSAGE_CHARS:
+        if type(message) is not str or not 1 <= len(message) <= MAX_MESSAGE_CHARS:
             raise ValueError("error message must be a bounded nonempty string")
         if _looks_secret(message):
             raise ValueError("error message must not carry credentials or model content")

@@ -167,8 +167,7 @@ def partition_stages(
         resident = bounds.max_batch_bytes + kernel.output_bound_bytes + state_bytes
         # A selected one-row worker may carry a measured codec workspace
         # below the full pair of maximum business rows.
-        if ('codec_min_bytes' in kernel.configuration and kernel.state == 'none'
-                and kernel.kind in {'items', 'range', 'materialized', 'literal_empty', 'MapOp', 'BoundMapOp'}):
+        if 'codec_min_bytes' in kernel.configuration and kernel.state == 'none':
             resident = min(resident, kernel.profile.requests['memory_bytes'])
         from ..execution.dataflow_publication_budget import REF_CARRIER, TERMINAL_WORKSPACE
         memory = kernel.configuration.get('terminal_memory', {})
@@ -188,14 +187,25 @@ def partition_stages(
         # worker. The sealed payload size accounts its decode buffer; Python
         # object heap is not inferred from a pickle's length.
         startup = kernel.configuration.get('task_load_bytes', 0)
-        if startup:
+        measured_state = (kernel.state != 'none' and 'task_batch_rows' in kernel.configuration
+            and kernel.uses_measured_workspace(bounds)
+            and not kernel.configuration.get('shared_actor'))
+        if measured_state:
+            # The private reload and the measured state/payload use one grant.
+            # Keep the decoder's known peak aside from the working allowance.
+            resident = profile.requests['memory_bytes']
+            if resident <= startup:
+                raise _error('RESOURCE_INFEASIBLE', 'private task load exhausts its worker memory',
+                             stage_id=stage_id, resource='memory_bytes', required=startup, available=resident)
+            state_bytes = min(state_bytes, resident - startup)
+        elif startup:
             fixed = kernel.configuration.get('fixed_worker_min_bytes')
             resident = max(resident, fixed or 0) + startup
             if fixed is not None:
                 granted = profile.requests['memory_bytes']
                 if resident > granted:
                     raise _error('RESOURCE_INFEASIBLE', 'private task load exceeds its declared worker memory',
-                                 resource='memory_bytes', stage_id=stage_id, required=resident, available=granted)
+                                 stage_id=stage_id, resource='memory_bytes', required=resident, available=granted)
             else:
                 profile = replace(profile, requests={**profile.requests,
                     'memory_bytes': profile.requests['memory_bytes'] + startup})
@@ -675,7 +685,7 @@ def validate_physical_dataflow(graph: DataflowGraph, physical: PhysicalDataflow)
             seen_occ[occ] = stage.stage_id
             window = (stage.kernel_memory_bytes or {}).get(occ)
             if window is not None:
-                nodes[occ].kernel.with_memory_bytes(window)
+                nodes[occ].kernel.with_memory_bytes(window, sealed_bounds=physical.bounds)
     from .dataflow_training import physical_values, reference_only_sources
     refs = reference_only_sources(graph)
     if set(seen_occ) != set(nodes) - refs:
@@ -861,8 +871,11 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
         # window would repeatedly close and recreate the same declared owner.
         shared_stages = {stage.stage_id for stage in stages if any(
             nodes[occ].kernel.configuration.get('shared_actor') for occ in stage.occurrences)}
+        terminals = (nodes[occ].kernel for occ in graph.terminals)
         complete_action = all(s.finite for s in snapshots) and all(
-            nodes[occ].kernel.kind in {'materialize', 'take_all'} for occ in graph.terminals)
+            kernel.kind == 'materialize' or (
+                kernel.kind == 'take_all' and kernel.configuration['arguments'].get('limit') is None)
+            for kernel in terminals)
         upgraded = []
         for exchange in exchanges:
             if exchange not in candidates:
@@ -916,7 +929,8 @@ def compile_physical_dataflow(
 
     from .dataflow_budget import minimum_workspace_graph, allocate_workspace_slack
     declared_graph = graph
-    graph = minimum_workspace_graph(graph)
+    graph = minimum_workspace_graph(graph, bounds, allow_measured_terminal=any(
+        s.replay == "attempt_only" for s in snapshots))
     from .dataflow_training import physical_values, reference_only_sources
     refs = reference_only_sources(graph)
     splits = tuple(split for split in splits if split.source_id not in refs)

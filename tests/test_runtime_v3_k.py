@@ -316,6 +316,9 @@ class FakeStore:
             raise DataflowError("BUDGET_EXCEEDED", "read exceeds max_bytes")
         yield data
 
+    def read_into(self, ref, destination):
+        destination[:] = next(self.read(ref, max_bytes=len(destination)))
+
     def inspect(self, ref):
         return ref.key in self.objects
 

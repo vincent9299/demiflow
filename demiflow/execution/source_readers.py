@@ -72,7 +72,8 @@ class _BaseReader:
         self._services = services
         from .dataflow_record_frames import resident_limit
         bounds = services.bounds
-        self._measure_row_copies = resident_limit(bounds, services) < bounds.max_batch_bytes + bounds.max_row_bytes
+        self._measure_row_copies = (getattr(services, 'measured_workspace', False)
+            or resident_limit(bounds, services) < bounds.max_batch_bytes + bounds.max_row_bytes)
         self._split: SourceSplit | None = None
         self._offset: dict[str, Any] = {}
         self._next_sequence = 0
@@ -329,12 +330,8 @@ class ItemsReader(_BaseReader):
         record = self._pending_record
         if self._literal_rows is None or record is None:
             return 0
-        from .dataflow_record_frames import _json_shape, metadata_bytes
-        import sys
-        return (self.pending_inline_bytes + sys.getsizeof(record) + sys.getsizeof(vars(record))
-                + _json_shape(record.source_position, self._services.bounds.max_control_bytes)[1]
-                + metadata_bytes((record.record_id, record.sequence, record.encoded_bytes,
-                                  record.payload_ref, record.schema_ref)))
+        from .dataflow_record_frames import retained_record_bytes
+        return retained_record_bytes(record, self._services.bounds)
 
     @property
     def retained_bytes(self):

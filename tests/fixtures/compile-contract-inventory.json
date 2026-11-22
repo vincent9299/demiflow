@@ -162,7 +162,8 @@
    "arguments": [
     "execution/dataflow_native_limits.py",
     "execution/worker/dataflow_graph_runner.py",
-    "planning/dataflow_graph_adapter.py"
+    "planning/dataflow_graph_adapter.py",
+    "planning/dataflow_place.py"
    ],
    "batch_size": [
     "execution/dataflow_batch_membership.py",
@@ -183,7 +184,6 @@
    "codec_min_bytes": [
     "execution/contracts/dataflow.py",
     "execution/kernels/operator.py",
-    "planning/dataflow_budget.py",
     "planning/dataflow_place.py",
     "planning/dataflow_thread_fusion.py"
    ],
@@ -396,6 +396,9 @@
    "prompt_name": [
     "execution/plan_capture.py"
    ],
+   "publication_workspace": [
+    "planning/dataflow_budget.py"
+   ],
    "query": [
     "execution/program_materials.py"
    ],
@@ -459,7 +462,6 @@
    "streaming_map": [
     "execution/kernels/operator.py",
     "execution/seal/plan.py",
-    "planning/dataflow_budget.py",
     "planning/dataflow_compile.py",
     "planning/dataflow_configuration.py",
     "planning/dataflow_finite_fusion.py",
@@ -478,7 +480,9 @@
     "planning/dataflow_graph_adapter.py"
    ],
    "task_batch_rows": [
+    "execution/contracts/dataflow.py",
     "execution/kernels/operator.py",
+    "planning/dataflow_budget.py",
     "planning/dataflow_compile.py",
     "planning/dataflow_place.py"
    ],
@@ -487,6 +491,7 @@
     "planning/dataflow_compile.py"
    ],
    "task_load_bytes": [
+    "execution/worker/dataflow_execution.py",
     "planning/dataflow_place.py"
    ],
    "task_origin": [
@@ -494,6 +499,7 @@
    ],
    "terminal_memory": [
     "execution/worker/dataflow_graph_runner.py",
+    "planning/dataflow_budget.py",
     "planning/dataflow_place.py"
    ],
    "thread_attempt": [
