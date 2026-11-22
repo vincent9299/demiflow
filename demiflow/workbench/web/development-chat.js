@@ -203,6 +203,36 @@
       else if(item.preview)item.preview.textContent=item.summary;
     }
     function system(event,label,body,rawId=null,identity=event.sequence){finishText();const key=scope(event,'system',identity),item=items.get(key)||addItem(key,'system',event,rawId);item.row.label.textContent=label;item.summary=excerpt(body);write(item,body);return item;}
+    function review(event){
+      finishText();
+      const data=event.data,key=scope(event,'system','pipeline-review');
+      let item=items.get(key);
+      if(!item){
+        item=addItem(key,'system',event,null);
+        item.turn.review=item;
+        item.turn.answers.append(item.node);
+        item.inProcess=false;item.turn.processCount--;paintTurn(item.turn);
+      }
+      item.row.label.textContent='独立评审';
+      if(event.type==='review.detail'){
+        const value=data.item,location=value?.path?value.path+(value.line?':'+value.line:''):'';
+        const body=typeof value==='string'?value:[location,value?.trigger,value?.impact,value?.suggestion,value?.reason,value?.detail].filter(Boolean).join(' · ');
+        const label={findings:value?.severity==='blocking'?'需修正':'建议',gaps:'待核实',checks:'已核对',diagnostics:'说明'}[data.field]||'';
+        write(item,(item.text?'\n':'')+label+'  '+body,true);
+      }else{
+        const status={passed:'已完成',invalid:'需要修改',incomplete:'未完成'}[data.status];
+        item.reviewClosed=!!status;
+        item.summary=status||(event.type==='review.requested'?'已提交':'正在评审');
+        item.preview.textContent=item.summary;
+        if(status==='需要修改')showDefault(item.row,true);
+      }
+    }
+    function closeReview(turn,event,result={}){
+      const item=turn.review;
+      if(item?.reviewClosed||(!item&&!result.pipeline_review))return;
+      review({...event,type:'review.completed',data:{status:result.pipeline_review||'incomplete'}});
+      if(result.review_reason)write(turn.review,result.review_reason,true);
+    }
     function project(event){
       if(disposed||!event||typeof event.type!=='string'||!event.data)return false;
       if(Number.isSafeInteger(event.sequence)){if(event.sequence<=(seen.get(event.session_id)||0))return true;seen.set(event.session_id,event.sequence);if(seen.size>LIMITS.items)seen.delete(seen.keys().next().value);}
@@ -217,8 +247,9 @@
         const turn=newTurn(event);if(data.state)turn.state=data.state;
         if(data.cleanup==='complete'){finishText();turn.done=true;turn.ended=timestamp(event.observed_at);for(const key of turn.ids){const item=items.get(key);if(item){item.running=false;item.node.classList.remove('dfc-streaming');if(item.preview)item.preview.textContent=excerpt(item.summary||item.text);}}}
         paintTurn(turn);
-        if(data.result){try{
-          const result=typeof data.result==='string'?JSON.parse(data.result):data.result;
+        try{
+          const result=(typeof data.result==='string'?JSON.parse(data.result):data.result)||{};
+          if(turn.done||['failed','cancelled','interrupted'].includes(turn.state))closeReview(turn,event,result);
           if(result.reason)system(event,'Run details',result.reason);
           for(const [key,label] of [['native_flow','原生数据流检查'],['project_layout','项目目录检查']]){
             const check=result.pipeline_checks?.[key];if(!check)continue;
@@ -227,8 +258,9 @@
             const omitted=check.diagnostic_count-details.length;if(omitted>0)details.push('另有 '+omitted+' 项诊断');
             system(event,label,[status,...details].join('\n'),null,'pipeline:'+key);
           }
-        }catch{}}
-      }else if(event.type==='change.observed')system(event,'Changed files',(data.files||[]).map(file=>file.path+'\n'+(file.diff||file.diff_unavailable||'')).join('\n'),'change:'+event.sequence);
+        }catch{}
+      }else if(['review.requested','review.started','review.detail','review.completed'].includes(event.type))review(event);
+      else if(event.type==='change.observed')system(event,'Changed files',(data.files||[]).map(file=>file.path+'\n'+(file.diff||file.diff_unavailable||'')).join('\n'),'change:'+event.sequence);
       else if(event.type==='check.reference')system(event,'Checks',JSON.stringify(data.result||data,null,2),'check:'+event.sequence);
 
       else if(event.type==='questions.observed')system(event,'Questions',JSON.stringify(data,null,2));
@@ -245,7 +277,11 @@
       turn.started=nextStarted;turn.state=nextState;
       // A current session receipt can close a truncated history window, but no
       // duration is invented when the terminal event is outside that window.
-      turn.done=nextDone;paintTurn(turn);queueRender();changed();
+      turn.done=nextDone;
+      if(turn.review&&!turn.review.reviewClosed&&(nextDone||['failed','cancelled','interrupted'].includes(nextState))){
+        const item=turn.review;item.reviewClosed=true;item.summary='未完成';item.preview.textContent=item.summary;
+      }
+      paintTurn(turn);queueRender();changed();
     }
     function reset(){clearTimeout(renderTimer);renderTimer=null;for(const item of items.values())item.view?.dispose();items.clear();turns.clear();textItems.clear();toolItems.clear();seen.clear();flow.replaceChildren();textBytes=0;lastText=pagedText=latestTurn=null;changed();}
     const timer=setInterval(()=>{if(!disposed)for(const turn of turns.values())if(!turn.done)paintTurn(turn);},1000);

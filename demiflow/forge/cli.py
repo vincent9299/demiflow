@@ -107,6 +107,35 @@ def register(main: click.Group) -> None:
                              code='invalid_request')
         _output(root, as_json, perform)
 
+    @forge.command()
+    @root_option
+    @click.option('--goal', required=True, help='Original business goal for this change.')
+    @click.option('--entry', help='Review a draft or registered FILE:FUNCTION.')
+    @click.option('--params', help='Project-relative parameters of the selected entry.')
+    @click.option('--path', 'paths', multiple=True, help='Project-relative source to review.')
+    @click.option('--base', help='Compare current project files to this local Git revision.')
+    @click.option('--evidence', multiple=True, help='Include a project-relative test or evidence file.')
+    @click.option('--timeout', type=click.IntRange(1, 900), default=180, show_default=True,
+                  help='Time budget in seconds for the complete independent model review.')
+    @json_option
+    def review(root, goal, entry, params, paths, base, evidence, timeout, as_json):
+        """Start an independent, read-only review of a pipeline change."""
+        from .review import render_review, review_project
+        from .review_deepseek import run_reviewer
+        from time import monotonic
+        deadline = monotonic() + timeout
+
+        def reviewer(prompt):
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise ForgeError('DeepSeek 评审已超时。', code='inspection_incomplete')
+            return run_reviewer(prompt, timeout=remaining)
+
+        _output(root, as_json, lambda: review_project(
+            root, goal=goal, entry=entry, params=params, paths=paths, base=base, evidence=evidence,
+            reviewer=reviewer),
+            render_review)
+
     @add.command()
     @click.argument('name')
     @root_option
