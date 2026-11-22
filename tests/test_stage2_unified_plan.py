@@ -807,10 +807,9 @@ def test_f7_boundary_classification(tmp_path, monkeypatch):
         assert skipped not in manifest
 
 
-# F7-e: item/byte budget over-run and dynamic no-source business dep fail-closed.
+# F7-e: module count over-run and dynamic no-source business dep fail-closed.
 def test_f7e_budget_and_dynamic_fail_closed(tmp_path, monkeypatch):
     import types
-    import demiflow.execution.chain as chain_mod
     from demiflow.execution.chain import (
         _business_dependency_manifest, _classify_dependency_module)
     dynamic = types.ModuleType("f7_dynamic_" + uuid.uuid4().hex[:8])
@@ -830,9 +829,6 @@ def test_f7e_budget_and_dynamic_fail_closed(tmp_path, monkeypatch):
     plan = _map_plan(biz.transform)
     with pytest.raises(RecoveryContractError, match="exceeds budget"):
         _business_dependency_manifest(plan)                        # item budget >64
-    monkeypatch.setattr(chain_mod, "_DEP_MAX_BYTES", 10)
-    with pytest.raises(RecoveryContractError, match="exceeds budget"):
-        _business_dependency_manifest(plan)                        # byte budget
 
 
 # --- F8: worker failure frame -> immediate identifiable error + capacity release ---

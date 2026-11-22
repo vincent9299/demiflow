@@ -1306,6 +1306,35 @@ def test_d015(env):
                 "INVALID_CONTRACT")
 
 
+@pytest.mark.parametrize("shared", [False, True])
+def test_program_size_is_independent_of_checkpoint_state(env, shared):
+    bounds = replace(make_bounds(), max_state_bytes=9661)
+    graph = make_graph(kinds=("transform", "transform"))
+    members = [node.occurrence_id for node in graph.nodes]
+    if shared:
+        binding = {"owner": members[0], "members": members, "state_owner": members[-1]}
+        graph = replace(graph, nodes=tuple(replace(node, kernel=replace(node.kernel,
+            configuration={"shared_actor": binding})) for node in graph.nodes))
+
+    lookup = b"x" * (128 * 1024)
+    def transform(row):
+        return {"value": lookup[row["index"]]}
+
+    spec = CallableSpec.create(transform)
+    compiled = CompiledDataflow(graph=graph, declarations=tuple(
+        ProgramDeclaration(occurrence_id=member, callable_spec=spec, source_spec=None,
+                           action_program=None, code_identity={}) for member in members))
+    staged = seal.stage_dataflow_programs(compiled, action=env.action, store=env.store, bounds=bounds)
+    cache = {}
+    for node in staged.nodes:
+        manifest = _program_manifest(env.store, node.program_ref, bounds)
+        assert manifest["payload_ref"]["size_bytes"] > bounds.max_state_bytes
+        program = seal.verify_dataflow_program(node.program_ref, expected_pin=manifest["code_identity"],
+                                               store=env.store, bounds=bounds, shared_cache=cache)
+        assert program.value.instantiate()({"index": 100_000}) == {"value": ord("x")}
+    assert len(cache) == int(shared)
+
+
 # --- D016 -------------------------------------------------------------------
 def test_d016(env):
     graph = make_graph(kinds=("transform",))

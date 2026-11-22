@@ -35,7 +35,6 @@ COMMIT_RECEIPT_SCHEMA = "demiflow.commit_receipt.v1"
 WORKER_FAILURE_SCHEMA = "demiflow.worker_failure.v1"
 _MAX_CONTROL_BYTES = 1 << 20
 _DEP_MAX_MODULES = 64
-_DEP_MAX_BYTES = 8 * 1024 ** 2
 _DEP_MAX_FUNCTIONS = 256
 _DEP_MAX_NODES = 4096
 SEALED_PLAN_FACTS_SCHEMA = "demiflow.sealed_plan_facts.v1"
@@ -833,12 +832,12 @@ def _business_dependency_modules(plan, *, source=None):
     CAPTURES (cells + instance/partial/container state, R2), seeding the same BFS.
     Platform (``demiflow.*``), stdlib and site-packages third-party modules are
     skipped — platform source is provenance, not business code; third-party env
-    resolution is deferred (D5). Bounded (≤64 modules, ≤8 MiB total source, plus
+    resolution is deferred (D5). Bounded (≤64 modules, plus
     function/value walk budgets), deterministic (sorted by name), cycle-safe (visited
     set) and passive (no code execution). Over-budget or an unresolvable business
     source fail-closes at seal. The worker recomputes this from its own actual imports,
     so an edited helper changes the manifest and the load gate refuses. Returns
-    ``{name: (Path, raw_bytes)}`` sorted by name.
+    source file fingerprints sorted by module name.
     """
     import inspect
     import sys
@@ -900,7 +899,8 @@ def _business_dependency_modules(plan, *, source=None):
             pending.extend(candidates(function.__globals__))
         else:
             pending.extend(_by_value_business_modules(function))
-    visited, found, total = set(), {}, 0
+    from .dataflow_code import SourceFile
+    visited, found = set(), {}
     while pending:
         module = pending.popleft()
         name = getattr(module, "__name__", "")
@@ -910,12 +910,10 @@ def _business_dependency_modules(plan, *, source=None):
         path = _classify_dependency_module(module)
         if path is None:
             continue
-        raw = path.read_bytes()
-        total += len(raw)
-        if len(found) >= _DEP_MAX_MODULES or total > _DEP_MAX_BYTES:
+        if len(found) >= _DEP_MAX_MODULES:
             raise RecoveryContractError(
                 "Business dependency manifest exceeds budget; code-pin refuses (fail-closed)")
-        found[name] = (path, raw)
+        found[name] = SourceFile.capture(path)
         pending.extend(candidates(vars(module)))
     return {name: found[name] for name in sorted(found)}
 
@@ -926,8 +924,8 @@ def _business_dependency_manifest(plan, *, source=None):
     Paths are excluded so the driver-sealed and worker-recomputed manifests are
     identical for unedited code regardless of how each side resolved the module.
     """
-    return {name: {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
-            for name, (path, raw) in _business_dependency_modules(plan, source=source).items()}
+    return {name: {"sha256": file.digest, "bytes": file.size}
+            for name, file in _business_dependency_modules(plan, source=source).items()}
 
 
 def plan_code_pin(plan, *, source=None):
@@ -965,26 +963,26 @@ def snapshot_code_sources(action, plan, *, source=None):
     """
     import inspect
     from pathlib import Path
-    from .state_artifacts import atomic_bytes
+    from .dataflow_code import SourceFile
+    from .state_artifacts import atomic_chunks
     run = action.context
     seen, refs = set(), []
 
-    def archive(source):
+    def archive(source, captured=None):
         source = Path(source)
         if not source.is_file() or source in seen:
             return
         seen.add(source)
-        raw = source.read_bytes()
-        digest = hashlib.sha256(raw).hexdigest()
+        captured = captured or SourceFile.capture(source.resolve())
+        digest = captured.digest
         path = run.directory / "scratch" / "chain-code-pin" / (digest + ".py")
         # Unregistered, mirroring seal_plan_facts: clean_orphans unlinks registered
         # protected=0 artifacts at run exit, but this source archive is audited
         # post-run (the manifest definition_ref points at it), so it must survive.
         with run.journal.publication_guard(run.fence):
-            atomic_bytes(path, raw)
-        run.release_temporaries([path.with_name(path.name + ".staging")])
+            atomic_chunks(path, captured.chunks())
         refs.append({"path": str(path.relative_to(run.directory)), "sha256": digest,
-                     "bytes": len(raw), "source": str(source)})
+                     "bytes": captured.size, "source": str(source)})
 
     for operation in plan.operations:
         target = getattr(getattr(operation, "callable", None), "target", None)
@@ -1001,8 +999,8 @@ def snapshot_code_sources(action, plan, *, source=None):
         filename = inspect.getsourcefile(function)
         if filename:
             archive(filename)
-    for name, (path, raw) in _business_dependency_modules(plan, source=source).items():
-        archive(path)
+    for captured in _business_dependency_modules(plan, source=source).values():
+        archive(captured.path, captured)
     return refs
 
 

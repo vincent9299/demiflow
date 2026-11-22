@@ -29,6 +29,7 @@ from demiflow.forge.project_bindings import table_identity
 from demiflow.forge.project_bindings import table_binding as local_table_binding
 from demiflow.forge.platform import bounded_json
 from demiflow.forge.platform import content_digest
+from demiflow.workbench.python_sources import source_digest
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.platform_snapshot import build_snapshot
 from demiflow.forge.platform_snapshot import check_snapshot
@@ -637,7 +638,7 @@ def _publish_inspection(root, value, snapshot, report, *, save=True):
         raise ForgeError("Workspace inputs changed before report publication")
     for name, sha in report["binding"]["sources"].items():
         if (
-            hashlib.sha256(read_bounded(relative_path(root, name), 1024**2)).hexdigest()
+            source_digest(relative_path(root, name))
             != sha
         ):
             raise ForgeError("Candidate source changed before report publication")
@@ -809,7 +810,7 @@ def _report_status(root, digest, *, table_resolver, platform_check=True):
         current_policy = {**current_policy, 'platform': original_policy.get('platform')}
     check('workspace', 'policy', lambda: content_digest(current_policy), binding['workspace'], 'workspace_changed')
     for path, sha in binding['sources'].items():
-        check('source', path, lambda p=path: hashlib.sha256(read_bounded(relative_path(root, p), 1024**2)).hexdigest(),
+        check('source', path, lambda p=path: source_digest(relative_path(root, p)),
               sha, 'source_changed:' + path)
     for path, sha in binding['controls'].items():
         def read_binding(p=path):

@@ -18,14 +18,14 @@ import time
 import uuid
 
 from demiflow.workbench.projects import workspace as ws
-from demiflow.workbench.python_sources import MAX_MODULE_BYTES, bound_files, read_sealed, sealed_root
+from demiflow.workbench.python_sources import bound_files, sealed_root, source_digest
 from demiflow.workbench.process import process_identity
 from demiflow.workbench.runs.authority import LocalAuthority
 from demiflow.workbench.runs.admission import inputs as admit_inputs
 from demiflow.forge import audit
 from demiflow.forge.platform import content_digest
 from demiflow.forge.platform import bounded_json
-from demiflow.forge.platform_environment import read_bounded
+from demiflow.forge.platform_environment import read_bounded, regular_file_chunks
 from demiflow.forge.platform_environment import platform_declaration
 from demiflow.forge.platform_environment import environment_inventory
 from demiflow.forge.project_bindings import resolve_arguments
@@ -210,16 +210,21 @@ def refresh_index(root, run_id, *, deadline=None):
 
 
 def _copy_checked(source, target, expected, maximum):
+    from demiflow.forge.io import publish_chunks
+
+    def checked_chunks():
+        digest = hashlib.sha256()
+        for chunk in regular_file_chunks(source, maximum):
+            operation_budget.check()
+            digest.update(chunk)
+            yield chunk
+        operation_budget.check()
+        if digest.hexdigest() != expected:
+            raise ForgeError('Source changed while sealing: ' + source.name)
+
     operation_budget.check()
-    raw = read_bounded(source, maximum)
-    operation_budget.check()
-    if hashlib.sha256(raw).hexdigest() != expected:
-        raise ForgeError('Source changed while sealing: ' + source.name)
     target.parent.mkdir(parents=True, exist_ok=True)
-    with target.open('xb') as stream:
-        stream.write(raw)
-        stream.flush()
-        os.fsync(stream.fileno())
+    publish_chunks(target, checked_chunks())
     target.chmod(0o400)
 
 
@@ -491,7 +496,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                               schema_identity=sink['normalized_parameters']['schema']['identity'])
         if sum(t['row_count'] for t in report['binding']['tables'].values()) > limits['max_input_rows']:
             raise ForgeError('Input row admission budget exceeded')
-    from demiflow.workbench.runs.domain import SEALED_BYTES
+    from demiflow.workbench.runs.domain import MANAGEMENT_RESERVE, SEALED_BYTES
     from demiflow.workbench.runs import native_resources
     from demiflow.execution.host.control import training_deployment_reference
     training_deployment = None
@@ -510,17 +515,29 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     platform_root = Path(__file__).resolve().parents[2]
     seal_root = Path(report['binding'].get('source_root', root))
     sealed = sealed_root(Path('.'), report['binding'])
-    seal_files = [(ws.relative_path(seal_root,name), sealed/name, digest,1024**2)
+    seal_files = [(ws.relative_path(seal_root,name), sealed/name, digest,None)
                   for name,digest in report['binding']['sources'].items()]
     seal_files.extend((ws.relative_path(seal_root,r['path']),sealed/r['path'],r['sha256'],r.get('max_bytes',1024**2))
                       for r in report['binding'].get('resources',{}).values() if r['kind'] in {'config','file'})
-    seal_files.extend((ws.no_symlinks(origin), relative, digest, MAX_MODULE_BYTES)
+    seal_files.extend((ws.no_symlinks(origin), relative, digest, None)
                       for _, origin, relative, digest in bound_files(report['binding']))
     seal_files.extend((platform_root/item['path'],Path('runtime/demiflow')/item['path'],item['sha256'],platform['limits']['file_bytes'])
                       for item in platform['platform']['files'])
-    if len(seal_files)>16384 or sum(source.stat().st_size for source,_,_,_ in seal_files)>SEALED_BYTES:
-        raise ForgeError('Combined source/runtime seal exceeds 192 MiB budget',code='resource_limit')
-    if shutil.disk_usage(root).free < limits['max_scratch_bytes'] + limits['max_output_bytes'] + limits['max_evidence_bytes'] + 64 * 1024**2:
+    # Python files are admitted by their actual storage footprint. Keep the
+    # existing allowance for the platform snapshot and declared resources.
+    python_bytes = other_bytes = 0
+    measured_files = []
+    for path, relative, digest, limit in seal_files:
+        size = path.stat().st_size
+        if limit is None:
+            python_bytes += size
+        else:
+            other_bytes += size
+        measured_files.append((path, relative, digest, size if limit is None else min(size, limit)))
+    if len(seal_files) > 16384 or other_bytes > SEALED_BYTES:
+        raise ForgeError('Runtime and resource seal exceeds its storage or file count budget', code='resource_limit')
+    if shutil.disk_usage(root).free < (limits['max_scratch_bytes'] + limits['max_output_bytes']
+            + limits['max_evidence_bytes'] + python_bytes + other_bytes + 64 * 1024**2):
         raise ForgeError('Insufficient workspace disk headroom')
     from demiflow.workbench.runs.storage import object_locations
     store = root / '.forge/runs'
@@ -539,9 +556,10 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
             from demiflow.workbench.runs.domain import history_admission
             from demiflow.workbench.host_partition import policy
             from demiflow.workbench.host_partition import location
-            history_admission(root,ceiling=policy(location())['history_bytes'])
+            history_admission(root, ceiling=policy(location())['history_bytes'],
+                              reserve=MANAGEMENT_RESERVE + max(0, python_bytes + other_bytes - SEALED_BYTES))
             (target / 'work').mkdir()
-            for source,relative,digest,maximum in seal_files:
+            for source,relative,digest,maximum in measured_files:
                 _copy_checked(source,target/relative,digest,maximum)
             declaration = platform_declaration(platform_root, platform['limits'])
             ws.write_control(target / 'inspection.json', report, create=True)
@@ -716,10 +734,11 @@ def verify_seal(target, manifest, *, environment=True):
                                   scope=scope, root=manifest['root'], project_id=manifest['workspace']['id'])
     source = sealed_root(target, report['binding'])
     for name, digest in report['binding']['sources'].items():
-        if hashlib.sha256(read_bounded(source / name, 1024**2)).hexdigest() != digest:
+        if source_digest(source / name) != digest:
             raise ForgeError('Sealed candidate source differs')
     for name, _, relative, digest in bound_files(report['binding']):
-        read_sealed(name, target / relative, digest)
+        if source_digest(target / relative) != digest:
+            raise ForgeError('Sealed shared Python source differs: ' + name, code='conflict')
     for resource in report['binding'].get('resources', {}).values():
         if resource['kind'] in {'config', 'file'} and hashlib.sha256(read_bounded(source / resource['path'], resource.get('max_bytes', 1024**2))).hexdigest() != resource['sha256']:
             raise ForgeError('Sealed resource differs')

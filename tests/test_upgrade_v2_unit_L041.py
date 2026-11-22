@@ -78,9 +78,9 @@ def test_source_reducer_helper_enters_the_manifest(tmp_path, monkeypatch):
     assert _business_dependency_modules(plan) == {}
     found = _business_dependency_modules(plan, source=source)
     assert set(found) == {"l041_entry", "l041_helper"}
-    for name, (path, raw) in found.items():
-        assert path == paths[name].resolve()
-        assert raw == paths[name].read_bytes()
+    for name, file in found.items():
+        assert file.path == paths[name].resolve()
+        assert b"".join(file.chunks()) == paths[name].read_bytes()
 
 
 def test_plan_set_is_unchanged_when_source_is_added(tmp_path, monkeypatch):
@@ -138,7 +138,7 @@ def test_editing_the_source_helper_changes_the_manifest(tmp_path, monkeypatch):
     before = _business_dependency_modules(LogicalPlan(), source=source)
     paths["l041_helper"].write_text("def delta(row):\n    return row['v'] + 9999\n")
     after = _business_dependency_modules(LogicalPlan(), source=source)
-    assert after["l041_helper"][1] != before["l041_helper"][1]
+    assert after["l041_helper"].digest != before["l041_helper"].digest
     assert after["l041_entry"] == before["l041_entry"]
 
 

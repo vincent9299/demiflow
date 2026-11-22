@@ -106,19 +106,27 @@ def _artifact_from_json(value) -> ArtifactRef:
                        media_type=value["media_type"])
 
 
-def _read_bytes(store, ref: ArtifactRef, *, max_bytes: int, media_type: str) -> bytes:
+def _artifact_chunks(store, ref: ArtifactRef, *, media_type: str, max_bytes=None):
     if ref.media_type != media_type:
         raise DataflowError("INVALID_CONTRACT", "Sealed artifact media type differs")
+    if max_bytes is None:
+        max_bytes = max(1, ref.size_bytes)
     if ref.size_bytes > max_bytes:
         raise DataflowError("BUDGET_EXCEEDED", "Sealed artifact exceeds read budget")
-    raw = b"".join(store.read(ref, max_bytes=max_bytes))
-    if len(raw) != ref.size_bytes:
-        raise DataflowError("CORRUPT_ARTIFACT", "Sealed artifact length differs")
-    # Content-address gate before any bytes are consumed (notably before a program
-    # payload is deserialized): only bytes matching the sealed sha256 may load.
-    if hashlib.sha256(raw).hexdigest() != ref.digest:
-        raise DataflowError("CORRUPT_ARTIFACT", "Sealed artifact digest differs")
-    return raw
+    digest = hashlib.sha256()
+    size = 0
+    for chunk in store.read(ref, max_bytes=max_bytes):
+        size += len(chunk)
+        if size > ref.size_bytes:
+            raise DataflowError("CORRUPT_ARTIFACT", "Sealed artifact length differs")
+        digest.update(chunk)
+        yield chunk
+    if size != ref.size_bytes or digest.hexdigest() != ref.digest:
+        raise DataflowError("CORRUPT_ARTIFACT", "Sealed artifact length or digest differs")
+
+
+def _read_bytes(store, ref: ArtifactRef, *, max_bytes: int, media_type: str) -> bytes:
+    return b"".join(_artifact_chunks(store, ref, media_type=media_type, max_bytes=max_bytes))
 
 
 def _read_json(store, ref: ArtifactRef, *, max_bytes: int, media_type: str):
@@ -221,7 +229,7 @@ def _matches_original_program(kind, value, expected):
 
 def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds,
                        live_binding=None, force_live=False, shared_payload=None) -> ArtifactRef:
-    from ..dataflow_program_pickle import dumps
+    from ..dataflow_program_pickle import stage_payload
     kind = _program_kind(declaration)
     value = _program_value(declaration)
     if kind == 'source':
@@ -234,26 +242,17 @@ def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds
     code_identity = _code_identity_from_value(kind, value, sources=sources)
     manifest = {"schema": PROGRAM_SCHEMA, "occurrence_id": declaration.occurrence_id,
                 "kind": kind, "code_identity": code_identity}
-    try:
-        payload = None if force_live or shared_payload is not None else dumps(value)
-    except Exception as exc:
-        if live_binding is None:
-            raise DataflowError("INVALID_CONTRACT",
-                "Program carries a live handle (connection/lock/FD); task/process scope requires a serializable declaration: "
-                + str(exc)) from exc
-        payload = None
     if shared_payload is not None:
         payload_ref, binding, shared_sources, imports = shared_payload
-        manifest['payload_ref'] = _artifact_json(payload_ref)
         manifest['shared_actor'] = binding
         manifest['shared_sources'] = {'refs': shared_sources, 'imports': imports}
-    elif payload is None:
+    else:
+        payload_ref = None if force_live else stage_payload(
+            value, store=store, media_type=PAYLOAD_MEDIA, allow_live=live_binding is not None)
+    if payload_ref is None:
         from ..dataflow_thread_programs import marker
         manifest['thread_attempt'] = marker(declaration.occurrence_id, code_identity)
     else:
-        if len(payload) > bounds.max_state_bytes:
-            raise DataflowError("BUDGET_EXCEEDED", "Program payload exceeds byte budget")
-        payload_ref = store.put(iter([payload]), max_bytes=bounds.max_state_bytes, media_type=PAYLOAD_MEDIA)
         manifest['payload_ref'] = _artifact_json(payload_ref)
     manifest['business_sources'] = stage_sources(sources, store=store)
     raw = document(manifest, bounds.max_control_bytes)
@@ -321,32 +320,19 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
         binding = shared_binding(node.kernel.configuration, node.occurrence_id)
         if binding is None or binding['owner'] in shared_payloads:
             continue
-        import cloudpickle
-        import io
-        from ..dataflow_code import business_sources, source_identity, stage_sources, MAX_SOURCES, MAX_SOURCE_BYTES
+        from ..dataflow_program_pickle import stage_payload
+        from ..dataflow_code import business_sources, source_identity, stage_sources, MAX_SOURCES
         sources = {}
         for occ in binding['members']:
             member = declarations[occ]
             for name, source in business_sources(_program_kind(member), _program_value(member)).items():
-                if name in sources and sources[name][1] != source[1]:
+                if name in sources and sources[name].digest != source.digest:
                     raise DataflowError('CODE_MISMATCH', 'Shared actor bindings name different business source bytes')
                 sources[name] = source
-            if len(sources) > MAX_SOURCES or sum(len(raw) for _, raw in sources.values()) > MAX_SOURCE_BYTES:
+            if len(sources) > MAX_SOURCES:
                 raise DataflowError('BUDGET_EXCEEDED', 'Shared actor business imports exceed original source budget')
-        class BoundedPayload(io.BytesIO):
-            def write(self, chunk):
-                if self.tell() + len(chunk) > bounds.max_state_bytes:
-                    raise DataflowError('BUDGET_EXCEEDED', 'Shared actor program exceeds original byte budget')
-                return super().write(chunk)
-        stream = BoundedPayload()
-        try:
-            from ..dataflow_program_pickle import ProgramPickler
-            ProgramPickler(stream).dump(tuple(_program_value(declarations[o]) for o in binding['members']))
-        except DataflowError:
-            raise
-        except Exception as exc:
-            raise DataflowError('INVALID_CONTRACT', 'Shared actor requires a serializable recoverable declaration') from exc
-        payload_ref = store.put(iter([stream.getvalue()]), max_bytes=bounds.max_state_bytes, media_type=PAYLOAD_MEDIA)
+        payload_ref = stage_payload(tuple(_program_value(declarations[o]) for o in binding['members']),
+                                    store=store, media_type=PAYLOAD_MEDIA)
         shared_payloads[binding['owner']] = (payload_ref, binding,
             stage_sources(sources, store=store), source_identity(sources))
     nodes = []
@@ -439,18 +425,15 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
         cached = shared_cache.get(binding['owner']) if binding and shared_cache is not None else None
         if cached is not None and (cached[0] != payload_ref or cached[1] != binding):
             raise DataflowError('CORRUPT_ARTIFACT', 'Shared actor program bundle differs between members')
-        payload = None if cached is not None else _read_bytes(store, payload_ref, max_bytes=bounds.max_state_bytes, media_type=PAYLOAD_MEDIA)
-        import cloudpickle
-        try:
-            value = cached[2] if cached is not None else cloudpickle.loads(payload)
-            if binding:
-                if type(value) is not tuple or len(value) != len(binding['members']):
-                    raise DataflowError('CORRUPT_ARTIFACT', 'Invalid shared actor program membership')
-                if shared_cache is not None:
-                    shared_cache[binding['owner']] = (payload_ref, binding, value)
-                value = value[binding['members'].index(manifest['occurrence_id'])]
-        except Exception as exc:
-            raise DataflowError("CORRUPT_ARTIFACT", "Program payload failed to load: " + str(exc)) from exc
+        from ..dataflow_program_pickle import load_payload
+        value = cached[2] if cached is not None else load_payload(
+            _artifact_chunks(store, payload_ref, media_type=PAYLOAD_MEDIA))
+        if binding:
+            if type(value) is not tuple or len(value) != len(binding['members']):
+                raise DataflowError('CORRUPT_ARTIFACT', 'Invalid shared actor program membership')
+            if shared_cache is not None:
+                shared_cache[binding['owner']] = (payload_ref, binding, value)
+            value = value[binding['members'].index(manifest['occurrence_id'])]
     if not _matches_original_program(kind, value, code_identity):
         raise DataflowError("INVALID_CONTRACT",
                             "Loaded program code differs from the sealed pin (edited code or wrong module)")
@@ -464,7 +447,7 @@ def verify_completed_live_program(ref, *, expected_pin, declaration, store, boun
     original final ACKed cut before using it to read an already published result.
     Current declarations are inspected, never instantiated or invoked.
     """
-    from ..dataflow_code import MAX_SOURCES, MAX_SOURCE_BYTES, source_media
+    from ..dataflow_code import MAX_SOURCES, source_media
     from ..dataflow_thread_programs import marker
     manifest = _read_json(store, ref, max_bytes=bounds.max_control_bytes, media_type=PROGRAM_MEDIA)
     if type(manifest) is not dict:
@@ -479,14 +462,14 @@ def verify_completed_live_program(ref, *, expected_pin, declaration, store, boun
     if kind != manifest.get('kind') or not _matches_original_program(kind, _program_value(declaration), code):
         raise DataflowError('CODE_MISMATCH', 'completed live program code differs from the sealed pin')
     sources, imports = manifest.get('business_sources', {}), code.get('imports', {})
-    if (type(sources) is not dict or set(sources) != set(imports) or len(sources) > MAX_SOURCES
-            or sum(fact['bytes'] for fact in imports.values()) > MAX_SOURCE_BYTES):
+    if type(sources) is not dict or set(sources) != set(imports) or len(sources) > MAX_SOURCES:
         raise DataflowError('CORRUPT_ARTIFACT', 'completed live program source membership differs')
     for name, fact in imports.items():
         source = _artifact_from_json(sources[name])
         if source.digest != fact['sha256'] or source.size_bytes != fact['bytes']:
             raise DataflowError('CODE_MISMATCH', 'completed live source differs from the sealed pin')
-        _read_bytes(store, source, max_bytes=MAX_SOURCE_BYTES, media_type=source_media(name))
+        for _ in _artifact_chunks(store, source, media_type=source_media(name)):
+            pass
 
 
 # -- D014 -----------------------------------------------------------------

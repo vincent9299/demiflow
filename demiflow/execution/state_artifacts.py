@@ -9,15 +9,23 @@ from .recovery_contract import document, RecoveryContractError, identifier
 
 
 def atomic_bytes(path, raw):
-    """Durable local publication. No direct-to-final fallback is safe."""
+    _atomic_write(path, (raw,), Path(path).name + ".staging")
+
+
+def atomic_chunks(path, chunks):
+    """Publish a verified stream only after consuming it in full."""
+    _atomic_write(path, chunks, Path(path).name + "." + uuid.uuid4().hex + ".staging")
+
+
+def _atomic_write(path, chunks, staging_name):
     path = Path(path)
     if any(p.is_symlink() for p in (path, *path.parents)):
         raise RecoveryContractError("Artifact path contains a symlink")
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".staging")
+    temporary = path.with_name(staging_name)
     try:
         with temporary.open("xb") as stream:
-            stream.write(raw)
+            stream.writelines(chunks)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)

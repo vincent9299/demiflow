@@ -393,15 +393,6 @@ def test_g6_value_budget_refuses(tmp_path, monkeypatch):
         _business_dependency_manifest(_map_plan(_make_module_cell(helper_mod)))
 
 
-def test_g6_byte_budget_refuses_by_value(tmp_path, monkeypatch):
-    import demiflow.execution.chain as chain_mod
-    from demiflow.execution.chain import _business_dependency_manifest
-    helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7bbb")
-    monkeypatch.setattr(chain_mod, "_DEP_MAX_BYTES", 10)
-    with pytest.raises(RecoveryContractError, match="exceeds budget"):
-        _business_dependency_manifest(_map_plan(_make_module_cell(helper_mod)))
-
-
 # --- G4 queue: a capturing closure is eligible, seals the helper end-to-end on a
 #     managed worker through queue_chain's shared stage_plan_artifact seam ---
 

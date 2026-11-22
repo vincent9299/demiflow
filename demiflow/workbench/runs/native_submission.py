@@ -143,7 +143,7 @@ def prepare(root, entry, *, parameters, limits, metadata, source_modules=None):
 
 def verify_basis(root, manifest, report):
     from demiflow.forge import audit
-    from demiflow.workbench.python_sources import MAX_MODULE_BYTES, bound_files
+    from demiflow.workbench.python_sources import bound_files, source_digest
     root, workspace, platform = ws.load_workspace(root)
     audit.require_scope(ws._check_change_scope(root), expected_scope=manifest.get('change_scope'))
     binding = report['binding']
@@ -155,10 +155,10 @@ def verify_basis(root, manifest, report):
         raise ForgeError('Native prepared project basis changed', code='conflict')
     base = Path(binding['source_root'])
     for name, digest in binding['sources'].items():
-        if hashlib.sha256(read_bounded(ws.relative_path(base, name), 4 * 1024**2)).hexdigest() != digest:
+        if source_digest(ws.relative_path(base, name)) != digest:
             raise ForgeError('Native prepared source changed', code='conflict')
     for name, origin, _, digest in bound_files(binding):
-        if hashlib.sha256(read_bounded(ws.no_symlinks(origin), MAX_MODULE_BYTES)).hexdigest() != digest:
+        if source_digest(origin) != digest:
             raise ForgeError('Native prepared shared source changed: ' + name, code='conflict')
     for resource in binding['resources'].values():
         if resource['kind'] in {'config', 'file'} and hashlib.sha256(read_bounded(

@@ -5,7 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from demiflow.forge.platform_environment import read_bounded
+from demiflow.workbench.python_sources import read_source_bytes
 from demiflow.workbench.projects import workspace as ws
 
 KINDS = ('callsite', 'configuration', 'schema', 'implementation', 'prompt')
@@ -85,7 +85,7 @@ def _implementation(reference, root, sources, shared):
     if not expected or (reference.kind == 'function' and reference.source_hash != expected):
         return unavailable('函数源码未绑定本次解析的文件摘要。')
     ws.no_symlinks(path)
-    raw = read_bounded(path, 4 * 1024**2)
+    raw = read_source_bytes(path)
     if hashlib.sha256(raw).hexdigest() != expected:
         return unavailable('函数源码在解析期间发生变化。')
     # Parsing locates an already authenticated function; it never invents DAG
