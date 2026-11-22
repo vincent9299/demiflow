@@ -64,11 +64,14 @@ it is not proof that hostile descendants stopped and cannot authorize L2.
         # Validate before the trusted adapter creates profiles. This also rejects
         # symlink/hardlink poisoning left in an earlier untrusted provider HOME.
         specification(sandbox_spec, [sys.executable], {}, root)
-        if config.get('native_credentials') or config.get('credential_env'):
-            if not config.get('_boundary') or model_socket is None:
-                reject('Restricted model authentication requires the fixed external credential broker')
-        private = {key: value for key, value in config.items()
-                   if key not in {'native_credentials', 'credential_env', 'inherit_proxy'}}
+        if sandbox_spec.direct_network:
+            private = dict(config)
+        else:
+            if config.get('native_credentials') or config.get('credential_env'):
+                if not config.get('_boundary') or model_socket is None:
+                    reject('Restricted model authentication requires the fixed external credential broker')
+            private = {key: value for key, value in config.items()
+                       if key not in {'native_credentials', 'credential_env', 'inherit_proxy'}}
         command, environment = adapter.launch(private, home, root)
         if config.get('_cell_bin') and adapter.name == 'codex':
             wrapper = Path(__file__).parents[1] / 'notebooks/data_cli.py'

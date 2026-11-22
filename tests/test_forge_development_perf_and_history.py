@@ -343,3 +343,76 @@ def test_standby_prewarm_existing_session_and_unused_reserved_cleanup(tmp_path):
     finally:
         service.close()
     assert not reserved_dir.exists()
+
+
+def test_direct_model_sandbox_enforces_landlock_write_boundary_without_model_broker(tmp_path):
+    import socket
+    from demiflow.workbench.conversations.sandbox import SandboxSpec, launch_sandbox, specification
+    from demiflow.workbench.conversations.policy import Deployment
+    from test_forge_development_chat import configuration
+
+    root, path, _ = configuration(tmp_path)
+    raw = json.loads(Path(path).read_text())
+    raw['direct_model'] = True
+    dep = Deployment(raw)
+    assert dep.direct_model is True
+    assert dep.capabilities('wfixture', root)['direct_model'] is True
+
+    bad = dict(raw, direct_model='yes')
+    with pytest.raises(Exception):
+        Deployment(bad)
+
+    home = tmp_path / 'dm_home'; home.mkdir(mode=0o700)
+    src = tmp_path / 'dm_src'; src.mkdir()
+    cred = tmp_path / 'dm_creds.yaml'; cred.write_text('token: test\n')
+    ro = tmp_path / 'dm_ro.txt'; ro.write_text('keep')
+
+    # Verifier role must never be granted direct_network.
+    with pytest.raises(ValueError):
+        specification(
+            SandboxSpec(read_paths=(str(ro),), write_paths=(), runtime_paths=('/usr', '/lib', '/lib64'),
+                        protected_paths=(str(ro),), private_home=str(home), role='verifier',
+                        seconds=5, direct_network=True),
+            ['/usr/bin/python3', '-c', 'pass'], {}, str(src),
+        )
+
+    spec = SandboxSpec(
+        read_paths=(str(ro), str(cred)),
+        write_paths=(str(src),),
+        runtime_paths=('/usr', '/lib', '/lib64'),
+        protected_paths=(str(ro), str(cred)),
+        denied_paths=(),
+        private_home=str(home),
+        role='developer',
+        seconds=10,
+        direct_network=True,
+    )
+    code = '''import os, pathlib, socket, sys
+src, ro, cred = sys.argv[1:]
+pathlib.Path(src, 'written.txt').write_text('ok')
+assert pathlib.Path(ro).read_text() == 'keep'
+assert pathlib.Path(cred).read_text() == 'token: test\\n'
+for target in (ro, cred):
+    for fn in (lambda p=target: pathlib.Path(p).write_text('bad'),
+               lambda p=target: os.truncate(p, 0),
+               lambda p=target: os.open(p, os.O_RDONLY | os.O_TRUNC)):
+        try:
+            fn()
+        except OSError:
+            continue
+        raise RuntimeError('Protected file write was allowed: ' + target)
+# Direct network mode allows IPv4 TCP + UDP sockets and preserves explicit proxy env.
+for kind in (socket.SOCK_STREAM, socket.SOCK_DGRAM):
+    s = socket.socket(socket.AF_INET, kind)
+    s.close()
+assert os.environ.get('HTTPS_PROXY') == 'http://127.0.0.1:7897'
+print('direct_ok')
+'''
+    proc = launch_sandbox(['/usr/bin/python3', '-I', '-B', '-c', code, str(src), str(ro), str(cred)],
+                          spec=spec, env={'HTTPS_PROXY': 'http://127.0.0.1:7897'}, cwd=str(src))
+    out, err = proc.communicate(timeout=10)
+    assert proc.returncode == 0, err.decode(errors='replace')
+    assert out.strip() == b'direct_ok'
+    assert (src / 'written.txt').read_text() == 'ok'
+    assert ro.read_text() == 'keep'
+    assert cred.read_text() == 'token: test\n'

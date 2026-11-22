@@ -55,11 +55,26 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
     read = [root, *[path for path in sources if path.is_file()]]
     openssl = Path('/etc/ssl/openssl.cnf')
     if openssl.is_file(): read.append(openssl)
+    direct_network = bool(deployment.mode == 'restricted' and getattr(deployment, 'direct_model', False))
+    active_cred = None
+    if direct_network:
+        for net_path in ('/etc/resolv.conf', '/etc/hosts', '/etc/nsswitch.conf', '/etc/gai.conf',
+                         '/etc/ssl', '/etc/ca-certificates', '/usr/share/ca-certificates', '/etc/ld.so.cache'):
+            candidate = Path(net_path)
+            if candidate.exists():
+                read.append(candidate)
+        if config.get('native_credentials'):
+            cred_path = Path(config['native_credentials']).resolve()
+            if cred_path.is_file():
+                active_cred = cred_path
+                read.append(cred_path)
     readonly = turn.get('operation') in ('compact', 'notebook_cell', 'notebook_cell_cli')
     writes = [] if readonly else [root / name for name in project['writes']]
     protected = [root / name for name in ('.git', '.forge', 'AGENTS.md', 'workspace.json', 'PIPELINE_SPEC.md')]
     protected.extend(path for path in sources if path.name in {'AGENTS.md', 'PIPELINE_SPEC.md'})
     protected.extend(root / name for name in project.get('protected', []))
+    if active_cred is not None:
+        protected.append(active_cred)
     denied = [deployment.state / 'chat.sqlite3',
               deployment.state / 'service.lock', deployment.state / 'control.reserve']
     if deployment.value.get('runtime_domain'): denied.append(Path(deployment.value['runtime_domain']))
@@ -74,7 +89,10 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
             elif entry.is_dir(follow_symlinks=False) or entry.name.endswith('.json') or entry.name.startswith('ai-key-'):
                 denied.append(Path(entry.path))
     for provider in deployment.providers.values():
-        if provider.get('native_credentials'): denied.append(Path(provider['native_credentials']))
+        if provider.get('native_credentials'):
+            cred = Path(provider['native_credentials'])
+            if active_cred is None or cred.resolve() != active_cred:
+                denied.append(cred)
     unique = lambda paths: tuple(sorted({str(path.absolute()) for path in paths}))
     duration = seconds if seconds is not None else max(.1, turn['created'] + deployment.limits.turn_seconds - time.time())
     return SandboxSpec(read_paths=unique(read), write_paths=unique(writes), runtime_paths=runtime_paths(config),
@@ -82,7 +100,8 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
         role='readonly' if readonly else 'developer',
         seconds=min(3600, max(.1, duration)), rss_bytes=deployment.limits.rss_bytes,
         processes=deployment.limits.processes, file_bytes=min(64*1024**2, deployment.limits.provider_bytes),
-        private_bytes=min(deployment.limits.provider_bytes, deployment.limits.private_total_bytes))
+        private_bytes=min(deployment.limits.provider_bytes, deployment.limits.private_total_bytes),
+        direct_network=direct_network)
 
 
 def automatic_approval(project, request, *, assurance):
@@ -147,6 +166,7 @@ def _sandbox_compatible(standby_spec, actual_spec):
         and standby_spec.protected_paths == actual_spec.protected_paths
         and standby_spec.private_home == actual_spec.private_home
         and standby_spec.role == actual_spec.role
+        and standby_spec.direct_network == actual_spec.direct_network
     )
 
 
@@ -322,9 +342,10 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     sandbox_deadline = time.time() + standby_spec.seconds
                     from demiflow.workbench.conversations.sandbox import specification
                     specification(standby_spec, [sys.executable], {}, st_project['root'])
-                    from demiflow.workbench.conversations.model_broker import start_model_broker
-                    model_broker = start_model_broker(deployment, None, st_session, st_broker_home, defer_handshake=True)
-                    st_config = model_broker.child_config
+                    if not getattr(deployment, 'direct_model', False):
+                        from demiflow.workbench.conversations.model_broker import start_model_broker
+                        model_broker = start_model_broker(deployment, None, st_session, st_broker_home, defer_handshake=True)
+                        st_config = model_broker.child_config
                 else:
                     standby_lease = tempfile.TemporaryFile(dir=st_home)
                 process = launch_provider(
@@ -722,9 +743,10 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                             confined = replace(confined, runtime_paths=(*confined.runtime_paths, str(control_bridge.bin)))
                         from demiflow.workbench.conversations.sandbox import specification
                         specification(confined, [sys.executable], {}, project['root'])
-                        from demiflow.workbench.conversations.model_broker import start_model_broker
-                        model_broker = start_model_broker(deployment, turn, session, broker_home, defer_handshake=True)
-                        config = model_broker.child_config
+                        if not getattr(deployment, 'direct_model', False):
+                            from demiflow.workbench.conversations.model_broker import start_model_broker
+                            model_broker = start_model_broker(deployment, turn, session, broker_home, defer_handshake=True)
+                            config = model_broker.child_config
                         if cell_cli:
                             config = {**config, '_cell_bin': str(control_bridge.bin)}
                     process = launch_provider(mode=deployment.mode, adapter=adapter, config=config,

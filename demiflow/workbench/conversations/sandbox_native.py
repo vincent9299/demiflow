@@ -128,7 +128,7 @@ def drop_capabilities():
     prctl(38, 1, 0, 0, 0)
 
 
-def seccomp():
+def seccomp(*, direct_network=False):
     sec = SECCOMP
     sec.seccomp_init.argtypes = [ctypes.c_uint32]
     sec.seccomp_init.restype = ctypes.c_void_p
@@ -184,8 +184,14 @@ def seccomp():
         for name in allowed:
             if name != 'socketpair':
                 rule(name)
-        # No pathname Unix sockets, raw/IP packet sockets or host network.
+        # No pathname Unix sockets or raw/IP packet sockets.
         rule('socket', ((0, 4, 2, 0), (1, 7, 15, 1)))  # AF_INET + SOCK_STREAM
+        if direct_network:
+            rule('socket', ((0, 4, 2, 0), (1, 7, 15, 2)))   # AF_INET + SOCK_DGRAM (DNS)
+            rule('socket', ((0, 4, 10, 0), (1, 7, 15, 1)))  # AF_INET6 + SOCK_STREAM
+            rule('socket', ((0, 4, 10, 0), (1, 7, 15, 2)))  # AF_INET6 + SOCK_DGRAM (DNS)
+            rule('socket', ((0, 4, 16, 0), (1, 7, 15, 3)))  # AF_NETLINK + SOCK_RAW (getaddrinfo/interfaces)
+            rule('socket', ((0, 4, 16, 0), (1, 7, 15, 2)))  # AF_NETLINK + SOCK_DGRAM
         rule('socketpair', ((0, 4, 1, 0), (1, 7, 15, 1)))
         # Namespace creation flags are excluded, including through clone.
         namespace_flags = 0x00020000 | 0x02000000 | 0x04000000 | 0x08000000 | 0x10000000 | 0x20000000 | 0x40000000

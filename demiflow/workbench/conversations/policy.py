@@ -76,13 +76,16 @@ class Limits:
 class Deployment:
     def __init__(self, value):
         required = {'format', 'mode', 'state_root', 'projects', 'providers', 'host_budget'}
-        if type(value) is not dict or not required <= value.keys() or value.keys() - required - {'limits', 'runtime_domain'}:
+        if type(value) is not dict or not required <= value.keys() or value.keys() - required - {'limits', 'runtime_domain', 'direct_model'}:
             reject('Invalid development deployment fields')
         if value['format'] != 'demiflow_development_deployment_v1' or value['mode'] not in {'restricted', 'trusted_local'}:
             reject('Unsupported development deployment')
+        if type(value.get('direct_model', False)) is not bool:
+            reject('direct_model must be explicitly true or false')
         value = copy.deepcopy(value)
         self.value = value
         self.mode = value['mode']
+        self.direct_model = bool(value.get('direct_model', False))
         self.limits = Limits.parse(value.get('limits', {}))
         self.state = Path(text(value['state_root'], 2048)).absolute()
         if self.state != self.state.resolve():
@@ -244,7 +247,7 @@ class Deployment:
         available = any(p['available'] for p in providers)
         return dict(format='demiflow_development_chat_v1', enabled=permitted, start=available,
             conversation_stats=True, multiple_conversations=True, history_replay_api=True, events_include_session=True,
-            prewarm_api=True,
+            prewarm_api=True, direct_model=self.direct_model,
             notebook_cells=self.mode == 'restricted', notebook_cli=self.mode == 'restricted',
             mode=self.mode, filesystem_enforcement=execution['filesystem_enforcement'], reason=execution['reason'],
             providers=providers,

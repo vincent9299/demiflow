@@ -58,6 +58,7 @@ class SandboxSpec:
     processes: int = 32
     file_bytes: int = 64 * 1024**2
     private_bytes: int = 256 * 1024**2
+    direct_network: bool = False
 
 
 SPEC_BYTES = 2 * 1024 * 1024
@@ -91,6 +92,8 @@ def specification(spec, command, env, cwd):
         raise ValueError('The qualified development sandbox requires Linux x86-64')
     if type(spec) is not SandboxSpec or spec.role not in {'developer', 'readonly', 'verifier'}:
         raise ValueError('A trusted development sandbox specification is required')
+    if spec.direct_network and spec.role == 'verifier':
+        raise ValueError('Verifier sandbox cannot enable direct network access')
     for value, maximum in ((spec.seconds, 3600), (spec.rss_bytes, 16 * 1024**3),
                            (spec.processes, 64), (spec.file_bytes, 64 * 1024**2),
                            (spec.private_bytes, 512 * 1024**2)):
@@ -161,8 +164,9 @@ def specification(spec, command, env, cwd):
             if entry != physical or not any(_contains(parent, physical) for parent in read + runtime):
                 raise ValueError('Verifier PYTHONPATH must use physically scoped read/runtime paths')
     environment = dict(env, HOME=home, TMPDIR=home)
-    for name in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'NO_PROXY', 'no_proxy'):
-        environment.pop(name, None)
+    if not spec.direct_network:
+        for name in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'NO_PROXY', 'no_proxy'):
+            environment.pop(name, None)
     from .sandbox_native import tree_usage
     source_roots = [path for path in write if path != home]
     source_roots = [path for path in source_roots if not any(other != path and _contains(other, path) for other in source_roots)]
@@ -181,7 +185,8 @@ def specification(spec, command, env, cwd):
                 command=list(command), env=environment, cwd=str(Path(cwd).resolve(strict=True)),
                 seconds=spec.seconds, rss_bytes=spec.rss_bytes, processes=spec.processes, file_bytes=spec.file_bytes,
                 private_home=home, private_bytes=spec.private_bytes, source_roots=source_roots,
-                source_baseline_bytes=baseline_bytes, source_baseline_files=baseline_files)
+                source_baseline_bytes=baseline_bytes, source_baseline_files=baseline_files,
+                direct_network=bool(spec.direct_network))
 
 
 def launch_sandbox(command, *, spec, env, cwd, lease_fd=None, control_socket=None, model_socket=None):
@@ -222,8 +227,11 @@ def launch_sandbox(command, *, spec, env, cwd, lease_fd=None, control_socket=Non
         os.lseek(fd, 0, os.SEEK_SET)
         fcntl.fcntl(fd, 1033, 1 | 2 | 4 | 8)  # F_ADD_SEALS: seal/write/grow/shrink
         inherited = (fd, status_write) + (() if lease_fd is None else (lease_fd,)) + tuple(child.fileno() for _, child, _ in pairs)
-        process = subprocess.Popen([sys.executable, '-I', '-B', str(Path(__file__).with_name('sandbox_entry.py')),
-            str(os.getpid()), str(fd), str(status_write)], cwd=cwd,
+        entry_args = [sys.executable, '-I', '-B', str(Path(__file__).with_name('sandbox_entry.py'))]
+        if spec.direct_network:
+            entry_args.append('--allow-net')
+        entry_args.extend((str(os.getpid()), str(fd), str(status_write)))
+        process = subprocess.Popen(entry_args, cwd=cwd,
             env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True, pass_fds=inherited, start_new_session=True)
         os.close(status_write)
