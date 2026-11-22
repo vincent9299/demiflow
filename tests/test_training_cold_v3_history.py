@@ -22,7 +22,17 @@ def old_sdk(request, tmp_path_factory):
     checkout = tmp_path_factory.mktemp('published-sdk')
     archive = checkout / 'sdk.tar'
     with archive.open('wb') as out:
-        subprocess.run(['git','archive',request.param,'demiflow'], cwd=REPO, stdout=out, check=True)
+        try:
+            result = subprocess.run(['git', 'archive', request.param, 'demiflow'],
+                                    cwd=REPO, stdout=out, stderr=subprocess.PIPE, text=True)
+        except FileNotFoundError:
+            pytest.fail('Cold recovery requires the git executable and the published DemiFlow Git history.',
+                        pytrace=False)
+        if result.returncode:
+            pytest.fail(
+                f'Could not export the published SDK at {request.param}. Cold recovery requires '
+                'DemiFlow Git history. Run this test in a clone or worktree containing that commit. '
+                f'git archive: {result.stderr.strip()}', pytrace=False)
     with tarfile.open(archive) as bundle:
         bundle.extractall(checkout, filter='data')
     archive.unlink()
