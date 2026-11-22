@@ -331,8 +331,9 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
                 sources[name] = source
             if len(sources) > MAX_SOURCES:
                 raise DataflowError('BUDGET_EXCEEDED', 'Shared actor business imports exceed original source budget')
-        payload_ref = stage_payload(tuple(_program_value(declarations[o]) for o in binding['members']),
-                                    store=store, media_type=PAYLOAD_MEDIA)
+        members = tuple(_program_value(declarations[o]) for o in binding['members'])
+        payload_ref = stage_payload(members, store=store, media_type=PAYLOAD_MEDIA,
+            serialization_error='Shared actor requires a serializable recoverable declaration')
         shared_payloads[binding['owner']] = (payload_ref, binding,
             stage_sources(sources, store=store), source_identity(sources))
     nodes = []

@@ -24,7 +24,9 @@ class ProgramPickler(cloudpickle.CloudPickler):
         return reduced
 
 
-def stage_payload(value, *, store, media_type, allow_live=False):
+def stage_payload(value, *, store, media_type, allow_live=False,
+                  serialization_error="Program carries a live handle (connection/lock/FD); "
+                                      "task/process scope requires a serializable declaration"):
     """Serialize once. Store limits apply to actual bytes written."""
     from .contracts.dataflow_errors import DataflowError
     with TemporaryFile() as stream:
@@ -35,8 +37,7 @@ def stage_payload(value, *, store, media_type, allow_live=False):
         except Exception as exc:
             if allow_live:
                 return None
-            raise DataflowError("INVALID_CONTRACT",
-                "Program requires a serializable declaration (live handle/connection/lock/FD): " + str(exc)) from exc
+            raise DataflowError("INVALID_CONTRACT", serialization_error + ": " + str(exc)) from exc
         size = stream.tell()
         stream.seek(0)
         return store.put(iter(lambda: stream.read(65536), b""), max_bytes=size, media_type=media_type)
