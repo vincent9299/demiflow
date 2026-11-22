@@ -25,9 +25,8 @@ import pytest
 
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp
 from demiflow.data.sources import ItemsSource
-from demiflow.execution import chain
+from runtime_v3_history_scenarios import write_legacy_seal
 from demiflow.execution.recovery_contract import identity
-from demiflow.execution.run_context import RunContext, RunAction
 from demiflow.execution.run_journal import RunJournal
 from demiflow.planning.dag import (
     compile_logical_dag, compile_physical_execution_plan,
@@ -77,7 +76,7 @@ def _executed_plan(action_id, run_id):
 
 
 @pytest.fixture
-def sealed(tmp_path):
+def sealed(tmp_path, legacy_seal_writer):
     """A finished run whose executed plan was sealed by the genuine engine seam.
 
     The run lives at the workbench-shaped path manager.directory resolves, so
@@ -91,12 +90,9 @@ def sealed(tmp_path):
     target.mkdir(parents=True)
     action_id = 'n3'
     dag, physical, manifest_ref = _executed_plan(action_id, run_id)
-    with RunContext.start(target) as run:
-        declaration = {'kind': 'chain-materialize', 'source': {'source_id': 'fixed'}}
-        run.journal.bind_execution_action(run.fence, action_id, declaration)
-        action = RunAction(run, action_id, declaration)
-        f1 = chain.seal_plan_facts(run, action, dag, physical, manifest_ref, 1700000000.0)
-        run.journal.complete_execution_action(run.fence, action_id, {'kind': 'test-complete'})
+    f1 = write_legacy_seal(legacy_seal_writer, target, action_id=action_id,
+                           logical_dag=dag, physical_plan=physical, manifest_ref=manifest_ref,
+                           sealed_at=1700000000.0)['facts']
     return SimpleNamespace(root=root, run_id=run_id, target=target, action_id=action_id,
                            logical_dag=dag, physical=physical, f1=f1,
                            engine_run_id=f1['run_id'])

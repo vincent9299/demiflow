@@ -30,10 +30,10 @@ def _carrier_doc(root, ref):
     return json.loads((root / ref["path"]).read_bytes())
 
 
-def test_v2_seal_returns_content_addressed_carrier(workdir):
+def test_v2_seal_returns_content_addressed_carrier(workdir, legacy_seal_writer):
     n = fx.native_v2_doc()
     root = workdir / "run"
-    sealed = fx.seal_native_run(root, n)
+    sealed = fx.seal_existing_format(legacy_seal_writer, root, n, native=True)
     ref = sealed.ref
     assert set(ref) == {"path", "sha256", "bytes"}
     assert (root / ref["path"]).is_file()

@@ -24,9 +24,9 @@ def workdir():
         shutil.rmtree(path, ignore_errors=True)
 
 
-def test_load_native_execution_locates_placement(workdir):
+def test_load_native_execution_locates_placement(workdir, legacy_seal_writer):
     n = fx.native_v2_doc(backend="datafusion", recovery="final_commit")
-    sealed = fx.seal_native_run(workdir / "run", n)
+    sealed = fx.seal_existing_format(legacy_seal_writer, workdir / "run", n, native=True)
     run = RunContext(sealed.root)
     layout, placement = load_native_execution(run, sealed.action_id, execution_id=n.execution_id)
     assert layout.supported_slice == "native_driver_v1"
@@ -37,17 +37,17 @@ def test_load_native_execution_locates_placement(workdir):
     assert list(placement.stage_ids) == n.op_stages
 
 
-def test_unknown_execution_id_rejected(workdir):
+def test_unknown_execution_id_rejected(workdir, legacy_seal_writer):
     n = fx.native_v2_doc()
-    sealed = fx.seal_native_run(workdir / "run", n)
+    sealed = fx.seal_existing_format(legacy_seal_writer, workdir / "run", n, native=True)
     run = RunContext(sealed.root)
     with pytest.raises(PlanContractError) as exc:
         load_native_execution(run, sealed.action_id, execution_id="absent-execution")
     assert exc.value.reason == "invalid_contract"
 
 
-def test_v1_run_exposes_no_native_execution(workdir):
-    sealed = fx.seal_v1_run(workdir / "run", chain_fixture())
+def test_v1_run_exposes_no_native_execution(workdir, legacy_seal_writer):
+    sealed = fx.seal_existing_format(legacy_seal_writer, workdir / "run", chain_fixture(), native=False)
     run = RunContext(sealed.root)
     with pytest.raises(PlanContractError) as exc:
         load_native_execution(run, sealed.action_id, execution_id="any")
