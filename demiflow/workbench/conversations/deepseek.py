@@ -205,7 +205,8 @@ class DeepSeek:
         if kind in {'tool_call','tool_call_update'}:
             self.message_kind=None
             key=update['toolCallId']
-            if len(self.items)>=128 and key not in self.items:reject('ACP tool count exceeded budget')
+            if len(self.items)>=512 and key not in self.items:
+                self.items.pop(next(iter(self.items)))
             item={**self.items.get(key,{}),**update}
             # Retain only approval context, never all prior tool output frames.
             remembered={k:v for k,v in item.items() if k in {'toolCallId','title','rawInput','kind','locations'}}
@@ -225,7 +226,6 @@ class DeepSeek:
             if set(params)!={'sessionId','phase','attemptId'} or self.stream_attempt is not None:
                 reject('Invalid native assistant attempt boundary')
             self.stream_count+=1
-            if self.stream_count>128:reject('Native assistant attempts exceed budget', 'resource_limit')
             self.stream_attempt=attempt;self.stream_blocks={}
             return [('activity',{})]
         if attempt!=self.stream_attempt:reject('Native assistant attempt identity mismatch')
@@ -234,7 +234,8 @@ class DeepSeek:
                 reject('Invalid native assistant settlement')
             if 'messageId' in params:
                 self.stream_messages.add(text(params['messageId'],256))
-                if len(self.stream_messages)>128:reject('Native message identity budget exceeded', 'resource_limit')
+                if len(self.stream_messages)>1024:
+                    self.stream_messages.pop()
             self.stream_attempt=None;self.stream_blocks={}
             return []
         expected={'sessionId','phase','attemptId','blockIndex','channel','text'}

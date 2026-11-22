@@ -56,7 +56,10 @@ def test_unstarted_failure_recovers_same_identity_without_fd_leaks(tmp_path, mon
         with monkeypatch.context() as m:
             if boundary == 'directory': m.setattr(Path, 'mkdir', mkdir)
             elif boundary == 'unit': m.setattr(os, 'open', open_unit)
-            elif boundary == 'pipe': m.setattr(os, 'pipe', fail)
+            elif boundary == 'pipe':
+                import socket as _sock
+                m.setattr(os, 'pipe', fail)
+                m.setattr(_sock, 'socketpair', fail)
             elif boundary == 'popen': m.setattr(module.subprocess, 'Popen', fail)
             else: m.setattr(service.store, 'update', update)
             with pytest.raises(OSError, match='injected'):

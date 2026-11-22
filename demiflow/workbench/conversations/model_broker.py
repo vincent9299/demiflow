@@ -29,7 +29,7 @@ from .common import identifier, reject, wire
 from .transport import Transport, decode
 
 FRAME = 4 * 1024 * 1024
-REQUESTS = 256
+REQUESTS = 10000
 OPTION_FIELDS = {'provider', 'model', 'reasoningEffort', 'messages', 'system', 'tools',
                  'toolHistory', 'temperature', 'maxTokens', 'stop', 'sessionId', 'purpose'}
 
@@ -120,8 +120,8 @@ class _Quota:
             self.close(); raise
 
     def charge(self, **amounts):
-        input_limit = max(self.maximum, 64 * 1024 * 1024) if self.maximum >= 1024 * 1024 else self.maximum
-        limits = dict(requests=REQUESTS, connections=1024, input=input_limit, output=self.maximum)
+        byte_limit = max(self.maximum, 256 * 1024 * 1024) if self.maximum >= 1024 * 1024 else self.maximum
+        limits = dict(requests=REQUESTS, connections=10000, input=byte_limit, output=byte_limit)
         value = dict(self.value)
         for key, amount in amounts.items():
             value[key] += amount
@@ -198,6 +198,7 @@ class ModelBroker:
         self.maximum = deployment.limits.output_bytes
         self.process = self.transport = self.listener = self.thread = self.client = self.quota = self.http_process = None
         self._init_thread = None; self._ready = threading.Event(); self._init_error = None
+        self._turn_lock = threading.Lock(); self.idle = False
         self.output_reserved = 0
         self.socket_dir = Path(tempfile.mkdtemp(prefix='df-model-'))
         self.socket_path = self.socket_dir / 'channel'
@@ -214,7 +215,7 @@ class ModelBroker:
                 self.process = subprocess.Popen([sys.executable, '-I', '-B', str(launcher), str(os.getpid()), *command],
                     cwd=self.home, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     close_fds=True, start_new_session=True)
-                self.transport = Transport(self.process, _replace_dataclass(deployment.limits, frame_bytes=FRAME))
+                self.transport = Transport(self.process, _replace_dataclass(deployment.limits, frame_bytes=FRAME, output_bytes=0))
                 self.child_config['_boundary'] = dict(token=self.token)
                 if defer_handshake:
                     self._init_thread = threading.Thread(target=self._run_handshake, name='development-model-init', daemon=True)
@@ -257,8 +258,33 @@ class ModelBroker:
         if self._init_error is not None:
             raise self._init_error
 
+    def park_idle(self):
+        with self._turn_lock:
+            self.idle = True
+            if self.quota is not None:
+                self.quota.close()
+                self.quota = None
+
+    def begin_turn(self, turn, limits):
+        with self._turn_lock:
+            if self.closed.is_set():
+                raise ConnectionError('Model broker is closed')
+            if self.quota is not None:
+                self.quota.close()
+                self.quota = None
+            self.deadline = turn['created'] + limits.turn_seconds
+            self.requests = self.connections = 0
+            self.input_bytes = self.output_bytes = self.output_reserved = 0
+            self.failure = None
+            if self.transport is not None:
+                self.transport.frame_count = 0
+                self.transport.output_bytes = 0
+            self.quota = _Quota(self.home.parent.parent / (identifier(turn['id']) + '.model-budget.json'),
+                                turn['id'], self.maximum)
+            self.idle = False
+
     def _check(self):
-        if self.closed.is_set() or time.time() >= self.deadline:
+        if self.closed.is_set() or self.idle or time.time() >= self.deadline:
             raise TimeoutError('Development model channel has expired')
 
     def _rpc(self, method, params, on_chunk, *, timeout=180):
@@ -399,12 +425,15 @@ class ModelBroker:
                 except BaseException:
                     self.send_error(502, 'Configured model request failed or exceeded its budget')
         try:
-            while not self.closed.is_set() and time.time() < self.deadline:
+            while not self.closed.is_set() and (self.idle or time.time() < self.deadline):
                 try: client, _ = self.listener.accept()
                 except socket.timeout: continue
                 self.client = client; self.connections += 1
                 try:
-                    self.quota.charge(connections=1)
+                    with self._turn_lock:
+                        if self.idle or self.quota is None:
+                            reject('Development model channel is idle', 'conflict')
+                        self.quota.charge(connections=1)
                     client.settimeout(.2 if self.name == 'deepseek' else 5)
                     if self.name == 'deepseek': self._handle_json(client)
                     else: Handler(client, ('127.0.0.1', 0), self)
@@ -413,7 +442,11 @@ class ModelBroker:
                     if safe and any(word in safe.lower() for word in ('http://', 'https://', 'bearer ', 'token', 'sk-')):
                         safe = ''
                     self.failure = safe[:180] if safe else 'Configured model request failed or exceeded its budget'
-                    try: self._send(client, dict(error=self.failure))
+                    try:
+                        if not self.idle and self.quota is not None:
+                            self._send(client, dict(error=self.failure))
+                        else:
+                            client.sendall(wire(dict(error=self.failure), FRAME) + b'\n')
                     except BaseException: pass
                     # Never retry a dispatched request with an uncertain result.
                     if self.transport and self.transport.pending: self.closed.set()

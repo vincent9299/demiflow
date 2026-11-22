@@ -32,12 +32,36 @@ exports.apply=function(ctx,config) {
     if(method!=='model/stream')throw new Error('Unsupported model method');
     const options={...params,provider:config.provider,model:config.model,
       reasoningEffort:config.reasoningEffort,maxTokens:Math.min(params.maxTokens||16384,16384),signal:active.signal};
-    let finished=false;
+    let finished=false,pending=null,lastSent=0;
+    async function flushPending() {
+      if(!pending)return;
+      const chunk=pending;pending=null;lastSent=Date.now();
+      await send({method:'model/chunk',params:{requestId:id,chunk}});
+    }
     for await(const chunk of ctx.llm.stream(options)) {
       if(finished)throw new Error('Model emitted data after completion');
+      const delta=(chunk?.type==='text-delta'||chunk?.type==='reasoning-delta')&&typeof chunk.text==='string';
+      if(delta) {
+        if(pending&&pending.type===chunk.type&&pending.index===chunk.index&&pending.text.length+chunk.text.length<=4096) {
+          pending.text+=chunk.text;
+          if(Date.now()-lastSent>=16||pending.text.length>=512) await flushPending();
+          continue;
+        }
+        await flushPending();
+        if(lastSent===0) {
+          lastSent=Date.now();
+          await send({method:'model/chunk',params:{requestId:id,chunk}});
+        } else {
+          pending={...chunk};
+          if(Date.now()-lastSent>=16||pending.text.length>=512) await flushPending();
+        }
+        continue;
+      }
+      await flushPending();
       await send({method:'model/chunk',params:{requestId:id,chunk}});
       if(chunk.type==='finish')finished=true;
     }
+    await flushPending();
     if(!finished)throw new Error('Model stream ended without completion');
     return {complete:true};
   }

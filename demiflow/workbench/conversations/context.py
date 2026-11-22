@@ -120,7 +120,9 @@ class BridgeServer:
     token, epoch, active-turn and fixed-operation checks apply on this side.
     """
     def __init__(self, input_access):
+        self.lock = threading.Lock()
         self.input_access = input_access
+        self.bound_identity = (input_access.tid, input_access.epoch) if input_access is not None else None
         self.token = secrets.token_urlsafe(32)
         self.directory = Path(tempfile.mkdtemp(prefix='demiflow-dev-control-'))
         self.path = self.directory / 'bridge.sock'
@@ -132,19 +134,31 @@ class BridgeServer:
         self.thread = threading.Thread(target=self._run, name='development-control', daemon=True)
         self.thread.start()
 
-    def _answer(self, request):
-        if (type(request) is not dict or set(request) != {'token', 'turn_id', 'epoch', 'method', 'params'}
-                or type(request['token']) is not str or not hmac.compare_digest(request['token'], self.token)
-                or request['turn_id'] != self.input_access.tid or request['epoch'] != self.input_access.epoch):
-            reject('Development control capability does not match this turn', 'not_found')
-        self.input_access.require_active()
-        return self.dispatch(request['method'], request['params'])
+    def set_turn(self, input_access):
+        with self.lock:
+            self.input_access = input_access
+            if input_access is not None and self.bound_identity is None:
+                self.bound_identity = (input_access.tid, input_access.epoch)
 
-    def dispatch(self, method, params):
+    def _answer(self, request):
+        with self.lock:
+            active = self.input_access
+            bound = self.bound_identity
+        if (active is None or type(request) is not dict or set(request) != {'token', 'turn_id', 'epoch', 'method', 'params'}
+                or type(request['token']) is not str or not hmac.compare_digest(request['token'], self.token)
+                or (request['turn_id'], request['epoch']) not in {(active.tid, active.epoch), bound}):
+            reject('Development control capability does not match this turn', 'not_found')
+        active.require_active()
+        return self.dispatch(request['method'], request['params'], active)
+
+    def dispatch(self, method, params, active=None):
+        target = active if active is not None else self.input_access
         if method == 'tools/list' and params == {}:
             return dict(tools=[INPUT_TOOL])
         if method == 'tools/call' and type(params) is dict and set(params) == {'name', 'arguments'} and params['name'] == INPUT_TOOL['name']:
-            answer = self.input_access.invoke(params['arguments'])
+            if target is None:
+                reject('Development control capability does not match this turn', 'not_found')
+            answer = target.invoke(params['arguments'])
             return dict(content=[dict(type='text', text=wire(answer, 60000).decode())], isError=False)
         reject('Unsupported development control operation')
 

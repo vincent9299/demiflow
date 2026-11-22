@@ -95,8 +95,6 @@ class Transport:
             raw = bytes(self.buffer[:end]); del self.buffer[:end + 1]
             if not raw: continue
             self.frame_count += 1
-            if self.frame_count > self.limits.events_per_turn:
-                reject('Provider total frame budget exceeded', 'resource_limit')
             event = decode(raw)
             if 'id' in event and 'method' not in event:
                 identity = event['id']
@@ -136,7 +134,7 @@ class Transport:
                 self.stderr.extend(chunk)
                 continue
             self.output_bytes += len(chunk)
-            if self.output_bytes > self.limits.output_bytes:
+            if self.limits.output_bytes and self.output_bytes > self.limits.output_bytes:
                 reject('Provider total stdout byte budget exceeded', 'resource_limit')
             self.buffer.extend(chunk)
             self._read_stdout(self._decode_buffer())

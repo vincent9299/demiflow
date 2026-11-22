@@ -171,3 +171,79 @@ def test_single_pass_capture_preserves_hashes_and_preview_budgets(tmp_path):
     assert facts['bin.dat']['preview_unavailable'] == 'not_plain_source'
     assert facts['bad.txt']['preview_unavailable'] == 'not_utf8'
     assert facts['missing.py'] is None
+
+
+def test_warm_worker_reuses_live_provider_across_turns_and_drains_on_close(tmp_path):
+    from demiflow.workbench.conversations.service import Service
+    from test_forge_development_chat import configuration, wait_turn
+
+    root, path, _ = configuration(tmp_path)
+    service = Service(path)
+    try:
+        sid = service.create_project('wfixture', root, 'warm-session', 'codex')['id']
+        t1 = service.start_project('wfixture', root, sid, 'warm-1', 0, 'First turn')['id']
+        r1 = wait_turn(service, t1)
+        assert r1['state'] == 'completed' and r1['cleanup'] == 'complete'
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            warm = service.warm_workers.get(sid)
+            if warm is not None and warm.idle:
+                break
+            time.sleep(0.05)
+        warm = service.warm_workers.get(sid)
+        assert warm is not None and warm.idle and warm.process.poll() is None
+        first_pid = warm.process.pid
+        assert not service.workers
+
+        t2 = service.start_project('wfixture', root, sid, 'warm-2', 1, 'Second warm turn')['id']
+        r2 = wait_turn(service, t2)
+        assert r2['state'] == 'completed' and r2['cleanup'] == 'complete'
+        events = service.store.events('wfixture', sid, 0, 50)['events']
+        bound_t2 = [e for e in events if e['turn_id'] == t2 and e['type'] == 'provider.bound']
+        assert bound_t2 and bound_t2[0]['data'].get('warm_reused') is True
+        assert service.warm_workers[sid].process.pid == first_pid
+        warm_proc = service.warm_workers[sid].process
+    finally:
+        service.close()
+    assert warm_proc.poll() is not None
+
+
+def test_model_broker_coalesces_many_deltas_without_20k_frame_limit(tmp_path, monkeypatch):
+    import shutil
+    from types import SimpleNamespace
+    from demiflow.workbench.conversations import model_broker as broker
+    from demiflow.workbench.conversations.deepseek import DeepSeek
+    from demiflow.workbench.conversations.policy import Limits
+    from test_forge_development_model_broker import exchange, options
+
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node is required')
+    plugin = Path(broker.__file__).with_name('deepseek_model_broker.cjs')
+    driver = tmp_path / 'llm_many.cjs'
+    driver.write_text('''
+const plugin=require(process.argv[2]);
+plugin.apply({effect(){},llm:{
+ async resolveModelInfo(provider,id){return {provider,id,name:id,defaultMaxTokens:65536,inputModalities:['text']};},
+ async *stream(options){
+  for(let i=0;i<25000;i++) yield {type:'text-delta',index:0,text:'a'};
+  yield {type:'finish',reason:{kind:'stop'}};
+ }
+}}, {provider:'fixture',model:'fixture-model',reasoningEffort:'high'});
+''')
+    monkeypatch.setattr(broker, 'capabilities', lambda *_: dict(available=True))
+    monkeypatch.setattr(DeepSeek, 'launch', lambda config, home, root: ([node, str(driver), str(plugin)], dict(PATH='/usr/bin:/bin', HOME=str(home))))
+    deployment = SimpleNamespace(
+        limits=Limits(),
+        providers={'deepseek': dict(model='fixture-model', model_provider='fixture', effort='high')},
+    )
+    home = tmp_path / 'session/control/turn-many/model'
+    channel = broker.ModelBroker(deployment, dict(id='turnmany', created=time.time()), dict(provider='deepseek'), home)
+    try:
+        rows = exchange(channel, 'stream', options())
+        assert rows[-1] == {'done': True}
+        text = ''.join(r['value']['text'] for r in rows if isinstance(r.get('value'), dict) and r['value'].get('type') == 'text-delta')
+        assert len(text) == 25000
+        assert len(rows) < 1000
+    finally:
+        channel.close()

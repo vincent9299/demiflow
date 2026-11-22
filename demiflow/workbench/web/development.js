@@ -402,7 +402,7 @@ SOFTWARE.
             for(const event of page.events)project(event);
             state.sequence=page.next_sequence;chat.updateSession(current);
             const stillBusy=current.turn&&current.turn.cleanup!=='complete';
-            delay=state.sequence<page.last_sequence||stillBusy?25:1500;
+            delay=page.events.length||state.sequence<page.last_sequence?0:stillBusy?25:1500;
           }else{
             current=await api('dev-session',{session_id:state.session.id});if(state.disposed||(state.feedEpoch||0)!==startEpoch)return;
             applySession(current);
