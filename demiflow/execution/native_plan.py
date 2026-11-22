@@ -16,9 +16,9 @@ import dataclasses
 
 from .recovery_contract import RecoveryContractError, identifier, identity
 from .recovery_identity import describe, source_identity
-from .plan_interpreter import PlanContractError, interpret_physical_plan
+from .plan_interpreter import PlanContractError
 from .sealed_plans import (
-    load_sealed_plan, load_execution_bindings, seal_execution_bindings,
+    load_sealed_plan, seal_execution_bindings,
 )
 from ..data.sources import PlanInput
 
@@ -49,14 +49,6 @@ def _locate_subprogram(source, plan, input_path):
     if not isinstance(node, PlanInput):
         raise PlanContractError("invalid_contract", "input_path does not locate a program input")
     return node.source, node.plan
-
-
-def _locate_execution(layout, execution_id):
-    matches = [entry for entry in layout.executions if entry.execution_id == execution_id]
-    if len(matches) != 1:
-        raise PlanContractError("invalid_contract",
-                                "execution_id is absent or ambiguous in the sealed layout")
-    return matches[0]
 
 
 def stage_native_programs(action, program_slices):
@@ -135,6 +127,7 @@ def compile_native_topology(action, source, plan, *, decision, profile=None):
     from .exchange import read_domain
     from ..planning.dag import compile_physical_execution_plan, channel_id_for
     from ..planning.dataset_dag import compile_dataset_logical_dag
+    from .seal.plan import load_native_execution
     run = action.context
     terminal_kind = decision.action_kind
     sink_ids = ("lance",) if terminal_kind == "write_lance" else ("output",)
@@ -216,24 +209,10 @@ def compile_native_topology(action, source, plan, *, decision, profile=None):
     return logical_dag, physical, bindings_ref
 
 
-def load_native_execution(run, action_id, *, execution_id):
-    """Read the same sealed inputs and locate one execution exactly (read_only).
-
-    No re-selection from current defaults/eligibility: the sealed layout is the
-    authority and ``execution_id`` must match a single placement.
-    """
-    sealed_plan = load_sealed_plan(run.directory, action_id, version='v2')
-    bindings = load_execution_bindings(run.directory, action_id, sealed_plan=sealed_plan)
-    layout = interpret_physical_plan(sealed_plan["logical_dag"], sealed_plan["physical_plan"],
-                                     bindings=bindings,
-                                     manifest_ref=sealed_plan["facts"]["artifact_manifest_ref"])
-    placement = _locate_execution(layout, execution_id)
-    return layout, placement
-
-
 def bind_native_execution(action, source, plan, *, decision, profile=None):
     """Seal once, then consume and verify the immutable execution on every attempt."""
     from ..planning.dataset_dag import compile_dataset_logical_dag
+    from .seal.plan import load_native_execution
     run = action.context
     execution_id = identity([action.action_id, 'driver', decision.route])
     if run.journal.source_binding(action.action_id + '-sealed-plan') is None:
@@ -294,62 +273,3 @@ def seal_native_identity_bridge(run, action, logical_dag, program_slices):
     bridge = build_identity_bridge(logical_dag, action_id=action.action_id,
                                    report_digest=checked.report_digest, bindings=bindings)
     return seal_identity_bridge(run, action, bridge)
-
-
-def execute_native_plan(executor, source, plan, *, layout, execution_id,
-                        arrow=False, sink_schema=None):
-    """Verify then dispatch the sealed backend/profile/program (runtime_state).
-
-    The placement is located by id, its programs are verified against the live
-    source/plan under the current action authority, and only the sealed backend
-    entrypoint runs — no free ``eligible()`` re-selection. The generator finally
-    closes the borrowed backend iterator so this execution's resources release on
-    normal completion, error and early close.
-    """
-    from .run_context import current_action
-    placement = _locate_execution(layout, execution_id)
-    if placement.placement != "driver":
-        raise PlanContractError("unsupported_layout", "native execute supports driver placements only")
-    action = current_action()
-    if action is None:
-        raise PlanContractError("invalid_contract", "execute_native_plan requires an active action authority")
-    verify_native_programs(source, plan, programs=placement.programs, action_id=action.action_id)
-    if placement.backend == "arrow_batch":
-        from .arrow_batch_sink import execute as backend_execute
-        iterator = backend_execute(executor, source, plan, sink_schema, execution=placement)
-    elif placement.backend in {'datafusion', 'local_pull'}:
-        from .dataset_native import execute as backend_execute
-        iterator = backend_execute(executor, source, plan, arrow=arrow,
-                                   sink_schema=sink_schema, execution=placement)
-    elif placement.backend == 'lance_scan':
-        from ..lance.read import iter_lance_batches
-        from .native_resources import _sealed_ceilings
-        ceiling = _sealed_ceilings(placement)
-        iterator = iter_lance_batches(source.query, batch_size=ceiling['inflight_rows'] or 256)
-    elif placement.backend == 'local_stream':
-        from .stream_delivery import iter_stream_rows
-        arguments = action.declaration.get('arguments') or {}
-        limit = (arguments.get('limit', arguments.get('batch_size'))
-                 if action.declaration.get('kind') in {'take', 'take_batch'} else None)
-        if arrow:
-            from .dataset_native import execute as backend_execute
-            iterator = backend_execute(executor, source, plan, arrow=True,
-                sink_schema=sink_schema, execution=placement, limit=limit)
-        else:
-            iterator = iter_stream_rows(executor, source, plan, action=action,
-                execution=placement, limit=limit)
-    else:
-        raise PlanContractError('unsupported_layout', 'Unsupported native execution backend')
-    try:
-        yield from iterator
-    finally:
-        close = getattr(iterator, "close", None)
-        if close is not None:
-            close()
-
-
-def root_stage_limits(placement):
-    """Map sealed full-graph stage budgets to root stream operator ordinals."""
-    return {binding['program_index']: dict(placement.stage_limits[binding['stage_id']])
-            for program in placement.programs if not program['input_path']
-            for binding in program['operator_bindings']}

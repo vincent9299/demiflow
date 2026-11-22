@@ -63,7 +63,7 @@ PRE_V3_MODULES = {
         'demiflow.execution.worker.graph_execution', 'demiflow.execution.worker.queue_transform'},
     'demiflow.execution.plan_interpreter': {
         'demiflow.execution.chain', 'demiflow.execution.dataflow_history',
-        'demiflow.execution.graph', 'demiflow.execution.native_plan',
+        'demiflow.execution.graph', 'demiflow.execution.native_plan', 'demiflow.execution.seal.plan',
         'demiflow.execution.sealed_plan_facts', 'demiflow.execution.sealed_plans',
         'demiflow.execution.worker.layout', 'demiflow.planning.dataset_dag',
         'demiflow.workbench.runs.facts'},

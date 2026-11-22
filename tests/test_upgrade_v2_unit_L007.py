@@ -18,7 +18,8 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 from demiflow.execution import chain
-from demiflow.execution.native_plan import compile_native_topology, load_native_execution
+from demiflow.execution.native_plan import compile_native_topology
+from demiflow.execution.seal.plan import load_native_execution
 from demiflow.execution.plan_interpreter import PlanContractError
 from demiflow.execution.recovery_contract import identity
 from demiflow.execution.recovery_identity import describe, source_identity

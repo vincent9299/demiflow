@@ -789,3 +789,19 @@ def verify_action_programs(action, graph, physical, sealed, *, store, bounds):
         verify_dataflow_program(node.program_ref, expected_pin=expected, store=store,
                                 bounds=bounds, live_binding=live_binding)
     return pending
+
+
+def load_native_execution(run, action_id, *, execution_id):
+    """Read one published v2 placement, using only its immutable F1 and bindings."""
+    from ..plan_interpreter import PlanContractError, interpret_physical_plan
+    from ..sealed_plans import load_execution_bindings, load_sealed_plan
+
+    sealed = load_sealed_plan(run.directory, action_id, version='v2')
+    bindings = load_execution_bindings(run.directory, action_id, sealed_plan=sealed)
+    layout = interpret_physical_plan(sealed["logical_dag"], sealed["physical_plan"],
+                                     bindings=bindings,
+                                     manifest_ref=sealed["facts"]["artifact_manifest_ref"])
+    matches = [entry for entry in layout.executions if entry.execution_id == execution_id]
+    if len(matches) != 1:
+        raise PlanContractError("invalid_contract", "execution_id is absent or ambiguous in the sealed layout")
+    return layout, matches[0]

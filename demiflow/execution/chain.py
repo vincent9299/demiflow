@@ -810,7 +810,8 @@ def seal_write_topology(action, source, plan, *, host_id="local", decision=None)
         logical_dag, physical = sealed["logical_dag"], sealed["physical_plan"]
         if bindings["document"]["schema"] == "demiflow.execution_bindings.v2":
             from ..planning.dataset_dag import compile_dataset_logical_dag
-            from .native_plan import load_native_execution, verify_native_programs
+            from .native_plan import verify_native_programs
+            from .seal.plan import load_native_execution
             drivers = [entry for entry in bindings["document"]["executions"]
                        if entry["placement"] == "driver"]
             if len(drivers) != 1:
@@ -876,7 +877,8 @@ def seal_write_topology(action, source, plan, *, host_id="local", decision=None)
             topology["identity_bridge_ref"] = bridge_ref
         return _WriteSeal(action, plan_ref, topology)
     if decision is not None and decision.route in ("native_relational", "arrow_batch", "lance_scan"):
-        from .native_plan import compile_native_topology, load_native_execution
+        from .native_plan import compile_native_topology
+        from .seal.plan import load_native_execution
         from .plan_interpreter import to_wire
         logical_dag, physical, bindings_ref = compile_native_topology(
             action, source, plan, decision=decision)
