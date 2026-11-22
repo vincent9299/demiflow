@@ -54,7 +54,7 @@ exclude = ["demiflow._vendor.searxng*"]
 
 [tool.setuptools.package-data]
 "demiflow.collect.native_search" = ["inventory.json"]
-"demiflow.forge" = ["standards/*.json", "standards/pipeline-authoring.md", "skills/demiforge/SKILL.md"]
+"demiflow.forge" = ["standards/*.json", "standards/pipeline-authoring.md", "standards/pipeline-review.md", "skills/demiforge/SKILL.md"]
 "demiflow.workbench" = ["notebooks/skills/dataskill/SKILL.md", "analysis/*.json", "web/*.html", "web/*.js", "web/*.css", "web/*.txt", "web/*.json"]
 "demiflow.workbench.conversations" = ["*.cjs"]
 "demiflow._vendor" = ["searxng/**/*", "searxng/*"]
