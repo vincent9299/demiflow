@@ -62,6 +62,25 @@ class Service:
         self.policy_hash, self.config_path = self.seal_policy(self.deployment)
         for t in self.store.unresolved():
             self.store.interrupt_unresolved(t['id'])
+        threading.Thread(target=self._prewarm_coding_catalog, name='demiflow-dev-catalog', daemon=True).start()
+
+    def _prewarm_coding_catalog(self):
+        try:
+            from demiflow.forge.api_reference import REFERENCE_BYTES, build_reference
+            raw = wire(build_reference(), REFERENCE_BYTES)
+            with self.lock:
+                if self.closed or self.coding_catalog is not None:
+                    return
+                catalog = tempfile.TemporaryFile(dir=self.root)
+                try:
+                    catalog.write(raw)
+                    catalog.flush()
+                except BaseException:
+                    catalog.close()
+                    return
+                self.coding_catalog = catalog
+        except Exception:
+            pass
 
     def seal_policy(self, deployment):
         """Persist the exact bounded non-secret policy before creating a session."""
@@ -163,10 +182,13 @@ class Service:
 
     def start(self, workspace, root, session_id, submission_id, expected_revision, text, *, operation="message"):
         self.project(workspace, root)
+        _, current_hash, _ = self.binding(workspace, root, seal=True)
         caps = self.capabilities(workspace, root)
         session = self.store.show(workspace, session_id)
-        if not caps['start'] or not any(p['id'] == session['provider'] and p['available'] for p in caps['providers']):
+        available_providers = [p['id'] for p in caps['providers'] if p['available']]
+        if not caps['start'] or not available_providers:
             reject('Development provider is unavailable in this deployment')
+        target_provider = session['provider'] if session['provider'] in available_providers else available_providers[0]
         with self.lock:
             if self.closed: reject('Development service is stopping', 'busy')
             self._reap()
@@ -188,9 +210,10 @@ class Service:
             reserved = sum(max(0, allowance - homes.get(t['session'], 0)) for t in self.store.unresolved())
             if used + reserved + max(0, allowance - homes.get(session_id, 0)) > self.deployment.limits.private_total_bytes:
                 reject('Retained provider homes exhaust private disk reservation', 'resource_limit')
-            value, fresh = self.store.submit(workspace, session_id, submission_id, expected_revision, text, root_identity(root), self.current_hash(workspace,root),
-                                             operation=operation)
+            value, fresh = self.store.submit(workspace, session_id, submission_id, expected_revision, text, root_identity(root), current_hash,
+                                             operation=operation, provider=target_provider)
             if not fresh: return self.store.public_turn(value)
+            session = self.store.show(workspace, session_id)
             return self._launch_provider(value, session)
 
     def notify(self):
@@ -429,8 +452,10 @@ class Service:
             if life >= 0: os.close(life)
         self.workers.clear()
         self.worker_targets.clear()
-        if self.coding_catalog is not None:
-            self.coding_catalog.close()
+        with self.lock:
+            if self.coding_catalog is not None:
+                self.coding_catalog.close()
+                self.coding_catalog = None
         os.close(self.owner)
         if failure is not None:
             reject('Development shutdown could not read final cleanup state', 'busy')

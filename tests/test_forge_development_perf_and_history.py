@@ -116,7 +116,7 @@ def test_browser_multiturn_history_survives_new_message_and_reload(tmp_path):
 
             # Reloading the page must still show all 5 turns cleanly.
             page.reload()
-            page.locator('.development-status').filter(has_text='本轮已完成').wait_for()
+            page.locator('.development-status[data-turn-state="completed"][data-turn-cleanup="complete"]').wait_for(state='attached')
             expect(page.locator('.dfc-user')).to_have_count(5)
             for i in range(4):
                 expect(page.locator('.dfc-user').nth(i)).to_contain_text(f'历史问题-{i + 1}')

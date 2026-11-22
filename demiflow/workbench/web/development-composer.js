@@ -141,7 +141,7 @@
       const caps=state.capabilities,session=state.session,turn=session?.turn;
       const readonly=state.readonly||caps.read_only===true,unavailable=!caps.enabled;
       const busy=!!(turn&&turn.cleanup!=='complete');
-      const provider=(caps.providers||[]).find(value=>value.id===(session?.provider||providers.value));
+      const provider=(caps.providers||[]).find(value=>value.id===(session?.provider||providers.value))||(caps.providers||[]).find(value=>value.available);
       input.disabled=readonly||state.historyOnly||unavailable||state.sending;
       send.disabled=input.disabled||!caps.start||!provider?.available||busy||!input.value.trim()||bytes(input.value)>32768;
       stop.disabled=readonly||state.historyOnly||unavailable||!busy;stop.hidden=!busy||state.historyOnly;send.hidden=busy&&!state.historyOnly;

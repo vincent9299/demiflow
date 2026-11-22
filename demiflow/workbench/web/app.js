@@ -413,6 +413,24 @@
     value = V.validateView(value);
     if (value.workspace !== (value.v === 2 ? workspaceId : context.workspace)) throw new Error('workspace_mismatch：此链接属于另一个工作区');
     if(value.v === 1)value={...value,v:2,workspace:workspaceId};
+    const sameDevelopment = ['development', 'development_session', 'development_new'].includes(value.kind)
+      && developmentView && developmentView.workspaceId === workspaceId && typeof developmentView.navigate === 'function';
+    if (sameDevelopment) {
+      rememberTab();
+      pendingView = value; clearSelection(); viewState = 'loading'; markFunction();
+      try {
+        await developmentView.navigate(value);
+        if (developmentView?.sessionId) value = target('development_session', {session_id: developmentView.sessionId});
+        view = value; pendingView = null; viewState = 'ready';
+        if (!selection) clearSelection();
+        putHistory(value, historyMode);
+        return;
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+        view = value; pendingView = null; viewState = 'error';
+        throw err;
+      }
+    }
     rememberTab();
     readController.abort();readController=new AbortController();
     const epoch = ++viewEpoch; selectionEpoch++; disposeReaders();updates={};

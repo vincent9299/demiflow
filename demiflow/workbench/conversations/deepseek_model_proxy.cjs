@@ -8,7 +8,8 @@ exports.name = 'demiflow-model-proxy';
 exports.inject = ['llm'];
 exports.apply = async function(ctx, config) {
   const {LlmAdapter} = await import(pathToFileURL(config.llmModule).href);
-  const maximum = 1024 * 1024;
+  const maximum = 4 * 1024 * 1024;
+  let cachedModel = null;
   async function* exchange(method, options, signal) {
     const endpoint = process.env.DEMIFLOW_MODEL_ENDPOINT;
     if (!/^127\.0\.0\.1:[0-9]{1,5}$/.test(endpoint || '')) throw new Error('Fixed model channel is unavailable');
@@ -42,11 +43,13 @@ exports.apply = async function(ctx, config) {
   class FixedAdapter extends LlmAdapter {
     async resolveModel(provider,model,signal) {
       if(provider!==config.provider||model!==config.model) throw new Error('Model route is fixed for this task');
+      if(cachedModel) return {...cachedModel};
       let result;
       for await(const value of exchange('resolve',{provider,model},signal)) {
         if(result!==undefined) throw new Error('Duplicate model metadata');result=value;
       }
       if(!result || result.provider!==provider || result.id!==model) throw new Error('Model metadata identity differs');
+      cachedModel={...result};
       return result;
     }
     async listModels(provider) {return [await this.resolveModel(provider,config.model)];}

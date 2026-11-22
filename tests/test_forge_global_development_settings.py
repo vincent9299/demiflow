@@ -61,7 +61,7 @@ def test_restart_and_changes_preserve_history_and_pinned_policies(tmp_path):
     try:
         old=service.create('wfixture',root,'old','codex')['id']
         settings.save(payload(settings))
-        assert service.show('wfixture',old)['writable'] is False
+        assert service.show('wfixture',old)['writable'] is True
         new=service.create_project('wfixture',root,'new','codex')['id']
         tid=service.start('wfixture',root,new,'turn',0,'A small normal task')['id']
         assert wait_turn(service,tid)['state']=='completed'
@@ -78,10 +78,16 @@ def test_restart_and_changes_preserve_history_and_pinned_policies(tmp_path):
         request=payload(settings);request.update(model='fixture-next',api_key='')
         settings.save(request)
         assert service.store.events('wfixture',new)==events
-        assert service.show('wfixture',new)['writable'] is False
+        assert service.show('wfixture',new)['writable'] is True
         assert service.show('wfixture',new)['model']=='fixture-global'
         snapshot=service.session_policy(service.store.session(new))
         assert snapshot.providers['codex']['model']=='fixture-global'
+        # Continuing an existing session after a settings update seamlessly
+        # rebinds it to the new Forge-constrained policy while preserving history.
+        tid2=service.start_project('wfixture',root,new,'turn-2',1,'Follow-up after model update')['id']
+        assert wait_turn(service,tid2)['state']=='completed'
+        assert service.show('wfixture',new)['model']=='fixture-next'
+        assert len(service.store.events('wfixture',new)['events']) > len(events['events'])
     finally:service.close()
 
 

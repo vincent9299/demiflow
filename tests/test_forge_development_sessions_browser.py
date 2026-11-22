@@ -78,7 +78,7 @@ def pick(page, sid):
 def send(page, text):
     page.get_by_label('开发要求').fill(text)
     page.get_by_role('button', name='发送', exact=True).click()
-    page.locator('.development-status').filter(has_text='本轮已完成').wait_for()
+    page.locator('.development-status[data-turn-state="completed"][data-turn-cleanup="complete"]').wait_for(state='attached')
     return current_session(page)
 
 
@@ -167,13 +167,17 @@ def test_legacy_history_stays_readonly_and_session_list_is_bounded(tmp_path):
         service.store.finish_provider(turn['id'], state='completed', cleanup='complete', result={})
         before = service.store.events(workspace, legacy)['events']
         with browser_page(server) as (page, expect):
+            layout_marker = page.evaluate('()=>{const el=document.querySelector(".development-layout");el.dataset.persistCheck="kept";return true;}')
+            assert layout_marker
             pick(page, legacy)
-            expect(page.get_by_label('开发要求')).to_be_disabled()
-            expect(page.get_by_role('button', name='发送', exact=True)).to_be_disabled()
-            page.get_by_text('历史会话 · 只读，不能继续发送', exact=True).wait_for()
+            # In-place session switch keeps the mounted layout intact and all sessions continuable.
+            assert page.evaluate('document.querySelector(".development-layout")?.dataset.persistCheck') == 'kept'
+            expect(page.get_by_label('开发要求')).to_be_enabled()
+            expect(page.locator('.development-session-state')).to_have_count(2)
+            assert page.evaluate('[...document.querySelectorAll(".development-session-state")].every(n=>!n.textContent.trim())')
             expect(page.locator('.dfc-answer')).to_contain_text('Saved historical answer')
             page.reload()
-            expect(page.get_by_label('开发要求')).to_be_disabled()
+            expect(page.get_by_label('开发要求')).to_be_enabled()
             assert current_session(page) == legacy
             assert service.store.events(workspace, legacy)['events'] == before
             pick(page, primary)
