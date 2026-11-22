@@ -6,7 +6,7 @@
 
 ## 一　模块职责与输入输出
 
-一个 run 可含多个 action。编译器决定计划，数据源确定实际分片，封存模块固定这一 action 使用的程序和计划。driver 编排 action，调度器放置并准入任务，主机和资源后端负责实际分配。worker 执行分区，算子库实现行处理，Exchange 持有跨分区投递状态。Local 和 Ray 使用同一套计划、任务、提交和恢复契约。
+每项职责由一个模块负责。一个 run 可含多个 action。编译器决定计划，数据源确定实际分片，封存模块固定这一 action 使用的程序和计划。driver 编排 action，调度器放置并准入任务，主机和资源后端负责实际分配。worker 驱动分区执行，算子库负责逐行、批次和关系计算，Exchange 持有跨分区投递状态。Local 和 Ray 使用同一套计划、任务、提交和恢复契约。
 
 **新增一级模块。** 提议者须在详细设计前说明现有模块为何无法承担该独立职责，在下表末尾追加稳定编号、职责、输入、输出、代码目录，并按第三节核对与现有模块的依赖。已有编号不重排。已有职责内拆文件或增加内部函数沿用原模块编号。
 
@@ -20,10 +20,10 @@
 | 06 | 程序准备与封存 | 固定程序引用，让 action 的图、程序、源和物理计划可重载、可校验 | 编译结果、程序/常量、实际计划、RunAction、存储 | 带程序引用的图、SealedExecution 或经核验的历史图与计划 | [程序准备与封存](../demiflow/execution/seal/plan.py) |
 | 07 | 调度器 | 负责整批可行性、选机、单项准入及租约、运行和发布预留、退役等待。03 持有整批的重试与截止时间 | ReadyWork、stage profile、已探测主机、有效 worker/内存上限、当前占用 | 每项 host、WorkerLease、等待/不可行原因、退出观察结果 | [DataflowScheduler](../demiflow/execution/scheduler/placement.py) |
 | 08 | 主机适配与资源管理 | 适配器在选定主机准备连接/派发任务；ResourceManager 对 provider 申请、核对和收回物理资源 | 选机、WorkerAssignment、租约与资源计划 | 可激活的 endpoint、实际分配状态、退出或待清理证据 | [主机端点](../demiflow/execution/dataflow_hosts.py)、[ResourceManager](../demiflow/resources/manager.py) |
-| 09 | Worker 与计算 kernel | worker 管分区循环与控制，kernel 调用函数/actor，执行融合或专用关系计算 | WorkerAssignment、源/通道数据、业务程序、控制命令 | 行/批、进度、控制事件、分区 checkpoint 贡献 | [分区执行](../demiflow/execution/worker/dataflow_execution.py)、[图推进](../demiflow/execution/worker/dataflow_graph_runner.py)、[kernel](../demiflow/execution/kernels/) |
-| 10 | 算子库、绑定与可选服务 | 领域包实现从输入行到输出行的处理与外部调用语义；worker 装配受控能力；已声明受管模型服务负责就绪/生命周期 | 行/批、算子配置、原账本接口、必要的服务或客户端 | 业务输出、已知响应、已知失败或结果未明 | [Prompt](../demiflow/operator_llm/runtime.py)、[Embedding](../demiflow/embeddings/)、[SearchWeb](../demiflow/collect/operators.py)、[模型装配](../demiflow/execution/dataflow_models.py) |
+| 09 | Worker 与分区执行 | 按物理计划驱动分区循环，绑定并调用算子，管理批次成员、进度和取消 | WorkerAssignment、源或通道输入、算子绑定、控制命令 | 行/批、进度、控制事件、分区 checkpoint 贡献 | [分区执行](../demiflow/execution/worker/dataflow_execution.py)、[图推进](../demiflow/execution/worker/dataflow_graph_runner.py)、[kernel](../demiflow/execution/kernels/) |
+| 10 | 算子库 | 负责算子的计算语义和算法实现，包括 join 键匹配、DataFusion 查询、Arrow 批变换及模型调用。同一算子的不同算法遵守相同的输入输出契约。受管模型服务负责自身就绪和生命周期 | 输入行、批或左右分区数据，算子参数、业务函数及获准的账本或服务接口 | 结果行、批、聚合状态或外部调用结果（含失败或结果未明） | [关系计算](../demiflow/execution/kernels/relational.py)、[DataFusion 查询](../demiflow/execution/dataset_native.py)、[Prompt](../demiflow/operator_llm/runtime.py)、[Embedding](../demiflow/embeddings/)、[SearchWeb](../demiflow/collect/operators.py)、[模型装配](../demiflow/execution/dataflow_models.py) |
 | 11 | Exchange | 管跨分区投递登记、路由、额度、确认与通道恢复状态；driver 进程负责中转通知 | ExchangeSpec、发送/接收端标识、记录定位、ACK | 下游投递、额度归还、可用于 cut 的通道进度 | [通道与传输](../demiflow/execution/exchange/)、[投递状态](../demiflow/execution/exchange/deliveries.py) |
-| 12 | 终端结果与业务 sink | terminal 交付 count/take/流式读等结果；sink 实施目标格式的准备、发布、检查 | 终端记录、发布事实，或分区待写结果 | 标量、行/批、物化句柄、WriteResult 或 sink 回执 | [终端](../demiflow/execution/dataflow_terminals.py)、[sink](../demiflow/execution/dataflow_sinks.py)、[Lance 写出](../demiflow/execution/lance_sink.py) |
+| 12 | 终端结果与业务 sink | terminal 交付 count/take/流式读等结果；sink 按目标协议准备和发布，Lance 写者负责查重、目标版本核对和事务提交 | 终端记录、发布事实，或分区待写结果 | 标量、行/批、物化句柄、WriteResult 或 sink 回执 | [终端](../demiflow/execution/dataflow_terminals.py)、[sink](../demiflow/execution/dataflow_sinks.py)、[Lance 写出](../demiflow/execution/lance_sink.py) |
 | 13 | Checkpoint 与提交 | 收齐参与者状态，协调一致恢复点，按 sink 协议提交/对账 | CutRequest、源位置、核与缓冲状态、通道进度、sink 准备结果 | RecoveryImage、确认的输出与原生提交事实 | [checkpoint 协调](../demiflow/execution/checkpoint/coordinator.py)、[提交](../demiflow/execution/commit.py) |
 | 14 | 运行产物存储 | 保存、校验、保留、释放引用、安全回收 | 有界字节流或 ArtifactRef、owner | ArtifactRef、已校验字节、引用变更或回收结果 | [对象存储](../demiflow/execution/storage/objects.py)、[引用与租约](../demiflow/execution/storage/lease.py)、[回收](../demiflow/execution/storage/gc.py) |
 | 15 | 运行账本、观测与历史接口 | 按原事务记录运行事实；写观测；按指定运行和 attempt 只读解释 | 状态变更与授权、运行事件或查询条件 | 持久事实、观测指标、只读视图 | [账本](../demiflow/execution/run_journal.py)、[观测](../demiflow/execution/run_telemetry.py)、[历史读取](../demiflow/execution/run_reader.py)、[P4 端口](../demiflow/execution/host/) |
@@ -101,8 +101,8 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant D as Action driver
-    participant W as Worker 与 kernel
-    participant O as 算子库
+    participant W as Worker（09）
+    participant O as 算子库（10）
     participant J as 原账本或对应的具名接口
     participant X as driver 内的 exchange
     participant T as 终端订阅
@@ -110,7 +110,7 @@ sequenceDiagram
     participant K as 业务 sink
     participant S as 原制品与状态存储
     D->>W: 激活后开放本阶段
-    W->>O: 输入行与先前绑定的节点接口
+    W->>O: 按计划传入行、批或左右分区输入及已绑定的节点接口
     opt Prompt 外部调用
         O->>J: 查请求记录，确需新调用时预留额度
         J-->>O: 已存响应、获准请求或结果未明
@@ -120,7 +120,7 @@ sequenceDiagram
         end
         Note over O,J: 结果未明沿原账本上报，禁止自动重发
     end
-    O-->>W: 输出行或明确的错误
+    O-->>W: 结果行、批、聚合状态或错误
     opt 跨分区
         W->>X: delivery 及 peer 定位或持久引用
         X->>W: 通知目标分区读取
@@ -209,13 +209,13 @@ sequenceDiagram
 
 **打回。** 新的声明或逻辑规划为了表达“是什么”，需要导入 kernel、主机后端或运行期服务的具体实现；或者把排序、落盘、锁、执行缓存等实现放进声明包，再让执行模块反向导入。用第二套 DTO、转发文件或函数内导入包住同一条依赖，也须按真实提供方裁定。
 
-**用 join 裁定。** 左右输入、键、连接类型归声明。编译器消费这些值并展开两个端口；worker 的关系 kernel 消费两个分区记录流并执行匹配。`PlanInput`、`KeyedSource`、`UnionSource` 的历史导入路径是 `execution.local_kernel`。新关系操作复用声明入口。旧程序可能按原限定名解码类对象，并在解码后复算程序身份。移动定义须同时满足 D8，兼容出口只覆盖登记的原符号和用途。[关系组装](../demiflow/data/relational_declaration.py) · [编译](../demiflow/planning/dataflow_compile.py) · [执行](../demiflow/execution/kernels/relational.py) · [历史保留依据](architecture-upgrade-20261120/G/RETAINED-OBJECTS.md)
+**用 join 裁定。** 左右输入、键、连接类型归声明。编译器消费这些值并展开两个端口；09 提供两个分区记录流，10 的关系算子执行匹配。`PlanInput`、`KeyedSource`、`UnionSource` 的历史导入路径是 `execution.local_kernel`。新关系操作复用声明入口。旧程序可能按原限定名解码类对象，并在解码后复算程序身份。移动定义须同时满足 D8，兼容出口只覆盖登记的原符号和用途。[关系组装](../demiflow/data/relational_declaration.py) · [编译](../demiflow/planning/dataflow_compile.py) · [执行](../demiflow/execution/kernels/relational.py) · [历史保留依据](architecture-upgrade-20261120/G/RETAINED-OBJECTS.md)
 
 **评审批据。** 标出同一声明的定义、生产者和消费者，确认声明阶段启动了哪些资源；检查源码导入和冷进程实际加载的模块。涉及 join 时检查左右端口、重复键多重性、空键和执行器绑定。只有触及持久身份或旧路径才追加 D8 的历史验证。
 
 ### D2　通用抽象依赖契约，具体算子由装配处选择
 
-**适用模块**　02 Dataset API、04 编译器、06 封存、09 worker/kernel、10 算子与服务绑定、15 观测。
+**适用模块**　02 Dataset API、04 编译器、06 封存、09 Worker 与分区执行、10 算子库、15 观测。
 
 **允许。** 编译、调度、分区执行等通用模块依赖完成本职工作所需的契约。具体实现依该契约提供能力，装配处选择实现。编译器处理声明种类和已登记的 lowering，通用 worker 按执行规格调用已绑定的算子。具体工厂可以导入并构造 `PromptActor`；专用绑定可以核对受支持的精确类型后，注入本 action/node 的账本、请求额度和恢复能力。算子拥有字段映射、请求与响应处理、领域重放语义。领域到引擎的依赖逐符号使用已有合同、注入服务或已批准的原生装配。[算子服务契约](architecture-upgrade-20261120/F/F2-SERVICE-CONTRACTS.txt)
 
@@ -242,7 +242,7 @@ sequenceDiagram
 |---|---|---|---|
 | **D3　计划、数据源与封存** | 03→04 请求逻辑计划及目标并行度；03→05 获取源快照和真实分片；04 消费实际分片生成物理计划；03→06 固定程序、图、源和常量。 | 编译器读 Lance 元数据、查询当前 run 或写封存；恢复时重切原输入、用新计划替代旧封存。 | 对照图 1，分别走一次新 action 和一次命中原封存的路径，明确哪个模块执行 I/O。 |
 | **D4　编排、调度与资源** | 03 管重试截止与终止；07 管整批可行性、单项准入与选机；08 负责真实分配与退出。07 经准备回调让 03 先把 assignment、权限和恢复位置交给选定端点，随后申请资源，确认就绪后才激活。 | 新增第二处 worker 数或内存准入决策；07 持有具体 driver；08 在启动材料准备好之前启动 worker；把停止请求当作已退出。 | 能区分永久不可行、暂时等待和物理退出。Local/Ray 使用相同任务与回执，后端特有行为只在适配侧取证。 |
-| **D5　计算、投递与终端** | 09 执行分区内计算；11 在 driver 进程持有跨分区和终端投递、额度、ACK、持久通道在途状态；12 交付订阅结果或写出。 | worker 绕过当前协议直连；driver、订阅或算子另存一份权威投递表；用传输 ACK 代替输出提交。 | 对照图 2 验证分区内直传、跨分区 ACK 和终端关闭中本次受影响的路径；恢复证据含原通道进度。 |
+| **D5　计算、投递与终端** | 09 驱动分区，10 执行算子计算；11 在 driver 进程持有跨分区和终端投递、额度、ACK、持久通道在途状态；12 交付订阅结果或写出。 | worker 绕过当前协议直连；driver、订阅或算子另存一份权威投递表；用传输 ACK 代替输出提交。 | 对照图 2 验证分区内直传、跨分区 ACK 和终端关闭中本次受影响的路径；恢复证据含原通道进度。 |
 | **D6　效果、提交与存储** | 算子或原生队列经具名端口登记领域效果；13 协调 cut 与提交；sink 根据 prepared 描述检查和发布；14 只持有可校验字节及其引用；15 按原事务记事实。 | 依据文件存在或观测计数判断发布成功；结果未明时自动重发；存储自行承认效果；增加并行真账本。 | 核实一次成功和一个对应的失败或重入窗口。区分请求已准入、效果已确认、提交已确认和结果未明。 |
 | **D7　控制、观测与历史** | 01 接收取消，03 停止新准入并排空，09 关闭本地实例，07/08 观察实际退出，14 按可达引用回收。P4 inspection 消费指定 run/attempt 的事实，获准控制走 control。 | 通过指标推算成功或资源已释放；取消时误删旧提交；读取历史触发模型、恢复或写账本；底座反向依赖应用。 | 针对所改分支，区分停止请求、排空完成、实际退出；历史读取冷进程只读且指向指定 attempt。 |
 | **D8　跨版本身份、解码与续跑** | 16 保有唯一的声明/编码；06 读取原程序与身份；13 按原恢复点继续。变更涉及限定名、编码、工厂、模块源身份或反序列化时，列出旧写端、新读端和实际载荷。保留原业务、程序和输入校验。 | 只验证新写新读，或只看历史列表就声称可续跑；改旧数据、跳过 code pin、放宽类型检查、恢复平台版本门禁，或让受支持的旧路径悄然失效。 | 从旧发布提交产生样本，新进程分别冷读已发布结果、从非最终 cut 真续跑；比较旧 seal、回执和 cut 前缀；适用时覆盖闭包引用被移动类，并保留损坏/不兼容输入的拒绝。更改兼容承诺单独裁定。 |
