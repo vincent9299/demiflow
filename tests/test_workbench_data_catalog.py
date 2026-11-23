@@ -126,14 +126,22 @@ def test_assistant_cli_edits_runs_and_reads_native_output(browser,native_project
                         assert (result.returncode==0)==success,(args,result.stdout,result.stderr)
                         return json.loads(result.stdout)
                     if not cli('cell','show')['allow_run']:
+                        assert turn['text'] in {'inspect','重试中断的连接'}
+                        ctx_info=cli('context')
+                        assert ctx_info['kernel_python']==str(PYTHON)
+                        assert ctx_info['sandbox']=={'mode':'readonly','write_paths':[]}
                         assert '运行许可' in cli('cell','run',success=False)
                     else:
-                        tools=cli('catalog','list','tools')['items']
+                        tools=cli('catalog','list','tools','--query','column_profile')['items']
                         profile=next(i['name'] for i in tools if i['name'].endswith('.column_profile'))
                         tool=cli('catalog','show','tools',profile)
-                        table=next(i for i in cli('catalog','list','dictionary')['items'] if i['name']=='samples')
+                        filtered=cli('catalog','list','dictionary','--query','sam')['items']
+                        assert len(filtered)==1 and filtered[0]['name']=='samples'
+                        assert cli('catalog','list','dictionary','--query','nonexistent_table_xyz')['items']==[]
+                        table=filtered[0]
                         fixed=cli('catalog','show','dictionary',table['name'])
                         assert 'binding=' not in fixed['read'] and 'version=1' in fixed['read']
+                        assert fixed['sample_limit']==100 and 'count(' in fixed['count']
                         assert dict(fixed['fields']).keys()=={'name','score'}
                         cmd=tool['import']+'\n'+fixed['read']+'\nprint("count=",column_profile(df).loc["score","present"])'
                         assert cli('cell','edit',source=cmd)['state']=='edited'
@@ -160,6 +168,9 @@ def test_assistant_cli_edits_runs_and_reads_native_output(browser,native_project
             page.goto(app.origin+'/#token='+app.token+'&view='+view)
             page.frame_locator('iframe.native-notebook-frame').get_by_role('button',name='卡片助手',exact=True).first.click(timeout=60000)
             pane=page.get_by_role('complementary',name='卡片助手')
+            auto_run=pane.get_by_role('checkbox',name='允许自动运行')
+            expect(auto_run).to_be_checked()
+            auto_run.uncheck()
             query=pane.get_by_role('textbox',name='卡片要求')
             query.fill('inspect');pane.get_by_role('button',name='发送要求').click()
             expect(pane.locator('.dfc-think .dfc-summary')).to_have_text('正在检查测试卡片',timeout=30000)
@@ -172,12 +183,14 @@ def test_assistant_cli_edits_runs_and_reads_native_output(browser,native_project
             pane.get_by_role('button',name='关闭原文').click()
             continue_reply.set()
             expect(pane).to_contain_text('本轮仅编辑',timeout=30000)
-            pane.get_by_role('checkbox',name='允许本轮运行').check()
+            auto_run.check()
             query.fill('检查评分，并验证运行错误');pane.get_by_role('button',name='发送要求').click()
             expect(pane).to_contain_text('已收到内核回执',timeout=95000)
+            expect(auto_run).to_be_checked()
             frame=page.frame_locator('iframe.native-notebook-frame')
             expect(frame.locator('.jp-CodeCell').last).to_contain_text('native error probe')
             assert len(recorded)==1 and 'execution_count' in recorded[0],recorded
+            auto_run.uncheck()
             query.fill('重试中断的连接');pane.get_by_role('button',name='发送要求').click()
             expect(pane).to_contain_text('模型连接已关闭，未收到完整回复。')
             assert len(attempts)==3

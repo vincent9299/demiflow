@@ -31,7 +31,7 @@ export function notebookTranscript(flow, original, api, onChange) {
     if(event.session_id!==session || event.sequence<=sequence)return;
     sequence=event.sequence;
     if(event.type==='message.user'){
-      const text=event.data.text.split(/\n\n当前 Notebook：[^\n]*\n\n本轮运行许可：(?:允许|仅编辑)\n\n要调整的单元格：/,1)[0];
+      const text=event.data.text.split(/\n\n当前 Notebook：[^\n]*\n\n本轮运行许可：(?:允许|仅编辑)(?:\n\n|$)/,1)[0];
       chat.project({...event,data:{...event.data,text}});
     }else chat.project(event);
   }

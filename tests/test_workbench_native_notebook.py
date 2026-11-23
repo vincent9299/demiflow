@@ -30,6 +30,7 @@ def native_project(tmp_path, monkeypatch):
     value['projects'][key].pop('allow_runs',None)
     value['projects'][key]['permissions']={**{k:False for k in registry.PERMISSIONS},
         **{k:False for k in registry.CAPABILITIES},'analysis_write':True,'analysis_execute':True}
+    value['projects'][key]['python']=str(PYTHON)
     path.write_text(json.dumps(value))
     import lance, pyarrow as pa
     data=root/'data';data.mkdir();lance.write_dataset(pa.table({'name':['alpha','beta','gamma'],'score':[1,2,3]}),data/'samples.lance')
@@ -55,6 +56,8 @@ def call(app, method, path, body=None, *, cookie=None, origin=True, token=False)
 
 def grants(path, key, **changes):
     value=json.loads(path.read_text());value['projects'][key]['permissions'].update(changes)
+    if changes.get('analysis_execute') and 'python' not in value['projects'][key]:
+        value['projects'][key]['python']=str(PYTHON)
     path.write_text(json.dumps(value))
 
 
@@ -402,6 +405,8 @@ def test_dictionary_resolved_request_stays_fixed_across_rebind_and_navigation(br
 
 def test_reuse_annotation_tool_preset_in_native_notebook(browser,native_project):
     root,path,key=native_project
+    # This test asserts an annotation widget writing directly into project root.
+    registry.set_notebook_sandbox(path,key,expected=registry.projects(registry.load_registry(path))['digest'],mode='off')
     folder=root/'data_tools'
     folder.mkdir()
     (folder/'ratings.py').write_text(

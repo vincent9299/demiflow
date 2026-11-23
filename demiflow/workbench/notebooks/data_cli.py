@@ -12,11 +12,13 @@ def main():
     if binding == '--provider':
         endpoint = os.environ['DEMIFLOW_CONTROL_ENDPOINT']
         os.execv(args[0], [arg.replace('__DEMIFLOW_CELL_ENDPOINT__', endpoint) for arg in args])
-    parser = argparse.ArgumentParser(prog='data', description='Inspect the notebook catalogs and operate on the current cell.')
+    parser = argparse.ArgumentParser(prog='data', description='Inspect the notebook context, catalogs, and operate on the current cell.')
     groups = parser.add_subparsers(dest='group', required=True)
+    groups.add_parser('context', help='Show current notebook cell context, kernel Python, and sandbox policy')
     catalog = groups.add_parser('catalog').add_subparsers(dest='action', required=True)
     listing = catalog.add_parser('list')
     listing.add_argument('kind', choices=['dictionary', 'tools'])
+    listing.add_argument('--query', default='', help='Filter items by keyword')
     listing.add_argument('--offset', type=int, default=0)
     detail = catalog.add_parser('show')
     detail.add_argument('kind', choices=['dictionary', 'tools'])
@@ -34,18 +36,26 @@ def main():
     token, turn, epoch = json.loads(Path(binding).read_text())
     def send(method, params):
         return call('', token, turn, epoch, method, params)
-    if args.group == 'catalog':
-        params = {'group': args.kind, **({'offset': args.offset} if args.action == 'list' else {'id': args.id, 'offset':args.offset})}
+    if args.group == 'context':
+        method = 'context.show'
+        params = {}
+    elif args.group == 'catalog':
+        method = 'catalog.' + args.action
+        params = {'group': args.kind, **({'offset': args.offset} if args.action == 'list' else {'id': args.id, 'offset': args.offset})}
+        if args.action == 'list' and args.query:
+            params['query'] = args.query
         if args.action == 'show' and args.version is not None:
             params['version'] = args.version
     elif args.action == 'edit':
+        method = 'cell.edit'
         raw = sys.stdin.buffer.read(12001)
         if len(raw) > 12000:
             parser.error('Cell edit exceeds 12000 UTF-8 bytes')
         params = {'source': raw.decode()}
     else:
+        method = 'cell.' + args.action
         params = {}
-    key = send(args.group + '.' + args.action, params)
+    key = send(method, params)
     delay = .2
     while True:
         reply = send('result', key)
