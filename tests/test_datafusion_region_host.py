@@ -37,7 +37,9 @@ def test_region_child_uses_one_grant_and_preserves_typed_nulls_and_duplicates(mo
     monkeypatch.setattr(host.DataFusionSession, '_admit', no_admission)
     assert query() == [(9, 102, 56), (9, 105, 56), (7, 102, 56), (7, 105, 56), (11, 101, None)]
     assert len(launched) == 1 and launched[0].returncode == 0
-    assert query(maximum=4) is None
+    with pytest.raises(DataflowError, match='more offset pairs than admitted') as error:
+        query(maximum=4)
+    assert error.value.code == 'BUDGET_EXCEEDED'
     assert query(tables={**TABLES, 'akeys': []}) == []
 
 

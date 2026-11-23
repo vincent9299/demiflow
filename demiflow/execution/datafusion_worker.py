@@ -54,7 +54,7 @@ def _region_offsets(request):
         for wrapped in frame.execute_stream():
             batch = wrapped.to_pyarrow()
             if len(rows) + batch.num_rows > maximum:
-                status, value = 'overflow', None
+                status, value = 'budget', 'native relation produced more offset pairs than admitted'
                 break
             if (len(rows) + batch.num_rows) * (128 + 48 * len(schema)) > limit:
                 status, value = 'budget', 'native relation output tuples exceed their memory window'
