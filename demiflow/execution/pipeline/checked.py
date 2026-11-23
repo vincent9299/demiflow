@@ -664,7 +664,7 @@ def action(kind, source, plan, spec=None, *, arguments=None):
     if not capability['supported']:
         from demiflow.execution.recovery_contract import RecoveryContractError
         raise RecoveryContractError(capability['reason'])
-    from demiflow.execution.plan_capture import current_capture
+    from demiflow.execution.executors.plan_capture import current_capture
     capture = current_capture()
     if capture is not None:
         # Validate/build ordinary Dataset requests without allocating an implicit

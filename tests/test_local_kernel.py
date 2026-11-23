@@ -145,7 +145,7 @@ def test_lance_fixed_version_narrow_columns_and_normal_writer(tmp_path):
 
 def test_hash_prefilter_cannot_replace_exact_keys_or_move_across_udf(tmp_path,monkeypatch):
     from types import SimpleNamespace
-    from demiflow.execution.kernels import join_spool as kernel
+    from demiflow.operators import join_spool as kernel
     # The retired bloom hook is gone. Collide every real spool hash prefix,
     # forcing the current key-only index to prove equality after the UDF.
     hashed = []

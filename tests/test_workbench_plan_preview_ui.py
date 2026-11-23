@@ -12,7 +12,8 @@ import pytest
 from playwright.sync_api import expect
 
 from demiflow import data
-from demiflow.execution.plan_capture import capture_pipeline, build_logical_plan_view
+from demiflow.execution.pipeline.managed_native import capture_pipeline
+from demiflow.execution.journal.program_materials import build_logical_plan_view
 from demiflow.workbench.projects import registry
 from demiflow.workbench.projects import workspace as ws
 from demiflow.forge.platform import content_digest

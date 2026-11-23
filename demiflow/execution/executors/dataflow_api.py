@@ -108,7 +108,7 @@ def make_action_request(executor: "DatasetExecutor", source: SourcePlan, plan: L
     declaration = declare_action_v3(source, plan, kind=kind, arguments=args,
                                     sink_declaration=None)
     action = current_action()
-    from demiflow.execution.plan_capture import current_capture
+    from demiflow.execution.executors.plan_capture import current_capture
     capture = current_capture()
     if capture is not None:
         action = RunAction(capture.context, capture.action_id, declaration)
@@ -134,7 +134,7 @@ def make_action_request(executor: "DatasetExecutor", source: SourcePlan, plan: L
 # -- E016 run_dataset_action ----------------------------------------------
 def run_dataset_action(request: ActionRequest) -> object:
     from demiflow.execution.action_driver.services import resolve_action_runtime
-    from demiflow.execution.plan_capture import current_capture
+    from demiflow.execution.executors.plan_capture import current_capture
     capture = current_capture()
     if capture is not None:
         # Sink lifecycle hooks are execution, even before driver services exist.

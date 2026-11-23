@@ -738,7 +738,7 @@ def compile_case(name, context, raw=None):
 
 def capture(name, context):
     """The real terminal method, stopped at the production planning boundary."""
-    from demiflow.execution.plan_capture import capture_pipeline
+    from demiflow.execution.pipeline.managed_native import capture_pipeline
     return capture_pipeline(lambda: CAPTURED[name](context), {})
 
 

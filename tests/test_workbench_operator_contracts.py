@@ -5,7 +5,7 @@ import hashlib
 import sys
 from pathlib import Path
 
-from demiflow.execution.plan_capture import capture_pipeline
+from demiflow.execution.pipeline.managed_native import capture_pipeline
 from demiflow.workbench.graph.plan_callsite import PlanCallsites
 from demiflow.workbench.graph.plan_details import build_plan_details
 

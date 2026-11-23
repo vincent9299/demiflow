@@ -24,7 +24,7 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
             raise TypeError('stream hooks must be callable')
     from demiflow.execution.action_driver.services import resolve_action_runtime
     policy, bounds = resolve_action_runtime(request)
-    from demiflow.execution.plan_capture import current_capture
+    from demiflow.execution.executors.plan_capture import current_capture
     capture = current_capture()
     if capture is not None:
         # Do not enter callback ownership: its finally block invokes on_drain.

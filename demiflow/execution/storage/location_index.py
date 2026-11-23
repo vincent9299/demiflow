@@ -239,7 +239,7 @@ class IndexedLocations:
             finally: temporary.unlink(missing_ok=True)
 
     def get(self,key):
-        from demiflow.execution.plan_capture import current_capture
+        from demiflow.execution.executors.plan_capture import current_capture
         if current_capture() is not None:
             return self.get_readonly(key)
         if type(key) is not str or len(key)>MAX_TOKEN: raise ValueError('Location lookup key exceeds token budget')

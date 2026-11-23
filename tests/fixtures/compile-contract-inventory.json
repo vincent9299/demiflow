@@ -441,7 +441,7 @@
     "execution/kernels/recovery_rows.py"
    ],
    "prompt_name": [
-    "execution/plan_capture.py"
+    "execution/journal/program_materials.py"
    ],
    "publication_workspace": [
     "planning/dataflow_budget.py"

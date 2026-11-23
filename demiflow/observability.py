@@ -306,7 +306,7 @@ def observe_batches(action: str, batches: Iterable[Any], source: Any, plan: Any,
 @contextmanager
 def observe_action(action: str, source: Any, plan: Any, executor: Any, **fields: Any):
     observer = ActionObserver(action, source, plan, executor, **fields)
-    from .execution.plan_capture import current_capture
+    from demiflow.execution.executors.plan_capture import current_capture
     if current_capture() is not None:
         # A compile preview must not emit action-start facts or spawn a heartbeat.
         yield observer

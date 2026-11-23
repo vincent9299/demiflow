@@ -296,7 +296,7 @@ def test_lance_indeterminate_registers_receipt_before_original_error(boundary, m
 
 
 def test_lance_capture_skips_callback_and_propagates_baseexception(boundary, monkeypatch):
-    from demiflow.execution import plan_capture
+    from demiflow.execution.executors import plan_capture
     state = boundary
     callbacks = []
     monkeypatch.setattr(plan_capture, 'current_capture', lambda: object())

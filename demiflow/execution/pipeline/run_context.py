@@ -238,7 +238,7 @@ class RunContext:
 
     def __init__(self, directory, *, entry_identity=None, limits=None, resume=False,
                  journal=None, check_stop=None, training=None, explicit_limits=None):
-        from demiflow.execution.plan_capture import current_capture
+        from demiflow.execution.executors.plan_capture import current_capture
         if current_capture() is not None:
             from demiflow.execution.contracts.dataflow_errors import DataflowError
             raise DataflowError('UNSUPPORTED_CAPABILITY',
@@ -640,7 +640,7 @@ class RunAction:
 @contextmanager
 def execution_scope():
     """All ordinary actions acquire the same context; a launcher may bind it."""
-    from demiflow.execution.plan_capture import current_capture
+    from demiflow.execution.executors.plan_capture import current_capture
     capture = current_capture()
     if capture is not None:
         yield capture.context

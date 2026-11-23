@@ -13,7 +13,7 @@ from demiflow.data.plan import LogicalPlan
 from demiflow.data.declaration_inspection import dataset_declaration_links
 from demiflow.execution.contracts.dataflow_codec import encode_wire
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.plan_capture import capture_pipeline
+from demiflow.execution.pipeline.managed_native import capture_pipeline
 from demiflow.execution.journal.program_materials import compiled_node_materials
 from demiflow.workbench.graph.plan_details import build_plan_details
 from test_plan_capture import no_execution

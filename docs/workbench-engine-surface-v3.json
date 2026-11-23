@@ -110,7 +110,7 @@
         "admit_prepared_stage"
       ],
       "build_logical_plan_view": [
-        "demiflow.execution.plan_capture",
+        "demiflow.execution.journal.program_materials",
         "build_logical_plan_view"
       ],
       "capture_managed_pipeline": [
@@ -118,7 +118,7 @@
         "capture_managed_pipeline"
       ],
       "capture_pipeline": [
-        "demiflow.execution.plan_capture",
+        "demiflow.execution.pipeline.managed_native",
         "capture_pipeline"
       ],
       "compile_declared_dag": [

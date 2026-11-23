@@ -5,7 +5,9 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.plan_capture import capture_pipeline, current_capture, build_logical_plan_view
+from demiflow.execution.pipeline.managed_native import capture_pipeline
+from demiflow.execution.executors.plan_capture import current_capture
+from demiflow.execution.journal.program_materials import build_logical_plan_view
 
 
 def forbidden(*args, **kwargs):
@@ -331,3 +333,38 @@ def test_capture_does_not_leak_into_ordinary_execution(tmp_path):
         assert data.range(3).take_all() == [{'id': 0}, {'id': 1}, {'id': 2}]
     assert captured.kind == 'take_all'
     assert current_capture() is None
+
+
+def test_close_keeps_capture_bound_and_does_not_swallow_a_second_boundary(no_execution):
+    from demiflow.execution.executors.plan_capture import _Captured
+    events = []
+    def closing():
+        try:
+            yield
+        finally:
+            events.append(current_capture() is not None)
+            raise _Captured()
+    def entry():
+        try:
+            data.range(1).take_all()
+        except _Captured:
+            events.append(current_capture().result is not None)
+        result = closing()
+        next(result)
+        return result
+    with pytest.raises(_Captured):
+        capture_pipeline(entry, {})
+    assert events == [True, True]
+    assert current_capture() is None
+
+
+def test_compile_callback_failure_resets_only_its_capture_scope(no_execution):
+    failure = ValueError('callback failed')
+    def callback(_):
+        assert current_capture() is not None
+        raise failure
+    with pytest.raises(ValueError) as caught:
+        capture_pipeline(lambda: data.range(1).take_all(), {}, on_compiled=callback)
+    assert caught.value is failure
+    assert current_capture() is None
+    assert capture_pipeline(lambda: data.range(1).count(), {}).kind == 'count'

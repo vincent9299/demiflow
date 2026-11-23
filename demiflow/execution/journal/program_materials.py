@@ -6,12 +6,14 @@ live only for this compilation; callers must not mutate or persist these views.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from dataclasses import dataclass
 from types import FunctionType
 from typing import Any, Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from demiflow.execution.contracts.dataflow import ProgramDeclaration
+    from demiflow.execution.contracts.dataflow import ProgramDeclaration, DataflowGraph
     from demiflow.operator_llm.model import PromptDefinition
 
 
@@ -340,3 +342,104 @@ def compiled_node_materials(compiled, *, bounds):
             'unavailable', 'model_manifest_value', None), config_material,
             _implementation_material(declaration, prompts), prompts)
     return result
+
+
+def build_logical_plan_view(graph: DataflowGraph, *, declarations: tuple[ProgramDeclaration, ...] = (),
+                            observation_labels: Mapping[str, str] | None = None) -> dict:
+    """Project a compiled graph without inventing placement or execution facts.
+
+    IDs and all edges come directly from the engine's immutable DataflowGraph.
+    This view is suitable for an explicitly unexecuted preview, not a historical
+    run binding. It performs no source inspection, compilation or external I/O.
+    """
+    from demiflow.execution.contracts.dataflow import DataflowGraph, ProgramDeclaration
+    if not isinstance(graph, DataflowGraph):
+        raise TypeError('build_logical_plan_view requires a DataflowGraph')
+    semantic = {node.occurrence_id: node.semantic_id for node in (*graph.nodes, *graph.jobs)}
+    labels = observation_labels if observation_labels is not None else {}
+    if (not isinstance(labels, Mapping) or not set(labels) <= set(semantic)
+            or any(type(v) is not str or not v for v in labels.values())):
+        raise ValueError('labels must name compiled graph occurrences')
+    if type(declarations) is not tuple or any(type(d) is not ProgramDeclaration for d in declarations):
+        raise TypeError('declarations must be the compiled ProgramDeclaration tuple')
+    programs = {}
+    for declaration in declarations:
+        if declaration.occurrence_id not in semantic:
+            raise ValueError('declaration occurrence is outside the compiled graph')
+        # Read only frozen JSON produced by the compiler. Never getattr a user
+        # callable, descriptor, class or actor merely to give a node its label.
+        target = declaration.code_identity.get('target')
+        if isinstance(target, Mapping):
+            target = target.get('actor', target)
+        if isinstance(target, Mapping):
+            module, name = target.get('module'), target.get('name')
+            if type(module) is str and type(name) is str:
+                programs[declaration.occurrence_id] = dict(module=module[:256], qualname=name[:256])
+
+    def presentation(node):
+        program = programs.get(node.occurrence_id)
+        prompt = node.kernel.configuration.get('prompt_name')
+        source = None
+        config = node.kernel.configuration
+        if node.kernel.kind == 'lance':
+            query = config.get('query', {})
+            fields = query.get('fields', {}) if isinstance(query, Mapping) else {}
+            uri = fields.get('uri') if isinstance(fields, Mapping) else None
+            if type(uri) is str:
+                from urllib.parse import urlsplit
+                # Only the frozen table basename, never credentials/query strings.
+                name = urlsplit(uri).path.rstrip('/').rsplit('/', 1)[-1][:160]
+                version = fields.get('version')
+                source = dict(name=name, version=version if type(version) is int else None)
+        label = labels.get(node.occurrence_id) or (prompt if type(prompt) is str else
+                 program['qualname'] if program is not None else
+                 '读取 ' + source['name'] if source and source['name'] else node.kernel.kind)
+        return dict(label=label[:256], program=program, data_source=source)
+
+    ports = {}
+    for edge in (*graph.edges, *graph.value_edges):
+        ports.setdefault(edge.producer, [])
+        if edge.output_port not in ports[edge.producer]:
+            ports[edge.producer].append(edge.output_port)
+    result = dict(
+        schema_version=graph.schema, dag_id=graph.dag_id, action_id=graph.action_id,
+        nodes=[dict(logical_node_id=node.semantic_id, occurrence_id=node.occurrence_id,
+                    op_kind=node.kernel.kind, input_ports=[p.name for p in node.kernel.inputs],
+                    output_ports=ports.get(node.occurrence_id, []),
+                    **presentation(node),
+                    traits=dict(state=node.kernel.state, effect=node.kernel.effect,
+                                resource_role=node.kernel.resource_role, mergeable=node.kernel.mergeable))
+               for node in graph.nodes],
+        edges=[dict(edge_id=edge.edge_id,
+                    **{'from':dict(logical_node_id=semantic[edge.producer],
+                                   occurrence_id=edge.producer, port=edge.output_port),
+                       'to':dict(logical_node_id=semantic[edge.consumer],
+                                 occurrence_id=edge.consumer, port=edge.input_port)})
+               for edge in graph.edges],
+        sources=list(graph.sources), terminals=list(graph.terminals))
+    if graph.jobs:
+        project_training_ports(graph, result)
+    return result
+
+def project_training_ports(graph, dag):
+    """Append sealed jobs and typed dependencies to a logical or historical view."""
+    from demiflow.execution.recovery_contract import identity
+    by_id = {n.occurrence_id: n.semantic_id for n in (*graph.nodes, *graph.jobs)}
+    inputs, outputs = {}, {}
+    for edge in graph.value_edges:
+        inputs.setdefault(edge.consumer, []).append(edge.input_port)
+        outputs.setdefault(edge.producer, set()).add(edge.output_port)
+        dag["edges"].append({
+            "edge_id": identity(["dataflow-value-edge-v4", edge.producer, edge.output_port, edge.consumer, edge.input_port]),
+            "kind": edge.kind, "step": edge.step,
+            "from": {"logical_node_id": by_id[edge.producer], "occurrence_id": edge.producer, "port": edge.output_port},
+            "to": {"logical_node_id": by_id[edge.consumer], "occurrence_id": edge.consumer, "port": edge.input_port}})
+    for job in graph.jobs:
+        dag["nodes"].append({"logical_node_id": job.semantic_id, "occurrence_id": job.occurrence_id, "op_kind": "fit",
+                             "label": "fit", "input_ports": [], "output_ports": []})
+    for node in dag["nodes"]:
+        key = node["occurrence_id"]
+        node["input_ports"].extend(inputs.get(key, ()))
+        for name in sorted(outputs.get(key, ())):
+            if name not in node["output_ports"]:
+                node["output_ports"].append(name)

@@ -4,6 +4,9 @@ The contract covers one compiled terminal and its entire upstream graph. It is
 neither a Python analyser nor a second executor. Extra actions are rejected;
 no receipt is fabricated to discover branches after an execution boundary.
 """
+
+import inspect
+from demiflow.execution.executors.plan_capture import CapturedAction
 from contextlib import contextmanager
 from dataclasses import replace
 import json
@@ -17,7 +20,6 @@ from demiflow.execution.contracts.pipeline import NATIVE_SUBMISSION_FORMAT as FO
 
 
 def capture_managed_pipeline(entry, arguments, *, limits, explicit_limits=None, inherited_native_resources=None, on_compiled=None):
-    from demiflow.execution.plan_capture import capture_pipeline
     from demiflow.execution.pipeline.local_kernel import local_execution
     def construct():
         with local_execution(worker_mode='thread', partitions=1, batch_rows=limits['batch_rows'],
@@ -174,3 +176,34 @@ class NativeExecution(CheckedExecution):
                 or declared.get('writer_mode') != writer.mode):
             raise DataflowError('INVALID_CONTRACT', 'Native stage differs from admitted output')
         return dict(mode='create', expected_version=None)
+
+
+def capture_pipeline(entry, arguments, *, on_compiled=None, limits=None, explicit_limits=None, _submission=False) -> "CapturedAction":
+    """Compile the exact first action request from a trusted callable and kwargs.
+
+    The same make_action_request/resolve_action_runtime/lower_action functions
+    are used by execution. No placeholder receipt, source snapshot, physical
+    placement, worker or completion fact is produced. The returned graph covers
+    one action, never a claim about the rest of an arbitrary Python program.
+    Optional host callback ``on_compiled(CompilationProvenance)`` runs once after
+    final graph validation, before unwinding the active SDK call. It receives
+    only bounded, process-local origin links; it never changes sealed identity.
+    Budget exhaustion is reported as unavailable provenance. Callback errors
+    propagate (capture context still resets); no success is fabricated.
+    """
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    if not callable(entry) or type(arguments) is not dict:
+        raise TypeError('capture_pipeline requires a callable and keyword arguments')
+    if on_compiled is not None and not callable(on_compiled):
+        raise TypeError('on_compiled must be a callable or None')
+    from demiflow.execution.executors.plan_capture import capture_scope, _Captured
+    with capture_scope(on_compiled, limits=limits, explicit_limits=explicit_limits, submission=_submission) as capture:
+        try:
+            returned = entry(**arguments)
+        except _Captured:
+            if capture.result is not None:
+                return capture.result
+            raise
+        if inspect.iscoroutine(returned) or inspect.isgenerator(returned):
+            returned.close()
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'entry did not reach a Dataset action, or swallowed the planning boundary')

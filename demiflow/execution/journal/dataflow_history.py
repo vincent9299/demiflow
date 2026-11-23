@@ -122,7 +122,7 @@ def build_plan_view(graph: DataflowGraph, sealed: SealedExecution, physical: Phy
            "nodes": nodes, "edges": edges, "shared_ancestors": shared,
            "sources": list(graph.sources), "terminals": list(graph.terminals)}
     if graph.jobs:
-        from demiflow.execution.plan_capture import project_training_ports
+        from demiflow.execution.journal.program_materials import project_training_ports
         project_training_ports(graph, dag)
     stage_by_occurrence = {job.occurrence_id: {"stage_id": job.stage_id, "kind": "fit"} for job in physical.jobs}
     for stage in physical.stages:
@@ -209,7 +209,7 @@ def _profile_json(profile):
 
 def native_submission_view(captured):
     """Product-neutral occurrence/edge/target projection of an admitted plan."""
-    from demiflow.execution.plan_capture import build_logical_plan_view
+    from demiflow.execution.journal.program_materials import build_logical_plan_view
     from demiflow.execution.contracts.dataflow import thaw_record_value
     contract = captured.submission
     if not contract or contract['format'] != FORMAT:

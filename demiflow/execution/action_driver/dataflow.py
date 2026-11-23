@@ -53,7 +53,7 @@ def _now_ms() -> int:
 
 
 def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bounds, after_prepare=None) -> ActionHandle:
-    from ..plan_capture import current_capture
+    from demiflow.execution.executors.plan_capture import current_capture
     capture = current_capture()
     if capture is not None:
         capture.intercept(request, policy=policy, bounds=bounds)

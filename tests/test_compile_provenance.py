@@ -10,7 +10,8 @@ from demiflow.data.dataset import Dataset
 from demiflow.execution.contracts.dataflow import ActionRequest
 from demiflow.execution.contracts.dataflow_codec import encode_wire
 from demiflow.execution.compiler_support.dataflow_compile_inputs import CompileInputs, ReportBindings
-from demiflow.execution.plan_capture import capture_pipeline, current_capture
+from demiflow.execution.pipeline.managed_native import capture_pipeline
+from demiflow.execution.executors.plan_capture import current_capture
 from demiflow.planning import dataflow_compile, dataflow_provenance
 from test_dataflow_compile_inputs import _request, BOUNDS
 from test_plan_capture import no_execution, forbidden

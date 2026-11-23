@@ -364,7 +364,7 @@ def _write_lance(executor: actions.ExecutionPort, request_spec: actions.WriteLan
         'write_lance', request_spec.source, request_spec.plan, executor,
         sink_type='LanceWrite', sink_target=spec.uri,
     ) as observer:
-        from demiflow.execution.plan_capture import current_capture
+        from demiflow.execution.executors.plan_capture import current_capture
         if binding is not None and current_capture() is None:
             _consume_lance_action_binding(binding, current_action(), spec)
         request = make_action_request(executor, checked.source, checked.plan,

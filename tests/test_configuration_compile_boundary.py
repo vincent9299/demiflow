@@ -250,7 +250,7 @@ def test_real_completed_live_revalidation_warns_without_reexecuting_callback(tmp
 
 @reports_on_purpose
 def test_public_capture_rejects_on_first_lowering(monkeypatch):
-    from demiflow.execution.plan_capture import capture_pipeline
+    from demiflow.execution.pipeline.managed_native import capture_pipeline
     purposes=[]
     original=schema.report_configuration_stage
     def observed(*args, **kwargs):
