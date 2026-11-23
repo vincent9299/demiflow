@@ -711,10 +711,13 @@ class LanceReader(_BaseReader):
         workspace = _window(self._services.bounds, self._services)
         if workspace <= 0:
             raise DataflowError('BUDGET_EXCEEDED', 'native scan requires an admitted byte window')
-        count = limit_value(self._services, 'batch_rows', query.batch_size or 256)
+        count = min(65536, workspace, self._services.bounds.max_output_rows,
+                    limit_value(self._services, 'batch_rows', query.batch_size or 256))
         query = replace(query, version=self._version, batch_size=count, batch_readahead=1, fragment_readahead=1)
         dataset = open_lance_dataset(query.uri, query.version, query.storage_options)
         by_id = {int(f.fragment_id): f for f in dataset.get_fragments()}
+        if self._next_sequence and self._fragment_id not in self._fragment_ids:
+            raise DataflowError('INCOMPATIBLE_HISTORY', 'native scan cursor names a fragment outside its split')
         first = self._fragment_ids.index(self._fragment_id) if self._next_sequence else 0
         for index, frag_id in enumerate(self._fragment_ids[first:]):
             offset = self._row_offset if index == 0 else 0
@@ -732,6 +735,8 @@ class LanceReader(_BaseReader):
         self._check_open()
         if self._eoi:
             return None
+        if max_rows <= 0 or max_bytes <= 0:
+            raise DataflowError('INVALID_CONTRACT', 'native scan needs positive row and byte credit')
         if not hasattr(self, '_batch_scan'):
             self._batch_scan = self._native_batches()
             self._batch_remainder = None

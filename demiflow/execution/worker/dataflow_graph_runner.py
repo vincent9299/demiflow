@@ -479,6 +479,28 @@ class WorkerGraphRunner:
     def _send(self, kind, payload=None, ref=None):
         self.e._mailbox.send(self.e._event(kind, payload=payload, payload_ref=ref))
 
+    def _send_cut(self, request):
+        from ..contracts.dataflow_codec import encode_wire
+        from ..recovery_contract import MAX_DOCUMENT_BYTES
+        raw = encode_wire(self.snapshot(request), type_name='CutContribution', bounds=self.bounds)
+        # A cut contribution contains bounded control metadata and references.
+        # Its durable owner is the coordinator. Leave ample room for escaping
+        # and the host envelope; the full event still goes through the wire codec.
+        limit = min(self.bounds.max_control_bytes, MAX_DOCUMENT_BYTES)
+        if len(raw) <= limit // 4:
+            event = self.e._event('cut', payload={'contribution': raw.decode('utf-8')})
+            try:
+                encoded = encode_wire(event, type_name='WorkerEvent', bounds=self.bounds)
+            except DataflowError as exc:
+                if exc.code != 'BUDGET_EXCEEDED':
+                    raise
+            else:
+                if len(encoded) <= limit:
+                    self.e._mailbox.send(event)
+                    return
+        ref = self.services.store.put(iter([raw]), max_bytes=len(raw), media_type='application/json')
+        self._send('cut', ref=ref)
+
     def _checkpoint_wait_notification(self):
         # Called under the same lock as pause/activity admission. This is live
         # control evidence only: no state, cursor or recovery promise is made.
@@ -924,11 +946,7 @@ class WorkerGraphRunner:
             self._send('idle', {'done': done, 'activity_generation': idle_generation,
                 'source_done': set(self.e._readers) <= self._finished_splits})
         if snapshot_request is not None and self._cut is snapshot_request:
-            from ..contracts.dataflow_codec import encode_wire
-            contribution = self.snapshot(snapshot_request)
-            raw = encode_wire(contribution, type_name='CutContribution', bounds=self.bounds)
-            ref = self.services.store.put(iter([raw]), max_bytes=len(raw), media_type='application/json')
-            self._send('cut', ref=ref)
+            self._send_cut(snapshot_request)
             self._cut = None
         return WorkerStep(processed=processed, blocked=not bool(processed), end_of_input=done, events=())
 

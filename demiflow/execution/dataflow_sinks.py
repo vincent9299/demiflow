@@ -153,11 +153,10 @@ class _DataflowArtifactSink(Datasink):
                                   media_type=PUBLICATION_MEDIA)
         for partition in blocks["partitions"]:
             data_ref = _artifact_from_json(partition["data_ref"])
-            from .dataflow_segments import tree_refs
-            for ref in tree_refs(self._store, data_ref, self._bounds):
+            from .dataflow_segments import segment_refs
+            for ref in segment_refs(self._store, data_ref, self._bounds):
                 # Authenticate the entire prefix before publication, including
-                # old leaves. The original GC traces this publication's typed
-                # children, so each cut needs only its publication owner pin.
+                # old leaves. The traversal reads and authenticates each index.
                 if not self._store.inspect(ref):
                     raise DataflowError('UNKNOWN_EFFECT', 'Cannot pin an absent artifact')
         self._store.retain(pub_ref, owner=context.commit_id)
@@ -477,6 +476,8 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
                     first = next(leaves, None)
                     if first and first[0].media_type == ARROW_STREAM_MEDIA:
                         rows = total = 0
+                        sealed_schema = manifest.get('schema_ref')
+                        expected = schemas.read(_artifact_from_json(sealed_schema)) if sealed_schema else None
                         for leaf, offset, count in itertools.chain((first,), leaves):
                             if (offset != rows or leaf.media_type != ARROW_STREAM_MEDIA
                                     or not 0 < leaf.size_bytes <= bounds.max_batch_bytes):
@@ -489,8 +490,6 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
                             with pa.ipc.open_stream(buffer, options=options) as scanner:
                                 value = scanner.read_next_batch()
                             value.validate(full=True)
-                            sealed_schema = manifest.get('schema_ref')
-                            expected = schemas.read(_artifact_from_json(sealed_schema)) if sealed_schema else None
                             if (value.num_rows != count or expected is None
                                     or not value.schema.equals(expected, check_metadata=True)):
                                 raise DataflowError('INVALID_CONTRACT', 'native segment differs from row count or schema')

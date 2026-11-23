@@ -366,6 +366,7 @@ class RunArtifactStore:
             # unlink. Release that physical ownership before refunding budget.
             staging.unlink()
             _sync_directory(self._staging)
+            staging = None  # Already removed durably before refunding its staging space.
             self._journal.artifact(ArtifactCommand(identity([operation_id, 'settle']),
                 'settle_staging', ref, operation_id, size))
             settled = True
