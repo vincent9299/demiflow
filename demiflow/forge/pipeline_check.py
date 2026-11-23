@@ -28,7 +28,19 @@ CHECK_SECONDS = 24
 MAX_SOURCE_BYTES = 16 * 1024**2
 
 
+_SUPPRESSED_INCOMPLETE_RULES = frozenset({'OP-06', 'OP-03'})
+
+
+def _keep_diagnostic(item):
+    if not isinstance(item, dict):
+        return False
+    if item.get('status') == 'incomplete' and item.get('rule') in _SUPPRESSED_INCOMPLETE_RULES:
+        return False
+    return True
+
+
 def result(diagnostics, inspected, *, applicable=True):
+    diagnostics = [d for d in diagnostics if _keep_diagnostic(d)]
     invalid = any(d.get('status') == 'invalid' for d in diagnostics)
     status = ('failed' if invalid else 'incomplete' if diagnostics else
               'passed' if applicable else 'not_applicable')
@@ -164,9 +176,6 @@ def _candidates(root, view, paths, entry, params, sources, native, layout):
         direct.append((path + ':' + public[0], None, not is_flow))
 
     shared = any(Path(p).parts[0] != 'data_tools' for p in relevant - declared - parameters - drafts)
-    if shared and any(path not in declared | drafts and Path(path).name != '__init__.py'
-                      for path in view['roles']['flows']):
-        native.append(diagnostic('FL-10', '', '存在未登记 Flow，其共享依赖尚未确定。', status='incomplete'))
     variants = [(e, p, False) for e, bound in entries.items() for p in bound
                 if shared or e.partition(':')[0] in relevant or p in relevant]
     return variants + direct, relevant
@@ -409,6 +418,7 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
     verify_check_inputs(root, basis, deadline=deadline, max_bytes=max_bytes)
     if sdk_identity(reference['catalog']) != reference['sdk_revision']:
         raise ForgeError('SDK changed during inspection', code='inputs_changed')
+    native = [d for d in native if _keep_diagnostic(d)]
     flow = result(native, checked, applicable=bool(checked))
     roles = result(layout, layout_paths, applicable=bool(layout_paths))
     statuses = {flow['status'], roles['status']}

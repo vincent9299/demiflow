@@ -264,10 +264,17 @@
           if(result.reason)system(event,'Run details',result.reason);
           for(const [key,label] of [['native_flow','原生数据流检查'],['project_layout','项目目录检查']]){
             const check=result.pipeline_checks?.[key];if(!check)continue;
-            const status={passed:'通过',failed:'发现问题',incomplete:'待核对',not_applicable:'不适用'}[check.status]||'待核对';
-            const details=(check.diagnostics||[]).map(d=>[d.rule,d.path+(d.line?':'+d.line:''),d.detail].filter(Boolean).join(' · '));
+            const diags=check.diagnostics||[];
+            const onlyFl10=key==='native_flow'&&check.status==='incomplete'&&(check.inspected_count||0)>0&&diags.length>0&&diags.every(d=>d.rule==='FL-10');
+            const status=onlyFl10?'变更流通过（有未登记提示）':({passed:'通过',failed:'发现问题',incomplete:'待核对',not_applicable:'不适用'}[check.status]||'待核对');
+            const details=diags.map(d=>[d.rule,d.path+(d.line?':'+d.line:''),d.detail].filter(Boolean).join(' · '));
             const omitted=check.diagnostic_count-details.length;if(omitted>0)details.push('另有 '+omitted+' 项诊断');
-            system(event,label,[status,...details].join('\n'),null,'pipeline:'+key);
+            const item=system(event,label,[status,...details].join('\n'),null,'pipeline:'+key);
+            if((check.status==='failed'||(check.status==='incomplete'&&!onlyFl10))&&item.inProcess){
+              item.turn.answers.append(item.node);
+              item.inProcess=false;item.turn.processCount--;paintTurn(item.turn);
+              if(check.status==='failed')showDefault(item.row,true);
+            }
           }
         }catch{}
       }else if(['review.requested','review.started','review.detail','review.completed'].includes(event.type))review(event);

@@ -11,7 +11,7 @@ for (const method of ['log', 'info', 'debug', 'warn']) {
 // to match mode bits; ignore ONLY ENOSYS so writes in Landlock-writable dirs succeed
 // without relaxing kernel seccomp.
 const fs = require('fs');
-for (const syncName of ['chmodSync', 'fchmodSync']) {
+for (const syncName of ['chmodSync', 'fchmodSync', 'lchmodSync']) {
   const orig = fs[syncName];
   if (typeof orig === 'function') {
     fs[syncName] = function (...args) {
@@ -20,7 +20,7 @@ for (const syncName of ['chmodSync', 'fchmodSync']) {
     };
   }
 }
-for (const cbName of ['chmod', 'fchmod']) {
+for (const cbName of ['chmod', 'fchmod', 'lchmod']) {
   const orig = fs[cbName];
   if (typeof orig === 'function') {
     fs[cbName] = function (...args) {
@@ -35,10 +35,33 @@ for (const cbName of ['chmod', 'fchmod']) {
     };
   }
 }
-if (fs.promises && typeof fs.promises.chmod === 'function') {
-  const origPromiseChmod = fs.promises.chmod.bind(fs.promises);
-  fs.promises.chmod = async function (...args) {
-    try { return await origPromiseChmod(...args); }
-    catch (err) { if (err && err.code === 'ENOSYS') return undefined; throw err; }
-  };
+if (fs.promises) {
+  for (const pName of ['chmod', 'lchmod']) {
+    const orig = fs.promises[pName];
+    if (typeof orig === 'function') {
+      fs.promises[pName] = async function (...args) {
+        try { return await orig.apply(this, args); }
+        catch (err) { if (err && err.code === 'ENOSYS') return undefined; throw err; }
+      };
+    }
+  }
+  if (typeof fs.promises.open === 'function') {
+    const origOpen = fs.promises.open.bind(fs.promises);
+    let patchedFh = false;
+    fs.promises.open = async function (...args) {
+      const fh = await origOpen(...args);
+      if (!patchedFh && fh) {
+        const proto = Object.getPrototypeOf(fh);
+        if (proto && typeof proto.chmod === 'function') {
+          const origFhChmod = proto.chmod;
+          proto.chmod = async function (...cargs) {
+            try { return await origFhChmod.apply(this, cargs); }
+            catch (err) { if (err && err.code === 'ENOSYS') return undefined; throw err; }
+          };
+          patchedFh = true;
+        }
+      }
+      return fh;
+    };
+  }
 }
