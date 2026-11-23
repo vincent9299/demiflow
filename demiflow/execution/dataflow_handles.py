@@ -218,7 +218,7 @@ class RuntimeActionHandle:
                 > self._bounds.max_resident_bytes):
             raise _error('BUDGET_EXCEEDED', 'collected bytes exceed the driver resident budget')
 
-    def _read_records(self):
+    def _read_records(self, *, values=False):
         maximum = _PULL_CREDIT_RECORDS
         kind = getattr(self.request, 'kind', None)
         if kind in {'take', 'take_batch'}:
@@ -242,12 +242,13 @@ class RuntimeActionHandle:
         try:
             if read is not None:
                 bounded = kind in {'take', 'take_all', 'take_batch'} or self._read_admission is not None
+                options = {'batch_values': True} if values and self.request.kind == 'iter_rows' else {}
                 records = read(max_records=maximum, deadline_ms=0, admit=admit if bounded else None,
-                               admit_workspace=workspace if bounded else None)
+                               admit_workspace=workspace if bounded else None, **options)
             else:
                 records = self._subscription.read(max_records=maximum, deadline_ms=0)
             self._conversion_read_start = self._yielded_rows
-            self._conversion_read_sizes = tuple(record.encoded_bytes for record in records)
+            self._conversion_read_sizes = () if values else tuple(record.encoded_bytes for record in records)
             return records
         except BaseException as exc:
             # An admission/decode error is as authoritative as a worker failure;
@@ -257,14 +258,37 @@ class RuntimeActionHandle:
 
     # -- ActionHandle surface ----------------------------------------------
     def rows(self) -> Iterator["Record"]:
+        return self._start_rows(values=False)
+
+    def values(self):
+        """Incremental public row values; keep the same ACK, result and early-close lifecycle."""
+        return self._start_rows(values=True)
+
+    def _start_rows(self, *, values):
         self._check_open()
         with self._lock:
             if self._rows_started:
                 raise _error("INVALID_CONTRACT", "terminal output is already being consumed")
             self._rows_started = True
-        return self._iter_records()
+        return self._iter_records(values=values)
 
-    def _iter_records(self) -> Iterator["Record"]:
+    def _deliver(self, records, values):
+        from .outputs.arrow_rows import PublishedArrowRows
+        from .dataflow_terminals import _record_row
+        while records:
+            record = records.popleft()
+            if isinstance(record, PublishedArrowRows):
+                for row in record.values():
+                    self._yielded_rows += 1
+                    yield row
+                self._yielded_bytes += record.batch.nbytes
+            else:
+                self._yielded_rows += 1
+                self._yielded_bytes += record.encoded_bytes
+                yield _record_row(record, self) if values else record
+            del record
+
+    def _iter_records(self, *, values=False):
         deadline = self._deadline()
         completed = False
         try:
@@ -275,11 +299,8 @@ class RuntimeActionHandle:
                     self._raise_deadline()
                 status = self._pump(min(_CONTROL_POLL_MS, remaining_ms))
                 from collections import deque
-                records = deque(self._read_records())
-                while records:
-                    self._yielded_rows += 1
-                    self._yielded_bytes += records[0].encoded_bytes
-                    yield records.popleft()
+                records = deque(self._read_records(values=values))
+                yield from self._deliver(records, values)
                 del records
                 if status.state == "failed":
                     failure = self._terminal_failure()
@@ -287,14 +308,11 @@ class RuntimeActionHandle:
                     raise failure
                 if status.state in ("succeeded", "cancelled"):
                     while True:
-                        tail = deque(self._read_records())
+                        tail = deque(self._read_records(values=values))
                         if not tail:
                             del tail
                             break
-                        while tail:
-                            self._yielded_rows += 1
-                            self._yielded_bytes += tail[0].encoded_bytes
-                            yield tail.popleft()
+                        yield from self._deliver(tail, values)
                         del tail
                     if status.state == "cancelled":
                         failure = _error("CANCELLED", "action cancelled while reading output")

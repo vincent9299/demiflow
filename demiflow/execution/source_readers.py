@@ -701,6 +701,10 @@ class LanceReader(_BaseReader):
         if prefix is not None:
             self._rows = itertools.chain(prefix, self._rows)
 
+    def pinned_keys(self, field, *, positions):
+        from .lance_key_source import PinnedKeyScan
+        return PinnedKeyScan.open(self, field, positions=positions)
+
     def supports_native_batches(self):
         """Only an exact pinned table with ordinary Arrow values may skip the row codec."""
         import pyarrow as pa

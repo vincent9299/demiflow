@@ -246,6 +246,7 @@ class TerminalBlocks:
         self.blocks[key][1].append(ref, rows=rows)
         self.rows += rows
         self.bytes += size
+        return ref
 
     def append(self, record, raw):
         self.append_parts(record, iter((raw,)), size=len(raw))

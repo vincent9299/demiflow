@@ -29,6 +29,8 @@ from ..dataflow_record_frames import (encode_document, decode_document, document
 
 
 class WorkerGraphRunner:
+    _fixed_key_exclusion = None
+
     def __init__(self, executor):
         self.e = executor
         self.services = executor._services
@@ -162,6 +164,8 @@ class WorkerGraphRunner:
             reader = next(iter(executor._readers.values()))
             if reader.supports_native_batches():
                 self._batch_source = reader
+        from .key_exclusion import FixedKeyExclusion
+        self._fixed_key_exclusion = FixedKeyExclusion.open(self)
         args = self._terminal_spec.configuration.get('arguments', {}) if self._terminal_spec else {}
         self._limit = (args.get('limit') if self._terminal_spec and self._terminal_spec.kind == 'take'
                        else args.get('batch_size', 20) if self._terminal_spec and self._terminal_spec.kind == 'take_batch'
@@ -378,6 +382,8 @@ class WorkerGraphRunner:
                 max_bytes=self.bounds.max_state_bytes)))
             if frontier.get('schema') != 'demiflow.worker-frontier.v3':
                 raise DataflowError('INCOMPATIBLE_HISTORY', 'unknown worker completion frontier')
+            if bool(frontier.get('fixed_key_batches')) != (self._fixed_key_exclusion is not None):
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'fixed key input strategy differs from the saved cut')
             self._finished = set(frontier['nodes'])
             self._finished_splits = set(frontier['splits'])
             self._finished_inputs = {tuple(x) for x in frontier['inputs']}
@@ -793,6 +799,65 @@ class WorkerGraphRunner:
             self._paused = True
             self._flush_metrics()
 
+    def _accept_arrow_result(self, terminal_occurrence, batch, *, positions):
+        """Seal each ordered output batch once and advertise that same leaf under ACK credit."""
+        import pyarrow as pa
+        from ..dataflow_native_limits import sealed_execution_ceilings
+        from ..dataflow_record_frames import admit_workspace
+        from ..outputs.arrow_rows import pack_result, validate_row_sizes
+        from ..record_schema import RecordSchemas
+        operator = next(node for node in self.e._node_specs.values() if node.kernel.kind == 'exclude_keys')
+        source_id = operator.kernel.configuration['lance_key_source']
+        split, = [s for s in self.e._physical.splits if s.source_id == source_id]
+        snapshot = next(s for s in self.e._physical.sources if s.source_id == source_id)
+        caps = sealed_execution_ceilings(self.e._graph)
+        row_budget = min(self.bounds.max_row_bytes, operator.kernel.output_bound_bytes or self.bounds.max_row_bytes)
+        validate_row_sizes(batch, row_budget)
+        if not batch.num_rows:
+            return
+        if self._terminal_schema_ref is None:
+            self._terminal_schema_ref = RecordSchemas(self.services).put(batch.schema)
+            self._set_terminal_columns(batch.schema, schema=True)
+        size_limit = min(self.bounds.max_batch_bytes, caps.get('inflight_bytes', self.bounds.max_batch_bytes))
+        start = 0
+        while start < batch.num_rows:
+            count = min(batch.num_rows - start, caps.get('inflight_rows', batch.num_rows))
+            while True:
+                packed = pack_result(batch.slice(start, count), positions.slice(start, count), source_id=source_id,
+                    split_id=split.split_id, version=snapshot.immutable_identity['version'],
+                    occurrence=operator.occurrence_id, sequence=self._terminal_rows, bounds=self.bounds)
+                size = pa.ipc.get_record_batch_size(packed) + len(packed.schema.serialize()) + 8
+                if size <= size_limit:
+                    break
+                if count == 1:
+                    raise DataflowError('BUDGET_EXCEEDED', 'terminal Arrow row exceeds admitted transfer bytes')
+                count //= 2
+            # Only one leased IPC leaf may await acknowledgement. Cursor movement
+            # and cuts outside this call observe the complete processed source prefix.
+            deadline = time.monotonic() + self.bounds.timeout_ms / 1000
+            with self._condition:
+                while self._credits:
+                    if self.e._cancel_event.is_set():
+                        raise DataflowError('CANCELLED', 'business execution cancelled')
+                    if time.monotonic() >= deadline:
+                        raise DataflowError('DEADLINE_EXCEEDED', 'terminal Arrow delivery credit deadline')
+                    self._condition.wait(.01)
+            self.services.check_stop()
+            self._frame_call(admit_workspace, packed.get_total_buffer_size() + 2 * size + 65536, self.bounds)
+            first = self._terminal_rows
+            ref = self._terminal_blocks.append_arrow_batch(packed)
+            self._terminal_rows, self._terminal_bytes = self._terminal_blocks.rows, self._terminal_blocks.bytes
+            delivery = self.e._next_operation_id('terminal')
+            with self._condition:
+                self._credits[delivery] = (None, None)
+            self._send('terminal', {'delivery_id': delivery, 'producer_partition': self.partition,
+                'result_batch': _artifact_json(ref), 'rows': count, 'sequence': first,
+                'schema_ref': _artifact_json(self._terminal_schema_ref)})
+            self._metrics[terminal_occurrence]['rows_input'] += count
+            self._metrics[terminal_occurrence]['rows_output'] += count
+            self._dirty_metrics.add(terminal_occurrence)
+            start += count
+
     def step(self, *, max_records, deadline_ms):
         if max_records <= 0 or deadline_ms <= 0:
             raise DataflowError('INVALID_CONTRACT', 'step budgets must be positive')
@@ -832,6 +897,10 @@ class WorkerGraphRunner:
                 self._edge_eoi(command['edge_id'], command['producer_partition'])
             elif command['kind'] == 'close_output':
                 self._close_output(command['edge_id'])
+            elif command['kind'] == 'satisfy' and self._fixed_key_exclusion is not None:
+                # The key scans may already be exhausted while selected output
+                # remains. Keep that unfinished node resumable from its published prefix.
+                self._paused = True
             elif command['kind'] == 'satisfy':
                 for occ, node in self.e._node_specs.items():
                     if node.kind == 'terminal':
@@ -854,7 +923,9 @@ class WorkerGraphRunner:
                 raise DataflowError('INVALID_CONTRACT', 'unknown business command')
             processed += 1
         if self._sealed_cut is None and not self._paused and not self._cut:
-            for split_id, reader in self.e._readers.items():
+            if self._fixed_key_exclusion is not None:
+                processed += self._fixed_key_exclusion.step(self)
+            for split_id, reader in (() if self._fixed_key_exclusion else self.e._readers.items()):
                 if split_id in self._finished_splits:
                     continue
                 self.services.check_stop()
@@ -902,7 +973,8 @@ class WorkerGraphRunner:
                     self._finish_node(occ)
         if (self._sealed_cut is None and not (self._paused and self._idle_sent)
                 and (command is None or command['kind'] not in ('cut', 'receipt'))):
-            processed += self._advance_input_completions(max_records=max_records, deadline_ms=deadline_ms)
+            if self._fixed_key_exclusion is None:
+                processed += self._advance_input_completions(max_records=max_records, deadline_ms=deadline_ms)
         if time.monotonic() - self._metrics_at >= .5:
             self._flush_metrics()
         done = set(self.e._node_specs).issubset(self._finished)
@@ -1586,6 +1658,7 @@ class WorkerGraphRunner:
                 states[identity(['finite-spool', spec.channel_id])] = self.services.store.put(
                     iter([raw]), max_bytes=len(raw), media_type='application/json')
         frontier = document({'schema': 'demiflow.worker-frontier.v3',
+            **({'fixed_key_batches': True} if self._fixed_key_exclusion is not None else {}),
             'nodes': sorted(self._finished), 'splits': sorted(self._finished_splits),
             'inputs': [list(x) for x in sorted(self._finished_inputs)],
             'finished_ports': sorted(self._finished_ports),
@@ -1645,6 +1718,8 @@ class WorkerGraphRunner:
         for iterator in self._active_finishes.values():
             iterator.close()
         self._active_finishes.clear()
+        if self._fixed_key_exclusion is not None:
+            self._fixed_key_exclusion.close()
         self._finite_input.close()
         self._peer.close()
         self._terminal_blocks.close()

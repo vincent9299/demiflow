@@ -55,6 +55,101 @@ def _hydration_rows(schema, services, requested):
                       resident_limit(bounds, services) // (2 * python_row)))
 
 
+class PinnedKeyScan:
+    """Project one fixed-width key from the original split, with its real row IDs on the left."""
+    @classmethod
+    def open(cls, reader, field, *, positions):
+        import pyarrow as pa
+        from ..lance.model import LanceScanSpec
+        from ..lance.storage import open_lance_dataset
+        from .dataflow_native_limits import limit_value
+        q = reader._plan.query
+        if (type(q) is not LanceScanSpec or reader._global or q.filter or q.limit or q.projection
+                or reader._replay_pending or reader._offset.get('arrow_batch')
+                or q.columns and field not in q.columns):
+            return None
+        ds = open_lance_dataset(q.uri, reader._version, q.storage_options)
+        if field not in ds.schema.names or not pa.types.is_integer(ds.schema.field(field).type):
+            return None
+        fragments = {int(f.fragment_id): f for f in ds.get_fragments()}
+        if any(f not in fragments for f in reader._fragment_ids):
+            raise DataflowError('SOURCE_CHANGED', 'a pinned key scan lost an assigned fragment')
+        bounds = reader._services.bounds
+        width = (ds.schema.field(field).type.bit_width // 8 + 1) + 8 * positions
+        if width > bounds.max_row_bytes:
+            return None
+        rows = min(q.batch_size or 1024, bounds.max_batch_bytes // width)
+        rows = limit_value(reader._services, 'batch_rows', rows)
+        if rows < 1:
+            return None
+        return cls(reader, ds, [fragments[f] for f in reader._fragment_ids], field, positions, rows)
+
+    def __init__(self, reader, dataset, fragments, field, positions, rows):
+        self.reader, self.dataset, self.fragments = reader, dataset, fragments
+        self.field, self.positions, self.batch_rows = field, positions, rows
+        self.dtype = dataset.schema.field(field).type
+        self.counts = [f.count_rows() for f in fragments]
+        self.count = sum(self.counts)
+        self.chunk_bound = sum((n+rows-1)//rows for n in self.counts)
+        self._scan = self._batches()
+        self._pending = None
+        self._replay = reader._next_sequence
+
+    def _batches(self):
+        for fragment in self.fragments:
+            offset = 0
+            scan = self.dataset.scanner(columns=[self.field], fragments=[fragment], scan_in_order=True,
+                with_row_id=self.positions, batch_size=self.batch_rows, batch_readahead=1, fragment_readahead=1)
+            for batch in scan.to_batches():
+                if not batch.num_rows:
+                    continue
+                if batch.nbytes > self.reader._services.bounds.max_batch_bytes:
+                    raise DataflowError('BUDGET_EXCEEDED', 'decoded key projection exceeds its batch window')
+                yield int(fragment.fragment_id), offset, batch
+                offset += batch.num_rows
+
+    def close(self):
+        self._scan.close()
+        self._pending = None
+
+    def advance(self, max_rows, max_bytes):
+        """Return a new native buffer once; only admitted rows advance the durable cursor."""
+        self.reader._services.check_stop()
+        new = None
+        if self._pending is None:
+            item = next(self._scan, None)
+            if item is None:
+                if self._replay or self.reader._next_sequence != self.count:
+                    raise DataflowError('SOURCE_CHANGED', 'pinned key count differs from the source cursor')
+                self.reader._eoi = True
+                return None
+            frag, start, batch = item
+            self._pending = (frag, start, batch, 0)
+            new = item
+        frag, start, batch, consumed = self._pending
+        if self._replay:
+            n = min(self._replay, batch.num_rows - consumed)
+            self._replay -= n
+            if not self._replay and (frag != self.reader._fragment_id or
+                                     start + consumed + n != self.reader._row_offset):
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'fixed key replay differs from the sealed cursor')
+            charged = size = 0
+        else:
+            n = min(batch.num_rows - consumed, max_rows)
+            while n and batch.slice(consumed, n).nbytes > max_bytes:
+                n //= 2
+            if not n:
+                raise DataflowError('BUDGET_EXCEEDED', 'a projected key row exceeds its credit')
+            charged, size = n, batch.slice(consumed, n).nbytes
+            self.reader._next_sequence += n
+            self.reader._fragment_id, self.reader._row_offset = frag, start + consumed + n
+            self.reader._offset = {'version': self.reader._version, 'fragment_id': frag,
+                                   'row_offset': self.reader._row_offset}
+        consumed += n
+        self._pending = (frag, start, batch, consumed) if consumed < batch.num_rows else None
+        return new, charged, size
+
+
 class PinnedKeyPayload:
     """Read surviving row IDs from the exact source version sealed for this partition."""
     def __init__(self, spec, services):
@@ -92,13 +187,23 @@ class PinnedKeyPayload:
             max(1, min(256, bounds.max_batch_bytes // bounds.max_row_bytes)))
         return limit_value(self.services, 'batch_rows', rows)
 
-    def read_rows(self, row_ids, *, bulk):
+    def supports_batch_output(self):
+        import pyarrow as pa
+        return all(pa.types.is_integer(f.type) or pa.types.is_boolean(f.type)
+                   or pa.types.is_string(f.type) or pa.types.is_binary(f.type)
+                   or pa.types.is_fixed_size_binary(f.type) for f in self.schema)
+
+    def read_table(self, row_ids):
         self.services.check_stop()
         table = self.dataset._take_rows(row_ids, columns=self.columns)
         if table.num_rows != len(row_ids):
             raise DataflowError('SOURCE_CHANGED', 'Pinned Lance row IDs did not resolve one-for-one')
         if table.nbytes > self.services.bounds.max_batch_bytes:
             raise DataflowError('BUDGET_EXCEEDED', 'Lance payload hydration exceeds batch budget')
+        return table
+
+    def read_rows(self, row_ids, *, bulk):
+        table = self.read_table(row_ids)
         for index in range(table.num_rows):
             row = table.slice(index, 1)
             if row.nbytes > self.services.bounds.max_row_bytes:

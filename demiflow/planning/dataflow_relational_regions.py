@@ -88,7 +88,7 @@ def fuse_relational_regions(graph, stages, *, policy, bounds, hosts, snapshots=(
                  for s in stages if s.stage_id in replacements or not any(o in used for o in s.occurrences))
 
 
-def place_key_exclusion(graph, snapshots, stages, *, policy, bounds, hosts):
+def place_key_exclusion(graph, snapshots, splits, stages, *, policy, bounds, hosts):
     """Admit the SQL process inside the stage that already owns a pinned left scan's anti join."""
     from ..execution.contracts.relational_region import KEY_SQL_SUFFIX, SQL_CHILD_RSS, SQL_PARENT_WINDOW
 
@@ -98,6 +98,28 @@ def place_key_exclusion(graph, snapshots, stages, *, policy, bounds, hosts):
                  and n.kernel.configuration.get('lance_key_source') in fixed}
     if not exclusion or (policy.native_limits or {}).get('max_rss_bytes', SQL_CHILD_RSS) < SQL_CHILD_RSS:
         return stages
+    from ..execution.contracts.relational_region import KEY_BATCH_SQL_SUFFIX, fixed_key_inputs
+    shape = fixed_key_inputs(graph)
+    if (policy.fusion and shape and set(shape[:2]) <= fixed and len(splits) == 2
+            and {s.source_id for s in splits} == set(shape[:2])
+            and all(not s.locator.get('global_query') for s in splits)
+            and all(s.replica_target == 1 and len(s.partitions) == 1 and not s.profile.limits
+                    and not s.profile.requirements and not set(s.profile.requests) - {'cpu_millis', 'memory_bytes'}
+                    for s in stages)):
+        total = sum(s.resident_bytes for s in stages) + SQL_CHILD_RSS + SQL_PARENT_WINDOW
+        cpu = max(1000, *(s.profile.requests['cpu_millis'] for s in stages))
+        control = min(bounds.max_control_bytes, bounds.max_resident_bytes // 8)
+        if total + control <= bounds.max_resident_bytes and any(
+                h.logical_resources.get('memory_bytes', 0) >= total and
+                h.logical_resources.get('cpu_millis', h.logical_resources.get('cpu', 0)*1000) >= cpu
+                for h in hosts):
+            marker = stages[0].stage_id + KEY_BATCH_SQL_SUFFIX
+            return (replace(stages[0], stage_id=marker, partitions=(marker+'-p0',),
+                occurrences=tuple(n.occurrence_id for n in graph.nodes),
+                profile=ResourceProfile(requests={'cpu_millis': cpu, 'memory_bytes': total}),
+                replica_min=1, replica_target=1, replica_max=1, resident_bytes=total,
+                output_bytes=sum(s.output_bytes for s in stages), state_bytes=sum(s.state_bytes for s in stages),
+                kernel_refs=tuple(dict.fromkeys(k for s in stages for k in s.kernel_refs))),)
     result = []
     for stage in stages:
         if exclusion.isdisjoint(stage.occurrences):

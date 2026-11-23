@@ -516,6 +516,18 @@ class DataflowExecution:
             physical = compile_physical_dataflow(
                 graph, tuple(snapshots), tuple(splits), policy=self._policy, hosts=self._services.hosts,
                 bounds=self._bounds, constants_ref=constants_ref)
+            from ..contracts.relational_region import KEY_BATCH_SQL_SUFFIX
+            context = self._action.context
+            if (any(s.stage_id.endswith(KEY_BATCH_SQL_SUFFIX) for s in physical.stages)
+                    and 'checkpoint_rows' not in context.explicit_limits
+                    and self._policy.checkpoint_rows == context.limits['checkpoint_rows']
+                    and self._policy.checkpoint_rows < context.limits['checkpoint_unconfirmed_rows']):
+                # Co-located deterministic scans can use the already authorized
+                # source window. Explicit cuts and unconfirmed limits remain binding.
+                from dataclasses import replace
+                self._policy = replace(self._policy, checkpoint_rows=context.limits['checkpoint_unconfirmed_rows'])
+                physical = compile_physical_dataflow(graph, tuple(snapshots), tuple(splits), policy=self._policy,
+                    hosts=self._services.hosts, bounds=self._bounds, constants_ref=constants_ref)
             from ..checked import current
             from ..identity_bridge import build_identity_bridge
             from ..contracts.dataflow import thaw_record_value
@@ -663,7 +675,7 @@ class DataflowExecution:
         if self._closed or self._cancelled:
             raise DataflowError("CANCELLED", "execution is closed")
         self._check_stop()
-        self._terminal = TerminalSubscription(self._bounds, self._exchange, self._endpoints.values())
+        self._terminal = TerminalSubscription(self._bounds, self._exchange, self._endpoints.values(), store=self._store)
         budget = {"cpu_millis": max(1, int(sum(h.logical_resources.get('cpu_millis', 0)
                                              for h in self._services.hosts))),
                   "memory_bytes": self._bounds.max_resident_bytes,
@@ -1186,8 +1198,16 @@ class DataflowExecution:
                 if not any(n in self._graph.terminals for st in self._physical.stages
                            if st.stage_id == lease.stage_id for n in st.occurrences):
                     raise DataflowError("FENCED", "non-terminal allocation emitted a terminal record")
+                count = 1
+                if 'result_batch' in payload:
+                    from ..contracts.relational_region import KEY_BATCH_SQL_SUFFIX
+                    count = payload.get('rows')
+                    if (self._request.kind != 'iter_rows' or not lease.stage_id.endswith(KEY_BATCH_SQL_SUFFIX)
+                            or type(count) is not int or not 0 < count <= self._bounds.max_output_rows - self._terminal_seen
+                            or type(payload.get('sequence')) is not int or payload['sequence'] != self._terminal_seen):
+                        raise DataflowError('FENCED', 'terminal Arrow batch differs from its declared delivery range')
                 self._terminal.receive(payload, endpoint)
-                self._terminal_seen += 1
+                self._terminal_seen += count
                 if self._limit is not None and self._terminal_seen >= self._limit:
                     self.satisfy_terminal()
             else:

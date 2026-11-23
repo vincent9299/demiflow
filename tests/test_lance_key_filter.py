@@ -100,3 +100,39 @@ def _assert_resource_cleanup(run):
     with run.journal._connection() as db:
         assert db.execute('SELECT COUNT(*) FROM resource_allocations').fetchone()[0] > 0
         assert db.execute("SELECT COUNT(*) FROM resource_allocations WHERE cleanup!='CONFIRMED'").fetchone()[0] == 0
+
+
+def test_close_after_first_survivor_can_resume_full_ordered_result(tmp_path):
+    from test_runtime_v3_terminal_replay_admission import InterruptedAfterAction
+
+    n = 2049
+    source = lance.write_dataset(pa.table({'key': range(n)}), tmp_path / 'source',
+                                 max_rows_per_file=256, max_rows_per_group=256)
+    keys = lance.write_dataset(pa.table({'key': range(0, n, 3)}), tmp_path / 'keys')
+    expected = [i for i in range(n) if i % 3]
+
+    def output():
+        left = data.read_lance(source.uri, version=source.version, batch_size=128)
+        right = data.read_lance(keys.uri, version=keys.version)
+        return left.exclude_keys(right, on='key').iter_rows()
+
+    def local():
+        return data.local_execution(worker_mode='thread', workers=2, partitions=1,
+                                    memory_bytes=1 << 30, temp_directory=str(tmp_path))
+
+    with pytest.raises(InterruptedAfterAction):
+        with RunContext.start(tmp_path / 'run', limits={'memory_bytes': 1 << 30}) as run, local():
+            ref = run.ref
+            rows = output()
+            assert next(rows) == {'key': expected[0]}
+            rows.close()
+            prefix = run.journal.execution_commits('action-1')[-1]
+            assert prefix['status'] == 'acked'
+            manifest = prefix['prepared']['sinks']['iter_rows']['manifest']
+            assert not manifest['final'] and 0 < manifest['total_rows'] < len(expected)
+            raise InterruptedAfterAction()
+
+    with RunContext.resume(ref) as run, local():
+        assert [row['key'] for row in output()] == expected
+        commits = run.journal.execution_commits('action-1')
+        assert prefix in commits and commits[-1]['prepared']['sinks']['iter_rows']['manifest']['final']
