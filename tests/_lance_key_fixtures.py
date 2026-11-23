@@ -29,7 +29,7 @@ if 'DEMIFLOW_WORKER_CONTROL_FD' in os.environ:
             emit(LOG_PATH, 'key_scan', rows=count, version=reader._version,
                  columns=list(reader._plan.query.columns))
     def observed_append(spool, record, fields, **kwargs):
-        row = join_spool.materialize_row(record, spool.services)
+        row = join_spool.materialize_row(record, store=spool.services.store, bounds=spool.services.bounds, assignment=getattr(spool.services, 'assignment', None))
         assert set(row) == set(fields), 'wide payload entered the key relation'
         return append(spool, record, fields, **kwargs)
     def observed_build(records, *, spec, services):
@@ -37,7 +37,7 @@ if 'DEMIFLOW_WORKER_CONTROL_FD' in os.environ:
         def checked():
             nonlocal count
             for record in records:
-                row = join_spool.materialize_row(record, services)
+                row = join_spool.materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None))
                 assert set(row) == {'ordinal', 'row_id'}
                 count += 1
                 yield record

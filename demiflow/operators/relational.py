@@ -358,3 +358,28 @@ def reduce_ordered_groups(ordered, *, reducer, initial, fn_kwargs, validation,
         close=getattr(iterator,'close',None)
         if close is not None:
             close()
+
+
+def select_columns(row, columns):
+    """Original Python row projection; a missing column raises its KeyError."""
+    return {column: row[column] for column in columns}
+
+def drop_columns(row, columns):
+    """Original checked row projection, independent of record identity/schema."""
+    missing = [column for column in columns if column not in row]
+    if missing:
+        raise DataflowError("INVALID_CONTRACT", "drop column missing", context={"fields": missing})
+    return {key: value for key, value in row.items() if key not in columns}
+
+def rename_columns(row, names):
+    """Original mapping/positional rename; retain their distinct validation."""
+    if isinstance(names, Mapping):
+        targets = [names.get(key, key) for key in row]
+        if len(targets) != len(set(targets)):
+            raise DataflowError("INVALID_CONTRACT", "rename produces duplicate column names")
+        return {names.get(key, key): value for key, value in row.items()}
+    else:
+        targets = tuple(names)
+        if len(row) != len(targets):
+            raise DataflowError("INVALID_CONTRACT", "rename list length must match schema")
+        return dict(zip(targets, row.values()))

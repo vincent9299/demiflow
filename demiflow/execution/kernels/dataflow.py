@@ -336,29 +336,20 @@ def invoke_unary(
             yield out
     elif kind == "SelectColumnsOp":
         columns = tuple(_cfg(spec, "columns"))
-        projected = {column: row[column] for column in columns}
+        from demiflow.operators.relational import select_columns
+        projected = select_columns(row, columns)
         yield output_record(record.record_id, position, projected, sequence, services,
                              schema_ref=schemas.project(record.schema_ref, columns=columns))
     elif kind == "DropColumnsOp":
         columns = tuple(_cfg(spec, "columns"))
-        missing = [column for column in columns if column not in row]
-        if missing:
-            raise _err("INVALID_CONTRACT", "drop column missing", fields=missing)
-        kept = {key: value for key, value in row.items() if key not in columns}
+        from demiflow.operators.relational import drop_columns
+        kept = drop_columns(row, columns)
         yield output_record(record.record_id, position, kept, sequence, services,
                              schema_ref=schemas.project(record.schema_ref, columns=tuple(kept)))
     elif kind == "RenameColumnsOp":
         names = _cfg(spec, "names")
-        if isinstance(names, Mapping):
-            targets = [names.get(key, key) for key in row]
-            if len(targets) != len(set(targets)):
-                raise _err("INVALID_CONTRACT", "rename produces duplicate column names")
-            renamed = {names.get(key, key): value for key, value in row.items()}
-        else:
-            targets = tuple(names)
-            if len(row) != len(targets):
-                raise _err("INVALID_CONTRACT", "rename list length must match schema")
-            renamed = dict(zip(targets, row.values()))
+        from demiflow.operators.relational import rename_columns
+        renamed = rename_columns(row, names)
         yield output_record(record.record_id, position, renamed, sequence, services,
                              schema_ref=schemas.project(record.schema_ref, names=tuple(renamed)))
     elif kind == "AddColumnOp":
