@@ -4,6 +4,8 @@ Only accepted identities, unique keys and counters are retained. Replay delivers
 the original owners once per action, even when input completion order changes.
 Rejected rows retain their receipt downstream and never consume capacity.
 """
+
+from demiflow.data.runtime_contract import RuntimeContractError
 import asyncio
 import hashlib
 import json
@@ -235,3 +237,11 @@ class StreamAdmission:
         if self.lock is not None:
             self.lock.__exit__(None, None, None)
             self.lock = None
+
+
+def validate_deduplicate_policy(actor):
+    policy = {name: getattr(actor, name) for name in
+              ('key', 'quotas', 'max_entries', 'max_key_bytes', 'max_disk_bytes')}
+    policy['unique_on'] = list(actor.unique_on)
+    if canonical(policy) != actor.config:
+        raise RuntimeContractError('Deduplicate actor policy differs from its configuration')

@@ -18,7 +18,7 @@ from demiflow.data import plan as ops
 from demiflow.data.sources import KeyedSource, LanceSource, MaterializedSource, UnionSource
 from demiflow.data.execution_contract import PlanView
 from demiflow.data.runtime_contract import RuntimeContractError
-from demiflow.execution.plan_facts import operation_facts, source_facts
+from demiflow.execution.seal.plan_facts import operation_facts, source_facts
 from demiflow.planning.traits import check_composition
 
 _CURRENT = ContextVar('demiflow_checked_execution', default=None)

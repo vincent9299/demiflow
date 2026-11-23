@@ -34,7 +34,7 @@ DECLARATION = 'planning/dataflow_declaration.py'
 # constructor is recognised too: an entry that called it and kept the result would be listed as used.
 PREFLIGHT = ('validate_native_operation', 'make_native_operation')
 NATIVE_DECLARATION = 'execution/operator_bindings/dataflow_model_factory.py'
-PLAN_FACTS = 'execution/plan_facts.py'
+PLAN_FACTS = 'execution/seal/plan_facts.py'
 LEGACY_TRAITS = 'planning/traits.py'
 # Files on the call chain of capture_graph(): the compile stage proper.
 COMPILE_STAGE = (COMPILER, 'planning/dataflow_shared.py', 'planning/dataflow_graph_adapter.py',

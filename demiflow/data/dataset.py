@@ -934,7 +934,7 @@ class Dataset:
         operation = declared._plan.operations[-1]
         typed = DeduplicateOp(**{**vars(operation), 'label': 'deduplicate_'+output},
                               on=fields, key=key, output=output)
-        from ..execution.plan_facts import _deduplicate_arguments
+        from demiflow.execution.seal.plan_facts import _deduplicate_arguments
         from ..execution.recovery_contract import identity
         actor = operation.callable.target.__self__
         actor._deduplicate_declaration = identity(_deduplicate_arguments(actor))

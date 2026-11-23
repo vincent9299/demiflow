@@ -17,7 +17,7 @@ from demiflow.execution.pipeline.run_context import RunContext
 def test_prompt_long_enum_preserves_historical_native_bytes(size):
     from test_gpt_prompt_policy_sealing import TEXT
     from demiflow.operator_llm.parser import parse_prompt_pack
-    from demiflow.execution.plan_facts import operation_facts
+    from demiflow.execution.seal.plan_facts import operation_facts
     import json
     text = TEXT.replace('result: {type: string}',
                         'result: {type: string, enum: ' + json.dumps([str(i) for i in range(size)]) + '}')

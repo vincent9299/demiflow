@@ -13,7 +13,7 @@ import hashlib
 from pathlib import Path
 
 import demiflow
-from demiflow.execution.plan_facts import _catch_facts
+from demiflow.execution.seal.plan_facts import _catch_facts
 
 _BASELINE_SHA = "75a4013106efddc70407c8ced4b53766e9c6b6b83c0a30d6e55b013799303eaa"
 
@@ -23,7 +23,7 @@ def test_module_source_is_worktree():
 
 
 def test_function_body_matches_baseline_sha():
-    path = Path(demiflow.__file__).parent / "execution" / "plan_facts.py"
+    path = Path(demiflow.__file__).parent / "execution" / "seal" / "plan_facts.py"
     source = path.read_text()
     node = next(n for n in ast.walk(ast.parse(source))
                 if isinstance(n, ast.FunctionDef) and n.name == "_catch_facts")

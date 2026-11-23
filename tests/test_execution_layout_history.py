@@ -34,6 +34,9 @@ CARRIERS = {
     'lance_predicate': ['scalar_equal'],
     'stream_checkpoint': ['StreamCheckpoint'],
     'file_ref': ['JsonArtifactRef', 'save_json_artifact'],
+    'plan_facts': ['source_facts', 'operation_facts', 'operation_capability', '_catch_facts',
+                   '_native_operation_facts', '_thaw_json', '_model_map_options',
+                   '_deduplicate_arguments', '_specialization_domain'],
     'artifacts': ['read', 'immutable', 'run_lock', 'run_is_active', 'snapshot'],
     'dataflow_acquisition_call': ['QueueSourceDeclaration', 'AcquisitionCall'],
     'literal_source': ['LiteralSourceReference'],
@@ -127,6 +130,9 @@ for name in ('bind_observation_scope', 'progress', 'rows', 'duration', 'group_du
 from demiflow import PipelineBundleRef
 buffer = io.BytesIO(); ProgramPickler(buffer, protocol=5).dump(PipelineBundleRef.load)
 result['bundle_loader'] = base64.b64encode(buffer.getvalue()).decode()
+from demiflow.execution.artifacts import digest, encoded
+for fn in (digest, encoded):
+    result['codec.' + fn.__name__] = base64.b64encode(pickle.dumps(fn, protocol=5)).decode()
 print(json.dumps(result))
 '''
     child = subprocess.run([sys.executable, '-P', '-B', '-c', script, str(original), json.dumps(CARRIERS)],
@@ -612,3 +618,16 @@ def test_relocated_keyword_default_authenticates_its_actual_owner(monkeypatch, c
         value = FunctionType(code, vars(queue_history))
         monkeypatch.setitem(parent.__kwdefaults__, 'check_stop', value)
     assert _layout_source_type(value) is None
+
+
+@pytest.mark.parametrize('name', ['digest', 'encoded'])
+@pytest.mark.parametrize('private', [False, True])
+def test_existing_codec_global_decodes_to_actual_owner(original_carriers, name, private):
+    from demiflow.execution.contracts import artifact
+    raw = base64.b64decode(original_carriers['codec.' + name])
+    ref = SimpleNamespace(size_bytes=len(raw), digest=hashlib.sha256(raw).hexdigest())
+    actual = load_private_payload(OriginalStore(raw), ref) if private else load_payload([raw])
+    assert actual is getattr(artifact, name)
+    assert actual({'nested': [1, '中文', True]}) == getattr(artifact, name)({'nested': [1, '中文', True]})
+    # A path move does not grant a new semantic pin: parent already used 16.
+    assert describe(actual)['module'] == 'demiflow.execution.contracts.artifact'

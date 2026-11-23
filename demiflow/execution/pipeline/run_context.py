@@ -700,7 +700,7 @@ def bind_iteration(rows):
 
 def admit_stream(plan, *, source_batch_size=1):
     """Native resource admission applies equally with or without a checker."""
-    from demiflow.execution.plan_facts import operation_facts
+    from demiflow.execution.seal.plan_facts import operation_facts
     from demiflow.planning.dataflow_policy import stream_residency
     context = current_run()
     if context is None:
@@ -744,7 +744,7 @@ def payload_scope(run, plan, *, owner_limits=None, arguments=None, source=None, 
     if plan is not None and not physical_dataflow:
         from demiflow.data.plan import is_stream_operation
         if any(is_stream_operation(op) for op in plan.operations):
-            from demiflow.execution.plan_facts import operation_facts
+            from demiflow.execution.seal.plan_facts import operation_facts
             from demiflow.execution.recovery_contract import RecoveryContractError
             try:
                 limits = stream_limits([operation_facts(op) for op in plan.operations], limits,

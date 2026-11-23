@@ -82,7 +82,7 @@
         "OBSERVATION_COUNT"
       ],
       "PlanContractError": [
-        "demiflow.execution.sealed_plan_facts",
+        "demiflow.execution.contracts.errors",
         "PlanContractError"
       ],
       "PreparedPublicationUnresolved": [
@@ -134,7 +134,7 @@
         "dataset_declaration_links"
       ],
       "execution_instances": [
-        "demiflow.execution.plan_facts",
+        "demiflow.execution.seal.plan_facts",
         "execution_instances"
       ],
       "identity": [
@@ -154,7 +154,7 @@
         "observe_storage"
       ],
       "read_action_plan": [
-        "demiflow.execution.sealed_plan_facts",
+        "demiflow.execution.journal.sealed_plan_facts",
         "read_action_plan"
       ],
       "read_run": [
@@ -162,11 +162,11 @@
         "read_run"
       ],
       "read_verified_identity_bridge": [
-        "demiflow.execution.sealed_plan_facts",
+        "demiflow.execution.journal.sealed_plan_facts",
         "read_verified_identity_bridge"
       ],
       "resolve_local_artifact": [
-        "demiflow.execution.artifacts",
+        "demiflow.execution.storage.artifacts",
         "resolve_local_artifact"
       ],
       "series": [

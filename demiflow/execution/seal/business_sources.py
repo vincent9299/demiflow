@@ -758,7 +758,7 @@ def business_dependency_modules(plan, *, source=None):
     import sys
     import types
     from collections import deque
-    from ..plan_facts import operation_facts
+    from demiflow.execution.seal.plan_facts import operation_facts
 
     def udfs():
         for operation in plan.operations:

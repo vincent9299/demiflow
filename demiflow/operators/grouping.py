@@ -37,3 +37,9 @@ def group_key(row, on):
 
 def pack_group(rows, *, on, output):
     return [{**{k: rows[0][k] for k in on}, output: rows}]
+
+
+def group_batches_facts(operation):
+    return {'contract': 'demiflow.stream_group_batches',
+                    'arguments': {name: getattr(operation, name) for name in
+                                  ('on', 'output', 'chunk_bytes', 'max_groups', 'buffer_bytes')}}

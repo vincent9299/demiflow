@@ -35,7 +35,7 @@ def prompt_identities():
     from demiflow.operator_llm.parser import parse_prompt_pack
     from demiflow.execution.recovery_contract import identity
     from demiflow.execution.recovery_identity import plan_identity
-    from demiflow.execution.plan_facts import operation_facts
+    from demiflow.execution.seal.plan_facts import operation_facts
     from demiflow.execution.seal.business_sources import plan_code_pin
 
     golden = json.loads(GOLDEN.read_text())

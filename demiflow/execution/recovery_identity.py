@@ -307,7 +307,7 @@ def operation_identity(operation):
                     "recipe": describe(decl.recipe), "retrain_id": decl.retrain_id, "parent": describe(parent)}
         return {"prediction": {"fit": fit_identity(operation.fit, set()), "steps": list(operation.steps),
                                "inputs": describe(operation.inputs), "parameters": describe(operation.parameters)}}
-    from .plan_facts import operation_facts
+    from demiflow.execution.seal.plan_facts import operation_facts
     specialized = type(operation) in {ops.EmbeddingMapOp, ops.VectorSearchOp,
         ops.StreamGroupBatchesOp, ops.DeduplicateOp, ops.StreamPrependOp}
     try:

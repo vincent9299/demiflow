@@ -230,10 +230,11 @@ def operation_facts(operation):
     elif kind == "block_order":
         arguments.update(seed=operation.seed)
     elif kind == "model_map":
+        from demiflow.operator_llm.flow_contract import model_map_options
         arguments.update(prompt_name=operation.prompt_name, inputs=dict(operation.inputs),
                          output=operation.output,
                          outputs=dict(operation.outputs) if operation.outputs is not None else None,
-                         options=_model_map_options(operation.options),
+                         options=model_map_options(operation.options),
                          max_requests=operation.max_requests,
                          config={"schema_version": str(operation.config.schema_version),
                                  "content_hash": operation.config.content_hash})
@@ -311,40 +312,13 @@ def operation_facts(operation):
 # Business-semantic prompt options projected into permanent model_map facts.
 # Credentials (request_options.api_key/extra_headers) and runtime environment
 # paths (journal/log/offline/codex/object_store) never enter the sealed identity.
-_MODEL_MAP_OPTION_KEYS = (
-    "model_revision", "verify_model", "require_finish_reason_stop",
-    "stream", "stream_include_usage", "gateway", "request_options",
-    "nonfatal_http_errors", "http_error_retry", "image_encoding",
-    "limits", "input_limits", "systemone_batch",
-    "max_request_bytes", "max_response_bytes", "max_event_bytes", "max_stream_events",
-)
 
 
-def _model_map_options(options):
-    if options is None:
-        return None
-    projected = {}
-    for name in _MODEL_MAP_OPTION_KEYS:
-        if name not in options:
-            continue
-        value = options[name]
-        if name == "request_options":
-            value = {k: v for k, v in dict(value).items() if k not in {"api_key", "extra_headers"}}
-        projected[name] = value
-    return projected
 
 
-def _deduplicate_arguments(actor):
-    from demiflow.execution.recovery_identity import describe
-    from demiflow.operators.admission import canonical
-    policy = {name: getattr(actor, name) for name in
-              ('key', 'quotas', 'max_entries', 'max_key_bytes', 'max_disk_bytes')}
-    policy['unique_on'] = list(actor.unique_on)
-    if canonical(policy) != actor.config:
-        raise RuntimeContractError('Deduplicate actor policy differs from its configuration')
-    return dict(on=list(actor.unique_on), key=actor.key, output=actor.output,
-                when=describe(actor.when), quotas=describe(actor.quotas),
-                **{name: getattr(actor, name) for name in ('max_entries', 'max_key_bytes', 'max_disk_bytes')})
+
+
+
 
 
 def _specialization_domain(operation):
@@ -357,9 +331,8 @@ def _specialization_domain(operation):
         from demiflow.lance.flow_contract import vector_search_facts
         return vector_search_facts(operation)
     if type(operation) is ops.StreamGroupBatchesOp:
-        return {'contract': 'demiflow.stream_group_batches',
-                'arguments': {name: getattr(operation, name) for name in
-                              ('on', 'output', 'chunk_bytes', 'max_groups', 'buffer_bytes')}}
+        from demiflow.operators.grouping import group_batches_facts
+        return group_batches_facts(operation)
     if type(operation) is ops.DeduplicateOp:
         from demiflow.operators.admission import StreamAdmission
         from demiflow.execution.recovery_contract import identity
@@ -383,3 +356,12 @@ def _specialization_domain(operation):
                 'arguments': dict(max_rows=operation.max_rows, max_row_bytes=operation.max_row_bytes,
                                   source=plan_identity('input', other._source, other._plan))}
     return None
+
+
+def _deduplicate_arguments(actor):
+    from demiflow.execution.recovery_identity import describe
+    from demiflow.operators.admission import validate_deduplicate_policy
+    validate_deduplicate_policy(actor)
+    return dict(on=list(actor.unique_on), key=actor.key, output=actor.output,
+                when=describe(actor.when), quotas=describe(actor.quotas),
+                **{name: getattr(actor, name) for name in ('max_entries', 'max_key_bytes', 'max_disk_bytes')})

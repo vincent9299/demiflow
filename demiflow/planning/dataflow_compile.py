@@ -128,7 +128,7 @@ def _operation_semantic_facts(operation: LogicalOp) -> Mapping[str, Any]:
             "factory": _callable_code_identity(operation.factory),
         }
     if is_dataclass(operation):
-        from ..execution.plan_facts import operation_facts
+        from demiflow.execution.seal.plan_facts import operation_facts
         from ..execution.recovery_identity import operation_identity
         try:
             fact = operation_facts(operation)

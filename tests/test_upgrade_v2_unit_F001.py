@@ -11,7 +11,7 @@ import demiflow
 from demiflow.data import plan as ops
 from demiflow.data.native_options import parse_native_options
 from demiflow.data.plan import CallableSpec
-from demiflow.execution.plan_facts import operation_capability
+from demiflow.execution.seal.plan_facts import operation_capability
 
 _C02_KEYS = {"kind", "driver", "native_options", "stream_options", "bound"}
 
@@ -29,7 +29,7 @@ def test_module_source_is_worktree():
 
 
 def test_facts_consume_the_same_capability_authority(monkeypatch):
-    from demiflow.execution import plan_facts
+    from demiflow.execution.seal import plan_facts
     original = plan_facts.operation_capability
     seen = []
     def observed(operation):

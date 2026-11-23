@@ -516,7 +516,7 @@ def test_workbench_bridge_readable_after_run_exit(tmp_path, pidfds, monkeypatch)
 def test_catch_nonempty_canonical_strict_json():
     """A non-empty exception whitelist serializes to sorted qualified names so the
     sealed plan identity is strict-JSON (the seam compiles every write_lance plan)."""
-    from demiflow.execution.plan_facts import operation_facts
+    from demiflow.execution.seal.plan_facts import operation_facts
     from demiflow.execution.recovery_contract import identity
 
     async def callback(row):
@@ -532,7 +532,7 @@ def test_catch_canonical_preserves_empty_identity():
     """The shared canonicalizer keeps the exact prior JSON form for empty/None so
     neither catch copy site (stream_options fields nor the async/batch/save names
     loop) can drift a sealed identity."""
-    from demiflow.execution.plan_facts import _catch_facts
+    from demiflow.execution.seal.plan_facts import _catch_facts
     from demiflow.execution.recovery_contract import identity
 
     for raw in ((), None, []):
@@ -545,7 +545,7 @@ def test_catch_empty_dag_id_unchanged(monkeypatch):
     pre-fix raw operation.catch copy) and after (canonical) — byte-identical. The
     None defensive path is covered by test_catch_canonical_preserves_empty_identity
     (the public map_async API normalizes catch=None to ())."""
-    import demiflow.execution.plan_facts as pf
+    import demiflow.execution.seal.plan_facts as pf
     from demiflow.planning.dag import compile_logical_dag
 
     real_facts = pf.operation_facts

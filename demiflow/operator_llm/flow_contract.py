@@ -344,3 +344,25 @@ def prompt_constructor_settings(actor, operation):
     if service is not None:
         settings['service'] = service
     return settings
+
+
+_MODEL_MAP_OPTION_KEYS = (
+    "model_revision", "verify_model", "require_finish_reason_stop",
+    "stream", "stream_include_usage", "gateway", "request_options",
+    "nonfatal_http_errors", "http_error_retry", "image_encoding",
+    "limits", "input_limits", "systemone_batch",
+    "max_request_bytes", "max_response_bytes", "max_event_bytes", "max_stream_events",
+)
+
+def model_map_options(options):
+    if options is None:
+        return None
+    projected = {}
+    for name in _MODEL_MAP_OPTION_KEYS:
+        if name not in options:
+            continue
+        value = options[name]
+        if name == "request_options":
+            value = {k: v for k, v in dict(value).items() if k not in {"api_key", "extra_headers"}}
+        projected[name] = value
+    return projected

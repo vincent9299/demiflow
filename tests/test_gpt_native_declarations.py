@@ -3,7 +3,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.recovery_identity import plan_identity
 from demiflow.execution.seal.business_sources import plan_code_pin
-from demiflow.execution.plan_facts import operation_facts
+from demiflow.execution.seal.plan_facts import operation_facts
 from demiflow.data.runtime_contract import RuntimeContractError
 
 

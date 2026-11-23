@@ -51,7 +51,7 @@ FROZEN = {
     'demiflow/execution/queue_sinks.py': 'b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074',
     'demiflow/execution/queue_source.py': '637da9b68276d02a3a4836ef0002fbe8f853ab3584894e7edbece1169bcf9a35',
     'demiflow/execution/contracts/exchange.py': 'dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2',
-    'demiflow/planning/dag.py': '294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b',
+    'demiflow/planning/dag.py': 'df6390bb1235e5e493bfcbd8c664628f673c3dd2f3fb3be693ce7e6ba38003f5',
     'demiflow/resources/contracts.py': '61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff',
 }
 

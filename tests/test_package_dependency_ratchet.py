@@ -85,7 +85,7 @@ PLANNING_MAY_IMPORT = {
     'demiflow.execution.compiler_support.capabilities',  # original pure capability vocabulary
     'demiflow.execution.contracts.record_schema',
     'demiflow.execution.compiler_support.operator_policy',
-    'demiflow.execution.plan_facts',
+    'demiflow.execution.seal.plan_facts',
     'demiflow.execution.recovery_contract',
     'demiflow.execution.recovery_identity',
 }

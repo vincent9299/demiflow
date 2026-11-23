@@ -37,7 +37,7 @@
     ],
     [
       "Dataset.deduplicate",
-      "demiflow.execution.plan_facts",
+      "demiflow.execution.seal.plan_facts",
       "_deduplicate_arguments"
     ],
     [

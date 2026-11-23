@@ -38,7 +38,7 @@ def _traits_dict(traits):
 
 
 def _operation_semantics(operation):
-    from ..execution.plan_facts import operation_capability, operation_facts
+    from demiflow.execution.seal.plan_facts import operation_capability, operation_facts
     try:
         facts = operation_facts(operation)
     except (RuntimeContractError, RuntimeError, ValueError):
@@ -159,7 +159,7 @@ def compile_declared_dag(*, action_id, nodes, edges, descriptors):
     structure reuses plan_facts.execution_instances, so shared bridges keep the
     existing reuse semantics and every ancestor executes once per action.
     """
-    from ..execution.plan_facts import execution_instances
+    from demiflow.execution.seal.plan_facts import execution_instances
     identifier(action_id)
     by_id = {node["id"]: node for node in nodes}
     instances = execution_instances(nodes, edges, [action_id])

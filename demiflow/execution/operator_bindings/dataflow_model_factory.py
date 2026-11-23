@@ -102,7 +102,7 @@ def native_model_declaration(operation):
         return CallableSpec.create(LanceLookup, fn_constructor_kwargs=lookup_declaration(actor, target))
     if type(actor) is VectorSearch:
         from demiflow.data.plan import VectorSearchOp
-        from demiflow.execution.plan_facts import operation_facts
+        from demiflow.execution.seal.plan_facts import operation_facts
         from demiflow.execution.contracts.dataflow_errors import DataflowError
         if type(operation) is not VectorSearchOp:
             raise DataflowError('INVALID_CONTRACT', 'Vector search requires its typed declaration')

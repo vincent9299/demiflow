@@ -162,7 +162,7 @@ def test_fixed_binding_snapshots_reference_once_before_selection_and_registers_s
     assert events == ['checked', 'lock', 'ownership', 'unlock', 'select', 'schema', 'register']
     expected = DataAPI(port).read_lance(opened[0]['uri'], version=1, columns=['id'],
                                      batch_readahead=1, fragment_readahead=1)._source
-    from demiflow.execution.plan_facts import source_facts
+    from demiflow.execution.seal.plan_facts import source_facts
     from demiflow.execution.recovery_identity import source_identity
     assert result._source.query.to_dict() == expected.query.to_dict()
     assert result._source.native_options == expected.native_options
@@ -242,7 +242,7 @@ def test_real_capability_gate_still_rejects_checkpoint_before_host_selection(tmp
 @pytest.mark.parametrize('native', [False, True])
 def test_public_and_shared_lance_scan_have_identical_declaration_and_facts(tmp_path, projection, native):
     from demiflow.data.native_options import parse_native_options
-    from demiflow.execution.plan_facts import source_facts
+    from demiflow.execution.seal.plan_facts import source_facts
     from demiflow.execution.recovery_identity import source_identity
     from demiflow.lance.model import LanceScanSpec
     options = dict(uri=str(tmp_path / 'input.lance'), version=4, filter='id >= 0', limit=9,

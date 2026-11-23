@@ -24,7 +24,7 @@ _REVISIONS = {'demiflow.collect.net': ('486592d6e616d61145b22a9f4169812ed5f3d4a5
                           '0acad54f342ecf3269418d44d0f9e978ebcfa92bcdbe4b47e92d112c87b5ccd0'),
  'demiflow.execution.request_limits': ('431b27e1065e3fdc02cfd708d60c20b924a1489c78ff2bd6afd36546cf56e134',
                                        '54bc1fa489826c74c7d67432fdeaba9fb9e54131d681936b5c2ea18180c117e9'),
- 'demiflow.data.dataset': ('d9331c9fe56c7c43fec7b1ac569012232e042e52141ab59618d28a1df0880192',
+ 'demiflow.data.dataset': ('8af95006842edfce80fce04ced8e80ce321a8d7450d33c3b09b8f91c61d32ec7',
                            '1ba0e80f1ed0853948a97792dc65125fdaec17504bc3396b5f53ffb593da7e88'),
  'demiflow.data.sources': ('4c349450034860cbaaa81d7b88e39b5caeea6c9ea56849e031804007cd226e79',
                            '3033f1f14141c9759d29679ee5275492bfbc83bcd41b51c7bf9962afd115387f'),
@@ -87,7 +87,9 @@ _DATASET_METHODS = {'Dataset.map_embeddings': ('4319758ab733dfdb7dc059abfc237532
  'Dataset.admit_rows': ('a68edf8d3cb18ef57f273e4165d1757427dc5722b8f3f9dd49bccbe3e8b2cca6',
                         '8e513b315f586801b301bf457f5d6d7bddb04571dcbaef25441578eaeb3eaf4b'),
  'Dataset.lookup_lance': ('8423dcd182b1c0af44540a50665065874e089a44b802406f22c201a014f63452',
-                          'a19a4c9ce708e85aa09f1060b82a5ead02693c1339c3cdea55d556bdb14e7790')}
+                          'a19a4c9ce708e85aa09f1060b82a5ead02693c1339c3cdea55d556bdb14e7790'),
+ 'Dataset.deduplicate': ('13d86a4d6a81e243aaff3d4ffc0ea7689b0892d64f847fd03c05b6f967d9a591',
+                         'dd486724d1ccd3946d68b998f82d819a2c1eac105662adbe9b46b67fd21db58e')}
 
 
 # Published captures contain public client getters and the bounded row queue's
