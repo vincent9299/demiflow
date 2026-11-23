@@ -47,7 +47,7 @@ def test_materialized_count_uses_authenticated_rows_and_records_action(tmp_path)
 def test_materialized_count_rejects_damaged_input(tmp_path, damage):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.dataflow_segments import segment_refs
-    with RunContext.start(tmp_path / 'run'), data.local_execution():
+    with pytest.raises(DataflowError) as rejected, RunContext.start(tmp_path / 'run') as run, data.local_execution():
         stored = data.from_items(_rows()).map(lambda row: row).materialize()
         handle = stored._source.handle
         ref = handle._manifest_ref if damage == 'manifest' else next(
@@ -61,11 +61,12 @@ def test_materialized_count_rejects_damaged_input(tmp_path, damage):
             else:
                 with path.open('r+b') as payload:
                     payload.write(bytes([original[0] ^ 1]))
-            with pytest.raises(DataflowError):
-                stored.count()
+            stored.count()
         finally:
             path.write_bytes(original)
             stored.release()
+    assert rejected.value.code in {"UNKNOWN_EFFECT", "INVALID_CONTRACT", "CORRUPT_ARTIFACT"}
+    assert run.journal.execution_action('action-2')['result'] is None
 
 
 def test_public_union_take_all(tmp_path):
