@@ -386,10 +386,14 @@
       const checkTone = status => ({passed:'ok', failed:'bad', incomplete:'warn', not_applicable:'muted'})[status] || 'muted';
       if (latestChecks.native_flow && latestChecks.native_flow.status !== 'not_applicable') {
         const c = latestChecks.native_flow;
-        const lines = (c.diagnostics || []).map(d => [d.rule, d.path + (d.line ? ':' + d.line : ''), d.detail].filter(Boolean).join(' · '));
+        const diags = c.diagnostics || [];
+        const onlyUnregisteredFl10 = c.status === 'incomplete' && (c.inspected_count || 0) > 0 && diags.length > 0 && diags.every(d => d.rule === 'FL-10');
+        const lines = diags.map(d => [d.rule, d.path + (d.line ? ':' + d.line : ''), d.detail].filter(Boolean).join(' · '));
         const omitted = (c.diagnostic_count || 0) - lines.length;
         if (omitted > 0) lines.push('另有 ' + omitted + ' 项诊断');
-        items.push({key: 'native_flow', label: '原生数据流检查', text: checkLabel(c.status), tone: checkTone(c.status),
+        items.push({key: 'native_flow', label: '原生数据流检查',
+          text: onlyUnregisteredFl10 ? '变更流通过 (有未登记提示)' : checkLabel(c.status),
+          tone: onlyUnregisteredFl10 ? 'ok' : checkTone(c.status),
           lines: lines.length ? lines : ['静态数据流与 SDK 契约检查通过。']});
       }
       if (latestChecks.project_layout && latestChecks.project_layout.status !== 'not_applicable') {

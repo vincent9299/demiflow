@@ -46,6 +46,16 @@ WARM_IDLE_SECONDS = 600
 WARM_SANDBOX_SECONDS = 2400
 
 
+def effective_project_python(project):
+    """Resolve per-project configured read-only Python: None -> workbench default, '' -> disabled."""
+    configured = project.get('python')
+    if configured == '':
+        return None
+    if configured:
+        return configured
+    return sys.executable if project.get('kind') == 'pipeline' else None
+
+
 def sandbox_spec(deployment, project, session, turn, manifest, config, private_home, *, seconds=None):
     """Assemble only controller-declared scope; no provider-supplied path grants."""
     from demiflow.workbench.conversations.sandbox import SandboxSpec
@@ -95,7 +105,8 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
                 denied.append(cred)
     unique = lambda paths: tuple(sorted({str(path.absolute()) for path in paths}))
     duration = seconds if seconds is not None else max(.1, turn['created'] + deployment.limits.turn_seconds - time.time())
-    return SandboxSpec(read_paths=unique(read), write_paths=unique(writes), runtime_paths=runtime_paths(config),
+    return SandboxSpec(read_paths=unique(read), write_paths=unique(writes),
+        runtime_paths=runtime_paths(config, project_python=effective_project_python(project)),
         protected_paths=unique(protected), denied_paths=unique(denied), private_home=str(private_home),
         role='readonly' if readonly else 'developer',
         seconds=min(3600, max(.1, duration)), rss_bytes=deployment.limits.rss_bytes,
@@ -366,6 +377,9 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         st_config = {**st_config, '_cell_bin': str(control_bridge.bin)}
                 else:
                     standby_lease = tempfile.TemporaryFile(dir=st_home)
+                st_py = effective_project_python(st_project)
+                if st_py:
+                    st_config = {**st_config, '_project_python': st_py}
                 process = launch_provider(
                     mode=deployment.mode, adapter=st_adapter, config=st_config,
                     home=st_provider_home, root=st_project['root'],
@@ -787,6 +801,9 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                             config = model_broker.child_config
                         if cell_cli:
                             config = {**config, '_cell_bin': str(control_bridge.bin)}
+                    proj_py = effective_project_python(project)
+                    if proj_py:
+                        config = {**config, '_project_python': proj_py}
                     process = launch_provider(mode=deployment.mode, adapter=adapter, config=config,
                         home=provider_home, root=project['root'], lease_fd=lease_fd, sandbox_spec=confined,
                         control_socket=control_bridge.path if control_bridge is not None else None,

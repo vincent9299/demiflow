@@ -204,6 +204,55 @@ def test_project_git_changes_and_file_diff(tmp_path):
     assert documents.git_changes(sub)['is_git'] is False
 
 
+def test_per_project_python_configuration_is_readonly_and_configurable(tmp_path):
+    import sys
+    from demiflow.workbench.projects import registry
+    from demiflow.workbench.conversations.execution import runtime_paths
+    from demiflow.workbench.conversations.deepseek import DeepSeek
+    from demiflow.workbench.conversations.codex import Codex
+    proj = tmp_path / 'proj_a'
+    proj.mkdir()
+    reg = tmp_path / 'registry.json'
+    added = registry.add(reg, proj)
+    wid = added['workspace_id']
+    # Default is unset (None) -> inherits workbench default.
+    loaded = registry.projects(registry.load_registry(reg))
+    assert loaded['projects'][0]['python'] is None
+    # Create a fake custom project venv executable.
+    venv_bin = tmp_path / 'custom_venv/bin'
+    venv_bin.mkdir(parents=True)
+    custom_py = venv_bin / 'python'
+    custom_py.write_text('#!/bin/sh\nexit 0\n')
+    custom_py.chmod(0o755)
+    # Set custom python via CAS.
+    res = registry.set_python(reg, wid, expected=loaded['digest'], python=str(custom_py))
+    assert res['python'] == str(custom_py)
+    loaded2 = registry.projects(registry.load_registry(reg))
+    assert loaded2['projects'][0]['python'] == str(custom_py)
+    # Invalid path rejected.
+    with pytest.raises(ForgeError):
+        registry.set_python(reg, wid, expected=loaded2['digest'], python='/nonexistent/bin/python')
+    # Disable python explicitly ('').
+    res3 = registry.set_python(reg, wid, expected=loaded2['digest'], python='')
+    assert res3['python'] == ''
+    # Verify runtime_paths mounts custom venv prefix read-only.
+    rp = runtime_paths({'executable': sys.executable}, project_python=str(custom_py))
+    assert str(tmp_path / 'custom_venv') in rp
+    assert str(venv_bin) in rp
+    # Verify DeepSeek & Codex prepend configured python bin to PATH.
+    dsh_home = tmp_path / 'dsh_home'; dsh_home.mkdir()
+    _, dsh_env = DeepSeek.launch(
+        {'executable': str(custom_py), 'model': 'deepseek-v4-flash', 'version': '0.2.1-rc.2', '_project_python': str(custom_py)},
+        dsh_home, str(proj))
+    assert dsh_env['PATH'].startswith(str(venv_bin) + ':')
+    assert dsh_env['DEMIFLOW_PROJECT_PYTHON'] == str(custom_py)
+    cdx_home = tmp_path / 'cdx_home'; cdx_home.mkdir()
+    cdx_cmd, _ = Codex.launch(
+        {'executable': str(custom_py), 'model': 'gpt-5', 'version': '0.1.0', '_project_python': str(custom_py)},
+        cdx_home, str(proj))
+    assert any(str(venv_bin) in arg and 'DEMIFLOW_PROJECT_PYTHON' in arg for arg in cdx_cmd)
+
+
 def call(server,body=None,token=None):
     request=urllib.request.Request(server.origin+'/api/development-settings',
         data=json.dumps(body).encode() if body is not None else None,

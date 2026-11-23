@@ -287,3 +287,10 @@
 .op-flow-references{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0 16px;color:#52525b;font-size:12px}
 .op-tree-group>.op-legacy-heading{padding:6px 8px;color:#71717a;font-size:12px;cursor:pointer}
 .definition-behavior-title{margin:14px 0 6px;font-size:11px;font-weight:600;letter-spacing:.03em;color:#71717a}
+.project-python-settings{margin:14px 0;padding:12px;border:1px solid #e4e4e7;border-radius:10px;background:#fafafa}
+.project-python-select,.project-python-input{display:block;width:100%;box-sizing:border-box;margin:8px 0 6px;padding:6px 8px;border:1px solid #d4d4d8;border-radius:7px;background:#fff;font:inherit}
+.project-python-input{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace}
+.project-python-hint{margin:4px 0 8px;overflow-wrap:anywhere}
+.project-python-msg{margin:8px 0 0}
+.project-python-msg[data-tone=ok]{color:#15803d}
+.project-python-msg[data-tone=error]{color:#b91c1c}

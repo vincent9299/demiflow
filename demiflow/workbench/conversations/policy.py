@@ -95,9 +95,15 @@ class Deployment:
             reject('Configure 1..128 explicitly permitted projects')
         for key, project in self.projects.items():
             required = {'root', 'kind', 'phase', 'writes', 'watch', 'sources', 'non_goals', 'authorization'}
-            optional = {'protected'}
+            optional = {'protected', 'python'}
             if type(project) is not dict or not required <= project.keys() or project.keys() - required - optional:
                 reject('Invalid project development grant')
+            if 'python' in project:
+                py_val = project['python']
+                if py_val != '':
+                    py_path = Path(text(py_val, 2048))
+                    if not py_path.is_absolute() or '..' in py_path.parts or not py_path.is_file() or not os.access(py_path, os.X_OK):
+                        reject('Configured project python must be an executable absolute path')
             project['identity'] = root_identity(project['root'])
             root = Path(project['root'])
             if self.state == root or root in self.state.parents or self.state in root.parents:

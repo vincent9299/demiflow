@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import secrets
 import socket
+import sys
 import tempfile
 import threading
 import time
@@ -93,6 +94,8 @@ def assemble(project, requirement, limits, *, execution_mode='trusted_local', in
         '工作台按实际源码呈现检查结果。'
         + ('使用所附 API 与目录规则。项目资料仅供参考。工作台将在源码改动后检查原生流程和目录。'
            if coding is not None else '使用项目现有验证入口。')
+        + ('\n本项目已配置只读 Python/测试环境：' + (project.get('python') or sys.executable) + '（已加入 PATH，可直接运行 python / pytest 验证项目 tests/，不可写入环境目录）。'
+           if project.get('kind') == 'pipeline' and project.get('python') != '' else '')
         + ('交付新增或实质修改的业务流程、算子、Prompt、跨管道输入或输出语义前，'
            '以及用户明确要求独立评审时，调用工作台工具 request_pipeline_review。'
            '它由宿主在本轮结束后执行，结果显示在本会话。修正发现的问题后再提请复核。'
