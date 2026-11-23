@@ -95,12 +95,11 @@
     button('关闭',()=>advancedDialog.close(),advancedDialogHead,{cls:'quiet'});
     const advancedContent=$('div',undefined,'wb-advanced-content');advancedDialog.append(advancedDialogHead,advancedContent);root.append(advancedDialog);
     const advancedButton=button('高级诊断',()=>{more.open=false;if(!advancedDialog.open)advancedDialog.showModal();},moreBody,{cls:'quiet'});advancedButton.hidden=true;
-    const pipelineHeader=$('header',undefined,'wb-pipeline-header'),headerIdentity=$('div',undefined,'wb-header-identity');
+    const pipelineHeader=$('header',undefined,'wb-pipeline-header');
     const pipelineTitle=$('h2',undefined,'wb-pipeline-title');
     const contextSwitch=$('div',undefined,'wb-context-switch');contextSwitch.setAttribute('role','group');contextSwitch.setAttribute('aria-label','管道视角');
-    const currentContextButton=button('当前',()=>showPage('flows'),contextSwitch);
-    const runsContextButton=button('运行记录',()=>showPage('monitor'),contextSwitch);
-    headerIdentity.append(pipelineTitle,contextSwitch);
+    const currentContextButton=button('当前配置',()=>{if(activePage!=='flows')return showPage('flows');},contextSwitch);
+    const runsContextButton=button('运行记录',()=>{if(activePage!=='monitor')return showPage('monitor');},contextSwitch);
     const runPicker=select('运行记录',[],null);
     const runContextLine=$('div',undefined,'wb-run-context-line');
     const refreshRunButton=button('刷新状态',()=>observer.refresh(),actions,{cls:'wb-icon-action'});
@@ -112,7 +111,7 @@
     runContextLine.append(pickerLabel);
     const olderRuns=button('更早记录',()=>listRuns({more:true}),runContextLine,{cls:'quiet'});
     runPicker.onchange=()=>openRun(runPicker.value).catch(error=>message(error.message,'error-box'));
-    pipelineHeader.append(headerIdentity,actions,runContextLine);
+    pipelineHeader.append(pipelineTitle,contextSwitch,actions,runContextLine);
     root.append(pipelineHeader,toolbar);
     const notice=$('div',undefined,'wb-notice');notice.hidden=true;notice.setAttribute('role','status');root.append(notice);
     const accessState=$('p',undefined,'wb-access wb-caption');accessState.hidden=true;root.append(accessState);
