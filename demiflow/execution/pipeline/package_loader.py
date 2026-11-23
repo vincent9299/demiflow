@@ -1,7 +1,8 @@
 """Load Python packages from an immutable Demiflow Pipeline bundle."""
 from __future__ import annotations
 
-from demiflow.execution.contracts.pipeline import PipelineBundleRef, PIPELINE_RUNTIME_ABI
+
+from demiflow.execution.contracts.pipeline import PIPELINE_RUNTIME_ABI
 from demiflow.pipeline import discover_pipeline_definition
 
 import hashlib
@@ -67,27 +68,6 @@ def _register_package(name: str, directory: Path) -> None:
 __all__ = ["BundlePackages", "RUNTIME_PACKAGE_PATH", "load_bundle_packages"]
 
 
-def load_bundle_ref(root: str | Path) -> "PipelineBundleRef":
-    bundle_root = Path(root).expanduser().resolve()
-    discover_pipeline_definition(bundle_root)
-    return PipelineBundleRef(
-        root=str(bundle_root),
-        content_digest=pipeline_bundle_digest(bundle_root),
-    )
-
-
-def verify_bundle(bundle) -> Path:
-    if bundle.runtime_abi != PIPELINE_RUNTIME_ABI:
-        raise ValueError(
-            f"unsupported Pipeline runtime ABI: {bundle.runtime_abi}"
-        )
-    root = Path(bundle.root).resolve()
-    if pipeline_bundle_digest(root) != bundle.content_digest:
-        raise ValueError("Pipeline bundle content digest mismatch")
-    discover_pipeline_definition(root)
-    return root
-
-
 def pipeline_bundle_digest(root: str | Path) -> str:
     bundle_root = Path(root).expanduser().resolve()
     roots = [bundle_root / PIPELINE_PACKAGE_PATH]
@@ -114,3 +94,41 @@ def pipeline_bundle_digest(root: str | Path) -> str:
         digest.update(b"\0")
         digest.update(hashlib.sha256(path.read_bytes()).digest())
     return "sha256:" + digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class PipelineBundleRef:
+    root: str
+    content_digest: str
+    runtime_abi: str = PIPELINE_RUNTIME_ABI
+
+    @classmethod
+    def load(cls, root: str | Path) -> "PipelineBundleRef":
+        bundle_root = Path(root).expanduser().resolve()
+        discover_pipeline_definition(bundle_root)
+        return cls(
+            root=str(bundle_root),
+            content_digest=pipeline_bundle_digest(bundle_root),
+        )
+
+    def verify(self) -> Path:
+        if self.runtime_abi != PIPELINE_RUNTIME_ABI:
+            raise ValueError(
+                f"unsupported Pipeline runtime ABI: {self.runtime_abi}"
+            )
+        root = Path(self.root).resolve()
+        if pipeline_bundle_digest(root) != self.content_digest:
+            raise ValueError("Pipeline bundle content digest mismatch")
+        discover_pipeline_definition(root)
+        return root
+
+    @property
+    def module_key(self) -> str:
+        value = self.content_digest.removeprefix("sha256:")
+        if not value or any(
+            character not in "0123456789abcdef" for character in value
+        ):
+            raise ValueError(
+                "Pipeline bundle digest is not a canonical sha256 value"
+            )
+        return "p_" + value[:24]

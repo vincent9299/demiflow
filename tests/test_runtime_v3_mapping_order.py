@@ -1,4 +1,5 @@
 """Business row field order survives transport without rewriting old carriers."""
+from demiflow.execution.contracts import record_codec
 import json
 import math
 import sys
@@ -15,11 +16,11 @@ def test_both_mapping_orders_roundtrip_deterministically_with_original_types():
             dict(a={'first': True, 'second': None}, z=(b'\x00\xff', [-0.0, 0.0]))]
     encoded = []
     for row in rows:
-        raw = codec._encode_payload(row, max_bytes=4096)
-        assert codec._encode_payload(row, max_bytes=4096) == raw
+        raw = record_codec._encode_payload(row, max_bytes=4096)
+        assert record_codec._encode_payload(row, max_bytes=4096) == raw
         record = Record('a' * 64, {'offset': 0}, None, row, len(raw), 0)
-        wire = codec._encode_record_document(record, max_bytes=4096)
-        restored = codec._decode_record_document(wire, record_id=record.record_id,
+        wire = record_codec._encode_record_document(record, max_bytes=4096)
+        restored = record_codec._decode_record_document(wire, record_id=record.record_id,
                                                 sequence=0, max_bytes=4096)
         actual = thaw_record_value(restored.inline)
         assert list(actual) == list(row) and list(actual['a']) == list(row['a'])
@@ -27,7 +28,7 @@ def test_both_mapping_orders_roundtrip_deterministically_with_original_types():
         assert type(actual['z'][1]) is list
         assert math.copysign(1, actual['z'][1][0]) == -1
         assert math.copysign(1, actual['z'][1][1]) == 1
-        assert codec._encode_record_document(restored, max_bytes=4096) == wire
+        assert record_codec._encode_record_document(restored, max_bytes=4096) == wire
         encoded.append(raw)
     assert encoded[0] != encoded[1]
 
@@ -35,13 +36,13 @@ def test_both_mapping_orders_roundtrip_deterministically_with_original_types():
 def test_original_sorted_map_bytes_remain_readable_and_unchanged():
     # Literal original v3 bytes, independent of the current encoder.
     raw = b'{"t":"map","v":[["a",{"t":"int","v":1}],["z",{"t":"bytes","v":"AA=="}]]}'
-    row = codec._decode_payload(raw, max_bytes=4096)
+    row = record_codec._decode_payload(raw, max_bytes=4096)
     assert row == {'a': 1, 'z': b'\x00'} and list(row) == ['a', 'z']
-    assert codec._encode_payload(row, max_bytes=4096) == raw
+    assert record_codec._encode_payload(row, max_bytes=4096) == raw
     document = {'v': 3, 'sp': {'offset': 0}, 'eb': len(raw), 'p': json.loads(raw), 'r': None}
     wire = json.dumps(document, sort_keys=True, ensure_ascii=False, separators=(',', ':')).encode()
-    record = codec._decode_record_document(wire, record_id='a' * 64, sequence=0, max_bytes=4096)
-    assert codec._encode_record_document(record, max_bytes=4096) == wire
+    record = record_codec._decode_record_document(wire, record_id='a' * 64, sequence=0, max_bytes=4096)
+    assert record_codec._encode_record_document(record, max_bytes=4096) == wire
 
 
 @pytest.mark.parametrize('provider', ['local', 'ray_core'])

@@ -340,7 +340,8 @@ class _Trace:
             store = RunArtifactStore(root=self.journal.directory / '.dataflow-store',
                 store_id=ref.store_id, journal=None, bounds=self.bounds, readonly=True)
             media = ref.media_type
-            from ..dataflow_kernel_pack import PACK_MEDIA, iter_kernel_images
+            from demiflow.execution.contracts.state_codec import PACK_MEDIA
+            from demiflow.execution.storage.streams import iter_kernel_images
             if media == PACK_MEDIA:
                 self.check(ref.size_bytes)
                 for _, raw in iter_kernel_images(store, ref, self.bounds):

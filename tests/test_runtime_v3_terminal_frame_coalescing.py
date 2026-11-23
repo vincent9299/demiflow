@@ -10,10 +10,10 @@ from types import SimpleNamespace as NS
 import pytest
 
 import demiflow
-from demiflow.execution import dataflow_record_frames as frames
+from demiflow.execution.contracts import record_codec as frames
 from demiflow.execution.contracts.dataflow import BlockPartition, Record
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _encode_record_document
+from demiflow.execution.contracts.record_codec import _encode_payload, _encode_record_document
 from demiflow.execution.recovery_contract import document, identity
 from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
 from demiflow.execution.worker.terminal_blocks import TerminalBlocks

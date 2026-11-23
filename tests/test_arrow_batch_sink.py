@@ -155,7 +155,7 @@ def test_mapped_arrow_refuses_oversized_output_without_lance_publication(tmp_pat
 
 def test_arrow_output_accounting_matches_typed_record_bytes():
     from demiflow.execution.arrow_payload import mapped_row_bytes
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload as encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload as encode_payload
 
     rows = [{'i': -728, 'binary': b'\x91' * 32, 'nested': [{'word': '汉"\t\x00', 'xs': [1.0, -0.0]}]},
             {'i': None, 'binary': b'', 'nested': []}, {'i': 91, 'binary': None, 'nested': None}]

@@ -4,13 +4,13 @@ from pathlib import Path
 import demiflow
 
 from demiflow.execution.contracts.dataflow import ArtifactRef, thaw_record_value
-from demiflow.execution.dataflow_handles import _ChunkStream
+from demiflow.execution.storage.streams import _ChunkStream
 if (Path(demiflow.__file__).parent / 'execution/storage/segments.py').is_file():
     from demiflow.execution.storage.segments import segment_refs
 else:
     from demiflow.execution.dataflow_segments import segment_refs
 from demiflow.execution.storage.objects import RunArtifactStore
-from demiflow.execution.exchange.dataflow_bridge import _decode_record_document, _decode_payload
+from demiflow.execution.contracts.record_codec import _decode_record_document, _decode_payload
 if (Path(demiflow.__file__).parent / 'execution/seal/sealed_plans.py').is_file():
     from demiflow.execution.seal.sealed_plans import load_sealed_plan
 else:

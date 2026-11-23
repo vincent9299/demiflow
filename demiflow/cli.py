@@ -1,7 +1,7 @@
 """Standalone CLI for inspecting and running immutable Demiflow bundles."""
 
 from __future__ import annotations
-from demiflow.execution.pipeline.package_loader import load_bundle_ref
+
 import json
 import sys
 import uuid
@@ -20,7 +20,8 @@ from .execution import (
     backend_for,
     inspect_pipeline_run_readiness,
 )
-from .execution.contracts import PipelineBundleRef, PipelineRunRequest
+from demiflow.execution.pipeline.package_loader import PipelineBundleRef
+from demiflow.execution.contracts import PipelineRunRequest
 
 
 def _environment(config_path):
@@ -103,7 +104,7 @@ def inspect_readiness(
         ray_namespace,
     )
     result = inspect_pipeline_run_readiness(
-        load_bundle_ref(root),
+        PipelineBundleRef.load(root),
         _environment(config),
         target,
     )
@@ -150,7 +151,7 @@ def run(
     ray_namespace,
     monitor_format,
 ):
-    bundle = load_bundle_ref(root)
+    bundle = PipelineBundleRef.load(root)
     environment = _environment(config)
     target = _target(
         backend,

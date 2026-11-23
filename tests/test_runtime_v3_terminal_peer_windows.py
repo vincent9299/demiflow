@@ -6,7 +6,7 @@ import pytest
 
 from demiflow.execution.contracts.dataflow import Record, thaw_record_value
 from demiflow.execution.dataflow_terminals import TerminalSubscription
-from demiflow.execution.exchange.dataflow_bridge import _encode_record_document
+from demiflow.execution.contracts.record_codec import _encode_record_document
 from demiflow.execution.kernels.dataflow import _row_bytes
 from demiflow.execution.recovery_contract import identity
 from test_runtime_v3_ready_peer_reads import peer_store
@@ -52,7 +52,7 @@ def test_terminal_honours_original_or_low_fd_peer_window(tmp_path, monkeypatch, 
 def test_result_batch_uses_one_ack_and_replays_original_record_positions(tmp_path):
     from dataclasses import asdict
     import pyarrow as pa
-    from demiflow.execution.dataflow_record_frames import decode_document
+    from demiflow.execution.contracts.record_codec import decode_document
     from demiflow.execution.dataflow_replay import PublishedRecordReader
     from demiflow.execution.outputs.arrow_rows import pack_result
     from demiflow.execution.record_schema import RecordSchemas

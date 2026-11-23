@@ -10,7 +10,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _decode_payload
+from demiflow.execution.contracts.record_codec import _encode_payload, _decode_payload
 from demiflow.execution.contracts.dataflow import Record, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 
@@ -154,13 +154,13 @@ def test_set_encoding_is_order_independent_and_preserves_nan_members():
     {'t': []},
 ])
 def test_corrupt_data_only_nodes_are_rejected(node):
-    from demiflow.execution.exchange.dataflow_bridge import _decode_value
+    from demiflow.execution.contracts.record_codec import _decode_value
     with pytest.raises(DataflowError, match='CORRUPT_ARTIFACT'):
         _decode_value(node)
 
 
 def test_named_zone_offset_and_payload_depth_cannot_silently_change():
-    from demiflow.execution.exchange.dataflow_bridge import _encode_value, _decode_value
+    from demiflow.execution.contracts.record_codec import _encode_value, _decode_value
     node = _encode_value(payload()['fold'])
     node['offset_us'] += 3600 * 1000000
     with pytest.raises(DataflowError, match='CORRUPT_ARTIFACT'):

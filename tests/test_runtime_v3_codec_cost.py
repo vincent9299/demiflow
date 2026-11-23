@@ -5,10 +5,7 @@ import pytest
 
 from demiflow.execution.contracts.dataflow import Record, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.exchange.dataflow_bridge import (
-    _codec_dumps, _encode_payload, _encode_value, _encode_record_document,
-    _decode_record_document, _decode_payload,
-)
+from demiflow.execution.contracts.record_codec import _codec_dumps, _encode_payload, _encode_value, _encode_record_document, _decode_record_document, _decode_payload
 
 
 def historical(value):
@@ -30,7 +27,7 @@ def test_transfer_bytes_equal_original_canonical_codec(row):
                     inline=row, payload_ref=None, encoded_bytes=len(payload))
     doc = {'v': 'demiflow.record.v3', 'sp': record.source_position, 'eb': record.encoded_bytes,
            'p': json.loads(payload), 'r': None}
-    from demiflow.execution.exchange.dataflow_bridge import _CODEC_VERSION
+    from demiflow.execution.contracts.record_codec import _CODEC_VERSION
     doc['v'] = _CODEC_VERSION
     encoded = _encode_record_document(record, max_bytes=maximum)
     assert encoded == historical(doc)

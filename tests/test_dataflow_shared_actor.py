@@ -44,7 +44,8 @@ async def identity(row):
 
 def capture_images(monkeypatch):
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.dataflow_kernel_pack import PACK_MEDIA, iter_kernel_images
+    from demiflow.execution.contracts.state_codec import PACK_MEDIA
+    from demiflow.execution.storage.streams import iter_kernel_images
     from demiflow.execution.contracts import state_codec
     original = DataflowCheckpointCoordinator.commit
     traces = []

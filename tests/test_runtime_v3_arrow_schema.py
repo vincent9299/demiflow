@@ -80,7 +80,7 @@ def test_projection_rename_preserves_declared_field_types(tmp_path):
 def test_legacy_record_wire_bytes_stay_unchanged():
     from demiflow.execution.contracts.dataflow import Record, ArtifactRef
     from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _encode_record_document, _decode_record_document
+    from demiflow.execution.contracts.record_codec import _encode_payload, _encode_record_document, _decode_record_document
     from demiflow.execution.record_schema import SCHEMA_MEDIA_TYPE
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     _, bounds = resolve_runtime_policy({}, {}, provider='local')

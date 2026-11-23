@@ -7,6 +7,7 @@ lives in the channel, never here). QueueReader only talks to the driver queue
 service port and never ACKs on close.
 """
 from __future__ import annotations
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 
 import csv
 import gzip
@@ -29,7 +30,7 @@ _RECORD_MEDIA_TYPE = "application/vnd.demiflow.record.v3"
 
 def _load_row(ref: ArtifactRef, store: Any, max_bytes: int) -> Any:
     raw = b"".join(store.read(ref, max_bytes=max_bytes))
-    from demiflow.execution.exchange.dataflow_bridge import _decode_payload
+    from demiflow.execution.contracts.record_codec import _decode_payload
     return _decode_payload(raw, max_bytes=max_bytes)
 
 
@@ -41,7 +42,7 @@ def _source_plan(snapshot: SourceSnapshot, services: RuntimeServices) -> Any:
 
 
 def _encoded_size(row: Any, *, max_bytes: int) -> int:
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     return len(_encode_payload(row, max_bytes=max_bytes))
 
 
@@ -51,10 +52,10 @@ class _BaseReader:
     def __init__(self, snapshot: SourceSnapshot, *, services: RuntimeServices) -> None:
         self._snapshot = snapshot
         self._services = services
-        from demiflow.execution.dataflow_record_frames import resident_limit
+        from demiflow.execution.contracts.record_codec import resident_limit
         bounds = services.bounds
         self._measure_row_copies = (getattr(services, 'measured_workspace', False)
-            or resident_limit(bounds, services) < bounds.max_batch_bytes + bounds.max_row_bytes)
+            or resident_limit(bounds, stage_resident_bytes(getattr(services, 'assignment', None))) < bounds.max_batch_bytes + bounds.max_row_bytes)
         self._split: SourceSplit | None = None
         self._offset: dict[str, Any] = {}
         self._next_sequence = 0
@@ -101,12 +102,14 @@ class _BaseReader:
     def next_record(self) -> SourcePoll:
         self._check_open()
         if self._replay_pending:
-            from demiflow.execution.dataflow_record_frames import read_pending_frame, decode_document
+            from demiflow.execution.storage.streams import read_pending_frame
+            from demiflow.execution.contracts.record_codec import decode_document
             ref = self._replay_pending.popleft()
             if ref.media_type != "application/vnd.demiflow.source-pending.v3":
                 raise DataflowError("INCOMPATIBLE_HISTORY", "pending source record lacks provenance")
             if getattr(self, '_literal_rows', None) is not None:
-                from demiflow.execution.dataflow_record_frames import read_document, decode_frame, line_limit
+                from demiflow.execution.storage.streams import read_document
+                from demiflow.execution.contracts.record_codec import decode_frame, line_limit
                 raw = self._literal_frame_call(read_document, ref, self._services.store,
                     self._services.bounds, _maximum=line_limit(self._services.bounds))
                 encoded, saved = self._literal_frame_call(decode_frame, raw, self._services.bounds, newline=False)
@@ -115,10 +118,10 @@ class _BaseReader:
                     record_id=saved['record_id'], sequence=saved['sequence'], bounds=self._services.bounds)
             else:
                 encoded, saved = read_pending_frame(ref, self._services.store,
-                    self._services.bounds, services=self._services)
+                    self._services.bounds, resident_bytes=stage_resident_bytes(getattr(self._services, 'assignment', None)))
                 record = decode_document(encoded,
                     record_id=saved["record_id"], sequence=saved["sequence"],
-                    bounds=self._services.bounds, services=self._services)
+                    bounds=self._services.bounds, resident_bytes=stage_resident_bytes(getattr(self._services, 'assignment', None)))
             # Retain the replayed item until the next successful pull confirms
             # ordered publication, just as on the original attempt.
             self._pending = (ref, *self._replay_pending)
@@ -146,7 +149,7 @@ class _BaseReader:
             else:
                 # The decoded immutable row and the source Record's frozen
                 # containers/array copy briefly coexist before publication.
-                from demiflow.execution.dataflow_record_frames import admit_workspace, _typed_shape
+                from demiflow.execution.contracts.record_codec import admit_workspace, _typed_shape
                 native = _typed_shape(row, self._services.bounds.max_row_bytes)[1]
                 self._literal_frame_call(admit_workspace, 2 * native + 512, self._services.bounds)
             record = Record(record_id, position, None, row, encoded_bytes, sequence, self._schema_ref)
@@ -166,13 +169,13 @@ class _BaseReader:
     def measured_row_size(self, row):
         """Apply the same row copy and byte budgets for each emitted source record."""
         if self._measure_row_copies:
-            from demiflow.execution.dataflow_record_frames import admit_row_copies
+            from demiflow.execution.contracts.record_codec import admit_row_copies
             bounds = self._services.bounds
             shared = getattr(self, '_shared_frame_call', None)
             if shared is not None:
                 shared(admit_row_copies, row, bounds)
             else:
-                admit_row_copies(row, bounds, services=self._services)
+                admit_row_copies(row, bounds, resident_bytes=stage_resident_bytes(getattr(self._services, 'assignment', None)))
         return _encoded_size(row, max_bytes=self._services.bounds.max_row_bytes)
 
     def acknowledge_output(self) -> None:
@@ -190,12 +193,12 @@ class _BaseReader:
     def snapshot(self) -> SourceCursor:
         self._check_open()
         if self._pending_record is not None:
-            from demiflow.execution.dataflow_record_frames import frame_parts
+            from demiflow.execution.contracts.record_codec import frame_parts
             record = self._pending_record
             if getattr(self, '_literal_rows', None) is not None:
                 size, chunks = self._literal_frame_call(frame_parts, record, self._services.bounds, newline=False)
             else:
-                size, chunks = frame_parts(record, self._services.bounds, services=self._services, newline=False)
+                size, chunks = frame_parts(record, self._services.bounds, resident_bytes=stage_resident_bytes(getattr(self._services, 'assignment', None)), newline=False)
             ref = self._services.store.put(chunks, max_bytes=size,
                 media_type="application/vnd.demiflow.source-pending.v3")
             self._pending = (ref,)
@@ -307,7 +310,7 @@ class ItemsReader(_BaseReader):
         record = self._pending_record
         if self._literal_rows is None or record is None or record.inline is None:
             return 0
-        from demiflow.execution.dataflow_record_frames import _typed_shape
+        from demiflow.execution.contracts.record_codec import _typed_shape
         return _typed_shape(record.inline, self._services.bounds.max_row_bytes)[1]
 
     @property
@@ -315,7 +318,7 @@ class ItemsReader(_BaseReader):
         record = self._pending_record
         if self._literal_rows is None or record is None:
             return 0
-        from demiflow.execution.dataflow_record_frames import retained_record_bytes
+        from demiflow.execution.contracts.record_codec import retained_record_bytes
         return retained_record_bytes(record, self._services.bounds)
 
     @property
@@ -667,7 +670,7 @@ class LanceReader(_BaseReader):
             from demiflow.execution.arrow_payload import ArrowBatchCache, ArrowPayload
             ref = ArtifactRef(**saved)
             cache = ArrowBatchCache(self._services.store, self._services.bounds, services=self._services)
-            from demiflow.execution.arrow_payload import ARROW_BATCH_MEDIA
+            from demiflow.execution.contracts.record_codec import ARROW_BATCH_MEDIA
             if ref.media_type != ARROW_BATCH_MEDIA:
                 raise DataflowError('INCOMPATIBLE_HISTORY', 'Lance cursor does not reference a source batch')
             batch, header = cache.load(ref)
@@ -901,7 +904,8 @@ class LanceReader(_BaseReader):
         self._row_offset = row_offset + 1
         self._offset = {"version": self._version, "fragment_id": fragment_id,
                         "row_offset": row_offset + 1}
-        from demiflow.execution.arrow_payload import ArrowPayload, ARROW_BATCH_MEDIA
+        from demiflow.execution.arrow_payload import ArrowPayload
+        from demiflow.execution.contracts.record_codec import ARROW_BATCH_MEDIA
         if isinstance(row, ArrowPayload) and row.ref.media_type == ARROW_BATCH_MEDIA:
             from dataclasses import asdict
             self._offset['arrow_batch'] = asdict(row.ref)
@@ -940,8 +944,8 @@ class SqlReader(_BaseReader):
             self._open_cursor()
 
     def _open_spool(self) -> None:
-        from demiflow.execution.dataflow_handles import _ChunkStream
-        from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _decode_payload
+        from demiflow.execution.storage.streams import _ChunkStream
+        from demiflow.execution.contracts.record_codec import _encode_payload, _decode_payload
         store, bounds = self._services.store, self._services.bounds
         spool = self._offset.get("spool")
         media_type = "application/vnd.demiflow.sql-rows.v3+ndjson"

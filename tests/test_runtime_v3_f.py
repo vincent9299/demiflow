@@ -499,7 +499,7 @@ def test_p1_materialize_uses_one_action_on_the_original_provider(monkeypatch, na
     from demiflow.data.plan import LogicalPlan
     from demiflow.data.sources import ItemsSource
     from demiflow.execution import checked
-    from demiflow.execution import dataset_runtime
+    from demiflow.execution.executors import dataset_runtime
 
     source, plan = ItemsSource([{'id': 1}]), LogicalPlan()
     completed = []

@@ -104,7 +104,7 @@ class CallbackObservations:
 
     def dead_batch(self, rows, reason, *, max_bytes):
         """Small diagnostics only; failed business payload is not a retry ledger."""
-        from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+        from demiflow.execution.contracts.record_codec import _encode_payload
         payload = None
         if max_bytes >= 512:
             try:
@@ -317,7 +317,7 @@ def stream_observations(execution, stats):
     stats.dead_batches = []
     stats.dead_batches_dropped = 0
     remaining = min(32768, execution._bounds.max_control_bytes // 2)
-    from demiflow.execution.exchange.dataflow_bridge import _decode_payload
+    from demiflow.execution.contracts.record_codec import _decode_payload
     for (occurrence, _), (_, value) in getattr(execution, '_operator_observations', {}).items():
         stats.dead_batches_dropped += value.get('dead_batches_dropped', 0)
         for item in value.get('dead_batches', ()):

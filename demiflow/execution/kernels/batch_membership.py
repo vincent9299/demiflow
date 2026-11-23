@@ -24,7 +24,7 @@ def bind_contracts(service, graph, physical):
 
 
 def member(record, bounds):
-    from demiflow.execution.dataflow_record_frames import encode_document
+    from demiflow.execution.contracts.record_codec import encode_document
     raw=encode_document(record,bounds)
     return [record.record_id,hashlib.sha256(raw).hexdigest()]
 

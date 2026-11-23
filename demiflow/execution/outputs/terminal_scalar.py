@@ -3,12 +3,13 @@
 No source or transform is evaluated again. The durable spool is also the
 recovery prefix, so metadata and aggregation see exactly the committed rows.
 """
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 import base64
 import json
 from collections.abc import Mapping
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_record_frames import decode_frame, decode_document, line_limit
+from demiflow.execution.contracts.record_codec import decode_frame, decode_document, line_limit
 from demiflow.execution.kernels.dataflow import _materialize_row
 from demiflow.execution.contracts import state_codec
 
@@ -30,10 +31,10 @@ def terminal_scalar(stream, *, spec, services, schema_ref=None):
             if not line:
                 break
             held = getattr(stream, 'buffered_bytes', 0)
-            raw, item = decode_frame(line, services.bounds, services=services, retained=held)
+            raw, item = decode_frame(line, services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=held)
             del line
             record = decode_document(raw, record_id=item['record_id'],
-                sequence=item['sequence'], bounds=services.bounds, services=services, retained=held)
+                sequence=item['sequence'], bounds=services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=held)
             del raw
             rows += 1
             size += record.encoded_bytes

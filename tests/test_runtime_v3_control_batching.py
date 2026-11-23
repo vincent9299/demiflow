@@ -1,4 +1,5 @@
 """Original frames remain ordered and bounded through coalesced transport."""
+from demiflow.execution.contracts import record_codec
 from collections import deque
 import json
 import socket
@@ -301,7 +302,7 @@ def test_actual_process_terminal_partial_read_and_error_release_workers(tmp_path
     from demiflow.execution.local_kernel import LocalKernelOptions
     from demiflow.execution.run_context import RunContext
     import demiflow.execution.exchange.dataflow_bridge as bridge
-    original_start, original_decode = DataflowExecution.start, bridge._decode_record_document
+    original_start, original_decode = DataflowExecution.start, record_codec._decode_record_document
     executions, decoded = [], []
     def start(execution):
         assert execution._policy.provider == 'local' and execution._policy.worker_mode != 'thread'
@@ -315,7 +316,7 @@ def test_actual_process_terminal_partial_read_and_error_release_workers(tmp_path
     monkeypatch.setattr(DataflowExecution, 'start', start)
     monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT', str(tmp_path/'capacity'))
     if fault == 'read_error':
-        monkeypatch.setattr(bridge, '_decode_record_document', decode)
+        monkeypatch.setattr(record_codec, '_decode_record_document', decode)
     def execute():
         # The module's real Ray fixture may still hold its public executor.
         # Bind this test's Local API explicitly; do not replace that fixture.

@@ -263,7 +263,7 @@ def test_real_ray_literal_original_ack_gc_and_resume(tmp_path, monkeypatch):
 
 
 def test_other_finished_split_pending_record_shares_original_worker_grant(tmp_path):
-    from demiflow.execution.dataflow_record_frames import admit_workspace
+    from demiflow.execution.contracts.record_codec import admit_workspace
     from test_runtime_v3_finite_reader_credit import HeldState
     with store_fixture(tmp_path) as (_,store,_):
         bounds=replace(store._bounds,max_resident_bytes=256*1024,max_control_bytes=4096,
@@ -373,7 +373,7 @@ def test_literal_leaf_is_authenticated_before_first_row(tmp_path):
 
 
 def test_literal_root_authentication_failure_releases_manifest_workspace(tmp_path):
-    from demiflow.execution.dataflow_record_frames import read_document
+    from demiflow.execution.storage.streams import read_document
     from test_runtime_v3_finite_reader_credit import HeldState
     with store_fixture(tmp_path) as (_,store,_):
         bounds=replace(store._bounds,max_resident_bytes=256*1024,max_control_bytes=4096,

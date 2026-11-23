@@ -107,8 +107,8 @@ def _k6_shapes(run, execution, expected):
     """Verify native cuts/retained ACK proofs and every ordered published prefix."""
     import hashlib
     from demiflow.execution.dataflow_replay import PublishedRecordReader
-    from demiflow.execution.dataflow_record_frames import document_limit
-    from demiflow.execution.exchange.dataflow_bridge import _decode_record_document
+    from demiflow.execution.contracts.record_codec import document_limit
+    from demiflow.execution.contracts.record_codec import _decode_record_document
     shapes, inherited, prior_ids, growth = [], {}, [], []
     for fact in run.journal.execution_commits(_chain_child_id(run)):
         assert fact['status'] == 'acked'

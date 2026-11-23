@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import platform
+import sys
+from dataclasses import dataclass
+from typing import Any
+from demiflow.execution.contracts.pipeline import PlatformRuntimeIdentity
 
 import fcntl
-import json
 import os
 from pathlib import Path
 import shutil
 import signal
 import subprocess
-import sys
 import tempfile
 import time
 import uuid
@@ -50,7 +54,7 @@ def prepare_local_environment(
     cancellation=None,
     resolution=None,
 ) -> Path:
-    verify_environment_artifacts(execution_environment)
+    execution_environment.verify_artifacts()
     if (
         not requirements.nonempty
         and resolution is None
@@ -292,30 +296,56 @@ def _terminate(process):
 __all__ = ["inspect_local_environment_cache", "prepare_local_environment", "uses_embedded_current_runtime"]
 
 
-def verify_environment_artifacts(environment) -> None:
-    values = (
-        (
-            environment.runtime_wheel,
-            environment.runtime.wheel_filename,
-            environment.runtime.wheel_sha256,
-            "runtime wheel",
-        ),
-        (
-            environment.platform_requirements,
-            environment.runtime.platform_requirements_filename,
-            environment.runtime.platform_requirements_sha256,
-            "platform requirements",
-        ),
-    )
-    for configured, filename, expected_sha256, label in values:
-        if configured.is_symlink():
-            raise ValueError(f"Configured {label} is unavailable")
-        path = configured.resolve()
-        if not path.is_file() or path.name != filename:
-            raise ValueError(f"Configured {label} is unavailable")
-        if hashlib.sha256(path.read_bytes()).hexdigest() != expected_sha256:
-            raise ValueError(f"Configured {label} digest mismatch")
-    from demiflow.execution.requirements import platform_wheel_paths
-    platform_wheel_paths(
-        environment.runtime.platform_wheels, environment.platform_wheel_directory,
-    )
+@dataclass(frozen=True)
+class PipelineExecutionEnvironment:
+    runtime: PlatformRuntimeIdentity
+    runtime_wheel: Path
+    platform_requirements: Path
+    local_environment_cache: Path
+    dependency_setup_timeout_seconds: int
+    planning_policy: Any
+    ray_job_enabled: bool = True
+    candidate_wheelhouse: Path | None = None
+    platform_wheel_directory: Path | None = None
+
+    def verify_artifacts(self) -> None:
+        values = (
+            (
+                self.runtime_wheel,
+                self.runtime.wheel_filename,
+                self.runtime.wheel_sha256,
+                "runtime wheel",
+            ),
+            (
+                self.platform_requirements,
+                self.runtime.platform_requirements_filename,
+                self.runtime.platform_requirements_sha256,
+                "platform requirements",
+            ),
+        )
+        for configured, filename, expected_sha256, label in values:
+            if configured.is_symlink():
+                raise ValueError(f"Configured {label} is unavailable")
+            path = configured.resolve()
+            if not path.is_file() or path.name != filename:
+                raise ValueError(f"Configured {label} is unavailable")
+            if hashlib.sha256(path.read_bytes()).hexdigest() != expected_sha256:
+                raise ValueError(f"Configured {label} digest mismatch")
+        from demiflow.execution.requirements import platform_wheel_paths
+        platform_wheel_paths(
+            self.runtime.platform_wheels, self.platform_wheel_directory,
+        )
+
+    def declaration_id(self, requirements_sha256: str) -> str:
+        payload = {
+            "environment_policy": self.runtime.environment_policy,
+            "runtime": self.runtime.to_dict(),
+            "requirements_sha256": str(requirements_sha256 or ""),
+            "python_cache_tag": str(sys.implementation.cache_tag or ""),
+            "platform": sys.platform,
+            "machine": platform.machine(),
+        }
+        encoded = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"),
+        ).encode()
+        return hashlib.sha256(encoded).hexdigest()

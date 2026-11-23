@@ -8,6 +8,7 @@ seal. Every durable write goes through the ArtifactStore protocol (H031/H035);
 no persistent state is created outside these functions and no runtime object is
 written into a recovery image.
 """
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 import base64
 import hashlib
 import json
@@ -20,14 +21,9 @@ from demiflow.execution.contracts.dataflow import (
 )
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.recovery_contract import document, identifier, identity
-from .dataflow_bridge import (
-    RECORD_ENCODING, SEAL_MEDIA_TYPE, SEGMENT_MEDIA_TYPE, STATE_MEDIA_TYPE,
-    _codec_dumps, _decode_payload, _decode_record_document, _encode_payload,
-    _encode_record_document, _encode_value, _ref_document, _validate_artifact_ref,
-    _validate_record, _validate_tree, artifact_to_data_ref, record_to_envelope,
-    to_channel_plan_v1,
-)
-from .dataflow_state import ChannelSetState, RoutingCounters
+from demiflow.execution.contracts.record_codec import RECORD_ENCODING, SEAL_MEDIA_TYPE, SEGMENT_MEDIA_TYPE, STATE_MEDIA_TYPE, _codec_dumps, _decode_payload, _decode_record_document, _encode_payload, _encode_record_document, _encode_value, _ref_document, _validate_artifact_ref, _validate_record, _validate_tree
+from demiflow.execution.exchange.dataflow_bridge import artifact_to_data_ref, record_to_envelope, to_channel_plan_v1
+from demiflow.execution.exchange.dataflow_state import ChannelSetState, RoutingCounters
 
 _ROUTINGS = frozenset({"forward", "hash", "rebalance", "broadcast", "target"})
 _SEGMENT_SCHEMA = "demiflow.segment.v3"
@@ -125,7 +121,7 @@ def encode_record(record, *, bounds):
     if not isinstance(bounds, Bounds):
         _fail("INVALID_CONTRACT", "bounds must be a Bounds declaration")
     _validate_record(record)
-    from ..dataflow_record_frames import encode_document
+    from demiflow.execution.contracts.record_codec import encode_document
     raw = encode_document(record, bounds)
     return EncodedRecord(record_id=record.record_id, encoding=RECORD_ENCODING, data=raw,
                          ref=None, encoded_bytes=len(raw),
@@ -148,7 +144,8 @@ def resolve_record(encoded, *, store, bounds):
         _fail("INVALID_CONTRACT", "bounds must be a Bounds declaration")
     if encoded.encoding != RECORD_ENCODING:
         _fail("INVALID_CONTRACT", "unsupported record encoding")
-    from ..dataflow_record_frames import document_limit, decode_document, read_document
+    from demiflow.execution.contracts.record_codec import document_limit, decode_document
+    from demiflow.execution.storage.streams import read_document
     if encoded.decoded_upper_bytes > document_limit(bounds):
         _fail("BUDGET_EXCEEDED", "decoded record exceeds the row byte budget")
     # EncodedRecord owns exactly one *transfer document*: inline bytes or a
@@ -165,7 +162,7 @@ def resolve_record(encoded, *, store, bounds):
     _validate_artifact_ref(ref, "record payload ref")
     if ref.store_id != store.store_id:
         _fail("INVALID_CONTRACT", "record ref belongs to a different store domain")
-    from ..arrow_payload import is_arrow_record, batch_cache
+    from demiflow.execution.arrow_payload import is_arrow_record, batch_cache
     if is_arrow_record(skeleton):
         batch_cache(store, bounds).locate(skeleton)
         return skeleton
@@ -203,7 +200,7 @@ def route_record(record, *, spec, state):
     return _routed_records(record, spec=spec, ordinal=ordinal, window=window)
 
 
-def _route_record_document(record, *, spec, state, bounds, services=None, retained=0):
+def _route_record_document(record, *, spec, state, bounds, resident_bytes=None, retained=0):
     """One authenticated payload encoding for routing and worker publication.
 
     The payload channel window and the full document row bound are distinct.
@@ -215,8 +212,8 @@ def _route_record_document(record, *, spec, state, bounds, services=None, retain
     _, window = _route_context(record, spec=spec, state=state, advance=False, validate=False)
     if record.payload_ref is not None and record.encoded_bytes > window:
         _fail("BUDGET_EXCEEDED", "record exceeds the channel byte window")
-    from ..dataflow_record_frames import encode_document
-    raw = encode_document(record, bounds, payload_limit=window, services=services, retained=retained)
+    from demiflow.execution.contracts.record_codec import encode_document
+    raw = encode_document(record, bounds, payload_limit=window, resident_bytes=resident_bytes, retained=retained)
     # Codec admission can wait for original peer ACKs. A refused/retried
     # workspace must not consume a routing ordinal or change delivery identity.
     ordinal = state.next_ordinal(spec.channel_id)

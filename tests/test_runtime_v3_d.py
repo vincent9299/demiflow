@@ -725,7 +725,7 @@ def make_physical(action_id, graph, store, *, partitions=("p0", "p1"), with_sour
 def make_record(index, row, bounds):
     body = {"record_id": identity(["rec", index]), "source_position": {"split": "split-p0", "row": index},
             "sequence": index, "inline": row, "payload_ref": None}
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     raw = _encode_payload(row, max_bytes=bounds.max_row_bytes)
     return Record(record_id=body["record_id"], source_position=body["source_position"],
                   payload_ref=None, inline=row, encoded_bytes=len(raw), sequence=index)

@@ -3,6 +3,7 @@
 Only this versioned MIME changes ref payload interpretation. Old row bytes,
 identity, source positions and commit/cursor authorities remain unchanged.
 """
+from demiflow.execution.contracts.record_codec import ARROW_BATCH_MEDIA, ARROW_MEDIA_TYPES, MAPPED_ARROW_MEDIA
 from dataclasses import dataclass
 import re
 import hashlib
@@ -10,11 +11,11 @@ import json
 import struct
 import threading
 
-from .contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
-ARROW_BATCH_MEDIA = 'application/vnd.demiflow.arrow-batch.v1'
-MAPPED_ARROW_MEDIA = 'application/vnd.demiflow.mapped-arrow-batch.v1'
-ARROW_MEDIA_TYPES = frozenset({ARROW_BATCH_MEDIA, MAPPED_ARROW_MEDIA})
+
+
+
 _MAGIC = b'DFARROW1'
 _HEADER = struct.Struct('!I')
 _MAX_ROWS = 256
@@ -149,7 +150,7 @@ def publish_batch(batch, *, reader, fragment_id, start):
     allocation is additionally constrained by its existing row/batch admission.
     """
     import pyarrow as pa
-    from .record_schema import encode_schema
+    from demiflow.execution.record_schema import encode_schema
     bounds, services = reader._services.bounds, reader._services
     if not 0 < batch.num_rows <= _MAX_ROWS or batch.get_total_buffer_size() > _window(bounds, services):
         return None
@@ -177,9 +178,9 @@ def publish_batch(batch, *, reader, fragment_id, start):
     # both the original transfer and terminal/pending frame before publishing
     # any batch artifact. The dummy digest/key have the original store's fixed
     # 64-hex shape; maximum offset/sequence/bytes conservatively bound this batch.
-    from .contracts.dataflow import ArtifactRef, Record
-    from .exchange.dataflow_bridge import _encode_record_document
-    from .recovery_contract import document, RecoveryContractError
+    from demiflow.execution.contracts.dataflow import ArtifactRef, Record
+    from demiflow.execution.contracts.record_codec import _encode_record_document
+    from demiflow.execution.recovery_contract import document, RecoveryContractError
     position = dict(version=reader._version, fragment_id=fragment_id,
                     row_offset=start + batch.num_rows - 1)
     probe = Record('0'*64, position,
@@ -205,8 +206,8 @@ _UTF8_STRING_ESCAPE = re.compile(rb'["\\\x00-\x1f]')
 def mapped_row_bytes(batch, index, maximum):
     """Exact tagged-row size for Arrow outputs, without constructing a row or copying its binary values."""
     import pyarrow as pa
-    from .dataflow_record_frames import _string_size as json_string_size, _typed_shape as typed_shape
-    from .exchange.dataflow_bridge import _MAX_DEPTH, _MAX_NODES
+    from demiflow.execution.contracts.record_codec import _string_size as json_string_size, _typed_shape as typed_shape
+    from demiflow.execution.contracts.record_codec import _MAX_DEPTH, _MAX_NODES
     count = 1
     def value_size(value, depth):
         nonlocal count
@@ -244,8 +245,8 @@ def mapped_row_bytes(batch, index, maximum):
 
 
 def mapped_member(record_id, position):
-    from .contracts.dataflow_codec import _thaw_json as thaw_control_json
-    from .recovery_contract import identity
+    from demiflow.execution.contracts.dataflow_codec import _thaw_json as thaw_control_json
+    from demiflow.execution.recovery_contract import identity
     return identity([record_id, thaw_control_json(position)])
 
 
@@ -270,9 +271,9 @@ def store_mapped_arrow(batch, bindings, schema_ref, services, *, retained_bytes)
     """Authenticate output occurrences sharing an IPC artifact; None selects typed rows."""
     import json
     import pyarrow as pa
-    from .contracts.dataflow import ArtifactRef, Record
-    from .contracts.dataflow_codec import _thaw_json as thaw_control_json
-    from .exchange.dataflow_bridge import _encode_record_document as encode_record_document
+    from demiflow.execution.contracts.dataflow import ArtifactRef, Record
+    from demiflow.execution.contracts.dataflow_codec import _thaw_json as thaw_control_json
+    from demiflow.execution.contracts.record_codec import _encode_record_document as encode_record_document
     bounds = services.bounds
     window = _window(bounds, services)
     sizes = []
@@ -310,7 +311,7 @@ def store_mapped_arrow(batch, bindings, schema_ref, services, *, retained_bytes)
 def publish_source_rows(batch, *, reader, position_at, retained_bytes):
     """Share fixed-source columns under the original per-record identities and cursors."""
     from types import SimpleNamespace
-    from .recovery_contract import identity
+    from demiflow.execution.recovery_contract import identity
     offset = 0
     while offset < batch.num_rows:
         reader._services.check_stop()
@@ -483,8 +484,8 @@ class ArrowBatchCache:
                     or type(pos.get('row_offset')) is not int):
                 _fail('Arrow record source position differs from batch binding')
             index = pos['row_offset'] - header['start']
-            from .recovery_contract import identity
-            from .contracts.dataflow_codec import _thaw_json as thaw_control_json
+            from demiflow.execution.recovery_contract import identity
+            from demiflow.execution.contracts.dataflow_codec import _thaw_json as thaw_control_json
             if identity([header['source_id'], header['split_id'], thaw_control_json(pos)]) != record.record_id:
                 _fail('Arrow record identity differs from its original source occurrence')
         if not 0 <= index < header['count'] or record.encoded_bytes != header['sizes'][index]:

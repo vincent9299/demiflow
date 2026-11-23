@@ -3,6 +3,7 @@
 Only the control transport is in-process. Seals, assignments, codecs, kernels,
 artifact grants and cleanup use their original implementation.
 """
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import copy_context
@@ -244,16 +245,16 @@ def test_cancel_inside_intermediate_sort_merge_stops_before_next_spill_frame(tmp
 
 
 def test_finite_credit_retry_checks_cancel_but_native_port_keeps_original_guard(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_record_frames import admit_workspace, resident_limit
+    from demiflow.execution.contracts.record_codec import admit_workspace, resident_limit
     with _join_worker(tmp_path) as item:
         runner = item.worker._runner
         held = runner._peer.put(b'x' * 4096)
         requests, sizes = [], []
-        def measure(bounds, *, services, retained):
+        def measure(bounds, *, resident_bytes, retained):
             requests.append(retained)
             if not sizes:
-                sizes.append(resident_limit(bounds, services) - retained + 2048)
-            return admit_workspace(sizes[0], bounds, services=services, retained=retained)
+                sizes.append(resident_limit(bounds, stage_resident_bytes(getattr(services, 'assignment', None))) - retained + 2048)
+            return admit_workspace(sizes[0], bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained)
         original_wait = runner._condition.wait
         def cancel_at_original_credit_wait(timeout):
             item.worker.cancel('cancel finite peer-credit wait', deadline_ms=100)

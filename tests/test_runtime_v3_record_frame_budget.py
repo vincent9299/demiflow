@@ -1,3 +1,5 @@
+from demiflow.execution.contracts import record_codec
+from demiflow.execution.storage.streams import read_document
 """Payload limits do not charge provenance and JSON escaping as business data."""
 import math
 import hashlib
@@ -7,11 +9,11 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+from demiflow.execution.contracts.record_codec import _encode_payload
 from demiflow.execution.contracts.dataflow import Record, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.recovery_contract import identity, document
-from demiflow.execution import dataflow_record_frames as frames
+from demiflow.execution.contracts import record_codec as frames
 from test_runtime_v3_c import bounds
 
 
@@ -43,7 +45,7 @@ def test_real_small_budget_typed_rows_keep_payload_bound(tmp_path):
 @pytest.mark.parametrize('value', ['"\\' * 960, 'x' * 3950, ('a', b'\x00\xff', -0.0),
                                   {'list':[1, None, True], 'tuple':(2,3)}, '测试🙂' * 300])
 def test_old_document_and_line_bytes_remain_identical_and_payload_measured(value):
-    from demiflow.execution.exchange.dataflow_bridge import _encode_record_document, _decode_record_document
+    from demiflow.execution.contracts.record_codec import _encode_record_document, _decode_record_document
     rec = _record({'value':value}, {'source':'s', 'offset':12})
     b = bounds(max_row_bytes=4096, max_control_bytes=8192, max_resident_bytes=256*1024)
     old = _encode_record_document(rec, max_bytes=65536)
@@ -72,7 +74,7 @@ def test_encode_rejects_before_building_document(monkeypatch, damage):
         if damage == 'spoofed_size': rec = replace(rec, encoded_bytes=1)
     elif damage == 'metadata': rec = replace(rec, source_position={'huge':'x'*2048})
     else: b = replace(b, max_resident_bytes=128)
-    monkeypatch.setattr(codec, '_encode_record_document', lambda *a, **k: pytest.fail('unsafe codec allocation occurred'))
+    monkeypatch.setattr(record_codec, '_encode_record_document', lambda *a, **k: pytest.fail('unsafe codec allocation occurred'))
     with pytest.raises(DataflowError, match='budget|bound'):
         frames.encode_document(rec, b)
 
@@ -80,14 +82,14 @@ def test_encode_rejects_before_building_document(monkeypatch, damage):
 def test_decoder_separates_document_and_actual_payload_and_admits_before_parse(monkeypatch):
     from demiflow.execution.exchange import dataflow_bridge as codec
     rec = _record({'value':'x'*4050})
-    raw = codec._encode_record_document(rec, max_bytes=65536)
+    raw = record_codec._encode_record_document(rec, max_bytes=65536)
     b = bounds(max_row_bytes=4096, max_resident_bytes=65536)
     assert len(raw) > 4096 and rec.encoded_bytes == 4096
     assert frames.decode_document(raw, record_id=rec.record_id, sequence=0, bounds=b) == rec
     bad = raw.replace(b'"eb":' + str(rec.encoded_bytes).encode(), b'"eb":1')
     with pytest.raises(DataflowError, match='size mismatch'):
         frames.decode_document(bad, record_id=rec.record_id, sequence=0, bounds=b)
-    monkeypatch.setattr(codec, '_codec_loads', lambda *a, **k: pytest.fail('parse before resident admission'))
+    monkeypatch.setattr(record_codec, '_codec_loads', lambda *a, **k: pytest.fail('parse before resident admission'))
     with pytest.raises(DataflowError, match='workspace'):
         frames.decode_document(raw, record_id=rec.record_id, sequence=0, bounds=replace(b, max_resident_bytes=len(raw)+1))
 
@@ -237,20 +239,20 @@ def test_binary_codec_workspace_covers_decode_and_canonical_copies(monkeypatch):
     for value in (b'x'*20000, np.arange(20000,dtype=np.uint8), 'x'*20000,
                   (b'x'*20000, 'y'*10000)):
         record = _record({'value':value})
-        raw = codec._encode_record_document(record, max_bytes=1024*1024)
+        raw = record_codec._encode_record_document(record, max_bytes=1024*1024)
         kwargs = dict(record_id=record.record_id, sequence=0, max_bytes=1024*1024,
                       payload_max_bytes=1024*1024, metadata_max_bytes=1024*1024)
-        codec._decode_record_document(raw, **kwargs)  # Warm imports, outside accounting.
+        record_codec._decode_record_document(raw, **kwargs)  # Warm imports, outside accounting.
         tracemalloc.start()
         try:
-            codec._decode_record_document(raw, **kwargs)
+            record_codec._decode_record_document(raw, **kwargs)
             _, peak = tracemalloc.get_traced_memory()
         finally: tracemalloc.stop()
         assert peak + len(raw) <= frames.raw_workspace(raw)
         old_grant = 3*len(raw) + 1024
         b = bounds(max_row_bytes=65536, max_resident_bytes=old_grant)
         with monkeypatch.context() as patch:
-            patch.setattr(codec, '_codec_loads', lambda *a,**k: pytest.fail('parse before admission'))
+            patch.setattr(record_codec, '_codec_loads', lambda *a,**k: pytest.fail('parse before admission'))
             with pytest.raises(DataflowError, match='workspace'):
                 frames.decode_document(raw, record_id=record.record_id, sequence=0,bounds=b)
 
@@ -263,7 +265,7 @@ def test_kernel_retained_credit_cannot_be_waited_away():
         _condition=threading.Condition(), _wake_generation=0, _peer=SimpleNamespace(_bytes=100),
         e=SimpleNamespace(_kernels={'one':SimpleNamespace(retained_resident_bytes=200)}))
     observed=[]
-    def blocked(*,services,retained):
+    def blocked(*,resident_bytes,retained):
         observed.append(retained)
         frames._admit(retained+100,250)
     with pytest.raises(DataflowError, match='workspace'):
@@ -274,7 +276,7 @@ def test_kernel_retained_credit_cannot_be_waited_away():
 def test_binary_preparse_charge_survives_noncanonical_field_order_and_tag_escapes():
     from demiflow.execution.exchange import dataflow_bridge as codec
     record = _record({'value':b'x'*20000})
-    raw = codec._encode_record_document(record, max_bytes=65536)
+    raw = record_codec._encode_record_document(record, max_bytes=65536)
     encoded = b'eHh4' * (20000 // 3) + b'eHg='
     leaf = b'{"t":"bytes","v":"' + encoded + b'"}'
     assert leaf in raw
@@ -284,7 +286,7 @@ def test_binary_preparse_charge_survives_noncanonical_field_order_and_tag_escape
     assert frames.raw_workspace(escaped) >= frames.raw_workspace(raw)
     # A two-byte binary leaf must not charge an unrelated wide escaped string
     # as a second base64 copy (same row/profile as the real materialize case).
-    mixed = codec._encode_record_document(_record(_rows()[0]), max_bytes=65536)
+    mixed = record_codec._encode_record_document(_record(_rows()[0]), max_bytes=65536)
     assert frames.raw_workspace(mixed) < 18432
 
 
@@ -301,8 +303,8 @@ def test_stored_document_read_admits_before_legacy_store_and_keeps_chunk_bound(m
             # Legacy protocol may return arbitrary fragmentation; helper does
             # not collect an unbounded list of tiny chunks.
             yield from (raw[index:index+1] for index in range(len(raw)))
-    assert frames.read_document(ref,Store(),b) == raw
+    assert read_document(ref,Store(),b) == raw
     assert len(calls) == 1
     with pytest.raises(DataflowError,match='workspace'):
-        frames.read_document(ref,Store(),replace(b,max_resident_bytes=len(raw)+1))
+        read_document(ref,Store(),replace(b,max_resident_bytes=len(raw)+1))
     assert len(calls) == 1

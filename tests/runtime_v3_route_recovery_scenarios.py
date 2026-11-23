@@ -141,7 +141,7 @@ def _recover(fx,name,build,*,eligible=None,workers=8,first_run=None,parked=False
         value=thaw_record_value(event.payload) if event.payload is not None else {}
         row=None
         if event.kind=='data':
-            from demiflow.execution.exchange.dataflow_bridge import _decode_record_document
+            from demiflow.execution.contracts.record_codec import _decode_record_document
             from demiflow.execution.contracts.dataflow import ArtifactRef
             if 'ref' in value:
                 raw=b''.join(execution._store.read(ArtifactRef(**value['ref']),max_bytes=execution._bounds.max_row_bytes))
@@ -294,7 +294,7 @@ def _assert_actual_routes(result):
         if spec['routing']=='hash':
             from demiflow.execution.exchange.dataflow_channels import _route_targets
             from demiflow.execution.contracts.dataflow import ExchangeSpec,Record
-            from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+            from demiflow.execution.contracts.record_codec import _encode_payload
             row=event['row'];encoded=_encode_payload(row,max_bytes=65536)
             record=Record(payload['record_id'],{},None,row,len(encoded),payload['sequence'])
             assert (consumer,)==_route_targets(record,spec=ExchangeSpec(**spec),

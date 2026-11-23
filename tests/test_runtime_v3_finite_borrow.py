@@ -17,7 +17,7 @@ from demiflow.execution.contracts.dataflow import Record, ProducerCompletion
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.worker.finite_input import validate_finite_members, borrowed_records
 from demiflow.execution.storage.segments import FINITE_RECORDS_MEDIA
-from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _encode_record_document
+from demiflow.execution.contracts.record_codec import _encode_payload, _encode_record_document
 from demiflow.execution.exchange.dataflow_channels import route_record, seal_scope
 from demiflow.execution.exchange.dataflow_state import RoutingCounters
 from demiflow.execution.kernels.operator import _SpoolPort
@@ -122,7 +122,7 @@ def test_old_owned_prefix_and_pending_snapshot_remain_readable_in_order(tmp_path
 
 @pytest.mark.parametrize('routing', ['forward', 'rebalance', 'broadcast', 'hash', 'target'])
 def test_canonical_finite_payload_cannot_bypass_provenance_validation(tmp_path, routing):
-    from demiflow.execution.exchange.dataflow_bridge import _codec_dumps
+    from demiflow.execution.contracts.record_codec import _codec_dumps
     with store_fixture(tmp_path) as (_, store, _):
         svc, spec = fixture(store, routing=routing)
         def edit(part, items):

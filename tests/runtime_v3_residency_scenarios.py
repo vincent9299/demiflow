@@ -401,7 +401,7 @@ def _channel_recovery(fx):
     from demiflow.execution.contracts.dataflow import Record, ExchangeSpec, CutRequest
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.exchange import dataflow_channels as channels
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     from demiflow.execution.recovery_contract import identity
     from test_runtime_v3_artifact_accounting import store_fixture
     cases=[]

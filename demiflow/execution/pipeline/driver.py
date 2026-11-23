@@ -1,6 +1,6 @@
 """Pipeline Driver shared by Local subprocess and Ray Job execution."""
 from __future__ import annotations
-from demiflow.execution.pipeline.package_loader import verify_bundle
+
 
 import argparse
 import importlib
@@ -18,7 +18,7 @@ from demiflow._compat.observability import setup_logging
 
 from demiflow.operator_llm import load_referenced_prompt_packs, required_environment
 from demiflow.pipeline import Pipeline, discover_pipeline_definition
-from demiflow.execution.contracts import PipelineBundleRef
+from demiflow.execution.pipeline.package_loader import PipelineBundleRef
 from demiflow.planning.policy import BUILT_IN_RULE_VERSION, parse_platform_planning_policy
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.pipeline.package_loader import load_bundle_packages
@@ -103,7 +103,7 @@ def execute_driver(request: PipelineDriverRequest) -> None:
         root=str(bundle_root), content_digest=request.bundle.content_digest,
         runtime_abi=request.bundle.runtime_abi,
     )
-    verify_bundle(bundle)
+    bundle.verify()
     definition = discover_pipeline_definition(bundle_root)
     policy=parse_platform_planning_policy(request.planning_policy)
     if policy.digest != request.planning_policy_digest:

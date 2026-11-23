@@ -82,7 +82,7 @@ def test_upstream_continues_before_commit_and_snapshot_is_detached(tmp_path, mon
                 max_bytes=execution._bounds.max_control_bytes)))
             reader = PublishedRecordReader(publication, store=execution._store, bounds=execution._bounds)
             rows = []
-            from demiflow.execution.exchange.dataflow_bridge import _decode_record_document
+            from demiflow.execution.contracts.record_codec import _decode_record_document
             try:
                 while True:
                     raw, record_id, sequence, _ = reader.pop()

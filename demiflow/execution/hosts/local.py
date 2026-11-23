@@ -1,6 +1,6 @@
 """Local isolated-process PipelineBackend."""
 from __future__ import annotations
-from demiflow.execution.pipeline.package_loader import verify_bundle
+
 
 import json
 import math
@@ -64,7 +64,7 @@ class LocalPipelineBackend:
         cancellation=None, observer=None,
     ) -> PipelineRunResult:
         started = time.monotonic()
-        verify_bundle(request.bundle)
+        request.bundle.verify()
         definition = discover_pipeline_definition(Path(request.bundle.root))
         execution = definition.execution
         if request.target.backend != self.TYPE:

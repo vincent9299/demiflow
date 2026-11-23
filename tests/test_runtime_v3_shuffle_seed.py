@@ -41,7 +41,7 @@ def test_seed_repeats_union_flatmap_multiplicity_despite_input_order(tmp_path):
 
 def _record(row, index, action='a', *, max_bytes=4096):
     from demiflow.execution.contracts.dataflow import Record
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     return Record(hashlib.sha256(f'{action}:{index}'.encode()).hexdigest(),
         {'source': action, 'ordinal': index}, None, row,
         len(_encode_payload(row, max_bytes=max_bytes)), index)
@@ -111,7 +111,7 @@ def test_low_window_real_store_spills_twice_and_closes_every_reader(tmp_path, mo
 def test_duplicate_record_identity_order_survives_reordered_delivery(tmp_path):
     import random
     from demiflow.execution.kernels.shuffle_order import seeded_shuffle
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     from test_runtime_v3_artifact_accounting import store_fixture
     records = [_record({'v': i % 3}, i) for i in range(90)]
     # Distinct provenance also disambiguates a forwarded record-id collision.
@@ -418,7 +418,7 @@ def test_typed_codec_values_and_mapping_order_contract(tmp_path):
     from decimal import Decimal
     import numpy as np
     from demiflow.execution.kernels.shuffle_order import seeded_shuffle
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     from test_runtime_v3_artifact_accounting import store_fixture
     rows = [{'v': value} for value in (None, True, 1, 1.0, -0.0, float('nan'), float('inf'),
             b'\x00data', (1, 'x'), [1, 'x'], {1, 2}, frozenset({1, 2}), Decimal('1.20'),

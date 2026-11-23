@@ -4,13 +4,15 @@ Small/old ItemsSource programs keep their original carrier. New large sources
 retain the historical protocol-4 identity and use the original store, segment
 index, typed row codec and source index cursor. No independent recovery ledger.
 """
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 from dataclasses import dataclass, asdict
 import hashlib
 import pickle
 
 from demiflow.execution.contracts.dataflow import ArtifactRef, Record, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_record_frames import admit_workspace, metadata_bytes, read_document, decode_metadata, decode_frame, decode_document, frame_parts, frame_stream, read_chunk_bytes, line_limit, _typed_shape, _json_shape
+from demiflow.execution.contracts.record_codec import admit_workspace, metadata_bytes, decode_metadata, decode_frame, decode_document, frame_parts, read_chunk_bytes, line_limit, _typed_shape, _json_shape
+from demiflow.execution.storage.streams import read_document, frame_stream
 from demiflow.execution.storage.segments import SegmentForest, RECORDS_MEDIA, SEGMENTS_MEDIA, range_segments, block_totals
 from demiflow.execution.recovery_contract import document, identity
 
@@ -180,7 +182,7 @@ class LiteralRows:
 
     def _chunks(self, ref):
         bounds, store = self.services.bounds, self.services.store
-        width = read_chunk_bytes(bounds, self.services)
+        width = read_chunk_bytes(bounds, stage_resident_bytes(getattr(self.services, 'assignment', None)))
         # Authenticate the immutable leaf before exposing any business input.
         for expose in (False, True):
             chunks = store.read(ref, max_bytes=max(1, ref.size_bytes), chunk_bytes=width)
@@ -212,7 +214,7 @@ class LiteralRows:
                     except StopIteration as exc:
                         raise DataflowError('SOURCE_CHANGED', 'literal source ended before its sealed row count') from exc
                     self._segment_index, self._segment_end = start, start + rows
-                    self._stream = frame_stream(self._chunks(ref), bounds, services=self.services,
+                    self._stream = frame_stream(self._chunks(ref), bounds, resident_bytes=stage_resident_bytes(getattr(self.services, 'assignment', None)),
                         check_workspace=lambda size: self._call(admit_workspace, size, bounds, growth=True))
                 line = self._stream.readline(line_limit(bounds))
                 if not line:

@@ -1,10 +1,12 @@
 """Pure, side-effect-free readiness inspection for one Pipeline bundle."""
 from __future__ import annotations
-from demiflow.execution.hosts.python_environment import verify_environment_artifacts
-from demiflow.execution.pipeline.package_loader import verify_bundle
+
+
 import importlib.util
 from typing import Mapping
-from demiflow.execution.contracts import PipelineBundleRef, PipelineExecutionEnvironment, PipelineRunReadiness
+from demiflow.execution.pipeline.package_loader import PipelineBundleRef
+from demiflow.execution.hosts.python_environment import PipelineExecutionEnvironment
+from demiflow.execution.contracts import PipelineRunReadiness
 from demiflow.execution.contracts.target import PipelineExecutionTarget
 from demiflow.execution.hosts.environment import missing_required_environment_names, prompt_environment_names
 from demiflow.execution.requirements import read_candidate_requirements
@@ -12,11 +14,11 @@ from demiflow.execution.hosts.python_environment import inspect_local_environmen
 from demiflow.pipeline import discover_pipeline_definition
 
 def inspect_pipeline_run_readiness(bundle: PipelineBundleRef, execution_environment: PipelineExecutionEnvironment, target: PipelineExecutionTarget, *, environment: Mapping[str, str] | None = None) -> PipelineRunReadiness:
-    root = verify_bundle(bundle)
+    root = bundle.verify()
     definition = discover_pipeline_definition(root)
     requirements = read_candidate_requirements(root)
     issues=[]
-    try: verify_environment_artifacts(execution_environment)
+    try: execution_environment.verify_artifacts()
     except (OSError, ValueError): issues.append("platform_runtime_unavailable")
     required=prompt_environment_names(root)
     missing=missing_required_environment_names(required, environment)

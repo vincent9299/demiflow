@@ -9,10 +9,10 @@ from pathlib import Path
 import pytest
 
 import demiflow
-from demiflow.execution import dataflow_record_frames as frames
+from demiflow.execution.contracts import record_codec as frames
 from demiflow.execution.contracts.dataflow import ArtifactRef, Record, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _encode_record_document
+from demiflow.execution.contracts.record_codec import _encode_payload, _encode_record_document
 from demiflow.execution.record_schema import SCHEMA_MEDIA_TYPE
 from demiflow.execution.recovery_contract import document
 from test_runtime_v3_c import bounds
@@ -71,7 +71,7 @@ def test_native_decode_preserves_original_typed_document_and_metadata(monkeypatc
 def test_conservative_native_peak_falls_back_without_rejecting_small_original_grant(resident):
     record, raw, metadata, line = fixture('x' * 7600, finite=True)
     b = bounds(max_row_bytes=8192, max_control_bytes=2048, max_resident_bytes=resident)
-    assert frames._decode_native_outer(line, b, services=None, retained=0, finite=True) is None
+    assert frames._decode_native_outer(line, b, resident_bytes=None, retained=0, finite=True) is None
     decoded, fields = frames.decode_frame(line, b, finite=True)
     assert (decoded, fields) == (raw, metadata)
     restored = frames.decode_document(decoded, record_id=record.record_id,
@@ -83,7 +83,7 @@ def test_existing_owners_are_charged_before_native_json_allocation(monkeypatch):
     _, _, _, line = fixture(b'a' * 4096, finite=True)
     b = bounds(max_row_bytes=8192, max_control_bytes=2048, max_resident_bytes=1024 * 1024)
     monkeypatch.setattr(frames.json, 'loads', lambda *args, **kwargs: pytest.fail('parse before admission'))
-    assert frames._decode_native_outer(line, b, services=None,
+    assert frames._decode_native_outer(line, b, resident_bytes=None,
         retained=b.max_resident_bytes - len(line), finite=True) is None
     with pytest.raises(DataflowError, match='workspace'):
         frames.decode_frame(line, b, retained=b.max_resident_bytes - len(line), finite=True)
@@ -95,7 +95,7 @@ def test_tail_tree_peak_is_admitted_before_json_parsing(monkeypatch):
     line = b'{"document":"{}",' + json.dumps(tail, separators=(',', ':')).encode()[1:] + b'\n'
     b = bounds(max_row_bytes=8192, max_control_bytes=4096, max_resident_bytes=16000)
     monkeypatch.setattr(frames.json, 'loads', lambda *args, **kwargs: pytest.fail('metadata tree parsed before admission'))
-    assert frames._decode_native_outer(line, b, services=None, retained=0, finite=False) is None
+    assert frames._decode_native_outer(line, b, resident_bytes=None, retained=0, finite=False) is None
     with pytest.raises(DataflowError, match='workspace'):
         frames.decode_frame(line, b)
 
@@ -134,7 +134,7 @@ def test_other_valid_historical_outer_spellings_keep_original_reader(spelling):
     else:
         line = b' ' + line
     b = bounds(max_resident_bytes=1024 * 1024)
-    assert frames._decode_native_outer(line, b, services=None, retained=0, finite=True) is None
+    assert frames._decode_native_outer(line, b, resident_bytes=None, retained=0, finite=True) is None
     assert frames.decode_frame(line, b, finite=True) == (raw, metadata)
 
 

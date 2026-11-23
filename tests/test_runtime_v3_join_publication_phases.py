@@ -90,7 +90,8 @@ def test_original_wide_join_native_return_loss_reuses_acked_phases(tmp_path, mon
 
 def _finite_payloads(execution):
     from demiflow.execution.storage.segments import block_chunks
-    from demiflow.execution.dataflow_record_frames import frame_stream, decode_frame, decode_document, line_limit
+    from demiflow.execution.storage.streams import frame_stream
+    from demiflow.execution.contracts.record_codec import decode_frame, decode_document, line_limit
     result = []
     for channel, value in execution._finite_seals.items():
         ref = ArtifactRef(**value) if isinstance(value,dict) else value
@@ -145,7 +146,7 @@ def test_join_phase_ack_keeps_payload_roots_and_resumes_or_rejects_corruption(tm
     assert execution._published_gc['blocked'] is None and execution._published_gc['removed'] > 0
     assert not execution._store.inspect(first['orphan'])
     assert all(execution._store.inspect(r) for r in first['payloads'])
-    from demiflow.execution.exchange.dataflow_bridge import _decode_payload
+    from demiflow.execution.contracts.record_codec import _decode_payload
     raw = execution._store._object_path(first['payloads'][0]).read_bytes()
     value = _decode_payload(raw,max_bytes=limits['max_row_bytes'])
     if value['typed'] is not None:

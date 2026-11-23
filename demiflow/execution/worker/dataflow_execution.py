@@ -12,6 +12,7 @@ Upstream lane symbols are imported lazily at call time against their frozen
 signatures; no ImportError fallback or stub is provided.
 """
 from __future__ import annotations
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -611,9 +612,9 @@ def source_run_view(services, *, limits=None):
     limits = dict(limits or {})
     for name, value in (services.constants.get('native_limits') or {}).items():
         limits[name] = min(limits.get(name, value), value)
-    from demiflow.execution.dataflow_record_frames import resident_limit
+    from demiflow.execution.contracts.record_codec import resident_limit
     for name, bound in (
-        ('memory_bytes', resident_limit(services.bounds, services)),
+        ('memory_bytes', resident_limit(services.bounds, stage_resident_bytes(getattr(services, 'assignment', None)))),
         ('max_row_bytes', services.bounds.max_row_bytes),
         ('max_batch_bytes', services.bounds.max_batch_bytes),
     ):

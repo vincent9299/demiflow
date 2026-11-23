@@ -4,14 +4,16 @@ Only immutable references and consumed frame ordinals enter the existing worker
 frontier. The handoff ACK means the worker adopted those references, not that it
 consumed them. Output/actor state and this cursor commit in the same native cut.
 """
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 
 import json
 from demiflow.execution.contracts.dataflow import ArtifactRef, Record
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_handles import _ChunkStream
+from demiflow.execution.storage.streams import _ChunkStream
 from demiflow.execution.storage.segments import block_chunks, block_totals
-from demiflow.execution.exchange.dataflow_bridge import _validate_record, _decode_record_document
-from demiflow.execution.dataflow_record_frames import decode_frame, decode_document, admit_document, document_limit, line_limit, frame_stream, read_chunk_bytes, read_document, decode_metadata, admit_workspace, metadata_bytes
+from demiflow.execution.contracts.record_codec import _validate_record, _decode_record_document
+from demiflow.execution.contracts.record_codec import decode_frame, decode_document, admit_document, document_limit, line_limit, read_chunk_bytes, decode_metadata, admit_workspace, metadata_bytes
+from demiflow.execution.storage.streams import frame_stream, read_document
 import sys
 import time
 
@@ -102,7 +104,7 @@ class FiniteInputDrain:
         states = {**self._states, edge_id: state}
         members = {**self._entries, edge_id: entries}
         ceiling = _metadata_ceiling(states, members)
-        from demiflow.execution.dataflow_record_frames import _json_shape
+        from demiflow.execution.contracts.record_codec import _json_shape
         size, workspace = _json_shape(states, runner.bounds.max_state_bytes)
         # The original grant must also hold the new conservative ceiling.
         # Both old map containers survive until replacement; their children
@@ -172,9 +174,9 @@ class FiniteInputDrain:
                 self._active_entry = current
                 self._stream = frame_stream(block_chunks(runner.services.store,
                     entry['manifest_ref'], runner.bounds,
-                    chunk_bytes=read_chunk_bytes(runner.bounds, runner.services),
+                    chunk_bytes=read_chunk_bytes(runner.bounds, stage_resident_bytes(getattr(runner.services, 'assignment', None))),
                     frame_call=self._frame_call, on_retained=self._retain_index),
-                    runner.bounds, services=runner.services,
+                    runner.bounds, resident_bytes=stage_resident_bytes(getattr(runner.services, 'assignment', None)),
                     check_workspace=lambda size: self._frame_call(admit_workspace, size,
                         runner.bounds, _frame_reader_growth=True))
             line = self._stream.readline(line_limit(runner.bounds))
@@ -328,15 +330,15 @@ def _records(services, ref, spec, *, target, total_rows, total_bytes, project=No
         retained = _frame_retained + index_bytes[0] + held
         if frame_call is not None:
             return frame_call(function, *args, _frame_retained=retained, **kwargs)
-        return function(*args, services=services, retained=retained, **kwargs)
+        return function(*args, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained, **kwargs)
     def index_call(function, *args, _frame_retained=0, **kwargs):
         return call(function, *args, _frame_retained=(
             _frame_retained + (stream.buffered_bytes if stream is not None else 0)), **kwargs)
     stream = frame_stream(block_chunks(services.store, ref, services.bounds,
-        chunk_bytes=read_chunk_bytes(services.bounds, services),
+        chunk_bytes=read_chunk_bytes(services.bounds, stage_resident_bytes(getattr(services, 'assignment', None))),
         frame_call=index_call if frame_call is not None else None,
         on_retained=(lambda size: index_bytes.__setitem__(0, size)) if frame_call is not None else None),
-        services.bounds, services=services,
+        services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)),
         check_workspace=(lambda size: call(admit_workspace, size, services.bounds))
                         if frame_call is not None else None)
     consumers = spec.consumer_partitions
@@ -370,10 +372,10 @@ def _records(services, ref, spec, *, target, total_rows, total_bytes, project=No
             if record.payload_ref is not None:
                 # Authenticate an existing external row too, without retaining
                 # another payload copy or taking over its original ownership.
-                chunk_bytes = read_chunk_bytes(services.bounds, services)
+                chunk_bytes = read_chunk_bytes(services.bounds, stage_resident_bytes(getattr(services, 'assignment', None)))
                 # Authenticate external bytes in small pieces; grant their
                 # read buffers before advancing the original store iterator.
-                from demiflow.execution.dataflow_record_frames import raw_workspace
+                from demiflow.execution.contracts.record_codec import raw_workspace
                 if frame_call is not None:
                     call(admit_workspace, raw_workspace(raw) + 2 * chunk_bytes,
                          services.bounds, _frame_retained=retained)

@@ -9,21 +9,17 @@ the single native ``CommitCoordinator`` (D004); ``ack_source_claims`` only verif
 the native finalize fact and never issues a second ACK (C08/C16).
 """
 from __future__ import annotations
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 
 import hashlib
 import json
 from collections.abc import Mapping
 
-from ..data.datasink import Datasink, WriteContext
-from .contracts.dataflow import (
-    FIXED_SCAN_BATCHES,
-    ArtifactRef, DriverServices, KernelSpec, Record, RecoveryImage, RuntimeServices,
-)
-from .contracts.dataflow_errors import DataflowError
-from .recovery_contract import (
-    RecoveryContractError, UnresolvedCommit, document, identifier, identity,
-)
-from .run_context import RunAction
+from demiflow.data.datasink import Datasink, WriteContext
+from demiflow.execution.contracts.dataflow import FIXED_SCAN_BATCHES, ArtifactRef, DriverServices, KernelSpec, Record, RecoveryImage, RuntimeServices
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identifier, identity
+from demiflow.execution.run_context import RunAction
 from demiflow.execution.storage.state_artifacts import atomic_bytes
 
 RECORDS_MEDIA = "application/x-demiflow-records-v3"
@@ -102,7 +98,7 @@ def make_sink_adapter(spec: KernelSpec, *, services: DriverServices) -> Datasink
     if type(sink_id) is not str:
         raise DataflowError("INVALID_CONTRACT", "Sink id must be a string")
     identifier(sink_id)
-    from .contracts.dataflow import thaw_record_value
+    from demiflow.execution.contracts.dataflow import thaw_record_value
     pure = thaw_record_value({k: v for k, v in config.items() if k not in {"sink", "datasink"}})
     try:
         document(pure)
@@ -247,9 +243,9 @@ def _partition_id(spec: KernelSpec, services: RuntimeServices) -> str:
 
 
 def _encode_record(record: Record, bounds, *, services=None, retained=0) -> bytes:
-    from .dataflow_record_frames import encode_frame
+    from demiflow.execution.contracts.record_codec import encode_frame
     # Preserve the original no-newline helper contract and exact JSON bytes.
-    return encode_frame(record, bounds, services=services, retained=retained)[:-1]
+    return encode_frame(record, bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained)[:-1]
 
 
 def _manifest_non_mapping_values(manifest):
@@ -309,7 +305,7 @@ def combine_prepared_sinks(refs, *, sink_id: str, services: DriverServices):
         raise DataflowError("BUDGET_EXCEEDED", "Prepared sink partition count exceeds budget")
     partitions, seen = {}, set()
     total_rows, total_bytes, columns = 0, 0, None
-    from .record_schema import RecordSchemas
+    from demiflow.execution.record_schema import RecordSchemas
     schemas = RecordSchemas(services)
     schema_ref, declared_schema = None, None
     non_mapping_values = column_drift = schema_drift = False
@@ -350,7 +346,7 @@ def combine_prepared_sinks(refs, *, sink_id: str, services: DriverServices):
             entry = {'partition_id': pid, 'rows': part['rows'], 'bytes': part['bytes'],
                      'data_ref': part['data_ref'], 'scalar': manifest.get('scalar')}
             if 'block_partition' in part:
-                from .contracts.dataflow import BlockPartition
+                from demiflow.execution.contracts.dataflow import BlockPartition
                 tag = BlockPartition(**part['block_partition'])
                 if tag.count > bounds.max_partitions:
                     raise DataflowError('BUDGET_EXCEEDED', 'logical partition count exceeds bound')
@@ -386,7 +382,7 @@ def ack_source_claims(image: RecoveryImage, *, action: RunAction) -> None:
     """
     if not isinstance(image, RecoveryImage):
         raise DataflowError("INVALID_CONTRACT", "ack_source_claims requires a RecoveryImage")
-    from .checkpoint.coordinator import source_vector_position
+    from demiflow.execution.checkpoint.coordinator import source_vector_position
     journal = action.context.journal
     fact = journal.execution_commit(image.commit_id)
     if fact is None or fact["action_id"] != action.action_id:
@@ -406,14 +402,13 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
     import contextlib
     import itertools
     import pyarrow as pa
-    from .exchange.dataflow_bridge import _decode_payload
-    from .dataflow_record_frames import (decode_frame, decode_document, line_limit, frame_stream,
-        read_chunk_bytes, admit_workspace, metadata_bytes, read_document, raw_workspace,
-        _typed_shape, _json_shape)
-    from .contracts.dataflow import thaw_record_value
-    from .record_schema import RecordSchemas
-    from .arrow_payload import ArrowBatchCache, is_arrow_record
-    from ..data.runtime_contract import check_size
+    from demiflow.execution.contracts.record_codec import _decode_payload
+    from demiflow.execution.contracts.record_codec import decode_frame, decode_document, line_limit, read_chunk_bytes, admit_workspace, metadata_bytes, raw_workspace, _typed_shape, _json_shape
+    from demiflow.execution.storage.streams import frame_stream, read_document
+    from demiflow.execution.contracts.dataflow import thaw_record_value
+    from demiflow.execution.record_schema import RecordSchemas
+    from demiflow.execution.arrow_payload import ArrowBatchCache, is_arrow_record
+    from demiflow.data.runtime_contract import check_size
     schemas = RecordSchemas(store=store, bounds=bounds)
     arrow = ArrowBatchCache(store, bounds)
     pending = stream = None
@@ -445,7 +440,7 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
         index_bytes = value
 
     def table():
-        from .batch_conversion import admit_batch_conversion, native_arrow_table, native_writer_workspace
+        from demiflow.execution.batch_conversion import admit_batch_conversion, native_arrow_table, native_writer_workspace
         writer_window = []
         reserved = (held() - batch_resident + stream.buffered_bytes + (0 if publication_metadata else 65536)
                     if publication_workspace else 0)
@@ -471,7 +466,7 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
         if publication_workspace:
             # The cache already owns the retained parent. Writer copies
             # and the caller's previous yielded batch share this grant.
-            from .batch_conversion import native_writer_workspace
+            from demiflow.execution.batch_conversion import native_writer_workspace
             overhead = native_writer_workspace(value.schema, bounds) if publication_metadata else 65536
             if publication_metadata:
                 overhead += sum(64*len(chunk.buffers()) for column in value.columns for chunk in column.chunks)
@@ -486,7 +481,7 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
             ref = _artifact_from_json(partition['data_ref'])
             from demiflow.execution.storage.segments import ARROW_STREAM_MEDIA, block_chunks, range_segments
             if fixed_scan_batches and partition['rows']:
-                from .arrow_payload import _uncompressed_ipc
+                from demiflow.execution.arrow_payload import _uncompressed_ipc
                 leaves = range_segments(store, ref, bounds, start=0, end=partition['rows'],
                     frame_call=index_call if publication_workspace else None, on_retained=retain_index)
                 with contextlib.closing(leaves):
@@ -661,7 +656,7 @@ class NativeTerminalSink(_DataflowArtifactSink):
                 max_resident_bytes=min(self._bounds.max_resident_bytes, self._publication_workspace))
 
     def _native_scope(self):
-        from .payload_limits import payload_scope
+        from demiflow.execution.payload_limits import payload_scope
         limits = dict(self._native_limits, memory_bytes=self._bounds.max_resident_bytes,
                       max_row_bytes=self._bounds.max_row_bytes,
                       max_batch_bytes=self._bounds.max_batch_bytes, batch_rows=self._batch_rows)
@@ -763,21 +758,21 @@ def make_native_terminal_sink(spec, *, request, services, publication_reserved_b
             raise DataflowError('INVALID_CONTRACT', 'native publication workspace lacks sealed residency reservation')
     if request.kind == 'write_lance':
         from demiflow.execution.outputs.lance_sink import LanceSink
-        from ..lance.model import LanceWriteSpec
+        from demiflow.lance.model import LanceWriteSpec
         declaration = next((p.value for p in request.programs if p.name == 'write_lance'), None)
         if not isinstance(declaration, LanceWriteSpec):
             raise DataflowError('INVALID_CONTRACT', 'write_lance requires its sealed LanceWriteSpec')
         if declaration.expected_version is not None and not services.action.replaying:
-            from ..lance.storage import inspect_lance
-            from ..errors import LanceWriteConflict
+            from demiflow.lance.storage import inspect_lance
+            from demiflow.errors import LanceWriteConflict
             current = inspect_lance(declaration.uri, None, declaration.storage_options)
             if current.resolved_version != declaration.expected_version:
                 raise LanceWriteConflict('Lance CAS baseline changed before source execution')
         # Historical final ACKs are inspected at their original committed
         # version. A later destination head must not reject that replay.
         # Native prepare and commit still enforce the actual publication CAS.
-        from ..data.sources import LanceSource
-        from ..lance.model import LanceScanSpec
+        from demiflow.data.sources import LanceSource
+        from demiflow.lance.model import LanceScanSpec
         # The sealed request identifies an exact scan; its already staged
         # output supplies the count. Never rescan source data during commit.
         # Unknown/transformed/filtered streams retain the existing auto mode.
@@ -787,8 +782,8 @@ def make_native_terminal_sink(spec, *, request, services, publication_reserved_b
             and not request.plan.operations)
         native = LanceSink(services.action, declaration, exact_merge_source=exact_merge_source)
         if declaration.mode == 'create':
-            from ..lance.storage import inspect_lance
-            from ..errors import LanceResourceNotFound, LanceWriteConflict
+            from demiflow.lance.storage import inspect_lance
+            from demiflow.errors import LanceResourceNotFound, LanceWriteConflict
             action = services.action
             # Before any model call, retain the same absent-target admission
             # fact used by workbench recovery. Actual prepare still checks CAS.
@@ -796,11 +791,11 @@ def make_native_terminal_sink(spec, *, request, services, publication_reserved_b
                 try:
                     inspect_lance(declaration.uri, None, declaration.storage_options)
                 except LanceResourceNotFound:
-                    from .run_context import create_target_absent_binding
+                    from demiflow.execution.run_context import create_target_absent_binding
                     view = action.context.journal.execution_view(detail='summary', action_ids=[action.action_id])
                     intent = next((e['value'] for e in view['events'] if e['kind'] == 'intent'), None)
                     if intent is None and action.record['declaration']['kind'] == 'write_table':
-                        from .recovery_contract import identity
+                        from demiflow.execution.recovery_contract import identity
                         intent = {'kind': 'write_table', 'spec': declaration.to_dict(),
                                   'request_hash': declaration.content_hash,
                                   'operation_id': identity([action.context.ref.run_id, action.action_id, 1])}
@@ -817,7 +812,7 @@ def make_native_terminal_sink(spec, *, request, services, publication_reserved_b
         native = FileSink(services.action, request.arguments)
     elif request.kind == 'write_datasink':
         native = request.sink
-        from .queue_sinks import QueueResultSink
+        from demiflow.execution.queue_sinks import QueueResultSink
         if isinstance(native, QueueResultSink):
             # Each task is already atomically settled by the original queue
             # authority before the terminal can publish it. This cut only owns
@@ -842,10 +837,10 @@ def make_native_terminal_sink(spec, *, request, services, publication_reserved_b
 
 def inspect_native_write_receipt(journal, action_id):
     """Project a v3 native publication without starting code or changing history."""
-    from .publication_facts import observation_action, commit_write_context
+    from demiflow.execution.publication_facts import observation_action, commit_write_context
     from demiflow.execution.outputs.lance_sink import LanceSink, spec_from_identity
     from demiflow.execution.seal.sealed_plans import _v3_read_store
-    from .seal.plan import load_dataflow
+    from demiflow.execution.seal.plan import load_dataflow
     binding = journal.recovery_identity()
     action = journal.execution_action(action_id)
     facts = journal.execution_commits(action_id)
@@ -866,7 +861,7 @@ def inspect_native_write_receipt(journal, action_id):
     prepared = fact['prepared']['sinks']['write_lance']
     composite = type(prepared) is dict and {'objects', 'rows'} <= set(prepared)
     if composite:
-        from .object_sink import ObjectRowsSink
+        from demiflow.execution.object_sink import ObjectRowsSink
         sink = ObjectRowsSink.for_inspection(native_action, sink, prepared)
     receipt = sink.inspect(prepared, commit_write_context(native_action, fact['commit_id']))
     if receipt is None:

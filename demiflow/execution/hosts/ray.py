@@ -1,8 +1,8 @@
 """Ray Jobs status-only PipelineBackend."""
 
 from __future__ import annotations
-from demiflow.execution.hosts.python_environment import verify_environment_artifacts
-from demiflow.execution.pipeline.package_loader import verify_bundle
+
+
 
 import json
 import shutil
@@ -13,7 +13,8 @@ from pathlib import Path
 from demiflow.errors import PipelineRunCancelled, PipelineRunFailure, PipelineRunIndeterminate, PipelineRunTimeout
 from demiflow.operator_llm import load_referenced_prompt_packs
 from demiflow.pipeline import discover_pipeline_definition
-from demiflow.execution.contracts import PipelineBundleRef, PipelineRunObservation, PipelineRunRequest, PipelineRunResult
+from demiflow.execution.pipeline.package_loader import PipelineBundleRef
+from demiflow.execution.contracts import PipelineRunObservation, PipelineRunRequest, PipelineRunResult
 from demiflow.execution.pipeline.driver import PipelineDriverRequest
 from demiflow.execution.requirements import PLATFORM_WHEEL_BUNDLE_DIRECTORY, file_sha256, platform_wheel_paths, read_candidate_requirements, read_platform_requirements, render_effective_requirements, resolved_wheel_paths, write_effective_requirements
 from demiflow.execution.contracts.pipeline import FrozenRequirements
@@ -93,7 +94,7 @@ class RayPipelineBackend:
         emit_observation(
             observer, PipelineRunObservation("phase", "preparing_environment", 0)
         )
-        verify_bundle(request.bundle)
+        request.bundle.verify()
         definition = discover_pipeline_definition(Path(request.bundle.root))
         execution = definition.execution
         if request.target.backend != self.TYPE:
@@ -146,7 +147,7 @@ class RayPipelineBackend:
                 if requirements.nonempty or lock_path.is_file()
                 else None
             )
-            verify_environment_artifacts(self.execution_environment)
+            self.execution_environment.verify_artifacts()
             platform_requirements = read_platform_requirements(
                 self.execution_environment.platform_requirements
             )

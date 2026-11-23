@@ -11,6 +11,7 @@ user reducer in provenance order without assuming associativity, and keep large
 groups on disk. K007 concatenates inputs in port order preserving multiplicity.
 """
 from __future__ import annotations
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 
 from demiflow.operators.relational import merge_join_rows
 import copy
@@ -26,21 +27,8 @@ from demiflow.execution.contracts.dataflow import (
     RuntimeServices,
 )
 
-from .dataflow import (
-    RECORD_DOMAIN,
-    _check_stop,
-    _cfg,
-    _err,
-    _group_key,
-    _hash_id,
-    _loads_row,
-    _dumps_row,
-    _materialize_row,
-    _occurrence,
-    _output_record,
-    _OutputBudget,
-)
-from .ordering import build_sort_runs, merge_sort_runs
+from demiflow.execution.kernels.dataflow import RECORD_DOMAIN, _check_stop, _cfg, _err, _group_key, _hash_id, _loads_row, _dumps_row, _materialize_row, _occurrence, _output_record, _OutputBudget
+from demiflow.execution.kernels.ordering import build_sort_runs, merge_sort_runs
 
 
 def _program(services: RuntimeServices, key: str, kind: str) -> Any:
@@ -55,9 +43,10 @@ def _program(services: RuntimeServices, key: str, kind: str) -> Any:
 
 def typed_join_pairs(left, right, *, spec, services, retained_key):
     """Compute with raw declared key columns; finite ports keep the fallback input."""
-    from ..contracts.relational_region import TYPED_JOIN_SUFFIX, SQL_CHILD_RSS, SQL_PARENT_WINDOW
-    from ..arrow_payload import ARROW_MEDIA_TYPES, batch_cache
-    from ...operators.relational_sql import typed_join_query, json_key_type
+    from demiflow.execution.contracts.relational_region import TYPED_JOIN_SUFFIX, SQL_CHILD_RSS, SQL_PARENT_WINDOW
+    from demiflow.execution.contracts.record_codec import ARROW_MEDIA_TYPES
+    from demiflow.execution.arrow_payload import batch_cache
+    from demiflow.operators.relational_sql import typed_join_query, json_key_type
     if not any(s.stage_id.endswith(TYPED_JOIN_SUFFIX) for s in services.assignment.stages):
         return None
     if services.query_region_offsets is None:
@@ -68,7 +57,7 @@ def typed_join_pairs(left, right, *, spec, services, retained_key):
     tables, inputs, types = {}, [], None
     retained = 4096
     cache = batch_cache(services.store, services.bounds, services=services)
-    from ..record_schema import RecordSchemas
+    from demiflow.execution.record_schema import RecordSchemas
     schemas = RecordSchemas(services)
     for name, port, fields in zip(('lkeys', 'rkeys'), (left, right), columns):
         scan = port.within_offset_budget(window // 2048)
@@ -169,10 +158,10 @@ def join_partitions(
 ) -> Iterator[Record]:
     """K005: bounded key/reference hash join, no global business ordering."""
     if spec.kind == 'exclude_keys':
-        from .lance_keys import exclude_keys
+        from demiflow.execution.kernels.lance_keys import exclude_keys
         yield from exclude_keys(left, right, spec=spec, services=services)
         return
-    from .join_spool import join_pairs
+    from demiflow.execution.kernels.join_spool import join_pairs
     lk = tuple(_cfg(spec, "on"))
     rk = tuple(_cfg(spec, "right_on", list(lk)))
     how = "anti" if spec.kind == "exclude_keys" else _cfg(spec, "how", "inner")
@@ -184,7 +173,7 @@ def join_partitions(
     occurrence, budget = _occurrence(spec), _OutputBudget(spec, services, streaming=True)
     from demiflow.execution.scheduler.dataflow_publication_budget import REF_CARRIER
     stored = spec.configuration.get('output_carrier') == REF_CARRIER
-    from .operator import _SpoolRecords
+    from demiflow.execution.kernels.operator import _SpoolRecords
     key_bytes = [0]
     retain_key = lambda size: key_bytes.__setitem__(0, size)
     pairs = (typed_join_pairs(left, right, spec=spec, services=services, retained_key=retain_key)
@@ -206,16 +195,16 @@ def join_partitions(
                 _materialize_row(right_record, services), lk, rk, suffix))
             record_id = _hash_id([RECORD_DOMAIN, occurrence, "join", sequence])
             if stored:
-                from ..dataflow_record_frames import _typed_shape, admit_workspace
-                from ..exchange.dataflow_bridge import _encode_payload
+                from demiflow.execution.contracts.record_codec import _typed_shape, admit_workspace
+                from demiflow.execution.contracts.record_codec import _encode_payload
                 # One actual left/right pair, bounded key index, and encoded
                 # output coexist. No payload-sized transport batch is built.
                 native = sum(_typed_shape(r.inline, services.bounds.max_row_bytes)[1]
                              for r in (left_record, right_record) if r is not None)
                 size, row_native, tree = _typed_shape(out_row, services.bounds.max_row_bytes)
-                from .join_spool import _resident_limit
+                from demiflow.execution.kernels.join_spool import _resident_limit
                 held = native + row_native + key_bytes[0] + _resident_limit(services) // 16 + 16384
-                admit_workspace(tree + 2 * size, services.bounds, services=services, retained=held)
+                admit_workspace(tree + 2 * size, services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=held)
                 raw = _encode_payload(out_row, max_bytes=services.bounds.max_row_bytes)
                 ref = services.store.put(iter((raw,)), max_bytes=services.bounds.max_row_bytes,
                                          media_type='application/octet-stream')
@@ -239,7 +228,7 @@ def join_partitions(
 
 
 def _group_sort_spec(spec: KernelSpec, on: tuple[str, ...]) -> KernelSpec:
-    from ..contracts.dataflow_codec import _thaw_json
+    from demiflow.execution.contracts.dataflow_codec import _thaw_json
     configuration = _thaw_json(spec.configuration)
     configuration["keys"] = list(on)
     configuration["descending"] = False
@@ -254,7 +243,7 @@ def _ordered_group_rows(
         for record in records:
             _group_key(_materialize_row(record, services), on)
             yield record
-    from .reducer_memory import sort_window
+    from demiflow.execution.kernels.reducer_memory import sort_window
     from demiflow.execution.contracts.relational_region import reducer_contract as contract
     window = sort_window(services.bounds,key_only=False) if memory is not None or contract(spec) is not None else None
     runs = build_sort_runs(keyed_records(), spec=sort_spec, services=services,window=window)
@@ -282,9 +271,9 @@ def reduce_partition(
 
 
 def admit_reducer(spec, services, *, join_depth=None):
-    from .reducer_memory import declare, check_initial, check_grant
+    from demiflow.execution.kernels.reducer_memory import declare, check_initial, check_grant
     from demiflow.execution.contracts.relational_region import reducer_contract as contract
-    from ...data.plan import CallableSpec
+    from demiflow.data.plan import CallableSpec
     memory = contract(spec)
     if memory is not None or getattr(services.assignment,'stages',()):
         program = _program(services,_cfg(spec,'reducer_program'),'callable')
@@ -305,14 +294,14 @@ def admit_reducer(spec, services, *, join_depth=None):
 
 def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeServices, memory_join_depth=None, retain=None):
     """One original sequential fold; caller proves complete ordered key groups."""
-    from .reducer_memory import check_initial,check_state,yielded_peers
+    from demiflow.execution.kernels.reducer_memory import check_initial, check_state, yielded_peers
     memory = admit_reducer(spec,services,join_depth=memory_join_depth)
     on = tuple(_cfg(spec, "on"))
     if not on:
         raise _err("INVALID_CONTRACT", "empty group keys")
     program = _program(services, _cfg(spec, "reducer_program"), "callable")
-    from ...data.plan import CallableSpec
-    from ...data.runtime_contract import validator
+    from demiflow.data.plan import CallableSpec
+    from demiflow.data.runtime_contract import validator
     if isinstance(program, CallableSpec):
         if len(program.call_args) != 1:
             raise _err('INVALID_CONTRACT', 'Reducer program must bind one initial accumulator')
@@ -448,7 +437,7 @@ def batch_ordered_groups(ordered, *, spec, services, retained_limit=None):
                 index += 1
                 retained = encoded = 0
             if retained_limit is not None:
-                from ..dataflow_record_frames import _typed_shape as typed_shape
+                from demiflow.execution.contracts.record_codec import _typed_shape as typed_shape
                 size, resident, _ = typed_shape(row, services.bounds.max_row_bytes)
                 encoded += size
                 retained += resident + 16  # one slot and its shallow mapping

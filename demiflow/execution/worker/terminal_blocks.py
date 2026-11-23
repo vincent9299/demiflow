@@ -1,13 +1,14 @@
 """Native terminal logical blocks backed by incremental artifact forests."""
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 from dataclasses import asdict
 from collections.abc import Mapping
 from contextlib import contextmanager
 
-from ..contracts.dataflow import BlockPartition
-from ..contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.dataflow import BlockPartition
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.scratch import ScratchStream
 from demiflow.execution.storage.segments import SegmentForest, block_chunks, RECORDS_MEDIA
-from ..recovery_contract import identity
+from demiflow.execution.recovery_contract import identity
 
 
 def declared_blocks(graph, terminal, bounds):
@@ -16,7 +17,7 @@ def declared_blocks(graph, terminal, bounds):
     incoming = {}
     for edge in graph.edges:
         incoming.setdefault(edge.consumer, []).append(edge.producer)
-    from ..contracts.dataflow_kinds import kinds_with
+    from demiflow.execution.contracts.dataflow_kinds import kinds_with
     preserving = kinds_with('keeps_layout')
     current = terminal
     reorder = None
@@ -103,7 +104,7 @@ class TerminalBlocks:
         return self._retained_metadata()
 
     def _retained_metadata(self, extra=()):
-        from ..dataflow_record_frames import metadata_bytes
+        from demiflow.execution.contracts.record_codec import metadata_bytes
         # The fixed charge covers each block/forest and its lookup/layout
         # containers. Count the actual variable trees in one traversal: a
         # restored manifest, its columns and forest leaves may alias strings.
@@ -132,12 +133,12 @@ class TerminalBlocks:
         self.columns = columns
 
     def manifest_chunks(self, manifest):
-        from ..recovery_contract import document
+        from demiflow.execution.recovery_contract import document
         if self._workspace_limit is None:
             raw = document(manifest, self.bounds.max_control_bytes)
             return len(raw), iter((raw,))
         import json
-        from ..dataflow_record_frames import _json_shape, _string_size
+        from demiflow.execution.contracts.record_codec import _json_shape, _string_size
         count = [0]
         size, _ = _json_shape(manifest, self.bounds.max_control_bytes, count=count)
         def token_size(value):
@@ -148,7 +149,7 @@ class TerminalBlocks:
             if type(value) is float:
                 import math
                 if not math.isfinite(value):
-                    from ..recovery_contract import RecoveryContractError
+                    from demiflow.execution.recovery_contract import RecoveryContractError
                     raise RecoveryContractError('Nonfinite execution metadata')
             return _json_shape(value, self.bounds.max_control_bytes)[0]
         # No complete output string/list of chunks is constructed. Charge the
@@ -182,7 +183,7 @@ class TerminalBlocks:
     def _check_workspace(self, extra=0, *, metadata=None):
         if self._workspace_limit is None:
             return
-        from ..dataflow_record_frames import admit_workspace
+        from demiflow.execution.contracts.record_codec import admit_workspace
         current = self.retained_bytes
         peak = (current if metadata is None else metadata) + self._pending_resident + extra
         if peak > self._workspace_limit:
@@ -192,7 +193,7 @@ class TerminalBlocks:
             # peer buffers, queued commands and readers remain charged there.
             self._frame_call(admit_workspace, peak, self.bounds, _frame_retained=-current)
         else:
-            admit_workspace(peak, self.bounds, services=self.services)
+            admit_workspace(peak, self.bounds, resident_bytes=stage_resident_bytes(getattr(self.services, 'assignment', None)))
 
     def _admit_metadata(self, *, blocks=0, roots=0):
         # Conservative managed-object charge, in addition to payload/scratch.
@@ -206,7 +207,7 @@ class TerminalBlocks:
         retained = self._pending_resident + _frame_retained
         if self._frame_call is not None:
             return self._frame_call(function, *args, _frame_retained=retained, **kwargs)
-        return function(*args, services=self.services,
+        return function(*args, resident_bytes=stage_resident_bytes(getattr(self.services, 'assignment', None)),
                         retained=self.retained_bytes + retained, **kwargs)
 
     def _block(self, tag):
@@ -253,7 +254,7 @@ class TerminalBlocks:
 
     def append_parts(self, record, chunks, *, size):
         if self._workspace_limit is not None:
-            from ..dataflow_record_frames import _typed_shape
+            from demiflow.execution.contracts.record_codec import _typed_shape
             # frame_parts retains the original encoded document and its
             # bounded escaping/suffix buffers while a block switch flushes.
             native = _typed_shape(record.inline, self.bounds.max_row_bytes)[1] if record.inline is not None else 0
@@ -291,7 +292,7 @@ class TerminalBlocks:
                 max_io_bytes=self.bounds.max_row_bytes + self.bounds.max_control_bytes)
         if self.bytes + size > self.bounds.max_spill_bytes or self.rows >= self.bounds.max_output_rows:
             raise DataflowError('BUDGET_EXCEEDED', 'terminal output exceeds disk/row budget')
-        from ..dataflow_record_frames import _RecordFrameParts
+        from demiflow.execution.contracts.record_codec import _RecordFrameParts
         joined = (chunks.coalesce(record, self.bounds, size=size, max_write_bytes=self._tail._io,
                                  admit=self._coalescing_fits)
                   if (type(chunks) is _RecordFrameParts
@@ -319,7 +320,7 @@ class TerminalBlocks:
         self.bytes += size
 
     def _coalescing_fits(self, workspace, record):
-        from ..dataflow_record_frames import resident_limit
+        from demiflow.execution.contracts.record_codec import resident_limit
         # Called after a possible old-tail flush. The proposed workspace
         # includes this row/raw and replaces _pending_resident, not adds to it.
         # Old metadata/payload windows remain unchanged on the fallback path.
@@ -333,12 +334,12 @@ class TerminalBlocks:
         if self._workspace_limit is not None and peak > self._workspace_limit:
             return False
         if self._frame_call is not None:
-            def fits(record, size, bounds, *, services, retained):
-                return retained + size <= resident_limit(bounds, services)
+            def fits(record, size, bounds, *, resident_bytes, retained):
+                return retained + size <= resident_limit(bounds, resident_bytes)
             # The shared owner already counts this terminal's workspace
             # metadata. Finite spools are distinct owners and count theirs here.
             return self._frame_call(fits, record, peak - self.retained_bytes, self.bounds)
-        return peak <= resident_limit(self.bounds, self.services)
+        return peak <= resident_limit(self.bounds, stage_resident_bytes(getattr(self.services, 'assignment', None)))
 
     def flush(self):
         if self._tail is None:
@@ -403,7 +404,7 @@ class TerminalBlocks:
         return out
 
     def restore(self, manifest):
-        from ..contracts.dataflow import ArtifactRef
+        from demiflow.execution.contracts.dataflow import ArtifactRef
         with self.hold_metadata(manifest):
             self.blocks.clear()
             self._layouts.clear()
@@ -417,14 +418,14 @@ class TerminalBlocks:
             if sum(f.rows for _, f in self.blocks.values()) != self.rows or sum(f.bytes for _, f in self.blocks.values()) != self.bytes:
                 raise DataflowError('CORRUPT_ARTIFACT', 'terminal partition totals disagree with manifest')
 
-    def scalar_workspace(self, *, services, retained):
+    def scalar_workspace(self, *, resident_bytes, retained):
         # The sealed index reservation and any previous worker-side Arrow
         # parent are still live beside this scalar's input and result.
-        from ..dataflow_record_frames import resident_limit
-        memory = resident_limit(self.bounds, services) - self._metadata_limit - retained
+        from demiflow.execution.contracts.record_codec import resident_limit
+        memory = resident_limit(self.bounds, resident_bytes) - self._metadata_limit - retained
         cached = getattr(self.services.store, '_arrow_payload_cache', None)
         if cached is not None and cached.ref is not None:
-            from ..dataflow_record_frames import metadata_bytes
+            from demiflow.execution.contracts.record_codec import metadata_bytes
             memory -= cached.ref.size_bytes + cached.batch.get_total_buffer_size() + metadata_bytes(cached.header)
         return memory
 
@@ -432,13 +433,14 @@ class TerminalBlocks:
         """Replay the exact sealed prefix. The consumer shares its retained
         block/state charge with segment traversal, physical reads and decoding.
         """
-        from ..contracts.dataflow import ArtifactRef
-        from ..dataflow_record_frames import admit_workspace, metadata_bytes, raw_workspace
-        from ..exchange.dataflow_bridge import _decode_payload
-        from ..dataflow_record_frames import decode_frame, decode_document, frame_stream, line_limit, read_chunk_bytes
-        from ..dataflow_record_frames import read_document
-        from ..kernels.dataflow import _materialize_row
-        from ..arrow_payload import ArrowBatchCache, is_arrow_record
+        from demiflow.execution.contracts.dataflow import ArtifactRef
+        from demiflow.execution.contracts.record_codec import admit_workspace, metadata_bytes, raw_workspace
+        from demiflow.execution.contracts.record_codec import _decode_payload
+        from demiflow.execution.contracts.record_codec import decode_frame, decode_document, line_limit, read_chunk_bytes
+        from demiflow.execution.storage.streams import frame_stream
+        from demiflow.execution.storage.streams import read_document
+        from demiflow.execution.kernels.dataflow import _materialize_row
+        from demiflow.execution.arrow_payload import ArrowBatchCache, is_arrow_record
         index_bytes = 0
         stream = None
         arrow = ArrowBatchCache(self.services.store, self.bounds, services=self.services)
@@ -456,9 +458,9 @@ class TerminalBlocks:
 
         for part in partitions:
             chunks = block_chunks(self.services.store, ArtifactRef(**part['data_ref']), self.bounds,
-                chunk_bytes=read_chunk_bytes(self.bounds, self.services),
+                chunk_bytes=read_chunk_bytes(self.bounds, stage_resident_bytes(getattr(self.services, 'assignment', None))),
                 frame_call=index_call, on_retained=retain_index)
-            stream = frame_stream(chunks, self.bounds, services=self.services,
+            stream = frame_stream(chunks, self.bounds, resident_bytes=stage_resident_bytes(getattr(self.services, 'assignment', None)),
                 check_workspace=lambda peak: codec_call(admit_workspace, peak, self.bounds, retained_input=reader_bytes()))
             try:
                 while True:
@@ -488,7 +490,7 @@ class TerminalBlocks:
                         codec_call(admit_workspace, charge + 12 * record.payload_ref.size_bytes + 16384,
                                    self.bounds, retained_input=held)
                         row = arrow.row(record)
-                        from ..dataflow_record_frames import _typed_shape
+                        from demiflow.execution.contracts.record_codec import _typed_shape
                         charge = _typed_shape(row, self.bounds.max_resident_bytes)[1] + 512
                     else:
                         raw = codec_call(read_document, record.payload_ref, self.services.store, self.bounds,
@@ -505,7 +507,8 @@ class TerminalBlocks:
                 arrow.close()
 
     def stream(self):
-        from ..dataflow_record_frames import frame_stream, read_chunk_bytes
+        from demiflow.execution.storage.streams import frame_stream
+        from demiflow.execution.contracts.record_codec import read_chunk_bytes
         owner = self
         class View:
             def __init__(self):
@@ -519,10 +522,10 @@ class TerminalBlocks:
                     raise ValueError('terminal segment view supports rewind/end only')
                 def chunks():
                     for part in owner.manifest_partitions():
-                        from ..contracts.dataflow import ArtifactRef
+                        from demiflow.execution.contracts.dataflow import ArtifactRef
                         yield from block_chunks(owner.services.store, ArtifactRef(**part['data_ref']), owner.bounds,
-                            chunk_bytes=read_chunk_bytes(owner.bounds, owner.services))
-                self._stream = frame_stream(chunks() if whence == 0 else iter(()), owner.bounds, services=owner.services)
+                            chunk_bytes=read_chunk_bytes(owner.bounds, stage_resident_bytes(getattr(owner.services, 'assignment', None))))
+                self._stream = frame_stream(chunks() if whence == 0 else iter(()), owner.bounds, resident_bytes=stage_resident_bytes(getattr(owner.services, 'assignment', None)))
             def readline(self, size=-1):
                 return self._stream.readline(size)
             @property

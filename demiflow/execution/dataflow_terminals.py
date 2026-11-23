@@ -66,7 +66,7 @@ def _record_row(record: "Record", handle: "ActionHandle") -> "Row":
             return batch_cache(handle.services.store, handle.bounds).row(record)
         ref = record.payload_ref
         chunks = handle.services.store.read(ref, max_bytes=ref.size_bytes)
-        from .exchange.dataflow_bridge import _decode_payload
+        from demiflow.execution.contracts.record_codec import _decode_payload
         return _decode_payload(b"".join(chunks), max_bytes=handle.bounds.max_row_bytes)
     raise _error("INVALID_CONTRACT", "record has neither inline nor payload_ref")
 
@@ -369,8 +369,8 @@ class TerminalSubscription:
 
     def read_admitted(self, *, max_records, deadline_ms, admit=None, admit_workspace=None, batch_values=False):
         from .exchange.dataflow_transport import read_peer_many, MAX_PEER_BATCH, peer_batch_limit
-        from .dataflow_record_frames import decode_document, document_limit
-        from .dataflow_replay import record_encoded_bytes
+        from demiflow.execution.contracts.record_codec import decode_document, document_limit
+        from demiflow.execution.contracts.record_codec import record_encoded_bytes
         records = []
         byte_window = min(self._bounds.max_batch_bytes, self._bounds.max_resident_bytes)
         admitted = payload_bytes = 0

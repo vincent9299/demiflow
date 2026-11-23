@@ -188,7 +188,7 @@ def test_exact_original_document_limit_plus_newline_remains_legal(tmp_path):
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_c import bounds, make
     row = {'value': 'x'*32}
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     record = make('Record', inline=row, encoded_bytes=len(_encode_payload(row, max_bytes=8192)))
     raw = _encode_record(record, bounds()) + b'\n'
     limits = bounds(max_row_bytes=len(raw)-1)

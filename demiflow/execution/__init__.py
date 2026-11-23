@@ -2,8 +2,10 @@
 from importlib import import_module as _import_module
 
 _EXPORTS = {
+    "PipelineBundleRef": (".pipeline.package_loader", "PipelineBundleRef"),
+    "PipelineExecutionEnvironment": (".hosts.python_environment", "PipelineExecutionEnvironment"),
     **{name: (".contracts", name) for name in (
-        "PipelineBackend", "PipelineBundleRef", "PipelineExecutionEnvironment",
+        "PipelineBackend",
         "PipelineRunObservation", "PipelineRunObserver", "PipelineRunReadiness",
         "PipelineRunRequest", "PipelineRunResult", "PlatformRuntimeIdentity",
     )},

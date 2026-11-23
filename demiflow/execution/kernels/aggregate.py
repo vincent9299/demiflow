@@ -12,6 +12,7 @@ the owning OperatorKernel binds the runtime services through ``bind_finalize``
 for the store/program reads it needs (documented C06 interpretation).
 """
 from __future__ import annotations
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 
 import pickle
 from collections.abc import Iterator, Mapping
@@ -27,13 +28,7 @@ from demiflow.execution.contracts.dataflow import (
     TerminalResult,
 )
 
-from .dataflow import (
-    _canonical,
-    _check_stop,
-    _cfg,
-    _err,
-    _materialize_row,
-)
+from demiflow.execution.kernels.dataflow import _canonical, _check_stop, _cfg, _err, _materialize_row
 
 AGGREGATE_STATE_VERSION = "demiflow-aggregate-state-v3"
 AGGREGATE_STATE_MEDIA_TYPE = "application/x-demiflow-aggregate-state-v3"
@@ -294,7 +289,7 @@ def aggregate_records(program, read_records, *, services, workspace, batch_eligi
     of integers must fold against the previous state one row at a time.
     """
     from demiflow.execution.contracts import state_codec
-    from ..contracts.dataflow_errors import DataflowError
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
     from contextlib import closing
 
     aggregates = program if isinstance(program, tuple) else (program,)
@@ -331,8 +326,8 @@ def aggregate_records(program, read_records, *, services, workspace, batch_eligi
             block.clear()
         payload = retained = 0
 
-    from ..dataflow_record_frames import resident_limit
-    grant = resident_limit(bounds, services)
+    from demiflow.execution.contracts.record_codec import resident_limit
+    grant = resident_limit(bounds, stage_resident_bytes(getattr(services, 'assignment', None)))
 
     def codec_call(function, *args, retained_input=0, **kwargs):
         # Every admission below is side-effect free until the checked

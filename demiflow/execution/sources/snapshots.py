@@ -449,7 +449,7 @@ def spool_record(
         return record.payload_ref
     if record.inline is None:
         raise DataflowError("INVALID_CONTRACT", "spool record has neither inline payload nor ref")
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     raw = _encode_payload(record.inline, max_bytes=bounds.max_row_bytes)
     if len(raw) > bounds.max_row_bytes:
         raise DataflowError("BUDGET_EXCEEDED", "spool record exceeds row byte budget")

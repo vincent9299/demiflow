@@ -1,7 +1,8 @@
 """Internal key-only Lance projection used by the public exclude_keys operator."""
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 from dataclasses import dataclass, replace
-from ..data.sources import LanceSource
-from .contracts.dataflow_errors import DataflowError
+from demiflow.data.sources import LanceSource
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 @dataclass(frozen=True)
@@ -11,7 +12,7 @@ class LanceKeySource(LanceSource):
 
 def key_rows(reader):
     """Read actual Lance row IDs from the original frozen version, never offsets."""
-    from ..lance.storage import open_lance_dataset
+    from demiflow.lance.storage import open_lance_dataset
     query = replace(reader._plan.query, version=reader._version)
     dataset = open_lance_dataset(query.uri, query.version, query.storage_options)
     bounds = reader._services.bounds
@@ -39,7 +40,7 @@ def key_rows(reader):
 
 def _hydration_rows(schema, services, requested):
     """Choose a bulk read before allocation. Variable-width values retain the sealed row ceiling."""
-    from .dataflow_record_frames import resident_limit
+    from demiflow.execution.contracts.record_codec import resident_limit
 
     bounds = services.bounds
     width = 0
@@ -52,7 +53,7 @@ def _hydration_rows(schema, services, requested):
             break
     python_row = 256 + 128 * len(schema) + 8 * width
     return max(1, min(requested, bounds.max_batch_bytes // max(1, width),
-                      resident_limit(bounds, services) // (2 * python_row)))
+                      resident_limit(bounds, stage_resident_bytes(getattr(services, 'assignment', None))) // (2 * python_row)))
 
 
 class PinnedKeyScan:
@@ -60,8 +61,8 @@ class PinnedKeyScan:
     @classmethod
     def open(cls, reader, field, *, positions):
         import pyarrow as pa
-        from ..lance.model import LanceScanSpec
-        from ..lance.storage import open_lance_dataset
+        from demiflow.lance.model import LanceScanSpec
+        from demiflow.lance.storage import open_lance_dataset
         from demiflow.execution.scheduler.native_limits import limit_value
         q = reader._plan.query
         if (type(q) is not LanceScanSpec or reader._global or q.filter or q.limit or q.projection
@@ -169,11 +170,11 @@ class PinnedKeyScan:
             encoded += len(json.dumps(name, ensure_ascii=True).encode()) + width
             if encoded > self.reader._services.bounds.max_row_bytes:
                 return False
-        from .dataflow_record_frames import resident_limit
+        from demiflow.execution.contracts.record_codec import resident_limit
         # Conservatively include the row dict, typed codec tree, source/frozen
         # copies and per-field containers in the existing stage grant.
         return 8 * encoded + 2048 * (1 + len(fields)) <= resident_limit(
-            self.reader._services.bounds, self.reader._services)
+            self.reader._services.bounds, stage_resident_bytes(getattr(self.reader._services, 'assignment', None)))
 
     def next_probe(self, rows, size):
         """Read original keys/row IDs with the cursor advanced by exactly this slice."""
@@ -186,9 +187,9 @@ class PinnedKeyScan:
 
     def matched_records(self, fragment, offset, projection, matches):
         """Restore original row, ID, schema and sequence only for probe positives."""
-        from .contracts.dataflow import Record
-        from .recovery_contract import identity
-        from .arrow_payload import fallback_row
+        from demiflow.execution.contracts.dataflow import Record
+        from demiflow.execution.recovery_contract import identity
+        from demiflow.execution.arrow_payload import fallback_row
         import pyarrow.compute as pc
         reader = self.reader
         query = reader._plan.query
@@ -229,9 +230,9 @@ class PinnedKeyPayload:
     """Read surviving row IDs from the exact source version sealed for this partition."""
     def __init__(self, spec, services):
         import pyarrow as pa
-        from ..lance.storage import open_lance_dataset
-        from .contracts.dataflow import thaw_record_value
-        from .seal.plan import load_sealed_dataflow
+        from demiflow.lance.storage import open_lance_dataset
+        from demiflow.execution.contracts.dataflow import thaw_record_value
+        from demiflow.execution.seal.plan import load_sealed_dataflow
 
         self.services = services
         _, physical, _ = load_sealed_dataflow(services.assignment.sealed,

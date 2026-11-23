@@ -22,6 +22,8 @@ CARRIERS = {
     'dataflow_inputs': ['InputMaterializedHandle'],
     'dataflow_acquisition_call': ['QueueSourceDeclaration', 'AcquisitionCall'],
     'literal_source': ['LiteralSourceReference'],
+    'contracts.pipeline': ['PipelineBundleRef', 'PipelineExecutionEnvironment'],
+    'requirements': ['FrozenRequirements', 'ResolvedWheel', 'PythonEnvironmentResolution'],
 }
 
 
@@ -80,7 +82,8 @@ def test_published_source_carrier_decodes_with_same_identity(original_carriers, 
     loaded = load_private_payload(OriginalStore(raw), ref) if private else load_payload([raw[:5], raw[5:]])
     assert describe(loaded) == expected
     # Loading old bytes never installs an old public module alias.
-    assert expected['module'] not in sys.modules
+    if expected['module'] not in {'demiflow.execution.contracts.pipeline', 'demiflow.execution.requirements'}:
+        assert expected['module'] not in sys.modules
 
 
 def test_changed_source_method_cannot_impersonate_published_carrier(original_carriers, monkeypatch):

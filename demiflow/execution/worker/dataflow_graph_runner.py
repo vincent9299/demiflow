@@ -5,6 +5,7 @@ internal edges run once and preserve their declared input ports. The driver sees
 bounded byte locators and progress/cut metadata, never calls an operator.
 """
 from __future__ import annotations
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 
 import json
 import tempfile
@@ -16,16 +17,16 @@ from collections.abc import Mapping
 from itertools import islice
 from dataclasses import asdict
 
-from ..contracts.dataflow import FIXED_SCAN_BATCHES, ArtifactRef, CutContribution, WorkerStep
-from ..contracts.dataflow_errors import DataflowError
-from ..exchange.dataflow_bridge import _encode_record_document, _decode_record_document
-from ..exchange.dataflow_channels import reserve_credit, _route_record_document, snapshot_channels
-from ..exchange.dataflow_transport import PeerBuffers, read_peer, read_peer_many, MAX_PEER_BATCH, peer_batch_limit
-from ..dataflow_sinks import (_artifact_json, _encode_record, _manifest_non_mapping_values,
-    RECORDS_MEDIA, MANIFEST_MEDIA)
-from ..recovery_contract import document
-from ..dataflow_record_frames import (encode_document, decode_document, document_limit,
-    frame_parts, decode_frame, line_limit, frame_stream, read_chunk_bytes, admit_receive, read_document)
+from demiflow.execution.contracts.dataflow import FIXED_SCAN_BATCHES, ArtifactRef, CutContribution, WorkerStep
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.record_codec import _encode_record_document, _decode_record_document
+from demiflow.execution.exchange.dataflow_channels import reserve_credit, _route_record_document, snapshot_channels
+from demiflow.execution.exchange.dataflow_transport import PeerBuffers, read_peer, read_peer_many, MAX_PEER_BATCH, peer_batch_limit
+from demiflow.execution.dataflow_sinks import _artifact_json, _encode_record, _manifest_non_mapping_values, RECORDS_MEDIA, MANIFEST_MEDIA
+from demiflow.execution.recovery_contract import document
+from demiflow.execution.contracts.record_codec import encode_document, decode_document, document_limit, frame_parts, decode_frame, line_limit, read_chunk_bytes
+from demiflow.execution.exchange.dataflow_transport import admit_receive
+from demiflow.execution.storage.streams import frame_stream, read_document
 
 
 class WorkerGraphRunner:
@@ -81,7 +82,7 @@ class WorkerGraphRunner:
         self._consumed_deliveries = set()
         self._memory_frontiers = {}
         physical = executor._physical
-        from ..arrow_payload import batch_carrier
+        from demiflow.execution.arrow_payload import batch_carrier
         carrier = batch_carrier(executor._graph, physical)
         for reader in executor._readers.values():
             reader.batch_carrier = carrier
@@ -108,7 +109,7 @@ class WorkerGraphRunner:
                 self._outgoing.setdefault(edge.producer, []).append(edge)
             if (edge.consumer not in executor._node_specs or self.partition in spec.consumer_partitions):
                 self._incoming.setdefault(edge.consumer, []).append(edge)
-        from .finite_input import FiniteInputDrain
+        from demiflow.execution.worker.finite_input import FiniteInputDrain
         self._finite_input = FiniteInputDrain(self, services=executor._finite_services)
         self._relational_regions = getattr(executor, '_relational_regions', {})
         self._region_members = {occ for region in self._relational_regions.values()
@@ -134,7 +135,7 @@ class WorkerGraphRunner:
             host = ray.util.get_node_ip_address()
         self._peer = PeerBuffers(bounds=self.bounds, host=host, store=self.services.store)
         self._read_batch = None
-        from ...resources.capacity import track_owned_thread
+        from demiflow.resources.capacity import track_owned_thread
         track_owned_thread(self._peer._thread)
         for thread in self._peer._threads:
             track_owned_thread(thread)
@@ -148,7 +149,7 @@ class WorkerGraphRunner:
         self._restored_terminal = False
         self._terminal_spec = next((n.kernel for n in executor._node_specs.values()
                                     if n.kind == 'terminal'), None)
-        from .terminal_blocks import TerminalBlocks, declared_blocks
+        from demiflow.execution.worker.terminal_blocks import TerminalBlocks, declared_blocks
         occurrence = next((occ for occ, node in executor._node_specs.items() if node.kind == 'terminal'), None)
         declaration = declared_blocks(executor._graph, occurrence, self.bounds) if occurrence else None
         scalar = self._terminal_spec is not None and self._terminal_spec.kind in (
@@ -165,9 +166,9 @@ class WorkerGraphRunner:
             reader = next(iter(executor._readers.values()))
             if reader.supports_native_batches():
                 self._batch_source = reader
-        from .key_exclusion import FixedKeyExclusion
+        from demiflow.execution.worker.key_exclusion import FixedKeyExclusion
         self._fixed_key_exclusion = FixedKeyExclusion.open(self)
-        from ..contracts.relational_region import JOIN_PROBE_SUFFIX, fixed_join_inputs
+        from demiflow.execution.contracts.relational_region import JOIN_PROBE_SUFFIX, fixed_join_inputs
         if any(stage.stage_id.endswith(JOIN_PROBE_SUFFIX) for stage in executor.assignment.stages):
             shape = fixed_join_inputs(executor._graph)
             if shape is None:
@@ -209,7 +210,7 @@ class WorkerGraphRunner:
         image = self.e._restore_image
         if image is None or self._terminal_spec is None:
             return
-        from ..dataflow_sinks import _artifact_from_json
+        from demiflow.execution.dataflow_sinks import _artifact_from_json
         for contribution in image.contributions:
             if contribution.participant_id not in self.e._participant_ids():
                 continue
@@ -218,7 +219,7 @@ class WorkerGraphRunner:
                 continue
             blocks = self._terminal_blocks
             if blocks._workspace_limit is not None:
-                from ..dataflow_record_frames import decode_metadata
+                from demiflow.execution.contracts.record_codec import decode_metadata
                 raw = self._frame_call(read_document, ref, self.services.store, self.bounds,
                                        _maximum=self.bounds.max_control_bytes)
                 manifest = self._frame_call(decode_metadata, raw, self.bounds)
@@ -232,7 +233,7 @@ class WorkerGraphRunner:
                 blocks.retain_columns(manifest['columns'])
                 self._terminal_columns = manifest["columns"]
                 self._terminal_non_mapping_values = non_mapping_values
-                from ..record_schema import RecordSchemas
+                from demiflow.execution.record_schema import RecordSchemas
                 self._terminal_schema_ref = (_artifact_from_json(manifest['schema_ref'])
                                             if manifest.get('schema_ref') is not None else None)
                 RecordSchemas(self.services).read(self._terminal_schema_ref)
@@ -242,7 +243,7 @@ class WorkerGraphRunner:
     def _set_terminal_columns(self, values, *, row=None, sort=False, schema=False):
         blocks = self._terminal_blocks
         if blocks._workspace_limit is not None:
-            from ..dataflow_record_frames import _typed_shape
+            from demiflow.execution.contracts.record_codec import _typed_shape
             # The first row still owns the aliased key strings. The new list
             # and sorting scratch must fit before allocating columns.
             resident = _typed_shape(row, self.bounds.max_row_bytes)[1] if row is not None else 0
@@ -383,15 +384,15 @@ class WorkerGraphRunner:
             return
         self._restore_terminal()
         if self._terminal_spec is not None and not self._restored_terminal:
-            from ..dataflow_schema import terminal_schema
-            from ..record_schema import RecordSchemas
+            from demiflow.execution.dataflow_schema import terminal_schema
+            from demiflow.execution.record_schema import RecordSchemas
             occurrence = next(occ for occ, node in self.e._node_specs.items() if node.kind == 'terminal')
             schema = terminal_schema(self.e._graph, self.e._physical,
                 terminal=occurrence, bounds=self.bounds)
             if schema is not None:
                 self._terminal_schema_ref = RecordSchemas(self.services).put(schema)
                 self._set_terminal_columns(schema, sort=True, schema=True)
-        from ..recovery_contract import identity
+        from demiflow.execution.recovery_contract import identity
         frontier_ref = self.e._restored_states.get(identity(['worker-frontier', self.partition]))
         if self.e._restore_image is not None:
             if frontier_ref is None:
@@ -492,7 +493,7 @@ class WorkerGraphRunner:
                                'consumer_partition': self.partition})
         self._thread = threading.Thread(target=copy_context().run, args=(self._run,), name='dataflow-business', daemon=True)
         self._thread.start()
-        from ...resources.capacity import track_owned_thread
+        from demiflow.resources.capacity import track_owned_thread
         track_owned_thread(self._thread)
 
     def wake(self):
@@ -504,8 +505,8 @@ class WorkerGraphRunner:
         self.e._mailbox.send(self.e._event(kind, payload=payload, payload_ref=ref))
 
     def _send_cut(self, request):
-        from ..contracts.dataflow_codec import encode_wire
-        from ..recovery_contract import MAX_DOCUMENT_BYTES
+        from demiflow.execution.contracts.dataflow_codec import encode_wire
+        from demiflow.execution.recovery_contract import MAX_DOCUMENT_BYTES
         raw = encode_wire(self.snapshot(request), type_name='CutContribution', bounds=self.bounds)
         # A cut contribution contains bounded control metadata and references.
         # Its durable owner is the coordinator. Leave ample room for escaping
@@ -787,7 +788,7 @@ class WorkerGraphRunner:
 
     def _advance_join_probe(self, source, split_id, credit):
         """Only confirmed non-matches may skip the usual finite input port."""
-        from ...operators.relational import matching_indices
+        from demiflow.operators.relational import matching_indices
         _, _, join, scan = self._join_probe
         if self._join_probe_values is None:
             kernel = self.e._kernels[(join, self.partition)]
@@ -848,7 +849,7 @@ class WorkerGraphRunner:
             self._finish_source_split(split_id, source)
             return
         if self._terminal_schema_ref is None:
-            from ..record_schema import RecordSchemas
+            from demiflow.execution.record_schema import RecordSchemas
             self._terminal_schema_ref = RecordSchemas(self.services).put(batch.schema)
             self._set_terminal_columns(batch.schema, schema=True)
         self._terminal_blocks.append_arrow_batch(batch)
@@ -871,9 +872,9 @@ class WorkerGraphRunner:
         """Seal each ordered output batch once and advertise that same leaf under ACK credit."""
         import pyarrow as pa
         from demiflow.execution.contracts.dataflow import sealed_execution_ceilings
-        from ..dataflow_record_frames import admit_workspace
-        from ..outputs.arrow_rows import pack_result, validate_row_sizes
-        from ..record_schema import RecordSchemas
+        from demiflow.execution.contracts.record_codec import admit_workspace
+        from demiflow.execution.outputs.arrow_rows import pack_result, validate_row_sizes
+        from demiflow.execution.record_schema import RecordSchemas
         caps = sealed_execution_ceilings(self.e._graph)
         row_budget = min(self.bounds.max_row_bytes, producer.kernel.output_bound_bytes or self.bounds.max_row_bytes)
         validate_row_sizes(batch, row_budget)
@@ -1075,7 +1076,7 @@ class WorkerGraphRunner:
         if wait_notice is not None:
             self._send('checkpoint_wait', wait_notice)
         if notify_done:
-            from ..checkpoint.coordinator import _cursor_json
+            from demiflow.execution.checkpoint.coordinator import _cursor_json
             self._send('eoi', {'scope': 'worker', 'cursors': [_cursor_json(r.snapshot())
                                                            for r in self.e._readers.values()],
                 'pruned_splits': [s.split_id for s in self.e.assignment.source_splits
@@ -1096,11 +1097,11 @@ class WorkerGraphRunner:
             self._finish_node(source)
 
     def _metrics_payload(self, occ):
-        from ..dataflow_usage import worker_prompt_usage
+        from demiflow.execution.dataflow_usage import worker_prompt_usage
         kernel = self.e._kernels.get((occ, self.partition))
         payload = {'occurrence_id': occ, 'partition_id': self.partition,
                    'metrics': dict(self._metrics[occ])}
-        from ..dataflow_model_observations import worker_model_observations
+        from demiflow.execution.dataflow_model_observations import worker_model_observations
         models = worker_model_observations(kernel)
         if models is not None:
             payload['model_observations'] = models
@@ -1139,7 +1140,7 @@ class WorkerGraphRunner:
             count += 1
             size += record.encoded_bytes
             if count > 1024 or size > 16 * 1024 ** 2:
-                from ..recovery_contract import RecoveryContractError
+                from demiflow.execution.recovery_contract import RecoveryContractError
                 raise RecoveryContractError('Producer input expansion exceeds 1024 records or 16 MiB at a stage')
             self._producer_expansion[occurrence] = (unit, count, size)
         self._metrics[occurrence]['rows_output'] += 1
@@ -1154,7 +1155,7 @@ class WorkerGraphRunner:
             routed_input = record
             if spec.routing in ('hash', 'target') and record.inline is None:
                 from demiflow.execution.contracts.dataflow import clone_record
-                from ..kernels.dataflow import _materialize_row, _row_bytes
+                from demiflow.execution.kernels.dataflow import _materialize_row, _row_bytes
                 row = _materialize_row(record, self.services)
                 routed_input = clone_record(record, inline=row, payload_ref=None,
                     encoded_bytes=_row_bytes(row, max_bytes=self.bounds.max_row_bytes))
@@ -1162,7 +1163,7 @@ class WorkerGraphRunner:
             routes, raw = self._frame_call(_route_record_document, routed_input, spec=spec,
                 state=self.e._channels.routing, bounds=self.bounds)
             for routed in routes:
-                from ..recovery_contract import identity
+                from demiflow.execution.recovery_contract import identity
                 self._publish(routed.record, edge=edge, spec=spec, target=routed.reader_id,
                               delivery=identity(["producer-delivery-v3", self.partition, routed.delivery_id]),
                               route_sequence=route_sequence, validated_raw=raw)
@@ -1197,12 +1198,12 @@ class WorkerGraphRunner:
             retained = peer_bytes + kernel_bytes + reader_bytes + source_bytes + _frame_retained
             terminal = getattr(self, '_terminal_blocks', None)
             if terminal is not None and terminal._workspace_limit is not None:
-                from ..dataflow_record_frames import metadata_bytes
+                from demiflow.execution.contracts.record_codec import metadata_bytes
                 with self._condition:
                     queued = sum(metadata_bytes(command) for command in self._queue)
                 retained += terminal.retained_bytes + queued
             try:
-                return function(*args, services=self.services, retained=retained, **kwargs)
+                return function(*args, resident_bytes=stage_resident_bytes(getattr(self.services, 'assignment', None)), retained=retained, **kwargs)
             except DataflowError as exc:
                 peak = exc.context.get('codec_workspace_bytes')
                 limit = exc.context.get('resident_limit_bytes')
@@ -1224,7 +1225,7 @@ class WorkerGraphRunner:
         if type(raw) is not bytes or len(raw) > document_limit(self.bounds):
             raise DataflowError('INVALID_CONTRACT', 'invalid prevalidated record document')
         if spec is None and validated_raw is not None:
-            from ..dataflow_record_frames import admit_encoded_record
+            from demiflow.execution.contracts.record_codec import admit_encoded_record
             # Appending may have grown the terminal index. Re-admit the live
             # row/document and bounded send metadata against current owners;
             # the earlier encoding grant cannot stand in for this check.
@@ -1344,7 +1345,7 @@ class WorkerGraphRunner:
                     # restored prefix; do not decode/encode/spool the probe.
                     # Cross-partition totals remain the driver's responsibility.
                     raise ValueError(f'Dataset contains more than the take_all limit of {maximum} rows')
-            from ..arrow_payload import is_arrow_record, batch_cache
+            from demiflow.execution.arrow_payload import is_arrow_record, batch_cache
             if is_arrow_record(record):
                 # Actual worker delivery uses the transfer codec directly.
                 # Authenticate and bind the shared payload before accepting its
@@ -1369,19 +1370,19 @@ class WorkerGraphRunner:
                 del chunk
             elif record.inline is None:
                 from demiflow.execution.contracts.dataflow import clone_record
-                from ..kernels.dataflow import _materialize_row, _row_bytes
+                from demiflow.execution.kernels.dataflow import _materialize_row, _row_bytes
                 row = _materialize_row(record, self.services)
                 record = clone_record(record, inline=row, payload_ref=None,
                     encoded_bytes=_row_bytes(row, max_bytes=self.bounds.max_row_bytes))
             if self._terminal_spec.kind == 'write_datasink':
-                from ..contracts.dataflow import thaw_record_value
+                from demiflow.execution.contracts.dataflow import thaw_record_value
                 facts = self.services.journal.read_configuration()
                 binding = facts.get('queue_binding')
                 if binding and binding['mode'] == 'sink':
                     from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
-                    from ..row_scope import RowScope, set_row_scope
+                    from demiflow.execution.row_scope import RowScope, set_row_scope
                     from demiflow.execution.contracts.dataflow import clone_record
-                    from ..kernels.dataflow import _row_bytes
+                    from demiflow.execution.kernels.dataflow import _row_bytes
                     if self._queue_finalizer is None:
                         self._queue_finalizer = AcquisitionCall('finalize')
                         self._queue_finalizer.bind(self.services, occ)
@@ -1405,7 +1406,7 @@ class WorkerGraphRunner:
                 if isinstance(record.inline, Mapping):
                     self._set_terminal_columns(record.inline, row=record.inline, sort=True)
                 elif record.schema_ref is not None:
-                    from ..record_schema import RecordSchemas
+                    from demiflow.execution.record_schema import RecordSchemas
                     self._set_terminal_columns(RecordSchemas(self.services).read(record.schema_ref), schema=True)
             raw = self._frame_call(encode_document, record, self.bounds)
             size, chunks = self._frame_call(frame_parts, record, self.bounds, raw=raw)
@@ -1637,7 +1638,7 @@ class WorkerGraphRunner:
         if spec.channel_id not in self._finite:
             if (len(self._finite) + 2) * 2 >= self.bounds.max_open_files:
                 raise DataflowError('BUDGET_EXCEEDED', 'finite spool exceeds open file budget')
-            from .terminal_blocks import TerminalBlocks
+            from demiflow.execution.worker.terminal_blocks import TerminalBlocks
             self._finite[spec.channel_id] = TerminalBlocks(self.services, self.partition, partitioned=False,
                 frame_call=self._frame_call,
                 coalesce_allowed=lambda: len(self._finite) <= 1 and not self._terminal_blocks.blocks)
@@ -1691,7 +1692,7 @@ class WorkerGraphRunner:
             return terminal_scalar(blocks.stream(), spec=self._terminal_spec, services=self.services,
                                    schema_ref=self._terminal_schema_ref)
         from functools import partial
-        from ..kernels.aggregate import aggregate_records
+        from demiflow.execution.kernels.aggregate import aggregate_records
         occurrence = next(occ for occ, node in self.e._node_specs.items() if node.kind == 'terminal')
         program = self.services.programs.get(occurrence)
         if program is None or program.kind != 'aggregate':
@@ -1712,9 +1713,9 @@ class WorkerGraphRunner:
             raise DataflowError('INVALID_CONTRACT', 'cut requires drained inputs and acknowledged deliveries')
         for reader in self.e._readers.values():
             reader.acknowledge_output()
-        from ..dataflow_kernel_pack import snapshot_kernel_images
+        from demiflow.execution.dataflow_kernel_pack import snapshot_kernel_images
         states = snapshot_kernel_images(self.e._kernels, store=self.services.store, bounds=self.bounds)
-        from ..recovery_contract import identity
+        from demiflow.execution.recovery_contract import identity
         for spec in self.e._output_specs:
             if spec.mode == 'finite_sealed':
                 ref, count = self._seal_finite_producer(spec)
@@ -1772,7 +1773,7 @@ class WorkerGraphRunner:
 
     def close(self):
         self.e._cancel_event.set()
-        from ..request_limits import cooperative_stop_error
+        from demiflow.execution.request_limits import cooperative_stop_error
         if cooperative_stop_error(self.e._cancel_reason) is None:
             self.e._mailbox.cancel_pending()
         self.wake()

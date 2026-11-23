@@ -1,4 +1,5 @@
 """Real ACKed output replays through original read credit before data decoding."""
+from demiflow.execution.contracts import record_codec
 import json
 import os
 from pathlib import Path
@@ -39,7 +40,7 @@ def test_final_ack_replay_admits_each_window_and_preserves_result(tmp_path, monk
             assert data.read_json(str(source)).take_all() == rows
             previous = run.journal.execution_commits('action-1')
             raise InterruptedAfterAction()
-    decoder = dataflow_bridge._decode_record_document
+    decoder = record_codec._decode_record_document
     read = TerminalSubscription.read_admitted
     decoded, windows, coexistence = [], [], []
     active = [None]
@@ -56,7 +57,7 @@ def test_final_ack_replay_admits_each_window_and_preserves_result(tmp_path, monk
     def forbidden_launch(*args, **kwargs):
         raise AssertionError('ACKed final result must not launch a worker')
     with monkeypatch.context() as patch:
-        patch.setattr(dataflow_bridge, '_decode_record_document', observe_decode)
+        patch.setattr(record_codec, '_decode_record_document', observe_decode)
         patch.setattr(TerminalSubscription, 'read_admitted', observe_read)
         patch.setattr(dataflow.DataflowExecution, '_launch_phase', forbidden_launch)
         def replay():
@@ -152,7 +153,7 @@ def test_original_published_blocks_probe_limit_without_decoding_payload(tmp_path
     subscription = TerminalSubscription(execution._bounds, execution._exchange, ())
     subscription.restore(publication, store=execution._store)
     decoded = []
-    decode = dataflow_bridge._decode_record_document
+    decode = record_codec._decode_record_document
     def observe(raw, **kwargs):
         value = decode(raw, **kwargs)
         decoded.append(value)
@@ -162,7 +163,7 @@ def test_original_published_blocks_probe_limit_without_decoding_payload(tmp_path
             raise ValueError('take_all limit metadata probe')
     try:
         with monkeypatch.context() as patch:
-            patch.setattr(dataflow_bridge, '_decode_record_document', observe)
+            patch.setattr(record_codec, '_decode_record_document', observe)
             with pytest.raises(ValueError, match='metadata probe'):
                 subscription.read_admitted(max_records=64, deadline_ms=0, admit=admit)
     finally:

@@ -56,7 +56,7 @@ def test_released_unrooted_publication_refunds_once_and_reput_charges_again(tmp_
 def test_old_and_pending_native_state_roots_keep_nested_record_payload_schema_and_borrowed(tmp_path):
     from demiflow.execution.storage.state_artifacts import StateArtifacts
     from demiflow.execution.storage.segments import SegmentForest, FINITE_RECORDS_MEDIA
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _encode_record_document
+    from demiflow.execution.contracts.record_codec import _encode_payload, _encode_record_document
     with store_fixture(tmp_path) as (run,store,port):
         payload = put(store,_encode_payload({'value':-0.0},max_bytes=4096),'application/vnd.demiflow.record.v3')
         schema = put(store,b'opaque-test-schema','application/vnd.demiflow.arrow-schema.v1')

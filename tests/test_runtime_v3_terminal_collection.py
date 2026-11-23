@@ -139,7 +139,7 @@ def test_admission_precedes_second_record_decode(monkeypatch, mode):
     from types import SimpleNamespace
     from demiflow.execution import dataflow_terminals as terminals
     from demiflow.execution.contracts.dataflow import Record
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
 
     _, bounds = resolve_runtime_policy({}, {}, provider='local')

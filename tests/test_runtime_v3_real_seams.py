@@ -114,7 +114,7 @@ def test_record_fidelity_through_real_store(tmp_path):
     with prepared(tmp_path, data.from_iter(lambda: iter([]))) as (ex, services):
         ref = spool_record(record, split_id="b" * 64, sequence=0,
                            store=services.store, bounds=services.bounds)
-        from demiflow.execution.exchange.dataflow_bridge import _decode_payload
+        from demiflow.execution.contracts.record_codec import _decode_payload
         value = _decode_payload(b"".join(services.store.read(ref, max_bytes=services.bounds.max_row_bytes)),
                                 max_bytes=services.bounds.max_row_bytes)
         assert type(value["list"]) is list and len(value["list"]) == 2

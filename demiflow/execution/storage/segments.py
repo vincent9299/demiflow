@@ -28,7 +28,8 @@ def _read(store, ref, bounds, *, frame_call=None):
     if frame_call is None:
         value = json.loads(b''.join(store.read(ref, max_bytes=bounds.max_control_bytes)))
     else:
-        from demiflow.execution.dataflow_record_frames import read_document, decode_metadata
+        from demiflow.execution.storage.streams import read_document
+        from demiflow.execution.contracts.record_codec import decode_metadata
         raw = frame_call(read_document, ref, store, bounds, _maximum=bounds.max_control_bytes)
         value = frame_call(decode_metadata, raw, bounds)
         del raw
@@ -69,7 +70,7 @@ def tree_refs(store, root, bounds, *, leaves_only=False, frame_call=None, on_ret
                 and (offset >= row_range[1] or offset + expected["rows"] <= row_range[0])):
             continue
         if on_retained is not None:
-            from demiflow.execution.dataflow_record_frames import metadata_bytes
+            from demiflow.execution.contracts.record_codec import metadata_bytes
             on_retained(metadata_bytes((stack, ref, expected, ancestors, offset)))
         visited += 1
         key = (ref.store_id, ref.key)
@@ -86,7 +87,7 @@ def tree_refs(store, root, bounds, *, leaves_only=False, frame_call=None, on_ret
             continue
         node = _read(store, ref, bounds, frame_call=frame_call)
         if frame_call is not None:
-            from demiflow.execution.dataflow_record_frames import admit_workspace, metadata_bytes
+            from demiflow.execution.contracts.record_codec import admit_workspace, metadata_bytes
             frame_call(admit_workspace, 2 * metadata_bytes(node), bounds)
         if expected is not None and any(node[k] != expected[k] for k in ('rows', 'bytes', 'height')):
             _fail('terminal index counters disagree with its parent')
@@ -139,7 +140,7 @@ def block_chunks(store, root, bounds, *, chunk_bytes=None, frame_call=None, on_r
             if frame_call is None:
                 yield from store.read(ref, max_bytes=max(1, ref.size_bytes), **options)
                 continue
-            from demiflow.execution.dataflow_record_frames import admit_workspace
+            from demiflow.execution.contracts.record_codec import admit_workspace
             chunks = store.read(ref, max_bytes=max(1, ref.size_bytes), **options)
             try:
                 while True:
@@ -192,7 +193,7 @@ class SegmentForest:
         # They remain live throughout construction, encoding and store.put.
         with self._metadata_context(children) if self._metadata_context is not None else nullcontext():
             if self._metadata_context is not None:
-                from demiflow.execution.dataflow_record_frames import admit_workspace
+                from demiflow.execution.contracts.record_codec import admit_workspace
                 self._frame_call(admit_workspace, 768, self.bounds)
             value = {'schema': SCHEMA, 'height': 1 + max(c['height'] for c in children),
                      'rows': sum(c['rows'] for c in children),
@@ -201,7 +202,7 @@ class SegmentForest:
                 raise DataflowError('BUDGET_EXCEEDED', 'terminal segment index depth exceeds bound')
             with self._metadata_context(value) if self._metadata_context is not None else nullcontext():
                 if self._frame_call is not None:
-                    from demiflow.execution.dataflow_record_frames import _json_shape, admit_workspace
+                    from demiflow.execution.contracts.record_codec import _json_shape, admit_workspace
                     size, resident = _json_shape(value, self.bounds.max_control_bytes)
                     if self._metadata_context is not None:
                         resident = 0  # Count the joint tree, including aliased roots, once.

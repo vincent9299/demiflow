@@ -373,7 +373,7 @@ def rid(label):
 
 
 def rec(row, record_id=None, sequence=0, position=None):
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     data = _encode_payload(dict(row), max_bytes=1 << 24)
     return Record(
         record_id=record_id or rid(repr((row, sequence))),

@@ -1,4 +1,5 @@
 """One validated payload encoding per routed cross-worker record."""
+from demiflow.execution.contracts import record_codec
 from dataclasses import replace
 
 import pytest
@@ -19,7 +20,7 @@ def row_record(row=None,**kwargs):
         from test_runtime_v3_scalar_values import payload
         row=payload()
         row.update(key=(-0.0,b'key'),target='r1',nan=float('nan'),infinity=float('inf'))
-    raw=bridge._encode_payload(row,max_bytes=65536)
+    raw=record_codec._encode_payload(row,max_bytes=65536)
     return Record(identity('record'),{'ordinal':7,'parent_record_ids':[identity('parent')],
         'nested':[{'v':1}]},None,row,len(raw),7,**kwargs)
 
@@ -45,7 +46,7 @@ def test_joint_route_matches_original_wire_identity_and_resumed_ordinal(routing,
     record=row_record(**extra);spec=spec_for(routing)
     old_state,new_state=state(19),state(19)
     expected=channels.route_record(record,spec=spec,state=old_state)
-    raw=bridge._encode_record_document(record,max_bytes=65536)
+    raw=record_codec._encode_record_document(record,max_bytes=65536)
     actual,encoded=channels._route_record_document(record,spec=spec,state=new_state,bounds=bounds(max_row_bytes=65536))
     assert actual==expected and encoded==raw
     assert all(r.record is record for r in actual)
@@ -56,7 +57,7 @@ def test_joint_route_matches_original_wire_identity_and_resumed_ordinal(routing,
 @pytest.mark.parametrize('mode',['memory_incremental','durable_incremental','finite_sealed'])
 def test_payload_window_and_full_document_row_budget_are_independent(mode):
     record=row_record({'value':'x'*200})
-    raw=bridge._encode_record_document(record,max_bytes=65536)
+    raw=record_codec._encode_record_document(record,max_bytes=65536)
     assert record.encoded_bytes<len(raw)
     spec=replace(spec_for(),mode=mode,scope_id='finite' if mode=='finite_sealed' else None,
                  credit_bytes=record.encoded_bytes,storage_bytes=record.encoded_bytes)
@@ -99,7 +100,7 @@ def test_bad_metadata_payload_counts_and_route_contracts_are_not_bypassed(fault)
 def test_external_payload_keeps_original_reference_channel_window_and_document_bytes():
     ref=ArtifactRef('e'*64,8192,'local','payload','application/octet-stream')
     record=Record('f'*64,{'ordinal':0},ref,None,ref.size_bytes,0)
-    raw=bridge._encode_record_document(record,max_bytes=65536)
+    raw=record_codec._encode_record_document(record,max_bytes=65536)
     spec=replace(spec_for(),credit_bytes=ref.size_bytes)
     assert channels._route_record_document(record,spec=spec,state=state(),bounds=bounds(max_row_bytes=ref.size_bytes))[1]==raw
     with pytest.raises(DataflowError,match='row byte budget'):
@@ -112,13 +113,13 @@ def test_external_payload_keeps_original_reference_channel_window_and_document_b
 
 def test_joint_path_encodes_entire_payload_once_even_for_broadcast(monkeypatch):
     record=row_record({'value':'x'*8192});spec=spec_for('broadcast')
-    count=[];encode=bridge._encode_value
+    count=[];encode=record_codec._encode_value
     def observe(value):
         if value is record.inline:count.append(1)
         return encode(value)
-    monkeypatch.setattr(bridge,'_encode_value',observe)
+    monkeypatch.setattr(record_codec,'_encode_value',observe)
     routes=channels.route_record(record,spec=spec,state=state())
-    expected=[bridge._encode_record_document(r.record,max_bytes=65536) for r in routes]
+    expected=[record_codec._encode_record_document(r.record,max_bytes=65536) for r in routes]
     assert len(count)==4
     count.clear()
     actual,raw=channels._route_record_document(record,spec=spec,state=state(),bounds=bounds(max_row_bytes=65536))
@@ -137,7 +138,7 @@ def test_real_worker_uses_validated_document_without_changing_results_or_ack(tmp
         if kwargs.get('spec') is not None:
             raw=kwargs.get('validated_raw')
             assert type(raw) is bytes
-            assert raw==bridge._encode_record_document(record,max_bytes=runner.bounds.max_row_bytes)
+            assert raw==record_codec._encode_record_document(record,max_bytes=runner.bounds.max_row_bytes)
             seen.append(kwargs['spec'].mode)
         return publish(runner,record,**kwargs)
     monkeypatch.setattr(WorkerGraphRunner,'_publish',observe)

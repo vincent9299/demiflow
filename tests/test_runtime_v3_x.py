@@ -8,6 +8,7 @@ plain imports with no fallback. The editable-install finder that redirects
 ``demiflow`` to the main repository is removed in this test process only, and
 every test asserts in-process that the loaded modules come from this worktree.
 """
+from demiflow.execution.contracts import record_codec
 import base64
 import dataclasses
 import hashlib
@@ -225,17 +226,17 @@ def make_services(store=None, bounds=None, plan_revision=1):
 
 
 def make_record(row, *, sequence=0, record_id=None, source_position=None):
-    rid = record_id or hashlib.sha256(bridge._codec_dumps(bridge._encode_value(row))).hexdigest()
-    raw = bridge._encode_payload(row, max_bytes=1 << 20)
+    rid = record_id or hashlib.sha256(record_codec._codec_dumps(record_codec._encode_value(row))).hexdigest()
+    raw = record_codec._encode_payload(row, max_bytes=1 << 20)
     return Record(record_id=rid, source_position=source_position or {"next": sequence + 1},
                   payload_ref=None, inline=row, encoded_bytes=len(raw), sequence=sequence)
 
 
 def make_ref_record(row, store, *, sequence=0):
-    raw = bridge._encode_payload(row, max_bytes=1 << 20)
+    raw = record_codec._encode_payload(row, max_bytes=1 << 20)
     ref = store.put(iter((raw,)), max_bytes=len(raw),
                     media_type=bridge.RECORD_MEDIA_TYPE)
-    rid = hashlib.sha256(bridge._codec_dumps(bridge._encode_value(row))).hexdigest()
+    rid = hashlib.sha256(record_codec._codec_dumps(record_codec._encode_value(row))).hexdigest()
     return Record(record_id=rid, source_position={"next": sequence + 1}, payload_ref=ref,
                   inline=None, encoded_bytes=ref.size_bytes, sequence=sequence)
 
@@ -755,7 +756,7 @@ def test_x014():
     assert envelope["bounds"] == {"rows": 1, "bytes": record.encoded_bytes}
     assert envelope["records"][0]["size_bytes"] == record.encoded_bytes
     payload = envelope["records"][0]["payload"]
-    assert base64.b64decode(payload["data"]) == bridge._encode_payload(record.inline, max_bytes=1 << 20)
+    assert base64.b64decode(payload["data"]) == record_codec._encode_payload(record.inline, max_bytes=1 << 20)
     # data and control share one sequence space: the next issue is the barrier slot
     state = channels.open_channels((make_spec("ch-a"),), services=make_services())
     seq_data = state.issue_sequence("ch-a")

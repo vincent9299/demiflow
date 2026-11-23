@@ -111,7 +111,7 @@ def test_worker_control_ids_change_on_boot_business_route_identity_does_not():
     from demiflow.execution.exchange.dataflow_state import RoutingCounters
     from demiflow.execution.contracts.dataflow import ExchangeSpec, Record
     from demiflow.execution.recovery_contract import identity
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     def worker(boot, attempt):
         e = object.__new__(DataflowWorkerExecutor)
         e._event_sequence = 0

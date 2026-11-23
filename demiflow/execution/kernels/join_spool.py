@@ -6,16 +6,16 @@ built for each partition. Oversized distinct-key partitions split recursively;
 an irreducible hot key uses a bounded scan (its cartesian output already costs
 that work). No global sort, temporary run ledger, or native unbudgeted spill.
 """
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 import hashlib
 import struct
 
-from ...operators.relational import (JOIN_PARTITION_BITS, JoinKeyFilter, hash_join_pairs,
-                                    right_index, probe_right_index)
+from demiflow.operators.relational import JOIN_PARTITION_BITS, JoinKeyFilter, hash_join_pairs, right_index, probe_right_index
 
-from ..exchange.dataflow_bridge import _decode_record_document as decode_record_document, _encode_record_document as encode_record_document
-from .dataflow import _check_stop, _err
-from .dataflow import _group_key as group_key
-from .dataflow import _materialize_row as materialize_row
+from demiflow.execution.contracts.record_codec import _decode_record_document as decode_record_document, _encode_record_document as encode_record_document
+from demiflow.execution.kernels.dataflow import _check_stop, _err
+from demiflow.execution.kernels.dataflow import _group_key as group_key
+from demiflow.execution.kernels.dataflow import _materialize_row as materialize_row
 
 # next offset, key digest prefix, key bytes, document bytes, sequence.
 _HEADER = struct.Struct('!qQIIQ')
@@ -47,7 +47,7 @@ class _EncodedJoinInput:
 
 def project_join_document(raw, *, record_id, sequence, max_bytes, fields, row_window,
                            payload_max_bytes=None):
-    from ..exchange.dataflow_bridge import _decode_value as decode_value, _codec_loads as load_codec_json
+    from demiflow.execution.contracts.record_codec import _decode_value as decode_value, _codec_loads as load_codec_json
     # Large/unsupported records keep the same original Record path. Do not
     # enlarge a grant to make the optimized representation fit.
     # Include JSON container overhead and typed-key expansion before parsing,
@@ -124,8 +124,8 @@ class _Spool:
         if type(record) is _EncodedJoinInput:
             raw = record.document
         elif self.bounded:
-            from ..dataflow_record_frames import encode_document
-            raw = encode_document(record, self.services.bounds, services=self.services,
+            from demiflow.execution.contracts.record_codec import encode_document
+            raw = encode_document(record, self.services.bounds, resident_bytes=stage_resident_bytes(getattr(self.services, 'assignment', None)),
                                   retained=self.index_limit)
         else:
             raw = encode_record_document(record, max_bytes=self.document_limit)
@@ -156,10 +156,10 @@ class _Spool:
         if encoded:
             row = record.inline
         elif (build_filter is not None or probe_filter is not None) and record.inline is not None:
-            from ..contracts.dataflow import thaw_record_value
+            from demiflow.execution.contracts.dataflow import thaw_record_value
             row = {field: thaw_record_value(record.inline[field]) for field in fields}
         elif (build_filter is not None or probe_filter is not None) and record.payload_ref is not None:
-            from ..arrow_payload import is_arrow_record, batch_cache
+            from demiflow.execution.arrow_payload import is_arrow_record, batch_cache
             if is_arrow_record(record):
                 cache = batch_cache(self.services.store, self.services.bounds, services=self.services)
                 batch, index = cache.locate(record)
@@ -191,8 +191,8 @@ class _Spool:
         key, hashed = entry
         encoded = type(record) is _EncodedJoinInput
         if self.bounded and not encoded:
-            from ..dataflow_record_frames import encode_document
-            document = encode_document(record, self.services.bounds, services=self.services,
+            from demiflow.execution.contracts.record_codec import encode_document
+            document = encode_document(record, self.services.bounds, resident_bytes=stage_resident_bytes(getattr(self.services, 'assignment', None)),
                                        retained=self.index_limit + len(key))
         else:
             document = record.document if encoded else encode_record_document(record, max_bytes=self.document_limit)
@@ -242,18 +242,18 @@ class _Spool:
     def hold_probe_record(self, offset, header):
         record = self.record(offset, header)
         if self.bounded:
-            from ..dataflow_record_frames import _typed_shape as typed_shape
+            from demiflow.execution.contracts.record_codec import _typed_shape as typed_shape
             self.live_bytes += typed_shape(record.inline, self.services.bounds.max_row_bytes)[1]
         return record
 
     def hold_stream_record(self, record, key):
         if type(record) is _EncodedJoinInput:
-            from ..dataflow_record_frames import decode_document
+            from demiflow.execution.contracts.record_codec import decode_document
             record = decode_document(record.document, record_id=record.record_id, sequence=record.sequence,
-                                     bounds=self.services.bounds, services=self.services,
+                                     bounds=self.services.bounds, resident_bytes=stage_resident_bytes(getattr(self.services, 'assignment', None)),
                                      retained=self.index_limit + len(key))
         if self.bounded:
-            from ..dataflow_record_frames import _typed_shape
+            from demiflow.execution.contracts.record_codec import _typed_shape
             self.live_bytes = len(key) + _typed_shape(record.inline, self.services.bounds.max_row_bytes)[1]
             if self.retained_key is not None:
                 self.retained_key(len(key))
@@ -308,9 +308,9 @@ class _Spool:
     def _decode(self, header, data):
         record_id, raw = data
         if self.bounded:
-            from ..dataflow_record_frames import decode_document
+            from demiflow.execution.contracts.record_codec import decode_document
             return decode_document(raw, record_id=record_id, sequence=header[4],
-                bounds=self.services.bounds, services=self.services,
+                bounds=self.services.bounds, resident_bytes=stage_resident_bytes(getattr(self.services, 'assignment', None)),
                 retained=self.index_limit + self.live_bytes)
         return decode_record_document(raw, record_id=record_id, sequence=header[4], max_bytes=self.document_limit)
 
@@ -360,7 +360,7 @@ def join_pairs(left, right, *, left_keys, right_keys, how, services, bounded=Fal
     bounds = services.bounds
     if bounds.max_open_files < 2:
         raise _err('RESOURCE_INFEASIBLE', 'Join needs one scratch file and its owner lease')
-    from ..storage.objects import RunArtifactStore
+    from demiflow.execution.storage.objects import RunArtifactStore
     if isinstance(services.store,RunArtifactStore):
         # One scratch extent, a streaming input record and a possible external
         # payload read coexist. Preserve the original same-store file authority.

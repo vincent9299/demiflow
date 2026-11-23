@@ -7,10 +7,9 @@ import sys
 import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_kernel_pack import (
-    PACK_MEDIA, _MAGIC, _header, iter_kernel_images, read_kernel_image,
-    snapshot_kernel_images,
-)
+from demiflow.execution.contracts.state_codec import PACK_MEDIA, _MAGIC, _header
+from demiflow.execution.storage.streams import iter_kernel_images
+from demiflow.execution.dataflow_kernel_pack import read_kernel_image, snapshot_kernel_images
 from demiflow.execution.contracts import state_codec
 from demiflow.execution.kernels.operator import OperatorKernel, IMAGE_MEDIA_TYPE
 from test_runtime_v3_artifact_accounting import store_fixture, consumed

@@ -6,14 +6,16 @@ keys are changed. A first sort makes identical row occurrences adjacent; the
 second hashes the seed, row digest and per-row duplicate ordinal. Only the last
 typed key is retained, never a table-sized counter dictionary.
 """
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 from dataclasses import dataclass, replace
 import hashlib
 import sys
 
-from .dataflow import _err, _seed, _materialize_row, _input_row_bytes
-from .ordering import OrderingServices, SortWindow, _build_sort_runs, merge_sort_runs, _release_runs, _provenance
-from ..dataflow_record_frames import resident_limit, raw_workspace, read_document, _typed_shape, _json_shape, _record_metadata
-from ..exchange.dataflow_bridge import _encode_payload, _decode_payload
+from demiflow.execution.kernels.dataflow import _err, _seed, _materialize_row, _input_row_bytes
+from demiflow.execution.kernels.ordering import OrderingServices, SortWindow, _build_sort_runs, merge_sort_runs, _release_runs, _provenance
+from demiflow.execution.contracts.record_codec import resident_limit, raw_workspace, _typed_shape, _json_shape, _record_metadata
+from demiflow.execution.storage.streams import read_document
+from demiflow.execution.contracts.record_codec import _encode_payload, _decode_payload
 
 FIELD = 'shuffle_order_version'
 VERSION = 'typed-multiset-v1'
@@ -45,7 +47,7 @@ def shuffle_windows(services):
     Final output retains merge + sort/input metadata (at most G/2);
     downstream codecs see that charge.
     """
-    grant = resident_limit(services.bounds, services)
+    grant = resident_limit(services.bounds, stage_resident_bytes(getattr(services, 'assignment', None)))
     metadata = grant // 16
     # Each run reserves 4 KiB for both passes' immutable references and the
     # current/owned/merged list slots. No unbounded list of tiny runs is allowed.
@@ -78,12 +80,12 @@ class _TypedKeys:
             row = record.inline
         else:
             scoped = OrderingServices(services, window.codec_bytes)
-            from ..arrow_payload import is_arrow_record
+            from demiflow.execution.arrow_payload import is_arrow_record
             if is_arrow_record(record):
                 row = _materialize_row(record, scoped)
             else:
                 payload = read_document(record.payload_ref, services.store, scoped.bounds,
-                    services=scoped, _maximum=services.bounds.max_row_bytes)
+                    resident_bytes=stage_resident_bytes(getattr(scoped, 'assignment', None)), _maximum=services.bounds.max_row_bytes)
                 if raw_workspace(payload) > window.codec_bytes:
                     raise _err('BUDGET_EXCEEDED', 'shuffle payload decode exceeds its codec subwindow')
                 row = _decode_payload(payload, max_bytes=services.bounds.max_row_bytes)

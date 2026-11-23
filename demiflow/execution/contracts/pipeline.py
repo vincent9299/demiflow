@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol
 
 
-
 PIPELINE_RUNTIME_ABI = "demiflow-pipeline-v12"
 
 
@@ -107,60 +106,9 @@ class PlatformRuntimeIdentity:
 
 
 @dataclass(frozen=True)
-class PipelineExecutionEnvironment:
-    runtime: PlatformRuntimeIdentity
-    runtime_wheel: Path
-    platform_requirements: Path
-    local_environment_cache: Path
-    dependency_setup_timeout_seconds: int
-    planning_policy: Any
-    ray_job_enabled: bool = True
-    candidate_wheelhouse: Path | None = None
-    platform_wheel_directory: Path | None = None
-
-
-
-    def declaration_id(self, requirements_sha256: str) -> str:
-        payload = {
-            "environment_policy": self.runtime.environment_policy,
-            "runtime": self.runtime.to_dict(),
-            "requirements_sha256": str(requirements_sha256 or ""),
-            "python_cache_tag": str(sys.implementation.cache_tag or ""),
-            "platform": sys.platform,
-            "machine": platform.machine(),
-        }
-        encoded = json.dumps(
-            payload, sort_keys=True, separators=(",", ":"),
-        ).encode()
-        return hashlib.sha256(encoded).hexdigest()
-
-
-@dataclass(frozen=True)
-class PipelineBundleRef:
-    root: str
-    content_digest: str
-    runtime_abi: str = PIPELINE_RUNTIME_ABI
-
-
-
-
-
-    @property
-    def module_key(self) -> str:
-        value = self.content_digest.removeprefix("sha256:")
-        if not value or any(
-            character not in "0123456789abcdef" for character in value
-        ):
-            raise ValueError(
-                "Pipeline bundle digest is not a canonical sha256 value"
-            )
-        return "p_" + value[:24]
-
-
-@dataclass(frozen=True)
 class PipelineRunRequest:
     run_id: str
-    bundle: PipelineBundleRef
+    bundle: object
     target: Any
 
     def __post_init__(self) -> None:
@@ -233,9 +181,6 @@ class PipelineBackend(Protocol):
         cancellation: Any = None,
         observer: PipelineRunObserver | None = None,
     ) -> PipelineRunResult: ...
-
-
-
 
 
 @dataclass(frozen=True)

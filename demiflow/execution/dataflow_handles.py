@@ -20,8 +20,9 @@ Cross-lane runtime edges (frozen vocabulary, producer implemented by the owning 
   ``retain``/``release`` (owner scoped); no new ledger is created here.
 """
 from __future__ import annotations
+from demiflow.execution.storage.streams import _ChunkStream
 
-from .contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 import json
 import pickle
@@ -139,7 +140,7 @@ class RuntimeActionHandle:
                 context = getattr(action, 'context', None)
                 journal = getattr(context, 'journal', None)
                 if journal is not None and journal.execution_status()['status'] in {'stopping', 'cancelled'}:
-                    from .request_limits import COOPERATIVE_RUN_STOP_REASON
+                    from demiflow.execution.request_limits import COOPERATIVE_RUN_STOP_REASON
                     reason = COOPERATIVE_RUN_STOP_REASON
                 self._execution.cancel(reason)
             except Exception as exc:
@@ -273,8 +274,8 @@ class RuntimeActionHandle:
         return self._iter_records(values=values)
 
     def _deliver(self, records, values):
-        from .outputs.arrow_rows import PublishedArrowRows
-        from .dataflow_terminals import _record_row
+        from demiflow.execution.outputs.arrow_rows import PublishedArrowRows
+        from demiflow.execution.dataflow_terminals import _record_row
         while records:
             record = records.popleft()
             if isinstance(record, PublishedArrowRows):
@@ -402,64 +403,7 @@ class RuntimeActionHandle:
             pass
 
 
-class _ChunkStream:
-    """File-like view over a bounded store chunk iterator for incremental unpickling.
 
-    Only the bytes needed for the current row are retained; the whole block/result is
-    never materialised before slicing.
-    """
-
-    def __init__(self, chunks) -> None:
-        self._it = iter(chunks)
-        self._buf = bytearray()
-        self._eof = False
-
-    def _pull(self) -> bool:
-        if self._eof:
-            return False
-        try:
-            chunk = next(self._it)
-        except StopIteration:
-            self._eof = True
-            return False
-        self._buf.extend(chunk)
-        return True
-
-    def read(self, n: int = -1) -> bytes:
-        if n is None or n < 0:
-            while self._pull():
-                pass
-            data = bytes(self._buf)
-            self._buf.clear()
-            return data
-        while len(self._buf) < n and self._pull():
-            pass
-        data = bytes(self._buf[:n])
-        del self._buf[:n]
-        return data
-
-    def readline(self, max_bytes: int) -> bytes:
-        while True:
-            index = self._buf.find(b"\n")
-            if index >= 0:
-                if index + 1 > max_bytes:
-                    raise DataflowError("BUDGET_EXCEEDED", "stored record frame exceeds its bound")
-                data = bytes(memoryview(self._buf)[: index + 1])
-                del self._buf[: index + 1]
-                return data
-            if len(self._buf) > max_bytes:
-                raise DataflowError("BUDGET_EXCEEDED", "stored record frame exceeds its bound")
-            if not self._pull():
-                data = bytes(self._buf)
-                self._buf.clear()
-                return data
-
-    def close(self):
-        self._eof = True
-        self._buf.clear()
-        close = getattr(self._it, 'close', None)
-        if close is not None:
-            close()
 
 
 class StoredMaterializedHandle:
@@ -488,7 +432,7 @@ class StoredMaterializedHandle:
         self._schema = None
         self._declared_schema_ref = None
         self._declared_schema = None
-        from .storage.objects import RunArtifactStore
+        from demiflow.execution.storage.objects import RunArtifactStore
         self._count_proof = {} if type(store) is RunArtifactStore else None
         self._verified_frame_rows = 0
         pinned: list["ArtifactRef"] = []
@@ -513,7 +457,7 @@ class StoredMaterializedHandle:
             self._rows = rows
             self._schema = manifest.get("columns")
             if manifest.get('schema_ref') is not None:
-                from .record_schema import RecordSchemas
+                from demiflow.execution.record_schema import RecordSchemas
                 self._declared_schema_ref = _artifact_ref(manifest['schema_ref'])
                 self._declared_schema = RecordSchemas(store=store, bounds=self._bounds).read(self._declared_schema_ref)
                 store.retain(self._declared_schema_ref, owner=owner)
@@ -535,8 +479,8 @@ class StoredMaterializedHandle:
 
     def _retain_block(self, ref, witness):
         from demiflow.execution.storage.segments import RECORDS_MEDIA, SEGMENTS_MEDIA
-        from .dataflow_record_frames import (decode_document, decode_frame, frame_stream,
-                                             line_limit, read_chunk_bytes)
+        from demiflow.execution.contracts.record_codec import decode_document, decode_frame, line_limit, read_chunk_bytes
+        from demiflow.execution.storage.streams import frame_stream
         proof = self._count_proof
         budget = min(self._bounds.max_state_bytes, self._bounds.max_resident_bytes // 8)
         if (proof is None or len(proof) >= budget // 1024
@@ -663,14 +607,14 @@ class StoredMaterializedHandle:
         return state
 
     def __setstate__(self, state):
-        from .storage.objects import RunArtifactStore
+        from demiflow.execution.storage.objects import RunArtifactStore
         self._store = RunArtifactStore(root=state["root"], store_id=state["store_id"],
             journal=None, bounds=state["bounds"], readonly=True)
         self._count_proof = None
         self._bounds = state["bounds"]
         self._manifest_ref, self._blocks = state["manifest"], state["blocks"]
         self._rows, self._schema = state["rows"], state["schema"]
-        from .record_schema import RecordSchemas
+        from demiflow.execution.record_schema import RecordSchemas
         self._declared_schema_ref = state.get('schema_ref')
         self._declared_schema = RecordSchemas(store=self._store,
             bounds=self._bounds).read(self._declared_schema_ref)
@@ -705,13 +649,14 @@ class StoredMaterializedHandle:
         return self._iter_rows(with_schema=True)
 
     def _iter_rows(self, *, with_schema=False) -> Iterator[object]:
-        from .record_schema import RecordSchemas
+        from demiflow.execution.record_schema import RecordSchemas
         schemas = RecordSchemas(store=self._store, bounds=self._bounds) if with_schema else None
         count = 0
-        from .arrow_payload import ArrowBatchCache, is_arrow_record
+        from demiflow.execution.arrow_payload import ArrowBatchCache, is_arrow_record
         arrow = ArrowBatchCache(self._store, self._bounds)
         from demiflow.execution.storage.segments import segment_refs
-        from .dataflow_record_frames import decode_frame, decode_document, line_limit, frame_stream, read_chunk_bytes
+        from demiflow.execution.contracts.record_codec import decode_frame, decode_document, line_limit, read_chunk_bytes
+        from demiflow.execution.storage.streams import frame_stream
         try:
             for ref in (leaf for block in self._blocks
                         for leaf in segment_refs(self._store, block, self._bounds)):
@@ -728,14 +673,14 @@ class StoredMaterializedHandle:
                                     break
                                 raw, item = decode_frame(line, self._bounds, retained=stream.buffered_bytes)
                                 del line
-                                from .contracts.dataflow import thaw_record_value
+                                from demiflow.execution.contracts.dataflow import thaw_record_value
                                 record = decode_document(raw, record_id=item["record_id"],
                                     sequence=item["sequence"], bounds=self._bounds, retained=stream.buffered_bytes)
                                 del raw
                                 if is_arrow_record(record):
                                     row = arrow.row(record)
                                 elif record.inline is None:
-                                    from .exchange.dataflow_bridge import _decode_payload
+                                    from demiflow.execution.contracts.record_codec import _decode_payload
                                     ceiling = self._bounds.max_row_bytes
                                     row = _decode_payload(b"".join(self._store.read(record.payload_ref,
                                         max_bytes=ceiling)), max_bytes=ceiling)

@@ -1,3 +1,4 @@
+from demiflow.execution.contracts import record_codec
 import json,statistics,subprocess,time,types,hashlib
 from demiflow.execution.exchange import dataflow_bridge as current
 from demiflow.execution.contracts.dataflow import Record
@@ -12,7 +13,7 @@ for name,row in rows.items():
  record=Record('a'*64,{'offset':7,'origin':'source'},None,row,len(payload),7)
  doc={'v':3,'sp':record.source_position,'eb':len(payload),'p':json.loads(payload),'r':None}
  raw=baseline._encode_record_document(record,max_bytes=2**20)
- assert current._encode_record_document(record,max_bytes=2**20)==raw
+ assert record_codec._encode_record_document(record,max_bytes=2**20)==raw
  cases={'wrapper':lambda module:module._record_document_bytes(doc,payload_raw=payload,max_bytes=2**20),
         'encode':lambda module:module._encode_record_document(record,max_bytes=2**20),
         'decode':lambda module:module._decode_record_document(raw,record_id=record.record_id,sequence=record.sequence,max_bytes=2**20)}

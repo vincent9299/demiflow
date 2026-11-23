@@ -12,6 +12,7 @@ not process RSS; Arrow logical bytes and decoded Python objects are accounted
 separately where they coexist (see ``invoke_batch``).
 """
 from __future__ import annotations
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 
 import hashlib
 import json
@@ -142,12 +143,12 @@ def group_key_values(raw):
 
 
 def _dumps_row(row: object, *, max_bytes: int) -> bytes:
-    from ..exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     return _encode_payload(row, max_bytes=max_bytes)
 
 
 def _loads_row(data: bytes) -> object:
-    from ..exchange.dataflow_bridge import _decode_payload
+    from demiflow.execution.contracts.record_codec import _decode_payload
     return _decode_payload(data, max_bytes=max(1, len(data)))
 
 
@@ -159,7 +160,7 @@ def _input_row_bytes(record: Record) -> int:
     if record.inline is not None:
         return record.encoded_bytes
     if record.payload_ref is not None:
-        from ..arrow_payload import is_arrow_record
+        from demiflow.execution.arrow_payload import is_arrow_record
         if is_arrow_record(record):
             return record.encoded_bytes
         return record.payload_ref.size_bytes
@@ -171,7 +172,7 @@ def _materialize_row(record: Record, services: RuntimeServices, *, measured=Fals
         raise _err("INVALID_CONTRACT", "record must carry exactly one of inline/payload_ref")
     if record.inline is not None:
         return thaw_record_value(record.inline)
-    from ..arrow_payload import is_arrow_record, materialize_arrow_row
+    from demiflow.execution.arrow_payload import is_arrow_record, materialize_arrow_row
     if is_arrow_record(record):
         return materialize_arrow_row(record, services)
     ref = record.payload_ref
@@ -179,23 +180,24 @@ def _materialize_row(record: Record, services: RuntimeServices, *, measured=Fals
     if ref.size_bytes > limit:
         raise _err("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", size=ref.size_bytes)
     if measured:
-        from ..dataflow_record_frames import admit_receive, admit_workspace, raw_workspace
-        admit_receive(ref.size_bytes, services.bounds, services=services, retained=retained)
+        from demiflow.execution.exchange.dataflow_transport import admit_receive
+        from demiflow.execution.contracts.record_codec import admit_workspace, raw_workspace
+        admit_receive(ref.size_bytes, services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained)
     data = b"".join(services.store.read(ref, max_bytes=limit))
     if measured:
-        admit_workspace(raw_workspace(data), services.bounds, services=services, retained=retained)
+        admit_workspace(raw_workspace(data), services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained)
     if len(data) > limit:
         raise _err("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", size=len(data))
     return _loads_row(data)
 
 
 def _measured_input(record, services, retained):
-    from ..dataflow_record_frames import admit_row_copies
+    from demiflow.execution.contracts.record_codec import admit_row_copies
     if record.inline is not None:
-        size = admit_row_copies(record.inline, services.bounds, services=services, retained=retained)
+        size = admit_row_copies(record.inline, services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained)
         return _materialize_row(record, services), retained + 2 * size
     value = _materialize_row(record, services, measured=True, retained=retained)
-    size = admit_row_copies(value, services.bounds, services=services, retained=retained)
+    size = admit_row_copies(value, services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained)
     return value, retained + size
 
 
@@ -208,10 +210,10 @@ def _output_record(
     *, schema_ref=None, retained=None,
 ) -> Record:
     if retained is not None:
-        from ..dataflow_record_frames import admit_row_copies
-        admit_row_copies(row, services.bounds, services=services, retained=retained)
-    from ..exchange.dataflow_bridge import _encode_payload
-    from ..contracts.dataflow_codec import _thaw_json
+        from demiflow.execution.contracts.record_codec import admit_row_copies
+        admit_row_copies(row, services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained)
+    from demiflow.execution.contracts.record_codec import _encode_payload
+    from demiflow.execution.contracts.dataflow_codec import _thaw_json
     data = _encode_payload(row, max_bytes=services.bounds.max_row_bytes)
     if len(data) > services.bounds.max_row_bytes:
         raise _err("BUDGET_EXCEEDED", "output row exceeds max_row_bytes", size=len(data))
@@ -252,7 +254,7 @@ class _OutputBudget:
 def _single_row_batch(
     row: Mapping[str, Any], batch_format: str, services: RuntimeServices
 ) -> tuple[Any, int]:
-    from ..batch_conversion import admit_batch_conversion
+    from demiflow.execution.batch_conversion import admit_batch_conversion
     admit_batch_conversion([row], 'pandas' if batch_format == 'default' else batch_format,
         schema=None, bounds=services.bounds)
     if batch_format in ("default", "pandas"):
@@ -275,9 +277,9 @@ def _batch_values(result: Any) -> list[Any]:
 
 
 def _invoke_scoped(instance, value, records, spec):
-    from ..row_scope import RowScope, current_row_scope, set_row_scope
+    from demiflow.execution.row_scope import RowScope, current_row_scope, set_row_scope
     previous = current_row_scope()
-    from .concurrent_calls import INVOCATION_SCOPE
+    from demiflow.execution.kernels.concurrent_calls import INVOCATION_SCOPE
     explicit = INVOCATION_SCOPE.get()
     scope = getattr(instance, 'native_scope', None)
     if len(records) == 1 and records[0].source_position.get('queue_delivery_kind') == 'producer':
@@ -299,7 +301,7 @@ def _invoke_scoped(instance, value, records, spec):
     delivery = None
     if len(records) == 1 and records[0].source_position.get('queue_delivery_ref'):
         import json
-        from ..contracts.dataflow import ArtifactRef
+        from demiflow.execution.contracts.dataflow import ArtifactRef
         delivery = ArtifactRef(**json.loads(records[0].source_position['queue_delivery_ref']))
     set_row_scope(RowScope(occurrence, delivery))
     try:
@@ -309,13 +311,13 @@ def _invoke_scoped(instance, value, records, spec):
 
 
 def _business_miss(exc, cfg):
-    from ...data.runtime_contract import RuntimeContractError
-    from ..recovery_contract import RecoveryContractError
-    from ..request_limits import ServiceStopped
-    from ...operator_llm.journal import UncertainPromptCall
+    from demiflow.data.runtime_contract import RuntimeContractError
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.request_limits import ServiceStopped
+    from demiflow.operator_llm.journal import UncertainPromptCall
     # Only the callback deadline class certifies that cancellation drained;
     # ordinary control/budget/unknown-effect failures can never become a miss.
-    from . import async_instance
+    from demiflow.execution.kernels import async_instance
     callback_timeout = getattr(async_instance, 'CallbackDeadlineExceeded', None)
     if (callback_timeout is not None and isinstance(exc, callback_timeout)
             and cfg.get('hard_timeout') is not None):
@@ -347,15 +349,16 @@ def invoke_unary(
         yield record
         return
     if kind in ('SelectColumnsOp', 'DropColumnsOp', 'RenameColumnsOp') and record.payload_ref is not None:
-        from ..arrow_payload import ARROW_MEDIA_TYPES, batch_cache
-        from ...operators.relational import project_columns
+        from demiflow.execution.contracts.record_codec import ARROW_MEDIA_TYPES
+        from demiflow.execution.arrow_payload import batch_cache
+        from demiflow.operators.relational import project_columns
         if record.payload_ref.media_type in ARROW_MEDIA_TYPES:
             cache = batch_cache(services.store, services.bounds, services=services)
             batch, _ = cache.locate(record)
             projection = project_columns(batch.schema.names, kind, cfg)
             if projection is not None:
                 if schemas is None:
-                    from ..record_schema import RecordSchemas
+                    from demiflow.execution.record_schema import RecordSchemas
                     schemas = RecordSchemas(services)
                 projected = cache.project(record, *projection, schemas)
                 if projected is not None:
@@ -375,7 +378,7 @@ def invoke_unary(
     position = record.source_position
     sequence = record.sequence
     if schemas is None:
-        from ..record_schema import RecordSchemas
+        from demiflow.execution.record_schema import RecordSchemas
         schemas = RecordSchemas(services)
 
     if kind in ("MapOp", "BoundMapOp") and not cfg.get("streaming_map"):
@@ -388,15 +391,15 @@ def invoke_unary(
                 observe(time.perf_counter_ns() - started)
         if not isinstance(result, Mapping):
             if position.get('queue_delivery_ref'):
-                from ..recovery_contract import RecoveryContractError
+                from demiflow.execution.recovery_contract import RecoveryContractError
                 raise RecoveryContractError('Task map must preserve exactly one row')
             raise _err("INVALID_CONTRACT", "map callable must return a mapping row")
         yield output_record(record.record_id, position, result, sequence, services)
     elif kind == "FilterOp":
         selected = instance(row)
         if state_bytes is not None:
-            from ..dataflow_record_frames import admit_workspace
-            admit_workspace(state_bytes(), services.bounds, services=services, retained=input_bytes)
+            from demiflow.execution.contracts.record_codec import admit_workspace
+            admit_workspace(state_bytes(), services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=input_bytes)
         if selected:
             yield record
     elif kind == "FlatMapOp":
@@ -416,8 +419,8 @@ def invoke_unary(
                 budget.charge(out)
                 yield out
             if state_bytes is not None:
-                from ..dataflow_record_frames import admit_workspace
-                admit_workspace(state_bytes(), services.bounds, services=services, retained=input_bytes)
+                from demiflow.execution.contracts.record_codec import admit_workspace
+                admit_workspace(state_bytes(), services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=input_bytes)
         finally:
             close = getattr(iterator, "close", None)
             if close is not None:
@@ -442,7 +445,7 @@ def invoke_unary(
                 observe(time.perf_counter_ns() - started, miss)
         if (position.get('queue_delivery_ref') and position.get('queue_delivery_kind') != 'producer'
                 and not isinstance(result, Mapping)):
-            from ..recovery_contract import RecoveryContractError
+            from demiflow.execution.recovery_contract import RecoveryContractError
             raise RecoveryContractError('Task map must preserve exactly one row')
         if result is None:
             return
@@ -510,7 +513,7 @@ def invoke_unary(
 def _rows_to_batch(
     rows: list[dict[str, Any]], batch_format: str, services: RuntimeServices, *, schema=None
 ) -> tuple[Any, int]:
-    from ..batch_conversion import admit_batch_conversion
+    from demiflow.execution.batch_conversion import admit_batch_conversion
     admit_batch_conversion(rows, batch_format, schema=schema, bounds=services.bounds)
     if batch_format in ("default", "numpy"):
         import numpy as np
@@ -586,8 +589,8 @@ def _batch_to_rows(result: Any, batch_format: str, *, on_schema=None) -> Iterato
 def _callback_table(records, services, *, zero_copy):
     """Reassemble the original business batch from validated, consecutive IPC slices."""
     import pyarrow as pa
-    from ..arrow_payload import _resident_budget
-    from ..arrow_payload import batch_cache
+    from demiflow.execution.arrow_payload import _resident_budget
+    from demiflow.execution.arrow_payload import batch_cache
     cache = batch_cache(services.store, services.bounds, services=services)
     limit = min(services.bounds.max_batch_bytes,
                 _resident_budget(services.bounds, services))
@@ -627,9 +630,9 @@ def _mapped_arrow_output(result, *, binding, schemas, services, budget, retained
     """Consume callback outputs once and leave each original occurrence with its ACK owner."""
     import pyarrow as pa
     from collections.abc import Iterator
-    from ..arrow_payload import _MAX_ROWS
-    from ..arrow_payload import _resident_budget
-    from ..arrow_payload import store_mapped_arrow
+    from demiflow.execution.arrow_payload import _MAX_ROWS
+    from demiflow.execution.arrow_payload import _resident_budget
+    from demiflow.execution.arrow_payload import store_mapped_arrow
 
     outputs = result if isinstance(result, Iterator) else (result,)
     ordinal = 0
@@ -705,7 +708,7 @@ def invoke_batch(
     input_bytes = sum(_input_row_bytes(record) for record in records)
     budget = _OutputBudget(spec, services)
     if schemas is None:
-        from ..record_schema import RecordSchemas
+        from demiflow.execution.record_schema import RecordSchemas
         schemas = RecordSchemas(services)
     schema = schemas.read(records[0].schema_ref) if records else None
     if any(record.schema_ref != records[0].schema_ref for record in records):
@@ -723,7 +726,7 @@ def invoke_batch(
 
     if (kind == 'MapBatchesOp' and cfg.get('batch_format') == 'pyarrow' and records
             and expected is None):
-        from ..arrow_payload import is_arrow_record
+        from demiflow.execution.arrow_payload import is_arrow_record
         if all(is_arrow_record(record) for record in records):
             table = _callback_table(records, services, zero_copy=cfg.get('zero_copy_batch', False))
             if table is not None:
@@ -740,7 +743,7 @@ def invoke_batch(
         rows = [_materialize_row(record, services) for record in records]
     if expected is not None:
         import pyarrow as pa
-        from ...data.training_schema import PREDICTION_ROW_ID, validate_columns
+        from demiflow.data.training_schema import PREDICTION_ROW_ID, validate_columns
         required = cfg['predict_input_schema']
         if schema is not None:
             validate_columns(schema, required)
@@ -804,7 +807,7 @@ def invoke_batch(
             out_rows = [{**row, column: value} for row, value in zip(rows, values)]
         else:
             if kind == "SaveLanceOp":
-                from ..dataflow_schema import stream_lance_output_schema
+                from demiflow.execution.dataflow_schema import stream_lance_output_schema
                 output_schema(stream_lance_output_schema(schema, cfg.get("output_ref")))
                 instance.bind_records(tuple(record.record_id for record in records), instance.native_call_ordinal)
             import time
@@ -893,7 +896,7 @@ def make_kernel(
         from demiflow.execution.dataflow_models import bind_cached_map
 
         return bind_cached_map(spec, services=services)
-    from .operator import OperatorKernel
+    from demiflow.execution.kernels.operator import OperatorKernel
 
     return OperatorKernel(spec, services=services, partition_id=partition_id,
                           finite_services=finite_services)

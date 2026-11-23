@@ -13,12 +13,13 @@ already-confirmed output. Incremental ports compute per record; batch ports
 assemble a bounded batch and flush the remainder on EOI.
 """
 from __future__ import annotations
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 
 import asyncio
 import pickle
 from demiflow.execution.contracts import state_codec
-from .async_instance import AsyncInstance
-from .block_partition import preserve_block
+from demiflow.execution.kernels.async_instance import AsyncInstance
+from demiflow.execution.kernels.block_partition import preserve_block
 from collections.abc import Iterator, Mapping
 from typing import Any
 
@@ -31,25 +32,7 @@ from demiflow.execution.contracts.dataflow import (
 )
 from demiflow.execution.contracts.dataflow_kinds import kinds_with
 
-from .dataflow import (
-    KERNEL_KINDS,
-    RECORD_MEDIA_TYPE,
-    _AGGREGATE_KINDS,
-    _canonical,
-    _cfg,
-    _check_stop,
-    _err,
-    _hash_id,
-    _input_row_bytes,
-    _MODEL_KINDS,
-    _occurrence,
-    _ORDERING_KINDS,
-    _RELATIONAL_KINDS,
-    _STREAM_GROUP_KINDS,
-    _UNARY_KINDS,
-    invoke_batch,
-    invoke_unary,
-)
+from demiflow.execution.kernels.dataflow import KERNEL_KINDS, RECORD_MEDIA_TYPE, _AGGREGATE_KINDS, _canonical, _cfg, _check_stop, _err, _hash_id, _input_row_bytes, _MODEL_KINDS, _occurrence, _ORDERING_KINDS, _RELATIONAL_KINDS, _STREAM_GROUP_KINDS, _UNARY_KINDS, invoke_batch, invoke_unary
 
 IMAGE_VERSION = "demiflow-kernel-image-v3"
 IMAGE_MEDIA_TYPE = "application/x-demiflow-kernel-image-v3"
@@ -99,7 +82,7 @@ class _FieldCallable(BoundCallable):
         if not shared:
             super().__init__(operation)
             return
-        from ...data.runtime_contract import validator
+        from demiflow.data.runtime_contract import validator
         self._operation = operation
         self._fn = operation.callable.target
         self._validation = validator(self._fn, operation.callable.runtime_contract)
@@ -189,8 +172,8 @@ class _SpoolPort:
 
     def bounded_order_records(self, services, input_bytes, metadata_limit):
         from copy import copy
-        from .ordering import OrderingServices
-        from ..dataflow_record_frames import metadata_bytes
+        from demiflow.execution.kernels.ordering import OrderingServices
+        from demiflow.execution.contracts.record_codec import metadata_bytes
 
         held = metadata_bytes((self._refs, self._borrowed, self._pending, self._borrowed_proofs))
         if held > metadata_limit or held >= input_bytes:
@@ -200,7 +183,7 @@ class _SpoolPort:
         scoped._order_input_window = input_bytes - held
 
         def call(function, *args, _frame_retained=0, **kwargs):
-            return function(*args, services=scoped._services, retained=held + _frame_retained, **kwargs)
+            return function(*args, resident_bytes=stage_resident_bytes(getattr(scoped._services, 'assignment', None)), retained=held + _frame_retained, **kwargs)
 
         scoped._order_frame_call = call
         return scoped.records(), held
@@ -212,7 +195,8 @@ class _SpoolPort:
             raise _err("BUDGET_EXCEEDED", "input spool row exceeds max_row_bytes", port=self.name)
         measured = self._services if getattr(self._services, 'measured_workspace', False) else None
         raw = state_codec.record_fragment(record, max_bytes=self._services.bounds.max_batch_bytes,
-                                          services=measured, retained=self._pending_bytes)
+                                          bounds=None if measured is None else measured.bounds,
+                                          resident_bytes=stage_resident_bytes(getattr(measured, 'assignment', None)), retained=self._pending_bytes)
         contribution = len(raw)
         workspace = 0
         if getattr(self, '_order_write_window', None) is not None:
@@ -318,7 +302,7 @@ class _SpoolPort:
                     yield from borrowed_records(self._services, pending['input'],
                         frame_call=getattr(self, '_order_frame_call', None))
                 else:
-                    from .join_spool import _resident_limit
+                    from demiflow.execution.kernels.join_spool import _resident_limit
                     yield from borrowed_join_records(self._services, pending['input'],
                         self._borrowed_proofs[member_index], fields=join_keys,
                         row_window=max(1, _resident_limit(self._services)//4))
@@ -400,7 +384,8 @@ class _SpoolPort:
         measured = self._services if getattr(self._services, 'measured_workspace', False) else None
         for record in pending:
             raw = state_codec.record_fragment(record, max_bytes=self._services.bounds.max_batch_bytes,
-                                              services=measured, retained=self._pending_bytes)
+                                              bounds=None if measured is None else measured.bounds,
+                                          resident_bytes=stage_resident_bytes(getattr(measured, 'assignment', None)), retained=self._pending_bytes)
             self._pending_bytes += len(raw) + bool(self._pending)
             self._pending.append(raw)
         if getattr(self, '_order_write_window', None) is not None:
@@ -456,8 +441,9 @@ def _exceeds_record_batch(records, services):
     maximum = services.bounds.max_batch_bytes
     if sum(record.encoded_bytes for record in records) <= maximum:
         return False
-    from ..arrow_payload import batch_cache
-    from ..arrow_payload import ARROW_BATCH_MEDIA, mapped_row_bytes
+    from demiflow.execution.arrow_payload import batch_cache
+    from demiflow.execution.contracts.record_codec import ARROW_BATCH_MEDIA
+    from demiflow.execution.arrow_payload import mapped_row_bytes
     total = 0
     for record in records:
         if record.payload_ref is not None and record.payload_ref.media_type == ARROW_BATCH_MEDIA:
@@ -482,7 +468,7 @@ class OperatorKernel:
         self.observations = CallbackObservations()
         self._services = services
         self._finite_services = services if finite_services is None else finite_services
-        from ..record_schema import RecordSchemas
+        from demiflow.execution.record_schema import RecordSchemas
         self._schemas = RecordSchemas(services)
         self._partition_id = partition_id
         self._occurrence = _occurrence(spec)
@@ -503,14 +489,14 @@ class OperatorKernel:
             if port.requirement == "finite_complete" or spec.kind in ("union", "StreamPrependOp")
         }
         if spec.kind == 'RandomShuffleOp' and 'shuffle_order_version' in spec.configuration:
-            from .shuffle_order import FIELD, VERSION, shuffle_windows
+            from demiflow.execution.kernels.shuffle_order import FIELD, VERSION, shuffle_windows
             if spec.configuration[FIELD] != VERSION:
                 raise _err('INVALID_CONTRACT', 'unknown seeded shuffle ordering version')
             windows = shuffle_windows(self._finite_services)
             for port in self._ports.values():
                 port.limit_order_segments(windows.input_bytes - windows.metadata_bytes)
         elif spec.kind == 'SortOp' and spec.configuration.get('wide_body_refs'):
-            from .ordering import sort_windows
+            from demiflow.execution.kernels.ordering import sort_windows
             input_bytes, metadata_bytes, _ = sort_windows(self._finite_services)
             for port in self._ports.values():
                 port.limit_order_segments(input_bytes - metadata_bytes)
@@ -562,7 +548,7 @@ class OperatorKernel:
     def _task_field_size(self, fields, *, copy=False):
         # Only a validated closed tree reaches this point. Charge existing
         # Python data and, for a detached copy, the JSON write/read workspace.
-        from ..dataflow_record_frames import json_copy_workspace, metadata_bytes
+        from demiflow.execution.contracts.record_codec import json_copy_workspace, metadata_bytes
         size = metadata_bytes(fields)
         if copy:
             return size + json_copy_workspace(fields)
@@ -572,7 +558,7 @@ class OperatorKernel:
         instance = self._instance
         if instance is None:
             return 0
-        from .task_scope import measurable_task_fields
+        from demiflow.execution.kernels.task_scope import measurable_task_fields
         target, args, kwargs = self._function_slots(instance)
         fields = measurable_task_fields(target, args, kwargs, self._occurrence)
         size = self._task_field_size(fields, copy=copy)
@@ -595,7 +581,7 @@ class OperatorKernel:
                     key = self._spec.implementation_ref.key
                 program = self._services.programs.get(key)
                 self._program = program
-                from ...data.plan import CallableSpec
+                from demiflow.data.plan import CallableSpec
                 factory = (program is not None and isinstance(program.value, CallableSpec)
                            and program.value.is_class)
                 # Existing instances own lifecycle even for empty input. Class
@@ -606,10 +592,10 @@ class OperatorKernel:
                     # resident serialized copy of the whole program.
                     if program is None:
                         raise _err('INVALID_CONTRACT', 'task kernel requires a staged program')
-                    from .task_scope import task_uses_function_slots
+                    from demiflow.execution.kernels.task_scope import task_uses_function_slots
                     self._task_function_slots = task_uses_function_slots(program.value)
                     if self._measured_task:
-                        from .task_scope import task_has_measurable_state
+                        from demiflow.execution.kernels.task_scope import task_has_measurable_state
                         if self._shared_actor is not None or not task_has_measurable_state(program.value):
                             raise _err('INVALID_CONTRACT', 'elastic state needs a private measurable task')
                 # A restored task constructs only if its snapshot has a live
@@ -618,7 +604,7 @@ class OperatorKernel:
                     for slot in range(count):
                         self._create_instance(slot)
                 if self._concurrency > 1:
-                    from .concurrent_calls import ConcurrentCalls
+                    from demiflow.execution.kernels.concurrent_calls import ConcurrentCalls
                     input_limit = None
                     minimum = self._spec.configuration.get('codec_min_bytes')
                     if self._spec.kind == 'AsyncMapOp' and minimum is not None:
@@ -638,8 +624,8 @@ class OperatorKernel:
 
     def _create_instance(self, slot):
         from dataclasses import replace
-        from ...data.plan import CallableSpec
-        from .task_scope import clone_resident_callable, function_residency_kind
+        from demiflow.data.plan import CallableSpec
+        from demiflow.execution.kernels.task_scope import clone_resident_callable, function_residency_kind
 
         declaration = self._program.value if self._program is not None else None
         if self._task_rows and self._shared_actor is None and not self._task_function_slots:
@@ -653,7 +639,7 @@ class OperatorKernel:
                 function_residency_kind(declaration.target, call_args=declaration.call_args,
                                         call_kwargs=declaration.call_kwargs) == 'adapter'):
             if self._measured_task:
-                from .task_scope import measurable_task_fields
+                from demiflow.execution.kernels.task_scope import measurable_task_fields
                 fields = measurable_task_fields(declaration.target, declaration.call_args,
                                                 declaration.call_kwargs, self._occurrence)
                 self._admit_task_workspace(self._task_field_size(fields, copy=True)
@@ -664,11 +650,11 @@ class OperatorKernel:
             declaration = replace(declaration, target=target, call_args=args, call_kwargs=kwargs)
         instance = _resolve_instance(self._spec, self._services, declaration=declaration)
         if self._spec.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
-            from ..dataflow_models import bind_model_services
+            from demiflow.execution.dataflow_models import bind_model_services
             instance = bind_model_services(instance, self._spec, services=self._services)
         from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
-        from ..dataflow_producer import ProducerCall
-        from ..dataflow_search import NativeSearchCall
+        from demiflow.execution.dataflow_producer import ProducerCall
+        from demiflow.execution.dataflow_search import NativeSearchCall
         # A real native writer declaration already imported its canonical
         # class while the sealed program was loaded. Merely recognizing an
         # ordinary callable must not initialize Lance and its driver stack.
@@ -680,7 +666,7 @@ class OperatorKernel:
         if any(type(instance) is native for native in
                (AcquisitionCall, ProducerCall, NativeSearchCall, stream_lance_type)):
             instance.bind(self._services, self._occurrence)
-        from ...data.result_cache import CacheCall
+        from demiflow.data.result_cache import CacheCall
         if isinstance(instance, CacheCall):
             restriction = instance.validate_runtime_state(1 if self._worker_scope else self._concurrency)
             if restriction is not None:
@@ -692,7 +678,7 @@ class OperatorKernel:
                 self._services.assignment.run_id, self._services.assignment.action_id,
                 state_owner, self._partition_id, slot if self._worker_scope else 0,
                 (self._task_ordinal or 0) if self._task_rows and self._shared_actor is None else None]))
-            from ..dataflow_models import bind_cached_model_services
+            from demiflow.execution.dataflow_models import bind_cached_model_services
             bind_cached_model_services(instance.fn, services=self._services, node_id=self._occurrence)
         import inspect
         owner = self._state_owner(instance)
@@ -718,8 +704,8 @@ class OperatorKernel:
         # Field-bound calls already validate at their original keyword boundary.
         # Other checked contracts belong to this call, not the actor state owner.
         if self._spec.kind != 'BoundMapOp':
-            from ...data.plan import CallableSpec
-            from ...data.runtime_contract import validator
+            from demiflow.data.plan import CallableSpec
+            from demiflow.data.runtime_contract import validator
             key = self._spec.configuration.get('program')
             if key is None and self._spec.implementation_ref is not None:
                 key = self._spec.implementation_ref.key
@@ -735,7 +721,7 @@ class OperatorKernel:
         if self._measured_task:
             self._admit_task_workspace(self._task_state_bytes() + self._restore_workspace_bytes())
         if self._spec.state != 'none':
-            from ..operator_policy import classify_operator_state
+            from demiflow.execution.operator_policy import classify_operator_state
             owner = self._state_owner(instance)
             policy = classify_operator_state(owner, phase='instance')
             if policy.mode == 'function' and not self._measured_task:
@@ -785,13 +771,13 @@ class OperatorKernel:
 
     @property
     def cooperative_finish(self):
-        from .recovery_rows import hook_owner
+        from demiflow.execution.kernels.recovery_rows import hook_owner
         return (self._recovery_rows is not None or hook_owner(self) is not None
                 or bool(self._ports) and self._spec.kind != 'StreamPrependOp')
 
     @property
     def recovery_waits_for_live_drain(self):
-        from .recovery_rows import hook_owner
+        from demiflow.execution.kernels.recovery_rows import hook_owner
         return self._shared_actor is not None and self._recovery_rows is None and hook_owner(self) is not None
 
     @property
@@ -888,9 +874,9 @@ class OperatorKernel:
 
     def fixed_probe_values(self, dtype):
         """Bind the closed build port to the operator's typed probe calculation."""
-        from ..contracts.relational_region import JOIN_PROBE_WINDOW
-        from ...operators.relational import probe_values
-        from .dataflow import _materialize_row
+        from demiflow.execution.contracts.relational_region import JOIN_PROBE_WINDOW
+        from demiflow.operators.relational import probe_values
+        from demiflow.execution.kernels.dataflow import _materialize_row
 
         rows = self._ports['right'].records().within_offset_budget(JOIN_PROBE_WINDOW // 192)
         if rows is None:
@@ -966,7 +952,7 @@ class OperatorKernel:
         # expansions forward that provenance, so later callbacks do not regroup
         # survivors or multiply the task count by the number of emitted rows.
         from demiflow.execution.contracts.dataflow import clone_record
-        from ..contracts.dataflow_codec import _thaw_json
+        from demiflow.execution.contracts.dataflow_codec import _thaw_json
         if self._task_origin:
             ordinal = self._task_frontier // self._task_rows
             record = clone_record(record, source_position={**_thaw_json(record.source_position),
@@ -988,9 +974,9 @@ class OperatorKernel:
     def _push_batch(self, record: Record) -> Iterator[Record]:
         bounds = self._services.bounds
         if getattr(self._services, 'measured_workspace', False):
-            from ..dataflow_record_frames import admit_workspace, retained_record_bytes
+            from demiflow.execution.contracts.record_codec import admit_workspace, retained_record_bytes
             held = sum(retained_record_bytes(item, bounds) for item in self._batch)
-            admit_workspace(held + retained_record_bytes(record, bounds), bounds, services=self._services)
+            admit_workspace(held + retained_record_bytes(record, bounds), bounds, resident_bytes=stage_resident_bytes(getattr(self._services, 'assignment', None)))
         if self._batch_membership is not None and self._batch:
             yield from self._drain_replay_batches()
         expected = self._batch_membership.expected(self._batch_ordinal) if self._batch_membership else None
@@ -1086,12 +1072,12 @@ class OperatorKernel:
         return chunk,buffer
 
     def _group_row_bytes(self,row):
-        from ..stream_grouping import row_size
+        from demiflow.execution.stream_grouping import row_size
         chunk,_=self._group_limits()
         return row_size(row,chunk)
 
     def _push_stream_group(self, record: Record) -> Iterator[Record]:
-        from .dataflow import _group_key, _materialize_row
+        from demiflow.execution.kernels.dataflow import _group_key, _materialize_row
         on=tuple(_cfg(self._spec,'on'))
         max_batch=int(self._spec.configuration.get('max_batch',self._max_batch))
         row=dict(_materialize_row(record,self._services))
@@ -1135,7 +1121,7 @@ class OperatorKernel:
         yield from self._emit_group(key, last=False)
 
     def _emit_group(self, key: str, *, last: bool) -> Iterator[Record]:
-        from .dataflow import _output_record, _OutputBudget
+        from demiflow.execution.kernels.dataflow import _output_record, _OutputBudget
 
         batch = self._groups.pop(key, [])
         base = self._group_base.pop(key, {})
@@ -1154,7 +1140,7 @@ class OperatorKernel:
 
     # -- K019 finish --------------------------------------------------------
     def finish(self, port: str, *, wait_for_calls: bool = True) -> Iterator[Record]:
-        from .recovery_rows import hook_owner, RecoveryRows
+        from demiflow.execution.kernels.recovery_rows import hook_owner, RecoveryRows
         if self._recovery_rows is None and hook_owner(self) is not None:
             self._recovery_rows = RecoveryRows(self)
         if self._recovery_rows is not None:
@@ -1247,39 +1233,39 @@ class OperatorKernel:
             return
         kind = self._spec.kind
         if kind in ("join", "exclude_keys"):
-            from .relational import join_partitions
+            from demiflow.execution.kernels.relational import join_partitions
 
             left = self._ports[self._port_order[0]].records()
             right = self._ports[self._port_order[1]].records()
             yield from self._emit(preserve_block(join_partitions(left, right, spec=self._spec,
                 services=services, retain=self.retain_reducer_peers), None))
         elif kind == "reduce":
-            from .relational import reduce_partition
+            from demiflow.execution.kernels.relational import reduce_partition
 
             yield from self._emit(reduce_partition(self._ports[self._port_order[0]].records(), spec=self._spec,
                 services=services,retain=self.retain_reducer_peers))
         elif kind == "groups":
-            from .relational import emit_groups
+            from demiflow.execution.kernels.relational import emit_groups
 
             yield from self._emit(emit_groups(self._ports[self._port_order[0]].records(), spec=self._spec, services=services))
         elif kind == "union":
-            from .relational import union_inputs
+            from demiflow.execution.kernels.relational import union_inputs
 
             inputs = tuple(self._ports[name].records() for name in self._port_order)
             yield from self._emit(preserve_block(union_inputs(inputs, spec=self._spec, services=services), None))
         elif kind in _ORDERING_KINDS:
-            from .ordering import build_sort_runs, merge_sort_runs
-            from .block_partition import partition_records, block_count
+            from demiflow.execution.kernels.ordering import build_sort_runs, merge_sort_runs
+            from demiflow.execution.kernels.block_partition import partition_records, block_count
             from dataclasses import replace
             port = self._ports[self._port_order[0]]
             records = port.records()
             order_iterator = None
             layout = None
             if kind == 'RandomizeBlockOrderOp':
-                from .block_partition import shuffled_block_layout
+                from demiflow.execution.kernels.block_partition import shuffled_block_layout
                 layout = shuffled_block_layout(port.records(), spec=self._spec, services=services)
             if kind == 'RandomShuffleOp' and 'shuffle_order_version' in self._spec.configuration:
-                from .shuffle_order import seeded_shuffle, shuffle_windows
+                from demiflow.execution.kernels.shuffle_order import seeded_shuffle, shuffle_windows
                 windows = shuffle_windows(services)
                 records.close()
                 records, held = port.bounded_order_records(services, windows.input_bytes, windows.metadata_bytes)
@@ -1294,7 +1280,7 @@ class OperatorKernel:
                         'keys': list(sort_spec.configuration.get('keys') or ()),
                         'num_blocks': block_count(sort_spec, rows=port.count, bounds=self._services.bounds)})
                 if kind == 'SortOp' and sort_spec.configuration.get('wide_body_refs'):
-                    from .ordering import sort_windows, sort_with_body_references
+                    from demiflow.execution.kernels.ordering import sort_windows, sort_with_body_references
                     records.close()
                     input_bytes, metadata_bytes, window = sort_windows(services)
                     records, held = port.bounded_order_records(services, input_bytes, metadata_bytes)
@@ -1308,7 +1294,7 @@ class OperatorKernel:
             if kind in ('RepartitionOp', 'RandomShuffleOp'):
                 records = partition_records(records, spec=self._spec, rows=port.count, services=services)
             elif layout is not None:
-                from .block_partition import reordered_records
+                from demiflow.execution.kernels.block_partition import reordered_records
                 records = reordered_records(records, layout=layout, spec=self._spec)
             else:
                 records = preserve_block(records, None)
@@ -1321,7 +1307,7 @@ class OperatorKernel:
                     finally:
                         order_iterator.close()
         elif kind in _AGGREGATE_KINDS:
-            from .aggregate import accumulate_partial
+            from demiflow.execution.kernels.aggregate import accumulate_partial
 
             records = self._ports[self._port_order[0]].records()
             self.aggregate_state = accumulate_partial(records, spec=self._spec, services=services)
@@ -1426,7 +1412,7 @@ class OperatorKernel:
             image['callback_observations'] = observed
         admit = None
         if self._measured_task:
-            from ..dataflow_record_frames import metadata_bytes
+            from demiflow.execution.contracts.record_codec import metadata_bytes
             retained = self._task_state_bytes() + metadata_bytes(image)
             def admit(workspace):
                 self._admit_task_workspace(retained + workspace)
@@ -1469,13 +1455,13 @@ class OperatorKernel:
         if instance is None or self._spec.state == "none":
             return None
         owner = self._state_owner(instance)
-        from ..operator_policy import classify_operator_state, snapshot_auto_state
+        from demiflow.execution.operator_policy import classify_operator_state, snapshot_auto_state
         policy = classify_operator_state(owner, phase="instance")
         snapshot = getattr(owner, "__demiflow_snapshot__", None)
         if snapshot is not None:
             return {"mode": "adapter", "value": instance.resolve(snapshot())}
         if policy.mode == "function":
-            from .task_scope import snapshot_resident_function
+            from demiflow.execution.kernels.task_scope import snapshot_resident_function
             target, args, kwargs = self._function_slots(instance)
             state = snapshot_resident_function(target, call_args=args, call_kwargs=kwargs,
                                                max_bytes=self._services.bounds.max_state_bytes, occurrence=self._occurrence)
@@ -1483,7 +1469,7 @@ class OperatorKernel:
                 self._services.journal.restrict_recovery(self._occurrence)
             return state
         if policy.mode == "hooks":
-            from ...data.result_cache import CacheCall
+            from demiflow.data.result_cache import CacheCall
             if isinstance(owner, CacheCall):
                 restriction = owner.validate_runtime_state()
                 if restriction is not None:
@@ -1506,7 +1492,7 @@ class OperatorKernel:
                 raise _err("INCOMPATIBLE_HISTORY", "stateful kernel cannot restore from an empty ref")
             return
         limit = self._services.bounds.max_state_bytes
-        from ..dataflow_kernel_pack import read_kernel_image
+        from demiflow.execution.dataflow_kernel_pack import read_kernel_image
         admit = None
         if self._measured_task:
             retained = self._task_state_bytes()
@@ -1515,7 +1501,7 @@ class OperatorKernel:
         data = read_kernel_image(self._services.store, ref, self._services.bounds,
                                  occurrence=self._occurrence, partition=self._partition_id, admit=admit)
         if self._measured_task:
-            from ..dataflow_record_frames import raw_workspace
+            from demiflow.execution.contracts.record_codec import raw_workspace
             self._admit_task_workspace(self._task_state_bytes() + raw_workspace(data))
         image = state_codec.loads(data, max_bytes=limit, occurrence=self._occurrence)
         del data
@@ -1533,12 +1519,12 @@ class OperatorKernel:
             self._apply_image(image)
 
     def _restore_workspace_bytes(self):
-        from ..dataflow_record_frames import metadata_bytes
+        from demiflow.execution.contracts.record_codec import metadata_bytes
         return 0 if self._image is None else metadata_bytes(self._image)
 
     def _apply_image(self, image: Mapping[str, Any]) -> None:
         if 'recovery_rows' in image:
-            from .recovery_rows import RecoveryRows
+            from demiflow.execution.kernels.recovery_rows import RecoveryRows
             self._recovery_rows = RecoveryRows(self)
             self._recovery_rows.restore(image['recovery_rows'])
         if 'callback_observations' in image:
@@ -1656,20 +1642,20 @@ class OperatorKernel:
         if mode == "nonrecoverable":
             raise _err("INCOMPATIBLE_HISTORY", "actor state cannot resume: " + state["reason"])
         if self._measured_task and mode in ('plain_json', 'function_slots_v1'):
-            from ..dataflow_record_frames import json_copy_workspace
+            from demiflow.execution.contracts.record_codec import json_copy_workspace
             fields = state['value']['fields'] if mode == 'plain_json' else state['value']
             self._admit_task_workspace(self._restore_workspace_bytes() + self._task_state_bytes()
                                        + json_copy_workspace(fields))
         if mode == "plain_json":
-            from ..operator_policy import restore_auto_state
+            from demiflow.execution.operator_policy import restore_auto_state
             restore_auto_state(owner, state["value"], max_bytes=self._services.bounds.max_state_bytes, occurrence=self._occurrence)
         elif mode == 'function_slots_v1':
-            from .task_scope import restore_resident_function
+            from demiflow.execution.kernels.task_scope import restore_resident_function
             target, args, kwargs = self._function_slots(instance)
             restore_resident_function(target, state, call_args=args, call_kwargs=kwargs,
                                       max_bytes=self._services.bounds.max_state_bytes, occurrence=self._occurrence)
         elif mode == 'task_function' and self._task_rows:
-            from .task_scope import restore_function
+            from demiflow.execution.kernels.task_scope import restore_function
             restore_function(owner, state, max_bytes=self._services.bounds.max_state_bytes, occurrence=self._occurrence)
         elif mode in ("adapter", "hooks", "auto_json"):
             name = "restore_state" if mode == "hooks" else "__demiflow_restore__"
@@ -1705,7 +1691,7 @@ class OperatorKernel:
                 _close_instance(instance)
             except BaseException as exc:
                 errors.append(exc)
-        from ..dataflow_usage import worker_prompt_usage
+        from demiflow.execution.dataflow_usage import worker_prompt_usage
         try:
             # Calls have drained even if an actor's resource cleanup failed.
             # Preserve actual request outcomes before discarding their owners;
@@ -1714,7 +1700,7 @@ class OperatorKernel:
         except BaseException as exc:
             errors.append(exc)
         if not errors:
-            from ..dataflow_model_observations import worker_model_observations
+            from demiflow.execution.dataflow_model_observations import worker_model_observations
             try:
                 worker_model_observations(self, final=True)
             except BaseException as exc:

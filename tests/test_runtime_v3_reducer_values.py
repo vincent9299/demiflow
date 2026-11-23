@@ -313,8 +313,8 @@ def test_reducer_value_limits_reject_without_committed_output(tmp_path, bound):
 def test_record_codec_clone_and_state_preserve_top_level_values(value):
     from demiflow.execution.contracts.dataflow import Record, thaw_record_value
     from demiflow.execution.contracts.dataflow import clone_record
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _decode_payload
-    from demiflow.execution import dataflow_record_frames as frames
+    from demiflow.execution.contracts.record_codec import _encode_payload, _decode_payload
+    from demiflow.execution.contracts import record_codec as frames
     from demiflow.execution.contracts import state_codec
     from test_runtime_v3_c import bounds
     raw = _encode_payload(value, max_bytes=4096)
@@ -332,7 +332,7 @@ def test_record_codec_clone_and_state_preserve_top_level_values(value):
 
 def test_top_level_mapping_keys_and_closed_data_gate_remain_strict():
     from demiflow.execution.contracts.dataflow import Record
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _decode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload, _decode_payload
     with pytest.raises(DataflowError):
         Record('0' * 64, {}, None, {1: 'invalid key'}, 1, 0)
     class Code:

@@ -451,7 +451,7 @@ def test_task_checkpoint_rejects_before_building_tagged_container_tree():
         raise TooLarge
 
     # Imports and the immutable input predate the working grant.
-    from demiflow.execution.dataflow_record_frames import json_encoding_shape
+    from demiflow.execution.contracts.record_codec import json_encoding_shape
     json_encoding_shape(0)
     tracemalloc.start()
     try:

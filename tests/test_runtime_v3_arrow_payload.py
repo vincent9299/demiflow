@@ -27,7 +27,7 @@ def source_table(n=25):
 
 
 def test_row_upper_bounds_original_typed_encoding_without_row_materialization():
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     table = source_table().append_column('float', pa.array([-0.0, 0.0, 1e300, -1e-300, None]*5))
     batch = table.to_batches()[0]
     for i, row in enumerate(table.to_pylist()):
@@ -423,8 +423,8 @@ def test_real_store_sha_failure_precedes_native_publication(tmp_path, monkeypatc
     import json
     from demiflow.execution import dataflow_sinks
     from demiflow.execution.storage.segments import block_chunks
-    from demiflow.execution.dataflow_handles import _ChunkStream
-    from demiflow.execution.exchange.dataflow_bridge import _decode_record_document
+    from demiflow.execution.storage.streams import _ChunkStream
+    from demiflow.execution.contracts.record_codec import _decode_record_document
     table = source_table(8)
     uri, target = str(tmp_path/'input.lance'), str(tmp_path/'output.lance')
     lance.write_dataset(table, uri)

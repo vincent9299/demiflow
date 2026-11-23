@@ -1,4 +1,5 @@
 """Local CPU/wall microbenchmark: original route+publish vs joint encoding."""
+from demiflow.execution.contracts import record_codec
 import hashlib,json,statistics,subprocess,time
 from demiflow.execution.contracts.dataflow import Record
 from demiflow.execution.exchange import dataflow_channels as channels
@@ -12,9 +13,9 @@ def main():
     limits=bounds(max_row_bytes=2**20)
     for name,row,iterations in [('narrow',{'k':1,'s':'中文','x':-0.0},10000),
                                 ('wide_8k',{'k':1,'left':'x'*8192,'right':'y'*8192},2000)]:
-        payload=codec._encode_payload(row,max_bytes=limits.max_row_bytes)
+        payload=record_codec._encode_payload(row,max_bytes=limits.max_row_bytes)
         record=Record('a'*64,{'ordinal':7},None,row,len(payload),7)
-        raw=codec._encode_record_document(record,max_bytes=limits.max_row_bytes)
+        raw=record_codec._encode_record_document(record,max_bytes=limits.max_row_bytes)
         for routing,readers in [('forward',('r0',)),('broadcast',('r0','r1','r2'))]:
             spec=make('ExchangeSpec',channel_id='bench',edge_id='b'*64,producer_partitions=('p0',),
                       consumer_partitions=readers,mode='memory_incremental',routing=routing,
@@ -26,7 +27,7 @@ def main():
             assert actual==expected and encoded==raw
             def old():
                 routes=channels.route_record(record,spec=spec,state=old_state)
-                for route in routes:codec._encode_record_document(route.record,max_bytes=limits.max_row_bytes)
+                for route in routes:record_codec._encode_record_document(route.record,max_bytes=limits.max_row_bytes)
             def new():channels._route_record_document(record,spec=spec,state=new_state,bounds=limits)
             timings={label:[] for label in ('old','new')}
             for _ in range(50):old();new()

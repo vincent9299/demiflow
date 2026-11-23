@@ -24,7 +24,7 @@ def pack_result(batch, positions, *, source_id, split_id, version, occurrence, s
 def validate_row_sizes(batch, maximum):
     """Prove existing typed-row limits in bulk. Ambiguous rows use the original exact codec."""
     from ..arrow_payload import _value_upper
-    from ..exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     names = sum(8 + len(json.dumps(name, ensure_ascii=False).encode()) for name in batch.schema.names)
     def check(start, count):
         part = batch.slice(start, count)
@@ -93,7 +93,7 @@ class PublishedArrowRows:
         self.bytes = result.get_total_buffer_size() + ref.size_bytes
 
     def record(self):
-        from ..exchange.dataflow_bridge import _encode_payload
+        from demiflow.execution.contracts.record_codec import _encode_payload
         i, lineage = self.index, self.lineage
         value = self.batch.slice(i, 1).to_pylist()[0]
         position = self.positions.slice(i, 1).to_pylist()[0]

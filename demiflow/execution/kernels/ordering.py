@@ -11,6 +11,7 @@ order (C06). Spill runs are immutable artifacts; only intermediates created here
 are released on failure, never caller-owned input runs.
 """
 from __future__ import annotations
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 
 import hashlib
 import heapq
@@ -31,24 +32,10 @@ from demiflow.execution.contracts.dataflow import (
 )
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 
-from ..exchange.dataflow_bridge import (
-    _encode_payload, _decode_payload, _encode_record_document, _decode_record_document,
-)
-from ..contracts.dataflow import thaw_record_value
+from demiflow.execution.contracts.record_codec import _encode_payload, _decode_payload, _encode_record_document, _decode_record_document
+from demiflow.execution.contracts.dataflow import thaw_record_value
 
-from .dataflow import (
-    RECORD_MEDIA_TYPE,
-    _canonical,
-    _check_stop,
-    _cfg,
-    _err,
-    _hash_id,
-    _input_row_bytes,
-    _materialize_row,
-    _occurrence,
-    _seed,
-    _shuffle_key_bytes,
-)
+from demiflow.execution.kernels.dataflow import RECORD_MEDIA_TYPE, _canonical, _check_stop, _cfg, _err, _hash_id, _input_row_bytes, _materialize_row, _occurrence, _seed, _shuffle_key_bytes
 
 _MERGE_FAN_IN = 32
 _FRAME_OVERHEAD = 256
@@ -226,7 +213,7 @@ def _record_sort_key(
 ) -> tuple:
     kind = spec.kind
     if kind == 'RepartitionOp':
-        from .dataflow import _group_key
+        from demiflow.execution.kernels.dataflow import _group_key
         keys = tuple(spec.configuration.get('keys') or ())
         bucket = int.from_bytes(hashlib.sha256(_group_key(row, keys).encode()).digest()[:8], 'big') % spec.configuration['num_blocks']
         fields = tuple(_field_token(row[key], False) for key in keys) if spec.configuration.get('sort') else ()
@@ -244,7 +231,7 @@ def _record_sort_key(
     if kind == "RandomShuffleOp":
         return ((_shuffle_key_bytes(record.record_id, seed=seed, occurrence_id=occurrence),),)
     if kind == "RandomizeBlockOrderOp":
-        from .block_partition import block_identity
+        from demiflow.execution.kernels.block_partition import block_identity
         block_id = block_identity(record)
         block_key = _shuffle_key_bytes(block_id, seed=seed, occurrence_id=occurrence)
         return ((block_key, record.sequence if ordinal is None else ordinal),)
@@ -254,7 +241,7 @@ def _record_sort_key(
 def _frame_bytes(key: tuple, prov: tuple, rec_bytes: bytes, *, frame_limit=None, admit=None) -> bytes:
     limit = len(rec_bytes) * 4 + 1024 if frame_limit is None else frame_limit
     if admit is not None:
-        from ..dataflow_record_frames import _typed_shape
+        from demiflow.execution.contracts.record_codec import _typed_shape
         ks, _, kt = _typed_shape({'value': key}, limit)
         ps, _, pt = _typed_shape({'value': prov}, limit)
         # Existing key/provenance/record bytes are retained by the merge.
@@ -351,7 +338,7 @@ class _FrameReader:
     def _decode(self, size):
         raw = self._read_exact(size)
         if self._budget is not None:
-            from ..dataflow_record_frames import raw_workspace
+            from demiflow.execution.contracts.record_codec import raw_workspace
             self._budget.check(raw_workspace(raw))
         return _decode_payload(raw, max_bytes=self._max_frame_bytes)['value']
 
@@ -439,9 +426,9 @@ def sort_windows(services):
     """One admitted worker. Build holds reader (7/16), run (1/8), codec (3/8)
     and descriptors (1/16). The merge reuses the closed input reader's space.
     """
-    from ..dataflow_record_frames import resident_limit
+    from demiflow.execution.contracts.record_codec import resident_limit
 
-    grant = resident_limit(services.bounds, services)
+    grant = resident_limit(services.bounds, stage_resident_bytes(getattr(services, 'assignment', None)))
     metadata = grant // 16
     run = grant // 8
     codec = 3 * grant // 8
@@ -458,15 +445,13 @@ def sort_windows(services):
 
 def sort_with_body_references(records, *, spec, services, rows, window, retain, metadata_bytes):
     """Only this sort owns its body extent. Recovery reopens the closed input port."""
-    from ..dataflow_record_frames import (
-        _json_shape, _typed_shape, admit_workspace, decode_document, encode_document,
-        raw_workspace, read_document, resident_limit,
-    )
-    from ..arrow_payload import is_arrow_record
-    from ..storage.objects import RunArtifactStore
+    from demiflow.execution.contracts.record_codec import _json_shape, _typed_shape, admit_workspace, decode_document, encode_document, raw_workspace, resident_limit
+    from demiflow.execution.storage.streams import read_document
+    from demiflow.execution.arrow_payload import is_arrow_record
+    from demiflow.execution.storage.objects import RunArtifactStore
 
     bounds, store = services.bounds, services.store
-    grant = resident_limit(bounds, services)
+    grant = resident_limit(bounds, stage_resident_bytes(getattr(services, 'assignment', None)))
     codec = OrderingServices(services, window.codec_bytes)
     threshold = max(1024, min(65536, grant // 16))
     room = not isinstance(store, RunArtifactStore) or store.available_file_slots(maximum=bounds.max_open_files) >= (
@@ -481,9 +466,9 @@ def sort_with_body_references(records, *, spec, services, rows, window, retain, 
             if is_arrow_record(record):
                 row = _materialize_row(record, codec)
             else:
-                raw = read_document(record.payload_ref, store, codec.bounds, services=codec,
+                raw = read_document(record.payload_ref, store, codec.bounds, resident_bytes=stage_resident_bytes(getattr(codec, 'assignment', None)),
                                     _maximum=bounds.max_row_bytes)
-                admit_workspace(raw_workspace(raw), codec.bounds, services=codec)
+                admit_workspace(raw_workspace(raw), codec.bounds, resident_bytes=stage_resident_bytes(getattr(codec, 'assignment', None)))
                 row = _decode_payload(raw, max_bytes=bounds.max_row_bytes)
                 del raw
             retained = _typed_shape(row, bounds.max_row_bytes)[1]
@@ -497,7 +482,7 @@ def sort_with_body_references(records, *, spec, services, rows, window, retain, 
                 raise _err('INVALID_CONTRACT', 'sort key field missing', field=name)
             size, native, tree = _typed_shape(row[name], bounds.max_row_bytes)
             memory += 3 * size + 2 * native + tree
-            admit_workspace(memory, codec.bounds, services=codec)
+            admit_workspace(memory, codec.bounds, resident_bytes=stage_resident_bytes(getattr(codec, 'assignment', None)))
             key_row[name] = thaw_record_value(row[name])
         return _record_sort_key(record, key_row, spec, codec), _provenance(record)
 
@@ -509,7 +494,7 @@ def sort_with_body_references(records, *, spec, services, rows, window, retain, 
         def frame(key, provenance, record, published):
             nonlocal extent, largest
             retained = _retained_frame_bytes(key, provenance, b'')
-            raw = encode_document(record, codec.bounds, services=codec, retained=retained)
+            raw = encode_document(record, codec.bounds, resident_bytes=stage_resident_bytes(getattr(codec, 'assignment', None)), retained=retained)
             saved = {'record_id': record.record_id, 'sequence': record.sequence}
             if (room and record.inline is not None and record.encoded_bytes >= threshold
                     and record.encoded_bytes * rows > grant):
@@ -524,10 +509,10 @@ def sort_with_body_references(records, *, spec, services, rows, window, retain, 
                 saved['document'] = raw
             del raw
             size, native, tree = _typed_shape(saved, window.frame_bytes)
-            admit_workspace(native + tree + 2 * size, codec.bounds, services=codec, retained=retained)
+            admit_workspace(native + tree + 2 * size, codec.bounds, resident_bytes=stage_resident_bytes(getattr(codec, 'assignment', None)), retained=retained)
             encoded = _encode_payload(saved, max_bytes=window.frame_bytes)
             packed = _frame_bytes(key, provenance, encoded, frame_limit=window.frame_bytes,
-                admit=lambda size: admit_workspace(size, codec.bounds, services=codec,
+                admit=lambda size: admit_workspace(size, codec.bounds, resident_bytes=stage_resident_bytes(getattr(codec, 'assignment', None)),
                                                    retained=retained + native + len(encoded)))
             largest = max(largest, _retained_frame_bytes(key, provenance, packed))
             return packed
@@ -545,7 +530,7 @@ def sort_with_body_references(records, *, spec, services, rows, window, retain, 
                 if hashlib.sha256(raw).digest() != saved['sha256']:
                     raise _err('CORRUPT_ARTIFACT', 'sort body differs from its authenticated reference')
             return decode_document(raw, record_id=saved['record_id'], sequence=saved['sequence'],
-                                   bounds=codec.bounds, services=codec)
+                                   bounds=codec.bounds, resident_bytes=stage_resident_bytes(getattr(codec, 'assignment', None)))
 
         def body_bytes():
             return 0 if extent is None else extent.size
@@ -696,7 +681,7 @@ def merge_sort_runs(
         window.validate(services.bounds)
     if not runs:
         return
-    from ..storage.objects import RunArtifactStore
+    from demiflow.execution.storage.objects import RunArtifactStore
     if isinstance(services.store, RunArtifactStore):
         store = services.store
         available = store.available_file_slots(maximum=services.bounds.max_open_files)
@@ -754,7 +739,7 @@ def merge_sort_runs(
             for key, prov, rec_bytes in source_frames:
                 _check_stop(services)
                 if window is not None and window.codec_bytes is not None:
-                    from ..dataflow_record_frames import raw_workspace
+                    from demiflow.execution.contracts.record_codec import raw_workspace
                     codec_window = window.codec_bytes if window.merge_codec_bytes is None else window.merge_codec_bytes
                     if raw_workspace(rec_bytes) > codec_window:
                         raise _err('BUDGET_EXCEEDED', 'sort record decode exceeds its codec subwindow')
@@ -832,7 +817,7 @@ class _RepartitionIterator:
             return consumers[self._ordinal % count]
         if self._routing == "hash":
             row = _materialize_row(record, self._services)
-            from .dataflow import _group_key
+            from demiflow.execution.kernels.dataflow import _group_key
 
             key = _group_key(row, tuple(self._exchange.keys))
             digest = hashlib.sha256(key.encode("utf-8")).digest()

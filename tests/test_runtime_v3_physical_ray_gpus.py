@@ -207,7 +207,7 @@ def test_multi_host_remote_gpu_actor_loss_resumes_original_ack(tmp_path, monkeyp
     from demiflow.data.api import _use_executor
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.executors.ray import RayDatasetExecutor
-    from demiflow.execution.exchange.dataflow_bridge import _decode_record_document
+    from demiflow.execution.contracts.record_codec import _decode_record_document
     from demiflow.resources.device_pool import DevicePool
     from runtime_v3_support import _RayDataBlocker
     assert ray.is_initialized()

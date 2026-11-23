@@ -113,7 +113,7 @@ def test_projection_falls_back_when_same_row_window_cannot_hold_copies(tmp_path)
 @pytest.mark.parametrize('how', ['inner', 'left', 'semi', 'anti'])
 def test_join_key_codec_matches_original_for_null_binary_tuple_negative_zero_and_skew(tmp_path, how):
     from demiflow.execution.kernels.join_spool import project_join_document
-    from demiflow.execution.exchange.dataflow_bridge import _encode_record_document
+    from demiflow.execution.contracts.record_codec import _encode_record_document
     with store_fixture(tmp_path) as (_, store, _):
         svc, _ = fixture(store)
         values = [None, b'bytes', ('a', 7), -0.0, 0.0, 3, *([9]*15)]
@@ -160,7 +160,7 @@ def test_projected_scratch_preserves_original_schema_provenance_and_document_byt
     import pyarrow as pa
     from demiflow.execution.record_schema import RecordSchemas
     from demiflow.execution.kernels.join_spool import project_join_document, _Spool
-    from demiflow.execution.exchange.dataflow_bridge import _encode_record_document
+    from demiflow.execution.contracts.record_codec import _encode_record_document
     with store_fixture(tmp_path) as (_, store, _):
         svc, _ = fixture(store)
         schemas = RecordSchemas(svc)

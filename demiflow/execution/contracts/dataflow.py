@@ -2113,3 +2113,10 @@ def clone_record(record, **changes):
     if 'source_position' not in changes:
         changes['source_position'] = _thaw_json(record.source_position)
     return replace(record, **changes)
+
+
+def stage_resident_bytes(assignment):
+    """Project the immutable assignment's resident grant; no runtime capability."""
+    stages = getattr(assignment, 'stages', ())
+    return (sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes'])
+                for stage in stages) if stages else None)

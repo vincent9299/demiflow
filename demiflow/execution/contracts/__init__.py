@@ -25,8 +25,6 @@ __all__ = [
     "PIPELINE_RUNTIME_ABI",
     "PlatformRuntimeIdentity",
     "PipelineBackend",
-    "PipelineBundleRef",
-    "PipelineExecutionEnvironment",
     "PipelineRunObservation",
     "PipelineRunObserver",
     "PipelineRunReadiness",

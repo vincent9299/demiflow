@@ -8,7 +8,7 @@ from demiflow.execution.contracts.dataflow import ArtifactRef, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.dataflow_authority import DriverArtifactPort
 from demiflow.execution.storage.objects import RunArtifactStore
-from demiflow.execution import dataflow_record_frames as frames
+from demiflow.execution.contracts import record_codec as frames
 from demiflow.execution import dataflow_sinks as sinks
 from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.resources.contracts import ResourceProfile
@@ -44,7 +44,7 @@ def test_bounded_sink_table_consistency_drift_and_mixed_values(tmp_path):
             driver = driver_services(action, physical, store)
 
             def stage(partition, values, *, external=False):
-                from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _decode_payload
+                from demiflow.execution.contracts.record_codec import _encode_payload, _decode_payload
                 spec = make_kernel(configuration={'sink_id': SINK_ID, 'partition_id': partition})
                 def records():
                     for i, value in enumerate(values):

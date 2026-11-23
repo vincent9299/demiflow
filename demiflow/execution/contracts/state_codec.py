@@ -1,12 +1,14 @@
 """Data-only snapshots for kernel buffers (no pickle of mappingproxy/actors)."""
+
+import hashlib
 import json
 from dataclasses import asdict
 from collections.abc import Mapping
 
-from demiflow.execution.dataflow_record_frames import raw_workspace
+from demiflow.execution.contracts.record_codec import raw_workspace
 from demiflow.execution.contracts.dataflow import Record, ArtifactRef, AggregateState
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.exchange.dataflow_bridge import _encode_value, _decode_value, _encode_record_document, _decode_record_document
+from demiflow.execution.contracts.record_codec import _encode_value, _decode_value, _encode_record_document, _decode_record_document
 
 RECORD_LIST_PREFIX = b'["demiflow.kernel-state.v3",["list",['
 RECORD_LIST_SUFFIX = b']]]'
@@ -22,16 +24,15 @@ def size_error(message, limit, *, actual=None, occurrence=None):
     return DataflowError('BUDGET_EXCEEDED', f'{message} ({detail})', context=context)
 
 
-def record_fragment(record, *, max_bytes, services=None, retained=0):
+def record_fragment(record, *, max_bytes, bounds=None, resident_bytes=None, retained=0):
     """One original list element, reusable for byte admission and publication."""
-    if services is None:
+    if bounds is None:
         raw = json.dumps(['record', record.record_id, record.sequence,
             _encode_record_document(record, max_bytes=max_bytes).decode()],
             separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()
     else:
-        from demiflow.execution.dataflow_record_frames import admit_workspace, encode_document, retained_record_bytes
-        bounds = services.bounds
-        document = encode_document(record, bounds, services=services, retained=retained)
+        from demiflow.execution.contracts.record_codec import admit_workspace, encode_document, retained_record_bytes
+        document = encode_document(record, bounds, resident_bytes=resident_bytes, retained=retained)
         # The document is already valid compact JSON, so embedding its UTF-8
         # in a JSON string escapes only quotes and backslashes. Check the
         # complete encoded fragment and its copy peak before building either.
@@ -43,7 +44,7 @@ def record_fragment(record, *, max_bytes, services=None, retained=0):
         if total > max_bytes:
             raise size_error('kernel image exceeds state byte budget', max_bytes, actual=total)
         live = retained + retained_record_bytes(record, bounds) + len(prefix) + len(document)
-        admit_workspace(live + 2 * size, bounds, services=services)
+        admit_workspace(live + 2 * size, bounds, resident_bytes=resident_bytes)
         raw = b''.join((prefix, document.replace(b'\\', b'\\\\').replace(b'"', b'\\"'), b'"]'))
     size = len(raw) + len(RECORD_LIST_PREFIX) + len(RECORD_LIST_SUFFIX)
     if size > max_bytes:
@@ -96,7 +97,7 @@ def measure(value, *, max_bytes, workspace_bytes):
     Return retained bytes and the peak workspace charged to this encoding.
     """
     import sys
-    from demiflow.execution.dataflow_record_frames import _admit, _json_shape, _typed_shape, _record_metadata
+    from demiflow.execution.contracts.record_codec import _admit, _json_shape, _typed_shape, _record_metadata
     wire = len(b'["demiflow.kernel-state.v3",]')
     native = 0
     tree = 0
@@ -134,7 +135,7 @@ def measure(value, *, max_bytes, workspace_bytes):
         elif isinstance(item, Record):
             # An embedded Record carries an escaped document. Admit the old
             # document encoder before computing its exact JSON string length.
-            from demiflow.execution.dataflow_record_frames import _string_size
+            from demiflow.execution.contracts.record_codec import _string_size
             n, held, temporary = _typed_shape(item.inline, max_bytes)
             metadata, meta_held = _json_shape(_record_metadata(item), max_bytes)
             _admit(native + tree + 10 * wire + held + temporary
@@ -184,7 +185,7 @@ def dumps(value, *, max_bytes, occurrence=None, admit=None):
 
     if admit is not None:
         import sys
-        from demiflow.execution.dataflow_record_frames import json_encoding_shape
+        from demiflow.execution.contracts.record_codec import json_encoding_shape
 
         header = sys.getsizeof([])
         pointer = sys.getsizeof([None]) - header
@@ -244,3 +245,24 @@ def loads(raw, *, max_bytes, occurrence=None):
     if envelope[0] != 'demiflow.kernel-state.v3':
         raise DataflowError('CORRUPT_ARTIFACT', 'unknown kernel state schema')
     return unpack(envelope[1])
+
+
+PACK_MEDIA = 'application/x-demiflow-kernel-pack-v1'
+
+_MAGIC = b'demiflow.kernel-pack.v1\n'
+
+_MAX_MEMBERS = 8
+
+_HEADER_BYTES = 512
+
+def pack_limit(bounds):
+    return min(bounds.max_state_bytes // 4, bounds.max_control_bytes // 4,
+               bounds.max_resident_bytes // 64, bounds.max_batch_bytes // 4, 65536)
+
+def _header(occurrence, partition, raw):
+    if (type(occurrence) is not str or type(partition) is not str
+            or not 1 <= len(occurrence) <= 64 or not 1 <= len(partition) <= 128):
+        return None
+    value = [occurrence, partition, len(raw), hashlib.sha256(raw).hexdigest()]
+    encoded = json.dumps(value, separators=(',', ':'), ensure_ascii=False).encode() + b'\n'
+    return (value, encoded) if len(encoded) <= _HEADER_BYTES else None
