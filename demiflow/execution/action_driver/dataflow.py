@@ -423,7 +423,8 @@ class DataflowExecution:
             if pinned_batch:
                 from dataclasses import replace
                 context = self._action.context
-                if 'checkpoint_rows' not in context.explicit_limits:
+                if ('checkpoint_rows' not in context.explicit_limits
+                        and self._policy.checkpoint_rows == context.limits['checkpoint_rows']):
                     self._policy = replace(self._policy, checkpoint_rows=context.limits['checkpoint_unconfirmed_rows'])
                 if 'batch_rows' in context.explicit_limits:
                     native = dict(self._policy.native_limits or {})

@@ -648,7 +648,9 @@ class LanceReader(_BaseReader):
         if not isinstance(plan, LanceSource):
             raise DataflowError("INVALID_CONTRACT", "LanceReader requires a Lance source")
         self._plan = plan
-        self._version = int(self._offset.get("version", self._snapshot.immutable_identity["version"]))
+        self._version = self._snapshot.immutable_identity["version"]
+        if int(self._offset.get("version", self._version)) != self._version:
+            raise DataflowError("INCOMPATIBLE_HISTORY", "Lance cursor differs from the pinned source version")
         self._fragment_ids = tuple(split.locator.get("fragment_ids", ()))
         self._global = bool(split.locator.get("global_query", False))
         self._arrow_cursor = None
@@ -698,13 +700,15 @@ class LanceReader(_BaseReader):
             return False
         dataset = open_lance_dataset(query.uri, self._version, query.storage_options)
         fields = [dataset.schema.field(name) for name in query.columns] if query.columns else dataset.schema
-        return all(pa.types.is_integer(f.type) or pa.types.is_boolean(f.type)
-                   or pa.types.is_string(f.type) or pa.types.is_binary(f.type) for f in fields)
+        if all(pa.types.is_integer(f.type) or pa.types.is_boolean(f.type)
+               or pa.types.is_string(f.type) or pa.types.is_binary(f.type) for f in fields):
+            self._native_dataset = dataset
+            return True
+        return False
 
     def _native_batches(self):
         from dataclasses import replace
         from ..lance.read import _iter_scan
-        from ..lance.storage import open_lance_dataset
         from .dataflow_native_limits import limit_value
         from .arrow_payload import _window
         query = self._plan.query
@@ -714,7 +718,7 @@ class LanceReader(_BaseReader):
         count = min(65536, workspace, self._services.bounds.max_output_rows,
                     limit_value(self._services, 'batch_rows', query.batch_size or 256))
         query = replace(query, version=self._version, batch_size=count, batch_readahead=1, fragment_readahead=1)
-        dataset = open_lance_dataset(query.uri, query.version, query.storage_options)
+        dataset = self._native_dataset
         by_id = {int(f.fragment_id): f for f in dataset.get_fragments()}
         if self._next_sequence and self._fragment_id not in self._fragment_ids:
             raise DataflowError('INCOMPATIBLE_HISTORY', 'native scan cursor names a fragment outside its split')
@@ -723,7 +727,7 @@ class LanceReader(_BaseReader):
             offset = self._row_offset if index == 0 else 0
             if frag_id not in by_id:
                 raise DataflowError('SOURCE_CHANGED', 'pinned source fragment disappeared')
-            for batch in _iter_scan(query, batch_size=count, batch_bytes=workspace,
+            for batch in _iter_scan(query, dataset=dataset, batch_size=count, batch_bytes=workspace,
                                     fragments=[by_id[frag_id]], offset=offset):
                 if batch.num_rows:
                     yield frag_id, offset, batch
@@ -861,6 +865,7 @@ class LanceReader(_BaseReader):
         if hasattr(self, '_batch_scan'):
             self._batch_scan.close()
             self._batch_remainder = None
+        self._native_dataset = None
         rows, self._rows = self._rows, iter(())
         close = getattr(rows, 'close', None)
         if close is not None:

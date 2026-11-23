@@ -147,10 +147,11 @@ def fragment_inventory_hash(fragments) -> str:
 
 
 def _iter_scan(
-    query: LanceScanSpec, *, batch_size: int, fragments=None,
+    query: LanceScanSpec, *, batch_size: int, fragments=None, dataset=None,
     expected_schema: pa.Schema | None = None, offset: int = 0, batch_bytes: int | None = None,
 ) -> Iterator[pa.RecordBatch]:
-    dataset = open_lance_dataset(query.uri, query.version, query.storage_options)
+    if dataset is None:
+        dataset = open_lance_dataset(query.uri, query.version, query.storage_options)
     schema = dataset.schema
     if not isinstance(schema, pa.Schema):
         raise LanceExecutionError("Lance returned a non-Arrow schema")
