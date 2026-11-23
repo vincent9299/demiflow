@@ -128,7 +128,10 @@ def _declared_readonly_locations(root: Path, denied: list[Path], private_home: P
     for loc in locations.values():
         if not isinstance(loc, dict):
             continue
-        if loc.get('kind') != 'local' or loc.get('read_only') is not True:
+        if loc.get('kind') not in (None, 'local'):
+            continue
+        is_readonly = (loc.get('writable') is False) or (loc.get('read_only') is True and loc.get('writable') is not True)
+        if not is_readonly:
             continue
         raw_root = loc.get('root')
         if not isinstance(raw_root, str) or not raw_root:
