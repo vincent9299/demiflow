@@ -140,3 +140,57 @@ def test_tabs_restore_exact_run_version_and_project_despite_late_response(owned_
         assert not [item for item in requests if item['method']=='POST'],requests
         fx.record('tab-restore-facts',dict(run=run_ref,fixed_version=fixed_ref,other_project=other,
                   late_real_graph_rejected=True,post_requests=0))
+
+
+@pytest.mark.parametrize('owned_fixture',[{'execution_format':'v3'}],indirect=True)
+def test_flows_tab_never_inherits_run_and_clears_settled_pending_intent(owned_fixture,browser):
+    fx=owned_fixture
+    run_id=fx.run_facts['run_id']
+    attempt=fx.run_facts['attempt']
+    with tab_page(fx,browser) as (page,_):
+        # 1. Open a historical run on monitor, leave to a non-pipeline tab, then
+        # return directly to 管道. 管道 must stay a clean flow view (enabled
+        # sidebar + action buttons), never a hybrid run view.
+        tab(page,'运行')
+        page.get_by_label('运行记录',exact=True).select_option(run_id)
+        expect(page.locator('.wb-node')).not_to_have_count(0)
+        run_ref=reference(page)
+        assert run_ref['kind']=='run' and run_ref['run_id']==run_id
+
+        tab(page,'数据')
+        expect(page.locator('.data-dictionary')).to_be_visible()
+
+        tab(page,'管道')
+        expect(page.locator('.wb-flow-record').first).to_be_visible()
+        expect(page.locator('.wb-flow-record').first).to_be_enabled()
+        expect(page.locator('.wb-actions').get_by_role('button',name='运行',exact=True)).to_be_visible()
+        expect(page.locator('.wb-actions').get_by_role('button',name='业务参数',exact=True)).to_be_visible()
+        page.wait_for_function("()=>ForgeView.decodeView(location.hash)?.kind==='flows'")
+        flow_ref=reference(page)
+        assert flow_ref['kind']=='flows' and flow_ref.get('panel')=='flows'
+
+        # Monitor tab still retains its own run locator independently.
+        tab(page,'数据')
+        tab(page,'运行')
+        expect_reference(page,run_ref)
+
+        # 2. A stale hash combining kind=run with panel=flows must still open a
+        # clean 管道 view without locking the flow sidebar.
+        stale=dict(v=2,workspace=fx.project_id,kind='run',run_id=run_id,attempt=attempt,panel='flows')
+        page.evaluate('ref=>{location.hash=ForgeView.encodeView(ref)}',stale)
+        expect(page.locator('.wb-flow-record').first).to_be_enabled()
+        expect(page.locator('.wb-actions').get_by_role('button',name='运行',exact=True)).to_be_visible()
+
+        # 3. A pending start intent whose run is already terminal auto-settles
+        # without leaving a stale "提交待核对" banner.
+        page.evaluate('''([project,runId,attempt])=>{
+          sessionStorage.setItem('demiflow-workbench-run-intents-v1',JSON.stringify([{
+            project,request_id:'p1795402058595-31021d262496d03d52260f9883e08642',
+            fingerprint:'0'.repeat(64),body:{entry:'flows/demo.py:run'},
+            phase:'start',run_id:runId,attempt,digest:'0'.repeat(64),created_at:Date.now()
+          }]));
+        }''',[fx.project_id,run_id,attempt])
+        page.reload()
+        expect(page.locator('.wb-flow-record').first).to_be_visible()
+        page.wait_for_function("()=>JSON.parse(sessionStorage.getItem('demiflow-workbench-run-intents-v1')||'[]').length===0")
+        expect(page.locator('.wb-pending')).to_be_hidden()

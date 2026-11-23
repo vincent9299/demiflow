@@ -155,14 +155,18 @@
       catch(e) {content.textContent=e.message;}
     }
     function reset() {levels=Object.create(null);expanded=[];body.scrollTop=0;list('/');}
+    const resize = globalThis.ForgeNavigation?.resizable
+      ? ForgeNavigation.resizable({layout,sidebar:pane,label:'项目文件',right:true,cssVar:'--side-detail-width',minWidth:220,maxWidth:720,minMain:320,active:false})
+      : null;
     function setOpen(value) {
       pane.hidden=!value;layout.classList.toggle('development-files-open',value);
       toggle.setAttribute('aria-expanded', String(value));
+      resize?.setActive(value && !matchMedia('(max-width:900px)').matches);
       if (value) {reset();close.focus();} else {levels=Object.create(null);toggle.focus();}
     }
     toggle.onclick=()=>setOpen(pane.hidden);close.onclick=()=>setOpen(false);refresh.onclick=reset;
     pane.onkeydown=e=>{if(e.key==='Escape'&&!preview?.open){e.preventDefault();setOpen(false);}};
-    return {dispose(){disposed=true;preview?.remove();root.unmount();}};
+    return {dispose(){disposed=true;resize?.dispose();preview?.remove();root.unmount();}};
   }
   globalThis.DevelopmentNavigation = {turnRail,filePanel};
 })();

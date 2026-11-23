@@ -32,7 +32,7 @@
     let settingsBasis=null,issueScope='flow',scopedCheckButton=null;
     let runInspector='observations',runDefinition=null,definitionSequence=0,runFlowFilter='';
     const runUI=globalThis.ForgeRunPresentation;
-    let pipelineCodeOpen=false,pipelineSequence=0,pipelineReadKey=null,flowCollapse,runCollapse;
+    let pipelineCodeOpen=false,pipelineSequence=0,pipelineReadKey=null,flowCollapse,runCollapse,nodePanelResize;
     let planPreview=null,previewSelection=null,previewSequence=0,previewBusy=false;
     let activePage=view.panel||(['run','run_compare','runs'].includes(view.kind)?'monitor':'flows'),detailOpen=false,locationFields=null,userNavigation=0;
     function rememberView(fields){locationFields=fields;saveView({...fields,panel:activePage});}
@@ -286,6 +286,8 @@
       pipelineCodeButton.disabled=!planPreview&&!data().graph?.binding?.entry;
       if(codeShown)loadPipelineCode();
       nodePanel.hidden=codeShown||(!detailOpen&&!monitoring)||operatorsActive;body.classList.toggle('wb-detail-open',!codeShown&&(detailOpen||monitoring)&&!operatorsActive);
+      const narrowDetail=matchMedia(monitoring?'(max-width:1200px)':'(max-width:950px)').matches;
+      nodePanelResize?.setActive(!nodePanel.hidden&&!body.hidden&&!narrowDetail);
       nodeOutputs.hidden=!run||!run.outputs?.length;
       bottom.hidden=monitoring?runInspector!=='definition':inspectorWhole&&!operatorsActive;
       inspector.hidden=monitoring||!inspectorWhole;
@@ -465,11 +467,13 @@
       if(model.selected){const card=model.nodes.find(n=>n.key===model.selected);if(card)selectGraphNode(card.selection,{quiet:true}).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});}
     }
     async function fetchGraph(ticket,{preserveSelection=false,refresh=false}={}){
-      clearPlanPreview(true);
+      const previousDigest=data().graph?.binding?.basis_digest||null;
+      if(!refresh)clearPlanPreview(true);
       const selected=data(),query=selected.run?{basis_kind:'run',run_id:selected.run,attempt:selected.attempt}:selected.report?{basis_kind:'report',report_digest:selected.report}:{basis_kind:'source',entry:selected.entry,...(selected.params?{params:selected.params}:{})};
       const sequence=++graphSequence,requestedStatus=run?.status;if(scopeNode)query.node_id=scopeNode;if(nodeOffset)query.node_offset=nodeOffset;
       const value=await request('graph',query);if(!current(ticket)||sequence!==graphSequence)return;
       if(refresh&&Object.keys(getDraft().values).length){message('项目内容已变化；配置草稿保留，请核对后再保存。');return;}
+      if(refresh&&value.binding?.basis_digest!==previousDigest)clearPlanPreview(true);
       const previous=preserveSelection?data().node:null,keepWhole=preserveSelection&&inspectorWhole;
       if(!state.acceptGraph(ticket,value))return;
       if(selected.run){lastRunGraphAt=Date.now();graphStatus=requestedStatus;}
@@ -808,20 +812,6 @@
       headings.forEach(name=>tr.append($('th',name)));head.append(tr);table.append(head,body);scroll.append(table);parent.append(scroll);
       for(const values of rows){const row=$('tr');values.forEach(value=>row.append($('td',value)));body.append(row);}
     }
-    function parameterRows(parent, meta, advanced){
-      const rows=(meta.arguments||[]).filter(p=>p.name!=='self'&&p.value?.type!=='Dataset'),provided=rows.filter(p=>p.origin!=='default'),defaults=rows.filter(p=>p.origin==='default');
-      const value=p=>{
-        if(p.value?.type==='Dataset')return 'Dataset · 上游数据流';
-        if(p.value?.type==='function')return p.value.reference;
-        if(p.value?.type==='Schema'&&p.value.fields)return 'Schema · '+p.value.fields.length+' 个字段（见下方声明）';
-        if(p.value?.unavailable)return p.value.type+' · '+p.value.unavailable;
-        return typeof p.value==='string'?p.value:json(p.value);
-      };
-      const render=(target,items)=>materialTable(target,['参数','调用表达式 / 来源','绑定值'],items.map(p=>[p.name,
-        p.expression||(p.origin==='default'?'API 默认值':'字典展开或 API 默认值'),value(p)]));
-      if(meta.expansions?.length)advanced.append($('p','字典展开：'+meta.expansions.map(x=>'**'+x).join('，'),'wb-caption'));
-      render(parent,[...provided,...defaults]);
-    }
     function sourceReferenced(node,kind){return node?.source_views?.[kind]?.referenced===true||sourceAvailable(node,kind);}
     function sourceAvailable(node,kind){
       return node?.source_views?.[kind]?.available===true
@@ -856,33 +846,86 @@
         basis:(value.source_basis==='compiled_snapshot'?'计划绑定版本':value.source_basis==='sealed'?'运行封存版本':'')+(definitionDigest?' · '+definitionDigest.slice(0,8):''),
         truncated:value.truncated},{mountText});
     }
+    const BEHAVIOR_ARGS=new Set(['when','catch','route','routes','isolate_route_failures','cache_when','schema_retries']);
+    const RUNTIME_ARGS=new Set(['config','model','options','concurrency','queue_depth','max_requests','request_concurrency','token_budget','service','request_gate','request_policy','batch_size','batch_readahead','fragment_readahead','max_batch','max_rows','max_row_bytes','wait_timeout_s','prepare_workers','reuse_workers','reuse_worker_max_tasks','index_cache_mb','max_entries','max_key_bytes']);
+    const OUTPUT_SIDE_ARGS=new Set(['call_output','error_output','output_ref']);
+    function formatArgValue(p){
+      if(p.value?.type==='Dataset')return 'Dataset · 上游数据流';
+      if(p.value?.type==='function')return p.value.reference;
+      if(p.value?.type==='Schema'&&p.value.fields)return 'Schema · '+p.value.fields.length+' 个字段（见下方声明）';
+      if(p.value?.unavailable)return p.value.type+' · '+p.value.unavailable;
+      return typeof p.value==='string'?p.value:json(p.value);
+    }
+    function renderArgTable(target,items){
+      materialTable(target,['参数','绑定来源','生效值'],items.map(p=>[p.name,
+        p.expression||(p.origin==='default'?'API 默认值':'字典展开或传入'),formatArgValue(p)]));
+    }
     function renderWiring(node,values,dag=planPreview?.dag){
       const byKind=Object.fromEntries(values.map(v=>[v.kind,v])),call=byKind.callsite,config=byKind.configuration,schema=byKind.schema;
-      if(call?.availability==='available'){
-        sourceBody.append($('h4','本次 API 调用'));
-        const text=$('div',undefined,'wb-implementation-text');sourceBody.append(text);mountText(text,call.text,{sourceOnly:true,compactSource:true,continuousSource:true});
-        if(call.metadata?.context&&call.metadata.context!==call.text){const context=details('完整链式调用上下文',sourceBody);mountText(context,call.metadata.context,{sourceOnly:true,compactSource:true});}
-      }
-      const advanced=details('高级信息',sourceBody);advanced.classList.add('wb-input-advanced');advanced.append($('div','解析时快照','wb-caption wb-material-basis'));
-      sourceBody.append($('h4','输入接线'));
-      if(schema?.metadata)schemaMaterial(sourceBody,schema.metadata,{input:true,advanced});
-      else sourceBody.append($('p','尚无上游 Dataset Schema。','wb-caption'));
+      const allArgs=(config?.metadata?.arguments||[]).filter(p=>p.name!=='self'&&p.value?.type!=='Dataset');
+      const provided=allArgs.filter(p=>p.origin!=='default'),defaults=allArgs.filter(p=>p.origin==='default');
+      const behaviorArgs=provided.filter(p=>BEHAVIOR_ARGS.has(p.name));
+      const runtimeArgs=provided.filter(p=>RUNTIME_ARGS.has(p.name));
+      const sideOutputs=provided.filter(p=>OUTPUT_SIDE_ARGS.has(p.name));
+      const interfaceArgs=provided.filter(p=>!BEHAVIOR_ARGS.has(p.name)&&!RUNTIME_ARGS.has(p.name)&&!OUTPUT_SIDE_ARGS.has(p.name));
       const bindings=schema?.metadata?.bindings||{};
-      if(bindings.inputs&&typeof bindings.inputs==='object')materialTable(sourceBody,['上游字段','算子输入'],Object.entries(bindings.inputs).map(([k,v])=>[String(v),k]));
-      sourceBody.append($('h4','本次参数'));
-      if(config?.metadata?.arguments)parameterRows(sourceBody,config.metadata,advanced);
-      else sourceBody.append($('p','尚未取得公开 API 参数绑定。','wb-caption'));
-      if(config?.metadata?.note)advanced.append($('p',config.metadata.note,'wb-caption wb-parameter-explanation'));
-      if(config?.metadata?.engine_configuration)raw('引擎内部描述（只读）',config.metadata.engine_configuration,advanced);
-      sourceBody.append($('h4','输出接线'));
-      if(bindings.output)sourceBody.append($('p','算子返回值 → 当前行的 '+bindings.output+' 字段','wb-wiring-binding'));
-      if(bindings.outputs)materialTable(sourceBody,['算子输出','Dataset 字段'],Object.entries(bindings.outputs).map(([k,v])=>[k,String(v)]));
-      if(schema?.metadata)schemaMaterial(sourceBody,schema.metadata,{advanced});
-      else sourceBody.append($('p','尚无已确认的输出 Schema。','wb-caption'));
+
+      const ioSection=$('section',undefined,'wb-wiring-section');
+      ioSection.append($('h4','1. 接口接线'));
+      if(bindings.inputs&&typeof bindings.inputs==='object')materialTable(ioSection,['上游字段','算子输入'],Object.entries(bindings.inputs).map(([k,v])=>[String(v),k]));
+      if(bindings.output)ioSection.append($('p','主输出：算子返回值 → 当前行的 '+bindings.output+' 字段','wb-wiring-binding'));
+      if(bindings.outputs)materialTable(ioSection,['算子输出','Dataset 字段'],Object.entries(bindings.outputs).map(([k,v])=>[k,String(v)]));
+      if(sideOutputs.length)materialTable(ioSection,['伴随输出','写回字段'],sideOutputs.map(p=>[p.name,formatArgValue(p)]));
+      if(interfaceArgs.length)renderArgTable(ioSection,interfaceArgs);
+      const advanced=details('本次 API 调用与高级信息',sourceBody);advanced.classList.add('wb-input-advanced');
+      const schemaFold=details('查看输入 / 输出 Schema',ioSection);schemaFold.classList.add('wb-wiring-fold');
+      if(schema?.metadata){
+        schemaMaterial(schemaFold,schema.metadata,{input:true,advanced});
+        schemaMaterial(schemaFold,schema.metadata,{advanced});
+      }else schemaFold.append($('p','尚无已确认的上下游 Dataset Schema。','wb-caption'));
       const next=(dag?.edges||[]).filter(e=>e.from.occurrence_id===node.occurrence_id);
       const targets=[...new Set(next.map(e=>e.to.occurrence_id))];
-      const downstream=$('div',undefined,'wb-downstream');downstream.append($('span',targets.length?'下游：':'当前动作的数据流终点。','wb-caption'));sourceBody.append(downstream);
+      const downstream=$('div',undefined,'wb-downstream');downstream.append($('span',targets.length?'下游：':'当前动作的数据流终点。','wb-caption'));ioSection.append(downstream);
       for(const id of targets){const target=dag.nodes.find(n=>n.occurrence_id===id);button(target?.label||target?.op_kind||'下游节点',()=>{const card=graphModel?.nodes.find(c=>c.selection.occurrenceId===id);if(card)return selectGraphNode(card.selection);},downstream);}
+      sourceBody.append(ioSection);
+
+      if(behaviorArgs.length){
+        const behaviorSection=$('section',undefined,'wb-wiring-section');
+        behaviorSection.append($('h4','2. 行为接线（门控与容错）'));
+        renderArgTable(behaviorSection,behaviorArgs);
+        if(behaviorArgs.some(p=>p.name==='when')&&sourceAvailable(node,'implementation')){
+          const jump=$('div',undefined,'wb-downstream');
+          button('查看门控代码源码 (when)',async()=>{sourceKind='implementation';sourceOpen=true;await loadSource();},jump);
+          behaviorSection.append(jump);
+        }
+        sourceBody.append(behaviorSection);
+      }
+
+      const engineCfg=config?.metadata?.engine_configuration;
+      const engineModel=engineCfg?.model?.name||engineCfg?.model||null;
+      if(runtimeArgs.length||engineModel){
+        const runtimeSection=$('section',undefined,'wb-wiring-section');
+        runtimeSection.append($('h4',(behaviorArgs.length?'3. ':'2. ')+'运行接线（模型 · 并发 · 预算）'));
+        const summaryChips=$('div',undefined,'wb-runtime-chips');
+        if(engineModel)summaryChips.append($('span','生效模型 '+engineModel,'definition-model'));
+        for(const p of runtimeArgs){
+          if(['concurrency','queue_depth','max_requests'].includes(p.name))summaryChips.append($('span',p.name+'='+formatArgValue(p),'definition-chip'));
+        }
+        if(summaryChips.children.length)runtimeSection.append(summaryChips);
+        if(runtimeArgs.length)renderArgTable(runtimeSection,runtimeArgs);
+        sourceBody.append(runtimeSection);
+      }
+
+      advanced.append($('div','解析时快照','wb-caption wb-material-basis'));
+      if(call?.availability==='available'){
+        advanced.append($('h4','本次 API 调用'));
+        const text=$('div',undefined,'wb-implementation-text');advanced.append(text);mountText(text,call.text,{sourceOnly:true,compactSource:true,continuousSource:true});
+        if(call.metadata?.context&&call.metadata.context!==call.text){const context=details('完整链式调用上下文',advanced);mountText(context,call.metadata.context,{sourceOnly:true,compactSource:true});}
+      }
+      if(config?.metadata?.expansions?.length)advanced.append($('p','字典展开：'+config.metadata.expansions.map(x=>'**'+x).join('，'),'wb-caption'));
+      if(defaults.length){const defBox=details('API 默认参数（'+defaults.length+' 项）',advanced);renderArgTable(defBox,defaults);}
+      if(config?.metadata?.note)advanced.append($('p',config.metadata.note,'wb-caption wb-parameter-explanation'));
+      if(engineCfg)raw('引擎内部描述（只读）',engineCfg,advanced);
       sourceBody.append(advanced);
     }
     async function loadPreviewSource(){
@@ -922,12 +965,15 @@
           else sourceBody.append($('p','这份旧快照未保存 API 定义；不会混入当前平台版本。重新解析可读取当前接口。','wb-caption'));
         }else if(kind==='implementation'){
           if(value.path){definitionSource={path:value.path,line:value.start_line,sha256:value.sha256};definitionButton.textContent='查看当前定义';}
-          readDefinition(sourceBody,meta.definition||{kind:'code'},value);
+          const isGuard=sourceReferenced(node,'prompt');
+          const implDef=meta.definition||{kind:'code'};
+          readDefinition(sourceBody,isGuard?{...implDef,role_badge:'门控代码 · when 条件'}:implDef,value);
         }else if(kind==='prompt'){
           if(meta.name&&meta.template_sha256){definitionSource={name:meta.name,version:meta.version,template_sha256:meta.template_sha256};definitionButton.textContent='查看当前定义';}
           for(const item of meta.routes||[meta]){
             if(meta.routes)sourceBody.append($('h4',item.name));
-            readDefinition(sourceBody,item.definition||{kind:'prompt',declared_version:item.version,output_schema:item.response_schema,model:item.model,response_format:item.response_format},value);
+            const baseDef=item.definition||{kind:'prompt',declared_version:item.version,output_schema:item.response_schema,model:item.model,response_format:item.response_format};
+            readDefinition(sourceBody,item.transport?{...baseDef,transport:item.transport}:baseDef,value);
           }
         }
       }catch(error){
@@ -1076,7 +1122,7 @@
       if(run.outputs.some(o=>o.status==='committed')&&run.status!=='succeeded')runAlerts.append($('div','部分输出已提交；整次运行尚未成功。','wb-partial'));
     }
     async function openRun(id,attempt=null,mode='monitor'){
-      activePage=mode==='operators'?'operators':mode==='config'?'flows':'monitor';detailOpen=false;
+      activePage=mode==='operators'?'operators':'monitor';detailOpen=false;
       historyOpen=activePage==='monitor';runCollapse?.setActive(historyOpen);
       sourceOpen=true;sourceBody.hidden=sourceTabs.hidden=false;runInspector='observations';detailKind='observations';
       run=null;comparison=null;
@@ -1087,7 +1133,7 @@
       catch(error){if(current(initial)&&error.name!=='AbortError'){graphHost.replaceChildren($('p','运行图暂未载入，请重新选择记录。','wb-caption'));inspector.replaceChildren();emptyTitle.textContent='运行详情读取失败';message(error.message,'error-box',initial);graphLoading(false);}return;}
       if(!current(initial))return;
       if(value.run_id!==id||(attempt&&value.attempt!==attempt))throw new Error('运行记录身份不一致');
-      run=value;
+      run=value;settlePendingForRun(run);
       if(runFlowFilter!==run.entry||!records?.runs.some(item=>item.run_id===id)){
         runFlowFilter=run.entry;records=null;
       }
@@ -1157,7 +1203,14 @@
         if(disposed||!run||data().run!==intent.run_id||data().attempt!==intent.attempt)return;
         const startTicket=state.capture();
         try{await commands.start(intent);if(current(startTicket)){message('运行已提交：'+intent.run_id);await observer.refresh();}}
-        catch(error){if(current(startTicket))message('已固定运行 '+intent.run_id+'；启动结果待核对。请查看这次运行，勿另建提交。 '+error.message,'error-box',startTicket);}
+        catch(error){
+          let settled=null;
+          try{const checked=await commands.inspect(intent);if(checked?.run&&checked.run.status!=='prepared')settled=checked.run;}catch{/* Keep pending intent when server status is uncertain. */}
+          if(current(startTicket)){
+            if(settled){run={...run,...settled};paintRunBar();paintRunFacts();paintPending();message('运行启动失败：'+(settled.state?.error?.message||settled.state?.error||error.message),'error-box',startTicket);}
+            else message('已固定运行 '+intent.run_id+'；启动结果待核对。请查看这次运行，勿另建提交。 '+error.message,'error-box',startTicket);
+          }
+        }
       }catch(error){if(current(ticket)){message('提交结果待核对，原请求身份已保留。 '+error.message,'error-box',ticket);paintPending();}throw error;}
       finally{busy=false;runButton.textContent='运行';updateActions();if(root.isConnected&&run)paintRunBar();paintPending();}
     }
@@ -1449,13 +1502,42 @@
       settings.append($('p','配置写入、分析执行、保存和标注分别受项目授权与服务上限约束；旧登记格式需由部署者显式迁移。','wb-caption'));
     }
     const pendingBox=$('section',undefined,'wb-pending');root.insertBefore(pendingBox,settings);
+    const inspectedPending=new Set();
+    function settlePendingForRun(value){
+      if(!value?.run_id||value.status==='prepared')return;
+      let changed=false;
+      try{
+        for(const intent of commands.pending()){
+          if(intent.run_id===value.run_id&&(intent.attempt==null||intent.attempt===value.attempt)){
+            commands.finish(intent);changed=true;
+          }
+        }
+      }catch{/* Storage errors are surfaced by paintPending. */}
+      if(changed)paintPending();
+    }
+    function reconcilePendingRuns(items){
+      for(const intent of items){
+        if(!intent.run_id||inspectedPending.has(intent.request_id))continue;
+        inspectedPending.add(intent.request_id);
+        commands.inspect(intent).then(value=>{
+          if(disposed||!root.isConnected)return;
+          if(value?.run&&value.run.status!=='prepared')paintPending();
+        }).catch(()=>{/* Keep pending intent until reachable or user inspects. */});
+      }
+    }
     function paintPending(){
       pendingBox.replaceChildren();
       let items=[];
       try{items=commands.pending();}catch(error){message(error.message,'error-box');return;}
       pendingBox.hidden=!items.length;
+      if(!items.length)return;
+      reconcilePendingRuns(items);
       for(const intent of items){
-        const line=$('div',undefined,'wb-pending-row');line.append($('strong','提交待核对'),$('span',intent.request_id,'wb-caption'));pendingBox.append(line);
+        const line=$('div',undefined,'wb-pending-row');
+        const flowLabel=intent.body?.entry?runUI.flowName(ctx,intent.body.entry):'';
+        const detail=(flowLabel?flowLabel+' · ':'')+(intent.run_id?'已创建，启动结果待确认':'准备结果待确认');
+        const caption=$('span',detail,'wb-caption');caption.title=intent.request_id;
+        line.append($('strong','提交待核对'),caption);pendingBox.append(line);
         if(intent.run_id)button('查看原运行',()=>openRun(intent.run_id,intent.attempt),line);
         button('核对原请求',async()=>{
           const ticket=state.capture(),value=await commands.inspect(intent);if(!current(ticket))return;
@@ -1514,6 +1596,7 @@
     for(const element of [...root.children])if(element!==layout)runMain.append(element);
     flowCollapse=ForgeNavigation.collapsible({layout,sidebar:flowNavigation,header:flowHeader,label:'管道目录',active:activePage==='flows'});
     runCollapse=ForgeNavigation.collapsible({layout,sidebar:historyPanel,header:runHeader,label:'运行目录',narrowQuery:'(max-width:680px)',active:activePage==='monitor'});
+    nodePanelResize=ForgeNavigation.resizable({layout:body,sidebar:nodePanel,label:'算子详情',right:true,cssVar:'--wb-detail-width',minWidth:240,maxWidth:820,minMain:260,active:false});
     let metricSequence=0,lastObservationRevision=null;
     async function refreshTrend(force=false){
       if(!run||trend.hidden||(!force&&Date.now()-lastMetricAt<5000))return;
@@ -1532,6 +1615,7 @@
         const refreshGraph=()=>data().graph&&fetchGraph(target.ticket,{preserveSelection:true});
         if(value.unchanged){paintRunFacts(value.freshness);if(active(run.status)&&Date.now()-lastRunGraphAt>=5000)await refreshGraph();return;}
         snapshot=value;run={...run,...value,attempts:run.attempts?.map(a=>a.attempt===value.attempt?{...a,status:value.status}:a)};
+        settlePendingForRun(run);
         if(records&&run.attempt===run.current_attempt){const i=records.runs.findIndex(r=>r.run_id===run.run_id);if(i>=0){
           const previousStatus=records.runs[i].status;records.runs[i]=historyRecord({...records.runs[i],...run});
           if(previousStatus!==run.status)paintHistory();
@@ -1562,26 +1646,26 @@
         if(data().run&&!run&&!busy){await openRun(data().run,data().attempt,data().mode);return;}
         if(force&&run)await observer.refresh();
         if(run&&!data().graph)await fetchGraph(state.capture(),{preserveSelection:true});
-        else if(activePage==='flows'&&(graphChanged||force||!data().graph)&&!run&&!busy){
+        else if(activePage==='flows'&&(graphChanged||force||!data().graph)&&!run&&!busy&&!previewBusy){
           if(Object.keys(getDraft().values).length)message('项目内容已变化；配置草稿保留，请核对后再保存。');
           else if(working.entry)await fetchGraph(state.capture(),{preserveSelection:true,refresh:true});
         }
       },
       dirty:()=>argumentEditor.dirty()||!!working&&Object.keys(getDraft().values).length>0,
       projectCheckSettled:()=>{if(!disposed&&documents.open&&projectInfoDirty)refreshProjectInfo();},
-      dispose:()=>{disposed=true;flowCollapse?.dispose();runCollapse?.dispose();operatorBrowser.dispose();argumentEditor.dispose();document.removeEventListener('fullscreenchange',fullscreenChanged);window.removeEventListener('resize',positionMore);window.removeEventListener('scroll',positionMore,true);if(document.fullscreenElement===body)document.exitFullscreen().catch(()=>{});observer.dispose();graph.dispose();controller.abort();state.dispose();disposeReaders(sourceBody);disposeReaders(runDetailBody);disposeReaders(pipelineCode);},
+      dispose:()=>{disposed=true;flowCollapse?.dispose();runCollapse?.dispose();nodePanelResize?.dispose();operatorBrowser.dispose();argumentEditor.dispose();document.removeEventListener('fullscreenchange',fullscreenChanged);window.removeEventListener('resize',positionMore);window.removeEventListener('scroll',positionMore,true);if(document.fullscreenElement===body)document.exitFullscreen().catch(()=>{});observer.dispose();graph.dispose();controller.abort();state.dispose();disposeReaders(sourceBody);disposeReaders(runDetailBody);disposeReaders(pipelineCode);},
     });
     options.register?.(handle);
     let firstEntry=view.entry||ctx.flows[0]?.entry||choices()[0]?.value||null;
     let firstParams=uniqueParams(firstEntry);
     working={entry:firstEntry,params:firstParams};
-    if(view.kind==='run')await openRun(view.run_id,view.attempt||null,view.panel==='operators'?'operators':view.panel==='flows'?'config':'monitor');
+    if(view.kind==='run'&&view.panel!=='flows')await openRun(view.run_id,view.attempt||null,view.panel==='operators'?'operators':'monitor');
     else if(view.kind==='runs'||view.kind==='flows'&&view.panel==='monitor')await selectRunFlow(firstEntry||'');
     else if(view.kind==='inspection')await useWorking(firstEntry,firstParams,view.report_digest,'checks');
     else if(view.kind==='run_compare'){await useWorking(firstEntry,firstParams);await compare(view.left,view.right);}
     else await useWorking(firstEntry,firstParams,null,view.kind==='checks'?'checks':view.panel==='operators'?'operators':'config');
     if(activePage==='operators')await operatorBrowser.load();
-    if(activePage==='flows'&&!run&&['flows',undefined].includes(view.kind)){
+    if(activePage==='flows'&&!run&&['flows','run',undefined].includes(view.kind)){
       const saved=storedPreviews()[project];
       if(saved&&saved.entry===working?.entry&&saved.params===working?.params){
         try{await compilePlanPreview({restore:saved});
@@ -1592,7 +1676,7 @@
       }
     }
     if(!userNavigation&&activePage!=='monitor'&&view.panel==='monitor'&&!run)await showPage('monitor');
-    if(view.kind==='run'&&data().graph){
+    if(view.kind==='run'&&run&&data().graph){
       if(view.action_id!=null){
         const actions=data().graph.logical?.actions||[];
         if(!actions.some(a=>a.action_id===view.action_id))throw new Error('定位 action 不属于这份封存图');
@@ -1615,7 +1699,7 @@
         if(target)await selectGraphNode(target);
       }
     }
-    if(view.node_id&&data().graph){
+    if(view.node_id&&data().graph&&(view.kind!=='run'||run)){
       if(view.kind==='run'&&view.report_digest!==run?.report_digest)throw new Error('运行节点不属于这份封存报告');
       if(!data().graph.nodes.some(n=>n.id===view.node_id)){
         state.chooseNode(null);graph.select(null);sourceSequence++;disposeReaders(sourceBody);sourceBody.replaceChildren();inspector.replaceChildren();

@@ -5,11 +5,11 @@
 body:not(.df-card-mode) .df-dataframe-view { display: none !important; }
 
 .df-card-mode {
-  --df-ink: #20242b;
-  --df-muted: #626a75;
-  --df-line: #e4e6e9;
-  --df-accent: #4664bb;
-  --sans-serif: var(--jp-ui-font-family, system-ui, sans-serif);
+  --df-ink: #09090b;
+  --df-muted: #71717a;
+  --df-line: #e4e4e7;
+  --df-accent: #18181b;
+  --sans-serif: "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", var(--jp-ui-font-family, system-ui, sans-serif);
 }
 .df-card-mode #top-panel-wrapper, .df-card-mode #menu-panel-wrapper,
 .df-card-mode .jp-NotebookPanel-toolbar { display: none !important; }
@@ -28,7 +28,11 @@ body.df-card-mode #main-panel .jp-Notebook .jp-WindowedPanel-outer { padding: 0 
 }
 .df-card-mode .jp-CodeCell::before { display: none !important; }
 .df-card-mode .jp-InputArea-editor {
-  background: #f7f8fa; border: 1px solid var(--df-line); border-radius: 6px; overflow: hidden;
+  background: #fafafa; border: 1px solid var(--df-line); border-radius: 10px; overflow: hidden;
+  transition: border-color .14s ease, box-shadow .14s ease;
+}
+.df-card-mode .jp-CodeCell.jp-mod-active .jp-InputArea-editor {
+  border-color: #a1a1aa; box-shadow: 0 2px 8px rgba(9, 9, 11, .04);
 }
 .df-card-mode .jp-CodeCell[data-df-folded=true] > .jp-Cell-inputWrapper { display: none; }
 .df-card-mode :is(.jp-InputPrompt, .jp-OutputPrompt, .jp-Collapser) { display: none; }
@@ -58,9 +62,9 @@ body.df-card-mode #main-panel .jp-Notebook .jp-WindowedPanel-outer { padding: 0 
 }
 .df-card-mode .df-dataframe-view table { width: 100%; margin: 0; font: inherit; border-collapse: collapse; }
 .df-card-mode .df-dataframe-view :is(td, th) { padding: 7px 12px; white-space: nowrap; border-bottom: 1px solid var(--df-line); }
-.df-card-mode .df-dataframe-view thead th { background: #f6f7f8; color: var(--df-muted); font-weight: 550; }
+.df-card-mode .df-dataframe-view thead th { background: #fafafa; color: var(--df-muted); font-weight: 550; font-size: 12.5px; }
 .df-card-mode .df-dataframe-view tbody tr { background: white; }
-.df-card-mode .df-dataframe-view tbody tr:hover { background: #f5f7fb; }
+.df-card-mode .df-dataframe-view tbody tr:hover { background: #fafafa; }
 .df-card-mode .df-dataframe-view tbody tr:last-child td { border-bottom: 0; }
 .df-card-mode .df-dataframe-view tr > :first-child { display: none; }
 .df-card-mode .df-indexed-table tr > :nth-child(2) {
