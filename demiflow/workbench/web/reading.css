@@ -1,5 +1,5 @@
 .forge-reader {
-  color: var(--reading-text, var(--text, #202532));
+  color: var(--reading-text, var(--ink, #09090b));
   font: inherit;
   line-height: 1.7;
   min-width: 0;
@@ -56,15 +56,15 @@
 .forge-reader .reader pre,
 .forge-reader .reading-source-page,
 .forge-reader .reading-source-chunk {
-  background: var(--reading-code-surface, #f6f7f9);
-  border: 1px solid var(--reading-border, var(--border, #dce0e7));
-  border-radius: 6px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: .9em;
+  background: var(--reading-code-surface, #fafafa);
+  border: 1px solid var(--reading-border, var(--line-subtle, #ededf0));
+  border-radius: 8px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: .88em;
   margin: 0 0 12px;
   max-width: 100%;
   overflow-x: auto;
-  padding: 12px;
+  padding: 14px;
   white-space: pre;
 }
 .forge-reader .reading-source-chunk { tab-size: 4; }
