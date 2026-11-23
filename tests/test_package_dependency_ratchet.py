@@ -26,7 +26,7 @@ LEAVES = {'resources', '_compat'}    # import no other demiflow package
 # (importer package, imported package) -> most private-name imports allowed.
 # 'root' is the top-level modules of ``demiflow/`` (errors, objects, cli, ...).
 PRIVATE_IMPORT_BUDGET = {
-    ('execution', 'data'): 7, ('execution', 'lance'): 10, ('workbench', 'resources'): 8,
+    ('execution', 'lance'): 10, ('workbench', 'resources'): 8,
     ('execution', 'planning'): 5, ('execution', 'root'): 4, ('root', 'operator_llm'): 3,
     ('data', 'root'): 3, ('execution', 'operator_llm'): 3, ('execution', 'resources'): 3,
     ('workbench', 'execution'): 3, ('data', 'execution'): 2, ('execution', 'services'): 2,
@@ -66,7 +66,7 @@ PRE_V3_MODULES = {
         'demiflow.planning.dataset_dag',
         'demiflow.workbench.runs.facts'},
     'demiflow.execution.local_tasks': {
-        'demiflow.execution.arrow_batch_sink', 'demiflow.execution.dataset_native'},
+        'demiflow.execution.dataset_native'},
     'demiflow.execution.local': {'demiflow.execution'},
     'demiflow.execution.ray': {'demiflow.execution'},
 }

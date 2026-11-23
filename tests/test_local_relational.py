@@ -274,6 +274,7 @@ def test_public_sort_preserves_equal_key_order(tmp_path, workers):
 
 
 def test_sort_and_join_cleanup_on_consumer_error(tmp_path, monkeypatch):
+    monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT', str(tmp_path / 'capacity'))
     from demiflow import data
     from demiflow.execution.run_context import RunContext
     from demiflow.execution.storage.objects import RunArtifactStore
