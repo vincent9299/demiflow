@@ -61,9 +61,12 @@ def test_real_eight_concurrent_prompts_wait_for_original_response_capacity(tmp_p
     # Keep the original test's 64 MiB control budget and 8 MiB+64 KiB response
     # bound: eight concurrent calls cannot all reserve responses at once.
     from demiflow.data.api import DataAPI
-    saved = DataAPI().from_items([{'item': str(i)} for i in range(8)]).map_prompt_async('enrich',
-            config=parse_prompt_pack(PACK), inputs={'payload': 'item'}, output='answer', concurrency=8,
-            max_requests=8, options={'trust_env': False}).materialize()
+    # Supply the plan's resident workspace while keeping its response budget unchanged.
+    with RunContext.start(tmp_path/'run', limits={'memory_bytes': 512*1024**2,
+            'max_row_bytes': 16*1024**2, 'max_batch_bytes': 16*1024**2}):
+        saved = DataAPI().from_items([{'item': str(i)} for i in range(8)]).map_prompt_async('enrich',
+                config=parse_prompt_pack(PACK), inputs={'payload': 'item'}, output='answer', concurrency=8,
+                max_requests=8, options={'trust_env': False}).materialize()
     try:
         run = runs[0]
         assert run.limits['max_control_bytes'] == 64*1024**2
