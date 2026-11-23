@@ -968,7 +968,7 @@ class DataflowExecution:
         if self._cancelled:
             return ExecutionStatus(state='cancelled', pending_events=0, confirmed_rows=self._confirmed_rows)
         self._check_stop()
-        if self._terminal_result is not None and self._physical is None:
+        if self._state == "succeeded" and self._physical is None:
             return ExecutionStatus(state=self._state, pending_events=0, confirmed_rows=self._confirmed_rows)
         if self._waiting_for_fit:
             self._launch_phase()
