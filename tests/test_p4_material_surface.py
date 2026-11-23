@@ -46,7 +46,7 @@ def test_sdk_links_preserve_identity_and_refuse_subclasses_or_overbudget():
 
 
 def test_all_schema_nodes_share_one_native_pass_and_preserve_wire(no_execution, monkeypatch):
-    from demiflow.execution import dataflow_schema
+    from demiflow.execution.compiler_support import dataflow_schema
     captured = capture_pipeline(lambda: data.from_items([{'x': 1}]).select_columns(['x']).take_all(), {})
     compiled, bounds = captured.compiled, captured.bounds
     before = encode_wire(compiled.graph, type_name='DataflowGraph', bounds=bounds)
@@ -65,7 +65,7 @@ def test_all_schema_nodes_share_one_native_pass_and_preserve_wire(no_execution, 
 
 
 def test_schema_budget_is_unavailable_not_unknown_and_corruption_stays_error(no_execution, monkeypatch):
-    from demiflow.execution import dataflow_schema
+    from demiflow.execution.compiler_support import dataflow_schema
     captured = capture_pipeline(lambda: data.range(3).map(passive).take_all(), {})
     result = compiled_node_materials(captured.compiled, bounds=replace(captured.bounds, max_nodes=1))
     assert all(item.schema.availability == 'unavailable' and item.schema.output is None for item in result.values())

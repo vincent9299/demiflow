@@ -301,13 +301,13 @@ class Dataset:
     @_flow_api("checkpoint", datasets=("self",), execution="action")
     def checkpoint(self, path, *, version):
         """Retired facade; execution-owned recovery uses the platform RunRef."""
-        from ..execution.capabilities import require_action
+        from demiflow.execution.compiler_support.capabilities import require_action
         require_action('checkpoint')
 
     @_flow_api("checkpoint_async", datasets=("self",), execution="action")
     async def checkpoint_async(self, path, *, version):
         """Retired facade; reject before dispatching a worker thread."""
-        from ..execution.capabilities import require_action
+        from demiflow.execution.compiler_support.capabilities import require_action
         require_action('checkpoint_async')
         import asyncio
         return await asyncio.to_thread(self.checkpoint, path, version=version)
@@ -319,7 +319,7 @@ class Dataset:
         max_rows_per_batch: int = 8192,
     ) -> "Dataset":
         """Retired facade; execution-owned recovery uses the platform RunRef."""
-        from ..execution.capabilities import require_action
+        from demiflow.execution.compiler_support.capabilities import require_action
         require_action('checkpoint_lance')
         from ..lance.checkpoint import checkpoint_lance
         return checkpoint_lance(
@@ -335,7 +335,7 @@ class Dataset:
         max_rows_per_batch: int = 8192,
     ) -> "Dataset":
         """Retired facade; reject before dispatching a worker thread."""
-        from ..execution.capabilities import require_action
+        from demiflow.execution.compiler_support.capabilities import require_action
         require_action('checkpoint_lance_async')
         import asyncio
         return await asyncio.to_thread(
@@ -507,7 +507,7 @@ class Dataset:
         I/O deadlines inside the callable; cancellation drains running calls
         before actor cleanup. The default 'inline' preserves existing behavior.
         """
-        from ..execution.capabilities import require_action
+        from demiflow.execution.compiler_support.capabilities import require_action
         require_action('async_map', dict(checkpoint=checkpoint,
             checkpoint_operator=checkpoint_operator, checkpoint_lease_s=checkpoint_lease_s))
         import inspect
@@ -582,7 +582,7 @@ class Dataset:
         记入 stats.dead_batches（幂等重跑即重试）。动机与契约详见
         plan.BatchMapOp；惰性路径遇到本算子将显式拒绝（同 AsyncMapOp）。
         """
-        from ..execution.capabilities import require_action
+        from demiflow.execution.compiler_support.capabilities import require_action
         require_action('batch_map', dict(checkpoint=checkpoint,
             checkpoint_operator=checkpoint_operator, checkpoint_lease_s=checkpoint_lease_s))
         from .flow_contract import normalize_stream_parameters
@@ -1062,7 +1062,7 @@ class Dataset:
             raise UnsupportedExecutionOptionError('worker exchange queues are owned by the unified engine')
         if source_batch_size is not None and (type(source_batch_size) is not int or not 1 <= source_batch_size <= 256):
             raise ValueError('source_batch_size must be 1..256')
-        from ..execution.capabilities import validate_stream_plan
+        from demiflow.planning.dataflow_compile import validate_stream_plan
         validate_stream_plan(self._plan, source=self._source)
         from ..planning.dataflow_declaration import validate_native_operation
         validate_native_operation("run_stream", configuration={"action": "run_stream"}, bindings={})

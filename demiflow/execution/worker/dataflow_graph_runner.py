@@ -384,7 +384,7 @@ class WorkerGraphRunner:
             return
         self._restore_terminal()
         if self._terminal_spec is not None and not self._restored_terminal:
-            from demiflow.execution.dataflow_schema import terminal_schema
+            from demiflow.execution.compiler_support.dataflow_schema import terminal_schema
             from demiflow.execution.storage.record_schema import RecordSchemas
             occurrence = next(occ for occ, node in self.e._node_specs.items() if node.kind == 'terminal')
             schema = terminal_schema(self.e._graph, self.e._physical,

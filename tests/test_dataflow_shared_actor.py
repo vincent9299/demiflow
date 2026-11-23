@@ -444,7 +444,7 @@ def test_alias_admission_never_reads_source_or_constructs_factory(tmp_path, monk
     graph = lower_action(request(True), bounds=bounds).graph
     # Guard every full-capture/row-schema path after the original plan exists.
     import demiflow.planning.dataflow_compile as compiler
-    import demiflow.execution.dataflow_schema as schema
+    import demiflow.execution.sources.materialized_input as schema
     monkeypatch.setattr(compiler, 'lower_action', refuse)
     monkeypatch.setattr(compiler, '_source_semantic_facts', refuse)
     monkeypatch.setattr(schema, 'literal_schema', refuse)
@@ -480,7 +480,7 @@ def test_passive_actor_relation_matches_multi_input_occurrences(tmp_path, monkey
             arguments={}, sink=None, programs=(), provider='local', action=action)
     _, bounds = resolve_runtime_policy({}, {}, provider='local')
     graph = lower_action(request(True), bounds=bounds).graph
-    import demiflow.execution.dataflow_schema as schema
+    import demiflow.execution.sources.materialized_input as schema
     def refuse(*args, **kwargs):
         raise AssertionError('alias validation read business rows')
     monkeypatch.setattr(schema, 'literal_schema', refuse)

@@ -6,7 +6,7 @@ from demiflow.data.plan import (
     AsyncMapOp, CallableSpec, FilterOp, LogicalPlan, MapBatchesOp, MapOp,
     MapStreamOptions,
 )
-from demiflow.execution.capabilities import validate_stream_plan
+from demiflow.planning.dataflow_compile import validate_stream_plan
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 

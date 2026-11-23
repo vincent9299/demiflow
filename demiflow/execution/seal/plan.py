@@ -12,6 +12,8 @@ The historical code-pin (``chain.plan_code_pin``) and identity-bridge
 """
 from __future__ import annotations
 
+from demiflow.execution.contracts.record_schema import KEY, decode
+
 from demiflow.execution.contracts.dataflow_kinds import MANAGED_HTTP_DEVICES_FIELD
 
 from demiflow.execution.contracts.dataflow import EXECUTION_LIMITS, DELIVERY_LIMIT
@@ -894,7 +896,7 @@ def validate_execution_binding(request, graph):
     Their added ceilings/schema belong to this same graph seal, not a nested
     action or a mutable side ledger. Refuse drift before loading/starting work.
     """
-    from demiflow.execution.dataflow_schema import KEY
+    from demiflow.execution.contracts.record_schema import KEY
     keys = (EXECUTION_LIMITS, KEY, DELIVERY_LIMIT)
     expected = {key: request.arguments.get(key) for key in keys}
     for node in graph.nodes:
@@ -948,3 +950,25 @@ def sealed_service_placements(graph, physical, *, store):
     if len(placements) != len(occurrences):
         raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed service placement does not cover every original occurrence')
     return placements
+
+
+def validate_literal_schema_replay(request, graph, *, bounds):
+    """Compare only explicit new-seal type facts, without rewriting old identity.
+
+    Historical literal action identities intentionally retain their old bytes.
+    New schema facts close the empty-literal ambiguity at the original seal gate.
+    Old graphs lacking these facts continue through the existing history checks.
+    """
+    expected = {node.occurrence_id: node.kernel.configuration[KEY]
+        for node in graph.nodes if node.kind == 'source' and KEY in node.kernel.configuration}
+    if not expected:
+        return
+    from demiflow.planning.dataflow_compile import revalidate_action
+    current = revalidate_action(request, bounds=bounds).graph
+    actual = {node.occurrence_id: node.kernel.configuration.get(KEY)
+        for node in current.nodes if node.kind == 'source'}
+    for occurrence, value in expected.items():
+        current_value = actual.get(occurrence)
+        if current_value is None or not decode(value, bounds=bounds).equals(
+                decode(current_value, bounds=bounds), check_metadata=True):
+            raise DataflowError('SOURCE_CHANGED', 'Literal source schema differs from its original sealed plan')

@@ -35,7 +35,7 @@ CARRIERS = {
     'target': ['PipelineExecutionTarget'],
     'package_loader': ['BundlePackages'],
     'run_context': ['RunContext', 'create_target_absent_binding'],
-    'checked': ['CheckedExecution'],
+    'checked': ['CheckedExecution', 'CheckedAction'],
     'managed_native': ['NativeExecution'],
     'run_journal': ['RunJournal'],
     'worker.authority': ['WorkerAuthority'],

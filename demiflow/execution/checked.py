@@ -19,7 +19,7 @@ from demiflow.data.sources import KeyedSource, LanceSource, MaterializedSource, 
 from demiflow.data.execution_contract import PlanView
 from demiflow.data.runtime_contract import RuntimeContractError
 from demiflow.execution.plan_facts import operation_facts, source_facts
-from demiflow.execution.capabilities import check_composition
+from demiflow.planning.traits import check_composition
 
 _CURRENT = ContextVar('demiflow_checked_execution', default=None)
 
@@ -594,7 +594,7 @@ class CheckedAction:
 
     def value(self, value):
         if self.owner is not None:
-            from demiflow.data.runtime_contract import check_size, check_value
+            from ..data.runtime_contract import check_size, check_value
             check_size(value, self.owner.limits['max_row_bytes'])
             check_value(value, self.owner.nodes[self.identity]['analysis']['value_type'], self.identity)
             raw = json.dumps({'value': value}, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False).encode() + b'\n'
@@ -659,7 +659,7 @@ def action(kind, source, plan, spec=None, *, arguments=None):
     from contextlib import nullcontext
     from demiflow.execution.run_context import execution_scope
     from demiflow.execution.recovery_identity import plan_identity
-    from demiflow.execution.capabilities import check_action
+    from demiflow.execution.compiler_support.capabilities import check_action
     capability = check_action(kind, arguments)
     if not capability['supported']:
         from demiflow.execution.recovery_contract import RecoveryContractError

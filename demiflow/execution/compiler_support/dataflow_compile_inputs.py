@@ -20,7 +20,8 @@ Equivalence with the previous behaviour:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -77,10 +78,16 @@ class ReportBindings:
         return self._context.observations.get(tuple(key), {}).get("state") == "reused"
 
 
+def _source_schema_reader():
+    from demiflow.execution.sources.materialized_input import literal_schema
+    return literal_schema
+
+
 @dataclass(frozen=True)
 class CompileInputs:
     defaults: CompileDefaults = CompileDefaults()
     report: ReportBindings | None = None
+    source_schema: Callable = field(default_factory=_source_schema_reader)
 
 
 def executor_defaults(executor) -> CompileDefaults:

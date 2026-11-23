@@ -17,6 +17,8 @@ Cross-lane runtime edges (frozen vocabulary, producer implemented by the owning 
 """
 from __future__ import annotations
 
+from demiflow.execution.storage.record_schema import RecordSchemas
+
 import pickle
 import uuid
 from typing import TYPE_CHECKING, Iterator
@@ -115,7 +117,7 @@ def collect_rows(handle: "ActionHandle", *, limit: "int | None", bounds: "Bounds
         raise
     records.close()
     if not rows and schema_receiver is not None:
-        from demiflow.execution.dataflow_schema import result_schema_ref
+        from demiflow.execution.outputs.terminals import result_schema_ref
         ref = result_schema_ref(handle.result(), services=handle.services)
         if ref is not None:
             schema_receiver(ref)
@@ -579,3 +581,20 @@ def graph_result(graph, physical, committed, observations, facts, result_ref, *,
             'result_ref': result_ref,
             'target_bindings': {reader: dict(binding) for reader, binding in targets.items()},
             'dag_id': graph.dag_id, 'plan_id': physical.plan_id}
+
+
+def result_schema_ref(result, *, services):
+    """Read type metadata from the original committed result publication."""
+    from demiflow.execution.storage.reading import read_sink_json as _read_json
+    from demiflow.execution.contracts.dataflow_codec import PUBLICATION_MEDIA, decode_sink_reference as _artifact_from_json
+    if result.result_ref is None:
+        return None
+    publication = _read_json(services.store, result.result_ref,
+        max_bytes=services.bounds.max_control_bytes, media_type=PUBLICATION_MEDIA)
+    if publication.get('schema') != 'demiflow.dataflow_sink_publication.v3':
+        raise DataflowError('CORRUPT_ARTIFACT', 'Invalid result publication for schema')
+    value = publication['manifest'].get('schema_ref')
+    ref = _artifact_from_json(value) if value is not None else None
+    if ref is not None:
+        RecordSchemas(services).read(ref)
+    return ref

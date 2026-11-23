@@ -8,7 +8,7 @@ import pytest
 
 from demiflow import data
 from demiflow.data.native_options import parse_native_options, resource_only_options
-from demiflow.execution.capabilities import check_call
+from demiflow.planning.traits import check_call
 from demiflow.execution.plan_facts import operation_facts
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.runs import manager as runs, native_resources

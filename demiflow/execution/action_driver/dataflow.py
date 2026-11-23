@@ -482,7 +482,7 @@ class DataflowExecution:
                 self._action.action_id, store=self._store, bounds=self._bounds)
             from demiflow.execution.seal.program_identity import validate_shared_actor_binding
             validate_shared_actor_binding(self._request, graph, bounds=physical.bounds)
-            from ..dataflow_schema import validate_literal_schema_replay
+            from demiflow.execution.seal.plan import validate_literal_schema_replay
             validate_literal_schema_replay(self._request, graph, bounds=self._bounds)
             from demiflow.execution.seal.plan import validate_execution_binding
             validate_execution_binding(self._request, graph)
@@ -528,7 +528,7 @@ class DataflowExecution:
                                                native.get('batch_rows', context.limits['batch_rows']))
                     self._policy = replace(self._policy, native_limits=native)
             from ...planning.dataflow_relational_regions import exclusion_read_bindings
-            from ..dataflow_schema import KEY, decode
+            from demiflow.execution.contracts.record_schema import KEY, decode
             scan_columns = (
                 (source.source_id, decode(source.immutable_identity[KEY], bounds=self._bounds).names)
                 for source in snapshots

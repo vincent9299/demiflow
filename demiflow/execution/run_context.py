@@ -701,7 +701,7 @@ def bind_iteration(rows):
 def admit_stream(plan, *, source_batch_size=1):
     """Native resource admission applies equally with or without a checker."""
     from .plan_facts import operation_facts
-    from .capabilities import stream_residency
+    from demiflow.planning.dataflow_policy import stream_residency
     context = current_run()
     if context is None:
         raise RecoveryContractError('A stream requires its execution context')

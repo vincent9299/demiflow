@@ -597,7 +597,7 @@ def invoke_batch(
             out_rows = [{**row, column: value} for row, value in zip(rows, values)]
         else:
             if kind == "SaveLanceOp":
-                from demiflow.execution.dataflow_schema import stream_lance_output_schema
+                from demiflow.lance.flow_contract import stream_lance_output_schema
                 output_schema(stream_lance_output_schema(schema, cfg.get("output_ref")))
                 instance.bind_records(tuple(record.record_id for record in records), instance.native_call_ordinal)
             import time

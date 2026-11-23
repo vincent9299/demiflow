@@ -39,7 +39,7 @@ class StreamCheckpoint:
     """Retired facade; construction cannot create or recover legacy sidecars."""
     def __init__(self, path, *, identity, initial=None, max_bytes=1024**2,
                  accepted_identities=(), allow_identity_migration=False, declared_outputs=None):
-        from .capabilities import require_action
+        from demiflow.execution.compiler_support.capabilities import require_action
         require_action('stream_checkpoint')
         supplied = Path(path).absolute()
         for component in (supplied, *supplied.parents):

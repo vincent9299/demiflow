@@ -552,6 +552,7 @@ class _Capture:
         # executor defaults and the report bindings (execution.dataflow_compile_inputs).
         self.defaults = inputs.defaults
         self.report = inputs.report
+        self.source_schema = inputs.source_schema
         self.jobs = []
         self.value_edges = []
         self.fit_ids = {}
@@ -657,8 +658,8 @@ class _Capture:
         if source_registry().get(kind) is None and kind != "literal_empty":
             raise _error("UNSUPPORTED_CAPABILITY", "source kind is not registered: " + kind)
         semantic = _source_semantic_facts(source)
-        from ..execution.dataflow_schema import literal_schema, encode, KEY
-        schema = literal_schema(source, bounds=self.bounds)
+        from demiflow.execution.contracts.record_schema import encode, KEY
+        schema = self.source_schema(source, bounds=self.bounds)
         if schema is not None:
             semantic = {**semantic, KEY: encode(schema, bounds=self.bounds)}
         kernel = KernelSpec(
@@ -1008,3 +1009,49 @@ def explain_action(request, *, inputs, bounds, policy):
     from demiflow.planning.dataflow_place import infer_recovery
     compiled = lower_action(request, bounds=bounds, inputs=inputs)
     return infer_recovery(compiled.graph, (), policy=policy)
+
+
+def validate_stream_plan(plan, *, source=None):
+    """Validate all declared inputs through the same v3 compiler, without I/O.
+
+    A relational Dataset may have no top-level operations while its PlanInputs
+    contain the stream declaration. Traverse the compiler's actual input ports;
+    neither a second capability table nor an obsolete pull/stream split decides
+    which registered kernels can be composed.
+    """
+    from demiflow.data import plan as ops
+    from demiflow.planning.dataflow_compile import compile_kernel_spec, expand_relational_inputs, expand_operation_inputs
+    from demiflow.planning.dataflow_policy import resolve_runtime_policy
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.data.native_options import validate_stream_native_options
+
+    _, bounds = resolve_runtime_policy({}, {}, provider='local')
+    pending, seen = [(source, plan, ())], set()
+    count, edges, streaming = 0, 0, False
+    while pending:
+        current_source, current_plan, path = pending.pop()
+        key = (id(current_source), id(current_plan))
+        if key in seen:
+            continue
+        seen.add(key)
+        if not isinstance(current_plan, ops.LogicalPlan):
+            raise TypeError('stream input requires a LogicalPlan')
+        count += 1 + len(current_plan.operations)
+        if count > bounds.max_nodes:
+            raise DataflowError('BUDGET_EXCEEDED', 'stream preflight exceeds node budget')
+        children = list(expand_relational_inputs(current_source, path=path, bounds=bounds))
+        for operation in current_plan.operations:
+            streaming |= ops.is_stream_operation(operation)
+            validate_stream_native_options(getattr(operation, 'native_options', None))
+            if isinstance(operation, (ops.MapOp, ops.BoundMapOp)) and operation.stream_options is not None:
+                operation.stream_options.validate_callable(operation.callable)
+            compile_kernel_spec(operation, program_ref=None, bounds=bounds)
+            children.extend(expand_operation_inputs(operation, path=path, bounds=bounds))
+            if edges + len(children) > bounds.max_edges:
+                raise DataflowError('BUDGET_EXCEEDED', 'stream preflight exceeds edge budget')
+        edges += len(children)
+        if edges > bounds.max_edges:
+            raise DataflowError('BUDGET_EXCEEDED', 'stream preflight exceeds edge budget')
+        pending.extend((item.source, item.plan, item.path) for item in children)
+    if not streaming:
+        raise ValueError('run_stream requires map_async/batch_map or explicit map streaming options')

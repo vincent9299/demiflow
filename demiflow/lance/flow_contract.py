@@ -144,3 +144,14 @@ def vector_search_facts(operation):
                                "keys": sorted(storage)}
     return {'contract': 'demiflow.search_vectors',
             'arguments': dict(spec, query=operation.query, output=operation.output)}
+
+
+def stream_lance_output_schema(schema, output_ref):
+    """A native publication passes input fields through and may add a receipt."""
+    if schema is None or output_ref is None:
+        return schema
+    if output_ref in schema.names:
+        raise ValueError('output_ref would overwrite an input field')
+    import pyarrow as pa
+    return schema.append(pa.field(output_ref,
+        pa.struct([pa.field('uri', pa.string()), pa.field('version', pa.int64())]), nullable=True))

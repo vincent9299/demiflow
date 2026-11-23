@@ -18,32 +18,22 @@ from .recovery_contract import identity
 
 
 # Current source SHA-256, v3 pre-move source SHA-256.
-_REVISIONS = {
-    'demiflow.collect.net': (
-        '486592d6e616d61145b22a9f4169812ed5f3d4a53e1b133e079fac7f4abdc6ef',
-        '6434ec51ebce0c0d575b1522273341a7e97da1cfe07b1af71876d8bf5b3a29e7'),
-    'demiflow.collect.llm': (
-        '9fc966441838dc954d7e60ff5618c0d1dd0356f597e94495641e14d842ef1d42',
-        '0acad54f342ecf3269418d44d0f9e978ebcfa92bcdbe4b47e92d112c87b5ccd0'),
-    'demiflow.execution.request_limits': (
-        '431b27e1065e3fdc02cfd708d60c20b924a1489c78ff2bd6afd36546cf56e134',
-        '54bc1fa489826c74c7d67432fdeaba9fb9e54131d681936b5c2ea18180c117e9'),
-    'demiflow.data.dataset': (
-        '7c3d3f95b0fa7384a32367f439b730bd381b673b36c9b78cae134adbf392e05d',
-        '1ba0e80f1ed0853948a97792dc65125fdaec17504bc3396b5f53ffb593da7e88'),
-    'demiflow.data.sources': (
-        '4c349450034860cbaaa81d7b88e39b5caeea6c9ea56849e031804007cd226e79',
-        '3033f1f14141c9759d29679ee5275492bfbc83bcd41b51c7bf9962afd115387f'),
-    'demiflow.execution.local_kernel': (
-        '5fac23cf24cf8e2b27e79b36f9faf28ab2a0104517a13d1c02a249a94a74cb24',
-        'e67e3703f03ea14f8bcefb803bafc3251072e78bc17a5c1f2df60fad2ca2f83f'),
-    'demiflow.planning.dataflow_graph_adapter': (
-        '1c38779585642c638837951296a61ac58cf3f47298fcab83ed1153f69e14e1d0',
-        '0ab9e3db6f4dffe74c2f614ac887ce0a69749910b083db63eaa95c819652cbcf'),
-    'demiflow.data.result_cache': (
-        'e3020b591ab8dec8be60f70b63a02e9413a2cfef38afb6b7d6bb21917b59c0f2',
-        'dc6858f90a4ea48fb5c950027e405084d9f820ba26b3159592b38a9f42d46788'),
-}
+_REVISIONS = {'demiflow.collect.net': ('486592d6e616d61145b22a9f4169812ed5f3d4a53e1b133e079fac7f4abdc6ef',
+                          '6434ec51ebce0c0d575b1522273341a7e97da1cfe07b1af71876d8bf5b3a29e7'),
+ 'demiflow.collect.llm': ('9fc966441838dc954d7e60ff5618c0d1dd0356f597e94495641e14d842ef1d42',
+                          '0acad54f342ecf3269418d44d0f9e978ebcfa92bcdbe4b47e92d112c87b5ccd0'),
+ 'demiflow.execution.request_limits': ('431b27e1065e3fdc02cfd708d60c20b924a1489c78ff2bd6afd36546cf56e134',
+                                       '54bc1fa489826c74c7d67432fdeaba9fb9e54131d681936b5c2ea18180c117e9'),
+ 'demiflow.data.dataset': ('d18f428df9715f3afd98afb4db59ea361325fbcbf36699b766c2d4438549b810',
+                           '1ba0e80f1ed0853948a97792dc65125fdaec17504bc3396b5f53ffb593da7e88'),
+ 'demiflow.data.sources': ('4c349450034860cbaaa81d7b88e39b5caeea6c9ea56849e031804007cd226e79',
+                           '3033f1f14141c9759d29679ee5275492bfbc83bcd41b51c7bf9962afd115387f'),
+ 'demiflow.execution.local_kernel': ('5fac23cf24cf8e2b27e79b36f9faf28ab2a0104517a13d1c02a249a94a74cb24',
+                                     'e67e3703f03ea14f8bcefb803bafc3251072e78bc17a5c1f2df60fad2ca2f83f'),
+ 'demiflow.planning.dataflow_graph_adapter': ('1c38779585642c638837951296a61ac58cf3f47298fcab83ed1153f69e14e1d0',
+                                              '0ab9e3db6f4dffe74c2f614ac887ce0a69749910b083db63eaa95c819652cbcf'),
+ 'demiflow.data.result_cache': ('e3020b591ab8dec8be60f70b63a02e9413a2cfef38afb6b7d6bb21917b59c0f2',
+                                'dc6858f90a4ea48fb5c950027e405084d9f820ba26b3159592b38a9f42d46788')}
 _REVISIONS.update({'demiflow.data.read_api': ('a2ca56b3a7b3faf33fafca97480bc56ceda4cbd16ad02d4d600f618912538a78',
                             '1ff5e8431b684f758d2bc2bbe4818783c58ef4fb604e1ad564c4bc9c61f650f1'),
  'demiflow.data.guards': ('77fca99debe0b691ef1a64a75de9fae0f8bb1f2921c5ecd20b0b3e6cfed77c7c',
@@ -70,28 +60,28 @@ _RELATIONAL_METHODS = ('join', 'reduce_by_key', 'group_batches', 'exclude_keys',
 
 # The explicit checkpoint operation and arguments already rejected before
 # these removed branches. Pin only measured still-present declarations.
-_DATASET_METHODS = {
-    'Dataset.map_embeddings': ('4319758ab733dfdb7dc059abfc23753249f07af1259b00ef3fdcb9c669d257d8', '7b2c26f325b5a33519ba5b213c2e35f5b39a8f1224dc43e3c7b19be4f357a33f'),
-    'Dataset.map_prompt_async': ('ec04f2b257e2405b0d82150ef74b07924e8c4e1e7f25120c6588510b31a4653f', '995d11e4cb7a97cba1a936b67faeec7656cba225f274387927fd5846e3c40f9d'),
-    # ④ import relocation only; live body/globals and this source revision
-    # are authenticated before encoding the original v3 import identity.
-    'Dataset.enqueue': (
-        '71419a5bc22bb91799fe27a6592471441e2cc53bde90e7850499fceddfafc35b',
-        'b532dc94028784498f89ad6308e264ea8c44cde65d321463aeb3131433a9702b'),
-    'Dataset.save_lance': (
-        '72fd4e75d41ea5438756108a26700d25e4ffb5588f52e398d9da3e47e205a853',
-        '70380580e66d2c6569ee32c248ef79e4f13abfcf292d210e5e44ae678d8db62a'),
-
-    'Dataset.checkpoint': (
-        '7a3505e339739860403b1cc5435db189f55a605cf2820da4389f061ea575d637',
-        'ff6767926e0022b28ebecc8e4084ce4bea5a5d66fbcefef109079cabb727d247'),
-    'Dataset.map_async': (
-        'e129a81cd80980ab713dbdc3ae94d6b949ab368c6f33f43c2c92c4207f0b51bc',
-        '0578db7e142a4a404ee0c3bb43342b3d9216e5498163dbc757aaf101f7dff1b2'),
-    'Dataset.batch_map': (
-        '2e280d2d116e06a79530cd7b8647ad4ddbbfc13823decccf7035a00165c25328',
-        '6457fd535618671ed1c8a5ecc0c0384c2cf11af1616b1091a4161d99fc66711c'),
-}
+_DATASET_METHODS = {'Dataset.map_embeddings': ('4319758ab733dfdb7dc059abfc23753249f07af1259b00ef3fdcb9c669d257d8',
+                            '7b2c26f325b5a33519ba5b213c2e35f5b39a8f1224dc43e3c7b19be4f357a33f'),
+ 'Dataset.map_prompt_async': ('ec04f2b257e2405b0d82150ef74b07924e8c4e1e7f25120c6588510b31a4653f',
+                              '995d11e4cb7a97cba1a936b67faeec7656cba225f274387927fd5846e3c40f9d'),
+ 'Dataset.enqueue': ('71419a5bc22bb91799fe27a6592471441e2cc53bde90e7850499fceddfafc35b',
+                     'b532dc94028784498f89ad6308e264ea8c44cde65d321463aeb3131433a9702b'),
+ 'Dataset.save_lance': ('72fd4e75d41ea5438756108a26700d25e4ffb5588f52e398d9da3e47e205a853',
+                        '70380580e66d2c6569ee32c248ef79e4f13abfcf292d210e5e44ae678d8db62a'),
+ 'Dataset.checkpoint': ('2e47242208e4a3ecd474fa1f19f3213bf14d22bc72ab71b8a3b06a6a6f100914',
+                        'ff6767926e0022b28ebecc8e4084ce4bea5a5d66fbcefef109079cabb727d247'),
+ 'Dataset.map_async': ('249d51ebc65a942fdee637b3cb31448199819d25666853c003e39a3c01d8e6e6',
+                       '0578db7e142a4a404ee0c3bb43342b3d9216e5498163dbc757aaf101f7dff1b2'),
+ 'Dataset.batch_map': ('407a3649a77f329e6eee7d2fb42e3951ae52b1fc130ef9d9a4f4105f364ed73e',
+                       '6457fd535618671ed1c8a5ecc0c0384c2cf11af1616b1091a4161d99fc66711c'),
+ 'Dataset.checkpoint_async': ('6c6b6992592e4f072ecb92f8aa4d979424f2f887d98457aa1322af0c4009533c',
+                              '1781511d6fe514790264ad5b5157b0fed353eba65502cfbe79ab688f0f22b0d9'),
+ 'Dataset.checkpoint_lance': ('1355f621e34a31685e50f4d48a36d317183376da2a179310b61b88ef7859b93b',
+                              '578db7fdd0c271d21c4721151756b3852d4dd62dd19786b64070da4c53a7967c'),
+ 'Dataset.checkpoint_lance_async': ('20e3b3b1f431809fb13139714d8b757757e46dc5fe449a7ec1e1b9f45f82d0a2',
+                                    'a9bd4397a371cad04a16dd30e1ee65efe0f40490344506b4981d1cfc7389deaf'),
+ 'Dataset.run_stream': ('f59366662a305d24c341cd26728a07e7d9c5b150486d62e50e03714303c9f2a5',
+                        '21fc84b10feaeaeb469142f7273a161e1edd8e31e87d047575008676a8ed90fc')}
 
 
 # Published captures contain public client getters and the bounded row queue's
@@ -372,7 +362,7 @@ _LAYOUT_SOURCE_TYPES = {'demiflow.execution.pipeline.package_loader.pipeline_bun
                                                                                                'f8ed4c30d25799a24ec9322fe62ac5a724e88d886ba8198fc4b58906c8de2a3c']}},
  'demiflow.execution.sources.materialized_input.InputMaterializedHandle': {'old_module': 'demiflow.execution.dataflow_inputs',
                                                                            'old_source': '23505a1d134a3312a8568aa497ab3d5f8375eb0bfd1bfd0b59942c17383e8456',
-                                                                           'source': 'b2169858de6ddfea9d90bfcc887b628e9e819342b94b635573bd870050b5b653',
+                                                                           'source': 'bbb8f81ac7a05886eef0c01996487a704e63d726884c11e005663c2e12e26536',
                                                                            'methods': {'__init__': ['b85b85852c1db8125162fcdf6c26a65c5a20c587813dd325935af2f134d63109',
                                                                                                     'b85b85852c1db8125162fcdf6c26a65c5a20c587813dd325935af2f134d63109'],
                                                                                        'check_open': ['158b5ef55654f20db50327de2fdbad18c1de3730db97d379e004483892a9b59b',

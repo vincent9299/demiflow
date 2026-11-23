@@ -20,7 +20,7 @@ def source(tmp_path, values=range(8)):
 def test_cast_admits_input_and_new_output_together_before_allocation(monkeypatch):
     from demiflow.resources.capacity import allocation_envelope
     from demiflow.execution.contracts.record_codec import cast_allocation as _cast_allocation
-    from demiflow.execution.dataflow_schema import encode
+    from demiflow.execution.contracts.record_schema import encode
     from demiflow.planning.dataflow_policy import PREFLIGHT_BOUNDS as _PREFLIGHT_BOUNDS
     table = pa.table({'id': pa.array(range(64), type=pa.int64())})
     schema = pa.schema([('id', pa.float64())])

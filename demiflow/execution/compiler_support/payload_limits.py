@@ -10,7 +10,7 @@ def stream_limits(facts, limits, source_batch_size=1, *, retained_rows=0,
     Resolve a smaller effective ceiling when simultaneous residency requires it.
     This calculation is deterministic from the frozen graph and run budgets.
     """
-    from demiflow.execution.capabilities import stream_residency
+    from demiflow.planning.dataflow_policy import stream_residency
     if type(source_batch_size) is not int or not 1 <= source_batch_size <= 256:
         raise ValueError('Stream source prefetch exceeds its run memory budget')
     if type(retained_rows) is not int or not 0 <= retained_rows <= limits['max_output_rows']:

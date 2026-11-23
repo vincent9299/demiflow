@@ -39,6 +39,7 @@
    "StreamLanceSink"
   ],
   "planning.compiler": [
+   "BoundMapOp",
    "Count",
    "DatasourceSource",
    "FileSource",
@@ -47,6 +48,7 @@
    "IterableSource",
    "KeyedSource",
    "LanceSource",
+   "MapOp",
    "MaterializedSource",
    "NativeOperation",
    "OperatorLLMMapOp",
@@ -138,7 +140,8 @@
     "planning/dataflow_budget.py"
    ],
    "KEY": [
-    "execution/dataflow_schema.py"
+    "execution/compiler_support/dataflow_schema.py",
+    "execution/seal/plan.py"
    ],
    "MANAGED_HTTP_DEVICES_FIELD": [
     "execution/operator_bindings/dataflow_managed_http.py",
@@ -474,7 +477,7 @@
     "execution/kernels/dataflow.py"
    ],
    "semantics": [
-    "execution/managed_native.py",
+    "execution/journal/dataflow_history.py",
     "planning/dataflow_training.py"
    ],
    "shared_actor": [

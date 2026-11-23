@@ -214,7 +214,7 @@ def snapshot_source(
             declared = csv_spec(source)
             if declared is not None:
                 import pyarrow as pa
-                from demiflow.execution.dataflow_schema import encode, KEY
+                from demiflow.execution.contracts.record_schema import encode, KEY
                 immutable[KEY] = encode(pa.schema([(name, pa.string())
                     for name in declared['columns']]), bounds=bounds)
     elif isinstance(source, SqlSource):
@@ -236,7 +236,7 @@ def snapshot_source(
         if isinstance(source.query, LanceScanSpec):
             from dataclasses import replace
             from demiflow.lance.read import lance_scan_schema
-            from demiflow.execution.dataflow_schema import encode, KEY
+            from demiflow.execution.contracts.record_schema import encode, KEY
             immutable[KEY] = encode(lance_scan_schema(replace(source.query, version=version)), bounds=bounds)
     elif isinstance(source, MaterializedSource):
         kind, replay, finite = "MaterializedSource", "seek", True

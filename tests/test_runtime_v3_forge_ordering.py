@@ -49,7 +49,7 @@ def test_ordering_invalid_declarations_stay_rejected(tmp_path,catalog,expression
 
 
 def test_checked_registry_accepts_mixed_finite_and_stream_without_second_engine():
-    from demiflow.execution.capabilities import check_composition
+    from demiflow.planning.traits import check_composition
     assert check_composition([{'kind':'async_map','driver':'stream'},
         {'kind':'sort','driver':'pull'},{'kind':'limit','driver':'pull'}])['supported']
     assert not check_composition([{'kind':'invented','driver':'pull'}])['supported']

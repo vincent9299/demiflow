@@ -7,6 +7,8 @@ so the unified source reader can bind and snapshot them across workers.
 """
 from __future__ import annotations
 
+from demiflow.execution.contracts.record_schema import encode_schema
+
 import copy
 import sys
 from collections.abc import Iterator
@@ -263,3 +265,33 @@ def _safe_copy(objects: Any, format: str) -> Any:
     if format == "pandas":
         return [frame.copy(deep=True) for frame in objects]
     raise DataflowError("INVALID_CONTRACT", f"unsupported input format: {format!r}")
+
+
+def literal_schema(source, *, bounds):
+    """Inspect native already-owned data metadata, without consuming any rows."""
+    from demiflow.data.sources import MaterializedSource
+    from demiflow.execution.sources.materialized_input import InputMaterializedHandle
+    from demiflow.execution.outputs.dataflow_handles import StoredMaterializedHandle
+    if type(source) is not MaterializedSource:
+        return None
+    handle = source.handle
+    if type(handle) is StoredMaterializedHandle:
+        return handle.declared_schema
+    if type(handle) is not InputMaterializedHandle:
+        return None
+    handle.check_open()
+    if handle._format not in ('arrow', 'pandas'):
+        return None
+    import pyarrow as pa
+    if len(handle._value) > bounds.max_nodes:
+        raise DataflowError('BUDGET_EXCEEDED', 'Input schema list exceeds metadata bounds')
+    schema = None
+    for value in handle._value:
+        current = value.schema if handle._format == 'arrow' else pa.Schema.from_pandas(value, preserve_index=False)
+        encode_schema(current, bounds=bounds)
+        if schema is not None and not schema.equals(current, check_metadata=True):
+            # Heterogeneous inputs retain per-record types. Do not invent a
+            # uniform declaration or reject a previously valid row collection.
+            return None
+        schema = current
+    return schema

@@ -68,7 +68,7 @@ def checkpoint_lance(
     max_rows_per_batch: int = _DEFAULT_MAX_ROWS_PER_BATCH,
 ):
     """Retired entry; legacy sidecars never select an execution/recovery path."""
-    from ..execution.capabilities import require_action
+    from demiflow.execution.compiler_support.capabilities import require_action
     require_action('checkpoint_lance')
     import pyarrow as pa
 

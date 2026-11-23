@@ -439,3 +439,47 @@ def explain_policy(provider, options, *, action_kinds):
     if options.get('terminal_native_options') is not None:
         normalize_native_options(options['terminal_native_options'], operation_kind=action_kind)
     return policy, bounds
+
+
+def stream_residency(facts, limits):
+    """Conservative platform payload admission, not a promise about process RSS.
+
+    Each worker reserves input/batch and a completed result while downstream is
+    blocked. Queues have separate reservations; dequeuing never erases ownership.
+    Candidate internal temporaries remain protected by the enclosing process.
+    """
+    row_bytes = limits['max_row_bytes']
+    batch_bytes = limits['max_batch_bytes']
+    # Materialization cache plus bounded control state, and reader/serialization
+    # buffers. Native libraries and candidate temporaries still need the process
+    # guard; this reservation describes platform-owned Python payload.
+    fixed = max(80 * 1024**2, 32 * 1024**2 + 3 * limits.get("max_state_bytes", 16 * 1024**2)) + 3 * batch_bytes
+    facts = list(facts)
+    if any(f.get("native", {}).get("contract") == "demiflow.prompt.http" for f in facts):
+        # Recovery index, output encoding and atomic batch publication buffers.
+        fixed += min(512 * 1024**2, limits["memory_bytes"] // 8) + 8 * 1024**2 + 2 * row_bytes
+    total = fixed
+    stages = []
+    for fact in facts:
+        args = fact['arguments']
+        concurrency = args.get('concurrency') or 1
+        depth = args.get('queue_depth') or concurrency
+        batch_rows = args.get('max_batch') or 1
+        if any(type(value) is not int or value < 1 for value in (concurrency, depth, batch_rows)):
+            raise ValueError('Stream concurrency, queue depth and batch rows must be positive integers')
+        if concurrency > 64 or depth > 256 or batch_rows > limits['batch_rows']:
+            raise ValueError('Stream worker/queue/batch admission limit exceeded')
+        # A batch may be small enough by row count yet exceed its byte budget;
+        # workers check that budget before appending each incoming row.
+        inputs = min(batch_rows * row_bytes, batch_bytes) if fact['kind'] == 'batch_map' else row_bytes
+        # Retain the original expansion while a post-filter list/serialized
+        # child is awaiting downstream capacity.
+        output = 2 * batch_bytes if fact['kind'] in {'async_map', 'batch_map', 'flat_map'} else row_bytes
+        reserved = (depth * (row_bytes + 1024) + concurrency * (inputs + output + 4096)
+                    + fact.get('reserved_bytes', 0))
+        stages.append({'kind': fact['kind'], 'reserved_bytes': reserved})
+        total += reserved
+    if total > limits['memory_bytes']:
+        raise ValueError(f'Stream payload reservation {total} exceeds memory budget {limits["memory_bytes"]}')
+    return {'reserved_bytes': total, 'fixed_bytes': fixed, 'stages': stages,
+            'assurance': 'platform_payload_admission; third_party_temporaries_require_process_guard'}

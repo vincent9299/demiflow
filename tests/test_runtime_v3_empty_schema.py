@@ -113,7 +113,7 @@ def test_filter_projection_keeps_declared_empty_types_and_field_order(tmp_path):
 
 def test_schema_metadata_is_bounded_and_corruption_is_not_inferred():
     from test_runtime_v3_k import Bounds
-    from demiflow.execution.dataflow_schema import encode, decode
+    from demiflow.execution.contracts.record_schema import encode, decode
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     bounds = Bounds(max_row_bytes=64, max_batch_bytes=128, max_control_bytes=128)
     with pytest.raises(DataflowError, match='budget'):

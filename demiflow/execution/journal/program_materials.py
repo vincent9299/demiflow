@@ -240,7 +240,7 @@ def compiled_node_materials(compiled, *, bounds):
     """
     from demiflow.execution.contracts.dataflow import Bounds, CompiledDataflow
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.dataflow_schema import node_schemas
+    from demiflow.execution.compiler_support.dataflow_schema import node_schemas
     from types import MappingProxyType
     from itertools import islice
     if type(compiled) is not CompiledDataflow:
