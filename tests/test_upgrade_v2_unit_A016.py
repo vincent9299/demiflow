@@ -2,7 +2,7 @@
 import pytest
 
 from demiflow import data
-from demiflow.execution.dataset_native import execute
+from demiflow.execution.executors.dataset_native import execute
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.recovery_contract import RecoveryContractError
 from _runtime_v3_executor_scope import observed_source

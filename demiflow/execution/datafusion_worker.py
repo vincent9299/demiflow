@@ -12,6 +12,27 @@ import sys
 import time
 
 
+def register_key_functions(context, spec):
+    """Worker-side canonical keys preserve the existing Python key contract."""
+    import json
+    import pyarrow as pa
+    from datafusion import udf
+    for item in spec['keys']:
+        def canonical(*arrays, names=item['fields']):
+            values = [a.to_pylist() for a in arrays]
+            count = len(names)
+            result = []
+            for i in range(len(arrays[0])):
+                for j, name in enumerate(names):
+                    if not values[count + j][i]:
+                        raise KeyError(name)
+                result.append(json.dumps([values[j][i] for j in range(count)],
+                    ensure_ascii=False, sort_keys=True, separators=(',', ':')))
+            return pa.array(result, type=pa.string())
+        context.register_udf(udf(canonical, [*item['types'], *[pa.bool_()] * len(item['fields'])],
+            pa.string(), 'immutable', name=item['name']))
+
+
 def _write_error(path, error, managed):
     import cloudpickle
     if not managed:
@@ -213,7 +234,6 @@ def main():
                 with_row_id=bool(payload_read and name == payload_read['source']),
                 with_row_addr=bool(request.get('dataset_spec'))))
         if request.get('dataset_spec'):
-            from .dataset_native import register_key_functions
             register_key_functions(context, request['dataset_spec'])
         for name, sql in request['views'].items():
             context.register_view(name, context.sql(sql, options=sql_options))

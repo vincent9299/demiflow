@@ -34,6 +34,11 @@ _REVISIONS = {
     'demiflow.data.sources': (
         '4c349450034860cbaaa81d7b88e39b5caeea6c9ea56849e031804007cd226e79',
         '3033f1f14141c9759d29679ee5275492bfbc83bcd41b51c7bf9962afd115387f'),
+    # Both published worker functions retain their module, code and defaults.
+    # Only the surrounding, retired DataFusion controller was removed.
+    'demiflow.execution.dataset_native': (
+        '0190242cdf4add543d4ea5ec4156025ee91ae0b01b7ff926af085cd55d0ac530',
+        'd9d085506558d444770c6e3cdf16c9aba487c10d2bae66ffc5a91151b13b5b94'),
     'demiflow.execution.local_kernel': (
         '5fac23cf24cf8e2b27e79b36f9faf28ab2a0104517a13d1c02a249a94a74cb24',
         'e67e3703f03ea14f8bcefb803bafc3251072e78bc17a5c1f2df60fad2ca2f83f'),
@@ -223,6 +228,9 @@ def function_pin(fn, source, source_hash, code):
         return source_hash, code
     module = sys.modules.get(fn.__module__)
     root_name = fn.__qualname__.partition('.<locals>.')[0]
+    if fn.__module__ == 'demiflow.execution.dataset_native' and fn.__qualname__ not in (
+            '_cast_sink_batch', 'finish_typed_batch'):
+        return source_hash, code
     if fn.__module__ == _ROUTING_MODULE and root_name not in _ROUTING_FUNCTIONS:
         # Only the three unchanged row-routing functions were sealed as programs.
         return source_hash, code

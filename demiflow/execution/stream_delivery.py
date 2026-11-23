@@ -28,7 +28,7 @@ def iter_stream_rows(executor, source, plan, *, limit=None, action=None, executi
             raise RecoveryContractError('Delivery action plan differs from the terminal plan')
         if borrowed is not current_action():
             raise RecoveryContractError('Delivery action must be the active action authority')
-    from .dataset_native import execute
+    from .executors.dataset_native import execute
     rows = execute(executor, source, plan, execution=execution, limit=limit)
     try:
         yield from rows
