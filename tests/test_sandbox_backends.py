@@ -493,3 +493,59 @@ def test_flow_check_allows_config_expr_and_ancestor_prefixed_imports(tmp_path):
     entry_report = report['entries'][0]
     assert entry_report['status'] != 'invalid', report
     assert not [d for d in report.get('diagnostics', []) if d.get('code') == 'FL-07'], report
+
+
+def test_tree_usage_tolerates_missing_and_transient_files(tmp_path, monkeypatch):
+    from demiflow.workbench.conversations import sandbox_native
+
+    root = tmp_path / 'work'
+    root.mkdir()
+    (root / 'keep.txt').write_text('hello')
+    vanishing = root / 'vanish.tmp'
+    vanishing.write_text('bye')
+
+    real_scandir = sandbox_native.os.scandir
+
+    class _VanishScandir:
+        def __init__(self, ctx):
+            self._ctx = ctx
+        def __enter__(self):
+            entries = list(self._ctx.__enter__())
+            if vanishing.exists():
+                vanishing.unlink()
+            return iter(entries)
+        def __exit__(self, *args):
+            return self._ctx.__exit__(*args)
+
+    monkeypatch.setattr(sandbox_native.os, 'scandir', lambda fd: _VanishScandir(real_scandir(fd)))
+    used, count = sandbox_native.tree_usage([str(root), str(tmp_path / 'already_deleted')])
+    assert used == 5
+    assert count >= 1
+
+
+def test_flow_check_supports_static_dict_str_methods_and_comprehensions(tmp_path):
+    from demiflow.forge.pipeline_check import check_project
+    from demiflow.forge.project import initialize_project
+
+    proj = tmp_path / 'comp_proj'
+    initialize_project(proj)
+    for d in ('flows', 'configs'):
+        (proj / d).mkdir(exist_ok=True)
+    (proj / 'flows' / 'demo.py').write_text(
+        'from demiflow import data\n'
+        'def run(source=None, items=None):\n'
+        '    ver = source.get("version")\n'
+        '    names = {item["name"].strip() for item in items if item.get("enabled")}\n'
+        '    if type(ver) is not int or ver <= 0 or not names:\n'
+        '        raise ValueError("bad config")\n'
+        '    if any(n.startswith("x") for n in names):\n'
+        '        return data.range(len(names)).count()\n'
+        '    return data.range(1).count()\n'
+    )
+    (proj / 'configs' / 'demo.json').write_text(
+        '{"format": "demiflow_forge_flow_parameters_v2", "arguments": {'
+        '"source": {"version": 2}, '
+        '"items": [{"name": " x1 ", "enabled": true}, {"name": "y2", "enabled": false}]}}\n'
+    )
+    report = check_project(proj, entry='flows/demo.py:run', params='configs/demo.json')
+    assert report['status'] == 'passed', report

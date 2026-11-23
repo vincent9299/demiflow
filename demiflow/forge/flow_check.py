@@ -410,6 +410,7 @@ class FlowChecker:
                 "ValueError", "TypeError", "RuntimeError", "Exception",
                 "type", "isinstance", "len", "str", "int", "float", "bool",
                 "min", "max", "list", "tuple", "dict", "set", "sorted",
+                "any", "all", "sum", "range", "enumerate", "zip",
             }:
                 return Symbol("builtins." + node.id)
             self.fail("FL-01", f"Unbound name: {node.id}", node, module)
@@ -434,6 +435,10 @@ class FlowChecker:
                         return API(member, parent)
             if isinstance(parent, DatasetPort) and node.attr in self.methods:
                 return API(self.methods[node.attr], parent)
+            if type(parent) is dict and node.attr in {'get', 'keys', 'values', 'items'}:
+                return ('__bound_pure_method__', getattr(parent, node.attr))
+            if type(parent) is str and node.attr in {'strip', 'lstrip', 'rstrip', 'startswith', 'endswith', 'lower', 'upper', 'replace', 'split', 'join'}:
+                return ('__bound_pure_method__', getattr(parent, node.attr))
             self.fail(
                 "FL-02",
                 "Attribute does not resolve to a public platform API",
@@ -517,6 +522,8 @@ class FlowChecker:
             value = visit(node.operand)
             if isinstance(value, RuntimeValue) and isinstance(node.op, ast.Not) and value.type == scalar('bool'):
                 return RuntimeValue({'value_expression': 'not', 'arguments': [value.expression]}, scalar('bool'))
+            if isinstance(node.op, ast.Not) and type(value) in (bool, int, float, str, list, tuple, dict, set, type(None)):
+                return not value
             if type(value) not in (bool, int, float):
                 self.fail("FL-07", "Runtime value used in topology", node, module)
             return (
@@ -599,7 +606,19 @@ class FlowChecker:
                 self.fail("FL-03", "Repeated keyword argument", node, module)
             args = [visit(a) for a in node.args]
             kwargs = {k.arg: visit(k.value) for k in node.keywords}
+            if (isinstance(target, tuple) and len(target) == 2 and target[0] == '__bound_pure_method__'
+                    and not any(isinstance(a, (RuntimeValue, DatasetPort, Action)) for a in (*args, *kwargs.values()))):
+                try:
+                    val = target[1](*args, **kwargs)
+                    return list(val) if isinstance(val, (type({}.keys()), type({}.values()), type({}.items()))) else val
+                except (TypeError, ValueError, KeyError) as exc:
+                    self.fail("FL-07", str(exc), node, module)
             if isinstance(target, Symbol):
+                def _bounded_range(*rargs):
+                    r = range(*rargs)
+                    if len(r) > 4096:
+                        raise ValueError("Static range exceeds 4096 elements")
+                    return list(r)
                 pure_builtins = {
                     'builtins.type': type,
                     'builtins.isinstance': isinstance,
@@ -615,6 +634,12 @@ class FlowChecker:
                     'builtins.dict': dict,
                     'builtins.set': set,
                     'builtins.sorted': sorted,
+                    'builtins.any': any,
+                    'builtins.all': all,
+                    'builtins.sum': sum,
+                    'builtins.range': _bounded_range,
+                    'builtins.enumerate': lambda it, start=0: list(enumerate(it, start)),
+                    'builtins.zip': lambda *its: list(zip(*its)),
                     'pathlib.Path': Path,
                     'pathlib.PurePosixPath': Path,
                 }
@@ -658,6 +683,8 @@ class FlowChecker:
                 module,
                 incomplete=True,
             )
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            return self._static_comprehension(node, env, module)
         self.fail(
             "FL-07",
             f"Unsupported wiring expression: {type(node).__name__}",
@@ -665,6 +692,67 @@ class FlowChecker:
             module,
             incomplete=True,
         )
+
+    def _static_comprehension(self, node, env, module):
+        def _bind_target(target, value, scope):
+            if isinstance(target, ast.Name):
+                scope[target.id] = value
+                return
+            if isinstance(target, (ast.Tuple, ast.List)):
+                if not isinstance(value, (tuple, list)) or len(value) != len(target.elts):
+                    self.fail("FL-07", "Comprehension target unpack mismatch", target, module)
+                for elt, item in zip(target.elts, value):
+                    _bind_target(elt, item, scope)
+                return
+            self.fail("FL-07", "Unsupported comprehension target", target, module, incomplete=True)
+
+        results = {} if isinstance(node, ast.DictComp) else []
+        steps = 0
+
+        def _walk(gen_index, scope):
+            nonlocal steps
+            if gen_index == len(node.generators):
+                if isinstance(node, ast.DictComp):
+                    k = self._expr(node.key, scope, module)
+                    v = self._expr(node.value, scope, module)
+                    if isinstance(k, (RuntimeValue, DatasetPort, Action)) or isinstance(v, (RuntimeValue, DatasetPort, Action)):
+                        self.fail("FL-07", "Runtime value used in static comprehension", node, module)
+                    results[k] = v
+                else:
+                    val = self._expr(node.elt, scope, module)
+                    if isinstance(val, (RuntimeValue, DatasetPort, Action)):
+                        self.fail("FL-07", "Runtime value used in static comprehension", node, module)
+                    results.append(val)
+                return
+            gen = node.generators[gen_index]
+            if gen.is_async:
+                self.fail("FL-07", "Async comprehension unsupported in wiring", gen, module, incomplete=True)
+            iterable = self._expr(gen.iter, scope, module)
+            if isinstance(iterable, (RuntimeValue, DatasetPort, Action)) or not isinstance(iterable, (list, tuple, set, dict, str)):
+                self.fail("FL-07", "Comprehension requires a static configured iterable", gen.iter, module)
+            for item in iterable:
+                steps += 1
+                if steps > 4096:
+                    self.fail("FL-10", "Static comprehension exceeded 4096 iterations", node, module, incomplete=True)
+                inner = dict(scope)
+                _bind_target(gen.target, item, inner)
+                keep = True
+                for cond in gen.ifs:
+                    flag = self._expr(cond, inner, module)
+                    if isinstance(flag, (RuntimeValue, DatasetPort, Action)):
+                        self.fail("FL-07", "Runtime value used in comprehension filter", cond, module)
+                    if not bool(flag):
+                        keep = False
+                        break
+                if keep:
+                    _walk(gen_index + 1, inner)
+
+        _walk(0, dict(env))
+        if isinstance(node, ast.DictComp):
+            return results
+        if isinstance(node, ast.SetComp):
+            return set(results)
+        return results
 
     def _native(self, api, args, kwargs, node, module):
         record = api.record
