@@ -323,8 +323,8 @@ def compile_kernel_spec(
     if kind == 'RandomShuffleOp':
         # New plans opt in. A sealed graph without this field keeps the exact
         # original occurrence/record-id shuffle formula when loaded or resumed.
-        from ..execution.kernels.shuffle_order import FIELD, VERSION
-        configuration[FIELD] = VERSION
+        from ..execution.contracts.dataflow_kinds import SHUFFLE_ORDER_FIELD, SHUFFLE_ORDER_VERSION
+        configuration[SHUFFLE_ORDER_FIELD] = SHUFFLE_ORDER_VERSION
     # Ordinary CPU kernels do not use native services. Importing every native
     # adapter here initializes Lance/Arrow and model modules even for a map.
     variant = native_variant(operation, native_declaration)

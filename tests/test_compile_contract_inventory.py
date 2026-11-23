@@ -153,7 +153,8 @@ def test_one_function_resolves_the_compiler_inputs():
 def test_source_tables_equal_the_imported_objects():
     """The source reader must agree with what the engine actually loads."""
     from demiflow.execution.kernels import batch_membership as dataflow_batch_membership
-    from demiflow.execution.kernels import dataflow as kernels, operator, task_scope
+    from demiflow.execution.kernels import dataflow as kernels, operator
+    from demiflow.execution.contracts.dataflow_kinds import TASK_KINDS
     from demiflow.planning import dataflow_compile as compiler, dataflow_registry as registry
 
     assert set(registry.operator_registry()) == set(TABLES['registry.operators'])
@@ -176,6 +177,6 @@ def test_source_tables_equal_the_imported_objects():
             ('runtime.stream_group_kinds', kernels._STREAM_GROUP_KINDS),
             ('runtime.instance_kinds', operator._INSTANCE_KINDS),
             ('runtime.batch_instance_kinds', operator._BATCH_INSTANCE_KINDS),
-            ('runtime.task_kinds', task_scope.TASK_KINDS),
+            ('runtime.task_kinds', TASK_KINDS),
             ('runtime.batch_membership_kinds', dataflow_batch_membership.KINDS)):
         assert set(actual) == set(TABLES[name]), name

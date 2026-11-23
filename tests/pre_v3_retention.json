@@ -23,6 +23,40 @@
     "never_ran": 7
    }
   },
+  "demiflow.execution.checkpoint.dataset_commit": {
+   "status": "live",
+   "reason": "④按13归位既有DatasetCommit对账；现行队列真实使用原提交验证，不是旧执行循环。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 0,
+     "historical_set_139_files": 1
+    },
+    "functions": 6,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 6,
+    "ran_only_at_import": 0,
+    "never_ran": 0
+   },
+   "original_module": "demiflow.execution.dataset_commit"
+  },
+  "demiflow.execution.contracts.native_commit_store": {
+   "status": "undecided",
+   "reason": "2026-11-20 P8批次3 D1已处置为保留：19行Protocol的当前跨进程测量、历史类型依赖、删后历史和真实Ray门槛未齐；不为可选清理新建测量体系。旧74d2f99测量不改绑，详见docs/architecture-upgrade-20261120/D/D1-NATIVE-COMMIT-STORE.md。",
+   "importers": [],
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 0,
+     "historical_set_139_files": 0
+    },
+    "functions": 9,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 9
+   }
+  },
   "demiflow.execution.contracts.pipeline": {
    "status": "separate_entry",
    "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
@@ -37,6 +71,22 @@
     "called_only_by_tests": 0,
     "ran_only_at_import": 0,
     "never_ran": 11
+   }
+  },
+  "demiflow.execution.contracts.target": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 263,
+     "historical_set_139_files": 135
+    },
+    "functions": 2,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 2
    }
   },
   "demiflow.execution.hosts.dataflow_control": {
@@ -56,42 +106,9 @@
     "never_ran": 0
    }
   },
-  "demiflow.execution.dataset_commit": {
-   "status": "undecided",
-   "reason": "docs/platform-upgrade.md 有记载，tests/test_platform_upgrade.py 使用；产品代码和业务仓都不导入。暂不处理。",
-   "importers": [],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 1
-    },
-    "functions": 6,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 6,
-    "ran_only_at_import": 0,
-    "never_ran": 0
-   }
-  },
-  "demiflow.execution.pipeline.driver": {
+  "demiflow.execution.hosts.environment": {
    "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 1,
-     "historical_set_139_files": 0
-    },
-    "functions": 5,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 1,
-    "ran_only_at_import": 0,
-    "never_ran": 4
-   }
-  },
-  "demiflow.execution.environment": {
-   "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "reason": "④按08归位原公开CLI环境投影及环境变量检查；入口保留，代码原体迁移。",
    "measured": {
     "at": "74d2f99",
     "test_files_that_load_it": {
@@ -103,7 +120,8 @@
     "called_only_by_tests": 2,
     "ran_only_at_import": 0,
     "never_ran": 2
-   }
+   },
+   "original_module": "demiflow.execution.environment"
   },
   "demiflow.execution.hosts.local": {
    "status": "separate_entry",
@@ -121,28 +139,60 @@
     "never_ran": 7
    }
   },
-  "demiflow.execution.local_tasks": {
-   "status": "history",
-   "reason": "已封存的 native worker 函数 dataset_native.finish_typed_batch 按原路径调用 _apply，_select 只供该函数求值投影。现行分派、池和旧执行循环已退役。",
+  "demiflow.execution.hosts.python_environment": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 263,
+     "historical_set_139_files": 135
+    },
+    "functions": 9,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 9
+   }
+  },
+  "demiflow.execution.hosts.ray": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 0,
+     "historical_set_139_files": 0
+    },
+    "functions": 11,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 11
+   }
+  },
+  "demiflow.execution.hosts.ray_worker_host": {
+   "status": "undecided",
+   "reason": "v3 的 DataflowRayConnector 继承这里的 RayControlConnector；_RayWorkerHost 属于 11-09 那一代。需要在 Ray 环境里测量后细化到符号。",
    "importers": [
-    "demiflow.execution.dataset_native"
+    "demiflow.execution.dataflow_hosts"
    ],
    "measured": {
     "at": "74d2f99",
     "test_files_that_load_it": {
-     "v3_set_276_files": 4,
-     "historical_set_139_files": 8
+     "v3_set_276_files": 1,
+     "historical_set_139_files": 0
     },
-    "functions": 49,
+    "functions": 20,
     "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 17,
+    "called_only_by_tests": 0,
     "ran_only_at_import": 0,
-    "never_ran": 32
+    "never_ran": 20
    }
   },
-  "demiflow.execution.contracts.native_commit_store": {
+  "demiflow.execution.hosts.timeout": {
    "status": "undecided",
-   "reason": "2026-11-20 P8批次3 D1已处置为保留：19行Protocol的当前跨进程测量、历史类型依赖、删后历史和真实Ray门槛未齐；不为可选清理新建测量体系。旧74d2f99测量不改绑，详见docs/architecture-upgrade-20261120/D/D1-NATIVE-COMMIT-STORE.md。",
+   "reason": "2026-09 的文件，没有导入方，没有测试。批次 3，待确认。",
    "importers": [],
    "measured": {
     "at": "74d2f99",
@@ -150,11 +200,43 @@
      "v3_set_276_files": 0,
      "historical_set_139_files": 0
     },
-    "functions": 9,
+    "functions": 3,
     "reached_through_a_product_entry": 0,
     "called_only_by_tests": 0,
     "ran_only_at_import": 0,
-    "never_ran": 9
+    "never_ran": 3
+   }
+  },
+  "demiflow.execution.journal.observation": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 0,
+     "historical_set_139_files": 0
+    },
+    "functions": 4,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 0,
+    "ran_only_at_import": 0,
+    "never_ran": 4
+   }
+  },
+  "demiflow.execution.pipeline.driver": {
+   "status": "separate_entry",
+   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 1,
+     "historical_set_139_files": 0
+    },
+    "functions": 5,
+    "reached_through_a_product_entry": 0,
+    "called_only_by_tests": 1,
+    "ran_only_at_import": 0,
+    "never_ran": 4
    }
   },
   "demiflow.execution.pipeline.notebook": {
@@ -174,27 +256,6 @@
     "never_ran": 6
    }
   },
-  "demiflow.execution.journal.observation": {
-   "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 0
-    },
-    "functions": 4,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 4
-   }
-  },
-  "demiflow.execution.operator_checkpoint": {
-   "status": "old",
-   "reason": "构造立即按已发布契约拒绝已退役的独立操作符检查点；不创建账本。",
-   "importers": []
-  },
   "demiflow.execution.pipeline.package_loader": {
    "status": "separate_entry",
    "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
@@ -209,70 +270,6 @@
     "called_only_by_tests": 0,
     "ran_only_at_import": 0,
     "never_ran": 2
-   }
-  },
-  "demiflow.execution.seal.plan_interpreter": {
-   "status": "history",
-   "reason": "sealed_plans 读封存计划时调它的校验函数和常量；PlanContractError 是读取方的错误类型。解释旧物理计划的部分随批次 4 细化到符号。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 36,
-     "historical_set_139_files": 44
-    },
-    "functions": 17,
-    "reached_through_a_product_entry": 3,
-    "called_only_by_tests": 14,
-    "ran_only_at_import": 0,
-    "never_ran": 0
-   }
-  },
-  "demiflow.execution.hosts.python_environment": {
-   "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 263,
-     "historical_set_139_files": 135
-    },
-    "functions": 9,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 9
-   }
-  },
-  "demiflow.execution.queue_execution": {
-   "status": "frozen",
-   "reason": "受保护的原生队列结算、确认和恢复入口。按授权删除了无调用方的 write_queue_datasink。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 211,
-     "historical_set_139_files": 70
-    },
-    "functions": 8,
-    "reached_through_a_product_entry": 5,
-    "called_only_by_tests": 1,
-    "ran_only_at_import": 0,
-    "never_ran": 2
-   }
-  },
-  "demiflow.execution.hosts.ray": {
-   "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 0
-    },
-    "functions": 11,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 11
    }
   },
   "demiflow.execution.pipeline.readiness": {
@@ -291,6 +288,22 @@
     "never_ran": 1
    }
   },
+  "demiflow.execution.queue_execution": {
+   "status": "frozen",
+   "reason": "受保护的原生队列结算、确认和恢复入口。按授权删除了无调用方的 write_queue_datasink。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 211,
+     "historical_set_139_files": 70
+    },
+    "functions": 8,
+    "reached_through_a_product_entry": 5,
+    "called_only_by_tests": 1,
+    "ran_only_at_import": 0,
+    "never_ran": 2
+   }
+  },
   "demiflow.execution.requirements": {
    "status": "separate_entry",
    "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
@@ -305,6 +318,22 @@
     "called_only_by_tests": 0,
     "ran_only_at_import": 0,
     "never_ran": 24
+   }
+  },
+  "demiflow.execution.seal.plan_interpreter": {
+   "status": "history",
+   "reason": "sealed_plans 读封存计划时调它的校验函数和常量；PlanContractError 是读取方的错误类型。解释旧物理计划的部分随批次 4 细化到符号。",
+   "measured": {
+    "at": "74d2f99",
+    "test_files_that_load_it": {
+     "v3_set_276_files": 36,
+     "historical_set_139_files": 44
+    },
+    "functions": 17,
+    "reached_through_a_product_entry": 3,
+    "called_only_by_tests": 14,
+    "ran_only_at_import": 0,
+    "never_ran": 0
    }
   },
   "demiflow.execution.seal.sealed_plans": {
@@ -326,58 +355,6 @@
   "demiflow.execution.stream": {
    "status": "live",
    "reason": "公开 Dataset.run_stream 返回的 StreamStats 及其历史类型。"
-  },
-  "demiflow.execution.contracts.target": {
-   "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 263,
-     "historical_set_139_files": 135
-    },
-    "functions": 2,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 2
-   }
-  },
-  "demiflow.execution.hosts.timeout": {
-   "status": "undecided",
-   "reason": "2026-09 的文件，没有导入方，没有测试。批次 3，待确认。",
-   "importers": [],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 0
-    },
-    "functions": 3,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 3
-   }
-  },
-  "demiflow.execution.hosts.ray_worker_host": {
-   "status": "undecided",
-   "reason": "v3 的 DataflowRayConnector 继承这里的 RayControlConnector；_RayWorkerHost 属于 11-09 那一代。需要在 Ray 环境里测量后细化到符号。",
-   "importers": [
-    "demiflow.execution.dataflow_hosts"
-   ],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 1,
-     "historical_set_139_files": 0
-    },
-    "functions": 20,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 20
-   }
   }
  },
  "methods": [
@@ -655,6 +632,22 @@
    "symbol": "run_stream",
    "batch": 5,
    "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
+  },
+  {
+   "module": "demiflow.execution.dataset_commit",
+   "reason": "④按13归位既有DatasetCommit对账；现行队列真实使用原提交验证，不是旧执行循环。"
+  },
+  {
+   "module": "demiflow.execution.environment",
+   "reason": "④按08归位原公开CLI环境投影及环境变量检查；入口保留，代码原体迁移。"
+  },
+  {
+   "module": "demiflow.execution.local_tasks",
+   "reason": "④已将仅剩_apply/_select原体归10/operators.arrow_batches；06限定验证旧by-value factory身份后绑定真实新提供者，无旧执行循环或转发壳。"
+  },
+  {
+   "module": "demiflow.execution.operator_checkpoint",
+   "reason": "④删除无人调用且构造仅拒绝的旧检查点占位器；同职责现行13检查点协调和提交校验保留。"
   }
  ]
 }

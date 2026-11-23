@@ -490,8 +490,9 @@ class OperatorKernel:
             if port.requirement == "finite_complete" or spec.kind in ("union", "StreamPrependOp")
         }
         if spec.kind == 'RandomShuffleOp' and 'shuffle_order_version' in spec.configuration:
-            from demiflow.execution.kernels.shuffle_order import FIELD, VERSION, shuffle_windows
-            if spec.configuration[FIELD] != VERSION:
+            from demiflow.execution.kernels.shuffle_order import shuffle_windows
+            from demiflow.execution.contracts.dataflow_kinds import SHUFFLE_ORDER_FIELD, SHUFFLE_ORDER_VERSION
+            if spec.configuration[SHUFFLE_ORDER_FIELD] != SHUFFLE_ORDER_VERSION:
                 raise _err('INVALID_CONTRACT', 'unknown seeded shuffle ordering version')
             windows = shuffle_windows(self._finite_services)
             for port in self._ports.values():

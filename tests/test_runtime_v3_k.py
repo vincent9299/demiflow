@@ -635,30 +635,34 @@ def test_k011():
 # K012 repartition_records
 # ---------------------------------------------------------------------------
 def test_k012():
+    from demiflow.execution.exchange.dataflow_channels import repartition_records
+    from demiflow.execution.kernels.dataflow import _materialize_row, _input_row_bytes
     svc = services()
+    binding = dict(bounds=svc.bounds, check_stop=svc.check_stop,
+        input_size=_input_row_bytes, read_row=lambda record: _materialize_row(record, svc))
     records = [rec({"k": "a", "i": i}, record_id=rid(f"r{i}"), sequence=i) for i in range(6)]
 
     def exchange(routing, **kw):
         return ExchangeSpec("c", "e", ("p0",), ("c0", "c1", "c2"), routing=routing, **kw)
 
-    hashed = list(ko.repartition_records(iter(records), exchange=exchange("hash", keys=("k",)), services=svc))
-    again = list(ko.repartition_records(iter(records), exchange=exchange("hash", keys=("k",)), services=svc))
+    hashed = list(repartition_records(iter(records), exchange=exchange("hash", keys=("k",)), **binding))
+    again = list(repartition_records(iter(records), exchange=exchange("hash", keys=("k",)), **binding))
     assert [r.reader_id for r in hashed] == [r.reader_id for r in again]  # stable hash
 
-    reb = ko.repartition_records(iter(records), exchange=exchange("rebalance"), services=svc)
+    reb = repartition_records(iter(records), exchange=exchange("rebalance"), **binding)
     first = list(reb)
     assert [r.reader_id for r in first] == ["c0", "c1", "c2", "c0", "c1", "c2"]
     assert reb.ordinal == 6
     reb.restore_ordinal(1)
-    nxt = next(ko.repartition_records(iter([rec({"k": "a"}, record_id=rid("x"))]), exchange=exchange("rebalance"), services=svc))
+    nxt = next(repartition_records(iter([rec({"k": "a"}, record_id=rid("x"))]), exchange=exchange("rebalance"), **binding))
     assert nxt.reader_id in ("c0", "c1", "c2")
 
-    bc = list(ko.repartition_records(iter(records[:1]), exchange=exchange("broadcast"), services=svc))
+    bc = list(repartition_records(iter(records[:1]), exchange=exchange("broadcast"), **binding))
     assert len(bc) == 3
     assert len({r.delivery_id for r in bc}) == 3  # per-reader delivery identity
 
-    tgt = list(ko.repartition_records(iter([rec({"t": "c1"}, record_id=rid("t0"))]),
-                                    exchange=exchange("target", keys=("t",)), services=svc))
+    tgt = list(repartition_records(iter([rec({"t": "c1"}, record_id=rid("t0"))]),
+                                    exchange=exchange("target", keys=("t",)), **binding))
     assert tgt[0].reader_id == "c1"
 
 

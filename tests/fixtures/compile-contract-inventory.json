@@ -137,11 +137,8 @@
   },
   "constant": {
    "FIELD": [
-    "execution/kernels/operator.py",
-    "execution/kernels/shuffle_order.py",
     "execution/scheduler/dataflow_publication_budget.py",
-    "planning/dataflow_budget.py",
-    "planning/dataflow_compile.py"
+    "planning/dataflow_budget.py"
    ],
    "KEY": [
     "execution/dataflow_schema.py"
@@ -149,13 +146,18 @@
    "REDUCER_MEMORY_FIELD": [
     "execution/contracts/relational_region.py"
    ],
+   "SHUFFLE_ORDER_FIELD": [
+    "execution/kernels/operator.py",
+    "execution/kernels/shuffle_order.py",
+    "planning/dataflow_compile.py"
+   ],
    "_KEY": [
     "execution/dataflow_managed_devices.py"
    ]
   },
   "literal": {
    "actor_binding_version": [
-    "execution/dataflow_shared.py"
+    "execution/seal/program_identity.py"
    ],
    "actor_recovery_rows": [
     "planning/dataflow_shared.py"
@@ -180,7 +182,7 @@
     "execution/kernels/lance_keys.py"
    ],
    "cache": [
-    "execution/dataflow_models.py"
+    "execution/kernels/model_state.py"
    ],
    "cache_namespace": [
     "execution/kernels/dataflow.py"
@@ -197,16 +199,17 @@
    ],
    "columns": [
     "execution/contracts/relational_region.py",
+    "operators/relational.py",
     "planning/dataflow_relational_regions.py"
    ],
    "concurrency": [
     "execution/dataflow_model_observations.py",
-    "execution/dataflow_models.py",
     "execution/kernels/operator.py",
     "planning/dataflow_budget.py",
     "planning/dataflow_finite_fusion.py",
     "planning/dataflow_fusion.py",
     "planning/dataflow_graph_adapter.py",
+    "planning/dataflow_models.py",
     "planning/dataflow_single_worker.py",
     "planning/dataflow_thread_fusion.py"
    ],
@@ -276,7 +279,6 @@
    ],
    "input_carrier": [
     "execution/action_driver/dataflow.py",
-    "execution/arrow_payload.py",
     "execution/dataflow_sinks.py",
     "execution/worker/dataflow_graph_runner.py",
     "planning/dataflow_configuration.py",
@@ -292,7 +294,8 @@
    "keys": [
     "execution/kernels/block_partition.py",
     "execution/kernels/operator.py",
-    "execution/kernels/ordering.py"
+    "execution/kernels/ordering.py",
+    "operators/ordering.py"
    ],
    "kind": [
     "planning/dataflow_configuration.py"
@@ -341,6 +344,7 @@
     "planning/dataflow_training.py"
    ],
    "names": [
+    "operators/relational.py",
     "planning/dataflow_relational_regions.py"
    ],
    "native_key": [
@@ -362,8 +366,8 @@
    ],
    "num_blocks": [
     "execution/kernels/block_partition.py",
-    "execution/kernels/ordering.py",
     "execution/worker/terminal_blocks.py",
+    "operators/ordering.py",
     "planning/dataflow_compile.py"
    ],
    "occurrence_id": [
@@ -421,7 +425,7 @@
     "execution/dataflow_embedding_journal.py",
     "execution/dataflow_models.py",
     "execution/dataflow_prompt_journal.py",
-    "execution/dataflow_routed_prompt.py"
+    "planning/dataflow_models.py"
    ],
    "program": [
     "execution/kernels/operator.py",
@@ -467,7 +471,7 @@
     "planning/dataflow_training.py"
    ],
    "shared_actor": [
-    "execution/dataflow_shared.py",
+    "execution/contracts/dataflow.py",
     "execution/kernels/operator.py",
     "planning/dataflow_configuration.py",
     "planning/dataflow_place.py"
@@ -490,7 +494,7 @@
    ],
    "sort": [
     "execution/kernels/block_partition.py",
-    "execution/kernels/ordering.py"
+    "operators/ordering.py"
    ],
    "started_at": [
     "execution/run_context.py",
@@ -564,12 +568,12 @@
     "planning/dataflow_compile.py"
    ],
    "catch": [
-    "execution/dataflow_models.py",
-    "planning/dataflow_compile.py"
+    "planning/dataflow_compile.py",
+    "planning/dataflow_models.py"
    ],
    "concurrency": [
-    "execution/dataflow_models.py",
-    "planning/dataflow_compile.py"
+    "planning/dataflow_compile.py",
+    "planning/dataflow_models.py"
    ],
    "default_batch_size": [
     "planning/dataflow_compile.py"
@@ -591,7 +595,7 @@
     "planning/dataflow_compile.py"
    ],
    "managed_http_devices": [
-    "execution/dataflow_prompt_service.py"
+    "planning/dataflow_models.py"
    ],
    "native_key": [
     "execution/compiler_support/dataflow_native.py"
@@ -600,7 +604,7 @@
     "execution/compiler_support/dataflow_native.py"
    ],
    "node_id": [
-    "execution/dataflow_routed_prompt.py"
+    "planning/dataflow_models.py"
    ],
    "num_blocks": [
     "execution/kernels/operator.py",
@@ -2709,7 +2713,7 @@
     "inputs": [
      "main"
     ],
-    "kernel_symbol": "demiflow.execution.kernels.ordering:repartition_records"
+    "kernel_symbol": "demiflow.execution.exchange.dataflow_channels:repartition_records"
    },
    "SaveLanceOp": {
     "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",

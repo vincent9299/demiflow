@@ -124,16 +124,6 @@
     ],
     [
       "CacheCall.restore_state",
-      "demiflow.execution.kernels.task_scope",
-      "restore_resident_function"
-    ],
-    [
-      "CacheCall.restore_state",
-      "demiflow.execution.operator_policy",
-      "restore_auto_state"
-    ],
-    [
-      "CacheCall.restore_state",
       "demiflow.execution.recovery_contract",
       "RecoveryContractError"
     ],
@@ -143,18 +133,8 @@
       "DataflowError"
     ],
     [
-      "CacheCall.snapshot_state",
-      "demiflow.execution.kernels.task_scope",
-      "snapshot_resident_function"
-    ],
-    [
-      "CacheCall.snapshot_state",
-      "demiflow.execution.operator_policy",
-      "snapshot_auto_state"
-    ],
-    [
       "CacheCall.validate_runtime_state",
-      "demiflow.execution.kernels.task_scope",
+      "demiflow.execution.compiler_support.operator_policy",
       "_resident_slots"
     ],
     [
@@ -164,18 +144,18 @@
     ],
     [
       "_state_policy",
-      "demiflow.execution.kernels.task_scope",
-      "function_residency_kind"
+      "demiflow.execution.compiler_support.operator_policy",
+      "_resident_slots"
     ],
     [
       "_state_policy",
-      "demiflow.execution.kernels.task_scope",
-      "snapshot_resident_function"
-    ],
-    [
-      "_state_policy",
-      "demiflow.execution.operator_policy",
+      "demiflow.execution.compiler_support.operator_policy",
       "classify_operator_state"
+    ],
+    [
+      "_state_policy",
+      "demiflow.execution.compiler_support.operator_policy",
+      "function_residency_kind"
     ]
   ]
 }

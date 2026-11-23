@@ -1,14 +1,15 @@
 """Ordering implementation."""
 from __future__ import annotations
 
+from contextlib import closing
+
 import hashlib
 import heapq
-from demiflow.execution.contracts.dataflow import ArtifactRef
 import struct
 import sys
 from collections.abc import Iterator, Mapping
 from typing import Any
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.record_codec import canonical_record_json as _canonical
 
@@ -308,7 +309,7 @@ def build_sort_runs(records, *, bounds, window=None, input_size, prepare_frame,
     run_budget = bounds.max_resident_bytes if window is None else window.run_bytes
     if run_budget < 1:
         raise _ordering_error("RESOURCE_INFEASIBLE", "max_resident_bytes must be positive")
-    refs: list[ArtifactRef] = []
+    refs: list = []
     frames: list[tuple] = []
     used = 0
     spill_total = 0
@@ -390,3 +391,99 @@ def merge_sorted_frames(readers, *, check_stop, budget=None):
     finally:
         for reader in readers:
             reader.close()
+
+
+def sort_windows(bounds, grant):
+    """Original build/merge subwindows of an already admitted grant."""
+    metadata = grant // 16
+    run = grant // 8
+    codec = 3 * grant // 8
+    if metadata < 4096:
+        raise _ordering_error('RESOURCE_INFEASIBLE', 'ordering lacks space for run metadata')
+    window = SortWindow(resident_bytes=7 * grant // 8, run_bytes=run, frame_bytes=run,
+        read_chunk_bytes=min(4096, bounds.max_row_bytes, max(1, run // 16)),
+        merge_fan_in=min(MAX_SORT_MERGE_FAN_IN, bounds.max_open_files),
+        codec_bytes=codec, merge_reader_bytes=codec, merge_resident_bytes=2 * codec,
+        max_runs=metadata // 4096)
+    window.validate(bounds)
+    return 7 * grant // 16, metadata, window
+
+def merge_sort_runs(runs, *, bounds, fan_in, final_fan_in, window,
+                    body_bytes, check_stop, merge_frames, put_frames,
+                    release_run, owned, read_frames, ref_size):
+    """Original finite fan-in passes over bound immutable runs.
+
+    Inputs remain caller-owned; only successfully published intermediate runs
+    belong to this invocation. Actual file admission and record decoding are
+    supplied by the partition owner.
+    """
+    if final_fan_in < 1 or (len(runs)>1 and final_fan_in<2) or (len(runs)>final_fan_in and fan_in<2):
+        raise _ordering_error("BUDGET_EXCEEDED", "sort merge requires at least two input file slots plus owned leases/output")
+    max_spill = bounds.max_spill_bytes
+    live = body_bytes + sum(ref_size(run) for run in runs)
+    if live > max_spill:
+        raise _ordering_error("BUDGET_EXCEEDED", "live sort inputs exceed max_spill_bytes")
+    current = tuple(runs)
+    while len(current) > final_fan_in:
+        merged: list = []
+        for start in range(0, len(current), fan_in):
+            check_stop()
+            group = current[start:start + fan_in]
+            if len(group) == 1:
+                merged.append(group[0])
+                continue
+            remaining = max_spill - live
+            if sum(ref_size(ref) for ref in group) > remaining:
+                raise _ordering_error("BUDGET_EXCEEDED", "merge spill exceeds max_spill_bytes")
+
+            with closing(merge_frames(group, window)) as output_frames:
+                ref = put_frames(output_frames, remaining)
+            owned.append(ref)
+            merged.append(ref)
+            live += ref_size(ref)
+            for source in group:
+                if source in owned:
+                    release_run(source)
+                    owned.remove(source)
+                    live -= ref_size(source)
+        current = tuple(merged)
+    with closing(read_frames(current, window)) as source_frames:
+        yield from source_frames
+
+
+def descending_flags(value, count: int) -> tuple[bool, ...]:
+    if isinstance(value, bool):
+        return (value,) * count
+    flags = tuple(value)
+    if len(flags) != count or any(not isinstance(flag, bool) for flag in flags):
+        raise _ordering_error("INVALID_CONTRACT", "descending must be a bool or one bool per key")
+    return flags
+
+def repartition_sort_key(row, configuration):
+    from demiflow.operators.relational import group_key as _group_key
+    keys = tuple(configuration.get('keys') or ())
+    bucket = int.from_bytes(hashlib.sha256(_group_key(row, keys).encode()).digest()[:8], 'big') % configuration['num_blocks']
+    fields = tuple(sort_field_token(row[key], False) for key in keys) if configuration.get('sort') else ()
+    return ((0, bucket), *fields)
+
+
+def field_sort_key(row, keys, descending):
+    flags = descending_flags(descending, len(keys))
+    try:
+        fields = tuple(sort_field_token(row[key], desc) for key, desc in zip(keys, flags))
+    except KeyError as exc:
+        raise _ordering_error("INVALID_CONTRACT", "sort key field missing", field=str(exc)) from exc
+    return fields
+
+
+def wide_sort_body_reference(encoded_bytes, rows, grant):
+    """Original body-once eligibility within an already admitted grant."""
+    threshold = max(1024, min(65536, grant // 16))
+    return encoded_bytes >= threshold and encoded_bytes * rows > grant
+
+
+def measured_merge_window(window, largest):
+    """Narrow only the existing fan-in using measured retained frame size."""
+    per_reader = 4 * largest + 4 * window.read_chunk_bytes + 1024
+    fan = max(2, (window.merge_reader_bytes - 4096) // per_reader)
+    return replace(window, merge_fan_in=min(window.merge_fan_in, fan))

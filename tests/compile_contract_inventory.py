@@ -24,7 +24,6 @@ COMPILER = 'planning/dataflow_compile.py'
 REGISTRY = 'planning/dataflow_registry.py'
 KERNELS = 'execution/kernels/dataflow.py'
 OPERATOR = 'execution/kernels/operator.py'
-TASK_SCOPE = 'execution/kernels/task_scope.py'
 BATCH_MEMBERSHIP = 'execution/kernels/batch_membership.py'
 TERMINAL_BLOCKS = 'execution/worker/terminal_blocks.py'
 SEAL = 'execution/seal/plan.py'
@@ -158,7 +157,7 @@ def tables():
         'compiler.native_traits': compiler.value('_NATIVE_TRAITS'),
         'compiler.finite_complete_kinds': compiler.value('_FINITE_COMPLETE_KINDS'),
         'compiler.ordering_kinds': compiler.value('_ORDERING_KINDS'),
-        'runtime.task_kinds': Constants(TASK_SCOPE).value('TASK_KINDS'),
+        'runtime.task_kinds': kind_table().value('TASK_KINDS'),
         'runtime.batch_membership_kinds': Constants(BATCH_MEMBERSHIP).value('KINDS'),
         'runtime.instance_kinds': operator.value('_INSTANCE_KINDS'),
         'runtime.batch_instance_kinds': operator.value('_BATCH_INSTANCE_KINDS'),
@@ -363,7 +362,7 @@ def configuration_access():
     written: subscript stores, ``configuration.update(k=...)`` and ``configuration={...}`` literals
     """
     literal, accessor, constant, written = (defaultdict(set) for _ in range(4))
-    for package in ('planning', 'execution'):
+    for package in ('planning', 'execution', 'operators'):
         for path in sorted((PACKAGE / package).rglob('*.py')):
             relative = path.relative_to(PACKAGE).as_posix()
             for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):

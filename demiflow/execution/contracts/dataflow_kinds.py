@@ -41,6 +41,9 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping
 
+SHUFFLE_ORDER_FIELD = "shuffle_order_version"
+SHUFFLE_ORDER_VERSION = "typed-multiset-v1"
+
 TYPED = "typed"
 NATIVE = "native"
 
@@ -70,7 +73,7 @@ _MODEL_COMPILE = "demiflow.planning.dataflow_models:build_model_factory"
 _UNARY = "demiflow.execution.kernels.dataflow:invoke_unary"
 _BATCH = "demiflow.execution.kernels.dataflow:invoke_batch"
 _ORDER = "demiflow.execution.kernels.ordering:build_sort_runs"
-_REPARTITION = "demiflow.execution.kernels.ordering:repartition_records"
+_REPARTITION = "demiflow.execution.exchange.dataflow_channels:repartition_records"
 _MODEL_KERNEL = "demiflow.execution.dataflow_models:bind_model_services"
 
 

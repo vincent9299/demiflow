@@ -8,6 +8,12 @@ seal. Every durable write goes through the ArtifactStore protocol (H031/H035);
 no persistent state is created outside these functions and no runtime object is
 written into a recovery image.
 """
+
+from collections.abc import Iterator
+from demiflow.execution.contracts.record_codec import record_identity
+
+def _routing_error(code, message, **context):
+    return DataflowError(code, message, context=context)
 from demiflow.execution.contracts.dataflow import stage_resident_bytes
 import base64
 import hashlib
@@ -605,3 +611,115 @@ def close_channels(channels, *, reason, deadline_ms):
             break
         state.drain_buffer(channel_id)
     state.close()
+
+
+class _RepartitionIterator:
+    """Iterator[RoutedRecord] with a resumable rebalance ordinal (C05)."""
+
+    def __init__(
+        self,
+        records: Iterator[Record],
+        exchange: ExchangeSpec,
+        *, bounds, check_stop, input_size, read_row,
+    ) -> None:
+        self._records = iter(records)
+        self._exchange = exchange
+        self._bounds = bounds
+        self._check_stop = check_stop
+        self._input_size = input_size
+        self._read_row = read_row
+        self._ordinal = 0
+        self._consumers = tuple(exchange.consumer_partitions)
+        if not self._consumers:
+            raise _routing_error("INVALID_CONTRACT", "exchange has no consumer partitions")
+        self._routing = exchange.routing
+        if self._routing not in ("forward", "hash", "rebalance", "broadcast", "target"):
+            raise _routing_error("INVALID_CONTRACT", "unknown routing", routing=self._routing)
+        if self._routing == "hash" and not exchange.keys:
+            raise _routing_error("INVALID_CONTRACT", "hash routing requires keys")
+        if self._routing == "target" and not exchange.keys:
+            raise _routing_error("INVALID_CONTRACT", "target routing requires a target key")
+
+    @property
+    def ordinal(self) -> int:
+        return self._ordinal
+
+    def restore_ordinal(self, value: int) -> None:
+        if not isinstance(value, int) or value < 0:
+            raise _routing_error("INVALID_CONTRACT", "ordinal must be a non-negative integer")
+        self._ordinal = value
+
+    def __iter__(self) -> "_RepartitionIterator":
+        return self
+
+    def __next__(self) -> RoutedRecord:
+        record = next(self._records)
+        self._check_stop()
+        if self._input_size(record) > self._bounds.max_row_bytes:
+            raise _routing_error("BUDGET_EXCEEDED", "single row exceeds max_row_bytes")
+        edge = self._exchange.edge_id
+        reader = self._target(record)
+        self._ordinal += 1
+        delivery = record_identity(["dataflow-delivery-v3", record.record_id, edge, reader])
+        return RoutedRecord(reader_id=reader, delivery_id=delivery, record=record)
+
+    def _target(self, record: Record) -> str:
+        consumers = self._consumers
+        count = len(consumers)
+        if self._routing == "forward":
+            return consumers[0]
+        if self._routing == "rebalance":
+            return consumers[self._ordinal % count]
+        if self._routing == "hash":
+            row = self._read_row(record)
+            from demiflow.operators.relational import group_key as _group_key
+
+            key = _group_key(row, tuple(self._exchange.keys))
+            digest = hashlib.sha256(key.encode("utf-8")).digest()
+            return consumers[int.from_bytes(digest[:8], "big") % count]
+        if self._routing == "target":
+            row = self._read_row(record)
+            field = self._exchange.keys[0]
+            if field not in row:
+                raise _routing_error("INVALID_CONTRACT", "target field missing", field=field)
+            target = row[field]
+            if target not in consumers:
+                raise _routing_error("INVALID_CONTRACT", "target is not a consumer partition", target=str(target))
+            return target
+        raise _routing_error("INTERNAL_PROTOCOL", "unhandled routing")
+
+    def close(self) -> None:
+        close = getattr(self._records, "close", None)
+        if close is not None:
+            close()
+
+def repartition_records(
+    records: Iterator[Record], *, exchange: ExchangeSpec, bounds, check_stop, input_size, read_row
+) -> Iterator[RoutedRecord]:
+    """K012: stable hash/rebalance/target/forward routing; broadcast fans out."""
+    if exchange.routing != "broadcast":
+        return _RepartitionIterator(records, exchange, bounds=bounds, check_stop=check_stop,
+            input_size=input_size, read_row=read_row)
+
+    consumers = tuple(exchange.consumer_partitions)
+    if not consumers:
+        raise _routing_error("INVALID_CONTRACT", "exchange has no consumer partitions")
+
+    def broadcast() -> Iterator[RoutedRecord]:
+        source = iter(records)
+        try:
+            for record in source:
+                check_stop()
+                if input_size(record) > bounds.max_row_bytes:
+                    raise _routing_error("BUDGET_EXCEEDED", "single row exceeds max_row_bytes")
+                for reader in consumers:
+                    delivery = record_identity(
+                        ["dataflow-delivery-v3", record.record_id, exchange.edge_id, reader]
+                    )
+                    yield RoutedRecord(reader_id=reader, delivery_id=delivery, record=record)
+        finally:
+            close = getattr(source, "close", None)
+            if close is not None:
+                close()
+
+    return broadcast()

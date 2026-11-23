@@ -52,7 +52,7 @@
         "local_execution"
       ],
       "observe": [
-        "demiflow.execution.run_telemetry",
+        "demiflow.execution.journal.run_telemetry",
         "observe"
       ],
       "reconcile_stopped_fits": [
@@ -142,7 +142,7 @@
         "identity"
       ],
       "latest": [
-        "demiflow.execution.run_telemetry",
+        "demiflow.execution.journal.run_telemetry",
         "latest"
       ],
       "native_submission_view": [
@@ -170,7 +170,7 @@
         "resolve_local_artifact"
       ],
       "series": [
-        "demiflow.execution.run_telemetry",
+        "demiflow.execution.journal.run_telemetry",
         "series"
       ],
       "stream_residency": [
