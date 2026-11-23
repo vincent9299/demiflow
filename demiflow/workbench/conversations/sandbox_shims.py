@@ -42,6 +42,12 @@ if mode == 'restricted' and len(args) >= 2 and args[1] == 'review':
         '请勿在沙箱内直接运行 `demiflow forge review`。\\n'
     )
     raise SystemExit(2)
+if mode == 'restricted' and len(args) >= 2 and args[1] == 'init':
+    sys.stderr.write(
+        '工作台受限沙箱内 `.forge/` 与 `workspace.json` 由宿主受控管理，请勿直接运行 `demiflow forge init`；'
+        '如需创建缺失的标准目录或登记/更新 Flow 入口，请调用宿主工具 `manage_project_layout`。\\n'
+    )
+    raise SystemExit(2)
 
 os.environ['DEMIFLOW_FORGE_RUNTIME_CONFIG'] = runtime_cfg
 sys.path.insert(0, sdk_root)

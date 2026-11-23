@@ -701,33 +701,49 @@ class Store:
                 rows.append(json.loads(row['body'])); used += row['size']
             return dict(events=rows, next_sequence=rows[-1]['sequence'] if rows else after, last_sequence=session['sequence'])
 
-    def replay(self, workspace, sid, *, limit=200, max_turns=12):
-        """Return a bounded, display-compacted tail of recent turns without altering history."""
+    def replay(self, workspace, sid, *, limit=200, max_turns=12, before_sequence=None):
+        """Return a bounded, display-compacted slice of turns without altering history."""
         integer(limit, 1, 200); integer(max_turns, 1, 32)
+        if before_sequence is not None:
+            integer(before_sequence, 0, 2**62)
         with self.connect() as db:
             session = self._session(db, workspace, sid)
             last_seq = session['sequence']
-            archived = db.execute("""SELECT e.sequence FROM events e JOIN turns t ON t.id=e.turn
-                WHERE e.session=? AND t.operation='compact' AND t.state='completed' AND t.cleanup='complete'
-                  AND json_extract(e.body,'$.type')='compaction.completed'
-                  AND json_extract(e.body,'$.data.status')='compacted'
-                ORDER BY e.sequence DESC LIMIT 1""", (sid,)).fetchone()
-            archive_seq = archived['sequence'] if archived else 0
-            turns = db.execute('SELECT id,cleanup FROM turns WHERE session=? ORDER BY created DESC,id DESC LIMIT ?',
-                               (sid, max_turns + 1)).fetchall()
+            upper_bound = min(before_sequence, last_seq + 1) if before_sequence is not None else last_seq + 1
+            if before_sequence is not None:
+                archive_seq = 0
+                turns = db.execute(
+                    """SELECT t.id, t.cleanup FROM turns t
+                       WHERE t.session=?
+                         AND EXISTS (SELECT 1 FROM events e WHERE e.turn=t.id AND e.sequence<?)
+                       ORDER BY t.created DESC, t.id DESC LIMIT ?""",
+                    (sid, upper_bound, max_turns + 1),
+                ).fetchall()
+            else:
+                archived = db.execute("""SELECT e.sequence FROM events e JOIN turns t ON t.id=e.turn
+                    WHERE e.session=? AND t.operation='compact' AND t.state='completed' AND t.cleanup='complete'
+                      AND json_extract(e.body,'$.type')='compaction.completed'
+                      AND json_extract(e.body,'$.data.status')='compacted'
+                    ORDER BY e.sequence DESC LIMIT 1""", (sid,)).fetchone()
+                archive_seq = archived['sequence'] if archived else 0
+                turns = db.execute('SELECT id,cleanup FROM turns WHERE session=? ORDER BY created DESC,id DESC LIMIT ?',
+                                   (sid, max_turns + 1)).fetchall()
             older_turns = len(turns) > max_turns
             selected = turns[:max_turns]
-            if not selected or last_seq == 0:
-                return dict(events=[], first_sequence=last_seq, next_sequence=last_seq,
+            if not selected or last_seq == 0 or upper_bound <= 1:
+                return dict(events=[], first_sequence=max(0, upper_bound - 1), next_sequence=last_seq,
                             last_sequence=last_seq, has_earlier=bool(archive_seq > 0))
             active_turns = {row['id'] for row in selected if row['cleanup'] != 'complete'}
             oldest_seq_row = db.execute('SELECT min(sequence) FROM events WHERE turn=?', (selected[-1]['id'],)).fetchone()
             turn_start = oldest_seq_row[0] if oldest_seq_row and oldest_seq_row[0] is not None else 1
-            start_after = max(archive_seq - 1 if archive_seq > 0 else 0, turn_start - 1, max(0, last_seq - 4096))
+            window_end = upper_bound - 1
+            start_after = max(archive_seq - 1 if archive_seq > 0 else 0, turn_start - 1, max(0, window_end - 4096))
             truncated_scan = start_after > 0
             raw_rows = [(row['sequence'], row['size'], json.loads(row['body']))
-                        for row in db.execute('SELECT sequence,size,body FROM events WHERE session=? AND sequence>? ORDER BY sequence LIMIT 4096',
-                                              (sid, start_after))]
+                        for row in db.execute(
+                            'SELECT sequence,size,body FROM events WHERE session=? AND sequence>? AND sequence<? ORDER BY sequence LIMIT 4096',
+                            (sid, start_after, upper_bound),
+                        )]
         # Compact display-redundant events in completed turns only; keep active turns verbatim.
         # 1) Identify message spans terminated by message.completed without intervening tool events.
         completed_msg_final = {}
