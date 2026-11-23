@@ -169,7 +169,10 @@ class WorkerGraphRunner:
         self._fixed_key_exclusion = FixedKeyExclusion.open(self)
         from ..contracts.relational_region import JOIN_PROBE_SUFFIX, fixed_join_inputs
         if any(stage.stage_id.endswith(JOIN_PROBE_SUFFIX) for stage in executor.assignment.stages):
-            left, right, join = fixed_join_inputs(executor._graph)
+            shape = fixed_join_inputs(executor._graph)
+            if shape is None:
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'join probe differs from its sealed graph')
+            left, right, join = shape
             splits = {split.source_id:split.split_id for split in executor.assignment.source_splits}
             if {left, right} != set(splits):
                 raise DataflowError('INCOMPATIBLE_HISTORY', 'join probe differs from its original source splits')
@@ -179,6 +182,8 @@ class WorkerGraphRunner:
                 right_edge, = [e.edge_id for e in self._incoming[join] if e.input_port == 'right']
                 self._join_probe = (splits[left], right_edge, join, scan)
                 self._join_probe_values = None
+            elif scan is not None:
+                scan.close()
         args = self._terminal_spec.configuration.get('arguments', {}) if self._terminal_spec else {}
         self._limit = (args.get('limit') if self._terminal_spec and self._terminal_spec.kind == 'take'
                        else args.get('batch_size', 20) if self._terminal_spec and self._terminal_spec.kind == 'take_batch'
@@ -798,7 +803,7 @@ class WorkerGraphRunner:
         if credit is not None:
             available = credit['bytes'] - self._unconfirmed_bytes
             rows = min(rows, credit['rows'] - self._unconfirmed_rows,
-                       max(1, available // (self.bounds.max_row_bytes + 17)))
+                       max(1, available // self.bounds.max_row_bytes))
             size = min(size, available)
         step = scan.next_probe(rows, size)
         if step is None:
@@ -808,6 +813,14 @@ class WorkerGraphRunner:
         if count:
             fragment, offset, batch = item
             matched = pc.indices_nonzero(key_membership(batch.column(0), self._join_probe_values))
+            if credit and credit['bytes'] < self.bounds.max_row_bytes and len(matched) < count:
+                # This cut can reject even a legal, nonmatching source record.
+                # Read it normally to preserve the original byte-limit outcome.
+                import pyarrow as pa
+                matched = pa.array(range(count), type=pa.int64())
+            # Only unmatched rows advance as a projection. Matched rows advance
+            # as their original records, charged exactly once against source credit.
+            charged = ((count - len(matched)) * charged + count - 1) // count
             for record in scan.matched_records(fragment, offset, batch, matched):
                 charged += record.encoded_bytes
                 if credit and self._unconfirmed_bytes + charged > credit['bytes']:
@@ -953,10 +966,6 @@ class WorkerGraphRunner:
                 self._edge_eoi(command['edge_id'], command['producer_partition'])
             elif command['kind'] == 'close_output':
                 self._close_output(command['edge_id'])
-            elif command['kind'] == 'satisfy' and self._fixed_key_exclusion is not None:
-                # The key scans may already be exhausted while selected output
-                # remains. Keep that unfinished node resumable from its published prefix.
-                self._paused = True
             elif command['kind'] == 'satisfy':
                 for occ, node in self.e._node_specs.items():
                     if node.kind == 'terminal':

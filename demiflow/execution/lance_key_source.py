@@ -169,7 +169,11 @@ class PinnedKeyScan:
             encoded += len(json.dumps(name, ensure_ascii=True).encode()) + width
             if encoded > self.reader._services.bounds.max_row_bytes:
                 return False
-        return True
+        from .dataflow_record_frames import resident_limit
+        # Conservatively include the row dict, typed codec tree, source/frozen
+        # copies and per-field containers in the existing stage grant.
+        return 8 * encoded + 2048 * (1 + len(fields)) <= resident_limit(
+            self.reader._services.bounds, self.reader._services)
 
     def next_probe(self, rows, size):
         """Read original keys/row IDs with the cursor advanced by exactly this slice."""
@@ -201,6 +205,7 @@ class PinnedKeyScan:
             ordinal = 0
             for batch in table.to_batches():
                 for i in range(batch.num_rows):
+                    reader._services.check_stop()
                     local = indices[ordinal].as_py()
                     pos = {'version': reader._version, 'fragment_id': fragment, 'row_offset': offset + local}
                     row = fallback_row(batch, i)
