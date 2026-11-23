@@ -1645,6 +1645,13 @@ class DataflowExecution:
         limits = self._action.context.limits
         if len(sources) > min(limits['checkpoint_unconfirmed_rows'], limits['checkpoint_unconfirmed_bytes']):
             return  # A serial source grant rotates only at a real ACK boundary.
+        if (len(self._endpoints) == 1 and len(self._graph.nodes) == 2 and len(sources) == 1
+                and self._publication_frontiers[0] - self._last_checkpoint_rows
+                >= limits['checkpoint_unconfirmed_rows']):
+            # A single source connected directly to its terminal exhausted the
+            # entire admitted row window. Its sealed prefix cannot release any
+            # credit until the real receipt; an early resume can only go idle.
+            return
         from ..recovery_contract import identity
         commit_id = identity([self._run_id(), self._action.action_id, self._cut.sequence])
         fact = self._action.context.journal.execution_commit(commit_id)
