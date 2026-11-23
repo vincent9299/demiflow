@@ -29,6 +29,8 @@ from ..dataflow_record_frames import (encode_document, decode_document, document
 
 
 class WorkerGraphRunner:
+    _fixed_key_exclusion = None
+
     def __init__(self, executor):
         self.e = executor
         self.services = executor._services
@@ -162,6 +164,8 @@ class WorkerGraphRunner:
             reader = next(iter(executor._readers.values()))
             if reader.supports_native_batches():
                 self._batch_source = reader
+        from .key_exclusion import FixedKeyExclusion
+        self._fixed_key_exclusion = FixedKeyExclusion.open(self)
         args = self._terminal_spec.configuration.get('arguments', {}) if self._terminal_spec else {}
         self._limit = (args.get('limit') if self._terminal_spec and self._terminal_spec.kind == 'take'
                        else args.get('batch_size', 20) if self._terminal_spec and self._terminal_spec.kind == 'take_batch'
@@ -378,6 +382,8 @@ class WorkerGraphRunner:
                 max_bytes=self.bounds.max_state_bytes)))
             if frontier.get('schema') != 'demiflow.worker-frontier.v3':
                 raise DataflowError('INCOMPATIBLE_HISTORY', 'unknown worker completion frontier')
+            if bool(frontier.get('fixed_key_batches')) != (self._fixed_key_exclusion is not None):
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'fixed key input strategy differs from the saved cut')
             self._finished = set(frontier['nodes'])
             self._finished_splits = set(frontier['splits'])
             self._finished_inputs = {tuple(x) for x in frontier['inputs']}
@@ -854,7 +860,9 @@ class WorkerGraphRunner:
                 raise DataflowError('INVALID_CONTRACT', 'unknown business command')
             processed += 1
         if self._sealed_cut is None and not self._paused and not self._cut:
-            for split_id, reader in self.e._readers.items():
+            if self._fixed_key_exclusion is not None:
+                processed += self._fixed_key_exclusion.step(self)
+            for split_id, reader in (() if self._fixed_key_exclusion else self.e._readers.items()):
                 if split_id in self._finished_splits:
                     continue
                 self.services.check_stop()
@@ -902,7 +910,8 @@ class WorkerGraphRunner:
                     self._finish_node(occ)
         if (self._sealed_cut is None and not (self._paused and self._idle_sent)
                 and (command is None or command['kind'] not in ('cut', 'receipt'))):
-            processed += self._advance_input_completions(max_records=max_records, deadline_ms=deadline_ms)
+            if self._fixed_key_exclusion is None:
+                processed += self._advance_input_completions(max_records=max_records, deadline_ms=deadline_ms)
         if time.monotonic() - self._metrics_at >= .5:
             self._flush_metrics()
         done = set(self.e._node_specs).issubset(self._finished)
@@ -1586,6 +1595,7 @@ class WorkerGraphRunner:
                 states[identity(['finite-spool', spec.channel_id])] = self.services.store.put(
                     iter([raw]), max_bytes=len(raw), media_type='application/json')
         frontier = document({'schema': 'demiflow.worker-frontier.v3',
+            **({'fixed_key_batches': True} if self._fixed_key_exclusion is not None else {}),
             'nodes': sorted(self._finished), 'splits': sorted(self._finished_splits),
             'inputs': [list(x) for x in sorted(self._finished_inputs)],
             'finished_ports': sorted(self._finished_ports),
@@ -1645,6 +1655,8 @@ class WorkerGraphRunner:
         for iterator in self._active_finishes.values():
             iterator.close()
         self._active_finishes.clear()
+        if self._fixed_key_exclusion is not None:
+            self._fixed_key_exclusion.close()
         self._finite_input.close()
         self._peer.close()
         self._terminal_blocks.close()

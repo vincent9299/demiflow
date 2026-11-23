@@ -7,6 +7,7 @@ from ..recovery_contract import identity
 PREFIX = 'relational-v1-'
 SQL_PREFIX = PREFIX + 'sql1-'
 KEY_SQL_SUFFIX = '-key-sql1'
+KEY_BATCH_SQL_SUFFIX = '-batches' + KEY_SQL_SUFFIX
 # Separate from the v3 Python row/codec window. The child imports Arrow and
 # DataFusion, processes only bounded keys/offsets, and never owns business rows.
 SQL_CHILD_RSS = 256 << 20
@@ -18,6 +19,39 @@ REDUCER_MEMORY_FIELD = 'reducer_memory_v1'
 def selection_wire_bytes(child_rss):
     """Anonymous IPC allowance for a compact key binding or its selection bitmap."""
     return min(child_rss // 8, SQL_PARENT_WINDOW // 2)
+
+
+def fixed_key_inputs(graph):
+    """Exact two-scan anti join with an unmodified stream of surviving left rows."""
+    if len(graph.sources) != 2 or len(graph.terminals) != 1 or graph.jobs:
+        return None
+    nodes = {n.occurrence_id: n for n in graph.nodes}
+    terminal = graph.terminals[0]
+    terminal_spec = nodes[terminal].kernel
+    if (terminal_spec.kind != 'iter_rows' or terminal_spec.configuration.get('arguments', {}).get(
+            'native_execution_limits')):
+        return None
+    incoming = {node: {e.input_port: e.producer for e in graph.edges if e.consumer == node}
+                for node in nodes}
+    parents = list(incoming[terminal].values())
+    if len(parents) != 1:
+        return None
+    exclude = parents[0]
+    spec = nodes[exclude].kernel
+    if spec.kind != 'exclude_keys' or set(incoming[exclude]) != {'left', 'right'}:
+        return None
+    left, project = incoming[exclude]['left'], incoming[exclude]['right']
+    keys = tuple(spec.configuration['on'])
+    right_parents = list(incoming[project].values())
+    if (len(keys) != 1 or len(right_parents) != 1 or nodes[project].kernel.kind != 'SelectColumnsOp'
+            or tuple(nodes[project].kernel.configuration.get('columns', ())) != keys
+            or spec.configuration.get('lance_key_source') != left):
+        return None
+    right = right_parents[0]
+    if (set(graph.sources) != {left, right} or len(nodes) != 5 or len(graph.edges) != 4
+            or not all(nodes[src].kernel.kind == 'lance' for src in (left,right))):
+        return None
+    return left, right, project, exclude, terminal
 
 
 def needs_native_offsets(stage):

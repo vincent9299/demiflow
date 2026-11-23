@@ -914,7 +914,7 @@ def compile_physical_dataflow(
     stages = tuple(stage for stage in stages if not refs.intersection(stage.occurrences))
     if _allow_offset_sql:
         from .dataflow_relational_regions import place_key_exclusion
-        stages = place_key_exclusion(graph, snapshots, stages, policy=policy, bounds=bounds, hosts=hosts)
+        stages = place_key_exclusion(graph, snapshots, splits, stages, policy=policy, bounds=bounds, hosts=hosts)
     jobs, values = physical_values(graph, stages)
     exchanges = plan_exchanges(graph, stages, policy=policy, bounds=bounds)
     exchanges = specialize_graph_exchanges(graph, stages, exchanges, bounds=bounds)

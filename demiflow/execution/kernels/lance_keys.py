@@ -102,3 +102,56 @@ def exclude_keys(left, right, *, spec, services):
             budget.charge(out)
             sequence += 1
             yield clone_record(out, schema_ref=schema_ref)
+
+
+class BatchKeySelection:
+    """Own only projected equality keys and their selection, never the right or left payloads."""
+    @classmethod
+    def admits(cls, left, right):
+        from ..contracts.relational_region import SQL_CHILD_RSS, selection_wire_bytes
+        window = selection_wire_bytes(SQL_CHILD_RSS)
+        # Identical signedness and width give decimal encoding identical SQL
+        # equality and retain NULL. Size the request before either scan starts.
+        return (left.dtype == right.dtype and max(left.count, right.count) <= window // 8
+                and (left.count + right.count) * 26 + 4096
+                    + 1024 * (left.chunk_bound + right.chunk_bound) <= window)
+
+    def __init__(self):
+        self.columns = {'lkeys': [], 'rkeys': []}
+        self.left_positions = []
+
+    def append(self, side, fragment, offset, batch):
+        import pyarrow as pa
+        import pyarrow.compute as pc
+        self.columns[side].append(pc.cast(pc.cast(batch.column(0), pa.string()), pa.binary()))
+        if side == 'lkeys':
+            self.left_positions.append((fragment, offset, batch.column('_rowid')))
+
+    def survivors(self, services, *, skip, batch_size):
+        import numpy as np
+        import pyarrow as pa
+        import pyarrow.compute as pc
+        from ...operators.relational import EXCLUDE_OFFSETS_SQL
+        from ..contracts.relational_region import SQL_CHILD_RSS
+        tables = {side: pa.chunked_array(parts, type=pa.binary()) for side, parts in self.columns.items()}
+        total = len(tables['lkeys'])
+        bits = services.query_region_offsets(EXCLUDE_OFFSETS_SQL, tables=tables, max_pairs=total,
+            rss_bytes=SQL_CHILD_RSS, check_stop=services.check_stop, selection=True)
+        self.columns.clear()
+        del tables
+        keep = pa.Array.from_buffers(pa.bool_(), total, [None, pa.py_buffer(bits)])
+        start = 0
+        for fragment, row_offset, row_ids in self.left_positions:
+            index = pc.indices_nonzero(keep.slice(start, len(row_ids)))
+            start += len(row_ids)
+            if skip:
+                used = min(len(index), skip)
+                index = index.slice(used)
+                skip -= used
+            for begin in range(0, len(index), batch_size):
+                local = index.slice(begin, batch_size)
+                yield pa.record_batch([pa.array(np.full(len(local), fragment, np.uint64)),
+                    pc.add(local, pa.scalar(row_offset, type=pa.uint64())), pc.take(row_ids, local)],
+                    names=['fragment_id', 'row_offset', 'row_id'])
+        if skip:
+            raise DataflowError('INCOMPATIBLE_HISTORY', 'terminal exceeds replayed key selection')
