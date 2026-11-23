@@ -157,7 +157,7 @@ def iterate_rows(handle: "ActionHandle") -> "Iterator[Row]":
 
 
 def _convert_batch(rows: "list[Row]", batch_format: str, handle: "ActionHandle", *, schema=None):
-    from .batch_conversion import admit_batch_conversion
+    from demiflow.execution.contracts.record_codec import admit_batch_conversion
     reserve = getattr(handle, 'conversion_reserve', lambda: 0)()
     total, maximum = admit_batch_conversion(rows, batch_format, schema=schema, bounds=handle.bounds,
                                            reserved_bytes=reserve)

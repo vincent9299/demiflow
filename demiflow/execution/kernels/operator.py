@@ -32,7 +32,8 @@ from demiflow.execution.contracts.dataflow import (
 )
 from demiflow.execution.contracts.dataflow_kinds import kinds_with
 
-from demiflow.execution.kernels.dataflow import KERNEL_KINDS, RECORD_MEDIA_TYPE, _AGGREGATE_KINDS, _canonical, _cfg, _check_stop, _err, _hash_id, _input_row_bytes, _MODEL_KINDS, _occurrence, _ORDERING_KINDS, _RELATIONAL_KINDS, _STREAM_GROUP_KINDS, _UNARY_KINDS, invoke_batch, invoke_unary
+from demiflow.execution.kernels.dataflow import KERNEL_KINDS, RECORD_MEDIA_TYPE, _AGGREGATE_KINDS, _cfg, _check_stop, _err, _input_row_bytes, _MODEL_KINDS, _occurrence, _ORDERING_KINDS, _RELATIONAL_KINDS, _STREAM_GROUP_KINDS, _UNARY_KINDS, invoke_batch, invoke_unary
+from demiflow.execution.contracts.record_codec import canonical_record_json as _canonical, record_identity as _hash_id
 
 IMAGE_VERSION = "demiflow-kernel-image-v3"
 IMAGE_MEDIA_TYPE = "application/x-demiflow-kernel-image-v3"
@@ -1082,7 +1083,8 @@ class OperatorKernel:
         return row_size(row,chunk)
 
     def _push_stream_group(self, record: Record) -> Iterator[Record]:
-        from demiflow.execution.kernels.dataflow import _group_key, _materialize_row
+        from demiflow.operators.relational import group_key as _group_key
+        from demiflow.execution.kernels.dataflow import _materialize_row
         on=tuple(_cfg(self._spec,'on'))
         max_batch=int(self._spec.configuration.get('max_batch',self._max_batch))
         row=dict(_materialize_row(record,self._services))

@@ -35,7 +35,9 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.record_codec import _encode_payload, _decode_payload, _encode_record_document, _decode_record_document
 from demiflow.execution.contracts.dataflow import thaw_record_value
 
-from demiflow.execution.kernels.dataflow import RECORD_MEDIA_TYPE, _canonical, _check_stop, _cfg, _err, _hash_id, _input_row_bytes, _materialize_row, _occurrence, _seed, _shuffle_key_bytes
+from demiflow.execution.kernels.dataflow import RECORD_MEDIA_TYPE, _check_stop, _cfg, _err, _input_row_bytes, _materialize_row, _occurrence, _seed
+from demiflow.operators.ordering import shuffle_key_bytes as _shuffle_key_bytes
+from demiflow.execution.contracts.record_codec import canonical_record_json as _canonical, record_identity as _hash_id
 
 _MERGE_FAN_IN = 32
 _FRAME_OVERHEAD = 256
@@ -213,7 +215,7 @@ def _record_sort_key(
 ) -> tuple:
     kind = spec.kind
     if kind == 'RepartitionOp':
-        from demiflow.execution.kernels.dataflow import _group_key
+        from demiflow.operators.relational import group_key as _group_key
         keys = tuple(spec.configuration.get('keys') or ())
         bucket = int.from_bytes(hashlib.sha256(_group_key(row, keys).encode()).digest()[:8], 'big') % spec.configuration['num_blocks']
         fields = tuple(_field_token(row[key], False) for key in keys) if spec.configuration.get('sort') else ()
@@ -817,7 +819,7 @@ class _RepartitionIterator:
             return consumers[self._ordinal % count]
         if self._routing == "hash":
             row = _materialize_row(record, self._services)
-            from demiflow.execution.kernels.dataflow import _group_key
+            from demiflow.operators.relational import group_key as _group_key
 
             key = _group_key(row, tuple(self._exchange.keys))
             digest = hashlib.sha256(key.encode("utf-8")).digest()

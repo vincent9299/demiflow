@@ -1,6 +1,10 @@
 """Join key membership, matching, row combination and native offset queries."""
 from __future__ import annotations
 
+import json
+from demiflow.execution.contracts.record_codec import canonical_record_json as _canonical
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+
 from collections.abc import Mapping
 import itertools
 from typing import Any
@@ -165,7 +169,6 @@ def merge_join_rows(
     return out
 
 
-
 def match_probe(spool, key, matches, how, load_left, *left_position):
     """Apply inner/left/semi/anti multiplicity before hydrating either payload."""
     left = None
@@ -244,3 +247,52 @@ def project_columns(columns, kind, configuration):
             return None
         return tuple(range(len(columns))), names
     return None
+
+
+def key_token(value: Any) -> Any:
+    """Type-tagged encoding keeping -0.0/bytes/tuple/IEEE distinct (C01/C06)."""
+    if value is None:
+        return ["n"]
+    if isinstance(value, bool):
+        return ["b", value]
+    if isinstance(value, int):
+        return ["i", value]
+    if isinstance(value, float):
+        return ["f", repr(value)]
+    if isinstance(value, str):
+        return ["s", value]
+    if isinstance(value, bytes):
+        return ["y", value.hex()]
+    if isinstance(value, tuple):
+        return ["t", [key_token(item) for item in value]]
+    if isinstance(value, list):
+        return ["l", [key_token(item) for item in value]]
+    if isinstance(value, Mapping):
+        items = sorted(value.items(), key=lambda kv: _canonical(key_token(kv[0])))
+        return ["d", [[key_token(k), key_token(v)] for k, v in items]]
+    raise TypeError(f'Object of type {type(value).__name__} is not JSON serializable')
+
+def group_key(row: Mapping[str, Any], fields: tuple[str, ...]) -> str:
+    return _canonical([key_token(row[field]) for field in fields])
+
+def group_key_values(raw):
+    """Recover the typed sort columns from a canonical finite join key."""
+    def value(token):
+        kind = token[0]
+        if kind == 'n':
+            return None
+        payload = token[1]
+        if kind in ('s', 'i', 'b'):
+            return payload
+        if kind == 'f':
+            return float(payload)
+        if kind == 'y':
+            return bytes.fromhex(payload)
+        if kind == 'l':
+            return [value(item) for item in payload]
+        if kind == 't':
+            return tuple(value(item) for item in payload)
+        if kind == 'd':
+            return {value(k): value(v) for k, v in payload}
+        raise DataflowError('CORRUPT_ARTIFACT', 'unknown tag in a finite join key')
+    return tuple(value(token) for token in json.loads(raw))

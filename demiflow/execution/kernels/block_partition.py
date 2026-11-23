@@ -7,7 +7,8 @@ from demiflow.execution.contracts.dataflow import clone_record
 import hashlib
 
 from ..contracts.dataflow import BlockPartition, Record
-from .dataflow import _err, _occurrence, _materialize_row, _group_key
+from demiflow.execution.kernels.dataflow import _err, _occurrence, _materialize_row
+from demiflow.operators.relational import group_key as _group_key
 
 
 def block_count(spec, *, rows, bounds):
@@ -57,7 +58,7 @@ def preserve_block(records, block):
 
 
 def block_identity(record):
-    from .dataflow import _canonical
+    from demiflow.execution.contracts.record_codec import canonical_record_json as _canonical
     tag = record.block_partition
     if tag is not None:
         return _canonical(['logical', tag.occurrence_id, tag.index])
@@ -67,7 +68,9 @@ def block_identity(record):
 
 def shuffled_block_layout(records, *, spec, services):
     """Bounded block metadata only; record payloads stay in their native spool."""
-    from .dataflow import _canonical, _seed, _shuffle_key_bytes
+    from demiflow.execution.contracts.record_codec import canonical_record_json as _canonical
+    from demiflow.execution.kernels.dataflow import _seed
+    from demiflow.operators.ordering import shuffle_key_bytes as _shuffle_key_bytes
     blocks = set()
     layouts = set()
     for record in records:

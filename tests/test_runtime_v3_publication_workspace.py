@@ -10,7 +10,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 def test_retained_python_rows_reject_before_the_next_decode_or_constructor(tmp_path, monkeypatch):
     import demiflow.execution.contracts.record_codec as frames
-    import demiflow.execution.batch_conversion as conversion
+    import demiflow.execution.outputs.batch_conversion as conversion
     original = frames.decode_document
     retained = []
     encoded = []

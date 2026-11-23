@@ -1,10 +1,8 @@
-"""Generic kernel dispatch and the shared bounded record helpers (lane K).
+"""Worker kernel invocation, scoped effects and bounded record assembly.
 
-K001 ``make_kernel`` is the single factory; K002/K003 are the pure row/batch
-compute entry points; K004 forwards input EOI to the owning kernel. The private
-helpers below are the file-owner assembly shared by the other four kernel
-modules; they implement the versioned business record codec, the fidelity
-preserving key encoding and the pre-allocation budget checks required by C06.
+The worker owns invocation positions, cancellation, state/observation callbacks
+and output record admission. Pure key and batch computation lives in operators;
+the versioned record encoding and conversion budgets live in contracts.
 
 Resource accounting: ``encoded_bytes`` is the byte length of the versioned
 data-only row codec (``application/vnd.demiflow.record.v3``). It bounds wire/spool size,
@@ -12,11 +10,12 @@ not process RSS; Arrow logical bytes and decoded Python objects are accounted
 separately where they coexist (see ``invoke_batch``).
 """
 from __future__ import annotations
+from demiflow.operators.arrow_batches import batch_to_rows as _batch_to_rows, batch_values as _batch_values, rows_to_batch as _rows_to_batch, single_row_batch as _single_row_batch
+from demiflow.operators.ordering import shuffle_key_bytes as _shuffle_key_bytes
+from demiflow.execution.contracts.record_codec import record_identity as _hash_id
 from demiflow.execution.contracts.dataflow import stage_resident_bytes
 
-import hashlib
 import json
-import pickle
 from collections.abc import Iterator, Mapping
 from typing import Any
 
@@ -34,20 +33,10 @@ from demiflow.execution.contracts.dataflow_kinds import kinds_with
 
 ROW_MEDIA_TYPE = "application/vnd.demiflow.record.v3"
 RECORD_MEDIA_TYPE = "application/x-demiflow-record-v1"
-SHUFFLE_DOMAIN = "demiflow-shuffle-v3"
+
 RECORD_DOMAIN = "dataflow-record-v3"
 
 _MISSING = object()
-
-
-def _canonical(value: Any) -> str:
-    return json.dumps(
-        thaw_record_value(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
-    )
-
-
-def _hash_id(parts: Any) -> str:
-    return hashlib.sha256(_canonical(parts).encode("utf-8")).hexdigest()
 
 
 def _err(code: str, message: str, **context: Any) -> DataflowError:
@@ -82,64 +71,6 @@ def _seed(spec: KernelSpec, services: RuntimeServices) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise _err("INVALID_CONTRACT", "a resolved integer seed is required")
     return value
-
-
-def _shuffle_key_bytes(record_id: str, *, seed: int, occurrence_id: str) -> bytes:
-    # Single versioned formula; ordering.shuffle_key is the public wrapper.
-    return hashlib.sha256(
-        _canonical([SHUFFLE_DOMAIN, seed, occurrence_id, record_id]).encode("utf-8")
-    ).digest()
-
-
-def _key_token(value: Any) -> Any:
-    """Type-tagged encoding keeping -0.0/bytes/tuple/IEEE distinct (C01/C06)."""
-    if value is None:
-        return ["n"]
-    if isinstance(value, bool):
-        return ["b", value]
-    if isinstance(value, int):
-        return ["i", value]
-    if isinstance(value, float):
-        return ["f", repr(value)]
-    if isinstance(value, str):
-        return ["s", value]
-    if isinstance(value, bytes):
-        return ["y", value.hex()]
-    if isinstance(value, tuple):
-        return ["t", [_key_token(item) for item in value]]
-    if isinstance(value, list):
-        return ["l", [_key_token(item) for item in value]]
-    if isinstance(value, Mapping):
-        items = sorted(value.items(), key=lambda kv: _canonical(_key_token(kv[0])))
-        return ["d", [[_key_token(k), _key_token(v)] for k, v in items]]
-    raise TypeError(f'Object of type {type(value).__name__} is not JSON serializable')
-
-
-def _group_key(row: Mapping[str, Any], fields: tuple[str, ...]) -> str:
-    return _canonical([_key_token(row[field]) for field in fields])
-
-
-def group_key_values(raw):
-    """Recover the typed sort columns from a canonical finite join key."""
-    def value(token):
-        kind = token[0]
-        if kind == 'n':
-            return None
-        payload = token[1]
-        if kind in ('s', 'i', 'b'):
-            return payload
-        if kind == 'f':
-            return float(payload)
-        if kind == 'y':
-            return bytes.fromhex(payload)
-        if kind == 'l':
-            return [value(item) for item in payload]
-        if kind == 't':
-            return tuple(value(item) for item in payload)
-        if kind == 'd':
-            return {value(k): value(v) for k, v in payload}
-        raise DataflowError('CORRUPT_ARTIFACT', 'unknown tag in a finite join key')
-    return tuple(value(token) for token in json.loads(raw))
 
 
 def _dumps_row(row: object, *, max_bytes: int) -> bytes:
@@ -250,31 +181,6 @@ class _OutputBudget:
         admitted = record.encoded_bytes if self._streaming else self._bytes
         if self._max_bytes > 0 and admitted > self._max_bytes:
             raise _err("BUDGET_EXCEEDED", "output byte budget exceeded", bytes=admitted)
-
-
-def _single_row_batch(
-    row: Mapping[str, Any], batch_format: str, services: RuntimeServices
-) -> tuple[Any, int]:
-    from demiflow.execution.batch_conversion import admit_batch_conversion
-    admit_batch_conversion([row], 'pandas' if batch_format == 'default' else batch_format,
-        schema=None, bounds=services.bounds)
-    if batch_format in ("default", "pandas"):
-        import pandas as pd
-
-        frame = pd.DataFrame([dict(row)])
-        return frame, int(frame.memory_usage(deep=True).sum())
-    if batch_format == "pyarrow":
-        import pyarrow as pa
-
-        table = pa.Table.from_pylist([dict(row)])
-        return table, table.nbytes
-    raise _err("UNSUPPORTED_CAPABILITY", "unknown batch_format", format=batch_format)
-
-
-def _batch_values(result: Any) -> list[Any]:
-    if hasattr(result, "to_pylist"):
-        return list(result.to_pylist())
-    return list(result)
 
 
 def _invoke_scoped(instance, value, records, spec):
@@ -490,7 +396,7 @@ def invoke_unary(
     elif kind == "AddColumnOp":
         column = _cfg(spec, "column")
         batch_format = cfg.get("batch_format", "default")
-        batch, extra = _single_row_batch(row, batch_format, services)
+        batch, extra = _single_row_batch(row, batch_format, services.bounds)
         if _input_row_bytes(record) + extra > services.bounds.max_batch_bytes:
             raise _err("BUDGET_EXCEEDED", "add_column batch coexistence exceeds budget")
         values = _batch_values(instance(batch))
@@ -509,82 +415,6 @@ def invoke_unary(
             yield record
     else:
         raise _err("INVALID_CONTRACT", "kind is not a unary kernel", kind=kind)
-
-
-def _rows_to_batch(
-    rows: list[dict[str, Any]], batch_format: str, services: RuntimeServices, *, schema=None
-) -> tuple[Any, int]:
-    from demiflow.execution.batch_conversion import admit_batch_conversion
-    admit_batch_conversion(rows, batch_format, schema=schema, bounds=services.bounds)
-    if batch_format in ("default", "numpy"):
-        import numpy as np
-        columns = rows[0].keys() if rows else ()
-        batch = {name: np.asarray([row[name] for row in rows]) for name in columns}
-        return batch, sum(v.nbytes for v in batch.values())
-    if batch_format == "pandas":
-        import pandas as pd
-
-        if schema is None:
-            frame = pd.DataFrame(rows)
-        else:
-            import pyarrow as pa
-            frame = pa.Table.from_pylist(rows, schema=schema).to_pandas()
-        return frame, int(frame.memory_usage(deep=True).sum())
-    if batch_format == "pyarrow":
-        import pyarrow as pa
-
-        table = pa.Table.from_pylist(rows, schema=schema)
-        return table, table.nbytes
-    raise _err("UNSUPPORTED_CAPABILITY", "unknown batch_format", format=batch_format)
-
-
-def _batch_to_rows(result: Any, batch_format: str, *, on_schema=None) -> Iterator[dict[str, Any]]:
-    if isinstance(result, (list, tuple)):
-        if on_schema is not None:
-            on_schema(None)
-        # Public map_batches accepts row lists for every input batch format.
-        # Iterator outputs remain a lazy stream of batches below.
-        for row in result:
-            if not isinstance(row, Mapping):
-                raise _err('INVALID_CONTRACT', 'batch row lists must contain mappings')
-            yield dict(row)
-    elif isinstance(result, Mapping):
-        if on_schema is not None:
-            on_schema(None)
-        lengths = {len(column) for column in result.values()}
-        if len(lengths) > 1:
-            raise _err("INVALID_CONTRACT", "batch columns must have equal lengths")
-        import numpy as np
-        def value(item):
-            return item.item() if isinstance(item, np.generic) else item.tolist() if isinstance(item, np.ndarray) else item
-        for i in range(next(iter(lengths), 0)):
-            yield {name: value(column[i]) for name, column in result.items()}
-    elif hasattr(result, "to_pylist"):
-        if on_schema is not None:
-            on_schema(result.schema)
-        for batch in result.to_batches(max_chunksize=1) if hasattr(result, 'to_batches') else (result,):
-            for index in range(batch.num_rows):
-                yield batch.slice(index, 1).to_pylist()[0]
-    elif hasattr(result, "iloc"):
-        if on_schema is not None:
-            import pyarrow as pa
-            on_schema(pa.Schema.from_pandas(result, preserve_index=False))
-        for index in range(len(result)):
-            yield result.iloc[index:index + 1].to_dict(orient='records')[0]
-    else:
-        iterator = iter(result)
-        try:
-            for row in iterator:
-                if batch_format == 'rows':
-                    if on_schema is not None:
-                        on_schema(None)
-                    yield dict(row)
-                else:
-                    yield from _batch_to_rows(row, batch_format, on_schema=on_schema)
-        finally:
-            close = getattr(iterator, 'close', None)
-            if close is not None:
-                close()
 
 
 def _callback_table(records, services, *, zero_copy):
@@ -776,7 +606,7 @@ def invoke_batch(
     if kind == "MapBatchesOp":
         batch_format = cfg.get("batch_format", "default")
         zero_copy = bool(cfg.get("zero_copy_batch", False))
-        batch, extra = _rows_to_batch(rows, batch_format, services, schema=schema)
+        batch, extra = _rows_to_batch(rows, batch_format, services.bounds, schema=schema)
         # Arrow/pandas cast keeps the source Python rows alive alongside the
         # converted buffers; admit both before invoking the callable (C06/V023).
         if input_bytes + extra > services.bounds.max_batch_bytes:
@@ -793,7 +623,7 @@ def invoke_batch(
             raise _err("BUDGET_EXCEEDED", "batch exceeds max_batch_bytes", bytes=input_bytes)
         if kind == "AddColumnOp":
             batch_format = cfg.get("batch_format", "default")
-            batch, extra = _rows_to_batch(rows, batch_format, services, schema=schema)
+            batch, extra = _rows_to_batch(rows, batch_format, services.bounds, schema=schema)
             if input_bytes + extra > services.bounds.max_batch_bytes:
                 raise _err("BUDGET_EXCEEDED", "add_column coexistence exceeds budget")
             values = _batch_values(instance(batch))

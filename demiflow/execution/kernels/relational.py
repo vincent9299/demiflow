@@ -27,7 +27,9 @@ from demiflow.execution.contracts.dataflow import (
     RuntimeServices,
 )
 
-from demiflow.execution.kernels.dataflow import RECORD_DOMAIN, _check_stop, _cfg, _err, _group_key, _hash_id, _loads_row, _dumps_row, _materialize_row, _occurrence, _output_record, _OutputBudget
+from demiflow.execution.kernels.dataflow import RECORD_DOMAIN, _check_stop, _cfg, _err, _loads_row, _dumps_row, _materialize_row, _occurrence, _output_record, _OutputBudget
+from demiflow.operators.relational import group_key as _group_key
+from demiflow.execution.contracts.record_codec import record_identity as _hash_id
 from demiflow.execution.kernels.ordering import build_sort_runs, merge_sort_runs
 
 

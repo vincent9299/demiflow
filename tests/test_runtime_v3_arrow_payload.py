@@ -293,7 +293,7 @@ def test_wide_parent_buffers_use_original_rows_within_narrow_window(tmp_path, mo
     rows = [{'id':i, 'payload':'z'*12000} for i in range(9)]
     lance.write_dataset(pa.Table.from_pylist(rows), uri)
     limits = {**LIMITS, 'max_row_bytes':65536, 'max_batch_bytes':131072}
-    from demiflow.execution import batch_conversion
+    from demiflow.execution.contracts import record_codec as batch_conversion
     admission = batch_conversion.admit_batch_conversion
     conversions = []
     def checked(batch, fmt, **kwargs):

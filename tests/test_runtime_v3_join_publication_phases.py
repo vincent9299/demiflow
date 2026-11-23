@@ -263,7 +263,8 @@ def test_writer_metadata_bounds_real_ipc_without_charging_a_fixed_64k():
     import io
     from dataclasses import replace
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
-    from demiflow.execution.batch_conversion import native_writer_workspace, admit_batch_conversion
+    from demiflow.execution.outputs.batch_conversion import native_writer_workspace
+    from demiflow.execution.contracts.record_codec import admit_batch_conversion
     _, bounds = resolve_runtime_policy({}, {}, provider='local')
     for schema, row in [
         (pa.schema([('n',pa.int64())]), {'n':1}),
@@ -287,7 +288,7 @@ def test_writer_metadata_bounds_real_ipc_without_charging_a_fixed_64k():
 def test_writer_metadata_covers_nested_variadic_view_buffers_before_construction():
     import io
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
-    from demiflow.execution.batch_conversion import admit_batch_conversion
+    from demiflow.execution.contracts.record_codec import admit_batch_conversion
     _,bounds=resolve_runtime_policy({}, {},provider='local')
     schema=pa.schema([('values',pa.list_(pa.binary_view()))])
     rows=[{'values':[b'x'*40000 for _ in range(200)]}]

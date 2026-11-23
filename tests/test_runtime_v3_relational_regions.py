@@ -248,7 +248,7 @@ def test_sort_subwindow_uses_original_store_and_closes_readers(tmp_path,monkeypa
 
 
 def test_group_after_left_join_keeps_composite_null_groups_and_typed_keys(tmp_path):
-    from demiflow.execution.kernels.dataflow import _group_key as group_key, group_key_values
+    from demiflow.operators.relational import group_key as group_key, group_key_values
 
     complex_key = {'x': [b'v', None], 'y': (-0.0, True, 1)}
     encoded = group_key({'a': complex_key, 'b': 'y'}, ('a', 'b')).encode()
@@ -336,7 +336,7 @@ def test_skewed_bucket_refuses_unbounded_native_sort_before_spawning(tmp_path, m
     import hashlib
     import lance
     import pyarrow as pa
-    from demiflow.execution.kernels.dataflow import _group_key as group_key
+    from demiflow.operators.relational import group_key as group_key
     from demiflow.execution.hosts import datafusion as host
     from _native_relational_fixtures import native_region_evidence
 

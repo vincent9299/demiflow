@@ -10,7 +10,8 @@ import struct
 from ...operators.relational import hash_join_pairs, merge_join_rows
 from ...operators.relational_sql import offset_join_query
 from .join_spool import _Spool, _Chain, _HEADER, _ID_BYTES, _NONE, _FANOUT
-from .dataflow import _check_stop, _err, _row_bytes, _output_record, _hash_id, RECORD_DOMAIN, _OutputBudget
+from demiflow.execution.kernels.dataflow import _check_stop, _err, _row_bytes, _output_record, RECORD_DOMAIN, _OutputBudget
+from demiflow.execution.contracts.record_codec import record_identity as _hash_id
 from .dataflow import _materialize_row as materialize_row
 
 _REF = struct.Struct('!qqIQ')
@@ -291,7 +292,7 @@ class RelationalRegionRuntime:
         from .relational import _group_sort_spec, reduce_ordered_groups, batch_ordered_groups, admit_reducer
         from .ordering import build_sort_runs, merge_sort_runs
         from .reducer_memory import sort_window
-        from .dataflow import _group_key as group_key, group_key_values
+        from demiflow.operators.relational import group_key as group_key, group_key_values
         keys = tuple(spec.configuration['on'])
         if spec.kind == 'reduce':
             admit_reducer(spec,self.services,join_depth=self.plan.join_depth)

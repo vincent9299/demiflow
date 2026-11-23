@@ -28,7 +28,8 @@ from demiflow.execution.contracts.dataflow import (
     TerminalResult,
 )
 
-from demiflow.execution.kernels.dataflow import _canonical, _check_stop, _cfg, _err, _materialize_row
+from demiflow.execution.contracts.record_codec import canonical_record_json as _canonical
+from demiflow.execution.kernels.dataflow import _check_stop, _cfg, _err, _materialize_row
 
 AGGREGATE_STATE_VERSION = "demiflow-aggregate-state-v3"
 AGGREGATE_STATE_MEDIA_TYPE = "application/x-demiflow-aggregate-state-v3"

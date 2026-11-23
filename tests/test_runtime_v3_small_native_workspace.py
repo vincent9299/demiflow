@@ -64,7 +64,7 @@ def test_real_small_native_publication_keeps_live_terminal_grant_and_original_re
 
 
 def test_same_40k_envelope_rejects_a_real_unfit_row_before_native_constructor(tmp_path,monkeypatch):
-    import demiflow.execution.batch_conversion as conversion
+    import demiflow.execution.outputs.batch_conversion as conversion
     launch = DataflowExecution._prepare_launch
     launched, constructed = [], []
     def launching(execution,lease,stage):

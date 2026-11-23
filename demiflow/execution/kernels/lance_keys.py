@@ -4,14 +4,15 @@ from demiflow.execution.contracts.dataflow import clone_record
 
 from ..contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.record_schema import RecordSchemas
-from .dataflow import _materialize_row, _output_record, _hash_id, _OutputBudget
+from demiflow.execution.kernels.dataflow import _materialize_row, _output_record, _OutputBudget
+from demiflow.execution.contracts.record_codec import record_identity as _hash_id
 from .ordering import build_sort_runs, merge_sort_runs
 
 
 def _sql_survivors(left, right, keys, services):
     from ...operators.relational_sql import exclusion_query
     from ..contracts.relational_region import KEY_SQL_SUFFIX, SQL_CHILD_RSS, selection_wire_bytes
-    from .dataflow import _group_key
+    from demiflow.operators.relational import group_key as _group_key
 
     if not any(s.stage_id.endswith(KEY_SQL_SUFFIX) for s in services.assignment.stages):
         return None

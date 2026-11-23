@@ -14,7 +14,7 @@ from demiflow.operators.relational import JOIN_PARTITION_BITS, JoinKeyFilter, ha
 
 from demiflow.execution.contracts.record_codec import _decode_record_document as decode_record_document, _encode_record_document as encode_record_document
 from demiflow.execution.kernels.dataflow import _check_stop, _err
-from demiflow.execution.kernels.dataflow import _group_key as group_key
+from demiflow.operators.relational import group_key as group_key
 from demiflow.execution.kernels.dataflow import _materialize_row as materialize_row
 
 # next offset, key digest prefix, key bytes, document bytes, sequence.

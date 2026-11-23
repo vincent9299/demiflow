@@ -238,6 +238,14 @@ def _method_pin(fn, code):
     # other instruction, constant (including the relative level) and operand
     # still enters code_record. This works with the caller's Python optimizer.
     if fn.__module__ == 'demiflow.data.dataset' and fn.__qualname__ in _DATASET_METHODS:
+        # A v3 class records each method body, not surrounding file contents.
+        # Its caller has already checked the class's actual method globals.
+        # Preserve that representation in each measured interpreter mode.
+        entry = LAYOUT_RELOCATIONS.get(fn.__module__ + '.' + fn.__qualname__)
+        if entry is not None:
+            variants = entry.get('optimization_variants', {}).get(str(sys.flags.optimize), {})
+            if code in variants:
+                return variants[code]
         current, published = _DATASET_METHODS[fn.__qualname__]
         return published if current == code else code
     if (fn.__module__ != 'demiflow.data.dataset' or fn.__name__ not in _RELATIONAL_METHODS

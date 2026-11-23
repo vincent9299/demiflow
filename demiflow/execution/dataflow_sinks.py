@@ -441,7 +441,8 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
         index_bytes = value
 
     def table():
-        from demiflow.execution.batch_conversion import admit_batch_conversion, native_arrow_table, native_writer_workspace
+        from demiflow.execution.contracts.record_codec import admit_batch_conversion
+        from demiflow.execution.outputs.batch_conversion import native_arrow_table, native_writer_workspace
         writer_window = []
         reserved = (held() - batch_resident + stream.buffered_bytes + (0 if publication_metadata else 65536)
                     if publication_workspace else 0)
@@ -467,7 +468,7 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
         if publication_workspace:
             # The cache already owns the retained parent. Writer copies
             # and the caller's previous yielded batch share this grant.
-            from demiflow.execution.batch_conversion import native_writer_workspace
+            from demiflow.execution.outputs.batch_conversion import native_writer_workspace
             overhead = native_writer_workspace(value.schema, bounds) if publication_metadata else 65536
             if publication_metadata:
                 overhead += sum(64*len(chunk.buffers()) for column in value.columns for chunk in column.chunks)
