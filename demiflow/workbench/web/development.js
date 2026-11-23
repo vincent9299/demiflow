@@ -218,11 +218,13 @@ SOFTWARE.
     let sidebarTab='sessions';
     const navigation=ForgeNavigation.header({title:'开发',searchLabel:'搜索会话',placeholder:'筛选会话、文件或大纲',onSearch:()=>{if(sidebarTab==='files'||sidebarTab==='operators')state.files?.setFilter(navigation.search.value);else if(!state.initializing)renderConversations();}});
     const sideTabs=el('div',undefined,'dev-sidebar-tabs');
-    const sessionsTabBtn=el('button','会话','dev-sidebar-tab is-active');sessionsTabBtn.type='button';sessionsTabBtn.setAttribute('aria-pressed','true');
-    const filesTabBtn=el('button',undefined,'dev-sidebar-tab');filesTabBtn.type='button';filesTabBtn.setAttribute('aria-pressed','false');
+    const tabSvg=paths=>{const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');for(const d of paths){const p=document.createElementNS(svg.namespaceURI,'path');p.setAttribute('d',d);svg.append(p);}return svg;};
+    const makeSideTab=(label,paths,active=false)=>{const b=el('button',undefined,'dev-sidebar-tab'+(active?' is-active':''));b.type='button';b.setAttribute('aria-label',label);b.setAttribute('aria-pressed',String(active));b.dataset.tooltip=label;b.title=label;b.append(tabSvg(paths));return b;};
+    const sessionsTabBtn=makeSideTab('会话',['M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'],true);
+    const filesTabBtn=makeSideTab('文件',['M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z']);
     const filesBadge=el('span','0','dev-change-badge');filesBadge.hidden=true;
-    filesTabBtn.append(el('span','文件'),filesBadge);
-    const operatorsTabBtn=el('button','大纲','dev-sidebar-tab');operatorsTabBtn.type='button';operatorsTabBtn.setAttribute('aria-pressed','false');
+    filesTabBtn.append(filesBadge);
+    const operatorsTabBtn=makeSideTab('大纲',['M8 6h13','M8 12h13','M8 18h13','M3 6h.01','M3 12h.01','M3 18h.01']);
     sideTabs.append(sessionsTabBtn,filesTabBtn,operatorsTabBtn);
     const sessionsPane=el('div',undefined,'dev-sidebar-pane'),filesPane=el('div',undefined,'dev-sidebar-pane'),operatorsPane=el('div',undefined,'dev-sidebar-pane');filesPane.hidden=true;operatorsPane.hidden=true;
     sideHeading.append(createNew);
