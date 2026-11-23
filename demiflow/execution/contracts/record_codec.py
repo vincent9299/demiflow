@@ -1919,3 +1919,8 @@ def admit_receive(size, bounds, *, resident_bytes=None, retained=0):
 
 def peer_chunk_bytes(bounds):
     return max(1, min(65536, bounds.max_row_bytes // 4))
+
+
+def encode_record(record: Record, bounds, *, resident_bytes=None, retained=0) -> bytes:
+    # Preserve the original no-newline helper contract and exact JSON bytes.
+    return encode_frame(record, bounds, resident_bytes=resident_bytes, retained=retained)[:-1]

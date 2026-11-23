@@ -72,7 +72,7 @@ def test_old_and_pending_native_state_roots_keep_nested_record_payload_schema_an
             'application/x-demiflow-kernel-image-v3')
         from demiflow.execution.commit import CommitCoordinator
         from demiflow.execution.recovery_contract import SourcePosition
-        from demiflow.execution.dataflow_sinks import _DataflowArtifactSink
+        from demiflow.execution.outputs.sinks import _DataflowArtifactSink
         sink=_DataflowArtifactSink(sink_id='test',store=store,action=port._action,
                                    bounds=port._bounds,configuration={})
         old = CommitCoordinator(port._action).commit(1,outputs={'test':(sink,{

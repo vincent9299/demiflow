@@ -311,7 +311,7 @@ def test_input_block_boundaries_and_history_match_pre_v3(override):
 
 def test_real_native_cut_commit_and_recovery_with_typed_sink_record(tmp_path):
     from demiflow.execution.contracts.dataflow import CutContribution, SourceCursor
-    from demiflow.execution.dataflow_sinks import make_sink_adapter, prepare_sink_partition
+    from demiflow.execution.outputs.sinks import make_sink_adapter, prepare_sink_partition
     from demiflow.execution.kernels.dataflow import _output_record
     with prepared(tmp_path, data.from_items([{"value": (b"a", [-0.0])}])) as (ex, services):
         runtime = reader_services(ex, services)

@@ -129,7 +129,8 @@ def test_combined_schema_conflict_rejected_and_legacy_missing_field_preserved():
     # publication or row execution is introduced by this store-boundary fixture.
     from test_runtime_v3_k import services
     from demiflow.execution.storage.record_schema import RecordSchemas
-    from demiflow.execution.dataflow_sinks import combine_prepared_sinks, _artifact_json, RECORDS_MEDIA, MANIFEST_MEDIA
+    from demiflow.execution.outputs.sinks import combine_prepared_sinks
+    from demiflow.execution.contracts.dataflow_codec import artifact_reference_fields as _artifact_json, RECORDS_MEDIA, MANIFEST_MEDIA
     from demiflow.execution.recovery_contract import document
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     svc = services()
@@ -146,9 +147,9 @@ def test_combined_schema_conflict_rejected_and_legacy_missing_field_preserved():
     left = manifest(0, pa.schema([('k', pa.int32())]))
     right = manifest(1, pa.schema([('k', pa.large_string())]))
     with pytest.raises(DataflowError, match='schema drifted'):
-        combine_prepared_sinks([left, right], sink_id='materialize', services=svc)
+        combine_prepared_sinks([left, right], sink_id='materialize', store=svc.store, bounds=svc.bounds)
     old = manifest(0, None)
-    combined = combine_prepared_sinks([old], sink_id='materialize', services=svc)
+    combined = combine_prepared_sinks([old], sink_id='materialize', store=svc.store, bounds=svc.bounds)
     assert 'schema_ref' not in combined
 
 

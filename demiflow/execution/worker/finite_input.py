@@ -22,7 +22,7 @@ import time
 
 
 
-from demiflow.execution.dataflow_sinks import _artifact_json
+from demiflow.execution.contracts.dataflow_codec import artifact_reference_fields as _artifact_json
 from demiflow.execution.recovery_contract import document
 
 

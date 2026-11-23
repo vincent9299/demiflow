@@ -188,7 +188,7 @@ def test_native_lance_row_trigger_counts_business_frontier_once(tmp_path, monkey
         with observed.open('a') as out:
             out.write(str(row['id'])+'\n')
         return row
-    from demiflow.execution.dataflow_sinks import NativeTerminalSink
+    from demiflow.execution.outputs.sinks import NativeTerminalSink
     original = NativeTerminalSink.prepare
     native = LanceSink.prepare
     preparation, native_preparation = [], []
@@ -216,7 +216,7 @@ def test_native_lance_row_trigger_counts_business_frontier_once(tmp_path, monkey
 
 
 def test_failed_original_prepare_cleans_workers_without_false_receipt(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_sinks import _DataflowArtifactSink
+    from demiflow.execution.outputs.sinks import _DataflowArtifactSink
     def fail(sink, *args, **kwargs):
         raise OSError('original sink preparation failed')
     monkeypatch.setattr(_DataflowArtifactSink, 'prepare', fail)

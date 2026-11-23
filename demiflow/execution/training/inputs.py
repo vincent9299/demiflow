@@ -6,7 +6,7 @@ from pathlib import Path
 from ..contracts.dataflow import thaw_record_value
 from ..contracts.dataflow_errors import DataflowError
 from ..contracts.training import FixedDatasetRef
-from ..dataflow_sinks import publication_blocks
+from demiflow.execution.outputs.sinks import publication_blocks
 from ..recovery_contract import identity
 from ...lance.storage import open_lance_dataset
 

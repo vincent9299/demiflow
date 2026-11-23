@@ -42,7 +42,7 @@ def _intent(run, action_id, spec):
 
 def _pause_native(tmp_path, monkeypatch, *, mode='create', fn=keep_row):
     """Fault after sealing, before any commit; capture real native identity."""
-    from demiflow.execution import dataflow_sinks
+    from demiflow.execution.outputs import sinks as dataflow_sinks
     spec = LanceWriteSpec(str(tmp_path / 'out.lance'), mode=mode,
                          on=('value',) if mode == 'merge' else ())
     captured = {}

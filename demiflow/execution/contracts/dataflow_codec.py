@@ -10,6 +10,13 @@ output is allocated. Identity formulas (IDENTITY.md) live here exactly once:
 """
 from __future__ import annotations
 
+RECORDS_MEDIA = "application/x-demiflow-records-v3"
+MANIFEST_MEDIA = "application/x-demiflow-sink-manifest-v3"
+PUBLICATION_MEDIA = "application/x-demiflow-sink-publication-v3"
+_MANIFEST_SCHEMA = "demiflow.dataflow_sink_manifest.v3"
+_COMBINED_SCHEMA = "demiflow.dataflow_sink_combined.v3"
+_PUBLICATION_SCHEMA = "demiflow.dataflow_sink_publication.v3"
+
 from demiflow.execution.contracts.dataflow_errors import DataflowError as _err
 _JSON_MEDIA = "application/json"
 RUN_STORE_ID = "run"
@@ -1304,3 +1311,32 @@ def history_reference_list(value):
     if type(value) is not list:
         raise _err("INVALID_CONTRACT", "sealed reference sequence is not a list")
     return value
+
+
+def decode_sink_reference(value) -> ArtifactRef:
+    if type(value) is not dict or set(value) != {
+            "digest", "size_bytes", "store_id", "key", "media_type"}:
+        raise DataflowError("CORRUPT_ARTIFACT", "Invalid artifact reference in sink manifest")
+    return ArtifactRef(digest=value["digest"], size_bytes=value["size_bytes"],
+                       store_id=value["store_id"], key=value["key"],
+                       media_type=value["media_type"])
+
+def validate_sink_reference(ref, *, what: str) -> None:
+    if not isinstance(ref, ArtifactRef):
+        raise DataflowError("INVALID_CONTRACT", what + " must be a durable ArtifactRef")
+    if (type(ref.digest) is not str or len(ref.digest) != 64
+            or any(c not in "0123456789abcdef" for c in ref.digest)):
+        raise DataflowError("INVALID_CONTRACT", what + " has an invalid digest")
+    if type(ref.key) is not str or not ref.key or ".." in ref.key.split("/"):
+        raise DataflowError("INVALID_CONTRACT", what + " has an invalid store key")
+    if type(ref.size_bytes) is not int or ref.size_bytes < 0:
+        raise DataflowError("INVALID_CONTRACT", what + " has an invalid size")
+
+def sink_non_mapping_values(manifest):
+    flag = manifest.get('non_mapping_values', False)
+    if type(flag) is not bool:
+        raise DataflowError('CORRUPT_ARTIFACT', 'Sink non_mapping_values must be a boolean')
+    if flag and (not manifest['rows'] or manifest['columns'] is not None
+                 or manifest.get('schema_ref') is not None):
+        raise DataflowError('CORRUPT_ARTIFACT', 'Sink non_mapping_values contradicts its table metadata')
+    return flag

@@ -599,14 +599,14 @@ class DataflowExecution:
         from demiflow.execution.scheduler.dataflow_publication_budget import PublicationReservation, with_publication_workspace
         publication_reservation = PublicationReservation(graph, physical.stages, physical.bounds,
             declared=physical.residency.control_reserved_bytes)
-        from ..dataflow_sinks import make_sink_adapter
+        from demiflow.execution.outputs.sinks import make_sink_adapter
         for node in graph.nodes:
             if node.kind == "terminal":
                 if node.kernel.kind == "fixed_dataset":
                     self._sinks[node.kernel.configuration['sink_id']] = make_sink_adapter(
                         node.kernel, services=self._services)
                 elif self._request.kind in ("write_lance", "write_datasink", "write_file"):
-                    from ..dataflow_sinks import make_native_terminal_sink
+                    from demiflow.execution.outputs.sinks import make_native_terminal_sink
                     self._sinks[node.kernel.kind] = make_native_terminal_sink(
                         with_publication_workspace(node.kernel, publication_reservation.bytes),
                         request=self._request, services=self._services,

@@ -156,7 +156,8 @@ def terminal_schema(graph, physical, *, terminal, bounds):
 
 def result_schema_ref(result, *, services):
     """Read type metadata from the original committed result publication."""
-    from .dataflow_sinks import _read_json, PUBLICATION_MEDIA, _artifact_from_json
+    from demiflow.execution.storage.reading import read_sink_json as _read_json
+    from demiflow.execution.contracts.dataflow_codec import PUBLICATION_MEDIA, decode_sink_reference as _artifact_from_json
     if result.result_ref is None:
         return None
     publication = _read_json(services.store, result.result_ref,

@@ -60,7 +60,7 @@ def test_native_codec_targets_fit_one_original_incremental_component():
 def test_native_publication_is_separate_from_workers_and_must_be_sealed():
     from types import SimpleNamespace
     from demiflow.execution.scheduler.dataflow_publication_budget import graph_workspace_bytes, workspace_bytes
-    from demiflow.execution.dataflow_sinks import make_native_terminal_sink
+    from demiflow.execution.outputs.sinks import make_native_terminal_sink
     policy, bounds = resolve_runtime_policy({}, {}, provider='local')
     action = replace(request(data.from_items([{'id': 1}])), kind='write_lance')
     graph = lower_action(action, bounds=bounds).graph

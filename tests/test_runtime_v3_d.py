@@ -12,6 +12,7 @@ this worktree. V018: the D004 crash matrix truly kills a child process at native
 fault points and reconciles in a fresh process. No GPU/multi-host/PostgreSQL claims.
 """
 from __future__ import annotations
+from demiflow.execution.checkpoint.coordinator import ack_source_claims
 
 import hashlib
 import json
@@ -552,7 +553,7 @@ from demiflow.execution.contracts.dataflow_codec import (  # noqa: E402
 )
 from demiflow.execution.contracts.dataflow_errors import DataflowError  # noqa: E402
 from demiflow.execution.checkpoint import coordinator as ckpt  # noqa: E402
-from demiflow.execution import dataflow_sinks as sinks  # noqa: E402
+from demiflow.execution.outputs import sinks  # noqa: E402
 from demiflow.execution.seal import plan as seal  # noqa: E402
 from demiflow.execution import commit as commit_module  # noqa: E402
 from demiflow.execution.recovery_contract import (  # noqa: E402
@@ -1019,7 +1020,7 @@ def test_d005(env):
     bad = RecoveryImage(commit_id=image.commit_id, cut=image.cut, contributions=image.contributions,
                         confirmed_sinks={"ghost": image.confirmed_sinks[SINK_ID]},
                         source_vector=image.source_vector)
-    _code_error(lambda: sinks.ack_source_claims(bad, action=env.action), "UNKNOWN_EFFECT")
+    _code_error(lambda: ack_source_claims(bad, action=env.action), "UNKNOWN_EFFECT")
 
 
 # --- D006 -------------------------------------------------------------------
@@ -1156,20 +1157,20 @@ def test_d010(env):
     services = driver_services(env.action, physical, env.store)
     ref0 = prepare_partition(env.action, physical, env.store, "p0", [{"x": 1}])
     ref1 = prepare_partition(env.action, physical, env.store, "p1", [{"x": 2}])
-    combined = sinks.combine_prepared_sinks((ref0, ref1), sink_id=SINK_ID, services=services)
+    combined = sinks.combine_prepared_sinks((ref0, ref1), sink_id=SINK_ID, store=services.store, bounds=services.bounds)
     assert combined["total_rows"] == 2
     assert [p["partition_id"] for p in combined["partitions"]] == ["p0", "p1"]
     # two workers submitting one partition is refused
     dup = prepare_partition(env.action, physical, env.store, "p0", [{"x": 3}])
-    _code_error(lambda: sinks.combine_prepared_sinks((ref0, dup), sink_id=SINK_ID, services=services),
+    _code_error(lambda: sinks.combine_prepared_sinks((ref0, dup), sink_id=SINK_ID, store=services.store, bounds=services.bounds),
                 "INVALID_CONTRACT")
     # schema drift refused
     drift = prepare_partition(env.action, physical, env.store, "p1", [{"y": 2}])
-    _code_error(lambda: sinks.combine_prepared_sinks((ref0, drift), sink_id=SINK_ID, services=services),
+    _code_error(lambda: sinks.combine_prepared_sinks((ref0, drift), sink_id=SINK_ID, store=services.store, bounds=services.bounds),
                 "SOURCE_CHANGED")
     # empty partition still records completion
     empty = prepare_partition(env.action, physical, env.store, "p1", [])
-    combined2 = sinks.combine_prepared_sinks((ref0, empty), sink_id=SINK_ID, services=services)
+    combined2 = sinks.combine_prepared_sinks((ref0, empty), sink_id=SINK_ID, store=services.store, bounds=services.bounds)
     assert combined2["total_rows"] == 1
     assert any(p["partition_id"] == "p1" and p["rows"] == 0 for p in combined2["partitions"])
 
@@ -1187,14 +1188,14 @@ def test_d011(env):
         coord.contribute(contribution(cut, compute_participant_id("stage-0", "p1"), sink_ref=ref1))
         image = coord.commit(cut.cut_id, sinks={SINK_ID: make_adapter(env.action, physical, env.store)})
         # response-lost retry is idempotent (verify-only, no second ACK)
-        sinks.ack_source_claims(image, action=env.action)
-        sinks.ack_source_claims(image, action=env.action)
+        ack_source_claims(image, action=env.action)
+        ack_source_claims(image, action=env.action)
         fact = env.run.journal.execution_commit(image.commit_id)
         assert fact["status"] == "acked"
         # an image whose commit is not acked cannot advance the frontier
         pending = RecoveryImage(commit_id=identity(["no-commit"]), cut=cut, contributions=(),
                                 confirmed_sinks={}, source_vector=image.source_vector)
-        _code_error(lambda: sinks.ack_source_claims(pending, action=env.action), "INVALID_CONTRACT")
+        _code_error(lambda: ack_source_claims(pending, action=env.action), "INVALID_CONTRACT")
     finally:
         coord.close()
 

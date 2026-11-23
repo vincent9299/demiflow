@@ -107,7 +107,7 @@ def test_tiny_legal_row_uses_original_inline_when_reference_frame_does_not_fit(t
     from demiflow.data.sources import LanceSource
     from demiflow.lance.model import LanceScanSpec
     from demiflow.execution.sources.source_readers import LanceReader
-    from demiflow.execution.dataflow_sinks import _encode_record
+    from demiflow.execution.contracts.record_codec import encode_record as _encode_record
     uri = str(tmp_path/'source.lance')
     lance.write_dataset(pa.table({'x':[1,2]}), uri)
     store, bounds = FakeStore(), make_bounds(max_row_bytes=600, max_batch_bytes=2*1024**2)
@@ -435,7 +435,7 @@ def test_real_committed_cut_inside_arrow_batch_resumes_once(tmp_path, monkeypatc
 
 def test_real_store_sha_failure_precedes_native_publication(tmp_path, monkeypatch):
     import json
-    from demiflow.execution import dataflow_sinks
+    from demiflow.execution.outputs import sinks as dataflow_sinks
     from demiflow.execution.storage.segments import block_chunks
     from demiflow.execution.storage.streams import _ChunkStream
     from demiflow.execution.contracts.record_codec import _decode_record_document

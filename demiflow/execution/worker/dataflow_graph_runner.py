@@ -22,7 +22,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.record_codec import _encode_record_document, _decode_record_document
 from demiflow.execution.exchange.dataflow_channels import reserve_credit, _route_record_document, snapshot_channels
 from demiflow.execution.exchange.dataflow_transport import PeerBuffers, read_peer, read_peer_many, MAX_PEER_BATCH, peer_batch_limit
-from demiflow.execution.dataflow_sinks import _artifact_json, _encode_record, _manifest_non_mapping_values, RECORDS_MEDIA, MANIFEST_MEDIA
+from demiflow.execution.contracts.dataflow_codec import artifact_reference_fields as _artifact_json, sink_non_mapping_values as _manifest_non_mapping_values, RECORDS_MEDIA, MANIFEST_MEDIA
 from demiflow.execution.recovery_contract import document
 from demiflow.execution.contracts.record_codec import encode_document, decode_document, document_limit, frame_parts, decode_frame, line_limit, read_chunk_bytes
 from demiflow.execution.contracts.record_codec import admit_receive
@@ -210,7 +210,7 @@ class WorkerGraphRunner:
         image = self.e._restore_image
         if image is None or self._terminal_spec is None:
             return
-        from demiflow.execution.dataflow_sinks import _artifact_from_json
+        from demiflow.execution.contracts.dataflow_codec import decode_sink_reference as _artifact_from_json
         for contribution in image.contributions:
             if contribution.participant_id not in self.e._participant_ids():
                 continue

@@ -9,7 +9,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.staging import DriverArtifactPort
 from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.contracts import record_codec as frames
-from demiflow.execution import dataflow_sinks as sinks
+from demiflow.execution.outputs import sinks
 from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.resources.contracts import ResourceProfile
 
@@ -76,7 +76,7 @@ def test_bounded_sink_table_consistency_drift_and_mixed_values(tmp_path):
             same, _ = stage('p1', [{'x': 2}])
             empty, _ = stage('p-empty', [])
             assert first_manifest['columns'] == ['x']
-            consistent = sinks.combine_prepared_sinks((first, same, empty), sink_id=SINK_ID, services=driver)
+            consistent = sinks.combine_prepared_sinks((first, same, empty), sink_id=SINK_ID, store=driver.store, bounds=driver.bounds)
             assert consistent['columns'] == ['x'] and consistent['total_rows'] == 2
 
             different, _ = stage('p2', [{'y': 3}])
@@ -86,19 +86,19 @@ def test_bounded_sink_table_consistency_drift_and_mixed_values(tmp_path):
             for refs in ((first, different), (different, first),
                          (first, different, unknown), (unknown, different, first)):
                 with pytest.raises(DataflowError, match='SOURCE_CHANGED.*schema drifted'):
-                    sinks.combine_prepared_sinks(refs, sink_id=SINK_ID, services=driver)
+                    sinks.combine_prepared_sinks(refs, sink_id=SINK_ID, store=driver.store, bounds=driver.bounds)
 
             value, value_manifest = stage('p3', [['a', 'b']])
             assert value_manifest['columns'] is None
             assert value_manifest['non_mapping_values'] is True
             for refs in ((first, different, value), (value, different, first)):
-                mixed = sinks.combine_prepared_sinks(refs, sink_id=SINK_ID, services=driver)
+                mixed = sinks.combine_prepared_sinks(refs, sink_id=SINK_ID, store=driver.store, bounds=driver.bounds)
                 assert mixed['columns'] is None and 'schema_ref' not in mixed
                 assert mixed['total_rows'] == 3
             mixed_ref, mixed_manifest = stage('p4', [{'x': 1}, ['a', 'b'], {'y': 2}])
             assert mixed_manifest['columns'] is None
             assert mixed_manifest['non_mapping_values'] is True
-            combined = sinks.combine_prepared_sinks((first, mixed_ref), sink_id=SINK_ID, services=driver)
+            combined = sinks.combine_prepared_sinks((first, mixed_ref), sink_id=SINK_ID, store=driver.store, bounds=driver.bounds)
             assert combined['columns'] is None and 'schema_ref' not in combined
             assert combined['total_rows'] == 4
             from test_runtime_v3_small_terminal_metadata import owner
@@ -125,7 +125,7 @@ def test_bounded_sink_table_consistency_drift_and_mixed_values(tmp_path):
                 invalid = store.put(iter((raw,)), max_bytes=budget.max_control_bytes,
                     media_type=sinks.MANIFEST_MEDIA)
                 with pytest.raises(DataflowError, match='CORRUPT_ARTIFACT.*non_mapping_values'):
-                    sinks.combine_prepared_sinks((first, different, invalid), sink_id=SINK_ID, services=driver)
+                    sinks.combine_prepared_sinks((first, different, invalid), sink_id=SINK_ID, store=driver.store, bounds=driver.bounds)
                 runner = restored(invalid)
                 try:
                     with pytest.raises(DataflowError, match='CORRUPT_ARTIFACT.*non_mapping_values'):

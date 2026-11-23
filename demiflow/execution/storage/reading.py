@@ -1,6 +1,10 @@
 """Bounded, authenticated JSON carriers for sealed plans and recovery history."""
 from __future__ import annotations
 
+from demiflow.execution.contracts.dataflow import ArtifactRef
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.dataflow_codec import validate_sink_reference as _validate_ref
+
 import hashlib
 import json
 from pathlib import Path
@@ -79,3 +83,16 @@ def read_json_artifact(store, ref, *, max_bytes):
     if type(value) is not dict:
         raise _err("INVALID_CONTRACT", "artifact is not a JSON object")
     return value
+
+
+def read_sink_json(store, ref: ArtifactRef, *, max_bytes: int, media_type: str):
+    _validate_ref(ref, what="sink artifact")
+    if ref.media_type != media_type:
+        raise DataflowError("INVALID_CONTRACT", "Sink artifact media type differs")
+    raw = b"".join(store.read(ref, max_bytes=max_bytes))
+    if len(raw) > max_bytes:
+        raise DataflowError("BUDGET_EXCEEDED", "Sink artifact exceeds read budget")
+    try:
+        return json.loads(raw)
+    except ValueError as exc:
+        raise DataflowError("CORRUPT_ARTIFACT", "Sink artifact is not valid JSON") from exc

@@ -183,7 +183,7 @@ def test_impossible_batch_rejects_before_scratch_read(tmp_path, monkeypatch, bat
 def test_exact_original_document_limit_plus_newline_remains_legal(tmp_path):
     from types import SimpleNamespace
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.dataflow_sinks import _encode_record
+    from demiflow.execution.contracts.record_codec import encode_record as _encode_record
     from demiflow.execution.worker.terminal_blocks import TerminalBlocks
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_c import bounds, make

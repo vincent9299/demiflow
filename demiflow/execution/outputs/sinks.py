@@ -1,60 +1,19 @@
-"""Durable sink assembly and bounded staging for the unified dataflow runtime (D).
-
-Worker-side ``prepare_sink_partition`` only stages owned, content-addressed data
-and a small reconcilable manifest; it holds no global publication right. The
-driver-side ``make_sink_adapter`` assembles a native four-method durable sink and
-``combine_prepared_sinks`` folds per-partition manifests into one bounded combined
-manifest without pulling row data to the driver. Publication itself flows through
-the single native ``CommitCoordinator`` (D004); ``ack_source_claims`` only verifies
-the native finalize fact and never issues a second ACK (C08/C16).
-"""
+"""Sinks implementation."""
 from __future__ import annotations
-from demiflow.execution.contracts.dataflow import stage_resident_bytes
 
 import hashlib
 import json
 from collections.abc import Mapping
-
 from demiflow.data.datasink import Datasink, WriteContext
-from demiflow.execution.contracts.dataflow import FIXED_SCAN_BATCHES, ArtifactRef, DriverServices, KernelSpec, Record, RecoveryImage, RuntimeServices
+from demiflow.execution.contracts.dataflow import FIXED_SCAN_BATCHES, ArtifactRef, DriverServices, KernelSpec, Record, RuntimeServices, stage_resident_bytes
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identifier, identity
-from demiflow.execution.run_context import RunAction
 from demiflow.execution.storage.state_artifacts import atomic_bytes
-
-RECORDS_MEDIA = "application/x-demiflow-records-v3"
-MANIFEST_MEDIA = "application/x-demiflow-sink-manifest-v3"
-PUBLICATION_MEDIA = "application/x-demiflow-sink-publication-v3"
-_MANIFEST_SCHEMA = "demiflow.dataflow_sink_manifest.v3"
-_COMBINED_SCHEMA = "demiflow.dataflow_sink_combined.v3"
-_PUBLICATION_SCHEMA = "demiflow.dataflow_sink_publication.v3"
+from demiflow.execution.contracts.record_codec import encode_record as _encode_record
+from demiflow.execution.storage.reading import read_sink_json as _read_json
+from demiflow.execution.contracts.dataflow_codec import artifact_reference_fields as _artifact_json, decode_sink_reference as _artifact_from_json, sink_non_mapping_values as _manifest_non_mapping_values
+from demiflow.execution.contracts.dataflow_codec import RECORDS_MEDIA, MANIFEST_MEDIA, PUBLICATION_MEDIA, _MANIFEST_SCHEMA, _COMBINED_SCHEMA, _PUBLICATION_SCHEMA
 _DURABLE_METHODS = ("prepare", "commit", "inspect", "abort")
-
-
-def _artifact_json(ref: ArtifactRef) -> dict:
-    return {"digest": ref.digest, "size_bytes": ref.size_bytes,
-            "store_id": ref.store_id, "key": ref.key, "media_type": ref.media_type}
-
-
-def _artifact_from_json(value) -> ArtifactRef:
-    if type(value) is not dict or set(value) != {
-            "digest", "size_bytes", "store_id", "key", "media_type"}:
-        raise DataflowError("CORRUPT_ARTIFACT", "Invalid artifact reference in sink manifest")
-    return ArtifactRef(digest=value["digest"], size_bytes=value["size_bytes"],
-                       store_id=value["store_id"], key=value["key"],
-                       media_type=value["media_type"])
-
-
-def _validate_ref(ref, *, what: str) -> None:
-    if not isinstance(ref, ArtifactRef):
-        raise DataflowError("INVALID_CONTRACT", what + " must be a durable ArtifactRef")
-    if (type(ref.digest) is not str or len(ref.digest) != 64
-            or any(c not in "0123456789abcdef" for c in ref.digest)):
-        raise DataflowError("INVALID_CONTRACT", what + " has an invalid digest")
-    if type(ref.key) is not str or not ref.key or ".." in ref.key.split("/"):
-        raise DataflowError("INVALID_CONTRACT", what + " has an invalid store key")
-    if type(ref.size_bytes) is not int or ref.size_bytes < 0:
-        raise DataflowError("INVALID_CONTRACT", what + " has an invalid size")
 
 
 def _require_durable(sink) -> None:
@@ -68,21 +27,6 @@ def _require_durable(sink) -> None:
             raise DataflowError("INVALID_CONTRACT",
                                 "Sink lacks native durable " + method + "; legacy write is not recoverable")
 
-
-def _read_json(store, ref: ArtifactRef, *, max_bytes: int, media_type: str):
-    _validate_ref(ref, what="sink artifact")
-    if ref.media_type != media_type:
-        raise DataflowError("INVALID_CONTRACT", "Sink artifact media type differs")
-    raw = b"".join(store.read(ref, max_bytes=max_bytes))
-    if len(raw) > max_bytes:
-        raise DataflowError("BUDGET_EXCEEDED", "Sink artifact exceeds read budget")
-    try:
-        return json.loads(raw)
-    except ValueError as exc:
-        raise DataflowError("CORRUPT_ARTIFACT", "Sink artifact is not valid JSON") from exc
-
-
-# -- D008 -----------------------------------------------------------------
 def make_sink_adapter(spec: KernelSpec, *, services: DriverServices) -> Datasink:
     if not isinstance(spec, KernelSpec):
         raise DataflowError("INVALID_CONTRACT", "make_sink_adapter requires a KernelSpec")
@@ -108,7 +52,6 @@ def make_sink_adapter(spec: KernelSpec, *, services: DriverServices) -> Datasink
     return _DataflowArtifactSink(sink_id=sink_id, store=services.store,
                                  action=services.action, bounds=services.bounds,
                                  configuration=pure)
-
 
 class _DataflowArtifactSink(Datasink):
     """The default v3 durable terminal sink: confirmed output is a store artifact.
@@ -228,8 +171,6 @@ class _DataflowArtifactSink(Datasink):
             for ref in tree_refs(self._store, _artifact_from_json(partition["data_ref"]), self._bounds):
                 self._store.release(ref, owner=context.commit_id)
 
-
-# -- D009 -----------------------------------------------------------------
 def _partition_id(spec: KernelSpec, services: RuntimeServices) -> str:
     lease = services.assignment.lease
     configured = spec.configuration.get("partition_id")
@@ -240,23 +181,6 @@ def _partition_id(spec: KernelSpec, services: RuntimeServices) -> str:
     if len(lease.partition_ids) == 1:
         return lease.partition_ids[0]
     raise DataflowError("INVALID_CONTRACT", "Sink partition id is ambiguous for this lease")
-
-
-def _encode_record(record: Record, bounds, *, services=None, retained=0) -> bytes:
-    from demiflow.execution.contracts.record_codec import encode_frame
-    # Preserve the original no-newline helper contract and exact JSON bytes.
-    return encode_frame(record, bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained)[:-1]
-
-
-def _manifest_non_mapping_values(manifest):
-    flag = manifest.get('non_mapping_values', False)
-    if type(flag) is not bool:
-        raise DataflowError('CORRUPT_ARTIFACT', 'Sink non_mapping_values must be a boolean')
-    if flag and (not manifest['rows'] or manifest['columns'] is not None
-                 or manifest.get('schema_ref') is not None):
-        raise DataflowError('CORRUPT_ARTIFACT', 'Sink non_mapping_values contradicts its table metadata')
-    return flag
-
 
 def prepare_sink_partition(records, *, spec: KernelSpec, services: RuntimeServices) -> ArtifactRef:
     if not isinstance(spec, KernelSpec):
@@ -273,7 +197,7 @@ def prepare_sink_partition(records, *, spec: KernelSpec, services: RuntimeServic
         services.check_stop()
         if not isinstance(record, Record):
             raise DataflowError("INVALID_CONTRACT", "Sink staging requires Record values")
-        encoded = _encode_record(record, bounds, services=services, retained=total + 64 * len(chunks))
+        encoded = _encode_record(record, bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=total + 64 * len(chunks))
         rows += 1
         total += len(encoded) + 1
         if rows > bounds.max_output_rows:
@@ -295,18 +219,14 @@ def prepare_sink_partition(records, *, spec: KernelSpec, services: RuntimeServic
     raw = document(manifest, bounds.max_control_bytes)
     return store.put(iter([raw]), max_bytes=bounds.max_control_bytes, media_type=MANIFEST_MEDIA)
 
-
-# -- D010 -----------------------------------------------------------------
-def combine_prepared_sinks(refs, *, sink_id: str, services: DriverServices):
+def combine_prepared_sinks(refs, *, sink_id: str, store, bounds):
     identifier(sink_id)
-    bounds = services.bounds
-    store = services.store
     if len(refs) > bounds.max_partitions:
         raise DataflowError("BUDGET_EXCEEDED", "Prepared sink partition count exceeds budget")
     partitions, seen = {}, set()
     total_rows, total_bytes, columns = 0, 0, None
     from demiflow.execution.storage.record_schema import RecordSchemas
-    schemas = RecordSchemas(services)
+    schemas = RecordSchemas(store=store, bounds=bounds)
     schema_ref, declared_schema = None, None
     non_mapping_values = column_drift = schema_drift = False
     for ref in refs:
@@ -370,31 +290,6 @@ def combine_prepared_sinks(refs, *, sink_id: str, services: DriverServices):
         combined['schema_ref'] = _artifact_json(schema_ref)
     document(combined, bounds.max_control_bytes)
     return combined
-
-
-# -- D011 -----------------------------------------------------------------
-def ack_source_claims(image: RecoveryImage, *, action: RunAction) -> None:
-    """Verify the native finalize fact is acked; never issue a second ACK (C16).
-
-    The atomic queue settlement belongs to the native C16 service. This only
-    reconciles the image against the single native commit fact and advances the
-    confirmed frontier read-only, so a lost response retried here is idempotent.
-    """
-    if not isinstance(image, RecoveryImage):
-        raise DataflowError("INVALID_CONTRACT", "ack_source_claims requires a RecoveryImage")
-    from demiflow.execution.checkpoint.coordinator import source_vector_position
-    journal = action.context.journal
-    fact = journal.execution_commit(image.commit_id)
-    if fact is None or fact["action_id"] != action.action_id:
-        raise DataflowError("INVALID_CONTRACT", "Recovery image is not a commit of this action")
-    if fact["status"] != "acked":
-        raise DataflowError("UNKNOWN_EFFECT", "Native finalize fact is not acked; cannot advance frontier")
-    for sink_id in image.confirmed_sinks:
-        if sink_id not in fact["receipts"]:
-            raise DataflowError("UNKNOWN_EFFECT", "Confirmed sink has no native receipt; not ACKed")
-    position = source_vector_position(image, action_id=action.action_id)
-    if fact["intent"]["position"] != position.to_dict():
-        raise DataflowError("SOURCE_CHANGED", "Confirmed source frontier differs from the committed position")
 
 def publication_blocks(manifest, *, store, bounds, batch_rows, publication_workspace,
                        publication_metadata, declared_schema=None, fixed_scan_batches=False):
@@ -636,7 +531,6 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
     finally:
         arrow.close()
 
-
 class NativeTerminalSink(_DataflowArtifactSink):
     """Bind a published result manifest and a native destination to one commit.
 
@@ -748,7 +642,6 @@ class NativeTerminalSink(_DataflowArtifactSink):
             self.native.abort(prepared['native'], context)
         super().abort(prepared, context)
 
-
 def make_native_terminal_sink(spec, *, request, services, publication_reserved_bytes=None, admit_publication=None):
     from demiflow.execution.scheduler.dataflow_publication_budget import workspace_bytes
     workspace = workspace_bytes(spec.configuration)
@@ -837,37 +730,17 @@ def make_native_terminal_sink(spec, *, request, services, publication_reserved_b
         action=services.action, bounds=services.bounds, configuration=dict(spec.configuration))
 
 
-def inspect_native_write_receipt(journal, action_id):
-    """Project a v3 native publication without starting code or changing history."""
-    from demiflow.execution.publication_facts import observation_action, commit_write_context
+def inspect_native_publication(native_action, prepared, *, store, bounds, make_context):
+    """Inspect the original terminal target and composite receipt without selecting history."""
     from demiflow.execution.outputs.lance_sink import LanceSink, spec_from_identity
-    from demiflow.execution.seal.sealed_plans import sealed_read_bounds
-    from demiflow.execution.storage.objects import readonly_run_store
-    from demiflow.execution.seal.plan import load_dataflow
-    binding = journal.recovery_identity()
-    action = journal.execution_action(action_id)
-    facts = journal.execution_commits(action_id)
-    if binding is None or action is None or not facts:
-        return None
-    fact = facts[-1]
-    if fact['prepared'] is None or fact['intent']['sinks'] != ['write_lance']:
-        return None
-    seal = journal.source_binding(action_id + '-dataflow-sealed')
-    if seal is None:
-        return None
-    bounds = sealed_read_bounds()
-    store = readonly_run_store(journal.directory, store_id=seal['physical_ref']['store_id'], bounds=bounds)
-    graph, physical, _ = load_dataflow(journal.directory, action_id, store=store, bounds=bounds, _reader=journal)
-    native_action = observation_action(journal, action_id, action['declaration'], binding)
-    native = LanceSink(native_action, spec_from_identity(action['declaration']['sink']))
+    native = LanceSink(native_action, spec_from_identity(native_action.declaration['sink']))
     sink = NativeTerminalSink(native=native, sink_id='write_lance', store=store,
-        action=native_action, bounds=physical.bounds, configuration={})
-    prepared = fact['prepared']['sinks']['write_lance']
+        action=native_action, bounds=bounds, configuration={})
     composite = type(prepared) is dict and {'objects', 'rows'} <= set(prepared)
     if composite:
         from demiflow.execution.outputs.object_sink import ObjectRowsSink
         sink = ObjectRowsSink.for_inspection(native_action, sink, prepared)
-    receipt = sink.inspect(prepared, commit_write_context(native_action, fact['commit_id']))
+    receipt = sink.inspect(prepared, make_context())
     if receipt is None:
         return None
     data = receipt['data']['rows'] if composite else receipt['data']

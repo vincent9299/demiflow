@@ -36,7 +36,7 @@ class NestedCounter:
 def test_upstream_continues_before_commit_and_snapshot_is_detached(tmp_path, monkeypatch):
     import time
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_sinks import _artifact_from_json
+    from demiflow.execution.contracts.dataflow_codec import decode_sink_reference as _artifact_from_json
     from demiflow.execution.contracts import state_codec
 
     marker = tmp_path / 'upstream-8'
@@ -260,7 +260,7 @@ class ObservedCounter:
 def test_direct_lance_prepares_before_source_finishes_and_publishes_once(tmp_path, monkeypatch):
     import lance
     from demiflow.execution.outputs.lance_sink import LanceSink
-    from demiflow.execution.dataflow_sinks import _DataflowArtifactSink
+    from demiflow.execution.outputs.sinks import _DataflowArtifactSink
     from demiflow.execution.contracts.dataflow import ArtifactRef
     progress = tmp_path/'actual-worker-count'
     original = _DataflowArtifactSink.prepare
@@ -319,7 +319,7 @@ def test_temporary_release_rejects_live_files_and_stale_fence(tmp_path):
 
 def test_enospc_does_not_confirm_checkpoint_or_return_partial_result(tmp_path, monkeypatch):
     import errno
-    import demiflow.execution.dataflow_sinks as sinks
+    import demiflow.execution.outputs.sinks as sinks
     original = sinks.atomic_bytes
     def fail(path, raw):
         if '/dataflow-sinks/materialize/.receipts/' in str(path):
@@ -341,7 +341,7 @@ def test_enospc_does_not_confirm_checkpoint_or_return_partial_result(tmp_path, m
 
 def test_checkpoint_deadline_fails_and_drains_publication_thread(tmp_path, monkeypatch):
     import time
-    from demiflow.execution.dataflow_sinks import _DataflowArtifactSink
+    from demiflow.execution.outputs.sinks import _DataflowArtifactSink
     original = _DataflowArtifactSink.commit
     completed = []
     def slow(sink, prepared, context):

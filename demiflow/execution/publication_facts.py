@@ -91,7 +91,7 @@ def inspect_write_receipt(journal, action_id):
         return None
     facts = journal.execution_commits(action_id)
     if facts and facts[-1]['intent']['sinks'] == ['write_lance']:
-        from .dataflow_sinks import inspect_native_write_receipt
+        from demiflow.execution.journal.publication_facts import inspect_native_write_receipt
         return inspect_native_write_receipt(journal, action_id)
     if not facts or facts[-1]['prepared'] is None or facts[-1]['intent']['sinks'] != ['lance']:
         return None

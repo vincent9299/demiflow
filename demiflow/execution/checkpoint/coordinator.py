@@ -329,7 +329,7 @@ class DataflowCheckpointCoordinator:
                 raise DataflowError('CORRUPT_ARTIFACT', 'Cut model digest differs from original action binding')
 
     def commit(self, cut_id: str, *, sinks, native_queue_state=None, model_bindings=None) -> RecoveryImage:
-        from demiflow.execution.dataflow_sinks import ack_source_claims, combine_prepared_sinks
+        from demiflow.execution.outputs.sinks import combine_prepared_sinks
         with self._lock:
             self._check_open()
             pending = self._pending.get(cut_id)
@@ -382,7 +382,7 @@ class DataflowCheckpointCoordinator:
                 sink_contributions = (contributions if self._physical.jobs or pending.residency is not None and
                     pending.residency.get('schema') in ('demiflow.durable_residency.v1', 'demiflow.durable_residency.v2') else fresh)
                 refs = tuple(c.sinks[sink_id] for c in sink_contributions if sink_id in c.sinks)
-                manifest = combine_prepared_sinks(refs, sink_id=sink_id, services=self._driver_services())
+                manifest = combine_prepared_sinks(refs, sink_id=sink_id, store=self._store, bounds=self._physical.bounds)
                 outputs[sink_id] = (sink, {**manifest, "final": request.final})
             if not outputs:
                 raise DataflowError("INVALID_CONTRACT", "A commit requires at least one sink")
@@ -417,18 +417,10 @@ class DataflowCheckpointCoordinator:
             self._last_image = image
             return image
 
-    def _driver_services(self):
-        # combine_prepared_sinks only needs the driver store; build the minimal
-        # frozen service view without re-deriving any authority.
-        from demiflow.execution.contracts.dataflow import DriverServices
-        return DriverServices(action=self._action, journal_service=None, store=self._store,
-                              resources=None, policy=self._physical.policy,
-                              bounds=self._physical.bounds, hosts=(),
-                              clock_ms=lambda: 0)
+
 
     # -- D005 -------------------------------------------------------------
     def recover(self, *, sinks) -> RecoveryImage | None:
-        from demiflow.execution.dataflow_sinks import ack_source_claims
         with self._lock:
             self._check_open()
             journal = self._action.context.journal
@@ -589,3 +581,26 @@ def source_vector_position(image: RecoveryImage, *, action_id: str) -> SourcePos
         seen.add(cursor.split_id)
     source_id = identity(["dataflow-vector", action_id])
     return SourcePosition(source_id=source_id, next_ordinal=image.cut.sequence)
+
+
+def ack_source_claims(image: RecoveryImage, *, action: RunAction) -> None:
+    """Verify the native finalize fact is acked; never issue a second ACK (C16).
+
+    The atomic queue settlement belongs to the native C16 service. This only
+    reconciles the image against the single native commit fact and advances the
+    confirmed frontier read-only, so a lost response retried here is idempotent.
+    """
+    if not isinstance(image, RecoveryImage):
+        raise DataflowError("INVALID_CONTRACT", "ack_source_claims requires a RecoveryImage")
+    journal = action.context.journal
+    fact = journal.execution_commit(image.commit_id)
+    if fact is None or fact["action_id"] != action.action_id:
+        raise DataflowError("INVALID_CONTRACT", "Recovery image is not a commit of this action")
+    if fact["status"] != "acked":
+        raise DataflowError("UNKNOWN_EFFECT", "Native finalize fact is not acked; cannot advance frontier")
+    for sink_id in image.confirmed_sinks:
+        if sink_id not in fact["receipts"]:
+            raise DataflowError("UNKNOWN_EFFECT", "Confirmed sink has no native receipt; not ACKed")
+    position = source_vector_position(image, action_id=action.action_id)
+    if fact["intent"]["position"] != position.to_dict():
+        raise DataflowError("SOURCE_CHANGED", "Confirmed source frontier differs from the committed position")
