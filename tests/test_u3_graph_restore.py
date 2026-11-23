@@ -98,7 +98,7 @@ def test_graph_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
         return {**row, "x": row["x"] * 2}
 
     spec, readers, n = _graph_spec(shared_double, n=24, cut_rows=8)
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=1)
     limits = {"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
               "checkpoint_interval_ms": 60000}
     # The ancestor dies mid-graph; the driver run exits failed. Recovery re-enters
@@ -164,7 +164,7 @@ def test_completed_graph_short_circuits_reentry(tmp_path):
         return {**row, "x": row["x"] * 2}
 
     spec, readers, n = _graph_spec(shared_double, n=12, cut_rows=6)
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=1)
     limits = {"checkpoint_unconfirmed_rows": 6, "checkpoint_interval_ms": 60000}
     # The graph completes, then a later action fails so the run exits failed with
     # the graph result durable. Resuming re-enters the same completed action.
@@ -211,7 +211,7 @@ def test_graph_restore_across_exchange_modes(tmp_path, mode):
         return {**row, "x": row["x"] * 2}
 
     spec, readers, n = _graph_spec(shared_double, n=24, cut_rows=8, mode=mode)
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=1)
     limits = {"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
               "checkpoint_interval_ms": 60000}
     with pytest.raises((RecoveryContractError, OSError, DataflowError)) as failure:

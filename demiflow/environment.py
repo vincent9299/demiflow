@@ -314,6 +314,8 @@ class RowEnvironment:
             raise ValueError('Environment resources exceed max_context_chars')
         self.declaration = declaration
         self.resources = deepcopy(resources)
+        from .collect.client_scope import ClientScope
+        self._clients = ClientScope()
         self._actors = {}
         self._started_actors = set()
         self._actor_lock = asyncio.Lock()
@@ -335,16 +337,21 @@ class RowEnvironment:
                 stop = getattr(actor, 'astop', None)
                 if stop is not None:
                     import inspect
-                    result = stop()
-                    if inspect.isawaitable(result):
-                        await result
+                    with self._clients.active():
+                        result = stop()
+                        if inspect.isawaitable(result):
+                            await result
             except Exception as error:
                 errors.append(error)
             try:
-                await lifecycle.close(action_cleanups=False)
+                await lifecycle.close()
             except Exception as error:
                 errors.append(error)
         self._actors.clear()
+        try:
+            await self._clients.close()
+        except Exception as error:
+            errors.append(error)
         if errors:
             raise ExceptionGroup('Operator actor cleanup failed', errors)
 
@@ -378,13 +385,14 @@ class RowEnvironment:
         except (ValueError, KeyError, TypeError) as exc:
             raise OperatorCallError('invalid_arguments', str(exc)) from exc
         # One dispatcher for all methods; arguments and native results are unchanged.
-        async with asyncio.timeout(self.declaration.timeout_s):
-            if 'actor' in api:
-                function = await self._actor(api, function)
-            if api['execution'] == 'async':
-                return await function(*bound.args, **bound.kwargs)
-            from functools import partial
-            return await _journal_io(partial(function, *bound.args, **bound.kwargs))
+        with self._clients.active():
+            async with asyncio.timeout(self.declaration.timeout_s):
+                if 'actor' in api:
+                    function = await self._actor(api, function)
+                if api['execution'] == 'async':
+                    return await function(*bound.args, **bound.kwargs)
+                from functools import partial
+                return await _journal_io(partial(function, *bound.args, **bound.kwargs))
 
 
 def _trace(turns, observations):

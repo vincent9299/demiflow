@@ -13,7 +13,7 @@ from demiflow.execution.executors.local import LocalDatasetExecutor
 
 @pytest.fixture
 def data():
-    executor = LocalDatasetExecutor(workers=1, block_size=2, materialize_memory_limit=128)
+    executor = LocalDatasetExecutor(workers=1, block_size=2)
     try:
         yield DataAPI(executor)
     finally:

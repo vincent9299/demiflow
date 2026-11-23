@@ -103,7 +103,7 @@ def test_empty_reset_excludes_writer(tmp_path):
 def test_materialized_release_invalidates_aliases_and_keeps_other_cache(tmp_path):
     from demiflow.data.api import DataAPI
     from demiflow.execution.executors.local import LocalDatasetExecutor
-    executor = LocalDatasetExecutor(materialize_memory_limit=1)
+    executor = LocalDatasetExecutor()
     api = DataAPI(executor=executor)
     first = api.from_items([{'value': 'a' * 1000}]).materialize()
     alias = first.map(lambda row: row)
@@ -140,13 +140,6 @@ def test_sort_pool_failure_does_not_repeat_input(tmp_path, monkeypatch):
     actual = list(rel.sorted_rows(rows(), ['k'], tmp_path, 8*1024*1024, workers=2))
     assert len(seen) == len(actual) == 50
     assert [k for k, _ in actual] == sorted(k for k, _ in actual)
-
-
-def test_sort_workers_override(monkeypatch):
-    from demiflow.execution.executors.local import LocalDatasetExecutor
-    monkeypatch.setenv('DEMIFLOW_LOCAL_SORT_WORKERS', '1')
-    assert LocalDatasetExecutor(workers=8)._sort_workers == 1
-    assert LocalDatasetExecutor(workers=8, sort_workers=2)._sort_workers == 2
 
 
 def test_isolated_stage_returns_or_propagates():

@@ -28,9 +28,8 @@ class RayDatasetExecutor(DatasetExecutor):
     PROVIDER = "ray_core"
 
     def __init__(
-        self, *, aggregate_state_max_bytes: int = 8 * 1024 * 1024,
+        self, *,
         resource_root=None, planning_policy=None, candidate_execution=None,
-        unified_chain: bool = False, unified_graph: bool = False,
         workers: int | None = None, native_resources=None,
     ) -> None:
         if workers is not None and (type(workers) is not int or workers < 1):
@@ -38,18 +37,12 @@ class RayDatasetExecutor(DatasetExecutor):
         from ..native_resources import parse_native_resources
         self._workers = workers
         self._native_resources = parse_native_resources(native_resources)
-        self._aggregate_state_max_bytes = max(1, int(aggregate_state_max_bytes))
         self.resource_root = Path(resource_root or ".").resolve()
         self._planning_policy = planning_policy or parse_platform_planning_policy(None)
         self._candidate_execution = candidate_execution
-        # Legacy unified switches are compatibility validation only; they never
-        # select a separate execution engine (I01/I02).
-        self._unified_chain = bool(unified_chain)
-        self._unified_graph = bool(unified_graph)
         self._policy, self._bounds = resolve_runtime_policy(
             {}, {}, provider=self.PROVIDER,
         )
-        self._prompt_coordinators: dict[str, Any] = {}
         self._hosted_scopes: list[Any] = []
         self._last_metadata: ExecutionMetadata | None = None
         self._run_ref = None

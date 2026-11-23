@@ -170,8 +170,7 @@ def _assert_capture_resume_code_pin(tmp_path, monkeypatch, form, owner_factory):
         with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
             with RunContext.start(root, limits=LIMITS) as run:
                 reference = run.ref
-                with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                          unified_chain=True):
+                with data.local_execution(workers=1, worker_mode="process", partitions=1):
                     pipeline().materialize().take_all()
         assert_worker_killed(marker, root)
         assert_released(root)
@@ -184,8 +183,7 @@ def _assert_capture_resume_code_pin(tmp_path, monkeypatch, form, owner_factory):
         pre = [f for f in run.journal.execution_commits(materialize_action_id(run))
                if f["status"] == "acked"]
         assert pre
-        with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="process", partitions=1):
             rows = control_pipeline().materialize().take_all()
         assert rows == [{"input": i, "value": i + 1} for i in range(8)]
         after = {f["commit_id"]: f for f in run.journal.execution_commits(materialize_action_id(run))}
@@ -199,8 +197,7 @@ def _assert_capture_resume_code_pin(tmp_path, monkeypatch, form, owner_factory):
     importlib.reload(sys.modules[helper])
     with pytest.raises((RecoveryContractError, DataflowError), match="code") as excinfo:
         with RunContext.resume(reference):
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 pipeline().materialize().take_all()
     if isinstance(excinfo.value, DataflowError):
         assert excinfo.value.code == "INVALID_CONTRACT"
@@ -270,8 +267,7 @@ def test_g2_closure_clean_run_succeeds(tmp_path, monkeypatch, form):
     rows_in = [{"x": i} for i in range(8)]
     root = tmp_path / "run"
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             rows = (data.from_items(rows_in).map_async(transform, concurrency=1)
                     .materialize().take_all())
     assert {r["input"]: r["value"] for r in rows} == {i: i + 1 for i in range(8)}

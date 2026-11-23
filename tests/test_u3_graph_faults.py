@@ -113,7 +113,7 @@ def test_consumer_crash_recovers_whole_graph_exactly_once(tmp_path):
 
     spec, readers, n = _spec({"c0": crashing_target, "c1": None},
                              n=24, cut_rows=8)
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=1)
     limits = {"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
               "checkpoint_interval_ms": 60000}
     with pytest.raises((RecoveryContractError, OSError, DataflowError)) as failure:

@@ -128,7 +128,7 @@ def test_colocated_prefix_resumes_original_source_cursor_and_sealed_layout(tmp_p
         if not image.cut.final:
             raise Interrupted()
         return image
-    executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS)
     with monkeypatch.context() as patch:
         patch.setattr(DataflowCheckpointCoordinator, 'commit', interrupt)
         with pytest.raises(Interrupted):
@@ -148,7 +148,7 @@ def test_colocated_prefix_resumes_original_source_cursor_and_sealed_layout(tmp_p
     def no_recompile(*args, **kwargs):
         raise AssertionError('resume must use its original sealed placement')
     monkeypatch.setattr(dataflow, 'compile_physical_dataflow', no_recompile)
-    executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS)
     with RunContext.resume(reference) as resumed:
         with resumed.action({'kind': 'materialize', 'fixture': 'shared-prefix-restore'}) as action:
             result = executor.materialize_graph(spec)
@@ -166,7 +166,7 @@ def test_range_prefix_uses_original_reader_and_exact_committed_rows(tmp_path):
     spec, readers, count = _graph_spec(n=8, cut_rows=4, readers=('c0', 'c1'))
     spec['source'] = RangeSource(count)
     spec['ancestor']['plan'] = _stream_map(lambda row: {'x': row['id'] * 2})
-    executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS)
     with RunContext.start(tmp_path/'run', limits={'memory_bytes': HISTORICAL_MEMORY,
             'checkpoint_rows': 4, 'checkpoint_unconfirmed_rows': 4,
             'checkpoint_interval_ms': 60000}) as run:

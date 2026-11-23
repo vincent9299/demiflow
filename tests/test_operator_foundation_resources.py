@@ -13,27 +13,16 @@ from demiflow.forge.schema import ForgeError
 from demiflow.forge.project_bindings import resolve_flow_resources
 
 
-def test_materialization_spill_budget_preserves_other_live_handles(tmp_path, monkeypatch):
-    monkeypatch.setattr('tempfile.tempdir', str(tmp_path))
-    executor = LocalDatasetExecutor(workers=1, block_size=1, materialize_memory_limit=1)
-    row = {'payload': 'x' * 128}
-    size = len(pickle.dumps(row, protocol=pickle.HIGHEST_PROTOCOL))
-    existing = executor._materialize_blocks(None, lambda append: append(row))
-    paths = set(executor._spill_paths)
-    context = CheckedExecution(nodes=[], edges=[], actions=[], operators=[], source_root=tmp_path,
-        limits={**DEFAULT_LIMITS, 'max_scratch_bytes': size * 2}, record=lambda *a: None, check_stop=lambda: None)
-    try:
-        with pytest.raises(RuntimeContractError, match='spill reservation'):
-            with context.bind_context():
-                executor._materialize_blocks(None, lambda append: [append(row) for _ in range(3)])
-        assert set(executor._spill_paths) == paths
-        assert executor._spill_bytes == size
-        assert set(str(p) for p in tmp_path.glob('demiflow-block-*')) == paths
-        assert pickle.loads(Path(next(iter(paths))).read_bytes()) == row
-        executor.release(MaterializedSource(existing))
-        assert executor._spill_bytes == 0 and not executor._spill_paths
-    finally:
-        executor.close()
+def test_releasing_one_result_keeps_the_other_readable(tmp_path):
+    from demiflow import data
+    from demiflow.execution import RunContext
+
+    with RunContext.start(tmp_path / 'run'):
+        first = data.from_items([{'value': 1}]).materialize()
+        second = data.from_items([{'value': 2}]).materialize()
+        first.release()
+        assert second.take_all() == [{'value': 2}]
+        second.release()
 
 
 def test_resource_closure_applies_to_ledgers_and_parameter_collisions(tmp_path):

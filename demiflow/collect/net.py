@@ -31,6 +31,8 @@ from typing import AsyncIterator, Optional
 
 import httpx
 
+from .client_scope import ClientPool
+
 
 @dataclass(frozen=True)
 class SourceLimits:
@@ -177,11 +179,11 @@ def gate_stalls(max_age: float = 0.0) -> dict:
         held = [(t.get_name() if t else "?", round(now - ts, 1))
                 for t, ts in gate._held.items() if now - ts >= max_age]
         if held:
-            out[src] = held
+            out.setdefault(src, []).extend(held)
     return out
 
 
-_gates: dict[str, SourceGate] = {}
+_gates = ClientPool()
 
 # 下载闸默认兜底（2026-09-07，聚合源架构）：dl: 键来自动态上游引擎名
 # （searxng 聚合层的清单 source），不可穷举枚举——未登记的下载源回落
@@ -197,8 +199,7 @@ def gate_for(source: str) -> SourceGate:
     检索源未登记直接报错（严格制）；dl: 下载源未登记回落
     DEFAULT_DL_LIMITS 并告警一次（动态上游名语义）。
     """
-    gate = _gates.get(source)
-    if gate is None:
+    def create():
         limits = SOURCE_LIMITS.get(source)
         if limits is None:
             if source.startswith("dl:"):
@@ -210,18 +211,19 @@ def gate_for(source: str) -> SourceGate:
                 limits = DEFAULT_DL_LIMITS
             else:
                 raise ValueError(f"源 {source!r} 未在限速表 SOURCE_LIMITS 登记")
-        gate = _gates[source] = SourceGate(limits)
-    return gate
+        return SourceGate(limits)
+    return _gates.get(source, create)
 
 
 # ---------------------------------------------------------------------------
 # 带限速与分类重试的 HTTP 请求
 # ---------------------------------------------------------------------------
 
-_client_direct: Optional[httpx.AsyncClient] = None
-_client_proxy: Optional[httpx.AsyncClient] = None
-_dl_client_direct: Optional[httpx.AsyncClient] = None
-_dl_client_proxy: Optional[httpx.AsyncClient] = None
+async def _close_stream_pool(client):
+    await client.aclose()
+
+
+_clients = ClientPool(_close_stream_pool)
 
 # 下载专用池参数（2026-09-11 夜航回退：kb 配图线 fleet 多机出现半读连接
 # 停摆签名（CLOSE-WAIT 带 Recv-Q 未读字节、全链静默），按 get_download_client
@@ -257,20 +259,10 @@ def get_client(source: str = "") -> httpx.AsyncClient:
     injected = _INJECTED["proxy" if (lim and lim.proxy) else "direct"]
     if injected is not None:
         return injected
-    global _client_direct, _client_proxy
-    no_keepalive = httpx.Limits(max_keepalive_connections=0)
-    need_proxy = bool(lim and lim.proxy)
-    if need_proxy:
-        if _client_proxy is None:
-            _client_proxy = httpx.AsyncClient(
-                timeout=DEFAULT_TIMEOUT, follow_redirects=True,
-                proxy=PROXY_URL, limits=no_keepalive)
-        return _client_proxy
-    if _client_direct is None:
-        _client_direct = httpx.AsyncClient(
-            timeout=DEFAULT_TIMEOUT, follow_redirects=True,
-            limits=no_keepalive)
-    return _client_direct
+    proxy = bool(lim and lim.proxy)
+    return _clients.get(('request', proxy), lambda: httpx.AsyncClient(
+        timeout=DEFAULT_TIMEOUT, follow_redirects=True, proxy=PROXY_URL if proxy else None,
+        limits=httpx.Limits(max_keepalive_connections=0)))
 
 
 def get_download_client(source: str) -> httpx.AsyncClient:
@@ -291,19 +283,11 @@ def get_download_client(source: str) -> httpx.AsyncClient:
     injected = _INJECTED["dl_proxy" if (lim and lim.proxy) else "dl_direct"]
     if injected is not None:
         return injected
-    global _dl_client_direct, _dl_client_proxy
-    need_proxy = bool(lim and lim.proxy)
-    if need_proxy:
-        if _dl_client_proxy is None:
-            _dl_client_proxy = httpx.AsyncClient(
-                timeout=DEFAULT_TIMEOUT, follow_redirects=True,
-                proxy=PROXY_URL, limits=DOWNLOAD_LIMITS)
-        return _dl_client_proxy
-    if _dl_client_direct is None:
-        _dl_client_direct = httpx.AsyncClient(
-            timeout=DEFAULT_TIMEOUT, follow_redirects=True,
-            limits=DOWNLOAD_LIMITS)
-    return _dl_client_direct
+    proxy = bool(lim and lim.proxy)
+    return _clients.get(('download', proxy), lambda: httpx.AsyncClient(
+        timeout=DEFAULT_TIMEOUT, follow_redirects=True, proxy=PROXY_URL if proxy else None,
+        limits=DOWNLOAD_LIMITS))
+
 
 
 # 冒烟注入层（2026-09-06）：优先于惰性池构建，且不被 run_stream 退出期
@@ -329,12 +313,8 @@ def reset_injected_clients() -> None:
 
 
 async def close_client() -> None:
-    global _client_direct, _client_proxy, _dl_client_direct, _dl_client_proxy
-    for _c in (_client_direct, _client_proxy, _dl_client_direct, _dl_client_proxy):
-        if _c is not None:
-            await _c.aclose()
-    _client_direct = _client_proxy = None
-    _dl_client_direct = _dl_client_proxy = None
+    await _clients.close_unscoped()
+    await _gates.close_unscoped()
 
 
 async def request(
@@ -458,14 +438,3 @@ async def stream(
         yield resp
     finally:
         await resp.aclose()
-
-
-async def _close_stream_pool():
-    try:
-        await close_client()
-    finally:
-        _gates.clear()
-
-
-from ..execution.resource_registry import register_stream_cleanup as _register_cleanup
-_register_cleanup('collect.net', _close_stream_pool)

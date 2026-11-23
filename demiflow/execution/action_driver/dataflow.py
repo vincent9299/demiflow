@@ -52,7 +52,7 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bounds) -> ActionHandle:
+def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bounds, after_prepare=None) -> ActionHandle:
     from ..plan_capture import current_capture
     capture = current_capture()
     if capture is not None:
@@ -62,6 +62,8 @@ def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bou
     try:
         if not execution.read_materialized_count():
             execution.prepare()
+            if after_prepare is not None:
+                after_prepare()
             execution.start()
         return open_terminal(request, execution=execution)
     except BaseException as failure:

@@ -104,7 +104,7 @@ receipt = run_isolated(terminal_stage, fixed_source_ref, timeout_s=600)
 
 需要可靠清空一个重阶段的 Python/Arrow 原生分配时，使用 `run_isolated`，传固定路径/版本，返回小回执。子进程退出释放其内存；超时/异常不自动重放写入。该边界不会继承父进程的 monkeypatch/未持久配置，也不代替 cgroup 内存规划。
 
-Local 可设 `LocalDatasetExecutor(sort_workers=1)` 或 `DEMIFLOW_LOCAL_SORT_WORKERS=1`。兼容 TODO 原拼写 `DEMIWFLOW_LOCAL_SORT_WORKERS`，标准拼写优先。外排进程池出现 `BrokenProcessPool` 后仅重做已编码块的纯排序/归并；不重新遍历上游、不重放模型/用户回调，后续任务转单进程。其他数据异常正常传播。
+Local 的公开 Dataset 动作通过统一执行入口。并行度由运行策略、调度器和实际取得的资源决定。
 
 宽行物化、按字节 spill、宽载荷偏移归并、Lance scanner 预读开关，以及部分列 merge/显式增列、Codex 文件交付保持已有语义。此次回归包含这些功能，但没有把既有实现重复记为新功能；真实 GPU、Codex 图像工具、生产峰值 RSS 仍需对应环境验收。
 

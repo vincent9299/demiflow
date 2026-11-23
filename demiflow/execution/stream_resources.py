@@ -1,6 +1,6 @@
 """Action-scoped lifecycle and observations for native streaming Dataset nodes."""
 import inspect
-from .request_limits import ObservedQueue, LatencySummary
+from .request_limits import LatencySummary
 
 
 class CallMetrics:
@@ -30,99 +30,48 @@ class CallMetrics:
 
 
 class StreamResources:
-    def __init__(self, actors, queue_factory=None):
+    def __init__(self, actors):
         self.actors = list(dict((id(a),a) for a in actors).values())
         resources = [r for a in self.actors for r in getattr(a,'resources',())]
         self.resources = list(dict((id(r),r) for r in resources).values())
-        self.queues = []; self.queue_factory = queue_factory
-        self.started = []
+        from ..collect.client_scope import ClientScope
+        self.clients = ClientScope()
         targets = [a.uri for a in self.actors if getattr(a,'is_stream_sink',False)]
         if len(set(targets)) != len(targets): raise ValueError('Duplicate save_lance target in stream')
         names = [a.stage for a in self.actors if getattr(a,'is_stream_sink',False)]
         if len(set(names)) != len(names): raise ValueError('Duplicate save_lance stage name')
 
-    def make_queue(self, depth, *, max_bytes=None, max_item_bytes=None):
-        from .run_context import current_run
-        from .recovery_contract import RecoveryContractError
-        run = current_run()
-        if run is None:
-            raise RecoveryContractError('Native bounded queues require a run context')
-        if self.queue_factory is not None:
-            raise RecoveryContractError('Execution requires native byte-bounded queues; custom transports need their adapter')
-        if type(depth) is not int or not 1 <= depth <= 256:
-            raise RecoveryContractError('Stream queue depth exceeds admission budget')
-        maximum = max_item_bytes if max_item_bytes is not None else run.limits['max_row_bytes']
-        total = max_bytes if max_bytes is not None else depth * maximum
-        q = ObservedQueue(depth, max_item_bytes=maximum, max_bytes=total)
-        self.queues.append(q)
-        return q
-
     async def prepare(self):
-        from ..collect.search_contract import is_native_search_actor
-        searches = {id(actor) for actor in self.actors if is_native_search_actor(actor)}
-        if searches:
-            from .dataflow_search_runtime import SearchEffects
-            from .queue_producer import QueueProducer
-            from .run_context import current_action
-            producer = next((a for a in self.actors if type(a) is QueueProducer), None)
-        gates={id(gate):gate for actor in self.actors
-               if (gate:=getattr(getattr(actor,'_runtime',None),'request_gate',None)) is not None}
-        for gate in gates.values():
-            reset=getattr(gate,'begin_action',None)
-            if reset is not None: reset()
-        for actor in self.actors:
-            begin = getattr(actor, 'astart', None)
-            if begin is not None:
-                self.started.append(actor)
-                from .checked import current
-                checked = current()
-                completed = False
-                try:
-                    if id(actor) in searches:
-                        effects = SearchEffects.for_actor(current_action(), actor, actor.node_id, producer=producer)
-                        actor.bind_search_effects(effects)
-                    await begin()
-                    completed = True
-                finally:
-                    if checked is not None:
-                        checked.actor_lifecycle(actor, 'started', completed)
+        with self.clients.active():
+            from ..collect.search_contract import is_native_search_actor
+            searches = {id(actor) for actor in self.actors if is_native_search_actor(actor)}
+            if searches:
+                from .dataflow_search_runtime import SearchEffects
+                from .queue_producer import QueueProducer
+                from .run_context import current_action
+                producer = next((a for a in self.actors if type(a) is QueueProducer), None)
+            gates={id(gate):gate for actor in self.actors
+                   if (gate:=getattr(getattr(actor,'_runtime',None),'request_gate',None)) is not None}
+            for gate in gates.values():
+                reset=getattr(gate,'begin_action',None)
+                if reset is not None: reset()
+            for actor in self.actors:
+                begin = getattr(actor, 'astart', None)
+                if begin is not None:
+                    from .checked import current
+                    checked = current()
+                    completed = False
+                    try:
+                        if id(actor) in searches:
+                            effects = SearchEffects.for_actor(current_action(), actor, actor.node_id, producer=producer)
+                            actor.bind_search_effects(effects)
+                        await begin()
+                        completed = True
+                    finally:
+                        if checked is not None:
+                            checked.actor_lifecycle(actor, 'started', completed)
 
-    def snapshot(self, stats):
-        started_ids={id(a) for a in self.started}
-        stats.outputs = {a.stage:a.reference() for a in self.actors
-                         if id(a) in started_ids and getattr(a,'is_stream_sink',False) and a.version is not None}
-        stats.metrics = {
-            'stages':stats.stages, 'stage_processing_latency':stats.timing_summary(),
-            'stage_policies': stats.stage_policies,
-            'queues':[{'stage':name, 'capacity':q.maxsize, 'peak':getattr(q,'peak',None),
-                       'peak_bytes':getattr(q,'peak_bytes',None), 'max_bytes':getattr(q,'max_bytes',None),
-                       'wait':q.wait.summary() if hasattr(q,'wait') else None}
-                      for name,q in zip(stats.stages,self.queues)],
-            'resources':{f'{type(r).__name__}:{i}':r.snapshot_metrics() for i,r in enumerate(self.resources)
-                         if callable(getattr(r,'snapshot_metrics',None))},
-            'models':{}, 'native_journal_totals':{}, 'native_journal_totals_skipped':[],
-            'journal_totals_scope':'Entire journal, including earlier actions; models describes this action only'}
-        from demiflow.operator_llm.call_ref import journal_totals
-        for index, actor in enumerate(self.actors):
-            observation = getattr(actor,'call_metrics',None)
-            if observation is not None and id(actor) in started_ids:
-                name = f'{actor.label}:{index}'
-                stats.metrics['models'][name] = observation.summary()
-                gate = actor._runtime.request_gate
-                if gate is not None:
-                    stats.metrics['models'][name]['shared_admission'] = {'requests':gate.admitted,'peak':gate.peak,'wait_s':gate.wait_s,
-                        **({'adaptive':gate.snapshot()} if hasattr(gate,'snapshot') else {})}
-                options = actor._runtime.options or {}
-                path = (options.get('sqlite_journal') or options.get('offline_store') or {}).get('path')
-                if path:
-                    if options.get('collect_journal_totals', True):
-                        if str(path) not in stats.metrics['native_journal_totals']:
-                            stats.metrics['native_journal_totals'][str(path)] = journal_totals(path)
-                    else:
-                        stats.metrics['native_journal_totals_skipped'].append(
-                            {'stage': name, 'path': str(path), 'reason': 'collect_journal_totals=False'})
-
-    async def close(self, *, action_cleanups=True):
+    async def close(self):
         errors = []
         owned=list(dict((id(r),r) for r in self.actors+self.resources).values())
         for resource in reversed(owned):
@@ -132,17 +81,16 @@ class StreamResources:
                 checked = current()
                 completed = False
                 try:
-                    result = close()
-                    if inspect.isawaitable(result): await result
+                    with self.clients.active():
+                        result = close()
+                        if inspect.isawaitable(result): await result
                     completed = True
                 except BaseException as exc: errors.append(exc)
                 finally:
                     if checked is not None:
                         checked.actor_lifecycle(resource, 'closed', completed)
-        from .resource_registry import stream_cleanups
-        for cleanup in stream_cleanups() if action_cleanups else ():
-            try:
-                result=cleanup()
-                if inspect.isawaitable(result): await result
-            except BaseException as exc: errors.append(exc)
+        try:
+            await self.clients.close()
+        except BaseException as exc:
+            errors.append(exc)
         if errors: raise BaseExceptionGroup('Stream resource cleanup failed', errors)

@@ -225,7 +225,7 @@ def _graph_spec(ancestor_actor, n=24, cut_rows=8, readers=("c0", "c1")):
 
 
 def _run_graph(tmp_path, spec):
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=1)
     limits = {"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
               "checkpoint_interval_ms": 60000}
     with RunContext.start(tmp_path / "run", limits=limits) as run:
@@ -238,7 +238,7 @@ def _run_graph(tmp_path, spec):
 def test_graph_manifest_bounded_inflight_completed_journal_reused(tmp_path):
     from demiflow.execution.state_artifacts import StateArtifacts
     spec, readers, n = _graph_spec(_make_effect_actor("completed"), n=24, cut_rows=8)
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=1)
     limits = {"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
               "checkpoint_interval_ms": 60000}
     with RunContext.start(tmp_path / "run", limits=limits) as run:

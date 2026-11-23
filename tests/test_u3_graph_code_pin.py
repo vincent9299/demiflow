@@ -159,7 +159,7 @@ def test_graph_crash_edit_resume_refuses(tmp_path, monkeypatch):
                                 source_id="graph-codepin-source", fixture="graph-codepin-crash")
     limits = {"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
               "checkpoint_interval_ms": 60000}
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=1)
     root = tmp_path / "run"
     try:
         with pytest.raises((RecoveryContractError, OSError, DataflowError)) as failure:

@@ -146,7 +146,7 @@ def _owner(run):
 
 def test_ray_graph_two_targets_shared_egress_once(tmp_path, ray_cluster):
     spec, readers, n = _graph_spec(n=12, cut_rows=4)
-    executor = RayDatasetExecutor(unified_graph=True)
+    executor = RayDatasetExecutor()
     with RunContext.start(tmp_path / "run",
                           limits={"checkpoint_rows": 4, "checkpoint_unconfirmed_rows": 4,
                                   "checkpoint_interval_ms": 60000}) as run:
@@ -178,7 +178,7 @@ def test_sem_local_ray_graph_equivalence(tmp_path, ray_cluster):
     spec, readers, n = _graph_spec(n=12, cut_rows=4)
     limits = {"checkpoint_rows": 4, "checkpoint_unconfirmed_rows": 4, "checkpoint_interval_ms": 60000}
 
-    local_executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    local_executor = LocalDatasetExecutor(workers=1)
     with RunContext.start(tmp_path / "local-run", limits=limits) as local_run:
         with local_run.action({"kind": "materialize", "source": {"fixture": "u3-sem"}}) as execution:
             local_result = local_executor.materialize_graph(spec)
@@ -191,7 +191,7 @@ def test_sem_local_ray_graph_equivalence(tmp_path, ray_cluster):
         assert local_owner == (local_run.attempt, local_run.fence)
     local_k6 = _k6_shape(local_run, local_action)
 
-    ray_executor = RayDatasetExecutor(unified_graph=True)
+    ray_executor = RayDatasetExecutor()
     with RunContext.start(tmp_path / "ray-run", limits=limits) as ray_run:
         with ray_run.action({"kind": "materialize", "source": {"fixture": "u3-sem"}}) as execution:
             ray_result = ray_executor.materialize_graph(spec)
@@ -261,7 +261,7 @@ def test_ray_graph_producer_death_recovers_acked_prefix_exactly_once(tmp_path, r
     acknowledged_prefix = acknowledged_ancestor_rows(run, 'action-1', original_acks)
     assert 0 < acknowledged_prefix <= 8
 
-    executor = RayDatasetExecutor(unified_graph=True)
+    executor = RayDatasetExecutor()
     with RunContext.resume(reference, limits=limits) as run2:
         assert run2.attempt == 2
         with run2.action({"kind": "materialize", "source": {"fixture": "u3-ray-producer-fault"}}) as execution:
@@ -316,7 +316,7 @@ def test_ray_graph_consumer_death_recovers_whole_graph_exactly_once(tmp_path, ra
     _assert_actor_exited(crash_marker, run)
     original_acks = capture_acks(run, 'action-1')
 
-    executor = RayDatasetExecutor(unified_graph=True)
+    executor = RayDatasetExecutor()
     with RunContext.resume(reference, limits=limits) as run2:
         with run2.action({"kind": "materialize", "source": {"fixture": "u3-ray-consumer-fault"}}) as execution:
             result = executor.materialize_graph(spec)

@@ -309,7 +309,7 @@ def test_unified_queue_carrier_kill_recover_per_record_equivalence(tmp_path):
         try:
             with RunContext.start(root, limits=LIMITS) as run:
                 ref_file.write_text(json.dumps(asdict(run.ref)))
-                with data.local_execution(workers=1, worker_mode="process", partitions=1, unified_queue_chain=True):
+                with data.local_execution(workers=1, worker_mode="process", partitions=1):
                     build(cfg, root, url).write_datasink(QueueResultSink(cfg, pool='p'))
         except DataflowError as exc:
             assert exc.code == "UNKNOWN_EFFECT"
@@ -327,7 +327,7 @@ def test_unified_queue_carrier_kill_recover_per_record_equivalence(tmp_path):
         with channel.database.connection(write=True) as db:
             db.execute('UPDATE queue_tasks SET lease_until=0 WHERE generation=?', (p.generation,))
         with RunContext.resume(ref):
-            with data.local_execution(workers=1, worker_mode="process", partitions=1, unified_queue_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 build(cfg, root, url).write_datasink(QueueResultSink(cfg, pool='p'))
         # Unknown paid effect never replayed: t1's acked acquisition reused, only
         # the never-acquired t2 fetched on resume (2 -> 3, not 2 -> 4).
@@ -401,7 +401,7 @@ def test_unified_queue_carrier_crash_resume_reclaims_quota_no_live_worker(tmp_pa
         try:
             with RunContext.start(root, limits=LIMITS) as run:
                 ref_file.write_text(json.dumps(asdict(run.ref)))
-                with data.local_execution(workers=1, worker_mode="process", partitions=1, unified_queue_chain=True):
+                with data.local_execution(workers=1, worker_mode="process", partitions=1):
                     build(cfg, root, url).write_datasink(QueueResultSink(cfg, pool='p'))
         except DataflowError as exc:
             assert exc.code == "UNKNOWN_EFFECT"
@@ -415,7 +415,7 @@ def test_unified_queue_carrier_crash_resume_reclaims_quota_no_live_worker(tmp_pa
         with channel.database.connection(write=True) as db:
             db.execute('UPDATE queue_tasks SET lease_until=0 WHERE generation=?', (p.generation,))
         with RunContext.resume(ref):
-            with data.local_execution(workers=1, worker_mode="process", partitions=1, unified_queue_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 build(cfg, root, url).write_datasink(QueueResultSink(cfg, pool='p'))
         # Original allocator confirms both attempts released their own allocations.
         assert before_processes.keys() < process_records(root).keys()
@@ -664,8 +664,7 @@ def test_unified_queue_carrier_scratch_bounded_across_many_rows(tmp_path):
         sampler.start()
         try:
             with RunContext.start(root, limits=LIMITS):
-                with data.local_execution(workers=1, worker_mode='thread', partitions=1,
-                                          unified_queue_chain=True):
+                with data.local_execution(workers=1, worker_mode='thread', partitions=1):
                     build(cfg, root, url).write_datasink(QueueResultSink(cfg, pool='p'))
         finally:
             stop.set()
@@ -736,8 +735,7 @@ def test_unified_queue_carrier_unpicklable_business_error_fallback_conveys_type(
         start = time.monotonic()
         with pytest.raises(RecoveryContractError, match='ValueError: review-unpicklable-business') as excinfo:
             with RunContext.start(root, limits=LIMITS):
-                with data.local_execution(workers=1, worker_mode='thread', partitions=1,
-                                          unified_queue_chain=True):
+                with data.local_execution(workers=1, worker_mode='thread', partitions=1):
                     ds = data.read_queue(cfg, pool='p', max_tasks=1, max_inflight=1, idle_timeout_s=.2).fetch(
                         store=LocalObjectStore(root / 'objects'), concurrency=1,
                         policy=FetchPolicy(max_object_bytes=131072, http=HttpSource(allow_private=True)))
