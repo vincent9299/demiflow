@@ -8,7 +8,7 @@ from demiflow.services.blocking_io import BlockingIOPool
 from .queue import QueueChannel
 from .queue_contract import queue_config, QueueIdleTimeout, QueueIncomplete
 from .recovery_contract import RecoveryContractError, identity, identifier
-from .row_scope import RowScope,ScopedRow
+from demiflow.execution.worker.row_scope import RowScope, ScopedRow
 
 
 class QueueDatasource(Datasource):
@@ -144,7 +144,7 @@ class QueueDatasource(Datasource):
     def _reconcile_references(self):
         # At most max_inflight exact lookups from this run. A fresh worker has
         # no references and performs zero completed-record scans or hashes.
-        from .queue_history import inspect_result
+        from demiflow.execution.sources.queue_history import inspect_result
         from .queue_commit import QueueCommitStore
         run=self.parent.context
         with run.journal._connection() as db:

@@ -16,7 +16,7 @@ from demiflow.pipeline import discover_pipeline_definition
 from demiflow.execution.pipeline.package_loader import PipelineBundleRef
 from demiflow.execution.contracts import PipelineRunObservation, PipelineRunRequest, PipelineRunResult
 from demiflow.execution.pipeline.driver import PipelineDriverRequest
-from demiflow.execution.requirements import PLATFORM_WHEEL_BUNDLE_DIRECTORY, file_sha256, platform_wheel_paths, read_candidate_requirements, read_platform_requirements, render_effective_requirements, resolved_wheel_paths, write_effective_requirements
+from demiflow.execution.seal.requirements import PLATFORM_WHEEL_BUNDLE_DIRECTORY, file_sha256, platform_wheel_paths, read_candidate_requirements, read_platform_requirements, render_effective_requirements, resolved_wheel_paths, write_effective_requirements
 from demiflow.execution.contracts.pipeline import FrozenRequirements
 from demiflow.execution.journal.observation import emit_observation, parse_pipeline_log_observation
 from demiflow.execution.hosts.environment import pipeline_environment_names, prompt_environment_names, select_pipeline_environment
@@ -130,7 +130,7 @@ class RayPipelineBackend:
                 encoding="utf-8",
             )
             requirements = read_candidate_requirements(bundle_dir / driver.bundle_root)
-            from demiflow.execution.requirements import read_candidate_environment_lock
+            from demiflow.execution.seal.requirements import read_candidate_environment_lock
 
             lock_path = (
                 bundle_dir / driver.bundle_root / "pipeline/environment-lock.json"

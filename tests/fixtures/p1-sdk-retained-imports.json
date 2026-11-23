@@ -11,11 +11,6 @@
       "QueueAcknowledge"
     ],
     [
-      "Dataset.admit_rows",
-      "demiflow.execution.stream_admission",
-      "StreamAdmission"
-    ],
-    [
       "Dataset.batch_map",
       "demiflow.execution.compiler_support.capabilities",
       "require_action"
@@ -59,16 +54,6 @@
       "Dataset.fetch",
       "demiflow.execution.raw_fetch",
       "RawFetch"
-    ],
-    [
-      "Dataset.group_batches",
-      "demiflow.execution.stream_grouping",
-      "pack_group"
-    ],
-    [
-      "Dataset.lookup_lance",
-      "demiflow.execution.stream_lookup",
-      "LanceLookup"
     ],
     [
       "Dataset.map_async",

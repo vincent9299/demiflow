@@ -20,7 +20,7 @@ def bind_private_embedding_adapter(actor, *, services, node_id, configuration):
     action = make_native_action_view(services, node_id=node_id)
     actor._journal_binding = RemotePrivateEmbeddingJournal(
         services=services, action=action, node_id=node_id, declaration=declared)
-    from demiflow.execution.row_scope import current_row_scope
+    from demiflow.execution.worker.row_scope import current_row_scope
     from demiflow.execution.operator_bindings.dataflow_model_journal import _PRIVATE_EMBEDDING_SCOPE
     maximum = int(configuration.get('max_batch') or 256)
     exchange = actor._exchange

@@ -64,7 +64,7 @@ __all__ = [
 
 def prepare_candidate_environment(execution_environment, bundle_root, *, deadline_at, cancellation=None, resolution=None):
     """Prepare the exact local Candidate Python environment for trusted callers."""
-    from .requirements import read_candidate_requirements
+    from demiflow.execution.seal.requirements import read_candidate_requirements
     from demiflow.execution.hosts.python_environment import prepare_local_environment
     return prepare_local_environment(
         execution_environment, read_candidate_requirements(bundle_root),

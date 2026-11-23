@@ -9,7 +9,7 @@
       ],
       [
         "Dataset.admit_rows",
-        "from ..execution.stream_admission import StreamAdmission"
+        "from demiflow.operators.admission import StreamAdmission"
       ],
       [
         "Dataset.enqueue",
@@ -21,7 +21,7 @@
       ],
       [
         "Dataset.lookup_lance",
-        "from ..execution.stream_lookup import LanceLookup"
+        "from demiflow.operators.lookup import LanceLookup"
       ],
       [
         "Dataset.map_cached",
@@ -170,7 +170,7 @@
         ],
         [
           "read_queue_records",
-          "demiflow.execution.queue_history",
+          "demiflow.execution.sources.queue_history",
           "QueueHistoryDatasource",
           null
         ]

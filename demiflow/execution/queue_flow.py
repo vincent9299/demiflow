@@ -47,7 +47,7 @@ def normalize_source(arguments):
 
 
 def normalize_history(arguments):
-    from .queue_history import QueueHistoryDatasource
+    from demiflow.execution.sources.queue_history import QueueHistoryDatasource
     return QueueHistoryDatasource(**{key: decode(value) for key, value in arguments.items()}).declaration()
 
 

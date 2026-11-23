@@ -39,7 +39,7 @@ def read_queue_records(config, *, pool, through, results=False, verify='artifact
     adds verification.status=not_checked. Finite limits raise HistoryReadLimit
     carrying the first undelivered cursor bound to this exact QueueSnapshot.
     """
-    from ..execution.queue_history import QueueHistoryDatasource
+    from demiflow.execution.sources.queue_history import QueueHistoryDatasource
     source=QueueHistoryDatasource(config,pool=pool,through=through,results=results,verify=verify,limits=limits,after=after)
     return DataAPI(_current_executor.get()).read_datasource(source)
 

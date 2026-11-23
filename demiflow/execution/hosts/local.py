@@ -75,10 +75,10 @@ class LocalPipelineBackend:
             pipeline_environment_names(request.bundle.root),
             required_names=prompt_environment_names(request.bundle.root),
         )
-        from demiflow.execution.requirements import read_candidate_requirements
+        from demiflow.execution.seal.requirements import read_candidate_requirements
         from demiflow.execution.hosts.python_environment import prepare_local_environment
         requirements = read_candidate_requirements(request.bundle.root)
-        from demiflow.execution.requirements import read_platform_requirements, read_candidate_environment_lock
+        from demiflow.execution.seal.requirements import read_platform_requirements, read_candidate_environment_lock
         platform = read_platform_requirements(self.execution_environment.platform_requirements)
         lock_path = Path(request.bundle.root) / "pipeline/environment-lock.json"
         resolution = (

@@ -62,7 +62,7 @@ _EXPORTS = {
     )},
     "require": (".guards", "require"),
     "schema": ("..lance.schema", "schema"),
-    **{name: ("..execution.stream_checkpoint", name) for name in ("open_checkpoint", "read_checkpoint")},
+    **{name: ('demiflow.execution.executors.stream_checkpoint', name) for name in ("open_checkpoint", "read_checkpoint")},
     "local_execution": ('demiflow.execution.pipeline.local_kernel', "local_execution"),
     **{name: ("..lance", name) for name in ("add_lance_columns", "ensure_lance_vector_index")},
     **{name: (".read_api", name) for name in (

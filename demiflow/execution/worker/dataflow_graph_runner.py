@@ -1383,7 +1383,7 @@ class WorkerGraphRunner:
                 binding = facts.get('queue_binding')
                 if binding and binding['mode'] == 'sink':
                     from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
-                    from demiflow.execution.row_scope import RowScope, set_row_scope
+                    from demiflow.execution.worker.row_scope import RowScope, set_row_scope
                     from demiflow.execution.contracts.dataflow import clone_record
                     from demiflow.execution.contracts.record_codec import row_bytes as _row_bytes
                     if self._queue_finalizer is None:

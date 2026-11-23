@@ -35,7 +35,7 @@ class RemotePrivatePromptJournal(RemotePromptJournal, PrivatePromptJournalPort):
         return self._route
 
     def _command(self, operation, request, *, value_ref=None, reservation=None, options=None):
-        from demiflow.execution.row_scope import current_row_scope
+        from demiflow.execution.worker.row_scope import current_row_scope
         scope = current_row_scope()
         if scope is None or not re.fullmatch('[0-9a-f]{64}', scope.occurrence):
             raise DataflowError('INVALID_CONTRACT', 'Private Prompt RPC lost its original row scope')

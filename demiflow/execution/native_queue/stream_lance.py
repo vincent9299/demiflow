@@ -14,7 +14,7 @@ import lance
 import pyarrow as pa
 from demiflow.lance.model import LanceWriteSpec
 from demiflow.lance.write import write_lance
-from demiflow.execution.lance_predicate import scalar_equal
+from demiflow.lance.read import scalar_equal
 
 
 def _canonical(row):
@@ -178,7 +178,7 @@ class StreamLanceWriter:
         selected = [r for r in rows if selected_row(r)]
         if not selected:
             return rows
-        from demiflow.execution.stream_grouping import row_size
+        from demiflow.operators.grouping import row_size
         projected = [{k:r.get(k) for k in self.schema.names} for r in selected]
         for row in projected:
             row_size(row, self.max_row_bytes)

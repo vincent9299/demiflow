@@ -7,7 +7,7 @@ import pytest
 
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
-from demiflow.execution.row_scope import RowScope, set_row_scope
+from demiflow.execution.worker.row_scope import RowScope, set_row_scope
 from demiflow.embeddings.runtime import EmbeddingActor
 from demiflow.embeddings.model import EmbeddingModel
 from demiflow.execution.operator_bindings.dataflow_model_journal import NativeEmbeddingRecovery

@@ -5,11 +5,11 @@ import json
 import time
 from types import SimpleNamespace
 
-from ..data.datasource import Datasource,ReadTask,BlockMetadata
-from .queue import QueueChannel
-from .queue_contract import queue_config,QueueSnapshot,HistoryReadLimits,HistoryReadLimit
-from .queue_commit import QueueCommitStore
-from .recovery_contract import RecoveryContractError,UnresolvedCommit,document,identity,identifier
+from demiflow.data.datasource import Datasource, ReadTask, BlockMetadata
+from demiflow.execution.queue import QueueChannel
+from demiflow.execution.queue_contract import queue_config, QueueSnapshot, HistoryReadLimits, HistoryReadLimit
+from demiflow.execution.queue_commit import QueueCommitStore
+from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity, identifier
 
 
 class ReadOnlyQueueStore:
@@ -75,15 +75,15 @@ def inspect_result(channel,snapshot,task_id,*,verify='artifacts',check_stop=lamb
         limits={'max_output_bytes':channel.config.limits.max_object_bytes,'max_row_bytes':channel.config.limits.max_result_bytes})
     # QueueResultSink's read-only inspection checks SQL row equality and the
     # exact RawObjectSink receipts; it cannot claim, prepare, repair or finalize.
-    from .queue_sinks import QueueResultSink
+    from demiflow.execution.queue_sinks import QueueResultSink
     action=SimpleNamespace(context=context,action_id=fact['action_id'])
     store.delivery=SimpleNamespace(generation=snapshot.generation,task_id=task_id)
     sink=QueueResultSink(channel.config,pool=snapshot.pool,result=prepared['result_field']).bind(action)
     sink._validate(prepared)
     if verify=='artifacts':
-        from .commit import CommitCoordinator
+        from demiflow.execution.commit import CommitCoordinator
         if observation:
-            from ..data.datasink import WriteContext
+            from demiflow.data.datasink import WriteContext
             receipt=sink.inspect(prepared,WriteContext(run_id=context.ref.run_id,action_id=fact['action_id'],
                 commit_id=fact['commit_id'],attempt=1,fence=context.fence))
             if receipt!=fact['receipts']['result']:raise UnresolvedCommit('Observation result receipt changed')
@@ -182,7 +182,7 @@ class QueueHistoryDatasource(Datasource):
                     # Drop only the bounded metadata page and resume from the
                     # same unconsumed ordinal in the next SQL page.
                     break
-                from ..data.runtime_contract import check_size
+                from demiflow.data.runtime_contract import check_size
                 try:measured=check_size(output,resident_limit)
                 except TypeError:
                     raise HistoryReadLimit('History resident record budget exhausted',cursor()) from None

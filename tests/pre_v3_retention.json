@@ -304,7 +304,7 @@
     "never_ran": 2
    }
   },
-  "demiflow.execution.requirements": {
+  "demiflow.execution.seal.requirements": {
    "status": "separate_entry",
    "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
    "measured": {

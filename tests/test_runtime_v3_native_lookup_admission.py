@@ -85,7 +85,7 @@ def test_native_query_factory_is_passive_binds_policy_and_rejects_live_handles(t
     from demiflow.execution.seal.plan import _base_code_identity_from_value
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.planning.dataflow_compile import _callable_code_identity
-    from demiflow.execution.stream_lookup import LanceLookup
+    from demiflow.operators.lookup import LanceLookup
     from demiflow.lance.search import VectorSearch
     if kind == 'lookup':
         ds = data.from_items([{'id': 'a'}]).lookup_lance({'uri': str(tmp_path / 'absent'), 'version': 1},

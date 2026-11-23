@@ -95,7 +95,7 @@ def native_model_declaration(operation):
     if not isinstance(operation, EmbeddingMapOp) and (
             actor is None or type(actor) in (types.FunctionType, types.BuiltinFunctionType)):
         return None
-    from demiflow.execution.stream_lookup import LanceLookup
+    from demiflow.operators.lookup import LanceLookup
     from demiflow.lance.search import VectorSearch
     if type(actor) is LanceLookup:
         from demiflow.lance.flow_contract import lookup_declaration

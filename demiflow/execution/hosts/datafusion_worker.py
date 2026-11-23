@@ -218,7 +218,7 @@ def main():
         frame = context.sql(request['sql'], options=sql_options)
         if not managed:
             (diagnostic / 'plan.txt').write_text(str(frame.execution_plan()))
-        from demiflow.execution.opaque_payloads import payload_schema, hydrate_payloads
+        from demiflow.lance.read import payload_schema, hydrate_payloads
         hydrated_schema, opaque_payloads = payload_schema(frame.schema(), opaque_payloads)
         schema = request['schema'] if request['schema'] is not None else hydrated_schema
         if opaque_payloads:

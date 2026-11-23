@@ -5,6 +5,10 @@ intent covers the gap between a Lance commit and publication of the vector.
 Recovery verifies that intent; it never picks unrelated latest table heads.
 Business code supplies identity and pending-row relations, not storage logic.
 """
+
+from demiflow.data.execution_contract import CheckpointReadBinding, InputSpec
+from demiflow.data.plan import LogicalPlan
+from demiflow.data.sources import MaterializedSource
 import hashlib
 import json
 import os
@@ -15,7 +19,7 @@ import stat
 
 import lance
 
-from .lance_predicate import scalar_equal
+from demiflow.lance.read import scalar_equal
 
 
 def canonical(value):
@@ -124,7 +128,7 @@ class StreamCheckpoint:
     def validate_sinks(self, sinks):
         if self.declared_outputs is None:
             return
-        from ..lance.schema import schema_identity
+        from demiflow.lance.schema import schema_identity
         if {sink.stage for sink in sinks} != set(self.declared_outputs):
             raise ValueError('Stream sinks differ from declared checkpoint stages')
         for sink in sinks:
@@ -156,7 +160,7 @@ class StreamCheckpoint:
         pending = self.state.get('pending')
         if pending is not None and pending.get('kind') == 'create':
             if Path(pending['uri']).exists():
-                from ..lance.schema import schema_identity
+                from demiflow.lance.schema import schema_identity
                 current = lance.dataset(pending['uri'])
                 marker = (current.read_transaction(current.version).transaction_properties or {}).get('__lance_commit_message')
                 if (current.version != 1 or current.count_rows() != 0 or
@@ -195,7 +199,7 @@ class StreamCheckpoint:
             if lance.dataset(ref['uri']).version != ref['version']:
                 raise ValueError('Table head changed outside the checkpoint writer')
             if self.declared_outputs is not None:
-                from ..lance.schema import schema_identity
+                from demiflow.lance.schema import schema_identity
                 if schema_identity(lance.dataset(**ref).schema) != schema_identity(self.declared_outputs[stage]['schema']):
                     raise ValueError('Committed checkpoint schema differs from declaration')
 
@@ -243,8 +247,8 @@ class StreamCheckpoint:
 
 
 def normalize_checkpoint(arguments):
-    from ..lance.schema import build_schema, schema_identity
-    from ..data.flow_contract import arrow_fields
+    from demiflow.lance.schema import build_schema, schema_identity
+    from demiflow.data.flow_contract import arrow_fields
     import pyarrow as pa
     value = dict(arguments)
     path, outputs = value['path'], value['outputs']
@@ -276,7 +280,7 @@ def normalize_checkpoint(arguments):
 
 
 def analyze_checkpoint(arguments, *, inputs, callables, resources):
-    from ..data.flow_contract import scalar
+    from demiflow.data.flow_contract import scalar
     return {'fields': {}, 'driver': 'pull', 'value_type': {**scalar('checkpoint'), 'outputs': arguments['outputs']},
             'cardinality': 'none', 'order': 'preserved'}
 
@@ -288,7 +292,7 @@ def normalize_checkpoint_read(arguments):
 
 
 def analyze_checkpoint_read(arguments, *, inputs, callables, resources):
-    from ..data.flow_contract import require_fields
+    from demiflow.data.flow_contract import require_fields
     outputs = resources['checkpoint']['outputs']
     if arguments['stage'] not in outputs:
         raise ValueError('Read stage is absent from declared checkpoint')
@@ -299,7 +303,7 @@ def analyze_checkpoint_read(arguments, *, inputs, callables, resources):
     return {'fields': fields, 'driver': 'pull', 'cardinality': 'unknown', 'order': 'unspecified'}
 
 
-from ..data.flow_contract import flow_api
+from demiflow.data.flow_contract import flow_api
 
 
 @flow_api('open_checkpoint', role='query', execution='action', effects=('checkpoint',),
@@ -334,11 +338,10 @@ def read_checkpoint(checkpoint, stage, *, columns=None):
     The returned Dataset remains bound to that version if the checkpoint later
     advances. This never reads a table head or accepts a user-supplied receipt.
     """
-    from .checkpoint_read import _read_checkpoint_binding
-    from ..data.api import _select_executor
-    from ..data.dataset import Dataset, MaterializedDataset
-    from ..data.execution_contract import _current_executor
-    from ..data.sources import MaterializedSource
+    from demiflow.data.api import _select_executor
+    from demiflow.data.dataset import Dataset, MaterializedDataset
+    from demiflow.data.execution_contract import _current_executor
+    from demiflow.data.sources import MaterializedSource
 
     binding, executor = _read_checkpoint_binding(
         checkpoint, stage, columns=columns,
@@ -346,3 +349,49 @@ def read_checkpoint(checkpoint, stage, *, columns=None):
     )
     dataset_type = MaterializedDataset if isinstance(binding.source, MaterializedSource) else Dataset
     return dataset_type(binding.source, binding.plan, executor)
+
+
+def read_checkpoint_binding(checkpoint, stage, *, columns=None, executor):
+    """Return the registered source using an already selected input port."""
+    binding, _ = _read_checkpoint_binding(
+        checkpoint, stage, columns=columns, select_executor=lambda: executor,
+    )
+    return binding
+
+def _read_checkpoint_binding(checkpoint, stage, *, columns, select_executor):
+    """Select a default host only after the original checkpoint admission.
+
+    The private assembly callback is not a request field or a validation hook.
+    Both callers share this implementation; the core never imports DataAPI or
+    Dataset and never constructs another execution owner.
+    """
+    from demiflow.execution.pipeline.checked import action, current
+    import pyarrow as pa
+
+    if type(checkpoint) is not StreamCheckpoint or checkpoint.declared_outputs is None:
+        raise ValueError('Read requires a declared native checkpoint')
+    owner = current()
+    facts = owner.checkpoint_facts(checkpoint) if owner is not None else checkpoint.contract_arguments
+    arguments = normalize_checkpoint_read(dict(checkpoint=facts, stage=stage, columns=columns))
+    declared = checkpoint.declared_outputs.get(stage)
+    if declared is None:
+        raise ValueError('Read stage is absent from declared checkpoint')
+    with action('read_checkpoint', None, None, arguments=arguments) as checked:
+        with checkpoint.lock:
+            checkpoint.validate_ownership()
+            if checkpoint.state['pending'] is not None:
+                raise ValueError('Checkpoint has an unresolved commit; reopen it for recovery')
+            ref = dict(checkpoint.state['outputs'][stage]) if stage in checkpoint.state['outputs'] else None
+        executor = select_executor()
+        if ref is None:
+            schema = declared['schema']
+            if columns:
+                schema = pa.schema([schema.field(name) for name in columns], metadata=schema.metadata)
+            table = pa.Table.from_pylist([], schema=schema)
+            source = MaterializedSource(executor.prepare_input(InputSpec('arrow', table)))
+        else:
+            from demiflow.execution.sources.checkpoint_read import fixed_checkpoint_source
+            source = fixed_checkpoint_source(ref, declared, columns)
+        binding = CheckpointReadBinding(source, LogicalPlan(), ref)
+        checked.checkpoint_read(source, ref)
+        return binding, executor

@@ -152,7 +152,7 @@ class _OutputBudget:
 
 
 def _invoke_scoped(instance, value, records, spec):
-    from demiflow.execution.row_scope import RowScope, current_row_scope, set_row_scope
+    from demiflow.execution.worker.row_scope import RowScope, current_row_scope, set_row_scope
     previous = current_row_scope()
     from demiflow.execution.kernels.concurrent_calls import INVOCATION_SCOPE
     explicit = INVOCATION_SCOPE.get()

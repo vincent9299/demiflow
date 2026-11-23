@@ -200,7 +200,7 @@ class Dataset:
             import math
             from functools import partial
             from .plan import StreamGroupBatchesOp
-            from ..execution.stream_grouping import pack_group
+            from demiflow.operators.grouping import pack_group
             keys = (on,) if isinstance(on, str) else tuple(on)
             if (not keys or len(keys) > 32 or len(set(keys)) != len(keys)
                     or any(not isinstance(k, str) or not k for k in keys)
@@ -896,7 +896,7 @@ class Dataset:
         SQLite main pages are capped (rollback journal may use the same size).
         The action owns one writer and a bounded set of delivered key digests.
         """
-        from ..execution.stream_admission import StreamAdmission
+        from demiflow.operators.admission import StreamAdmission
         actor = StreamAdmission(path=path, key=key, unique_on=unique_on, quotas=quotas,
             output=output, when=when, max_entries=max_entries, max_key_bytes=max_key_bytes,
             max_disk_bytes=max_disk_bytes)
@@ -955,7 +955,7 @@ class Dataset:
         result cache. Oversized or ambiguous matches fail explicitly. Limits
         cover returned Arrow/Python payloads, not Lance's internal allocation.
         """
-        from ..execution.stream_lookup import LanceLookup
+        from demiflow.operators.lookup import LanceLookup
         from ..planning.dataflow_declaration import validate_native_operation
         validate_native_operation("lookup",
             configuration={"on": list(on) if isinstance(on, (list, tuple)) else on,

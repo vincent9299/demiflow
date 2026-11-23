@@ -363,7 +363,7 @@ class CheckedExecution:
         raise RuntimeContractError('Native source differs at ' + identity)
 
     def checkpoint_facts(self, checkpoint):
-        from demiflow.execution.stream_checkpoint import StreamCheckpoint, normalize_checkpoint
+        from demiflow.execution.executors.stream_checkpoint import StreamCheckpoint, normalize_checkpoint
         if type(checkpoint) is not StreamCheckpoint or id(checkpoint) not in self.checkpoints:
             raise RuntimeContractError('Checkpoint is not a resource from the checked action')
         actual, identity, path = self.checkpoints[id(checkpoint)]

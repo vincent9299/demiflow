@@ -87,7 +87,7 @@ class ObservedQueue(asyncio.Queue):
         size = 0
         if self.max_item_bytes is not None:
             from demiflow.data.runtime_contract import check_size
-            from demiflow.execution.row_scope import ScopedRow
+            from demiflow.execution.worker.row_scope import ScopedRow
             size = check_size(item.row if type(item) is ScopedRow else item, self.max_item_bytes)
             if type(item) is ScopedRow:
                 size += 256

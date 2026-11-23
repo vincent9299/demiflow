@@ -265,7 +265,7 @@ def _source_identity(source):
                 'rows': source.handle.row_count}
     if isinstance(source, DatasourceSource):
         from .queue_source import QueueDatasource
-        from .queue_history import QueueHistoryDatasource
+        from demiflow.execution.sources.queue_history import QueueHistoryDatasource
         if type(source.datasource) in {QueueDatasource,QueueHistoryDatasource}:
             return source.datasource.declaration()
         facts = source.datasource.snapshot_identity()

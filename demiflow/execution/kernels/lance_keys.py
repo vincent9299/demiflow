@@ -66,7 +66,7 @@ def _sql_survivors(left, right, keys, services):
 
 def exclude_keys(left, right, *, spec, services):
     from .join_spool import join_pairs
-    from ..lance_key_source import PinnedKeyPayload
+    from demiflow.execution.sources.source_readers import PinnedKeyPayload
     source = PinnedKeyPayload(spec, services)
     schema_ref = RecordSchemas(services).put(source.schema)
     keys = tuple(spec.configuration['on'])

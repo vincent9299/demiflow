@@ -436,7 +436,7 @@ from demiflow.embeddings import EmbeddingModel
 from demiflow.embeddings.runtime import EmbeddingActor
 from demiflow.services.blocking_io import BlockingIOPool
 from demiflow.services.adaptive_requests import AdaptiveRequestGate
-from demiflow.execution.row_scope import RowScope, set_row_scope
+from demiflow.execution.worker.row_scope import RowScope, set_row_scope
 from demiflow.resources.contracts import ResourceProfile
 from demiflow.environment import OperatorEnvironment
 

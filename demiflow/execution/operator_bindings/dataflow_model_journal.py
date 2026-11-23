@@ -13,7 +13,7 @@ from demiflow.execution.contracts.dataflow_codec import private_embedding_rpc_id
 
 import inspect
 import asyncio
-from demiflow.execution.row_scope import current_row_scope
+from demiflow.execution.worker.row_scope import current_row_scope
 from demiflow.execution.journal.prompt import RunPromptJournal
 from demiflow.execution.contracts.errors import _CapacityPending
 from demiflow.operator_llm.stream_recovery import native_delivery_trace, native_response
@@ -307,7 +307,7 @@ class NativePromptRecovery:
         def scoped(request):
             if isinstance(request, _PreparedCall):
                 return request.source
-            from demiflow.execution.row_scope import current_row_scope
+            from demiflow.execution.worker.row_scope import current_row_scope
             scope = current_row_scope()
             if scope is None:
                 raise RecoveryContractError('Native model request lost its source occurrence')
@@ -483,7 +483,7 @@ class RemoteCodexRecovery(RemotePromptRecovery):
         prepare = client.prepare
 
         def scoped(request):
-            from demiflow.execution.row_scope import current_row_scope
+            from demiflow.execution.worker.row_scope import current_row_scope
             scope = current_row_scope()
             if scope is None:
                 raise RecoveryContractError('Codex session lost its source occurrence')

@@ -15,10 +15,7 @@ from packaging.utils import canonicalize_name, parse_wheel_filename
 
 from demiflow.execution.contracts import PIPELINE_RUNTIME_ABI, PlatformRuntimeIdentity
 from demiflow.execution.hosts.python_environment import PipelineExecutionEnvironment
-from .execution.requirements import (
-    platform_requirement_names, read_platform_requirements,
-    resolve_platform_wheels,
-)
+from demiflow.execution.seal.requirements import platform_requirement_names, read_platform_requirements, resolve_platform_wheels
 from .planning.policy import parse_platform_planning_policy
 
 

@@ -42,9 +42,9 @@ PRIVATE_IMPORT_BUDGET = {
 P1_ASSEMBLY_IMPORTS = {
     ('demiflow.execution.pipeline.local_kernel', 'demiflow.data.execution_contract', '_current_executor'),
     ('demiflow.execution.pipeline.local_kernel', 'demiflow.data.execution_contract', '_use_executor'),
-    ('demiflow.execution.stream_checkpoint', 'demiflow.data.execution_contract', '_current_executor'),
+    ('demiflow.execution.executors.stream_checkpoint', 'demiflow.data.execution_contract', '_current_executor'),
     ('demiflow.pipeline.core', 'demiflow.data.execution_contract', '_use_executor'),
-    ('demiflow.execution.stream_checkpoint', 'demiflow.data.api', '_select_executor'),
+    ('demiflow.execution.executors.stream_checkpoint', 'demiflow.data.api', '_select_executor'),
 }
 
 # Pre-v3 execution modules. runtime-v3 has one orchestration entry

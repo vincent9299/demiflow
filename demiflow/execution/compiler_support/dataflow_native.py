@@ -118,7 +118,7 @@ def native_variant(operation, declaration) -> NativeVariant | None:
 def datasource_kind(datasource) -> str:
     """The source kind of a datasource: a queue, a queue history, or an ordinary datasource."""
     from demiflow.execution.queue_source import QueueDatasource
-    from demiflow.execution.queue_history import QueueHistoryDatasource
+    from demiflow.execution.sources.queue_history import QueueHistoryDatasource
     if type(datasource) is QueueDatasource:
         return 'queue'
     if type(datasource) is QueueHistoryDatasource:
@@ -128,13 +128,13 @@ def datasource_kind(datasource) -> str:
 
 def is_key_only(source) -> bool:
     """Whether a Lance source was narrowed to its key columns."""
-    from demiflow.execution.lance_key_source import LanceKeySource
+    from demiflow.execution.sources.lance_key_source import LanceKeySource
     return isinstance(source, LanceKeySource)
 
 
 def narrow_to_keys(source, columns):
     """The key-only reading of a Lance source, for the excluded side of exclude_keys."""
-    from demiflow.execution.lance_key_source import LanceKeySource
+    from demiflow.execution.sources.lance_key_source import LanceKeySource
     return LanceKeySource(replace(source.query, columns=tuple(columns)))
 
 

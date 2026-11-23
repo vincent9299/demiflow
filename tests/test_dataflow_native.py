@@ -102,7 +102,7 @@ def test_trait_replacement_is_keyed_by_the_reported_names():
 
 
 def test_datasource_kind_is_exact_type_not_subclass():
-    from demiflow.execution.queue_history import QueueHistoryDatasource
+    from demiflow.execution.sources.queue_history import QueueHistoryDatasource
     from demiflow.execution.queue_source import QueueDatasource
     def instance(cls):
         return object.__new__(cls)       # the check reads the type only; no queue is opened
@@ -115,7 +115,7 @@ def test_datasource_kind_is_exact_type_not_subclass():
 
 
 def test_key_only_and_native_publication_accept_subclasses_as_before():
-    from demiflow.execution.lance_key_source import LanceKeySource
+    from demiflow.execution.sources.lance_key_source import LanceKeySource
     from demiflow.execution.queue_sinks import QueueResultSink
     def instance(cls):
         return object.__new__(cls)
@@ -131,7 +131,7 @@ def test_narrowing_builds_the_key_only_source(tmp_path):
     import lance
     import pyarrow as pa
     from demiflow import data
-    from demiflow.execution.lance_key_source import LanceKeySource
+    from demiflow.execution.sources.lance_key_source import LanceKeySource
     uri = str(tmp_path / 't.lance')
     lance.write_dataset(pa.table({'k': ['a'], 'x': [1]}), uri)
     source = data.read_lance(uri)._source
@@ -163,10 +163,10 @@ def test_importing_the_module_initialises_no_native_service():
         "native.model_variant(None); native.native_variant(None, None)\n"
         "from demiflow.operator_llm.native_actor import is_native_prompt_actor\n"
         "assert not is_native_prompt_actor(lambda row: row)\n"
-        "heavy = [name for name in ('demiflow.execution.dataflow_acquisition_call', 'demiflow.execution.dataflow_producer',\n"
+        "heavy = [name for name in ('demiflow.execution.native_queue.dataflow_acquisition_call', 'demiflow.execution.dataflow_producer',\n"
         "    'demiflow.execution.dataflow_search', 'demiflow.execution.dataflow_stream_lance', 'demiflow.execution.dataflow_fetch',\n"
-        "    'demiflow.execution.queue_source', 'demiflow.execution.queue_history', 'demiflow.execution.queue_sinks',\n"
-        "    'demiflow.execution.lance_key_source', 'demiflow.operator_llm.runtime', 'demiflow.lance.search', 'lance', 'pyarrow')\n"
+        "    'demiflow.execution.queue_source', 'demiflow.execution.sources.queue_history', 'demiflow.execution.queue_sinks',\n"
+        "    'demiflow.execution.sources.lance_key_source', 'demiflow.operator_llm.runtime', 'demiflow.lance.search', 'lance', 'pyarrow')\n"
         "    if name in sys.modules]\n"
         "assert not heavy, heavy\n")
     done = subprocess.run([sys.executable, '-P', '-B', '-c', script], cwd=ROOT, capture_output=True, text=True, timeout=60,

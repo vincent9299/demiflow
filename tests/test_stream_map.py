@@ -427,7 +427,7 @@ def test_retired_checkpoint_is_rejected_and_native_run_replays_without_calls(dat
 
 
 def test_stream_native_recovery_preserves_sealed_policy_and_new_run_can_append(data, tmp_path):
-    from demiflow.execution.stream_checkpoint import StreamCheckpoint
+    from demiflow.execution.executors.stream_checkpoint import StreamCheckpoint
     from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.recovery_contract import RecoveryContractError
     from _worker_event_fixtures import emit, events

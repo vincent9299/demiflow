@@ -23,7 +23,7 @@ import uuid
 from demiflow.errors import PipelineRunCancelled, PipelineRunTimeout
 
 from demiflow.execution.contracts.pipeline import FrozenRequirements
-from demiflow.execution.requirements import platform_wheel_paths, read_platform_requirements, render_effective_requirements, resolved_wheel_paths, write_effective_requirements
+from demiflow.execution.seal.requirements import platform_wheel_paths, read_platform_requirements, render_effective_requirements, resolved_wheel_paths, write_effective_requirements
 
 
 def inspect_local_environment_cache(
@@ -331,7 +331,7 @@ class PipelineExecutionEnvironment:
                 raise ValueError(f"Configured {label} is unavailable")
             if hashlib.sha256(path.read_bytes()).hexdigest() != expected_sha256:
                 raise ValueError(f"Configured {label} digest mismatch")
-        from demiflow.execution.requirements import platform_wheel_paths
+        from demiflow.execution.seal.requirements import platform_wheel_paths
         platform_wheel_paths(
             self.runtime.platform_wheels, self.platform_wheel_directory,
         )

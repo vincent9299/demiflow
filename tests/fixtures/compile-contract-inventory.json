@@ -309,7 +309,7 @@
    ],
    "lance_key_source": [
     "execution/contracts/relational_region.py",
-    "execution/lance_key_source.py",
+    "execution/sources/source_readers.py",
     "planning/dataflow_configuration.py",
     "planning/dataflow_relational_regions.py"
    ],
@@ -413,7 +413,7 @@
     "execution/outputs/sinks.py"
    ],
    "payload_columns": [
-    "execution/lance_key_source.py"
+    "execution/sources/source_readers.py"
    ],
    "predict_input_schema": [
     "planning/dataflow_training.py"

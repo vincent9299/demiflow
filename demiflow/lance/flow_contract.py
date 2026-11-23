@@ -107,7 +107,7 @@ def save_facts(actor, operation):
 
 
 def lookup_declaration(actor, target):
-    from demiflow.execution.stream_lookup import LanceLookup
+    from demiflow.operators.lookup import LanceLookup
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     declaration = lookup_facts(actor)['arguments']
     if getattr(target, '__func__', None) is not LanceLookup.__call__:

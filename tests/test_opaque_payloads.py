@@ -3,7 +3,7 @@ import lance
 import pyarrow as pa
 import pytest
 
-from demiflow.execution.opaque_payloads import hydrate_payloads
+from demiflow.lance.read import hydrate_payloads
 
 
 def stats():

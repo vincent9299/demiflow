@@ -53,7 +53,7 @@ def restore_claims(service, value, *, has_cut):
         raise DataflowError('INCOMPATIBLE_HISTORY', 'Native queue cut differs from sealed binding/window')
     from demiflow.execution.dataflow_queue import _Claim
     from demiflow.execution.queue_commit import QueueCommitStore
-    from demiflow.execution.queue_history import inspect_result
+    from demiflow.execution.sources.queue_history import inspect_result
     restored = {}
     for entry in value['claims']:
         if type(entry) is not dict or set(entry) != {'delivery_ref', 'row_ref', 'receipt_ref'}:

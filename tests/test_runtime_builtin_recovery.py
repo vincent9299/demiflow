@@ -230,7 +230,7 @@ def test_builtin_partial_receipts_restore_without_serializing_resources(
 def test_lookup_rebuilds_pinned_handle_and_discards_cache_on_restore_and_close(
     tmp_path,
 ):
-    from demiflow.execution.stream_lookup import LanceLookup
+    from demiflow.operators.lookup import LanceLookup
 
     lance.write_dataset(pa.table({"id": ["a"], "value": ["old"]}), tmp_path / "table")
     actor = LanceLookup(

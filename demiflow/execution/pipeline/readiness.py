@@ -9,7 +9,7 @@ from demiflow.execution.hosts.python_environment import PipelineExecutionEnviron
 from demiflow.execution.contracts import PipelineRunReadiness
 from demiflow.execution.contracts.target import PipelineExecutionTarget
 from demiflow.execution.hosts.environment import missing_required_environment_names, prompt_environment_names
-from demiflow.execution.requirements import read_candidate_requirements
+from demiflow.execution.seal.requirements import read_candidate_requirements
 from demiflow.execution.hosts.python_environment import inspect_local_environment_cache, uses_embedded_current_runtime
 from demiflow.pipeline import discover_pipeline_definition
 

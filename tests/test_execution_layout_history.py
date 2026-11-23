@@ -25,6 +25,14 @@ CARRIERS = {
     'dataflow_operator_observations': ['_ObservedTiming'],
     'legacy_queue': ['LegacyQueueHistoryDatasource'],
     'dataflow_inputs': ['InputMaterializedHandle'],
+    'lance_key_source': ['LanceKeySource', 'PinnedKeyScan', 'PinnedKeyPayload'],
+    'row_scope': ['RowScope', 'ScopedRow'],
+    'stream_admission': ['StreamAdmission', 'AdmissionQuotaReader'],
+    'stream_lookup': ['LanceLookup'],
+    'queue_history': ['QueueHistoryDatasource', 'ReadOnlyQueueStore', 'inspect_result'],
+    'opaque_payloads': ['hydrate_payloads'],
+    'lance_predicate': ['scalar_equal'],
+    'stream_checkpoint': ['StreamCheckpoint'],
     'dataflow_acquisition_call': ['QueueSourceDeclaration', 'AcquisitionCall'],
     'literal_source': ['LiteralSourceReference'],
     'contracts.pipeline': ['PipelineBundleRef', 'PipelineExecutionEnvironment', 'PipelineRunRequest'],
@@ -578,3 +586,27 @@ def test_original_checked_class_rejects_observation_slot_substitution(original_c
         monkeypatch.setattr(fn, '__code__', fn.__code__.replace(co_consts=(*fn.__code__.co_consts, 'changed')))
     assert not authentic_source_global(CheckedExecution, 'demiflow.execution.checked')
     assert describe(CheckedExecution) != original_carriers['CheckedExecution'][1]
+
+
+@pytest.mark.parametrize('changed', ['parent_slot', 'default_slot', 'foreign_globals', 'code'])
+def test_relocated_keyword_default_authenticates_its_actual_owner(monkeypatch, changed):
+    from types import FunctionType
+    from demiflow.execution.sources import queue_history
+    from demiflow.execution.recovery_sdk_v3 import _layout_source_type
+    parent = queue_history.inspect_result
+    original = parent.__kwdefaults__['check_stop']
+    assert _layout_source_type(original) is not None
+    if changed == 'parent_slot':
+        monkeypatch.setattr(queue_history, 'inspect_result', lambda: None)
+        value = original
+    elif changed == 'default_slot':
+        monkeypatch.setitem(parent.__kwdefaults__, 'check_stop', lambda: None)
+        value = original
+    elif changed == 'foreign_globals':
+        value = FunctionType(original.__code__, dict(vars(queue_history)))
+        monkeypatch.setitem(parent.__kwdefaults__, 'check_stop', value)
+    else:
+        code = compile('lambda: 1', '<different-default>', 'eval').co_consts[0]
+        value = FunctionType(code, vars(queue_history))
+        monkeypatch.setitem(parent.__kwdefaults__, 'check_stop', value)
+    assert _layout_source_type(value) is None

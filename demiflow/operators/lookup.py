@@ -4,7 +4,7 @@ from collections import OrderedDict
 from contextlib import closing
 
 
-from ..lance.flow_contract import normalize_lookup
+from demiflow.lance.flow_contract import normalize_lookup
 
 
 class LanceLookup:
@@ -36,48 +36,18 @@ class LanceLookup:
         self.table, self._key_scan = await asyncio.to_thread(self._open)
 
     def _open(self):
-        import lance
-        table = lance.dataset(**self.source)
-        names = table.schema.names
-        if self.on not in names:
-            raise ValueError('Lookup key absent from source')
-        # An indexed lookup already fetches only matching rows. Keep its native
-        # plan, and leave multi-match or unusual projections to that scanner:
-        # many separate payload takes are slower than one native multi-row read.
-        columns = self.columns
-        direct_projection = columns is None or (
-            isinstance(columns, (list, tuple)) and bool(columns)
-            and all(isinstance(c, str) and c in names for c in columns)
-            and len(set(columns)) == len(columns))
-        key_scan = False
-        if self.max_matches == 1 and direct_projection:
-            key_scan = not any(self.on in index.field_names for index in table.describe_indices())
-        return table, key_scan
+        from demiflow.lance.read import open_lookup_source
+        return open_lookup_source(self.source, self.on, self.columns, self.max_matches)
 
     def _unindexed_batches(self, key):
-        from .lance_predicate import scalar_equal
-        predicate = scalar_equal(self.on, key)
-        # batch_size=1 also splits an unindexed filter's *input* into individual
-        # rows. Scan only keys/row IDs in finite native batches instead. The
-        # result holds at most two uint64 IDs; no payload or full key index stays
-        # resident. Row IDs belong to this same pinned dataset, not row offsets.
-        batches = self.table.scanner(columns=[], filter=predicate, with_row_id=True,
-            limit=self.max_matches+1, batch_size=8192, batch_size_bytes=64*1024,
-            io_buffer_size=1024**2, batch_readahead=1, fragment_readahead=1).to_batches()
-        with closing(batches):
-            for batch in batches:
-                for row_id in batch.column('_rowid').to_pylist():
-                    # Keep the original one-row Arrow/Python payload checks.
-                    # Taking all matches together could allocate max_matches
-                    # oversized payloads before any size check can reject them.
-                    payload = self.table._take_rows([row_id], columns=self.columns)
-                    if payload.num_rows != 1:
-                        raise RuntimeError('Pinned Lance lookup did not return its matching row')
-                    yield payload
+        from demiflow.lance.read import lookup_batches
+        # Bind only when this original generator is first advanced.
+        yield from lookup_batches(self.table, self.on, key, self.columns,
+                                  self.max_matches, key_scan=True)
 
     def lookup(self, row):
-        from .stream_grouping import row_size
-        from .lance_predicate import scalar_equal
+        from demiflow.operators.grouping import row_size
+        from demiflow.lance.read import lookup_batches
         if self.output in row:
             raise ValueError('Lookup output would overwrite an input field')
         key = row[self.on]
@@ -90,9 +60,8 @@ class LanceLookup:
         else:
             matches, size = [], 0
             batches = (self._unindexed_batches(key) if self._key_scan else
-                self.table.scanner(columns=self.columns, filter=scalar_equal(self.on, key),
-                    limit=self.max_matches+1, batch_size=1, batch_readahead=1,
-                    fragment_readahead=1).to_batches())
+                lookup_batches(self.table, self.on, key, self.columns,
+                    self.max_matches, key_scan=False))
             with closing(batches):
                 for batch in batches:
                     if batch.nbytes > self.max_bytes:

@@ -300,7 +300,7 @@ def _bare(cls, **attrs):
     lambda: _bare(__import__('demiflow.execution.native_queue.queue_producer', fromlist=["QueueProducer"]).QueueProducer),
     lambda: _bare(__import__("demiflow.operator_llm.runtime", fromlist=["PromptActor"]).PromptActor),
     lambda: _bare(__import__("demiflow.embeddings.runtime", fromlist=["EmbeddingActor"]).EmbeddingActor),
-    lambda: _bare(__import__("demiflow.execution.stream_lookup", fromlist=["LanceLookup"]).LanceLookup,
+    lambda: _bare(__import__('demiflow.operators.lookup', fromlist=["LanceLookup"]).LanceLookup,
                   cache=__import__("collections").OrderedDict(), cache_bytes=0),
 ])
 def test_native_adapter_snapshot_restore_round_trip(factory):

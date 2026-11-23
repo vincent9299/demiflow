@@ -12,7 +12,7 @@ from .contracts.dataflow_errors import DataflowError
 from .dataflow_queue import NativeAcquisitionService
 from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
 from .recovery_contract import identity
-from demiflow.execution.row_scope import RowScope, set_row_scope
+from demiflow.execution.worker.row_scope import RowScope, set_row_scope
 from demiflow.execution.pipeline.run_context import action_scope
 
 

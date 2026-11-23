@@ -58,11 +58,11 @@
       "schema"
     ],
     "open_checkpoint": [
-      "demiflow.execution.stream_checkpoint",
+      "demiflow.execution.executors.stream_checkpoint",
       "open_checkpoint"
     ],
     "read_checkpoint": [
-      "demiflow.execution.stream_checkpoint",
+      "demiflow.execution.executors.stream_checkpoint",
       "read_checkpoint"
     ],
     "read_queue": [

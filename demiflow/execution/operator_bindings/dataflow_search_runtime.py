@@ -7,7 +7,7 @@ from demiflow.services.blocking_io import BlockingIOPool
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.raw_budget import budget_delta, record_admission
 from demiflow.execution.recovery_contract import RecoveryContractError, SourcePosition, UnresolvedCommit, identity
-from demiflow.execution.row_scope import RowScope, current_row_scope, set_row_scope
+from demiflow.execution.worker.row_scope import RowScope, current_row_scope, set_row_scope
 from demiflow.execution.pipeline.run_context import RunAction, action_scope
 
 

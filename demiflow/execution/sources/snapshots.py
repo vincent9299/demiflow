@@ -166,7 +166,7 @@ def _lance_version(source: LanceSource) -> int:
 
 def _datasource_kind(datasource: Datasource) -> str:
     from demiflow.execution.sources.legacy_queue import LegacyQueueHistoryDatasource
-    from demiflow.execution.queue_history import QueueHistoryDatasource
+    from demiflow.execution.sources.queue_history import QueueHistoryDatasource
     from demiflow.execution.queue_source import QueueDatasource
 
     if isinstance(datasource, QueueDatasource):

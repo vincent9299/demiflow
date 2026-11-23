@@ -82,7 +82,7 @@ def _recipe_actor_relation(request, *, bounds):
             for item in expand_relational_inputs(source, path=path, bounds=bounds):
                 selected = item.source
                 if isinstance(source, KeyedSource) and source.kind == 'exclude_keys' and item.port == 'left':
-                    from demiflow.execution.lance_key_source import LanceKeySource
+                    from demiflow.execution.sources.lance_key_source import LanceKeySource
                     selected = LanceKeySource(replace(item.source.query, columns=tuple(source.on)))
                     retained.append(selected)
                 chain(selected, item.plan, item.path)

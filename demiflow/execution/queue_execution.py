@@ -9,7 +9,7 @@ from ..data.sources import DatasourceSource
 from .queue_source import QueueDatasource
 from .queue_sinks import QueueResultSink
 from .recovery_contract import RecoveryContractError,SourcePosition,identity
-from .row_scope import current_row_scope
+from demiflow.execution.worker.row_scope import current_row_scope
 
 
 def queue_source(source):

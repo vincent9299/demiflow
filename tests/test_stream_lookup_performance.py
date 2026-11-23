@@ -6,8 +6,8 @@ import lance
 import pyarrow as pa
 import pytest
 
-from demiflow.execution.stream_grouping import row_size
-from demiflow.execution.stream_lookup import LanceLookup
+from demiflow.operators.grouping import row_size
+from demiflow.operators.lookup import LanceLookup
 
 
 class ObservedDataset:

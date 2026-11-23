@@ -19,8 +19,8 @@ from demiflow.data.execution_contract import _use_executor
 from demiflow.data.lance_declaration import make_lance_scan_source
 from demiflow.data.sources import LanceSource, MaterializedSource
 from demiflow.errors import InvalidLanceRequest
-from demiflow.execution.checkpoint_read import read_checkpoint_binding
-from demiflow.execution.stream_checkpoint import StreamCheckpoint, read_checkpoint
+from demiflow.execution.executors.stream_checkpoint import read_checkpoint_binding
+from demiflow.execution.executors.stream_checkpoint import StreamCheckpoint, read_checkpoint
 
 
 class _Port:
@@ -235,7 +235,7 @@ def test_real_capability_gate_still_rejects_checkpoint_before_host_selection(tmp
         data.read_checkpoint(checkpoint, 'stage')
     assert events == []
     assert data.read_checkpoint is read_checkpoint
-    assert read_checkpoint.__module__ == 'demiflow.execution.stream_checkpoint'
+    assert read_checkpoint.__module__ == 'demiflow.execution.executors.stream_checkpoint'
 
 
 @pytest.mark.parametrize('projection', [False, True])

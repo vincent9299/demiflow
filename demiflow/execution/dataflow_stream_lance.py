@@ -77,7 +77,7 @@ class StreamLanceCall:
         return value['reference']
 
     def __call__(self, rows):
-        from demiflow.execution.row_scope import current_row_scope
+        from demiflow.execution.worker.row_scope import current_row_scope
         scope = current_row_scope()
         if scope is None or len(self.record_ids) != len(rows):
             raise DataflowError('INVALID_CONTRACT', 'Stream writer requires original record membership')
@@ -217,8 +217,8 @@ class _NativeWriter(StreamLanceWriter):
     def prepare_rows(self, rows, selected):
         import pyarrow as pa
         import lance
-        from .lance_predicate import scalar_equal
-        from .stream_grouping import row_size
+        from demiflow.lance.read import scalar_equal
+        from demiflow.operators.grouping import row_size
         input_bytes=sum(row_size(row,min(self.max_row_bytes,self.bounds.max_row_bytes)) for row in rows)
         if input_bytes>self.bounds.max_batch_bytes:
             raise DataflowError('BUDGET_EXCEEDED','Stream writer retained rows exceed native batch budget')

@@ -1081,7 +1081,7 @@ class OperatorKernel:
         return chunk,buffer
 
     def _group_row_bytes(self,row):
-        from demiflow.execution.stream_grouping import row_size
+        from demiflow.operators.grouping import row_size
         chunk,_=self._group_limits()
         return row_size(row,chunk)
 

@@ -44,7 +44,7 @@ def source_facts(source):
     from demiflow.lance.model import LanceScanSpec
 
     from demiflow.execution.queue_source import QueueDatasource
-    from demiflow.execution.queue_history import QueueHistoryDatasource
+    from demiflow.execution.sources.queue_history import QueueHistoryDatasource
     if type(source) is DatasourceSource and type(source.datasource) is QueueHistoryDatasource:
         if source.native_options is not None:raise RuntimeContractError('History has no alternate execution backend')
         from demiflow.execution.queue_flow import resource
@@ -263,7 +263,7 @@ def operation_facts(operation):
             raise RuntimeContractError('Explicit search checkpoint orchestration is retired')
         domain=search_facts(target)
     if type(operation) is ops.AsyncMapOp:
-        from demiflow.execution.stream_lookup import LanceLookup
+        from demiflow.operators.lookup import LanceLookup
         from demiflow.lance.flow_contract import lookup_facts
         from demiflow.operator_llm.native_actor import is_native_prompt_actor
         target = operation.callable.target
@@ -336,7 +336,7 @@ def _model_map_options(options):
 
 def _deduplicate_arguments(actor):
     from demiflow.execution.recovery_identity import describe
-    from demiflow.execution.stream_admission import canonical
+    from demiflow.operators.admission import canonical
     policy = {name: getattr(actor, name) for name in
               ('key', 'quotas', 'max_entries', 'max_key_bytes', 'max_disk_bytes')}
     policy['unique_on'] = list(actor.unique_on)
@@ -361,7 +361,7 @@ def _specialization_domain(operation):
                 'arguments': {name: getattr(operation, name) for name in
                               ('on', 'output', 'chunk_bytes', 'max_groups', 'buffer_bytes')}}
     if type(operation) is ops.DeduplicateOp:
-        from demiflow.execution.stream_admission import StreamAdmission
+        from demiflow.operators.admission import StreamAdmission
         from demiflow.execution.recovery_contract import identity
         target = operation.callable.target
         actor = getattr(target, '__self__', None)

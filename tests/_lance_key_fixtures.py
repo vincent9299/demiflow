@@ -10,7 +10,7 @@ def install_lance_key_probe(tmp_path, monkeypatch, *, fail_relation=False):
     script = '''import os
 if 'DEMIFLOW_WORKER_CONTROL_FD' in os.environ:
     import lance
-    from demiflow.execution import lance_key_source
+    from demiflow.execution.sources import source_readers as lance_key_source
     from demiflow.execution.kernels import lance_keys, join_spool
     from demiflow.operators import join_spool as spool_algorithm
     from contextvars import ContextVar
