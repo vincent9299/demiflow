@@ -897,6 +897,10 @@ class WorkerGraphRunner:
                 self._edge_eoi(command['edge_id'], command['producer_partition'])
             elif command['kind'] == 'close_output':
                 self._close_output(command['edge_id'])
+            elif command['kind'] == 'satisfy' and self._fixed_key_exclusion is not None:
+                # The key scans may already be exhausted while selected output
+                # remains. Keep that unfinished node resumable from its published prefix.
+                self._paused = True
             elif command['kind'] == 'satisfy':
                 for occ, node in self.e._node_specs.items():
                     if node.kind == 'terminal':
