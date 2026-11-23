@@ -267,7 +267,7 @@ class RunArtifactStore:
 
     def scratch(self, *, max_bytes, max_io_bytes):
         """Borrow bounded random-access scratch from this store's authority."""
-        from ..dataflow_scratch import KernelScratch
+        from demiflow.execution.storage.scratch import KernelScratch
         return KernelScratch(self, max_bytes=max_bytes, max_io_bytes=max_io_bytes)
 
     def put(self, chunks: Iterator[bytes], *, max_bytes: int, media_type: str) -> ArtifactRef:
@@ -480,7 +480,7 @@ class RunArtifactStore:
 
     def object_signature(self, ref):
         """Identify the current readable local object without opening its payload."""
-        from ..artifact_proof import ArtifactProofs
+        from demiflow.execution.storage.artifact_proof import ArtifactProofs
         path = self._object_path(ref)
         try:
             metadata = path.stat()

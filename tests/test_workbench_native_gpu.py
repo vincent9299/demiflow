@@ -131,7 +131,7 @@ def test_real_managed_cuda_plan_bridge_and_browser(root, tmp_path, monkeypatch, 
     from demiflow.forge.platform import content_digest
     from demiflow.workbench.projects import workspace as ws
     from demiflow.workbench.graph import model
-    from demiflow.execution.dataflow_devices import device_pool
+    from demiflow.execution.hosts.devices import device_pool
     from runtime_v3_product_scenarios import read_native_execution
     from test_forge_public_api import service
     from test_forge_workbench_browser import page_for

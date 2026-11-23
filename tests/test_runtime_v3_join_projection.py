@@ -10,7 +10,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.dataflow_finite_input import validate_finite_members
 from demiflow.execution.kernels.operator import _SpoolPort
 from demiflow.execution.kernels.join_spool import _EncodedJoinInput, join_pairs
-from demiflow.execution.kernels import state_codec
+from demiflow.execution.contracts import state_codec
 from test_runtime_v3_artifact_accounting import store_fixture, consumed
 from test_runtime_v3_finite_borrow import fixture, make_seal, record
 
@@ -186,7 +186,7 @@ def test_fixed_lance_probe_filters_before_finite_port_and_preserves_right_multip
     from demiflow.execution import RunContext
     from demiflow.execution.kernels.operator import _SpoolPort
     from demiflow.execution.contracts.relational_region import JOIN_PROBE_SUFFIX
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
     uri = str(tmp_path/'left.lance')
     source = lance.write_dataset(pa.table({'k': pa.array([2, -1, 1, 2, None, 6], type=pa.int32()),
@@ -332,7 +332,7 @@ def test_fixed_join_honors_original_source_credit_once(tmp_path, right_key):
     import pyarrow as pa
     from demiflow import data
     from demiflow.execution import RunContext
-    from demiflow.execution.source_readers import _encoded_size
+    from demiflow.execution.sources.source_readers import _encoded_size
 
     row = {'k':1, 'body':b'x'*512}
     source = lance.write_dataset(pa.table({'k':pa.array([1],type=pa.int64()),

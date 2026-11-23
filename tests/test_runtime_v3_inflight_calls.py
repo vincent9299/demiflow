@@ -6,7 +6,7 @@ import pytest
 from demiflow.execution.contracts.dataflow import Record
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.kernels.concurrent_calls import ConcurrentCalls, INVOCATION_SCOPE
-from demiflow.execution.kernels import state_codec
+from demiflow.execution.contracts import state_codec
 
 
 def row(i):

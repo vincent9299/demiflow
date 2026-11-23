@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from ..requirements import ResolvedWheel
 
 from ...pipeline import PIPELINE_PACKAGE_PATH, discover_pipeline_definition
-from ..package_loader import RUNTIME_PACKAGE_PATH
+from demiflow.execution.pipeline.package_loader import RUNTIME_PACKAGE_PATH
 
 PIPELINE_RUNTIME_ABI = "demiflow-pipeline-v12"
 
@@ -211,7 +211,7 @@ class PipelineRunRequest:
     def __post_init__(self) -> None:
         if not self.run_id.strip():
             raise ValueError("Pipeline run_id is required")
-        from ..target import PipelineExecutionTarget
+        from demiflow.execution.contracts.target import PipelineExecutionTarget
         if not isinstance(self.target, PipelineExecutionTarget):
             raise TypeError("PipelineRunRequest requires PipelineExecutionTarget")
 

@@ -7,7 +7,7 @@ from demiflow import data
 from demiflow.data.plan import CallableSpec
 from demiflow.execution.kernels.task_scope import owned_factory_declaration
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.sealed_plans import load_sealed_plan
+from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
 
 class NewOnlyFactory:

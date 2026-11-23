@@ -10,8 +10,8 @@ import sys
 
 import pytest
 
-from demiflow.execution import run_reader
-from demiflow.execution.run_reader import RunReadError, open_journal, read_run
+from demiflow.execution.journal import run_reader
+from demiflow.execution.journal.run_reader import RunReadError, open_journal, read_run
 from test_forge_history_admission import private_domain, run_fixture  # noqa: F401
 
 

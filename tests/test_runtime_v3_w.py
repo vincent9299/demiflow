@@ -43,7 +43,7 @@ from demiflow.execution.contracts.dataflow import (  # noqa: E402
 )
 from demiflow.execution.contracts.dataflow_errors import DataflowError  # noqa: E402
 from demiflow.execution import dataflow_history as hist  # noqa: E402
-from demiflow.execution import sealed_plans  # noqa: E402
+from demiflow.execution.seal import sealed_plans  # noqa: E402
 from demiflow.execution.recovery_contract import RecoveryContractError  # noqa: E402
 from demiflow.execution.recovery_identity import platform_identity  # noqa: E402
 from demiflow.execution.run_journal import RunJournal  # noqa: E402
@@ -609,7 +609,7 @@ def test_w006(tmp_path, monkeypatch):
 
 def test_w007(tmp_path):
     from demiflow import data
-    from demiflow.execution.plan_interpreter import PlanContractError
+    from demiflow.execution.seal.plan_interpreter import PlanContractError
     from test_runtime_v3_real_seams import prepared
     with prepared(tmp_path, data.from_items([{"x": 1}])) as (execution, services):
         target = services.action.context.directory
@@ -644,7 +644,7 @@ def _v3_bundle(store, original, bridge_doc):
 
 def test_w008(tmp_path):
     from demiflow import data
-    from demiflow.execution.plan_interpreter import PlanContractError
+    from demiflow.execution.seal.plan_interpreter import PlanContractError
     from test_runtime_v3_real_seams import prepared
     with prepared(tmp_path, data.from_items([{"x": 1}])) as (execution, services):
         target, action_id = services.action.context.directory, services.action.action_id

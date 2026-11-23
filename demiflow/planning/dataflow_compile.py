@@ -166,7 +166,7 @@ def _source_semantic_facts(source: SourcePlan) -> Mapping[str, Any]:
                 "options": dict(source.options),
                 "connection_factory": describe(source.connection_factory)}
     if isinstance(source, LanceSource):
-        from ..execution.dataflow_native import is_key_only
+        from demiflow.execution.compiler_support.dataflow_native import is_key_only
         key_only = is_key_only(source)
         return {"kind": "lance", "query": describe(source.query),
                 **({"key_only": True} if key_only else {})}
@@ -212,7 +212,7 @@ def _source_kind(source: SourcePlan) -> str:
     if isinstance(source, IterableSource):
         return "iterable"
     if isinstance(source, DatasourceSource):
-        from ..execution.dataflow_native import datasource_kind
+        from demiflow.execution.compiler_support.dataflow_native import datasource_kind
         return datasource_kind(source.datasource)
     if type(source) is _LiteralEmptySource:
         return "literal_empty"
@@ -269,7 +269,7 @@ def compile_kernel_spec(
     from ..data.native_options import validate_stream_native_options
     validate_stream_native_options(getattr(operation, 'native_options', None))
     from ..execution.dataflow_model_factory import native_model_declaration
-    from ..execution.dataflow_native import cache_runtime_state, declaration_lowering, model_variant, native_variant
+    from demiflow.execution.compiler_support.dataflow_native import cache_runtime_state, declaration_lowering, model_variant, native_variant
     native_declaration = native_model_declaration(operation)
     # The compiler asks which declaration this is; the classes stay on the execution side.
     model_kind = model_variant(native_declaration)
@@ -681,7 +681,7 @@ class _Capture:
         child_indices = []
         for binding in bindings:
             if isinstance(source, KeyedSource) and source.kind == "exclude_keys" and binding.port == "left":
-                from ..execution.dataflow_native import narrow_to_keys
+                from demiflow.execution.compiler_support.dataflow_native import narrow_to_keys
                 narrowed = narrow_to_keys(binding.source, source.on)
                 # Reading only the keys is still reading the declared source: the node keeps
                 # that source's report binding, so the report covers every node of the plan.
@@ -899,7 +899,7 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None, on_com
         raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
     request = _lower_request(request)
     if inputs is None:
-        from ..execution.dataflow_compile_inputs import compile_inputs
+        from demiflow.execution.compiler_support.dataflow_compile_inputs import compile_inputs
         inputs = compile_inputs(request)
     capture = _Capture(request, bounds, inputs)
     producer = capture.capture_chain(request.source, request.plan, ())

@@ -60,7 +60,8 @@ def test_every_key_the_corpus_produces_has_one_writer(graphs):
 
 
 def test_names_owned_by_other_modules_are_mirrored_exactly():
-    from demiflow.execution import dataflow_managed_devices, dataflow_publication_budget, dataflow_schema
+    from demiflow.execution import dataflow_managed_devices, dataflow_schema
+    from demiflow.execution.scheduler import dataflow_publication_budget
     from demiflow.execution.kernels import reducer_memory, shuffle_order, task_scope
     from demiflow.planning import dataflow_compile
     assert dataflow_publication_budget.FIELD == 'publication_workspace' in schema.COMPILER_KEYS

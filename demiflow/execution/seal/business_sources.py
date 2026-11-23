@@ -176,7 +176,7 @@ def stage_sources(sources, *, store):
 def mount_sources(refs, expected, *, store, cache):
     """Populate the managed worker cache only from sealed, hash-verified bytes."""
     from .plan import _artifact_from_json, _artifact_chunks
-    from ..state_artifacts import atomic_chunks
+    from demiflow.execution.storage.state_artifacts import atomic_chunks
     if not isinstance(refs, dict) or set(refs) != set(expected) or len(refs) > MAX_SOURCES:
         raise DataflowError('CORRUPT_ARTIFACT', 'Business import membership differs')
     if not refs:

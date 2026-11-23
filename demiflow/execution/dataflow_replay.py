@@ -116,7 +116,7 @@ class PublishedRecordReader:
 
     def _read_frames(self, publication):
         from itertools import groupby
-        from .dataflow_segments import ARROW_STREAM_MEDIA, tree_refs, SEGMENTS_MEDIA
+        from demiflow.execution.storage.segments import ARROW_STREAM_MEDIA, tree_refs, SEGMENTS_MEDIA
         from .record_schema import RecordSchemas
         from .outputs.arrow_rows import PublishedArrowRows
         schemas = None

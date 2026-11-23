@@ -9,8 +9,8 @@ from demiflow import data
 from demiflow.execution import RunContext
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.dataflow_publication_budget import TERMINAL_WORKSPACE
-from demiflow.execution.lance_sink import LanceSink
+from demiflow.execution.scheduler.dataflow_publication_budget import TERMINAL_WORKSPACE
+from demiflow.execution.outputs.lance_sink import LanceSink
 from test_runtime_v3_durable_residency import LIMITS
 
 
@@ -90,8 +90,8 @@ def test_same_40k_envelope_rejects_a_real_unfit_row_before_native_constructor(tm
 def test_real_terminal_switch_and_restore_keep_row_index_and_two_chunks_in_one_window(tmp_path,monkeypatch):
     from demiflow.execution.contracts.dataflow import ArtifactRef, BlockPartition
     from demiflow.execution.dataflow_record_frames import frame_parts
-    from demiflow.execution.dataflow_scratch import ScratchStream
-    from demiflow.execution.dataflow_segments import block_chunks
+    from demiflow.execution.storage.scratch import ScratchStream
+    from demiflow.execution.storage.segments import block_chunks
     from demiflow.execution.exchange.dataflow_bridge import _encode_payload
     from demiflow.execution.worker.terminal_blocks import TerminalBlocks
     from test_runtime_v3_artifact_accounting import store_fixture

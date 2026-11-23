@@ -52,15 +52,15 @@ def resource_scope_binding(resources, policy):
 
 def _driver_resources(action: "RunAction", policy: RuntimePolicy):
     from ..resources.manager import ManagerBounds, ResourceManager
-    from .resource_state import RunResourceState
+    from demiflow.execution.hosts.run_state import RunResourceState
     run = action.context
     root = run.directory.with_name(run.directory.name + "-driver-resources")
     state = RunResourceState(run.journal)
-    from .dataflow_devices import device_configuration
+    from demiflow.execution.hosts.devices import device_configuration
     devices, device_topology = device_configuration(policy.provider)
     job_resources, job_gpu = None, 0
     if policy.provider == "local":
-        from .dataflow_capacity import local_capacity
+        from demiflow.execution.hosts.capacity import local_capacity
         from ..resources.capacity import LocalCapacityPool
         from ..resources.local import LocalResourceProvider
         from ..resources.process_unit import ManagedProcessUnit
@@ -74,7 +74,7 @@ def _driver_resources(action: "RunAction", policy: RuntimePolicy):
             return ResourceManager(provider, RunResourceState(run.journal, operation_scope=scope_id))
         if policy.worker_mode == "thread":
             from ..resources.thread import ThreadResourceProvider
-            from .dataflow_thread_host import DataflowThreadConnector
+            from demiflow.execution.hosts.thread import DataflowThreadConnector
             provider = ThreadResourceProvider(pool, root / "thread-units", control=DataflowThreadConnector())
         else:
             provider = LocalResourceProvider(pool, unit, control=DataflowLocalConnector(), device_pool=devices)
@@ -98,9 +98,9 @@ def original_job_resources(run, scope_id):
     from ..resources.local import LocalResourceProvider
     from ..resources.manager import ResourceManager
     from ..resources.process_unit import ManagedProcessUnit
-    from .dataflow_capacity import local_capacity
-    from .dataflow_devices import device_configuration
-    from .resource_state import RunResourceState
+    from demiflow.execution.hosts.capacity import local_capacity
+    from demiflow.execution.hosts.devices import device_configuration
+    from demiflow.execution.hosts.run_state import RunResourceState
     state = RunResourceState(run.journal, operation_scope=scope_id)
     domain, capacity = local_capacity()
     units = run.directory.with_name(run.directory.name + '-driver-resources') / 'units'
@@ -114,9 +114,9 @@ def _driver_hosts(action: "RunAction", policy: RuntimePolicy, store: RunArtifact
     run = action.context
     revision = run.journal.recovery_identity()["platform_revision"]
     if policy.provider == "local":
-        from .dataflow_capacity import local_capacity
+        from demiflow.execution.hosts.capacity import local_capacity
         _, capacity = local_capacity()
-        from .dataflow_devices import gpu_capacity
+        from demiflow.execution.hosts.devices import gpu_capacity
         capacity = {**capacity, 'gpu': 0 if policy.worker_mode == 'thread' else gpu_capacity('local')}
         hosts = (HostDescriptor(
             host_id="local", provider="local", runtime_revision=revision,
@@ -293,7 +293,7 @@ def make_runtime_services(assignment: WorkerAssignment, *, transport: "ControlTr
         from .contracts.relational_region import needs_native_offsets
         query_region_offsets = None
         if any(needs_native_offsets(stage) for stage in assignment.stages):
-            from .datafusion import query_region_offsets
+            from demiflow.execution.hosts.datafusion import query_region_offsets
         return RuntimeServices(store=store, journal=journal, bounds=bounds, assignment=assignment,
                                clock_ms=_now_ms, check_stop=check_stop,
                                constants=constants, programs=programs, query_region_offsets=query_region_offsets)

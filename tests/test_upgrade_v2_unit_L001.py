@@ -10,9 +10,7 @@ import copy
 
 import pytest
 
-from demiflow.execution.plan_interpreter import (
-    EXECUTION_BINDINGS_SCHEMA_V2, PlanContractError, interpret_physical_plan,
-)
+from demiflow.execution.seal.plan_interpreter import EXECUTION_BINDINGS_SCHEMA_V2, PlanContractError, interpret_physical_plan
 from demiflow.execution.recovery_contract import identity
 from demiflow.planning.dag import compile_physical_execution_plan
 from test_execution_layout import PROFILE_REF, RECOVERY, bundle_for, chain_fixture, stage_id

@@ -10,7 +10,7 @@ from dataclasses import asdict, replace
 from .contracts.dataflow import QueueBinding, QueueReply, SourceSplit, thaw_record_value
 from .contracts.dataflow_errors import DataflowError
 from .dataflow_queue import NativeAcquisitionService
-from .dataflow_acquisition_call import AcquisitionCall
+from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
 from .recovery_contract import identity
 from .row_scope import RowScope, set_row_scope
 from .run_context import _ACTION
@@ -30,7 +30,7 @@ class ProducerCall(AcquisitionCall):
 
 class NativeProducerService(NativeAcquisitionService):
     def configure(self, source, plan, sink, *, graph):
-        from .queue_producer import producer_actor
+        from demiflow.execution.native_queue.queue_producer import producer_actor
         found = producer_actor(plan)
         if found is None or len(graph.sources) != 1 or sink is not None:
             raise DataflowError('INVALID_CONTRACT', 'Native producer requires one fixed source and one enqueue tail')

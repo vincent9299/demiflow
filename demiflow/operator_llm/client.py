@@ -293,7 +293,7 @@ class AsyncOperatorLLMClient:
             # Capability-verified remote native journal is assembled before the
             # http_error_retry guard. A private write journal must not silently
             # dual-write with native recovery; it stays as read-only history.
-            from demiflow.execution.dataflow_model_journal import RemotePromptJournal
+            from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal
             if not isinstance(native_journal, RemotePromptJournal):
                 raise ValueError('native_journal must be a capability-verified RemotePromptJournal')
             if self.journal is not None:
@@ -307,7 +307,7 @@ class AsyncOperatorLLMClient:
             journal = self.journal
             verified = isinstance(journal, SQLitePromptJournal)
             if not verified and journal is not None:
-                from demiflow.execution.dataflow_model_journal import RemotePromptJournal
+                from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal
                 verified = isinstance(journal, RemotePromptJournal)
             if (not verified or journal.read_only
                     or type(journal.limit) is not int or journal.limit < 0):

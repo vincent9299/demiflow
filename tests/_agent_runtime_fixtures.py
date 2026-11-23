@@ -71,7 +71,7 @@ def collect_actor_component(declaration):
     separate native Dataset tests cover those boundaries.
     """
     from demiflow.data.sources import ItemsSource, MaterializedSource
-    from demiflow.execution.dataflow_inputs import InputMaterializedHandle
+    from demiflow.execution.sources.materialized_input import InputMaterializedHandle
     from demiflow.operator_llm.runtime import PromptActor
     source = declaration._source
     if isinstance(source, ItemsSource):

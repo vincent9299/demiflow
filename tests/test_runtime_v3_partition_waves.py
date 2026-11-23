@@ -8,7 +8,7 @@ from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.dataflow_terminals import materialized_handle
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.state_artifacts import StateArtifacts
+from demiflow.execution.storage.state_artifacts import StateArtifacts
 from test_runtime_v3_graph_adapter import _spec, graph_environment
 
 
@@ -122,7 +122,7 @@ def test_explicit_graph_storage_is_sealed_and_not_silently_enlarged(graph_enviro
 @pytest.mark.parametrize('mode', ['finite_sealed', 'memory_incremental'])
 def test_graph_storage_remains_per_channel_under_original_aggregate_grant(graph_environment, monkeypatch, mode):
     from demiflow.execution.action_driver import dataflow
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     original, captures = dataflow.execute_action, []
     def capture(request, **kwargs):
         handle = original(request, **kwargs)

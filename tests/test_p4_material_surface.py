@@ -14,7 +14,7 @@ from demiflow.data.declaration_inspection import dataset_declaration_links
 from demiflow.execution.contracts.dataflow_codec import encode_wire
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.plan_capture import capture_pipeline
-from demiflow.execution.program_materials import compiled_node_materials
+from demiflow.execution.journal.program_materials import compiled_node_materials
 from demiflow.workbench.graph.plan_details import build_plan_details
 from test_plan_capture import no_execution
 
@@ -113,7 +113,7 @@ def test_inventory_public_validation_is_pure_and_same_native_implementation(tmp_
 
 
 def test_borrowed_native_slot_is_drained_before_session_close(tmp_path, monkeypatch):
-    from demiflow.execution import datafusion as native
+    from demiflow.execution.hosts import datafusion as native
     from test_native_resources import session
     monkeypatch.setattr(native, '_cpu_capacity', lambda: 4)
     monkeypatch.setattr(native, '_cgroup_memory', lambda: (0, 32 * 2**30))

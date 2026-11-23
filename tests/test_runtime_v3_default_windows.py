@@ -58,7 +58,7 @@ def test_finite_inputs_still_fit_the_downstream_streaming_component():
     from demiflow import data
     from test_runtime_v3_codec_profile_groups import request
     from test_runtime_v3_codec_profile_groups import physical
-    from demiflow.execution.dataflow_publication_budget import PublicationReservation
+    from demiflow.execution.scheduler.dataflow_publication_budget import PublicationReservation
 
     def source():
         raise AssertionError('planning accessed the live iterator')

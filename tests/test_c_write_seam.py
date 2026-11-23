@@ -19,7 +19,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunAction, RunContext
-from demiflow.execution.sealed_plans import load_execution_bindings, load_sealed_plan
+from demiflow.execution.seal.sealed_plans import load_execution_bindings, load_sealed_plan
 from demiflow.workbench.runs.facts import read_sealed_plan
 
 
@@ -81,7 +81,7 @@ def assert_sealed_readable(run_dir, run, expected_kinds):
 
 
 def read_program_evidence(run_dir, action_id):
-    from demiflow.execution.sealed_plans import _v3_read_store
+    from demiflow.execution.seal.sealed_plans import _v3_read_store
     import json
     bundle = load_sealed_plan(run_dir, action_id, version="v3")
     sealed = bundle["sealed"]
@@ -292,8 +292,8 @@ def test_identity_bridge_carrier_survives_run_exit(tmp_path):
     identity_bridge_corrupt). It must be written unregistered so the workbench
     reads it back after the run, with every entry four-way identity linked.
     """
-    from demiflow.execution.identity_bridge import build_identity_bridge, seal_identity_bridge
-    from demiflow.execution.sealed_plans import read_plan_artifact
+    from demiflow.execution.seal.identity_bridge import build_identity_bridge, seal_identity_bridge
+    from demiflow.execution.seal.sealed_plans import read_plan_artifact
     from demiflow.planning.dag import compile_logical_dag
     from demiflow.workbench.runs import facts
 

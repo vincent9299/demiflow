@@ -257,7 +257,7 @@ def test_failed_row_materialization_keeps_confirmed_prefix(tmp_path):
     assert journal.execution_action('action-1')['result'] is None
     facts = journal.execution_commits('action-1')
     assert len(facts) == 1 and facts[0]['status'] == 'acked'
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     from _native_receipt_fixtures import committed_rows
     image = StateArtifacts(run).read(facts[0]['prepared']['state']['dataflow-cut-v3'])
     assert image['cut']['final'] is False

@@ -27,7 +27,7 @@ class CodexExecPromptClient:
         if set(options) - {'codex_exec', 'sqlite_journal', 'timeout_s'}:
             raise ValueError('Unknown Codex execution options')
         if native_journal is not None:
-            from ..execution.dataflow_model_journal import RemotePromptJournal
+            from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal
             from ..execution.dataflow_prompt_journal import RemotePrivatePromptJournal
             if (not isinstance(native_journal, RemotePromptJournal)
                     or isinstance(native_journal, RemotePrivatePromptJournal)

@@ -8,9 +8,7 @@ from types import MappingProxyType
 
 import pytest
 
-from demiflow.execution.plan_interpreter import (
-    ExecutionPlacement, interpret_physical_plan, to_wire,
-)
+from demiflow.execution.seal.plan_interpreter import ExecutionPlacement, interpret_physical_plan, to_wire
 from test_execution_layout import chain_fixture
 import _v2_native_fixtures as fx
 

@@ -236,7 +236,7 @@ def _run_graph(tmp_path, spec):
 
 
 def test_graph_manifest_bounded_inflight_completed_journal_reused(tmp_path):
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     spec, readers, n = _graph_spec(_make_effect_actor("completed"), n=24, cut_rows=8)
     executor = LocalDatasetExecutor(workers=1)
     limits = {"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,

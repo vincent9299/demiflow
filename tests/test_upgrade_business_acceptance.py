@@ -52,7 +52,7 @@ import pytest
 import demiflow.data as data
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
-from demiflow.execution.block_sink import BlockSink
+from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message
@@ -415,7 +415,7 @@ def _chain_recovery(fixture, *, fault):
     def resource_evidence():
         value = _resource_evidence(run_dir, capacity=_CHAIN_CAPACITY, started=started)
         # v3 uses the selected deployment capacity domain, not run-resources.
-        from demiflow.execution.dataflow_capacity import local_capacity
+        from demiflow.execution.hosts.capacity import local_capacity
         domain, capacity = local_capacity()
         value['capacity_charged'] = LocalCapacityPool(domain / 'capacity', capacity=capacity).snapshot()['charged']
         return value
@@ -501,8 +501,8 @@ def _keyed_recovery(fixture, *, fault):
     instead of blindly resending, and a replay of the same logical keys is
     idempotent under the append contract.
     """
-    import demiflow.execution.stream_lance as stream_lance
-    from demiflow.execution.stream_lance import StreamLanceWriter
+    import demiflow.execution.native_queue.stream_lance as stream_lance
+    from demiflow.execution.native_queue.stream_lance import StreamLanceWriter
     root = fixture['root']
     schema, rows = fixture['schema'], fixture['rows']
     target = root / 'out.lance'
@@ -968,7 +968,7 @@ def test_keyed_append_conflicting_content_refused(tmp_path):
 def test_keyed_overwrite_duplicate_key_refused(tmp_path):
     # The managed public save_lance contract now requires append; the native keyed
     # writer still enforces overwrite uniqueness directly.
-    from demiflow.execution.stream_lance import StreamLanceWriter
+    from demiflow.execution.native_queue.stream_lance import StreamLanceWriter
     root = tmp_path / 'keyed'
     root.mkdir()
     writer = StreamLanceWriter(root / 'out.lance', KEYED_SCHEMA, key='id', mode='overwrite')
@@ -990,7 +990,7 @@ def test_keyed_public_save_lance_append_commits(tmp_path):
 
 
 def test_keyed_oversized_row_refused_before_commit(tmp_path):
-    from demiflow.execution.stream_lance import StreamLanceWriter
+    from demiflow.execution.native_queue.stream_lance import StreamLanceWriter
     root = tmp_path / 'keyed'
     root.mkdir()
     target = root / 'out.lance'

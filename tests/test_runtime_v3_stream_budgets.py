@@ -4,7 +4,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.resource_state import RunResourceState
+from demiflow.execution.hosts.run_state import RunResourceState
 
 
 def _increment(row):

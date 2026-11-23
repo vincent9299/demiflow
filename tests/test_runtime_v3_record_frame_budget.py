@@ -94,7 +94,7 @@ def test_decoder_separates_document_and_actual_payload_and_admits_before_parse(m
 
 def test_real_nonfinal_ack_resume_and_stored_handle_keep_wide_typed_rows(tmp_path, monkeypatch):
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     import json
     import time
     rows = [{**_rows()[0], 'k':i} for i in range(4)]
@@ -167,7 +167,7 @@ def test_source_pending_keeps_old_bytes_and_restores_actual_near_limit_payload(t
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_s import make_snapshot, first_split, make_services
     from demiflow.data.sources import ItemsSource
-    from demiflow.execution.source_readers import ItemsReader
+    from demiflow.execution.sources.source_readers import ItemsReader
     row = {'value':'x'*4050}
     with store_fixture(tmp_path) as (_,store,_):
         b = bounds(max_row_bytes=4096, max_batch_bytes=8192, max_control_bytes=8192)
@@ -198,7 +198,7 @@ def test_real_ray_core_near_limit_frame_preserves_original_ack_and_no_ray_data(t
     from demiflow.data.api import DataAPI
     from demiflow.execution.executors.ray import RayDatasetExecutor
     from runtime_v3_support import _RayDataBlocker
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     assert Path(ray.__file__).is_file() and not ray.is_initialized()
     executor = RayDatasetExecutor(workers=2, resource_root=tmp_path)
     rows = _rows()

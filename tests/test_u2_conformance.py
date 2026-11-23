@@ -10,7 +10,7 @@ import time
 import pytest
 
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.resource_state import RunResourceState
+from demiflow.execution.hosts.run_state import RunResourceState
 from demiflow.resources.contracts import (
     RESOURCE_PROTOCOL_VERSION, MutationContext, ResourceError, ResourceProfile,
     ResourceScope, WorkerLaunchSpec, WorkerRequest,

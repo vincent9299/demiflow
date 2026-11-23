@@ -14,7 +14,7 @@ from ..dataflow_record_frames import (
     decode_document, decode_frame, frame_stream, line_limit, read_chunk_bytes,
     admit_workspace, metadata_bytes,
 )
-from ..dataflow_segments import block_chunks
+from demiflow.execution.storage.segments import block_chunks
 from ..dataflow_sinks import _artifact_json
 from ..recovery_contract import document
 

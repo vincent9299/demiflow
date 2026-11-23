@@ -12,7 +12,7 @@ import pytest
 
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.sealed_plans import load_sealed_plan
+from demiflow.execution.seal.sealed_plans import load_sealed_plan
 from demiflow.planning.dataflow_graph_adapter import graph_credit
 from demiflow.execution.seal.plan import validate_graph_replay
 from test_runtime_v3_graph_adapter import _spec

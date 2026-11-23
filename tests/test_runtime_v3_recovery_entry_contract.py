@@ -10,7 +10,7 @@ from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal, ExecutionBudgetExceeded
 from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit
 from demiflow.execution.contracts.dataflow_errors import DataflowError, DataflowUnresolvedCommit
-from demiflow.execution.dataflow_failures import failure_payload, restore_failure
+from demiflow.execution.contracts.dataflow_failures import failure_payload, restore_failure
 from test_execution_recovery_entrypoints import FormalSink
 
 

@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from demiflow.execution import location_index as locations
+from demiflow.execution.storage import location_index as locations
 from demiflow.execution import artifacts
 
 

@@ -151,7 +151,7 @@ def child(root, function, *arguments):
 def test_builtin_partial_receipts_restore_without_serializing_resources(
     tmp_path, family
 ):
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
 
     if family == "lookup":
         lance.write_dataset(

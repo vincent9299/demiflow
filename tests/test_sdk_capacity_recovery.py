@@ -21,7 +21,7 @@ from demiflow.resources.contracts import RESOURCE_PROTOCOL_VERSION, MutationCont
 from demiflow.resources.manager import ResourceManager
 from demiflow.resources.local import LocalResourceProvider
 from demiflow.resources.process_unit import ManagedProcessUnit
-from demiflow.execution.resource_state import RunResourceState
+from demiflow.execution.hosts.run_state import RunResourceState
 from demiflow.execution.run_context import clean_stopped_execution
 
 
@@ -54,7 +54,7 @@ def crash_graph(root, mode='process', window='after_sink_commit_before_receipt')
 
 
 def pool_for(domain):
-    from demiflow.execution.dataflow_capacity import local_capacity
+    from demiflow.execution.hosts.capacity import local_capacity
     _, capacity = local_capacity()
     return LocalCapacityPool(domain / 'capacity', capacity=capacity)
 
@@ -338,7 +338,7 @@ def test_unrecorded_spawn_cannot_release_an_inherited_busy_unit_lock(original_un
 
 
 def test_unrecorded_spawn_rejects_replaced_unit_lock_even_if_new_inode_is_free(original_unit):
-    from demiflow.execution.dataflow_resource_recovery import _OriginalLocalExit
+    from demiflow.execution.hosts.execution_recovery import _OriginalLocalExit
     run, pool, unit, provider, _, _ = original_unit
     directory = unit.directory('scope-1', 'worker')
     process_path = directory / 'process.json'
@@ -430,7 +430,7 @@ def test_unbound_reservation_without_unit_requires_never_spawned_journal_facts(t
 
 
 def test_full_original_pool_is_freed_before_replay_and_next_normal_run(tmp_path, monkeypatch):
-    from demiflow.execution import dataflow_capacity
+    from demiflow.execution.hosts import capacity as dataflow_capacity
     domain = tmp_path / 'domain'
     monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT', str(domain))
     crash_graph(tmp_path)
@@ -464,7 +464,7 @@ def test_legacy_thread_scope_recovers_only_matching_original_evidence(tmp_path, 
 
 def test_unknown_cleanup_read_retains_owner_and_does_not_mask_original_error(original_unit, monkeypatch):
     run, pool, *_ = original_unit
-    from demiflow.execution import dataflow_resource_recovery
+    from demiflow.execution.hosts import execution_recovery as dataflow_resource_recovery
     def fail(*args, **kwargs):
         raise OSError('original recovery failure')
     def unknown(*args, **kwargs):

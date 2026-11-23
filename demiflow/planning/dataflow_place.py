@@ -169,7 +169,7 @@ def partition_stages(
         # below the full pair of maximum business rows.
         if 'codec_min_bytes' in kernel.configuration and kernel.state == 'none':
             resident = min(resident, kernel.profile.requests['memory_bytes'])
-        from ..execution.dataflow_publication_budget import REF_CARRIER, TERMINAL_WORKSPACE
+        from demiflow.execution.scheduler.dataflow_publication_budget import REF_CARRIER, TERMINAL_WORKSPACE
         memory = kernel.configuration.get('terminal_memory', {})
         if node.kind == 'terminal' and (kernel.configuration.get('input_carrier') == REF_CARRIER
                 or memory.get('schema') == TERMINAL_WORKSPACE):
@@ -837,9 +837,9 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
     from ..execution.dataflow_native_limits import sealed_execution_ceilings
     ceilings = sealed_execution_ceilings(graph)
     cpu_ceiling = ceilings.get('cpu_millis')
-    from ..execution.dataflow_publication_budget import graph_workspace_bytes
+    from demiflow.execution.scheduler.dataflow_publication_budget import graph_workspace_bytes
     publication = graph_workspace_bytes(graph)
-    from ..execution.dataflow_publication_budget import PublicationReservation
+    from demiflow.execution.scheduler.dataflow_publication_budget import PublicationReservation
     reservation = PublicationReservation(graph, stages, bounds)
     try:
         return exchanges, solve_residency(stages, exchanges, hosts=hosts, bounds=bounds,
@@ -1027,14 +1027,14 @@ def compile_physical_dataflow(
         # Automatic durable parking must not discard an explicit graph limit.
         # Keep the same sole solver's sealed spill/accounting facts consistent.
         exchanges = _share_exchange_storage(constrained, bounds)
-        from ..execution.dataflow_publication_budget import PublicationReservation
+        from demiflow.execution.scheduler.dataflow_publication_budget import PublicationReservation
         residency = solve_residency(stages, exchanges, hosts=hosts, bounds=bounds,
             max_active_workers=policy.max_active_workers, max_cpu_millis=cpu_ceiling,
             publication_reservation=PublicationReservation(graph, stages, bounds))
     stages, reserved = allocate_workspace_slack(declared_graph, graph, stages, residency,
                                                 hosts=hosts, bounds=bounds)
     # Validate the exact grants and the original (not floor) publication contract.
-    from ..execution.dataflow_publication_budget import PublicationReservation
+    from demiflow.execution.scheduler.dataflow_publication_budget import PublicationReservation
     residency = solve_residency(stages, exchanges, hosts=hosts, bounds=bounds,
         max_active_workers=policy.max_active_workers, max_cpu_millis=cpu_ceiling,
         publication_reservation=PublicationReservation(declared_graph, stages, bounds, declared=reserved))

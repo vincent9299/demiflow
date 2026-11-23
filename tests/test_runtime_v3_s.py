@@ -246,8 +246,8 @@ def _queue_service_request(command, *, services):
 
 _install("demiflow.execution.dataflow_queue", queue_service_request=_queue_service_request)
 
-from demiflow.execution import dataflow_sources as ds  # noqa: E402
-from demiflow.execution import source_readers as sr  # noqa: E402
+from demiflow.execution.sources import snapshots as ds  # noqa: E402
+from demiflow.execution.sources import source_readers as sr  # noqa: E402
 from demiflow.execution.recovery_contract import identity  # noqa: E402
 from demiflow.data.datasource import Datasource, ReadTask, BlockMetadata  # noqa: E402
 from demiflow.data.records import FileRecords  # noqa: E402

@@ -52,7 +52,7 @@ def bind_private_embedding_contracts(service, graph):
 
 def bind_private_embedding_adapter(actor, *, services, node_id, configuration):
     from .contracts.dataflow import thaw_record_value
-    from .dataflow_model_journal import make_native_action_view, RemotePrivateEmbeddingJournal
+    from demiflow.execution.operator_bindings.dataflow_model_journal import make_native_action_view, RemotePrivateEmbeddingJournal
     declared = thaw_record_value(configuration['private_journal'])
     if (actor.options.get('sqlite_journal') != declared
             or actor.max_requests != configuration['max_requests']
@@ -62,7 +62,7 @@ def bind_private_embedding_adapter(actor, *, services, node_id, configuration):
     actor._journal_binding = RemotePrivateEmbeddingJournal(
         services=services, action=action, node_id=node_id, declaration=declared)
     from .row_scope import current_row_scope
-    from .dataflow_model_journal import _PRIVATE_EMBEDDING_SCOPE
+    from demiflow.execution.operator_bindings.dataflow_model_journal import _PRIVATE_EMBEDDING_SCOPE
     maximum = int(configuration.get('max_batch') or 256)
     exchange = actor._exchange
     async def scoped_exchange(request, encoded, timings, *, request_part=0):
@@ -83,7 +83,7 @@ def bind_private_embedding_adapter(actor, *, services, node_id, configuration):
 
 def _journal(service, node_id):
     from ..operator_llm.sqlite_journal import SQLitePromptJournal
-    from .dataflow_private_storage import private_storage
+    from demiflow.execution.storage.private_journals import private_storage
     with service._private_embedding_lock:
         if service._closed:
             raise DataflowError('FENCED', 'Private embedding journal owner is closed')
@@ -101,7 +101,7 @@ def _journal(service, node_id):
 
 def private_embedding_request(service, command, request):
     from .dataflow_authority import _NATIVE_HANDLERS
-    from .dataflow_model_journal import _private_embedding_rpc_id
+    from demiflow.execution.operator_bindings.dataflow_model_journal import _private_embedding_rpc_id
     config = service._private_embedding_nodes[command.node_id]
     scope, part = command.options.get('row_scope'), command.options.get('request_part')
     if (command.operation not in _OPERATIONS or command.reservation is not None

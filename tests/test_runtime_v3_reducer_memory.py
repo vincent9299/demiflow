@@ -9,7 +9,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.sealed_plans import load_sealed_plan
+from demiflow.execution.seal.sealed_plans import load_sealed_plan
 from demiflow.execution.kernels import reducer_memory
 
 

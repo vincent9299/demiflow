@@ -147,7 +147,7 @@ def test_prompt_service_runs_on_its_actual_original_gpu_grant(tmp_path, monkeypa
     import os
     import subprocess
     from pathlib import Path
-    from demiflow.execution.dataflow_devices import device_pool
+    from demiflow.execution.hosts.devices import device_pool
     from test_runtime_v3_managed_service_gpu import _released
     value = prompt_transport(gpu_service, monkeypatch)
     observed, errors, done = [], [], threading.Event()

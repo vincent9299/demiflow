@@ -161,7 +161,7 @@ async def test_prompt_response_pool_progresses_while_journal_pool_is_busy(prompt
 
 def test_prompt_real_calls_use_owned_pools_and_skip_historical_audit(prompt_server, tmp_path, monkeypatch):
     from demiflow.operator_llm import client as clients, call_ref
-    from demiflow.execution.dataflow_model_journal import RemotePromptJournal
+    from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal
     observed, closed = {}, []
     def record(name, function):
         def wrapped(*args, **kwargs):

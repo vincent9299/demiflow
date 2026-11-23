@@ -674,7 +674,7 @@ def test_callback_cancellation_never_returns_partial_success(data, execution, co
 @pytest.mark.parametrize('failure', ['schema', 'writer'])
 def test_native_lance_writer_failure_joins_stream_and_closes_workers(data, tmp_path, monkeypatch, failure):
     from demiflow.execution.recovery_contract import RecoveryContractError
-    from demiflow.execution.lance_sink import LanceSink
+    from demiflow.execution.outputs.lance_sink import LanceSink
     from demiflow.execution.run_context import RunContext
     from _worker_event_fixtures import emit, events
     import lance

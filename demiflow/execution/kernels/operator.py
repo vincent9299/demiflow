@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import pickle
-from . import state_codec
+from demiflow.execution.contracts import state_codec
 from .async_instance import AsyncInstance
 from .block_partition import preserve_block
 from collections.abc import Iterator, Mapping
@@ -478,7 +478,7 @@ class OperatorKernel:
         if spec.kind not in KERNEL_KINDS:
             raise _err("INVALID_CONTRACT", "unknown kernel kind", kind=spec.kind)
         self._spec = spec
-        from ..dataflow_operator_observations import CallbackObservations
+        from demiflow.execution.journal.dataflow_operator_observations import CallbackObservations
         self.observations = CallbackObservations()
         self._services = services
         self._finite_services = services if finite_services is None else finite_services
@@ -626,7 +626,7 @@ class OperatorKernel:
                         input_limit = self._services.bounds.max_row_bytes + grant - minimum
                     self._calls = ConcurrentCalls(self._concurrency, check_stop=self._services.check_stop,
                                                   input_limit=input_limit)
-            from ..dataflow_batch_membership import KINDS, NativeBatchMembership
+            from demiflow.execution.kernels.batch_membership import KINDS, NativeBatchMembership
             if self._spec.kind in KINDS:
                 self._batch_membership = NativeBatchMembership(self._services,self._occurrence,self._partition_id)
             if self._image is not None:
@@ -666,7 +666,7 @@ class OperatorKernel:
         if self._spec.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
             from ..dataflow_models import bind_model_services
             instance = bind_model_services(instance, self._spec, services=self._services)
-        from ..dataflow_acquisition_call import AcquisitionCall
+        from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
         from ..dataflow_producer import ProducerCall
         from ..dataflow_search import NativeSearchCall
         # A real native writer declaration already imported its canonical
@@ -1017,7 +1017,7 @@ class OperatorKernel:
             yield from self._invoke_batch(batch)
             expected = self._batch_membership.expected(self._batch_ordinal) if self._batch_membership else None
         if expected is not None:
-            from ..dataflow_batch_membership import member
+            from demiflow.execution.kernels.batch_membership import member
             index=len(self._batch)
             if index >= len(expected) or member(record,self._services.bounds) != expected[index]:
                 raise _err('INCOMPATIBLE_HISTORY','Native replay batch changed original record membership or payload')
@@ -1033,7 +1033,7 @@ class OperatorKernel:
             yield from self._invoke_batch(batch)
 
     def _drain_replay_batches(self):
-        from ..dataflow_batch_membership import select_replay_batch
+        from demiflow.execution.kernels.batch_membership import select_replay_batch
         while self._batch:
             scan = (id(self._batch), self._batch_ordinal, len(self._batch))
             if getattr(self, '_batch_scan', None) == scan:

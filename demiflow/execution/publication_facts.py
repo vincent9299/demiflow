@@ -82,7 +82,7 @@ def inspect_write_receipt(journal, action_id):
     ``lance`` sink (optionally composed with object rows) is inspected here.
     Returns the native receipt data, or ``None`` when nothing conclusive exists.
     """
-    from .lance_sink import LanceSink, spec_from_identity
+    from demiflow.execution.outputs.lance_sink import LanceSink, spec_from_identity
     binding = journal.recovery_identity()
     if binding is None:
         return None
@@ -145,10 +145,10 @@ def admit_prepared_stage(journal, directory, *, parents, report_node_id, uri,
     inconclusive. Other ``RecoveryContractError`` come from the sealed bridge and
     stage binding checks, exactly as before the move.
     """
-    from .sealed_plans import read_plan_artifact
-    from .dataflow_stage_facts import stage_binding
+    from demiflow.execution.seal.sealed_plans import read_plan_artifact
+    from demiflow.execution.journal.dataflow_stage_facts import stage_binding
     from .dataflow_stream_lance import _BatchSink
-    from .run_reader import _ReadonlyJournal
+    from demiflow.execution.journal.run_reader import _ReadonlyJournal
     journal = _ReadonlyJournal(directory, attempt=getattr(journal, 'attempt', None))
     binding = journal.recovery_identity()
     if binding is None:
@@ -200,7 +200,7 @@ def object_namespace(run_id, logical_root):
     Hosts compare journal ``object_roots`` records against this instead of
     fabricating a context for ``object_resources.namespace_record``.
     """
-    from .object_resources import namespace_record
+    from demiflow.execution.storage.object_resources import namespace_record
     return namespace_record(SimpleNamespace(ref=SimpleNamespace(run_id=run_id)), logical_root)
 
 
@@ -214,7 +214,7 @@ def _check_deadline(deadline):
 
 
 def _publication_snapshot(directory, action_id, attempt, deadline):
-    from .run_reader import read_run
+    from demiflow.execution.journal.run_reader import read_run
     _check_deadline(deadline)
     with read_run(directory, deadline=deadline) as reader:
         state, _ = reader.state(attempt)
@@ -233,7 +233,7 @@ def _recheck(directory, action_id, attempt, deadline, before):
 
 def action_recovery_facts(directory, action_id, *, attempt=None, deadline=None):
     """Journal-only recovery eligibility; never proof that a target is absent."""
-    from .run_reader import read_run, _ReadonlyJournal
+    from demiflow.execution.journal.run_reader import read_run, _ReadonlyJournal
     from .run_context import create_target_absent_binding
     _check_deadline(deadline)
     # The readonly protocol shares this single transaction for the entire fact.
@@ -253,7 +253,7 @@ def action_recovery_facts(directory, action_id, *, attempt=None, deadline=None):
                    if native is not None and identity is not None else None)
         absence = journal.source_binding(action_id + '-create-target-absent')
         if absence is not None:
-            from .lance_sink import spec_from_identity
+            from demiflow.execution.outputs.lance_sink import spec_from_identity
             if native is None or identity is None or type(absence) is not dict:
                 raise PublicationMismatch('Create absence has no original native action')
             spec = spec_from_identity(native['declaration']['sink'])
@@ -294,8 +294,8 @@ def _verified(projection, action_id, uri, version, actual, *, schema_identity=No
 def verify_write_receipt(directory, action_id, *, expected_uri, attempt=None, recover=False,
                          require_current_head=False, deadline=None, metadata_reader=None):
     """Explicit fixed-version verification. Safe inside a running record callback."""
-    from .run_reader import _ReadonlyJournal
-    from .lance_sink import spec_from_identity
+    from demiflow.execution.journal.run_reader import _ReadonlyJournal
+    from demiflow.execution.outputs.lance_sink import spec_from_identity
     from ..lance.model import LanceWriteReceipt
     from ..lance.preview import snapshot_metadata
     from ..lance.storage import inspect_lance, open_lance_dataset
@@ -350,8 +350,8 @@ def verify_published_output(directory, action_id, *, expected_uri, expected_sche
                             parents=None, attempt=None, recover=False, require_current_head=False,
                             deadline=None, metadata_reader=None):
     """Verify a checkpoint or original native child ACK and its fixed table."""
-    from .run_reader import _ReadonlyJournal
-    from .dataflow_stage_facts import native_stage_commit, iter_native_stage_commits
+    from demiflow.execution.journal.run_reader import _ReadonlyJournal
+    from demiflow.execution.journal.dataflow_stage_facts import native_stage_commit, iter_native_stage_commits
     from ..lance.preview import snapshot_metadata
     from ..lance.storage import inspect_lance
     if publication not in (None, 'native_stage_v3'):

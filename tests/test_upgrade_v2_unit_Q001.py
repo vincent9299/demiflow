@@ -9,7 +9,7 @@ import math
 import pickle
 import struct
 
-from demiflow.execution.block_sink import _canonical_row, _CANON_MAX_DEPTH
+from demiflow.execution.outputs.block_sink import _canonical_row, _CANON_MAX_DEPTH
 
 
 def _bits(value):

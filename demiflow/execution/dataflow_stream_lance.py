@@ -15,8 +15,8 @@ import threading
 from .contracts.dataflow import ArtifactCommand, ArtifactRef, NativeJournalCommand, NativeJournalReply
 from .contracts.dataflow_errors import DataflowError
 from .recovery_contract import identity, document, SourcePosition, UnresolvedCommit
-from .stream_lance import StreamLanceWriter, _canonical
-from .lance_sink import LanceSink
+from demiflow.execution.native_queue.stream_lance import StreamLanceWriter, _canonical
+from demiflow.execution.outputs.lance_sink import LanceSink
 from .commit import CommitCoordinator
 from .run_context import RunAction
 
@@ -49,7 +49,7 @@ class StreamLanceCall:
             raise DataflowError('INCOMPATIBLE_HISTORY', 'Stream publication state belongs to its native scope')
 
     def _request(self, rows, selected, *, invocation, ordinal, finish=False):
-        from .kernels import state_codec
+        from demiflow.execution.contracts import state_codec
         from ..operator_llm.journal import request_key
         services = self.services
         raw = state_codec.dumps(list(rows), max_bytes=services.bounds.max_batch_bytes)
@@ -96,7 +96,7 @@ class StreamLanceCall:
 
 def declaration(operation, actor):
     """Validate the public native actor before replacing it with a passive factory."""
-    from .stream_lance import StreamLanceSink
+    from demiflow.execution.native_queue.stream_lance import StreamLanceSink
     from ..data.plan import SaveLanceOp
     target = operation.callable.target
     if (type(operation) is not SaveLanceOp or type(actor) is not StreamLanceSink
@@ -259,7 +259,7 @@ class _BatchSink:
         self.scope,self.declaration=scope,declaration
         spec=declaration['spec']
         if spec is not None:
-            from .lance_sink import spec_from_identity
+            from demiflow.execution.outputs.lance_sink import spec_from_identity
             self.native=LanceSink(scope,spec_from_identity(spec))
             self._marker=self.native._marker  # Original coordinator releases its atomic marker staging grant.
         else:self.native=None
@@ -370,7 +370,7 @@ class NativeStreamLanceService:
         # sealed writer. Validate before constructing a sink or opening ANY
         # table, including reference-only invocations with no native publish.
         from ..lance.schema import schema_identity
-        from .lance_sink import spec_from_identity
+        from demiflow.execution.outputs.lance_sink import spec_from_identity
         writer = self.writers.get(declaration['node_id'])
         if writer is None or declaration['schema_identity'] != schema_identity(writer.schema):
             raise DataflowError('CORRUPT_ARTIFACT','Stream scope differs from its declared writer schema')
@@ -442,7 +442,7 @@ class NativeStreamLanceService:
             else:
                 if writer.finished or request['ordinal']!=writer.last_ordinal+1:
                     raise DataflowError('INVALID_CONTRACT','Stream invocation order changed')
-                from .kernels import state_codec
+                from demiflow.execution.contracts import state_codec
                 ref=ArtifactRef(**request['batch'])
                 rows=state_codec.loads(b''.join(self.store.read(ref,max_bytes=self.bounds.max_batch_bytes)),max_bytes=self.bounds.max_batch_bytes)
                 selected=request['selected'];ids=request['records']
@@ -478,7 +478,7 @@ class NativeStreamLanceService:
                         'reference':facts[-1]['receipts']['lance']['data']['reference']},None)
                 # A pending intent never published; reconstruct ONLY its original
                 # selected batch, not the new table head or a new computation.
-                from .kernels import state_codec
+                from demiflow.execution.contracts import state_codec
                 import pyarrow as pa
                 ref=ArtifactRef(**request['batch'])
                 rows=state_codec.loads(b''.join(self.store.read(ref,max_bytes=self.bounds.max_batch_bytes)),max_bytes=self.bounds.max_batch_bytes)

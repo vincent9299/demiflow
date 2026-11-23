@@ -146,7 +146,7 @@ def test_sort_accounts_for_initial_runs_and_body_during_intermediate_write(tmp_p
 
 @pytest.mark.parametrize('end', ['cancel', 'corrupt', 'close'])
 def test_wide_sort_releases_its_extent_and_readers_on_every_exit(tmp_path, monkeypatch, end):
-    from demiflow.execution.dataflow_scratch import KernelScratch
+    from demiflow.execution.storage.scratch import KernelScratch
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_c import make
     from test_runtime_v3_finite_borrow import fixture, record
@@ -196,7 +196,7 @@ def test_wide_sort_releases_its_extent_and_readers_on_every_exit(tmp_path, monke
 
 
 def test_sort_reuses_published_payload_reference_and_falls_back_with_narrow_file_window(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_scratch import KernelScratch
+    from demiflow.execution.storage.scratch import KernelScratch
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_c import make
     from test_runtime_v3_finite_borrow import fixture, record

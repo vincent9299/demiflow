@@ -50,8 +50,8 @@ def test_native_guard_samples_actual_process_and_preserves_headroom_direction():
 def test_public_native_limits_constrain_real_lance_input_join_and_sink(tmp_path, monkeypatch):
     import lance
     import pyarrow as pa
-    from demiflow.execution.lance_sink import LanceSink
-    from demiflow.execution.resource_state import RunResourceState
+    from demiflow.execution.outputs.lance_sink import LanceSink
+    from demiflow.execution.hosts.run_state import RunResourceState
     source = tmp_path/'input.lance'
     lance.write_dataset(pa.table({'n': list(range(4))}), str(source))
     batches, physicals, charges = [], [], []

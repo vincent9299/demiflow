@@ -2,7 +2,7 @@
 from __future__ import annotations
 import os
 from typing import Mapping
-from .pipeline_sources import uses_lance
+from demiflow.execution.seal.pipeline_sources import uses_lance
 from ..operator_llm import load_referenced_prompt_packs
 from ..operator_llm.errors import PromptProviderUnavailableError
 from ..pipeline import discover_pipeline_definition

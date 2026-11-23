@@ -14,8 +14,8 @@ from types import SimpleNamespace
 import pytest
 
 from demiflow.data.plan import CallableSpec
-from demiflow.execution import dataflow_native as native
-from demiflow.execution.dataflow_native import NativeVariant
+from demiflow.execution.compiler_support import dataflow_native as native
+from demiflow.execution.compiler_support.dataflow_native import NativeVariant
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -62,7 +62,7 @@ def test_native_prompt_admission_uses_only_the_actual_actor_class():
 
 
 def test_service_declarations_and_the_configuration_they_add():
-    from demiflow.execution.dataflow_acquisition_call import AcquisitionCall
+    from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
     from demiflow.execution.dataflow_producer import ProducerCall
     from demiflow.execution.dataflow_search import NativeSearchCall
     from demiflow.execution.dataflow_stream_lance import StreamLanceFactory

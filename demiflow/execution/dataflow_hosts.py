@@ -593,7 +593,7 @@ class LocalHostEndpoint(_EndpointBase):
             if response is not None:
                 self._accept_final_observations(response)
                 if "error" in response:
-                    from .dataflow_failures import restore_failure
+                    from demiflow.execution.contracts.dataflow_failures import restore_failure
                     raise restore_failure(response["error"])
                 if kind in ("Drain", "Quiesce", "Cancel"):
                     self._cleanup_completed = True
@@ -628,7 +628,7 @@ def make_host_endpoint(lease: "WorkerLease", *, services: "DriverServices"):
         raise DataflowError("INVALID_CONTRACT", "lease host is not a declared driver host")
     if host.provider == "local":
         if services.policy.worker_mode == "thread":
-            from .dataflow_thread_host import ThreadHostEndpoint
+            from demiflow.execution.hosts.thread import ThreadHostEndpoint
             return ThreadHostEndpoint(lease, services=services)
         return LocalHostEndpoint(lease, services=services)
     if host.provider == "ray_core":
@@ -832,7 +832,7 @@ class RayHostEndpoint(_EndpointBase):
                 self._early_event(event)
         self._accept_final_observations(result)
         if "error" in result:
-            from .dataflow_failures import restore_failure
+            from demiflow.execution.contracts.dataflow_failures import restore_failure
             raise restore_failure(result["error"])
         if kind in ("Drain", "Quiesce", "Cancel"):
             self._cleanup_completed = True

@@ -228,7 +228,7 @@ def test_create_reconciliation_uses_marker_and_preserves_fixed_version(root, mon
     run.transition({'prepared'}, 'running')
     from demiflow.execution import RunContext, SourcePosition
     from demiflow.execution.commit import CommitCoordinator
-    from demiflow.execution.lance_sink import LanceSink
+    from demiflow.execution.outputs.lance_sink import LanceSink
     from demiflow.execution.recovery_identity import plan_identity
     import demiflow.execution.commit as protocol
     def fail(name, commit_id):

@@ -136,7 +136,7 @@ def main():
     # Periodic traceback dumping reproducibly crashed this runtime during Python
     # transforms. Keep fatal-error diagnostics; the parent enforces deadlines
     # and reports progress/RSS without asynchronously walking Python frames.
-    from .datafusion import _save
+    from demiflow.execution.hosts.datafusion import _save
     managed = request.get('managed_diagnostics', False)
     if managed:
         from .native_diagnostics import mandatory_json as _save
@@ -210,7 +210,7 @@ def main():
         sql_options = SQLOptions().with_allow_ddl(False).with_allow_dml(False).with_allow_statements(False)
         for name, ref in request['sources'].items():
             if ref.get('format') == 'csv':
-                from .csv_source import assert_csv_unchanged
+                from demiflow.execution.sources.csv_source import assert_csv_unchanged
                 from datafusion import CsvReadOptions
                 assert_csv_unchanged(ref)
                 context.register_csv(name, ref['uri'], options=CsvReadOptions(

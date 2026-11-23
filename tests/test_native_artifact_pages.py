@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from demiflow.execution.artifact_manifest import ArtifactManifest, manifest_pages
+from demiflow.execution.storage.artifact_manifest import ArtifactManifest, manifest_pages
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunContext
 

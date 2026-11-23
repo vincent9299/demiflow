@@ -5,8 +5,8 @@ from contextlib import contextmanager
 
 from ..contracts.dataflow import BlockPartition
 from ..contracts.dataflow_errors import DataflowError
-from ..dataflow_scratch import ScratchStream
-from ..dataflow_segments import SegmentForest, block_chunks, RECORDS_MEDIA
+from demiflow.execution.storage.scratch import ScratchStream
+from demiflow.execution.storage.segments import SegmentForest, block_chunks, RECORDS_MEDIA
 from ..recovery_contract import identity
 
 
@@ -56,7 +56,7 @@ class TerminalBlocks:
         self.columns = None
         stages = getattr(getattr(services, 'assignment', None), 'stages', ())
         granted = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) for s in stages) if stages else self.bounds.max_resident_bytes
-        from ..dataflow_publication_budget import MIN_TERMINAL_INDEX, MIN_TERMINAL_WORKSPACE, TERMINAL_WORKSPACE
+        from demiflow.execution.scheduler.dataflow_publication_budget import MIN_TERMINAL_INDEX, MIN_TERMINAL_WORKSPACE, TERMINAL_WORKSPACE
         if isinstance(budget, Mapping) and budget.get('schema') == TERMINAL_WORKSPACE:
             if (set(budget) != {'schema', 'resident_bytes'}
                     or type(budget['resident_bytes']) is not int
@@ -69,7 +69,7 @@ class TerminalBlocks:
             # original window; a new compiler never rewrites their grants.
             self._metadata_limit = min(self.bounds.max_state_bytes, granted // 2)
         else:
-            from ..dataflow_publication_budget import REF_CARRIER
+            from demiflow.execution.scheduler.dataflow_publication_budget import REF_CARRIER
             self._reference_only = isinstance(budget, Mapping) and budget.get('carrier') == REF_CARRIER
             fields = {'payload_bytes', 'metadata_bytes'} | ({'carrier'} if self._reference_only else set())
             if (not isinstance(budget, Mapping) or set(budget) != fields
@@ -225,7 +225,7 @@ class TerminalBlocks:
     def append_arrow_batch(self, batch):
         """Retain one native batch in the same checked forest as the checkpoint."""
         import pyarrow as pa
-        from ..dataflow_segments import ARROW_STREAM_MEDIA
+        from demiflow.execution.storage.segments import ARROW_STREAM_MEDIA
         rows = batch.num_rows
         size = pa.ipc.get_record_batch_size(batch) + len(batch.schema.serialize()) + 8
         if (size > self.bounds.max_batch_bytes or self.rows + rows > self.bounds.max_output_rows

@@ -6,7 +6,7 @@ from .recovery_contract import (
     CommitContext, SourcePosition, RecoveryContractError, MAX_SINKS, MAX_STATES,
     identifier, validate_receipt, identity,
 )
-from .state_artifacts import StateArtifacts
+from demiflow.execution.storage.state_artifacts import StateArtifacts
 
 
 def fault_point(name, commit_id):

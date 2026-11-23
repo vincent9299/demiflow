@@ -18,7 +18,7 @@ from ..execution.contracts.dataflow import (
 from ..execution.contracts.dataflow_kinds import operator_rows
 
 _RELATIONAL = "demiflow.execution.kernels.relational:"
-_READERS = "demiflow.execution.source_readers:"
+_READERS = "demiflow.execution.sources.source_readers:"
 _TERMINALS = "demiflow.execution.dataflow_terminals:"
 
 # kind -> (compiler_symbol, kernel_symbol, input ports). Every public LogicalOp

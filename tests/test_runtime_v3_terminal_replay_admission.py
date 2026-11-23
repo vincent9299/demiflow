@@ -99,7 +99,7 @@ def test_shared_source_respects_total_limit(tmp_path,limit,overflow):
 @pytest.mark.parametrize('count,overflow',[(4,False),(5,True)])
 def test_checkpoint_prefix_counts_toward_limit(tmp_path,monkeypatch,count,overflow):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     limits={'memory_bytes':40*1024,'max_batch_bytes':16*1024,'max_row_bytes':8*1024,'max_state_bytes':128*1024,'timeout_s':30,'checkpoint_rows':2,'checkpoint_interval_ms':60000,'max_output_rows':4}
     original=DataflowExecution._retire_phase;prefix=[]
     class Interrupted(Exception):pass

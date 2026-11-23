@@ -7,7 +7,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.sealed_plans import load_sealed_plan
+from demiflow.execution.seal.sealed_plans import load_sealed_plan
 from runtime_v3_recovery_scenarios import _provider
 from runtime_v3_support import _RayDataBlocker
 

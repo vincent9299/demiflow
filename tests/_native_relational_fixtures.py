@@ -7,9 +7,9 @@ from types import SimpleNamespace
 from demiflow.execution.contracts.dataflow import ArtifactRef
 from demiflow.execution.dataflow_kernel_pack import read_kernel_image
 from demiflow.execution.storage.objects import RunArtifactStore
-from demiflow.execution.kernels import state_codec
-from demiflow.execution.sealed_plans import load_sealed_plan
-from demiflow.execution.state_artifacts import StateArtifacts
+from demiflow.execution.contracts import state_codec
+from demiflow.execution.seal.sealed_plans import load_sealed_plan
+from demiflow.execution.storage.state_artifacts import StateArtifacts
 
 
 def native_region_evidence(local):

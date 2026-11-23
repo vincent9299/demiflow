@@ -94,7 +94,7 @@ def test_csv_extension_does_not_rewrite_historical_primitive_or_long_list_bytes(
 
 def test_source_snapshot_options_keep_old_digest_and_native_complete_semantics():
     import pickle
-    from demiflow.execution.dataflow_sources import _options_digest
+    from demiflow.execution.sources.snapshots import _options_digest
     original = {'columns': ['id'], 'include_paths': True, 'format': 'jsonl'}
     assert _options_digest(original) == hashlib.sha256(pickle.dumps(original, protocol=4)).hexdigest()
     for options in ({'parse_options': pacsv.ParseOptions(delimiter=';')},

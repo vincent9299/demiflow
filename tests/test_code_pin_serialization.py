@@ -136,7 +136,7 @@ def run(*, source, target):
     # The v3 worker loads the original code-pin/program bundle before emitting
     # any cut. Read that bundle and its original ACK, not retired chain keys.
     import json
-    from demiflow.execution.sealed_plans import load_sealed_plan, _v3_read_store
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan, _v3_read_store
     from demiflow.execution.seal.plan import _read_json, CODE_PIN_MEDIA, PROGRAM_MEDIA
     journal = runs.journal(root, result['run_id'])
     with journal._connection() as db:

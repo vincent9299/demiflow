@@ -20,12 +20,12 @@ from demiflow.execution.contracts.dataflow import WorkerLease, RuntimeServices
 from demiflow.execution.contracts.dataflow_codec import compute_graph_digest, compute_physical_digest
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.dataflow_api import make_action_request
-from demiflow.execution.dataflow_inputs import build_input_handle
+from demiflow.execution.sources.materialized_input import build_input_handle
 from demiflow.execution.seal.plan import load_dataflow
 from demiflow.execution.seal.plan import verify_dataflow_program
 from demiflow.execution.dataflow_services import make_driver_services
-from demiflow.execution.dataflow_sources import spool_record
-from demiflow.execution.dataflow_sources import open_source_reader
+from demiflow.execution.sources.snapshots import spool_record
+from demiflow.execution.sources.snapshots import open_source_reader
 from demiflow.execution.recovery_identity import source_identity
 from demiflow.execution.run_context import RunContext
 from demiflow.planning.dataflow_compile import lower_action
@@ -126,7 +126,7 @@ def test_record_fidelity_through_real_store(tmp_path):
 
 
 def test_nested_literal_input_budget_is_checked_before_copy():
-    from demiflow.execution.dataflow_inputs import InputMaterializedHandle
+    from demiflow.execution.sources.materialized_input import InputMaterializedHandle
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     with pytest.raises(DataflowError, match="BUDGET_EXCEEDED"):
         InputMaterializedHandle([{"nested": {"wide": "x" * 10000}}], format="items", max_bytes=1024)
@@ -288,7 +288,7 @@ def test_native_operation_has_one_type_authority():
 
 @pytest.mark.parametrize("override", [None, 0, -1, 1, 2, 4, 12])
 def test_input_block_boundaries_and_history_match_pre_v3(override):
-    from demiflow.execution.dataflow_inputs import build_input_handle
+    from demiflow.execution.sources.materialized_input import build_input_handle
     from demiflow.execution.recovery_identity import describe
     from demiflow.execution.recovery_contract import identity
     from demiflow.data.sources import MaterializedSource

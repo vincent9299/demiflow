@@ -11,7 +11,7 @@ from demiflow.execution import RunContext, RecoveryContractError, current_run
 from demiflow.execution.runtime_limits import execution_limits
 from demiflow.execution.payload_limits import BATCH_TARGET_BYTES, run_row_limit, arrow_batches
 from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.lance_sink import LanceSink
+from demiflow.execution.outputs.lance_sink import LanceSink
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.recovery_contract import SourcePosition
 from demiflow.lance.model import LanceWriteSpec
@@ -187,7 +187,7 @@ def test_native_small_explicit_budgets_preserve_duplicates_nulls_and_worker_limi
             rows = lance.dataset(str(target)).to_table().to_pylist()
             assert sorted((r['k'], r['tag'] or '') for r in rows) == [(1, 'a'), (1, 'a'), (1, 'b'), (1, 'b'), (2, '')]
             assert all(r['payload'] == b'full\x00' * 400 for r in rows if r['k'] == 1)
-            from demiflow.execution.sealed_plans import load_sealed_plan
+            from demiflow.execution.seal.sealed_plans import load_sealed_plan
             sealed = load_sealed_plan(run.ref.directory, 'action-1')
             physical = sealed['physical']
             assert physical.bounds.max_row_bytes == 8192
@@ -295,7 +295,7 @@ def test_resume_preserves_explicit_limit_semantics_even_when_numbers_match(tmp_p
 
 @pytest.mark.parametrize('payload_bytes', [512, 2048])
 def test_native_worker_honors_positive_row_cap_below_batch_target(tmp_path, payload_bytes):
-    from demiflow.execution.datafusion import DataFusionSession, DataFusionQueryError
+    from demiflow.execution.hosts.datafusion import DataFusionSession, DataFusionQueryError
     from test_datafusion_execution import options
     schema = pa.schema([('payload', pa.large_binary())])
     def transform(batch):

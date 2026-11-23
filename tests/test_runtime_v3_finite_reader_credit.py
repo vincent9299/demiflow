@@ -153,7 +153,7 @@ def test_existing_buffer_is_not_charged_twice_during_growth(tmp_path):
 def test_segment_index_authentication_shares_the_same_live_grant(tmp_path, monkeypatch):
     from dataclasses import asdict
     from demiflow.execution.contracts.dataflow import ProducerCompletion
-    from demiflow.execution.dataflow_segments import SEGMENTS_MEDIA, SCHEMA
+    from demiflow.execution.storage.segments import SEGMENTS_MEDIA, SCHEMA
     from demiflow.execution.exchange.dataflow_channels import seal_scope
     from demiflow.execution.recovery_contract import document
     with store_fixture(tmp_path) as (_, store, _):
@@ -291,7 +291,7 @@ def test_index_growth_is_readmitted_before_extending_the_record_buffer(tmp_path)
     # and new-index chunk allocation each fit, but complete growth with the
     # newly retained real index does not. Reject before bytearray.extend.
     from dataclasses import asdict
-    from demiflow.execution.dataflow_segments import block_chunks, SEGMENTS_MEDIA, FINITE_RECORDS_MEDIA, SCHEMA
+    from demiflow.execution.storage.segments import block_chunks, SEGMENTS_MEDIA, FINITE_RECORDS_MEDIA, SCHEMA
     from demiflow.execution.dataflow_record_frames import frame_stream, read_chunk_bytes, admit_workspace
     from demiflow.execution.exchange.dataflow_bridge import _encode_record_document
     from demiflow.execution.recovery_contract import document

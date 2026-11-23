@@ -7,7 +7,7 @@ from demiflow import data
 from demiflow.data.native_options import NativeOptions
 from demiflow.data.plan import CallableSpec, MapOp
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_native import collect_fixed_residency
+from demiflow.execution.compiler_support.dataflow_native import collect_fixed_residency
 from demiflow.planning.dataflow_budget import codec_window, default_profile
 from demiflow.planning.dataflow_compile import compile_kernel_spec
 from demiflow.planning.dataflow_policy import resolve_runtime_policy

@@ -52,7 +52,7 @@ class PublishedArrowRows:
     def __init__(self, ref, *, rows, first, schema_ref, schemas):
         import pyarrow as pa
         from ..arrow_payload import _uncompressed_ipc
-        from ..dataflow_segments import ARROW_STREAM_MEDIA
+        from demiflow.execution.storage.segments import ARROW_STREAM_MEDIA
         bounds = schemas.bounds
         if (ref.media_type != ARROW_STREAM_MEDIA or type(rows) is not int or not 0 < rows <= bounds.max_output_rows
                 or not 0 < ref.size_bytes <= bounds.max_batch_bytes

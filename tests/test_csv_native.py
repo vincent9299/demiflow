@@ -81,6 +81,6 @@ def test_tsv_strict_width_and_literal_quotes(tmp_path):
             convert_options=pacsv.ConvertOptions(column_types={'id': pa.string(), 'name': pa.string()}))
         data.read_lance(str(lp), version=1).join(right, on='id').take_all()
     assert failed_run.journal.execution_action('action-1')['result'] is None
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     assert not any(StateArtifacts(failed_run).read(c['prepared']['state']['dataflow-cut-v3'])['cut']['final']
                    for c in failed_run.journal.execution_commits('action-1'))

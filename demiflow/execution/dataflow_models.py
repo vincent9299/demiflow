@@ -381,7 +381,7 @@ def bind_cached_model_services(fn, *, services: RuntimeServices, node_id: str) -
     """Bind the cached callable to the effect journal for this worker occurrence."""
     from ..operator_llm.native_actor import is_native_prompt_actor
     if is_native_prompt_actor(fn):
-        from .dataflow_model_journal import bind_agent_adapter, bind_prompt_adapter
+        from demiflow.execution.operator_bindings.dataflow_model_journal import bind_agent_adapter, bind_prompt_adapter
         if fn.environment is None:
             bind_prompt_adapter(fn, services=services, node_id=node_id)
         else:
@@ -389,7 +389,7 @@ def bind_cached_model_services(fn, *, services: RuntimeServices, node_id: str) -
 
 
 def bind_model_services(instance: CallableInstance, spec: KernelSpec, *, services: RuntimeServices) -> CallableInstance:
-    from demiflow.execution import dataflow_model_journal as journal
+    from demiflow.execution.operator_bindings import dataflow_model_journal as journal
     node_id = spec.configuration.get('occurrence_id', spec.configuration.get('node_id'))
     kind = spec.kind
     if kind == 'prompt':

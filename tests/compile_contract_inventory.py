@@ -25,7 +25,7 @@ REGISTRY = 'planning/dataflow_registry.py'
 KERNELS = 'execution/kernels/dataflow.py'
 OPERATOR = 'execution/kernels/operator.py'
 TASK_SCOPE = 'execution/kernels/task_scope.py'
-BATCH_MEMBERSHIP = 'execution/dataflow_batch_membership.py'
+BATCH_MEMBERSHIP = 'execution/kernels/batch_membership.py'
 TERMINAL_BLOCKS = 'execution/worker/terminal_blocks.py'
 SEAL = 'execution/seal/plan.py'
 KINDS = 'execution/contracts/dataflow_kinds.py'
@@ -42,7 +42,7 @@ LEGACY_TRAITS = 'planning/traits.py'
 COMPILE_STAGE = (COMPILER, 'planning/dataflow_shared.py', 'planning/dataflow_graph_adapter.py',
                  REGISTRY, 'planning/dataflow_relational_regions.py')
 # The one module that reads the compiler's inputs from its surroundings and hands them over explicitly.
-INPUT_RESOLVER = 'execution/dataflow_compile_inputs.py'
+INPUT_RESOLVER = 'execution/compiler_support/dataflow_compile_inputs.py'
 
 
 def source(relative):

@@ -96,7 +96,7 @@ def test_lookup_nested_list_schema_and_quoted_key(tmp_path):
 
 
 def test_composite_nested_commit_reconciliation_does_not_resend(tmp_path, monkeypatch):
-    from demiflow.execution import stream_lance
+    from demiflow.execution.native_queue import stream_lance
     schema = pa.schema([('concept', pa.string()), ('sha', pa.string()), ('tags', pa.list_(pa.string()))])
     writer = stream_lance.StreamLanceWriter(tmp_path/'ambiguous.lance', schema, key=['concept', 'sha'])
     writer.initialize()

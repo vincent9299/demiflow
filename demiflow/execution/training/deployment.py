@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ..contracts.training import FitBinding, FitJobProvider
 from ..recovery_contract import document, identifier, identity
-from .index import TrainingIndex
+from demiflow.execution.journal.training_index import TrainingIndex
 
 
 @dataclass(frozen=True)

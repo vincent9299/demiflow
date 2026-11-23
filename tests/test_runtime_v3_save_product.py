@@ -52,9 +52,9 @@ def test_native_save_prepare_execute_and_fixed_result(root):
     with journal._connection() as db:
         declarations=[json.loads(row[0]) for row in db.execute('SELECT declaration FROM runtime_commit_scopes')]
     first=next(d for d in declarations if d.get('schema')=='demiflow.stream_lance.v3' and d['request']['ordinal']==0)
-    from demiflow.execution.lance_sink import spec_from_identity
+    from demiflow.execution.outputs.lance_sink import spec_from_identity
     assert spec_from_identity(first['spec']).mode=='create'  # native absence-CAS, not unchecked overwrite
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     bundle=load_sealed_plan(runs.directory(root,result['run_id']),commit['parent_action_id'])
     assert bundle['physical'].policy.max_active_workers==4
     assert bundle['physical'].bounds.max_resident_bytes <= prepared['limits']['memory_bytes']
@@ -223,7 +223,7 @@ def test_single_worker_native_adapter_recovery_preserves_microbatch_identity(tmp
     assert any(f['commit_id']==before['commit_id'] and f['status']=='acked' for f in result['commits'])
     assert result['budgets']['output_rows']==2
     assert lance.dataset(str(target)).to_table().to_pylist()==[{'id':'a','value':1},{'id':'b','value':2}]
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     journal=RunJournal(root/'run')
     with journal._connection() as db:
         action=db.execute('SELECT action_id FROM runtime_actions').fetchone()[0]

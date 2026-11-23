@@ -127,7 +127,7 @@ class HostedDataflowWorker:
     def identity(self) -> dict:
         result = {"spec_hash": self._spec_hash, "boot_id": self._boot_id}
         if self._ray_host:
-            from ..dataflow_ray_devices import worker_device_binding
+            from demiflow.execution.hosts.ray_devices import worker_device_binding
             result['accelerator_binding'] = worker_device_binding()
         return result
 
@@ -225,7 +225,7 @@ class HostedDataflowWorker:
         except ProtocolError as exc:
             return {"error": exc.to_dict(), **self._final_observations(message, executor)}
         except Exception as exc:
-            from ..dataflow_failures import failure_payload
+            from demiflow.execution.contracts.dataflow_failures import failure_payload
             return {"error": failure_payload(exc), **self._final_observations(message, executor)}
         if message["kind"] == "Restore":
             self._runtime.ready(message["payload"]["assignment_ref"])

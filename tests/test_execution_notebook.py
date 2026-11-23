@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 
 from demiflow.execution.artifacts import code_record, digest
-from demiflow.execution.notebook import load_pipeline, pipeline_cells, graph_version
-from demiflow.execution import processes
+from demiflow.execution.pipeline.notebook import load_pipeline, pipeline_cells, graph_version
+from demiflow.execution.hosts import processes
 
 
 def test_only_explicit_graph_cells_execute(tmp_path):

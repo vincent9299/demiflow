@@ -52,7 +52,7 @@ def read_legacy_queue_records(path, *, sha256, pool, through, results=False, lim
     This archive-only adapter has no publication, claim, repair or ACK methods.
     It preserves the stored v1 values and marks them legacy_not_certified.
     """
-    from ..execution.legacy_queue import LegacyQueueHistoryDatasource
+    from demiflow.execution.sources.legacy_queue import LegacyQueueHistoryDatasource
     source=LegacyQueueHistoryDatasource(path,sha256=sha256,pool=pool,through=through,results=results,
         limits=limits,max_journal_bytes=max_journal_bytes,after=after)
     return DataAPI(_current_executor.get()).read_datasource(source)

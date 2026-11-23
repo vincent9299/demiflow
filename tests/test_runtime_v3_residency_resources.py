@@ -132,7 +132,7 @@ def test_worker_control_ids_change_on_boot_business_route_identity_does_not():
 
 def test_retirement_clears_only_volatile_native_replies_and_fences_old_boot(tmp_path):
     from test_runtime_v3_native_rpc_replay import interrupted_run, service, event, charged
-    from demiflow.execution.resource_state import RunResourceState
+    from demiflow.execution.hosts.run_state import RunResourceState
     from demiflow.resources.capacity import LocalCapacityPool
     from demiflow.resources.process_unit import ManagedProcessUnit
     from demiflow.resources.local import LocalResourceProvider

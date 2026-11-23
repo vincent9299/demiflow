@@ -286,7 +286,7 @@ class NativeAcquisitionService(NativeSearchOperations):
         self._io_thread.start()
         try:
             self._run_io(self._astart(), timeout_s=self._services.bounds.timeout_ms / 1000)
-            from .dataflow_queue_recovery import restore_claims
+            from demiflow.execution.native_queue.dataflow_queue_recovery import restore_claims
             restore_claims(self, queue_state, has_cut=recovery_image is not None)
         except BaseException:
             self._close_owners()
@@ -413,7 +413,7 @@ class NativeAcquisitionService(NativeSearchOperations):
         row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
         if type(row) is not dict:
             raise DataflowError('INVALID_CONTRACT', 'acquire requires exactly one request record')
-        from .dataflow_queue_recovery import current_delivery_row
+        from demiflow.execution.native_queue.dataflow_queue_recovery import current_delivery_row
         native_row = current_delivery_row(row, claim)
         self._admit_io()
         try:
@@ -471,7 +471,7 @@ class NativeAcquisitionService(NativeSearchOperations):
             with self._lock:
                 self._claims.pop(claim.delivery.task_id, None)
             return reply
-        from .dataflow_queue_recovery import current_delivery_row
+        from demiflow.execution.native_queue.dataflow_queue_recovery import current_delivery_row
         native_row = current_delivery_row(row, claim)
         self._admit_io()
         try:
@@ -695,7 +695,7 @@ class NativeAcquisitionService(NativeSearchOperations):
         # Replaying a pre-acquisition cut may repeat pure maps before fetch.
         # Preserve their current row while reusing only the original paid result.
         row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
-        from .dataflow_queue_recovery import current_delivery_row
+        from demiflow.execution.native_queue.dataflow_queue_recovery import current_delivery_row
         current_delivery_row(row, claim)
         receipt = {**row, self._fetch.output: claim.receipt_row[self._fetch.output]}
         row_ref = self._put_json(receipt, media_type=_ROW_MEDIA, max_bytes=self._services.bounds.max_row_bytes)
@@ -705,7 +705,7 @@ class NativeAcquisitionService(NativeSearchOperations):
                           row_ref, fact_ref, 0)
 
     def checkpoint_state(self):
-        from .dataflow_queue_recovery import snapshot_claims
+        from demiflow.execution.native_queue.dataflow_queue_recovery import snapshot_claims
         return snapshot_claims(self)
 
     def claim_window_full(self):

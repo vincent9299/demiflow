@@ -264,7 +264,7 @@ def _run_v3_worker(launch_spec, sock):
                     error = exc.to_dict() if isinstance(exc, ProtocolError) else {"code": exc.code, "message": str(exc)}
                     send({"response_to": message.get("operation_id"), "error": error, **final_observations()})
                 except BaseException as exc:
-                    from ..dataflow_failures import failure_payload
+                    from demiflow.execution.contracts.dataflow_failures import failure_payload
                     send({"response_to": message.get("operation_id"), "error": failure_payload(exc), **final_observations()})
                 finally:
                     commands.task_done()

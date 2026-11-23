@@ -15,7 +15,7 @@ from demiflow.execution.contracts.training import (
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
 from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.execution.training.deployment import TrainingDeployment, bind_action_deployment
-from demiflow.execution.training.index import FitConflict, TrainingIndex
+from demiflow.execution.journal.training_index import FitConflict, TrainingIndex
 from demiflow.execution.training.runtime import FitRuntime, read_parent
 
 
@@ -130,11 +130,11 @@ def test_original_receipt_cross_action_and_parent(tmp_path):
         assert 'resume_files' not in selected['snapshot']
         first.hold_active()
         from demiflow.execution.commit import CommitCoordinator
-        from demiflow.execution.lance_sink import LanceSink
+        from demiflow.execution.outputs.lance_sink import LanceSink
         from demiflow.execution.recovery_contract import SourcePosition
         from demiflow.lance.model import LanceWriteSpec
         from demiflow.execution.training.runtime import confirm_table_consumption
-        from demiflow.execution.run_reader import read_run
+        from demiflow.execution.journal.run_reader import read_run
         import pyarrow as pa
         uri = str(tmp_path / 'scores.lance')
         provenance = dict(uri=uri, selection=[{'step':1},{'step':3}])
@@ -340,7 +340,7 @@ def test_cancel_requires_original_provider_terminal(tmp_path):
 
 
 def test_fit_observation_is_attempt_scoped_and_read_only(tmp_path):
-    from demiflow.execution.run_reader import read_run
+    from demiflow.execution.journal.run_reader import read_run
     request,binding = setup_request(tmp_path)
     provider = Provider()
     with pytest.raises(RuntimeError):
@@ -365,7 +365,7 @@ def test_fit_observation_is_attempt_scoped_and_read_only(tmp_path):
 def test_stopped_control_reconciles_model_without_replaying_rows(tmp_path):
     from demiflow.execution.run_journal import RunJournal
     from demiflow.execution.training.deployment import TrainingDeployment
-    from demiflow.execution.training.maintenance import reconcile_stopped_fits
+    from demiflow.execution.pipeline.training_maintenance import reconcile_stopped_fits
     request,binding = setup_request(tmp_path)
     provider = Provider()
     provider.lose_reply = True
@@ -538,7 +538,7 @@ def test_two_live_dataset_drivers_submit_one_actual_job(tmp_path):
     import sys
     import lance
     import pyarrow as pa
-    from demiflow.execution.run_reader import read_run, RunReadError
+    from demiflow.execution.journal.run_reader import read_run, RunReadError
     lance.write_dataset(pa.table({'x':[1,2]}),str(tmp_path/'inputs.lance'))
     names = ('first','second')
     command = [sys.executable,'-B','-c','from pathlib import Path; import sys; '
@@ -587,8 +587,8 @@ def test_two_live_dataset_drivers_submit_one_actual_job(tmp_path):
 def test_stopped_candidate_before_election_does_not_acquire_or_dispatch(tmp_path,monkeypatch):
     from demiflow.execution.run_journal import RunJournal
     from demiflow.execution.training.deployment import TrainingDeployment
-    from demiflow.execution.training.maintenance import reconcile_stopped_fits
-    from demiflow.execution.run_reader import read_run
+    from demiflow.execution.pipeline.training_maintenance import reconcile_stopped_fits
+    from demiflow.execution.journal.run_reader import read_run
     request,binding=setup_request(tmp_path)
     provider=Provider()
     directory=tmp_path/'candidate'
@@ -756,7 +756,7 @@ def test_quota_raise_preserves_published_training_and_scoring_table_hold(tmp_pat
         row = fit.index.read(request.instance_id)
         import pyarrow as pa
         from demiflow.execution.commit import CommitCoordinator
-        from demiflow.execution.lance_sink import LanceSink
+        from demiflow.execution.outputs.lance_sink import LanceSink
         from demiflow.execution.recovery_contract import SourcePosition
         from demiflow.execution.training.runtime import confirm_table_consumption
         from demiflow.lance.model import LanceWriteSpec

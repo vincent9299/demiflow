@@ -478,7 +478,7 @@ class WorkerGraphRunner:
             if ref is not None:
                 value = json.loads(b''.join(self.services.store.read(ref, max_bytes=self.bounds.max_control_bytes)))
                 data = ArtifactRef(**value['ref'])
-                from ..dataflow_segments import block_totals
+                from demiflow.execution.storage.segments import block_totals
                 rows, size = block_totals(self.services.store, data, self.bounds)
                 if (rows is not None and rows != value['count']) or size > spec.storage_bytes:
                     raise DataflowError('CORRUPT_ARTIFACT', 'finite spool restore counts differ')
@@ -729,7 +729,7 @@ class WorkerGraphRunner:
                             self._condition.wait(.005)
         except BaseException as exc:
             if not self.e._cancel_event.is_set():
-                from ..dataflow_failures import failure_payload
+                from demiflow.execution.contracts.dataflow_failures import failure_payload
                 self._send('failure', failure_payload(exc))
 
     def _ready_peer_commands(self):
@@ -1378,7 +1378,7 @@ class WorkerGraphRunner:
                 facts = self.services.journal.read_configuration()
                 binding = facts.get('queue_binding')
                 if binding and binding['mode'] == 'sink':
-                    from ..dataflow_acquisition_call import AcquisitionCall
+                    from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
                     from ..row_scope import RowScope, set_row_scope
                     from ..dataflow_records import clone_record
                     from ..kernels.dataflow import _row_bytes
@@ -1686,7 +1686,7 @@ class WorkerGraphRunner:
         return self._park_mode and set(self._credits) == set(self._credit_payloads)
 
     def _final_scalar(self, blocks, partitions):
-        from .dataflow_terminal import aggregate_scalar, terminal_scalar
+        from demiflow.execution.outputs.terminal_scalar import aggregate_scalar, terminal_scalar
         if self._terminal_spec.kind != 'aggregate':
             return terminal_scalar(blocks.stream(), spec=self._terminal_spec, services=self.services,
                                    schema_ref=self._terminal_schema_ref)

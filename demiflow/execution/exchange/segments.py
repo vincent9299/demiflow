@@ -7,7 +7,7 @@ read_domain, and converts back for the driver commit terminal. It builds no new
 physical transport; artifact registration/release stays with BlockSink under the
 granted fence (worker) and the CommitCoordinator (driver).
 """
-from ..artifact_manifest import entries
+from demiflow.execution.storage.artifact_manifest import entries
 from ..contracts.exchange import (
     build_data_ref, check_read_domain, validate_data_ref,
 )

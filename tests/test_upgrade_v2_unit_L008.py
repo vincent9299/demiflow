@@ -9,7 +9,7 @@ import shutil
 import pytest
 
 from demiflow.execution.seal.plan import load_native_execution
-from demiflow.execution.plan_interpreter import ExecutionPlacement, PlanContractError
+from demiflow.execution.seal.plan_interpreter import ExecutionPlacement, PlanContractError
 from demiflow.execution.run_context import RunContext
 from test_execution_layout import chain_fixture
 import _v2_native_fixtures as fx

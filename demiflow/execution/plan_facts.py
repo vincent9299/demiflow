@@ -239,7 +239,7 @@ def operation_facts(operation):
                                  "content_hash": operation.config.content_hash})
     domain = {}
     if type(operation) is ops.SaveLanceOp:
-        from .stream_lance import StreamLanceSink
+        from demiflow.execution.native_queue.stream_lance import StreamLanceSink
         from ..lance.flow_contract import save_facts
         target = operation.callable.target
         target = target.__self__ if inspect.ismethod(target) else target
@@ -269,7 +269,7 @@ def operation_facts(operation):
         target = operation.callable.target
         target = target.__self__ if inspect.ismethod(target) else target
         from .raw_fetch import RawFetch, raw_fetch_facts
-        from .queue_producer import QueueProducer, producer_facts
+        from demiflow.execution.native_queue.queue_producer import QueueProducer, producer_facts
         from .queue_ack import QueueAcknowledge, ack_facts
         if type(target) is QueueAcknowledge:
             domain=ack_facts(target)

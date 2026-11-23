@@ -13,7 +13,7 @@ not in the graph. Two things used to break that:
 """
 import pytest
 
-from demiflow.execution.identity_bridge import build_identity_bridge
+from demiflow.execution.seal.identity_bridge import build_identity_bridge
 
 import compile_contract_corpus as corpus
 

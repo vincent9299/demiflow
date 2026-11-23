@@ -184,7 +184,7 @@ def test_disk_keys_preserve_composite_binary_identity_and_cleanup(tmp_path, monk
 
 
 def test_large_reservation_excludes_other_native_jobs(tmp_path, monkeypatch):
-    import demiflow.execution.datafusion as native
+    import demiflow.execution.hosts.datafusion as native
     monkeypatch.setattr(native, '_cgroup_memory', lambda: None)
     monkeypatch.setattr(native, '_cpu_capacity', lambda: 4)
     options = native.DataFusionOptions(memory_bytes=16 * 1024**2, max_rss_bytes=64 * 1024**2,

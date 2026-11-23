@@ -21,13 +21,13 @@ import pytest
 
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
-from demiflow.execution.block_sink import BlockSink
+from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.contracts.errors import ProtocolError
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.operator_precheck import precheck_operator_state, precheck_plan_state
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunAction, RunContext
-from demiflow.execution.state_artifacts import StateArtifacts
+from demiflow.execution.storage.state_artifacts import StateArtifacts
 from demiflow.resources.capacity import LocalCapacityPool
 from demiflow.resources.process_unit import ManagedProcessUnit
 
@@ -304,7 +304,7 @@ def _bare(cls, **attrs):
     lambda: _bare(__import__("demiflow.collect.image_resize", fromlist=["EncodeImage"]).EncodeImage),
     lambda: _bare(__import__("demiflow.collect.operators", fromlist=["SearchWeb"]).SearchWeb),
     lambda: _bare(__import__("demiflow.execution.raw_fetch", fromlist=["RawFetch"]).RawFetch),
-    lambda: _bare(__import__("demiflow.execution.queue_producer", fromlist=["QueueProducer"]).QueueProducer),
+    lambda: _bare(__import__('demiflow.execution.native_queue.queue_producer', fromlist=["QueueProducer"]).QueueProducer),
     lambda: _bare(__import__("demiflow.operator_llm.runtime", fromlist=["PromptActor"]).PromptActor),
     lambda: _bare(__import__("demiflow.embeddings.runtime", fromlist=["EmbeddingActor"]).EmbeddingActor),
     lambda: _bare(__import__("demiflow.execution.stream_lookup", fromlist=["LanceLookup"]).LanceLookup,

@@ -12,7 +12,7 @@ import struct
 import pytest
 
 from demiflow.data.runtime_contract import RuntimeContractError
-from demiflow.execution.block_sink import BlockSink
+from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.recovery_contract import RecoveryContractError, SourcePosition
 from demiflow.execution.run_context import RunContext

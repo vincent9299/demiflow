@@ -121,7 +121,7 @@ def test_task_state_rejects_aliases_mutable_globals_and_invalid_frontier():
     from test_runtime_v3_k import services, spec, program, InputPort
     from demiflow.data.plan import CallableSpec
     from demiflow.execution.kernels.operator import OperatorKernel, IMAGE_MEDIA_TYPE
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
     svc = services(programs={'fn': program(CallableSpec.create(Number))})
     policy = spec('MapOp', {'program': 'fn', 'task_batch_rows': 3},
         inputs=[InputPort('input', 'incremental')], state='auto_json')
@@ -156,7 +156,7 @@ def test_filtered_and_expanded_chains_keep_original_task_boundaries():
 @pytest.mark.parametrize('form', ['class', 'closure'])
 def test_actual_driver_resume_preserves_partial_task_and_committed_prefix(tmp_path, monkeypatch, form):
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
     class Interrupted(Exception):
         pass
     path = str(tmp_path / 'calls')
@@ -436,7 +436,7 @@ def test_adaptive_task_rejects_growth_before_ack_of_filtered_row():
 
 def test_task_checkpoint_rejects_before_building_tagged_container_tree():
     import tracemalloc
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
 
     values = list(range(10000))
     grant = 1 << 20

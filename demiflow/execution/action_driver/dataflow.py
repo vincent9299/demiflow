@@ -30,7 +30,7 @@ from ..checkpoint.coordinator import DataflowCheckpointCoordinator
 from ..seal.plan import (
     seal_dataflow, stage_dataflow_programs, resolve_execution_constants,
 )
-from ..dataflow_sources import snapshot_source, plan_source_splits
+from demiflow.execution.sources.snapshots import snapshot_source, plan_source_splits
 from ..dataflow_queue import NativeAcquisitionService
 from ..dataflow_artifacts import stage_runtime_bundle
 from ..dataflow_hosts import make_host_endpoint
@@ -420,7 +420,7 @@ class DataflowExecution:
         if (self._request.arguments or self._request.programs or current() is not None
                 or self._action.context.journal.source_binding(self._action.action_id + "-dataflow-sealed")):
             return False
-        from ..dataflow_sources import verified_materialized_count
+        from demiflow.execution.sources.snapshots import verified_materialized_count
         self._check_stop()
         source = self._request.source
         previous = self._action.record['result']
@@ -455,7 +455,7 @@ class DataflowExecution:
         self._check_stop()
         normalize_native_options(self._request.arguments.get("native_options"),
                                  operation_kind=self._request.kind)
-        from ..queue_producer import producer_actor
+        from demiflow.execution.native_queue.queue_producer import producer_actor
         from ..dataflow_producer import NativeProducerService
         producer = producer_actor(self._request.plan)
         if producer is not None:
@@ -553,7 +553,7 @@ class DataflowExecution:
                 physical = compile_physical_dataflow(graph, tuple(snapshots), tuple(splits), policy=self._policy,
                     hosts=self._services.hosts, bounds=self._bounds, constants_ref=constants_ref)
             from ..checked import current
-            from ..identity_bridge import build_identity_bridge
+            from demiflow.execution.seal.identity_bridge import build_identity_bridge
             from ..contracts.dataflow import thaw_record_value
             checked = current()
             bridge = None
@@ -594,7 +594,7 @@ class DataflowExecution:
                 self._checked.bind_observation_scope(
                     report_key, plan_id=physical.plan_id, dag_id=graph.dag_id,
                     plan_revision=physical.plan_revision, occurrence_id=occurrence)
-        from ..dataflow_publication_budget import PublicationReservation, with_publication_workspace
+        from demiflow.execution.scheduler.dataflow_publication_budget import PublicationReservation, with_publication_workspace
         publication_reservation = PublicationReservation(graph, physical.stages, physical.bounds,
             declared=physical.residency.control_reserved_bytes)
         from ..dataflow_sinks import make_sink_adapter
@@ -674,13 +674,13 @@ class DataflowExecution:
                 self._acquisition = NativeAcquisitionService(self._action, services=self._services)
             self._acquisition.configure_searches(self._request.source, self._request.plan, graph)
             self._services.journal_service.bind_queue(self._acquisition)
-        from ..dataflow_batch_membership import bind_contracts
+        from demiflow.execution.kernels.batch_membership import bind_contracts
         bind_contracts(self._services.journal_service, graph, physical)
         from ..dataflow_embedding_journal import bind_private_embedding_contracts
         bind_private_embedding_contracts(self._services.journal_service, graph)
         from ..dataflow_prompt_journal import bind_private_prompt_contracts
         bind_private_prompt_contracts(self._services.journal_service, graph)
-        from ..dataflow_private_storage import bind_private_storage
+        from demiflow.execution.storage.private_journals import bind_private_storage
         bind_private_storage(self._services.journal_service)
         self._stream_lance = None
         if any(node.kernel.kind == 'SaveLanceOp' for node in graph.nodes):
@@ -731,7 +731,7 @@ class DataflowExecution:
         self._restore_image = self._verified_completed_image or (self._checkpoint.recover(sinks=self._sinks)
             if self._action.replaying and not queue_owned_recovery else None)
         if self._restore_image is not None:
-            from ..dataflow_operator_observations import restore_operator_observations, restore_node_metrics
+            from demiflow.execution.journal.dataflow_operator_observations import restore_operator_observations, restore_node_metrics
             restore_operator_observations(self, self._restore_image)
             pub = self._publication(self._restore_image)
             self._terminal_seen = pub["manifest"]["total_rows"]
@@ -745,7 +745,7 @@ class DataflowExecution:
             self._last_checkpoint_rows, self._last_checkpoint_outputs = self._checkpoint_frontiers()
             # Validate all actor images before ANY participant executes again.
             # A completed final result is safe to read without recreating actors.
-            from ..kernels import state_codec
+            from demiflow.execution.contracts import state_codec
             from ..dataflow_kernel_pack import read_kernel_image
             from ..contracts.dataflow_codec import compute_participant_id
             from ..recovery_contract import identity
@@ -1201,7 +1201,7 @@ class DataflowExecution:
                 self._worker_detail_bytes += detail_bytes
             return
         if event.kind == "failure":
-            from ..dataflow_failures import restore_failure
+            from demiflow.execution.contracts.dataflow_failures import restore_failure
             self._failure = restore_failure(payload)
             self._state = "failed"
             raise self._failure
@@ -1210,7 +1210,7 @@ class DataflowExecution:
             assigned = {n for stage in endpoint._assignment.stages for n in stage.occurrences}
             if occ not in assigned or partition not in lease.partition_ids:
                 raise DataflowError("FENCED", "node observation is outside assigned stage")
-            from ..dataflow_operator_observations import validated_node_counters
+            from demiflow.execution.journal.dataflow_operator_observations import validated_node_counters
             metrics = validated_node_counters(payload['metrics'])
             old = self._node_metrics.get((occ, partition), {'rows_input': 0, 'rows_output': 0})
             if any(metrics[k] < old[k] for k in metrics):
@@ -1220,7 +1220,7 @@ class DataflowExecution:
             observe_prompt_usage(self, event, payload)
             from ..dataflow_model_observations import observe_models
             observe_models(self, event, payload)
-            from ..dataflow_operator_observations import observe_operator
+            from demiflow.execution.journal.dataflow_operator_observations import observe_operator
             observe_operator(self, event, payload)
             from ..journal.run_telemetry import observe_graph_progress
             observe_graph_progress(self._graph_finished, self._graph, self._bounds, payload)

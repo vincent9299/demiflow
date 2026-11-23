@@ -287,7 +287,7 @@ def test_borrowed_metadata_is_admitted_while_first_sort_runs_exist(tmp_path, mon
     from demiflow.execution.contracts.dataflow import ProducerCompletion
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.dataflow_finite_input import borrowed_records
-    from demiflow.execution.dataflow_segments import FINITE_RECORDS_MEDIA, SEGMENTS_MEDIA, SCHEMA
+    from demiflow.execution.storage.segments import FINITE_RECORDS_MEDIA, SEGMENTS_MEDIA, SCHEMA
     from demiflow.execution.exchange.dataflow_channels import seal_scope
     from demiflow.execution.kernels.operator import OperatorKernel
     from test_runtime_v3_artifact_accounting import store_fixture

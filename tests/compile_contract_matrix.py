@@ -31,7 +31,7 @@ def _layout_preserving(kernels):
 
 def matrix():
     import demiflow
-    from demiflow.execution import dataflow_batch_membership
+    from demiflow.execution.kernels import batch_membership as dataflow_batch_membership
     from demiflow.execution.seal import plan as dataflow_seal
     from demiflow.execution.kernels import dataflow as kernels, operator, task_scope
     from demiflow.planning import dataflow_compile as compiler, dataflow_registry as registry

@@ -124,7 +124,7 @@ class NativeBudgetGuard:
             if rss > self.limits['max_rss_bytes']:
                 raise DataflowError('BUDGET_EXCEEDED', 'native host sampled RSS exceeds max_rss_bytes')
         if 'cgroup_headroom_bytes' in self.limits:
-            from .datafusion import _cgroup_memory
+            from demiflow.execution.hosts.datafusion import _cgroup_memory
             memory = _cgroup_memory()
             if memory and memory[0] + self.limits['cgroup_headroom_bytes'] >= memory[1]:
                 raise DataflowError('RESOURCE_INFEASIBLE', 'native host lacks declared cgroup headroom')

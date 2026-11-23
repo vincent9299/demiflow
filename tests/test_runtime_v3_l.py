@@ -158,7 +158,7 @@ class _BlockRayData:
 
 def _install_fakes(monkeypatch, engine):
     import demiflow.execution.dataflow_api as api
-    import demiflow.execution.dataflow_inputs as inputs
+    import demiflow.execution.sources.materialized_input as inputs
     import demiflow.execution.input_runtime as input_runtime
     monkeypatch.setattr(api, 'make_action_request', engine.make_action_request)
     monkeypatch.setattr(api, 'run_dataset_action', engine.run_dataset_action)

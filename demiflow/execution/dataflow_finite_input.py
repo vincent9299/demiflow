@@ -9,7 +9,7 @@ import json
 from .contracts.dataflow import ArtifactRef, Record
 from .contracts.dataflow_errors import DataflowError
 from .dataflow_handles import _ChunkStream
-from .dataflow_segments import block_chunks, block_totals
+from demiflow.execution.storage.segments import block_chunks, block_totals
 from .exchange.dataflow_bridge import _validate_record, _decode_record_document
 from .dataflow_record_frames import (decode_frame, decode_document, admit_document, document_limit,
     line_limit, frame_stream, read_chunk_bytes, read_document, decode_metadata,
@@ -234,7 +234,7 @@ def validate_finite_members(services, seal_ref, spec, *, target, frame_call=None
         if frame_call is not None:
             held_metadata = metadata_bytes((members, entries))
     # The original kernel image budget also bounds the proposed metadata.
-    from .kernels import state_codec
+    from demiflow.execution.contracts import state_codec
     if scoped_call is not None:
         # This closed metadata tree adds list/dict/value tags, one pair list
         # per field, and JSON text+bytes. Six times retained metadata plus 4KiB

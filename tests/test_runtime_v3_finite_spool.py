@@ -3,7 +3,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 import pytest
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.kernels import state_codec
+from demiflow.execution.contracts import state_codec
 from demiflow.execution.kernels.operator import _SpoolPort,_segment_rows
 from demiflow.execution.run_context import RunContext
 from test_runtime_v3_artifact_recovery import _store

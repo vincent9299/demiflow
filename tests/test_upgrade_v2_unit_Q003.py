@@ -9,7 +9,7 @@ import sqlite3
 
 import pytest
 
-from demiflow.execution.block_sink import BlockSink
+from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunContext

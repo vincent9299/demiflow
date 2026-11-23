@@ -11,7 +11,7 @@ from demiflow.execution.dataflow_kernel_pack import (
     PACK_MEDIA, _MAGIC, _header, iter_kernel_images, read_kernel_image,
     snapshot_kernel_images,
 )
-from demiflow.execution.kernels import state_codec
+from demiflow.execution.contracts import state_codec
 from demiflow.execution.kernels.operator import OperatorKernel, IMAGE_MEDIA_TYPE
 from test_runtime_v3_artifact_accounting import store_fixture, consumed
 from test_runtime_v3_k import services, spec, program, InputPort, rec

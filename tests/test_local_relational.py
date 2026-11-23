@@ -335,7 +335,7 @@ def test_wide_sort_writes_payload_once_across_merge_passes(
         tmp_path, monkeypatch, width, key_padding, rows, uses_offsets):
     from demiflow import data
     from demiflow.execution import RunContext
-    from demiflow.execution.dataflow_scratch import KernelScratch
+    from demiflow.execution.storage.scratch import KernelScratch
     from demiflow.execution.kernels import ordering
 
     extents, references, runs = [], [], []

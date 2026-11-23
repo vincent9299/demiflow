@@ -126,7 +126,7 @@ def fix_input(occurrence, columns, *, graph, physical, action, image, services, 
     from ..commit import CommitCoordinator
     from ..recovery_contract import SourcePosition
     from ..run_context import RunAction
-    from ..lance_sink import LanceSink
+    from demiflow.execution.outputs.lance_sink import LanceSink
     from ...lance.model import LanceWriteSpec
     scope = identity(['training_input', action.action_id, occurrence])
     # The row receipt can be carried into later cuts. Its ordered partition

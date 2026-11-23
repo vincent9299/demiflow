@@ -13,7 +13,7 @@ from demiflow.execution.contracts.dataflow import ArtifactCommand, ArtifactRef, 
 from demiflow.execution.storage.gc import collect_published_orphans, recover_published_gc
 from demiflow.execution.storage.lease import ObjectLease, exclusive_access
 from demiflow.execution.storage.objects import RunArtifactStore
-from demiflow.execution.kernels import state_codec
+from demiflow.execution.contracts import state_codec
 from demiflow.execution.run_context import RunContext
 from test_runtime_v3_artifact_accounting import store_fixture, consumed
 from test_runtime_v3_artifact_recovery import _open, _store
@@ -54,8 +54,8 @@ def test_released_unrooted_publication_refunds_once_and_reput_charges_again(tmp_
 
 
 def test_old_and_pending_native_state_roots_keep_nested_record_payload_schema_and_borrowed(tmp_path):
-    from demiflow.execution.state_artifacts import StateArtifacts
-    from demiflow.execution.dataflow_segments import SegmentForest, FINITE_RECORDS_MEDIA
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.segments import SegmentForest, FINITE_RECORDS_MEDIA
     from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _encode_record_document
     with store_fixture(tmp_path) as (run,store,port):
         payload = put(store,_encode_payload({'value':-0.0},max_bytes=4096),'application/vnd.demiflow.record.v3')

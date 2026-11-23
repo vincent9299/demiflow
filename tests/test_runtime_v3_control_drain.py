@@ -45,7 +45,7 @@ def test_late_reply_drain_preserves_other_worker_boot_and_original_notify(tmp_pa
             await_replies(2)
             assert authority.poll_worker_replies(max_replies=4,allocation_id=lease.allocation_id,boot_id='stale-boot')==()
             assert select.select([authority.reply_waitable()],[],[],0)[0]
-            from demiflow.execution.dataflow_thread_host import ThreadHostEndpoint
+            from demiflow.execution.hosts.thread import ThreadHostEndpoint
             host=ThreadHostEndpoint if transport=='thread' else LocalHostEndpoint
             endpoint=host.__new__(host)
             endpoint._allocation_id,endpoint._boot_id=lease.allocation_id,lease.boot_id
@@ -85,7 +85,7 @@ def test_late_reply_drain_preserves_other_worker_boot_and_original_notify(tmp_pa
 def test_early_stopped_reserve_returns_original_error_reply_and_releases_waiter(tmp_path,reason):
     from concurrent.futures import ThreadPoolExecutor
     from demiflow.execution.dataflow_hosts import ControlMailbox
-    from demiflow.execution.dataflow_failures import restore_failure
+    from demiflow.execution.contracts.dataflow_failures import restore_failure
     from demiflow.execution.request_limits import ServiceStopped
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority,store,lease):
         admitted=event(run,store,'admitted')

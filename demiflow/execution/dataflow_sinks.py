@@ -24,7 +24,7 @@ from .recovery_contract import (
     RecoveryContractError, UnresolvedCommit, document, identifier, identity,
 )
 from .run_context import RunAction
-from .state_artifacts import atomic_bytes
+from demiflow.execution.storage.state_artifacts import atomic_bytes
 
 RECORDS_MEDIA = "application/x-demiflow-records-v3"
 MANIFEST_MEDIA = "application/x-demiflow-sink-manifest-v3"
@@ -170,7 +170,7 @@ class _DataflowArtifactSink(Datasink):
         witness = self._store.object_signature(pub_ref)
         for partition in blocks["partitions"]:
             data_ref = _artifact_from_json(partition["data_ref"])
-            from .dataflow_segments import segment_refs
+            from demiflow.execution.storage.segments import segment_refs
             for ref in segment_refs(self._store, data_ref, self._bounds):
                 # Authenticate the entire prefix before publication, including
                 # old leaves. The traversal reads and authenticates each index.
@@ -228,7 +228,7 @@ class _DataflowArtifactSink(Datasink):
         pub_ref = _artifact_from_json(prepared["ref"])
         self._store.release(pub_ref, owner=context.commit_id)
         for partition in prepared.get("manifest", {}).get("partitions", ()):
-            from .dataflow_segments import tree_refs
+            from demiflow.execution.storage.segments import tree_refs
             for ref in tree_refs(self._store, _artifact_from_json(partition["data_ref"]), self._bounds):
                 self._store.release(ref, owner=context.commit_id)
 
@@ -484,7 +484,7 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
     try:
         for partition in manifest['partitions']:
             ref = _artifact_from_json(partition['data_ref'])
-            from .dataflow_segments import ARROW_STREAM_MEDIA, block_chunks, range_segments
+            from demiflow.execution.storage.segments import ARROW_STREAM_MEDIA, block_chunks, range_segments
             if fixed_scan_batches and partition['rows']:
                 from .arrow_payload import _uncompressed_ipc
                 leaves = range_segments(store, ref, bounds, start=0, end=partition['rows'],
@@ -652,7 +652,7 @@ class NativeTerminalSink(_DataflowArtifactSink):
         self._batch_rows = batch_rows
         self._native_limits = dict(native_limits or {})
         self._admit_publication = admit_publication
-        from .dataflow_publication_budget import workspace_bytes, phased
+        from demiflow.execution.scheduler.dataflow_publication_budget import workspace_bytes, phased
         self._publication_workspace = workspace_bytes(self._configuration)
         self._publication_metadata = phased(self._configuration)
         if self._publication_workspace:
@@ -688,7 +688,7 @@ class NativeTerminalSink(_DataflowArtifactSink):
                 or self.native.spec.schema is not None or not manifest['total_rows']
                 or len(manifest['partitions']) != 1):
             return False
-        from .dataflow_segments import ARROW_STREAM_MEDIA, segment_refs
+        from demiflow.execution.storage.segments import ARROW_STREAM_MEDIA, segment_refs
         root = _artifact_from_json(manifest['partitions'][0]['data_ref'])
         entries = segment_refs(self._store, root, self._bounds)
         try:
@@ -709,7 +709,7 @@ class NativeTerminalSink(_DataflowArtifactSink):
         if prepared['native'] is None:
             return artifact
         if 'publication' in prepared['native']:
-            from .dataflow_segments import segment_refs
+            from demiflow.execution.storage.segments import segment_refs
             if (prepared['native']['publication'] != prepared['ref']
                     or prepared['native']['rows'] != prepared['manifest']['total_rows']
                     or hashlib.sha256(self._publication_bytes(prepared['manifest'], context)).hexdigest()
@@ -753,7 +753,7 @@ class NativeTerminalSink(_DataflowArtifactSink):
 
 
 def make_native_terminal_sink(spec, *, request, services, publication_reserved_bytes=None, admit_publication=None):
-    from .dataflow_publication_budget import workspace_bytes
+    from demiflow.execution.scheduler.dataflow_publication_budget import workspace_bytes
     workspace = workspace_bytes(spec.configuration)
     if workspace:
         control = max(1, min(services.bounds.max_control_bytes, services.bounds.max_resident_bytes // 8))
@@ -762,7 +762,7 @@ def make_native_terminal_sink(spec, *, request, services, publication_reserved_b
                 or publication_reserved_bytes > services.bounds.max_resident_bytes):
             raise DataflowError('INVALID_CONTRACT', 'native publication workspace lacks sealed residency reservation')
     if request.kind == 'write_lance':
-        from .lance_sink import LanceSink
+        from demiflow.execution.outputs.lance_sink import LanceSink
         from ..lance.model import LanceWriteSpec
         declaration = next((p.value for p in request.programs if p.name == 'write_lance'), None)
         if not isinstance(declaration, LanceWriteSpec):
@@ -813,7 +813,7 @@ def make_native_terminal_sink(spec, *, request, services, publication_reserved_b
                 else:
                     raise LanceWriteConflict('Create target already exists')
     elif request.kind == 'write_file':
-        from .file_sink import FileSink
+        from demiflow.execution.outputs.file_sink import FileSink
         native = FileSink(services.action, request.arguments)
     elif request.kind == 'write_datasink':
         native = request.sink
@@ -843,8 +843,8 @@ def make_native_terminal_sink(spec, *, request, services, publication_reserved_b
 def inspect_native_write_receipt(journal, action_id):
     """Project a v3 native publication without starting code or changing history."""
     from .publication_facts import observation_action, commit_write_context
-    from .lance_sink import LanceSink, spec_from_identity
-    from .sealed_plans import _v3_read_store
+    from demiflow.execution.outputs.lance_sink import LanceSink, spec_from_identity
+    from demiflow.execution.seal.sealed_plans import _v3_read_store
     from .seal.plan import load_dataflow
     binding = journal.recovery_identity()
     action = journal.execution_action(action_id)

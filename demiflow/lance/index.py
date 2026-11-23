@@ -10,7 +10,7 @@ import tempfile
 import uuid
 
 from ..errors import LanceWriteConflict
-from ..execution.datafusion import DataFusionOptions, DataFusionSession, _save
+from demiflow.execution.hosts.datafusion import DataFusionOptions, DataFusionSession, _save
 from .control import control_directory
 from .storage import normalize_lance_uri, open_lance_dataset, require_lance, schema_hash
 

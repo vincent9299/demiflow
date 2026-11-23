@@ -114,7 +114,7 @@ def test_completed_native_ack_before_reply_is_reused_by_original_cut(tmp_path, m
             with RunContext.resume(ref) as run:
                 with data.local_execution(workers=1, worker_mode=worker_mode, partitions=1):
                     build(cfg, root, url).write_datasink(QueueResultSink(cfg, pool='p'))
-                from demiflow.execution.state_artifacts import StateArtifacts
+                from demiflow.execution.storage.state_artifacts import StateArtifacts
                 with run.journal._connection() as db:
                     actions = [r[0] for r in db.execute('SELECT action_id FROM runtime_actions')]
                 states = [StateArtifacts(run).read(f['prepared']['state']['dataflow-cut-v3'])
@@ -155,7 +155,7 @@ def test_completed_native_ack_before_reply_is_reused_by_original_cut(tmp_path, m
     else:
         from types import SimpleNamespace
         from demiflow.resources.thread import ThreadResourceProvider
-        from demiflow.execution.dataflow_capacity import local_capacity
+        from demiflow.execution.hosts.capacity import local_capacity
         from demiflow.resources.capacity import LocalCapacityPool
         from demiflow.execution.run_journal import RunJournal
         domain, capacity = local_capacity()

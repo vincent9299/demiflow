@@ -54,7 +54,7 @@ def test_actual_lance_reader_restores_inside_shared_batch_and_validates_binding(
     from test_runtime_v3_s import FakeStore, make_bounds, make_snapshot, first_split, make_services, drain
     from demiflow.data.sources import LanceSource
     from demiflow.lance.model import LanceScanSpec
-    from demiflow.execution.source_readers import LanceReader
+    from demiflow.execution.sources.source_readers import LanceReader
     from demiflow.execution.dataflow_records import clone_record
     table = source_table(16)
     uri = str(tmp_path / 'source.lance')
@@ -92,7 +92,7 @@ def test_tiny_legal_row_uses_original_inline_when_reference_frame_does_not_fit(t
     from test_runtime_v3_s import FakeStore, make_bounds, make_snapshot, first_split, make_services
     from demiflow.data.sources import LanceSource
     from demiflow.lance.model import LanceScanSpec
-    from demiflow.execution.source_readers import LanceReader
+    from demiflow.execution.sources.source_readers import LanceReader
     from demiflow.execution.dataflow_sinks import _encode_record
     uri = str(tmp_path/'source.lance')
     lance.write_dataset(pa.table({'x':[1,2]}), uri)
@@ -114,7 +114,7 @@ def test_tiny_legal_row_uses_original_inline_when_reference_frame_does_not_fit(t
 @pytest.mark.parametrize('provider', ['process','thread','ray_core'])
 def test_real_multiline_copy_keeps_schema_batch_and_ack(tmp_path, monkeypatch, provider):
     from demiflow.data.api import DataAPI
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     path = install_arrow_probe(tmp_path, monkeypatch)
     table = source_table()
     source, target = str(tmp_path/'source.lance'), str(tmp_path/'target.lance')
@@ -370,7 +370,7 @@ def test_slow_consumer_and_early_close_release_original_grants(tmp_path, monkeyp
 def test_real_committed_cut_inside_arrow_batch_resumes_once(tmp_path, monkeypatch):
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.contracts.dataflow import ArtifactRef
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     class Interrupted(Exception):
         pass
     proof = install_arrow_probe(tmp_path, monkeypatch)
@@ -422,7 +422,7 @@ def test_real_committed_cut_inside_arrow_batch_resumes_once(tmp_path, monkeypatc
 def test_real_store_sha_failure_precedes_native_publication(tmp_path, monkeypatch):
     import json
     from demiflow.execution import dataflow_sinks
-    from demiflow.execution.dataflow_segments import block_chunks
+    from demiflow.execution.storage.segments import block_chunks
     from demiflow.execution.dataflow_handles import _ChunkStream
     from demiflow.execution.exchange.dataflow_bridge import _decode_record_document
     table = source_table(8)

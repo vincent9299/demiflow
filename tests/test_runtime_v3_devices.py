@@ -17,7 +17,7 @@ def inventory(tmp_path, monkeypatch):
 
 def visible(row):
     import os
-    from demiflow.execution.dataflow_devices import gpu_capacity
+    from demiflow.execution.hosts.devices import gpu_capacity
     if gpu_capacity('local') != 0:
         raise RuntimeError('Child opened a second GPU authority')
     return {'n': row['n'], 'devices': os.environ.get('CUDA_VISIBLE_DEVICES')}
@@ -29,7 +29,7 @@ def test_real_dataset_gpu_grant_reaches_child_and_releases_on_exit(tmp_path, mon
         actual = data.from_items([{'n': 1}]).map(visible, backend_options={'ray': {'worker_resources': {'gpu': 1}}}).take_all()
         assert actual == [{'n': 1, 'devices': 'GPU-test-controlled'}]
         assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
-    from demiflow.execution.dataflow_devices import device_pool
+    from demiflow.execution.hosts.devices import device_pool
     assert device_pool('local').snapshot()['charged'] == {}
     records = [json.loads(p.read_text()) for p in (root/'devices'/'allocations').glob('*.json')]
     assert records and all(r['state'] == 'RELEASED' for r in records)
@@ -53,7 +53,7 @@ def test_gpu_without_inventory_rejects_before_business_activation(tmp_path, monk
 def test_nested_run_cannot_create_second_device_authority(tmp_path, monkeypatch):
     root = inventory(tmp_path, monkeypatch)
     from demiflow.resources import capacity
-    from demiflow.execution.dataflow_devices import device_pool, gpu_capacity
+    from demiflow.execution.hosts.devices import device_pool, gpu_capacity
     monkeypatch.setattr(capacity, 'inherited_envelope', lambda: {'allocation_id': 'outer'})
     assert device_pool('local') is None and gpu_capacity('local') == 0
     assert not (root/'devices').exists()
@@ -64,7 +64,7 @@ def test_ray_core_device_grant_uses_ray_assigned_visibility(tmp_path, monkeypatc
     ray = pytest.importorskip('ray')
     from demiflow.data.dataset import Dataset
     from demiflow.execution.executors.ray import RayDatasetExecutor
-    from demiflow.execution.dataflow_devices import device_pool
+    from demiflow.execution.hosts.devices import device_pool
     inventory(tmp_path, monkeypatch)
     try:
         # Controlled logical GPU scheduling only: no CUDA library is loaded.

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from demiflow.execution.output_watch import OutputWatch
+from demiflow.execution.journal.output_watch import OutputWatch
 
 
 def test_output_accounting_ignores_history_and_siblings(tmp_path):

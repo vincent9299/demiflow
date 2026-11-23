@@ -92,7 +92,7 @@ def _provider(fx, *, workers=4, fusion=True):
 
 def _cut_facts(coordinator, image):
     from demiflow.execution.checkpoint.coordinator import _contribution_json, _cursor_json
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
     states = []
     for owner in image.contributions:
         for occurrence, ref in owner.operator_states.items():
@@ -121,7 +121,7 @@ def _resume_after_ack(fx, name, build, *, eligible=None, workers=4, fusion=True,
                       observations=None):
     from demiflow.execution.run_context import RunContext
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from runtime_v3_support import _ExecuteActionRecorder, _RayDataBlocker
     directory = fx.journal_dir/name
     cuts, boundary = [], {}

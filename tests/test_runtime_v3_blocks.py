@@ -10,7 +10,7 @@ from demiflow.execution.contracts.dataflow import BlockPartition, Record
 from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire, _identity_project
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.exchange.dataflow_bridge import _encode_record_document, _decode_record_document, _encode_payload
-from demiflow.execution.dataflow_segments import SegmentForest, segment_refs, block_chunks, RECORDS_MEDIA
+from demiflow.execution.storage.segments import SegmentForest, segment_refs, block_chunks, RECORDS_MEDIA
 from demiflow.execution.run_context import RunContext
 from test_runtime_v3_c import bounds
 from test_runtime_v3_k import FakeStore

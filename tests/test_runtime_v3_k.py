@@ -855,7 +855,7 @@ def test_k020():
     list(kernel.push("input", rec({"v": 2})))  # partial batch (max_batch=4 not reached)
     ref = kernel.snapshot()
     assert ref is not None
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
     image = state_codec.loads(b"".join(svc.store.read(ref, max_bytes=ref.size_bytes)), max_bytes=ref.size_bytes)
     assert len(image["batch"]) == 2  # crash must not lose the partial batch
     assert image["output_cursor"] == 0

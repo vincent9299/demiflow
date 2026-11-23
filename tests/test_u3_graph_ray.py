@@ -26,7 +26,7 @@ from ray.exceptions import RayActorError
 
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
-from demiflow.execution.block_sink import BlockSink
+from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.contracts.checkpoint import validate_checkpoint_manifest
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.executors.ray import RayDatasetExecutor
@@ -101,7 +101,7 @@ def _commit_shape(run, action_id):
 
 
 def _k6_shape(run, action_id):
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     shapes = []
     for fact in run.journal.execution_commits(action_id):
         value = StateArtifacts(run).read(fact['prepared']['state']['dataflow-cut-v3'])

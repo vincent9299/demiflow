@@ -188,7 +188,7 @@ def test_actual_new_execution_rejects_before_staging_source_seal_worker_or_sink(
 @reports_on_purpose
 def test_real_literal_schema_replay_reports_new_bad_shape_but_preserves_old_schema_check(tmp_path,monkeypatch):
     import pyarrow as pa
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     original=pa.schema([('id',pa.int32())]);changed=pa.schema([('id',pa.large_string())])
     def pipeline(types):
         return data.from_arrow(pa.Table.from_batches([],schema=types)).map(identity).take_all()
@@ -218,7 +218,7 @@ def test_real_literal_schema_replay_reports_new_bad_shape_but_preserves_old_sche
 
 @reports_on_purpose
 def test_real_completed_live_revalidation_warns_without_reexecuting_callback(tmp_path,monkeypatch):
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     seen=[]
     def pipeline(observations):
         def callback(row):

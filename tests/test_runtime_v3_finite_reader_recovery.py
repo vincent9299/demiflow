@@ -13,7 +13,7 @@ from demiflow import data
 from demiflow.execution.contracts.dataflow import ArtifactRef
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-from demiflow.execution.dataflow_segments import tree_refs
+from demiflow.execution.storage.segments import tree_refs
 from demiflow.execution.recovery_contract import identity
 from demiflow.execution.run_context import RunContext
 from runtime_v3_recovery_scenarios import _provider

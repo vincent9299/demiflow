@@ -155,7 +155,7 @@ def test_real_graph_preserves_caller_and_run_bounds(graph_environment, monkeypat
 def test_actual_graph_routes_reach_distinct_programs(graph_environment, monkeypatch, routing):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.dataflow_terminals import materialized_handle
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     directory = graph_environment
     spec = _spec(directory)
     spec['source'] = ItemsSource(tuple({'x': i, 'group': 'a' if i % 2 == 0 else 'b'} for i in range(6)))
@@ -351,7 +351,7 @@ def test_reused_target_actor_is_independent_and_final_replay_starts_no_worker(gr
 def test_mixed_residency_waits_for_memory_peer_but_rejects_durable_expansion(graph_environment, monkeypatch, expand):
     from demiflow.data.plan import FlatMapOp
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     commits = []
     commit = DataflowCheckpointCoordinator.commit
@@ -394,7 +394,7 @@ def test_mixed_residency_waits_for_memory_peer_but_rejects_durable_expansion(gra
 
 def test_source_credit_pause_drains_pending_memory_before_original_cut(graph_environment, monkeypatch):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     directory = graph_environment
     spec = _spec(directory)
     spec['prefetch_slots'] = 1

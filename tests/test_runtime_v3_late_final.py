@@ -170,7 +170,7 @@ def test_late_native_eoi_obtains_final_ack_and_replays_live_result(
 @pytest.mark.parametrize('stop_when_complete', [False, True])
 def test_parked_complete_input_replays_without_new_worker_or_commit(
         tmp_path, monkeypatch, stop_when_complete):
-    from demiflow.execution.dataflow_thread_host import ThreadHostEndpoint
+    from demiflow.execution.hosts.thread import ThreadHostEndpoint
 
     original_send = ThreadHostEndpoint.send_business
     original_begin = DataflowCheckpointCoordinator.begin

@@ -62,7 +62,7 @@ with _open(Path(sys.argv[1])) as run:
 
 
 def test_worker_stream_is_lazy_and_refunds_only_with_original_lease_proof(tmp_path):
-    from demiflow.execution.dataflow_scratch import ScratchStream
+    from demiflow.execution.storage.scratch import ScratchStream
     from demiflow.execution.storage.staging import recover_staging
     with pytest.raises(PreparationOnly), RunContext.start(tmp_path / 'run') as run:
         store, port, bounds = _store(run, ceiling=200000)
@@ -175,7 +175,7 @@ def test_public_lance_join_vector_probes_only_true_inner_and_semi_batches(tmp_pa
     import pyarrow as pa
     import pyarrow.compute as pc
     from demiflow.execution.arrow_payload import ArrowBatchCache
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
     uri = str(tmp_path / 'source.lance')
     keys = [None, *range(1, 128)]

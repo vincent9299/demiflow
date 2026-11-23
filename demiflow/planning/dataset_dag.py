@@ -15,7 +15,7 @@ from typing import Mapping
 
 from ..data.plan import LogicalPlan
 from ..data.sources import KeyedSource, SourcePlan, UnionSource
-from ..execution.plan_interpreter import PlanContractError
+from demiflow.execution.seal.plan_interpreter import PlanContractError
 from ..execution.recovery_contract import identifier, identity
 from ..execution.recovery_identity import source_identity
 from .dag import (

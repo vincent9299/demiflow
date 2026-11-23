@@ -123,7 +123,7 @@ def test_f2_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
         before = {f['commit_id']: f for f in run2.journal.execution_commits(_chain_child_id(run2))
                   if f['status'] == 'acked'}
         assert before, 'the real crash must retain its original ACK prefix'
-        from demiflow.execution.state_artifacts import StateArtifacts
+        from demiflow.execution.storage.state_artifacts import StateArtifacts
         latest = max(before.values(), key=lambda fact: fact['sequence'])
         image = StateArtifacts(run2).read(latest['prepared']['state']['dataflow-cut-v3'])
         sources = image['dataflow.sources.v3']

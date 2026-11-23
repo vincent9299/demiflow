@@ -80,8 +80,8 @@ def run_materialize(config):
     # mount is dedicated to this job and never writable by the Python kernel.
     import pyarrow as pa
     import lance
-    from demiflow.execution.datafusion import DataFusionOptions
-    from demiflow.execution.datafusion import DataFusionSession
+    from demiflow.execution.hosts.datafusion import DataFusionOptions
+    from demiflow.execution.hosts.datafusion import DataFusionSession
     stream = decoded_batches(input_chunks(job_path("/input/data.bin"), config))
     first = next(stream, None)
     if first is None or schema_digest(first.schema) != config["schema_sha256"]:

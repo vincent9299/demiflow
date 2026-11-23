@@ -19,14 +19,14 @@ import pickle
 import socket
 import uuid
 
-from ..block_sink import BLOCK_BYTES
+from demiflow.execution.outputs.block_sink import BLOCK_BYTES
 from ..contracts.errors import ProtocolError
 from ..contracts.exchange import (
     build_data_ref, check_read_domain, record_identity, validate_data_ref,
     DATA_REF_SCHEMA,
 )
 from ..recovery_contract import RecoveryContractError, document, identifier
-from ..state_artifacts import atomic_bytes
+from demiflow.execution.storage.state_artifacts import atomic_bytes
 from .segments import read_domain
 
 FRAME_MAX_BYTES = 1 << 20

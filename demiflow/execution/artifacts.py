@@ -28,7 +28,7 @@ def resolve_local_artifact(value):
             info = manifest.stat()
             if not stat_mode.S_ISREG(info.st_mode):
                 continue
-            from .location_index import recent_digest
+            from demiflow.execution.storage.location_index import recent_digest
             mapping = _artifact_locations(str(manifest), info.st_mtime_ns, info.st_size,
                                           info.st_dev, info.st_ino, info.st_ctime_ns,
                                           recent_digest(str(manifest), info))
@@ -52,7 +52,7 @@ def resolve_local_artifact(value):
 @lru_cache(maxsize=16)
 def _artifact_locations(filename, modified_ns, size, device=0, inode=0, changed_ns=0, content_digest=None):
     if size>_LOCATION_INDEX_THRESHOLD:
-        from .location_index import IndexedLocations
+        from demiflow.execution.storage.location_index import IndexedLocations
         return IndexedLocations(filename,(device,inode,size,modified_ns,changed_ns), content_digest=content_digest)
     with Path(filename).open('rb') as stream:
         raw = stream.read(size + 1)

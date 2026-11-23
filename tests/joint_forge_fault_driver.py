@@ -74,7 +74,7 @@ elif mode == 'execute':
         run = run or current_run()
         fact = run.journal.execution_commit(commit_id) if commit_id else None
         observe('fault')
-        from demiflow.execution.state_artifacts import StateArtifacts
+        from demiflow.execution.storage.state_artifacts import StateArtifacts
         cut = (StateArtifacts(run).read(fact['prepared']['state']['dataflow-cut-v3'])
                if fact and 'dataflow-cut-v3' in fact['prepared'].get('state', {}) else None)
         write_json(Path(root)/'joint_fault_ready.json',dict(window=window['window'],fact=fact,cut=cut,run_id=run.ref.run_id))
@@ -91,7 +91,7 @@ elif mode == 'execute':
             fact = run.journal.execution_commit(commit_id)
             final=window['window'].startswith('final_')
             point=window['window'].removeprefix('final_') if final else window['window']
-            from demiflow.execution.state_artifacts import StateArtifacts
+            from demiflow.execution.storage.state_artifacts import StateArtifacts
             state = (fact.get('prepared') or {}).get('state', {}).get('dataflow-cut-v3')
             cut = StateArtifacts(run).read(state) if state else None
             matches = bool(cut) and (

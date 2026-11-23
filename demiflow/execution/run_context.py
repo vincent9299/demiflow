@@ -33,7 +33,7 @@ def current_action():
 def create_target_absent_binding(run_id, action_id, declaration, intent):
     """Derive a create admission identity from native facts, without storage IO."""
     from ..errors import DemiflowError
-    from .lance_sink import spec_from_identity
+    from demiflow.execution.outputs.lance_sink import spec_from_identity
     if (type(declaration) is not dict or declaration.get('kind') != 'write_table'
             or type(intent) is not dict or intent.get('kind') != 'write_table'):
         return None
@@ -67,7 +67,7 @@ def _maintenance_snapshot(journal, expected_attempt, expected_revision, confirm_
     """Read native inputs without initializing or migrating historical journals."""
     import json
     from ..errors import ExecutionConflict
-    from .run_reader import read_run
+    from demiflow.execution.journal.run_reader import read_run
     from .recovery_contract import MAX_DOCUMENT_BYTES
     journal._check_maintenance_deadline()
     with read_run(journal.directory, deadline=journal._maintenance_deadline) as reader:
@@ -156,7 +156,7 @@ def _stopped_maintenance(journal, expected_attempt, expected_revision, deadline)
     if expected_revision is not None and (type(expected_revision) is not int or expected_revision < 0):
         raise ValueError('Invalid maintenance revision')
     # Validate the original read policy before even creating a lock file.
-    from .run_reader import read_run
+    from demiflow.execution.journal.run_reader import read_run
     maintenance = RunJournal(journal.directory, attempt=journal.attempt, _maintenance_deadline=deadline)
     maintenance._check_maintenance_deadline()
     with read_run(journal.directory, deadline=deadline):
@@ -193,7 +193,7 @@ def _maintenance_owner(journal, configuration, *, recover_resources=False, prese
         release = True
         if recover_resources and not claimed:
             try:
-                from .resource_state import RunResourceState
+                from demiflow.execution.hosts.run_state import RunResourceState
                 release = not RunResourceState(journal).unfinished_scopes(configuration['run_id'])
             except BaseException:
                 release = False  # Unknown resource cleanup retains this owner.
@@ -255,7 +255,7 @@ def admit_absent_create(journal, *, action_id, expected_attempt, expected_revisi
     """Record current absence against the selected attempt's original write identity."""
     from .recovery_contract import identifier
     from ..errors import LanceResourceNotFound, ExecutionConflict
-    from .lance_sink import spec_from_identity
+    from demiflow.execution.outputs.lance_sink import spec_from_identity
     from ..lance.reconcile import reconcile_lance_create
     from ..lance.storage import inspect_lance
     identifier(action_id)
@@ -668,7 +668,7 @@ class RunContext:
 
     def object_namespace(self, logical_root):
         """Platform-owned physical namespace under a stable logical destination."""
-        from .object_resources import bind_namespace
+        from demiflow.execution.storage.object_resources import bind_namespace
         with self._object_resource_lock:
             return bind_namespace(self, logical_root)
 

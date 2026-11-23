@@ -30,7 +30,7 @@ from ..contracts.dataflow_codec import (
     compute_graph_digest, compute_physical_digest, decode_wire, encode_wire,
 )
 from ..contracts.dataflow_errors import DataflowError
-from ..identity_bridge import build_identity_bridge
+from demiflow.execution.seal.identity_bridge import build_identity_bridge
 from ..recovery_contract import RecoveryContractError, document, identifier, identity
 from ..recovery_identity import describe
 from ..run_context import RunAction
@@ -158,7 +158,7 @@ def _program_value(declaration: ProgramDeclaration):
         from ..queue_source import QueueDatasource
         source = declaration.source_spec
         if isinstance(source, DatasourceSource) and type(source.datasource) is QueueDatasource:
-            from ..dataflow_acquisition_call import QueueSourceDeclaration
+            from demiflow.execution.native_queue.dataflow_acquisition_call import QueueSourceDeclaration
             return replace(source, datasource=QueueSourceDeclaration(source.datasource.declaration()))
         return source
     if declaration.action_program is not None:
@@ -230,11 +230,11 @@ def _matches_original_program(kind, value, expected):
 
 def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds,
                        live_binding=None, force_live=False, shared_payload=None) -> ArtifactRef:
-    from ..dataflow_program_pickle import stage_payload
+    from demiflow.execution.seal.program_pickle import stage_payload
     kind = _program_kind(declaration)
     value = _program_value(declaration)
     if kind == 'source':
-        from ..literal_source import literal_reference
+        from demiflow.execution.sources.literal_source import literal_reference
         literal = literal_reference(value, bounds)
         if literal is not None:
             value = literal
@@ -284,7 +284,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
         binding = shared_binding(node.kernel.configuration, node.occurrence_id)
         if binding is None or binding['owner'] in shared_payloads:
             continue
-        from ..dataflow_program_pickle import stage_payload
+        from demiflow.execution.seal.program_pickle import stage_payload
         from .business_sources import business_sources, source_identity, stage_sources, MAX_SOURCES
         sources = {}
         for occ in binding['members']:
@@ -398,7 +398,7 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
         if cached is not None and (cached[0] != payload_ref or cached[1] != binding):
             raise DataflowError('CORRUPT_ARTIFACT', 'Shared actor program bundle differs between members')
         from ..contracts.dataflow_errors import MAX_MESSAGE_CHARS
-        from ..dataflow_program_pickle import load_payload, load_private_payload
+        from demiflow.execution.seal.program_pickle import load_payload, load_private_payload
         occurrence = manifest['occurrence_id']
 
         def load(*, private=False):
@@ -588,7 +588,7 @@ def seal_dataflow(action: RunAction, graph: DataflowGraph, physical: PhysicalDat
     else:
         if bridge.get("action_id") != action.action_id or bridge.get("dag_id") != graph.dag_id:
             raise DataflowError("INVALID_CONTRACT", "report bridge differs from executed graph")
-        from ..identity_bridge import seal_identity_bridge
+        from demiflow.execution.seal.identity_bridge import seal_identity_bridge
         seal_identity_bridge(context, action, bridge)
     bridge_raw = document(bridge, bounds.max_control_bytes)
     identity_bridge_ref = store.put(iter([bridge_raw]), max_bytes=bounds.max_control_bytes, media_type=BRIDGE_MEDIA)
@@ -790,7 +790,7 @@ def validate_graph_replay(action, declaration, credit):
     """Verify original routing and admitted credit before creating any graph workers."""
     if action.context.journal.source_binding(action.action_id + _SEAL_KEY) is None:
         return
-    from ..sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     bundle = load_sealed_plan(action.context.directory, action.action_id)
     graph, physical = bundle['graph'], bundle['physical']
     originals = [node.kernel.configuration['arguments'].get('graph') for node in graph.nodes if node.occurrence_id in graph.terminals]
@@ -805,8 +805,8 @@ def validate_graph_replay(action, declaration, credit):
 
 def load_native_execution(run, action_id, *, execution_id):
     """Read one published v2 placement, using only its immutable F1 and bindings."""
-    from ..plan_interpreter import PlanContractError, interpret_physical_plan
-    from ..sealed_plans import load_execution_bindings, load_sealed_plan
+    from demiflow.execution.seal.plan_interpreter import PlanContractError, interpret_physical_plan
+    from demiflow.execution.seal.sealed_plans import load_execution_bindings, load_sealed_plan
 
     sealed = load_sealed_plan(run.directory, action_id, version='v2')
     bindings = load_execution_bindings(run.directory, action_id, sealed_plan=sealed)

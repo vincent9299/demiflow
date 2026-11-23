@@ -9,7 +9,7 @@ generation. These readers name those facts once, in the engine.
 Read-only: the journal is only read, sealed artifacts are loaded through the
 existing bounded readers, nothing is recompiled and no plan is re-sealed.
 """
-from .plan_interpreter import PlanContractError
+from demiflow.execution.seal.plan_interpreter import PlanContractError
 
 __all__ = ['PlanContractError', 'recovery_restriction', 'sealed_plan_view',
            'sealed_plan_binding', 'identity_bridge', 'read_action_plan', 'read_verified_identity_bridge']
@@ -44,7 +44,7 @@ def sealed_plan_view(directory, action_id, *, journal=None):
     marker = journal.source_binding(action_id + _V3_SEAL)
     if marker is None:
         return None
-    from .sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from .dataflow_history import build_plan_view
     bundle = load_sealed_plan(directory, action_id)
     view = build_plan_view(bundle['graph'], bundle['sealed'], bundle['physical'], observations=())
@@ -81,7 +81,7 @@ def identity_bridge(directory, action_id, *, max_bytes, journal=None):
     ref = _journal(directory, journal).source_binding(action_id + _IDENTITY_BRIDGE)
     if ref is None:
         return None
-    from .sealed_plans import read_plan_artifact
+    from demiflow.execution.seal.sealed_plans import read_plan_artifact
     return dict(ref=ref, bridge=read_plan_artifact(directory, ref, max_bytes=max_bytes))
 
 
@@ -154,7 +154,7 @@ def _physical_summary(physical):
 
 def read_action_plan(directory, action_id, *, max_bytes, deadline=None):
     """Validated original F1/v3 history, without recompilation or execution."""
-    from .run_reader import _ReadonlyJournal
+    from demiflow.execution.journal.run_reader import _ReadonlyJournal
     if type(action_id) is not str or not 1 <= len(action_id) <= 128 or type(max_bytes) is not int or not 0 < max_bytes <= 4 * 1024**2:
         raise PlanContractError('invalid_contract', 'Invalid historical read selector/budget')
     _check_read(deadline)
@@ -163,7 +163,7 @@ def read_action_plan(directory, action_id, *, max_bytes, deadline=None):
     identity = journal.recovery_identity()
     restriction = journal.source_binding(action_id + _RECOVERY_RESTRICTION)
     if marker is not None:
-        from .sealed_plans import load_sealed_plan
+        from demiflow.execution.seal.sealed_plans import load_sealed_plan
         from .dataflow_history import build_plan_view
         if type(marker) is not dict:
             raise PlanContractError('invalid_contract', 'Invalid v3 seal marker')
@@ -222,8 +222,8 @@ def read_action_plan(directory, action_id, *, max_bytes, deadline=None):
 
 def read_verified_identity_bridge(directory, action_id, *, expected_dag_id, expected_report_digest,
                                   max_bytes, deadline=None):
-    from .run_reader import _ReadonlyJournal
-    from .sealed_plans import read_plan_artifact
+    from demiflow.execution.journal.run_reader import _ReadonlyJournal
+    from demiflow.execution.seal.sealed_plans import read_plan_artifact
     def bounded(value, maximum=128):
         return type(value) is str and 1 <= len(value) <= maximum
     if (not bounded(action_id) or not bounded(expected_dag_id) or not bounded(expected_report_digest,64)

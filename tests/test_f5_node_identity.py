@@ -189,7 +189,7 @@ def test_chain_sealing_input_distinguishes_repeated_async_map():
 @pytest.mark.parametrize("mode", ["process", "thread"])
 def test_unified_chain_repeated_map_async_runs_end_to_end(tmp_path, mode):
     from _worker_event_fixtures import emit, events
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from demiflow.resources.process_observation import require_pidfds
     try:
         require_pidfds()

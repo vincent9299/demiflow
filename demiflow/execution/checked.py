@@ -184,7 +184,7 @@ class CheckedExecution:
         """Project actual worker hook outcomes, never driver declaration objects."""
         if self.observe is None:
             return
-        from .dataflow_operator_observations import validated_lifecycle
+        from demiflow.execution.journal.dataflow_operator_observations import validated_lifecycle
         counts = validated_lifecycle(counters)
         if not counts['created']:
             return
@@ -253,7 +253,7 @@ class CheckedExecution:
             raise RuntimeContractError('Actor resource lifecycle is not enabled in the synchronous profile')
         for name, value in [('fn_args', spec.call_args), ('fn_kwargs', spec.call_kwargs),
                             ('fn_constructor_args', spec.constructor_args), ('fn_constructor_kwargs', spec.constructor_kwargs)]:
-            from .values import resolve
+            from demiflow.execution.pipeline.values import resolve
             _equal(value, resolve(p.get(name) or ([] if name.endswith('args') and not name.endswith('kwargs') else {}), self.values), node['id'] + '.' + name)
         description = self.operators[(operator['module'].replace('.', '/') + '.py', operator['name'])]
         contract = {k: description[k] for k in ('parameters', 'returns')}
@@ -415,7 +415,7 @@ class CheckedExecution:
         node = self.nodes[identity]
         p, kind, parents = node['parameters'], node['kind'], self.parents[identity]
         fact = source_facts(source)
-        from .values import resolve
+        from demiflow.execution.pipeline.values import resolve
         if kind == 'read_checkpoint':
             bound = self.checkpoint_sources.get(id(source))
             if bound is None or bound[0] is not source or bound[1] != identity:
@@ -516,7 +516,7 @@ class CheckedExecution:
 
     def native_save_policy(self, execution, node, writer):
         """Resolve a native writer through the sealed bridge to its target grant."""
-        from .dataflow_stage_facts import stage_binding
+        from demiflow.execution.journal.dataflow_stage_facts import stage_binding
         _, binding = stage_binding(execution._action.context.journal,
             execution._action.context.directory, execution._action.action_id, node, self.report_digest)
         declared = self.nodes.get(binding['report_node_id'])
@@ -536,7 +536,7 @@ class CheckedExecution:
 
     def native_stage_commit(self, execution, scope_id, commit_id):
         """Project only the original ACK; never turn UI events into commit authority."""
-        from .dataflow_stage_facts import native_stage_commit
+        from demiflow.execution.journal.dataflow_stage_facts import native_stage_commit
         run = execution._action.context
         fact = native_stage_commit(run.journal, run.directory, scope_id=scope_id,
             commit_id=commit_id, report_digest=self.report_digest)
@@ -551,7 +551,7 @@ class CheckedExecution:
 
     def dependency_identity(self, identity):
         """Bind a completed write to its actual fixed sources and native values."""
-        from .values import resolve
+        from demiflow.execution.pipeline.values import resolve
         pending, visited, digests = list(self.parents[identity]), set(), {}
         while pending:
             child = pending.pop()
@@ -635,7 +635,7 @@ class CheckedExecution:
         node = self.nodes[identity]
         _equal(kind, node['kind'], identity + '.action')
         if arguments is not None:
-            from .values import resolve
+            from demiflow.execution.pipeline.values import resolve
             expected_arguments = resolve(node['normalized_parameters'], self.values)
             if kind == 'run_stream':
                 # The native action records executable parameters; unused
@@ -774,7 +774,7 @@ class CheckedAction:
 
 def _validate_action_source(kind, value):
     if value.plan is not None:
-        from .queue_producer import producer_actor, validate_source
+        from demiflow.execution.native_queue.queue_producer import producer_actor, validate_source
         producer = producer_actor(value.plan)
         if producer is not None:
             from .recovery_contract import RecoveryContractError

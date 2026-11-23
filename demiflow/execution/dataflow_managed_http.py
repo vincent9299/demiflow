@@ -77,11 +77,11 @@ def restore_worker_managed_http(value):
 
     class WorkerOwner(_HTTPOwner):
         def _spawn_process(self, env):
-            from .dataflow_managed_http_child import spawn_owned_service
+            from demiflow.execution.hosts.managed_http_child import spawn_owned_service
             return spawn_owned_service(self.declaration, env=env, resource_fds=self._resource_fds)
 
         async def _release(self):
-            from .dataflow_managed_http_child import close_owned_service
+            from demiflow.execution.hosts.managed_http_child import close_owned_service
             await close_owned_service(self)
 
         async def aclose(self):

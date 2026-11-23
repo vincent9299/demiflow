@@ -3,7 +3,7 @@ from pathlib import Path
 
 from demiflow import data
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.sealed_plans import load_sealed_plan
+from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
 
 def build_chain():
@@ -103,7 +103,7 @@ def test_region_pure_join_nonfinal_ack_restores_original_input_refs(tmp_path,mon
     import pytest
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.dataflow_kernel_pack import read_kernel_image
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
     def flow():
         return data.from_items([{'k':1,'v':i} for i in range(20)]).join(
             data.from_items([{'k':1,'r':i} for i in range(8)]),on='k').join(
@@ -266,7 +266,7 @@ def test_group_after_left_join_keeps_composite_null_groups_and_typed_keys(tmp_pa
 def test_fixed_three_way_join_selects_sql_only_under_its_actual_stage_grant(tmp_path, monkeypatch, record_property):
     import lance
     import pyarrow as pa
-    from demiflow.execution import datafusion as host
+    from demiflow.execution.hosts import datafusion as host
     from demiflow.execution.contracts.relational_region import SQL_CHILD_RSS, SQL_PARENT_WINDOW, interpret_region
     from _native_relational_fixtures import native_region_evidence
 
@@ -337,7 +337,7 @@ def test_skewed_bucket_refuses_unbounded_native_sort_before_spawning(tmp_path, m
     import lance
     import pyarrow as pa
     from demiflow.execution.kernels.dataflow import _group_key as group_key
-    from demiflow.execution import datafusion as host
+    from demiflow.execution.hosts import datafusion as host
     from _native_relational_fixtures import native_region_evidence
 
     # Distinct keys in one hash bucket. A conservative multiplicity bound
@@ -367,7 +367,7 @@ def test_public_join_propagates_overflow_after_sql_started(tmp_path, monkeypatch
     import lance
     import pyarrow as pa
     import pytest
-    from demiflow.execution import datafusion
+    from demiflow.execution.hosts import datafusion
     from demiflow.execution.kernels import relational_region
 
     for name in ('a', 'b', 'c'):

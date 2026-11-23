@@ -8,7 +8,7 @@ import pytest
 
 from demiflow import data
 from demiflow.errors import LanceWriteConflict
-from demiflow.execution.datafusion import DataFusionQueryError, DataFusionSession
+from demiflow.execution.hosts.datafusion import DataFusionQueryError, DataFusionSession
 from demiflow.lance import vector_index_config
 
 

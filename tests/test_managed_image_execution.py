@@ -27,7 +27,7 @@ from PIL import Image
 from dataclasses import asdict
 from demiflow.data.datasink import Datasink,WriteResult
 from demiflow.execution.run_context import current_action
-from demiflow.execution.lance_sink import LanceSink
+from demiflow.execution.outputs.lance_sink import LanceSink
 from demiflow.lance.model import LanceWriteSpec
 
 from image_http_fixture import fixture_http,definition,json_definition
@@ -437,10 +437,10 @@ def test_known_inflight_model_response_crosses_barrier_and_recovers_once(tmp_pat
     import demiflow.execution.commit as protocol
     import demiflow.execution.dataflow_model_factory as factories
     from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.state_artifacts import StateArtifacts
-    from demiflow.execution.sealed_plans import _v3_read_store
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
+    from demiflow.execution.seal.sealed_plans import _v3_read_store
     from demiflow.execution.contracts.dataflow import ArtifactRef
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
     from demiflow.execution.kernels.operator import IMAGE_MEDIA_TYPE
     monkeypatch.setattr(factories, 'PromptFactory', DelayedNativePromptFactory)
     monkeypatch.setenv('DEMIFLOW_TEST_PENDING_NATIVE', '1')

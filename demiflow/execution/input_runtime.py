@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from ..data.execution_contract import InputSpec
-from .dataflow_inputs import build_input_handle
+from demiflow.execution.sources.materialized_input import build_input_handle
 
 
 def prepare_input(executor, request: InputSpec):

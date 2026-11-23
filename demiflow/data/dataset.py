@@ -858,7 +858,7 @@ class Dataset:
         Open a ProducerRef first. Native progress records empty expansions and
         actual source EOS; QueueChannel.seal then closes the producer explicitly.
         """
-        from ..execution.queue_producer import QueueProducer
+        from demiflow.execution.native_queue.queue_producer import QueueProducer
         actor=QueueProducer(config,producer=producer,messages=messages,queue_depth=queue_depth)
         from ..planning.dataflow_declaration import validate_native_operation
         validate_native_operation("enqueue",
@@ -1010,7 +1010,7 @@ class Dataset:
         identical saved content; changed content fails instead of overwriting.
         when selects which rows to persist; other rows pass through unchanged.
         """
-        from ..execution.stream_lance import StreamLanceSink
+        from demiflow.execution.native_queue.stream_lance import StreamLanceSink
         from .plan import SaveLanceOp
         import math
         if not isinstance(stage,str) or not stage: raise ValueError('save_lance stage is required')

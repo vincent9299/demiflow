@@ -181,8 +181,8 @@ def test_each_logical_edge_advances_checkpoint_trigger_without_depth_multiplicat
 
 def test_native_lance_row_trigger_counts_business_frontier_once(tmp_path, monkeypatch):
     import lance
-    from demiflow.execution.lance_sink import LanceSink
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.outputs.lance_sink import LanceSink
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     observed = tmp_path/'lance-input'
     async def record(row):
         with observed.open('a') as out:

@@ -110,7 +110,7 @@ def test_a_native_declaration_is_refused_by_name_not_by_accident(tmp_path):
 
 
 def test_every_older_table_is_a_view_of_the_rows():
-    from demiflow.execution import dataflow_batch_membership
+    from demiflow.execution.kernels import batch_membership as dataflow_batch_membership
     from demiflow.execution.kernels import dataflow as kernels, operator, task_scope
     from demiflow.planning import dataflow_compile as compiler, dataflow_configuration
     views = {
@@ -137,7 +137,7 @@ def test_the_literal_tables_are_gone():
         'execution/kernels/dataflow.py': '"MapOp", "FlatMapOp"',
         'execution/kernels/operator.py': 'frozenset({"MapOp"',
         'execution/kernels/task_scope.py': "frozenset({'MapOp'",
-        'execution/dataflow_batch_membership.py': "frozenset({'embedding'",
+        'execution/kernels/batch_membership.py': "frozenset({'embedding'",
         'execution/worker/terminal_blocks.py': '_UNARY_KINDS | _BATCH_KINDS',
         'planning/dataflow_configuration.py': "frozenset({'MapOp'",
     }.items():

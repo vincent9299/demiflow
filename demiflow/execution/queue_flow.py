@@ -52,7 +52,7 @@ def normalize_history(arguments):
 
 
 def normalize_enqueue(arguments):
-    from .queue_producer import QueueProducer
+    from demiflow.execution.native_queue.queue_producer import QueueProducer
     from .queue_contract import ProducerRef
     values = {key: decode(value) for key, value in arguments.items()}
     if type(values.get('producer')) is not ProducerRef:

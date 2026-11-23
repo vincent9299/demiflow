@@ -193,7 +193,7 @@ class DurableResidency:
                     raise DataflowError('CORRUPT_ARTIFACT', 'edge EOI lacks actual producer frontier')
             self._exchange.prove_parked(cut.cut_id, partition, state)
             # Nonrecoverable state cannot disappear merely because it has a cut.
-            from .kernels import state_codec
+            from demiflow.execution.contracts import state_codec
             from .dataflow_kernel_pack import read_kernel_image
             for occurrence, ref in contribution.operator_states.items():
                 if occurrence not in self._transforms:

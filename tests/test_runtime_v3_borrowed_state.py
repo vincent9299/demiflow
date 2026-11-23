@@ -15,7 +15,7 @@ def _counting_flow(state):
 
 @pytest.mark.parametrize('mode', ['thread', 'process'])
 def test_real_host_mode_controls_borrowed_state_admission(tmp_path, mode):
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     state = [0]
     with RunContext.start(tmp_path/'run') as run, data.local_execution(
             workers=2, worker_mode=mode):

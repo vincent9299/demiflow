@@ -73,8 +73,8 @@ def _check_max_bytes(max_bytes):
 
 def _read_carrier(directory, ref, *, max_bytes):
     """Bounded, run-relative, digest-gated read of one v1/v2 carrier."""
-    from .sealed_plans import read_plan_artifact
-    from .plan_interpreter import PlanContractError
+    from demiflow.execution.seal.sealed_plans import read_plan_artifact
+    from demiflow.execution.seal.plan_interpreter import PlanContractError
     ceiling = min(max_bytes, _MAX_SEALED_PLAN_BYTES)
     try:
         return read_plan_artifact(directory, ref, max_bytes=ceiling)
@@ -184,7 +184,7 @@ def _load_v3(journal, directory, action_id, marker):
                              programs=programs, code_pin_ref=refs["code_pin_ref"],
                              identity_bridge_ref=refs["identity_bridge_ref"],
                              source_refs=source_refs, constants_ref=refs["constants_ref"])
-    from .sealed_plans import _v3_read_store
+    from demiflow.execution.seal.sealed_plans import _v3_read_store
     from .seal.plan import load_sealed_dataflow
     store, bounds = _v3_read_store(directory, store_id=sealed.physical_ref.store_id)
     graph, physical, _ = load_sealed_dataflow(sealed, action_id=action_id, store=store, bounds=bounds)
@@ -504,7 +504,7 @@ def validate_resume_compatibility(binding: HistoricalBinding, *, current_runtime
         if binding.schema_version in {DATAFLOW_SEALED_SCHEMA, TRAINING_SEAL_SCHEMA}:
             from .contracts.dataflow_codec import decode_wire, compute_physical_digest
             try:
-                from .sealed_plans import _v3_read_bounds
+                from demiflow.execution.seal.sealed_plans import _v3_read_bounds
                 physical = decode_wire(json.dumps(plan, separators=(",", ":")).encode(),
                                        type_name="PhysicalDataflow", bounds=_v3_read_bounds())
                 if physical.plan_id != compute_physical_digest(physical):

@@ -66,7 +66,7 @@ def test_recovery_output_prefix_resumes_without_reinvoking_actor(tmp_path, monke
         receipt=fact['receipts'].get('materialize')
         rows=receipt['data']['rows'] if receipt else 0
         if not stopped and 0 < rows < 30 and not image.cut.final:
-            from demiflow.execution.kernels import state_codec
+            from demiflow.execution.contracts import state_codec
             for contribution in image.contributions:
                 for ref in contribution.operator_states.values():
                     if ref.media_type != 'application/x-demiflow-kernel-image-v3':

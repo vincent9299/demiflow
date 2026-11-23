@@ -11,7 +11,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.dataflow_managed_devices import _physical_devices
-from demiflow.execution.dataflow_devices import device_pool
+from demiflow.execution.hosts.devices import device_pool
 from runtime_v3_managed_http_scenarios import managed_fixture, events
 from test_runtime_v3_managed_embedding_service import dataset
 

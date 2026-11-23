@@ -15,7 +15,7 @@ from ..contracts.dataflow_codec import decode_wire_document
 from ..contracts.training import FitBinding, FitRequest, FitResult, TrainingSnapshotRef
 from ..recovery_contract import document
 from ..seal.plan import load_sealed_dataflow, verify_dataflow_program
-from ..state_artifacts import atomic_bytes
+from demiflow.execution.storage.state_artifacts import atomic_bytes
 from ..storage.objects import RunArtifactStore
 from .store import local_path
 

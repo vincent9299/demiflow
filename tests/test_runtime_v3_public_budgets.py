@@ -80,7 +80,7 @@ def _require_separate_stages(monkeypatch):
 
 @pytest.mark.parametrize('workers', [1, 2])
 def test_public_worker_budget_uses_actual_phases_and_native_allocation(tmp_path, monkeypatch, workers):
-    from demiflow.execution.resource_state import RunResourceState
+    from demiflow.execution.hosts.run_state import RunResourceState
     _require_separate_stages(monkeypatch)
     physicals, charges = [], []
     original_prepare = DataflowExecution.prepare

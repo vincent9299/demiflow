@@ -36,7 +36,7 @@ def decode(value, *, bounds):
 def literal_schema(source, *, bounds):
     """Inspect native already-owned data metadata, without consuming any rows."""
     from ..data.sources import MaterializedSource
-    from .dataflow_inputs import InputMaterializedHandle
+    from demiflow.execution.sources.materialized_input import InputMaterializedHandle
     from .dataflow_handles import StoredMaterializedHandle
     if type(source) is not MaterializedSource:
         return None

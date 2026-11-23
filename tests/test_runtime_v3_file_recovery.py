@@ -63,7 +63,7 @@ def test_file_failure_does_not_replace_existing_target(tmp_path):
 
 
 def test_file_concurrent_destination_is_not_adopted(tmp_path,monkeypatch):
-    from demiflow.execution.file_sink import FileSink
+    from demiflow.execution.outputs.file_sink import FileSink
     target=tmp_path/'out.json'
     prepare=FileSink.prepare
     def replace_target(self,blocks,context):

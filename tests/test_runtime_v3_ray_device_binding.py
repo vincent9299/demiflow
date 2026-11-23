@@ -9,7 +9,7 @@ import pytest
 ray = pytest.importorskip('ray')
 
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.resource_state import RunResourceState
+from demiflow.execution.hosts.run_state import RunResourceState
 from demiflow.execution.hosts.ray_worker_host import RayControlConnector
 from demiflow.resources.manager import ResourceManager
 from demiflow.resources.ray import RayResourceProvider
@@ -168,7 +168,7 @@ def test_unknown_creation_is_not_never_created(private_ray):
 
 
 def test_topology_rejects_outside_uuid_and_insufficient_single_card_memory():
-    from demiflow.execution.dataflow_ray_devices import RayDeviceTopology
+    from demiflow.execution.hosts.ray_devices import RayDeviceTopology
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     topology=RayDeviceTopology({'ray-node':({'device_id':'GPU-owned','uuid':'GPU-owned',
         'memory_bytes':8,'actual_memory_bytes':16},)},(),{'ray-node':('0',)})

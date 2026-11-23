@@ -10,7 +10,7 @@ from demiflow import data
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.state_artifacts import StateArtifacts
+from demiflow.execution.storage.state_artifacts import StateArtifacts
 
 _OVERLAP = None
 
@@ -37,7 +37,7 @@ def test_upstream_continues_before_commit_and_snapshot_is_detached(tmp_path, mon
     import time
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.dataflow_sinks import _artifact_from_json
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
 
     marker = tmp_path / 'upstream-8'
 
@@ -163,7 +163,7 @@ def test_shared_actor_uses_one_snapshot_at_last_owner(tmp_path, monkeypatch):
 def test_one_input_1201_objects_crosses_bounded_manifest_pages(tmp_path):
     from demiflow.execution.object_sink import ObjectRowsSink
     from demiflow.execution.recovery_contract import SourcePosition
-    from demiflow.execution.artifact_manifest import manifest_pages, entries
+    from demiflow.execution.storage.artifact_manifest import manifest_pages, entries
     from demiflow.objects import ObjectRef
     with RunContext.start(tmp_path/'run') as run:
         with run.action({'kind': 'materialize', 'source': {'fixture': 'one-to-1201'}}) as action:
@@ -187,7 +187,7 @@ def test_one_input_1201_objects_crosses_bounded_manifest_pages(tmp_path):
 
 
 def test_block_pages_preserve_output_order_and_recovery(tmp_path):
-    from demiflow.execution.block_sink import BlockSink
+    from demiflow.execution.outputs.block_sink import BlockSink
     from demiflow.execution.recovery_contract import SourcePosition
     with RunContext.start(tmp_path/'run', limits={'max_row_bytes': 1024, 'max_batch_bytes': 1024}) as run:
         with run.action({'kind': 'materialize', 'source': {'fixture': 'blocks'}}) as action:
@@ -205,7 +205,7 @@ def test_block_pages_preserve_output_order_and_recovery(tmp_path):
 
 def test_private_temporary_registration_is_released_but_references_are_kept(tmp_path):
     from demiflow.execution.recovery_contract import RecoveryContractError, SourcePosition
-    from demiflow.execution.block_sink import BlockSink
+    from demiflow.execution.outputs.block_sink import BlockSink
     with RunContext.start(tmp_path/'run') as run:
         path = run.directory/'scratch'/'private'
         path.parent.mkdir()
@@ -259,7 +259,7 @@ class ObservedCounter:
 
 def test_direct_lance_prepares_before_source_finishes_and_publishes_once(tmp_path, monkeypatch):
     import lance
-    from demiflow.execution.lance_sink import LanceSink
+    from demiflow.execution.outputs.lance_sink import LanceSink
     from demiflow.execution.dataflow_sinks import _DataflowArtifactSink
     from demiflow.execution.contracts.dataflow import ArtifactRef
     progress = tmp_path/'actual-worker-count'
@@ -478,7 +478,7 @@ class NativeSlowFixture:
 def test_native_inflight_cut_allows_free_slots_past_slow_call(tmp_path, monkeypatch):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
     from demiflow.execution.kernels.operator import IMAGE_MEDIA_TYPE
     from demiflow.operator_llm.stream_recovery import RunPromptJournal
     monkeypatch.setenv('DEMIFLOW_NATIVE_SLOW_TEST_KEY', 'fixture-only')
@@ -662,7 +662,7 @@ def test_aggregate_state_admission_applies_across_alignment_groups(tmp_path):
 
 def test_checksum_proof_detects_replacement_and_same_size_corruption(tmp_path):
     import hashlib
-    from demiflow.execution.artifact_proof import ArtifactProofs
+    from demiflow.execution.storage.artifact_proof import ArtifactProofs
     from demiflow.execution.recovery_contract import RecoveryContractError
     path = tmp_path/'blob'
     path.write_bytes(b'valid bytes')
@@ -717,7 +717,7 @@ def test_late_writer_keeps_run_lease_and_handles_until_it_exits(tmp_path):
 
 
 def test_temporary_hot_path_does_not_scan_tenfold_history(tmp_path, monkeypatch):
-    from demiflow.execution.block_sink import storage_usage
+    from demiflow.execution.outputs.block_sink import storage_usage
     results = []
     for history in (1000, 10000):
         with RunContext.start(tmp_path/str(history)) as run:

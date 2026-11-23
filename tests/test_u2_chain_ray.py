@@ -35,7 +35,7 @@ from demiflow.data.sources import ItemsSource
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.executors.ray import RayDatasetExecutor
 from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.resource_state import RunResourceState
+from demiflow.execution.hosts.run_state import RunResourceState
 from demiflow.execution.run_context import RunContext
 from demiflow.resources.contracts import (
     RESOURCE_PROTOCOL_VERSION, MutationContext, ResourcePlan, ResourceProfile,

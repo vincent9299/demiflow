@@ -7,7 +7,7 @@ from demiflow import data
 from demiflow.data.datasink import Datasink
 from demiflow.execution import RunContext, RecoveryContractError, UnresolvedCommit, current_run
 from demiflow.execution.run_context import current_action
-from demiflow.execution.block_sink import BlockSink
+from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.pipeline.core import Pipeline, PipelineExecution

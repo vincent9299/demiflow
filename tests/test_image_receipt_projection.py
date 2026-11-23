@@ -6,9 +6,9 @@ import lance
 import pyarrow as pa
 import pytest
 
-from demiflow.execution.block_sink import BlockSink
+from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.commit import CommitCoordinator
-from demiflow.execution.lance_sink import LanceSink
+from demiflow.execution.outputs.lance_sink import LanceSink
 from demiflow.execution.object_sink import ObjectRowsSink
 from demiflow.execution.recovery_contract import SourcePosition,UnresolvedCommit
 from demiflow.execution.run_context import RunContext

@@ -264,7 +264,7 @@ def test_prerequisite_failure_and_no_action_are_not_success(no_execution):
 
 
 def test_lance_location_alias_uses_authoritative_manifest_without_cache_writes(no_execution, tmp_path, monkeypatch):
-    from demiflow.execution.location_index import IndexedLocations
+    from demiflow.execution.storage.location_index import IndexedLocations
     root = tmp_path / 'storage'
     (root / '_demiflow').mkdir(parents=True)
     manifest = root / '_demiflow' / 'lance_locations.json'
@@ -282,7 +282,7 @@ def test_lance_location_alias_uses_authoritative_manifest_without_cache_writes(n
 
 
 def test_readonly_location_lookup_keeps_duplicate_and_whole_document_validation(tmp_path):
-    from demiflow.execution.location_index import IndexedLocations, identity
+    from demiflow.execution.storage.location_index import IndexedLocations, identity
     path = tmp_path / 'locations.json'
     path.write_text('{"version":1,"tables":{"x.lance":"old.lance"},'
                     '"tables":{"x.lance":"middle.lance","x.lance":"last.lance"}}')

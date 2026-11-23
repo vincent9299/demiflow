@@ -372,7 +372,7 @@ def _run_dataset_action(request: ActionRequest, *, after_prepare=None) -> object
             return result.scalar
         if request.kind == "aggregate":
             import base64
-            from .kernels import state_codec
+            from demiflow.execution.contracts import state_codec
             return state_codec.loads(base64.b64decode(result.scalar["typed_result"]),
                                      max_bytes=bounds.max_state_bytes)
         if request.kind == "materialize":

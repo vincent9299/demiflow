@@ -9,7 +9,7 @@ import tarfile
 import pytest
 
 from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.sealed_plans import load_sealed_plan
+from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
 
 REPO = Path(__file__).resolve().parents[1]

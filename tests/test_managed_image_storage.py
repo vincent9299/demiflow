@@ -3,7 +3,7 @@ from pathlib import Path
 import os
 
 import pytest
-from demiflow.execution.block_sink import storage_usage
+from demiflow.execution.outputs.block_sink import storage_usage
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.recovery_contract import RecoveryContractError
 

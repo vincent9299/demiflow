@@ -182,7 +182,7 @@ def join_partitions(
     if how not in ("inner", "left", "semi", "anti"):
         raise _err("INVALID_CONTRACT", "unsupported join type", how=how)
     occurrence, budget = _occurrence(spec), _OutputBudget(spec, services, streaming=True)
-    from ..dataflow_publication_budget import REF_CARRIER
+    from demiflow.execution.scheduler.dataflow_publication_budget import REF_CARRIER
     stored = spec.configuration.get('output_carrier') == REF_CARRIER
     from .operator import _SpoolRecords
     key_bytes = [0]

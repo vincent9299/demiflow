@@ -244,7 +244,7 @@ def _flood(batch):
 
 
 def test_rm16_real_native_stdout_and_query_rotation(tmp_path):
-    from demiflow.execution.datafusion import DataFusionSession, DataFusionOptions
+    from demiflow.execution.hosts.datafusion import DataFusionSession, DataFusionOptions
 
     diagnostic = tmp_path / "diagnostics"
     scratch = tmp_path / "scratch"

@@ -36,8 +36,8 @@ def _cuda(row, *, lane=0):
     import time
     import ray
     import torch
-    from demiflow.execution.dataflow_ray_devices import worker_device_binding
-    from demiflow.execution.dataflow_devices import gpu_capacity
+    from demiflow.execution.hosts.ray_devices import worker_device_binding
+    from demiflow.execution.hosts.devices import gpu_capacity
     if gpu_capacity('ray_core') != 0 or torch.cuda.device_count()!=1:
         raise RuntimeError('GPU worker did not receive exactly its original grant')
     binding=worker_device_binding()

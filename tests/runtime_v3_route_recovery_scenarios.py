@@ -122,7 +122,7 @@ def _recover(fx,name,build,*,eligible=None,workers=8,first_run=None,parked=False
     from demiflow.execution.contracts.dataflow import thaw_record_value
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.run_context import RunContext
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from runtime_v3_residency_scenarios import _provider,_cut_facts
     from runtime_v3_support import _ExecuteActionRecorder,_RayDataBlocker
     root=fx.journal_dir/name
@@ -394,7 +394,7 @@ def _first_native_action(fx,dataset,run,routing,evidence):
     from demiflow.planning.dataflow_place import (compile_physical_dataflow,validate_physical_dataflow,
         solve_residency)
     from demiflow.execution.seal.plan import (stage_dataflow_programs,resolve_execution_constants,seal_dataflow)
-    from demiflow.execution.dataflow_sources import snapshot_source,plan_source_splits
+    from demiflow.execution.sources.snapshots import snapshot_source, plan_source_splits
     from demiflow.execution.dataflow_artifacts import stage_runtime_bundle
     from demiflow.execution.contracts.dataflow_codec import compute_physical_digest
     from runtime_v3_residency_scenarios import _provider

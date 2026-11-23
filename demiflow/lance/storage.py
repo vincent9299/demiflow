@@ -33,7 +33,7 @@ def resolve_local_uri(value):
         if not manifest.is_file():
             continue
         stat = manifest.stat()
-        from ..execution.location_index import recent_digest
+        from demiflow.execution.storage.location_index import recent_digest
         mapping = _location_mapping(str(manifest), stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns,
                                     stat.st_ctime_ns, recent_digest(str(manifest), stat))
         target = mapping.get(path.relative_to(root).as_posix())
@@ -51,7 +51,7 @@ from functools import lru_cache
 
 @lru_cache(maxsize=16)
 def _location_mapping(filename, device, inode, size, modified_ns, changed_ns, content_digest=None):
-    from ..execution.location_index import IndexedLocations
+    from demiflow.execution.storage.location_index import IndexedLocations
     return IndexedLocations(filename, (device, inode, size, modified_ns, changed_ns), field='tables',
                             content_digest=content_digest)
 

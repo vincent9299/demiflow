@@ -15,7 +15,7 @@ from urllib.parse import urlsplit, unquote
 
 from ..contracts.training import FitResult, ProjectObject
 from ..recovery_contract import MAX_DOCUMENT_BYTES, RecoveryContractError, document
-from .index import FitConflict
+from demiflow.execution.journal.training_index import FitConflict
 
 
 def local_path(uri):

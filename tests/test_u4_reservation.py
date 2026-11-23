@@ -385,7 +385,7 @@ def _run_graph(tmp_path, spec):
         with run.action({"kind": "materialize", "source": {"fixture": "rsv"}}) as execution:
             result = executor.materialize_graph(spec)
             execution.complete(dict(kind="graph-materialized", workers=result["workers"]))
-        from demiflow.execution.sealed_plans import load_sealed_plan
+        from demiflow.execution.seal.sealed_plans import load_sealed_plan
         sealed = load_sealed_plan(run.directory, execution.action_id, version='v3')
     router = next(node.occurrence_id for node in sealed['graph'].nodes if 'graph_route' in node.kernel.configuration)
     routed = {edge.edge_id for edge in sealed['graph'].edges if router in (edge.producer, edge.consumer)}

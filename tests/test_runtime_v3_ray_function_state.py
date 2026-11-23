@@ -66,7 +66,7 @@ def own_scope(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('form', ['cell', 'kwargs'])
 def test_real_ray_function_state_is_independent_of_host_capacity(tmp_path, ray_capacity, form):
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     log = str(tmp_path / 'calls.jsonl')
     with RunContext.start(tmp_path / 'run', limits={'checkpoint_rows': 1,
             'checkpoint_interval_ms': 60000, 'timeout_s': 90}) as run:

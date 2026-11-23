@@ -34,7 +34,7 @@ def test_observation_action_cannot_advance_a_real_journal(tmp_path):
 
 
 def test_object_namespace_matches_the_host_fabricated_context(tmp_path):
-    from demiflow.execution.object_resources import namespace_record
+    from demiflow.execution.storage.object_resources import namespace_record
     run_id = 'b' * 32
     for logical in (str(tmp_path / 'objects'), (tmp_path / 'objects').as_uri()):
         fabricated = SimpleNamespace(ref=SimpleNamespace(run_id=run_id))

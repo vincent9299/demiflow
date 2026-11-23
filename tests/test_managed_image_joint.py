@@ -281,7 +281,7 @@ def test_actual_forge_multibatch_cancel_resume_prefix(image_workspace_base,tmp_p
     commits = runs.journal(root,value['run_id']).execution_commits(ready['fact']['action_id'])
     outputs = [f for f in commits if f['intent']['sinks']==['materialize']]
     from types import SimpleNamespace
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     states = StateArtifacts(SimpleNamespace(directory=runs.directory(root, value['run_id']), limits=original_limits))
     cuts = [states.read(f['prepared']['state']['dataflow-cut-v3']) for f in outputs]
     assert [sum(source['next_sequence'] for source in cut['dataflow.sources.v3']) for cut in cuts] == [128,130]

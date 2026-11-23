@@ -98,9 +98,9 @@ def test_old_cut_and_sink_effects(published, tmp_path, capture, operation, rejec
 
     interrupted, before = invoke(published, 'generate')
     assert interrupted.returncode == 75, interrupted.stderr
-    from demiflow.execution.run_reader import _ReadonlyJournal
-    from demiflow.execution.state_artifacts import StateArtifacts
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.journal.run_reader import _ReadonlyJournal
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     directory = tmp_path / 'run'
     stopped = json.loads((tmp_path / 'interruption.json').read_text())
     journal = _ReadonlyJournal(directory)

@@ -117,7 +117,7 @@ def lance_cast_preallocation(directory, *, provider='local', case='conversion_ne
     import pyarrow as pa
     from pytest import MonkeyPatch
     from demiflow import data
-    from demiflow.execution.lance_sink import LanceSink
+    from demiflow.execution.outputs.lance_sink import LanceSink
     from demiflow.execution.run_context import RunContext
     from demiflow.execution import arrow_batch_sink
     directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
@@ -191,7 +191,7 @@ def equal_width_cast_residency(directory, *, rejected):
     import pyarrow as pa
     from demiflow.execution.run_context import RunContext
     from demiflow.execution.commit import CommitCoordinator
-    from demiflow.execution.lance_sink import LanceSink
+    from demiflow.execution.outputs.lance_sink import LanceSink
     from demiflow.execution.recovery_contract import SourcePosition
     from demiflow.lance.model import LanceWriteSpec
     directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
@@ -322,7 +322,7 @@ def observe_execution(*, workers, memory_bytes):
     """Tap original successful decisions, never replace their results or grants."""
     from pytest import MonkeyPatch
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.resource_state import RunResourceState
+    from demiflow.execution.hosts.run_state import RunResourceState
     from demiflow.execution.exchange.dataflow_state import ChannelSetState
     from demiflow.execution.run_journal import RunJournal
     from runtime_v3_performance_scenarios import _plain
@@ -415,7 +415,7 @@ def partial_capacity(directory, *, provider):
             assert report['released_cpu'] >= 5
             _write(directory / 'holder-proof.json', report)
         return
-    from demiflow.execution.dataflow_capacity import local_capacity
+    from demiflow.execution.hosts.capacity import local_capacity
     from demiflow.resources.capacity import LocalCapacityPool
     from demiflow.resources.process_unit import ManagedProcessUnit
     domain, capacity = local_capacity()

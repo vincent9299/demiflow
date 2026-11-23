@@ -540,7 +540,7 @@ class DriverJournalService:
         try:
             return self.dispatch(event)
         except Exception as exc:
-            from .dataflow_failures import failure_payload
+            from demiflow.execution.contracts.dataflow_failures import failure_payload
             return ControlReply(operation_id=event.operation_id, status="error", payload=failure_payload(exc),
                                 payload_ref=None, error_code=getattr(exc, 'code', 'UNKNOWN_EFFECT'))
 
@@ -597,7 +597,7 @@ class DriverJournalService:
                 self._check_grant()
                 value = {"operation_id": event.operation_id}
         except DataflowError as exc:
-            from .dataflow_failures import failure_payload
+            from demiflow.execution.contracts.dataflow_failures import failure_payload
             return ControlReply(operation_id=event.operation_id, status="error", payload=failure_payload(exc),
                                 payload_ref=None, error_code=exc.code)
         return ControlReply(operation_id=event.operation_id, status="ok", payload=value,
@@ -729,7 +729,7 @@ class DriverJournalService:
         if request.request_key != command.request_key:
             raise DataflowError("INVALID_CONTRACT", "native request_key does not match the request")
         if command.operation == 'batch_membership':
-            from .dataflow_batch_membership import request as batch_membership
+            from demiflow.execution.kernels.batch_membership import request as batch_membership
             return batch_membership(self, command, request)
         if command.operation == 'stream_lance':
             service = self._stream_lance
@@ -1017,7 +1017,7 @@ class WorkerJournalClient:
             raise DataflowError("INVALID_CONTRACT", "reply operation_id does not match the request")
         if reply.status == "error":
             if reply.payload:
-                from .dataflow_failures import restore_failure
+                from demiflow.execution.contracts.dataflow_failures import restore_failure
                 raise restore_failure(reply.payload)
             raise DataflowError(reply.error_code or "UNKNOWN_EFFECT", "driver rejected the journal command")
         if reply.status != "ok":

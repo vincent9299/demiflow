@@ -14,9 +14,9 @@ import threading
 
 from ..data.datasink import Datasink
 from ..objects import LocalObjectStore
-from .block_sink import BlockSink, storage_usage
+from demiflow.execution.outputs.block_sink import BlockSink, storage_usage
 from .recovery_contract import RecoveryContractError, UnresolvedCommit, document, identifier, identity
-from .state_artifacts import atomic_bytes
+from demiflow.execution.storage.state_artifacts import atomic_bytes
 
 
 def fault_point(name, commit_id):
@@ -60,7 +60,7 @@ class ObjectSink(Datasink):
         if type(max_objects) is not int or not 1 <= max_objects <= 1024:
             raise RecoveryContractError('Object manifest count exceeds ceiling')
         self.maximum, self.count = max_object_bytes, max_objects
-        from .object_resources import namespace_record
+        from demiflow.execution.storage.object_resources import namespace_record
         self.resource=namespace_record(self.run,logical_root or self.run.directory/'objects')
         owner = object_action_id or action.action_id
         if owner not in {action.action_id, action.action_id + '-stream'}:
@@ -124,7 +124,7 @@ class ObjectSink(Datasink):
             except ValueError as exc:
                 raise RecoveryContractError('Object publication content differs') from exc
             self._verify(fact)
-            from .object_resources import sync_directories
+            from demiflow.execution.storage.object_resources import sync_directories
             sync_directories(self.resource,target.parent, synced=self._synced_directories)
         self.run.release_temporaries([temporary, target.with_name(target.name + ".staging")])
         self._record_object(sha, fact)
@@ -139,7 +139,7 @@ class ObjectSink(Datasink):
     def adopt(self, prepared):
         """Carry durable child references into the final publication receipt."""
         self._validate(prepared)
-        from .artifact_manifest import entries
+        from demiflow.execution.storage.artifact_manifest import entries
         for fact in entries(self.run, prepared['objects']):
             self._record_object(fact['sha256'], fact)
 
@@ -186,7 +186,7 @@ class ObjectSink(Datasink):
             raise RecoveryContractError('Object checksum differs')
 
     def _validate(self, prepared):
-        from .object_resources import inspect_namespace
+        from demiflow.execution.storage.object_resources import inspect_namespace
         inspect_namespace(self.resource)
         required = {'format', 'logical_root', 'root', 'max_object_bytes', 'max_objects', 'objects','image_requests'}
         if type(prepared) is not dict or set(prepared) != required:
@@ -199,7 +199,7 @@ class ObjectSink(Datasink):
         if type(values) is list and len(values) > self.count:
             raise RecoveryContractError('Prepared object count exceeds ceiling')
         document(prepared)
-        from .artifact_manifest import manifest_pages
+        from demiflow.execution.storage.artifact_manifest import manifest_pages
         pages = [(None, values)] if type(values) is list else manifest_pages(self.run.directory, values,
             maximum=self.run.limits['max_artifacts'])
         for _, page in pages:
@@ -213,7 +213,7 @@ class ObjectSink(Datasink):
                 raise RecoveryContractError('Object manifest identity is not canonical')
 
     def _flush_page(self):
-        from .artifact_manifest import ArtifactManifest
+        from demiflow.execution.storage.artifact_manifest import ArtifactManifest
         if self.manifest is None:
             self.manifest = ArtifactManifest(self.run,
                 self.run.directory / 'materializations' / self.action.action_id / (self.sink_id + '-index'))
@@ -281,7 +281,7 @@ class ObjectSink(Datasink):
         raw = document(receipt)
         self.run.allocate_artifact(self._marker(context), commit_id=context.commit_id, size=len(raw))
         atomic_bytes(self._marker(context), raw)
-        from .object_resources import sync_directories
+        from demiflow.execution.storage.object_resources import sync_directories
         sync_directories(self.resource,self._marker(context).parent, synced=self._synced_directories)
         return receipt
 
@@ -358,7 +358,7 @@ class ObjectRowsSink(Datasink):
             raise RecoveryContractError('Invalid bounded object resource set')
         parts=[prepared['objects']]+[more[k] for k in sorted(more)]
         registered={r['logical_root']:r for r in action.context.journal.object_roots()}
-        from .object_resources import namespace_record
+        from demiflow.execution.storage.object_resources import namespace_record
         names=[]
         owners=[]
         for index,part in enumerate(parts):

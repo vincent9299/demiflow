@@ -277,7 +277,7 @@ class WorkerRuntime:
                     type_name="RecoveryImage", bounds=executor._services.bounds)
             executor.restore(image)
             return [ref["sha256"] for ref in state_refs]
-        from ..state_artifacts import StateArtifacts
+        from demiflow.execution.storage.state_artifacts import StateArtifacts
         artifacts = StateArtifacts(_ReadContext(self.directory, self._limits))
         checksums = []
         for ref in state_refs:

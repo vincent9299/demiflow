@@ -7,7 +7,7 @@ import pytest
 
 from demiflow import data
 from demiflow.data.sources import ItemsSource
-from demiflow.execution.literal_source_identity import literal_source_digest
+from demiflow.execution.contracts.literal_source_identity import literal_source_digest
 from demiflow.execution.recovery_contract import document, identity, RecoveryContractError
 from demiflow.execution.recovery_identity import describe, source_identity
 from demiflow.execution.run_context import RunContext

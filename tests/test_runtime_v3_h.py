@@ -51,7 +51,7 @@ sys.modules['ray.exceptions'] = _RAY.exceptions
 
 from demiflow.execution import dataflow_authority as AUTH
 from demiflow.execution import dataflow_artifacts as ART
-from demiflow.execution import dataflow_control as CTRL
+from demiflow.execution.hosts import dataflow_control as CTRL
 from demiflow.execution import dataflow_hosts as HOSTS
 from demiflow.execution import dataflow_services as SVC
 from demiflow.execution.contracts.dataflow_errors import DataflowError

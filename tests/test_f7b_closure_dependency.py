@@ -423,7 +423,7 @@ def _assert_sealed_helper(run, helper, source):
     import hashlib
     import json
     from demiflow.execution.seal.plan import CODE_PIN_MEDIA, _read_json
-    from demiflow.execution.sealed_plans import _v3_read_store, load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import _v3_read_store, load_sealed_plan
 
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
     with run.journal._connection() as db:

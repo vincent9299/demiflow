@@ -12,7 +12,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.contracts.dataflow_codec import _thaw_json
 from demiflow.execution.dataflow_embedding_journal import bind_private_embedding_contracts
-from demiflow.execution.dataflow_model_journal import _rpc_operation_id
+from demiflow.execution.operator_bindings.dataflow_model_journal import _rpc_operation_id
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
@@ -145,7 +145,7 @@ def private_graph(path):
 def private_event(run, store, seed='a', *, scope='first', part=0, operation='reserve', value_ref=None):
     from demiflow.execution.contracts.dataflow import NativeJournalCommand
     from demiflow.execution.dataflow_authority import _ref_to_json, _ref_from_json
-    from demiflow.execution.dataflow_model_journal import _private_embedding_rpc_id
+    from demiflow.execution.operator_bindings.dataflow_model_journal import _private_embedding_rpc_id
     from demiflow.execution.recovery_contract import identity
     original = event(run, store, seed)
     payload = _thaw_json(original.payload)
@@ -160,7 +160,7 @@ def private_event(run, store, seed='a', *, scope='first', part=0, operation='res
 
 @pytest.mark.parametrize('new_scope,new_part', [('second', 0), ('first', 1)])
 def test_original_requeue_needs_new_embedding_batch_part_admission(tmp_path, new_scope, new_part):
-    from demiflow.execution.dataflow_private_storage import bind_private_storage
+    from demiflow.execution.storage.private_journals import bind_private_storage
     path = tmp_path/'private.sqlite'
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority, store, _):
         authority._action.declaration['kind'] = 'take_all'
@@ -192,7 +192,7 @@ def test_original_requeue_needs_new_embedding_batch_part_admission(tmp_path, new
 
 
 def test_private_embedding_part_outside_sealed_batch_has_no_intent(tmp_path):
-    from demiflow.execution.dataflow_private_storage import bind_private_storage
+    from demiflow.execution.storage.private_journals import bind_private_storage
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority, store, _):
         authority._action.declaration['kind'] = 'take_all'
         graph = private_graph(tmp_path/'private.sqlite')
@@ -243,7 +243,7 @@ def test_real_embedding_packing_preserves_original_batch_and_part_scopes(tmp_pat
 
 def test_duplicate_reserve_rpc_one_original_admission_and_private_intent(tmp_path):
     from concurrent.futures import ThreadPoolExecutor
-    from demiflow.execution.dataflow_private_storage import bind_private_storage
+    from demiflow.execution.storage.private_journals import bind_private_storage
     path = tmp_path / 'private.sqlite'
     with interrupted_run(tmp_path / 'run') as run, service(run, pending=1) as (authority, store, lease):
         authority._action.declaration['kind'] = 'take_all'

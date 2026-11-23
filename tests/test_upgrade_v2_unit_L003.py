@@ -9,10 +9,7 @@ from types import MappingProxyType
 
 import pytest
 
-from demiflow.execution.plan_interpreter import (
-    ExecutionPlacement, PlanContractError, interpret_physical_plan,
-    validate_worker_assignment,
-)
+from demiflow.execution.seal.plan_interpreter import ExecutionPlacement, PlanContractError, interpret_physical_plan, validate_worker_assignment
 from test_execution_layout import (
     assignment_for, chain_fixture, expected_channel_ids,
 )

@@ -101,7 +101,7 @@ def test_declaration_environment_does_not_run_user_hooks():
 
 
 def test_sql_failure_roundtrip_preserves_type_and_bounded_message():
-    from demiflow.execution.dataflow_failures import failure_payload, restore_failure
+    from demiflow.execution.contracts.dataflow_failures import failure_payload, restore_failure
     error = sqlite3.OperationalError('no such column: invalid_column')
     payload = failure_payload(error)
     payload['traceback'] = 't' * 8000
@@ -119,7 +119,7 @@ def test_real_ray_typed_finite_borrow(ray_api_scope, tmp_path):
 def test_real_ray_finite_join_restores_original_cut(ray_api_scope, tmp_path, monkeypatch):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
     from demiflow.execution.run_context import RunContext
     from test_runtime_v3_finite_finish import pipeline, Interrupted
     original_event = DataflowExecution._handle_event

@@ -415,7 +415,7 @@ DataflowError = ERRORS.DataflowError
 
 # --- production symbols under test (imported AFTER doubles are installed) ----
 from demiflow.execution import dataflow_models as models
-from demiflow.execution import dataflow_model_journal as journal
+from demiflow.execution.operator_bindings import dataflow_model_journal as journal
 from demiflow.execution.recovery_contract import identity, RecoveryContractError
 from demiflow.operator_llm.journal import RequestRecord, request_key, canonical
 from demiflow.operator_llm.stream_recovery import (
@@ -1440,7 +1440,7 @@ def test_m022():
     codex_actor, _, _ = make_prompt_actor()
     codex_actor.environment = OperatorEnvironment(runtime='codex', operators=())
     journal.bind_agent_adapter(codex_actor, services=services, node_id='node-codex')
-    from demiflow.execution.dataflow_model_journal import RemoteCodexRecovery
+    from demiflow.execution.operator_bindings.dataflow_model_journal import RemoteCodexRecovery
     assert isinstance(codex_actor._runtime.native_recovery, RemoteCodexRecovery)
     assert codex_actor._runtime.native_recovery.row_local is False
     coordinator = codex_actor._runtime.coordinator

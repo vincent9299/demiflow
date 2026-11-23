@@ -203,7 +203,7 @@ class NativeExecution(CheckedExecution):
         return replace(compiled, report_bindings=bindings)
 
     def native_save_policy(self, execution, node, writer):
-        from .dataflow_stage_facts import stage_binding
+        from demiflow.execution.journal.dataflow_stage_facts import stage_binding
         _, binding = stage_binding(execution._action.context.journal,
             execution._action.context.directory, execution._action.action_id, node, self.report_digest)
         declared = next((o for o in self.contract['outputs'] if o['node_id'] == binding['report_node_id']), None)

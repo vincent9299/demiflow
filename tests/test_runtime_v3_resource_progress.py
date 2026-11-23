@@ -10,7 +10,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 def test_runs_share_one_capacity_domain(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_capacity import local_capacity
+    from demiflow.execution.hosts.capacity import local_capacity
     from demiflow.execution.dataflow_services import _driver_resources
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     from demiflow.resources.capacity import LocalCapacityPool
@@ -35,7 +35,7 @@ def test_runs_share_one_capacity_domain(tmp_path, monkeypatch):
 
 
 def test_pending_admission_retries_same_allocation_then_executes(tmp_path, monkeypatch):
-    from demiflow.execution import dataflow_capacity
+    from demiflow.execution.hosts import capacity as dataflow_capacity
     from demiflow.resources.capacity import LocalCapacityPool
     from demiflow.resources.local import LocalResourceProvider
     capacity = {'cpu_millis': 3000, 'memory_bytes': 8 * 1024 ** 3}
@@ -64,7 +64,7 @@ def test_pending_admission_retries_same_allocation_then_executes(tmp_path, monke
 
 
 def test_unavailable_capacity_times_out_without_business_effect(tmp_path, monkeypatch):
-    from demiflow.execution import dataflow_capacity
+    from demiflow.execution.hosts import capacity as dataflow_capacity
     from demiflow.resources.capacity import LocalCapacityPool
     capacity = {'cpu_millis': 3000, 'memory_bytes': 8 * 1024 ** 3}
     domain = tmp_path / 'capacity-domain'

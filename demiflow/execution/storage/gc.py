@@ -243,14 +243,14 @@ class _Trace:
                     if len(self.states) >= self.maximum:
                         raise UnprovenGC('State carriers exceed trace budget')
                     self.states.add(path)
-                    from ..artifact_manifest import _read
+                    from demiflow.execution.storage.artifact_manifest import _read
                     raw = _read(self.journal.directory / path,
                                 min(self.bounds.max_state_bytes,self.bounds.max_resident_bytes//32),
                                 size=value['bytes'], digest=value['sha256'])
                     self.check(len(raw))
                     self.value(self.decode(raw), depth + 1)
             if value.get('format') == 'paged-artifacts-v1':
-                from ..artifact_manifest import manifest_pages
+                from demiflow.execution.storage.artifact_manifest import manifest_pages
                 for _, page in manifest_pages(self.journal.directory, value, maximum=self.maximum):
                     self.value(page, depth + 1)
             for field in ('data_b64', 'typed_result'):

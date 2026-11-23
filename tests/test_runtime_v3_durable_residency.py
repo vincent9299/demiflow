@@ -21,7 +21,7 @@ def dataset():
 
 
 def facts(run):
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     commits = run.journal.execution_commits('action-1')
     return commits, [StateArtifacts(run).read(f['prepared']['state']['dataflow-cut-v3']) for f in commits]
 

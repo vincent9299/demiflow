@@ -58,7 +58,7 @@ def test_real_dataset_pid_and_original_allocation_envelope(tmp_path, mode):
 @pytest.mark.parametrize('keep_current_assignment', [False, True], ids=['legacy', 'mixed'])
 def test_thread_host_rejects_retired_launch_before_allocation(tmp_path, monkeypatch, keep_current_assignment):
     from demiflow.execution.contracts.errors import ProtocolError
-    from demiflow.execution.dataflow_thread_host import DataflowThreadConnector
+    from demiflow.execution.hosts.thread import DataflowThreadConnector
 
     stage = DataflowThreadConnector.stage
 
@@ -99,7 +99,7 @@ def test_real_async_and_default_pool_inherit_same_grant(tmp_path):
 def test_thread_exit_evidence_waits_for_framework_work(tmp_path, monkeypatch):
     import threading
     import time
-    from demiflow.execution.dataflow_thread_host import _ThreadUnit
+    from demiflow.execution.hosts.thread import _ThreadUnit
     from demiflow.execution.worker import dataflow_host
     from demiflow.resources.capacity import inherited_envelope, track_owned_thread
     entered, release = threading.Event(), threading.Event()
@@ -129,7 +129,7 @@ def test_thread_exit_evidence_waits_for_framework_work(tmp_path, monkeypatch):
 
 def test_hook_failure_never_substitutes_for_physical_exit(tmp_path, monkeypatch):
     import threading
-    from demiflow.execution.dataflow_thread_host import _ThreadUnit
+    from demiflow.execution.hosts.thread import _ThreadUnit
     from demiflow.execution.worker import dataflow_host
     from demiflow.resources.capacity import track_owned_thread
     release = threading.Event()
@@ -253,7 +253,7 @@ def test_recovery_uses_original_sealed_thread_mode(tmp_path, monkeypatch):
 def test_original_capacity_remains_charged_until_real_thread_exit(tmp_path, monkeypatch):
     import threading
     from demiflow.execution.worker import dataflow_host
-    from demiflow.execution.dataflow_thread_host import DataflowThreadConnector
+    from demiflow.execution.hosts.thread import DataflowThreadConnector
     from demiflow.resources.thread import ThreadResourceProvider
     from demiflow.resources.capacity import LocalCapacityPool, track_owned_thread
     from demiflow.resources.contracts import spec_hash
@@ -321,7 +321,7 @@ def test_live_program_still_checks_real_code_pin(tmp_path):
 
 def test_failure_group_transport_is_finite_and_preserves_known_causes():
     import json
-    from demiflow.execution.dataflow_failures import failure_payload, restore_failure
+    from demiflow.execution.contracts.dataflow_failures import failure_payload, restore_failure
     error = ExceptionGroup('actors', [ValueError('first'), RuntimeError('second')])
     restored = restore_failure(failure_payload(error))
     assert isinstance(restored, ExceptionGroup)

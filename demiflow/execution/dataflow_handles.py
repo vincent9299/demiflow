@@ -502,7 +502,7 @@ class StoredMaterializedHandle:
             rows = manifest["rows"]
             if result.rows is not None and result.rows != rows:
                 raise _error("CORRUPT_ARTIFACT", "manifest row count differs from result")
-            from .dataflow_segments import tree_refs
+            from demiflow.execution.storage.segments import tree_refs
             for block in blocks:
                 for ref in tree_refs(store, block, self._bounds):
                     self._retain_block(ref, witness)
@@ -520,7 +520,7 @@ class StoredMaterializedHandle:
                 pinned.append(self._declared_schema_ref)
         except Exception:
             from itertools import islice
-            from .dataflow_segments import tree_refs
+            from demiflow.execution.storage.segments import tree_refs
             try:
                 for ref in islice((ref for block in blocks for ref in tree_refs(store, block, self._bounds)), pinned_tree_count):
                     store.release(ref, owner=owner)
@@ -534,7 +534,7 @@ class StoredMaterializedHandle:
             raise
 
     def _retain_block(self, ref, witness):
-        from .dataflow_segments import RECORDS_MEDIA, SEGMENTS_MEDIA
+        from demiflow.execution.storage.segments import RECORDS_MEDIA, SEGMENTS_MEDIA
         from .dataflow_record_frames import (decode_document, decode_frame, frame_stream,
                                              line_limit, read_chunk_bytes)
         proof = self._count_proof
@@ -710,7 +710,7 @@ class StoredMaterializedHandle:
         count = 0
         from .arrow_payload import ArrowBatchCache, is_arrow_record
         arrow = ArrowBatchCache(self._store, self._bounds)
-        from .dataflow_segments import segment_refs
+        from demiflow.execution.storage.segments import segment_refs
         from .dataflow_record_frames import decode_frame, decode_document, line_limit, frame_stream, read_chunk_bytes
         try:
             for ref in (leaf for block in self._blocks
@@ -767,7 +767,7 @@ class StoredMaterializedHandle:
                 return
             if self._owner is not None:
                 release = getattr(self._store, 'release_materialized', self._store.release)
-                from .dataflow_segments import tree_refs
+                from demiflow.execution.storage.segments import tree_refs
                 for block in self._blocks:
                     for ref in tree_refs(self._store, block, self._bounds):
                         release(ref, owner=self._owner)

@@ -14,7 +14,7 @@ from .contracts.dataflow_errors import DataflowError
 
 class RemoteOfflinePromptClient:
     def __init__(self, model, options, journal):
-        from .dataflow_model_journal import RemotePromptJournal
+        from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal
         if not isinstance(journal, RemotePromptJournal):
             raise ValueError('Offline input requires the verified native worker port')
         if set(options) not in ({'offline_dir'}, {'offline_store'}):

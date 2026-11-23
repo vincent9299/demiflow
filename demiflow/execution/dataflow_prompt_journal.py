@@ -11,7 +11,7 @@ import threading
 
 from .contracts.dataflow import NativeJournalReply, thaw_record_value
 from .contracts.dataflow_errors import DataflowError
-from .dataflow_model_journal import RemotePromptJournal, make_native_action_view, _rebuild_request_gate
+from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal, make_native_action_view, _rebuild_request_gate
 from .recovery_contract import RecoveryContractError, identity
 
 _DELIVERY = frozenset({'take', 'take_all', 'take_batch', 'iter_rows', 'iter_batches', 'run_stream'})
@@ -152,7 +152,7 @@ def is_private_prompt_request(service, command, request):
 
 def _journal(service, node_id, route):
     from ..operator_llm.sqlite_journal import SQLitePromptJournal
-    from .dataflow_private_storage import private_storage
+    from demiflow.execution.storage.private_journals import private_storage
     with service._private_prompt_lock:
         if service._closed:
             raise DataflowError('FENCED', 'Private Prompt journal owner is closed')

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from ..data.plan import CallableSpec
 from .contracts.dataflow_errors import DataflowError
 from .recovery_contract import identity
-from .dataflow_model_journal import RemotePromptJournal
+from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal
 
 
 class _RoutedPromptJournal(RemotePromptJournal):
@@ -90,8 +90,7 @@ def compile_routed_prompt(operation, declaration, *, program_ref, bounds):
 
 
 def bind_routed_prompt(actor, *, services, node_id, configuration):
-    from .dataflow_model_journal import (make_native_action_view, RemotePromptRecovery,
-                                        _rebuild_request_gate)
+    from demiflow.execution.operator_bindings.dataflow_model_journal import make_native_action_view, RemotePromptRecovery, _rebuild_request_gate
     action = make_native_action_view(services, node_id=node_id)
     for name, child in actor.actors.items():
         if configuration['routes'][name].get('private_journal') is not None:

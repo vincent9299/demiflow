@@ -64,7 +64,7 @@ class FitDependencies:
                              parent=parent_snapshot)
         provider = self.deployment.provider
         if binding.hosting == 'EngineManaged':
-            from ..training.managed_host import ManagedFitHost
+            from demiflow.execution.hosts.training_host import ManagedFitHost
             provider = ManagedFitHost(action=self.action, services=self.services, scheduler=self.scheduler,
                          sealed=self.sealed, occurrence=job.occurrence_id, binding=binding,
                          job_resources=self.services.job_resources, timeout_ms=self.services.policy.control_timeout_ms)

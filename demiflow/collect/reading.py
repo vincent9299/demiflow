@@ -267,7 +267,7 @@ class ReadDocuments:
     async def astart(self):
         if self.reuse_workers:
             from functools import partial
-            from ..execution.isolated_pool import IsolatedWorkerPool
+            from demiflow.execution.hosts.isolated_pool import IsolatedWorkerPool
             self.pool = IsolatedWorkerPool({
                 'read': partial(read_document, max_bytes=self.max_bytes),
                 'select': partial(select_context, context=self.context),

@@ -47,7 +47,7 @@ def test_materialized_count_uses_authenticated_rows_and_records_action(tmp_path)
 @pytest.mark.parametrize('damage', ['missing', 'same-size', 'manifest'])
 def test_materialized_count_rejects_damaged_input(tmp_path, damage):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.dataflow_segments import segment_refs
+    from demiflow.execution.storage.segments import segment_refs
     with pytest.raises(DataflowError) as rejected, RunContext.start(tmp_path / 'run') as run, data.local_execution():
         stored = data.from_items(_rows()).map(lambda row: row).materialize()
         handle = stored._source.handle
@@ -73,7 +73,7 @@ def test_materialized_count_rejects_damaged_input(tmp_path, damage):
 @pytest.mark.parametrize('change', ['mtime', 'replace-before-reopen', 'damaged', 'missing'])
 def test_completed_direct_count_reopens_its_receipt_without_sealing(tmp_path, change):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.dataflow_segments import segment_refs
+    from demiflow.execution.storage.segments import segment_refs
 
     def materialize():
         return data.from_items(_rows()).map(lambda row: row).materialize()

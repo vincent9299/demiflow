@@ -136,7 +136,7 @@ def test_public_sort_consumes_nonrepeatable_input_only_once(tmp_path):
 
 
 def test_isolated_stage_returns_or_propagates():
-    from demiflow.execution.isolation import run_isolated
+    from demiflow.execution.hosts.isolation import run_isolated
     assert run_isolated(os.getpid) != os.getpid()
     with pytest.raises(ZeroDivisionError):
         run_isolated(lambda: 1/0)

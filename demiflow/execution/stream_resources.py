@@ -46,8 +46,8 @@ class StreamResources:
             from ..collect.search_contract import is_native_search_actor
             searches = {id(actor) for actor in self.actors if is_native_search_actor(actor)}
             if searches:
-                from .dataflow_search_runtime import SearchEffects
-                from .queue_producer import QueueProducer
+                from demiflow.execution.operator_bindings.dataflow_search_runtime import SearchEffects
+                from demiflow.execution.native_queue.queue_producer import QueueProducer
                 from .run_context import current_action
                 producer = next((a for a in self.actors if type(a) is QueueProducer), None)
             gates={id(gate):gate for actor in self.actors

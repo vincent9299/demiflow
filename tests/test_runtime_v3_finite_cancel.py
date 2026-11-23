@@ -20,7 +20,7 @@ from demiflow.execution.contracts.dataflow import WorkerLease
 from demiflow.execution.contracts.dataflow_codec import runtime_scope_id
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.dataflow_hosts import ControlMailbox
-from demiflow.execution.dataflow_model_journal import make_native_action_view
+from demiflow.execution.operator_bindings.dataflow_model_journal import make_native_action_view
 from demiflow.execution.dataflow_services import make_runtime_services
 from demiflow.execution.recovery_contract import document, RecoveryContractError
 from demiflow.execution.run_context import RunContext
@@ -200,7 +200,7 @@ def test_real_dataset_cancel_interrupts_finite_authentication_and_releases_worke
                     cancelled.set()
     assert decoded and len(decoded) == 1
     from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.dataflow_capacity import local_capacity
+    from demiflow.execution.hosts.capacity import local_capacity
     from demiflow.resources.capacity import LocalCapacityPool
     with RunJournal(tmp_path/'run')._connection() as db:
         allocations = db.execute('SELECT allocation_id,cleanup FROM resource_allocations').fetchall()

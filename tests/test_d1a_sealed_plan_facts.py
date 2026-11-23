@@ -4,7 +4,7 @@ import json
 import sqlite3
 import pytest
 
-from demiflow.execution.sealed_plans import PlanContractError, load_sealed_plan
+from demiflow.execution.seal.sealed_plans import PlanContractError, load_sealed_plan
 from demiflow.execution.run_context import RunContext
 from demiflow.workbench.runs.facts import read_sealed_plan
 from test_stage2_unified_plan import LIMITS
@@ -42,7 +42,7 @@ def test_current_reader_refuses_invalid_old_carriers(original_chain, tmp_path, d
         path.rename(new)
         path.symlink_to(new)
     elif damage == 'budget':
-        from demiflow.execution import sealed_plans
+        from demiflow.execution.seal import sealed_plans
         monkeypatch.setattr(sealed_plans, 'MAX_SEALED_PLAN_BYTES', 16)
     else:
         with sqlite3.connect(root / 'run.sqlite') as db:

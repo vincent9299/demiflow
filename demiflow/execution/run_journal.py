@@ -773,7 +773,7 @@ class RunJournal:
             # Only callers holding the original runtime lease opt in. Old
             # physical workers must retire before their object leases can let
             # published GC finish, including receipt-only action replay.
-            from .dataflow_resource_recovery import recover_execution_resources
+            from demiflow.execution.hosts.execution_recovery import recover_execution_resources
             recover_execution_resources(self, configuration, fence, preserve_jobs=preserve_jobs)
         self._reconcile_published_gc(fence)
         return attempt
@@ -1219,7 +1219,7 @@ class RunJournal:
                         raise RecoveryContractError('Prepared artifact count exceeds budget')
                     yield path
                     if value.get('format') == 'paged-artifacts-v1':
-                        from .artifact_manifest import manifest_pages
+                        from demiflow.execution.storage.artifact_manifest import manifest_pages
                         for page_path, page in manifest_pages(self.directory, value,
                                 maximum=limits['max_artifacts']):
                             remaining -= 1
@@ -1228,7 +1228,7 @@ class RunJournal:
                             yield page_path
                             yield from references(page, depth + 1)
                     if 'state_id' in value:
-                        from .artifact_manifest import _read
+                        from demiflow.execution.storage.artifact_manifest import _read
                         relative = Path(path)
                         if (relative.is_absolute() or '..' in relative.parts
                                 or not relative.parts or relative.parts[0] != 'state'):
@@ -1797,7 +1797,7 @@ class RunJournal:
             row=db.execute('SELECT logical_root,physical_root,run_id FROM runtime_object_roots WHERE root_id=?',(root_id,)).fetchone()
             if row is None:
                 raise RecoveryContractError('Artifact object resource is not registered')
-            from .object_resources import inspect_namespace
+            from demiflow.execution.storage.object_resources import inspect_namespace
             inspect_namespace(dict(root_id=root_id,logical_root=row[0],physical_root=row[1],run_id=row[2]))
             return Path(row[1]).joinpath(*relative.parts[2:])
         return self.directory/relative

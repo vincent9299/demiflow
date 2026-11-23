@@ -48,7 +48,7 @@ def sealed(tmp_path,*,v2):
 @pytest.mark.parametrize('v2',[False,True])
 def test_registered_case_configuration_to_native_reader_and_runtime_without_kernel(tmp_path,monkeypatch,v2):
     config,object_root=sealed(tmp_path,v2=v2);assert case_worker.configuration(config)==config
-    from demiflow.execution import datafusion
+    from demiflow.execution.hosts import datafusion
     real_session=datafusion.DataFusionSession;real_reader=case_query.read_private
     (tmp_path/'scratch').mkdir();(tmp_path/'diagnostics').mkdir()
     def session(**kwargs):

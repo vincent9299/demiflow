@@ -23,7 +23,7 @@ from demiflow.execution.contracts.worker import validate_message
 from demiflow.execution.contracts.errors import ProtocolError
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunContext, _CURRENT, current_run
-from demiflow.execution.state_artifacts import StateArtifacts
+from demiflow.execution.storage.state_artifacts import StateArtifacts
 from demiflow.execution.worker.authority import WorkerAuthority
 from demiflow.execution.worker.bootstrap import recv_message, send_message, spawn_local_worker
 from demiflow.execution.worker.runtime import WorkerRuntime

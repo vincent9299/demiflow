@@ -5,8 +5,8 @@ import pyarrow.csv as pacsv
 
 from demiflow import data
 from demiflow.execution import RunContext
-from demiflow.execution import datafusion as host
-from demiflow.execution.sealed_plans import load_sealed_plan
+from demiflow.execution.hosts import datafusion as host
+from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
 
 def csv_table(path, columns, rows):
@@ -201,7 +201,7 @@ def test_legacy_partial_terminal_closure_is_rejected_before_workers_start(tmp_pa
 def test_csv_shared_batch_cursor_and_projection_keep_authenticated_occurrences(tmp_path):
     from dataclasses import replace
     from demiflow.data.sources import FileSource
-    from demiflow.execution.source_readers import FileReader
+    from demiflow.execution.sources.source_readers import FileReader
     from demiflow.execution.arrow_payload import ArrowBatchCache, is_arrow_record
     from demiflow.execution.record_schema import RecordSchemas
     from test_runtime_v3_s import FakeStore, make_bounds, make_snapshot, first_split, make_services, drain

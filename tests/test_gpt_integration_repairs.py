@@ -20,7 +20,7 @@ def _identity(row):
 
 
 def test_run_stream_uses_the_sealed_worker_limits(tmp_path):
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     with RunContext.start(tmp_path/'run', limits={'checkpoint_rows':2}) as run:
         stats = data.from_items([{'id': 1}, {'id': 2}]).map_async(lambda row: row).run_stream()
         physical = load_sealed_plan(run.directory, 'action-1', version='v3')['physical']
@@ -33,7 +33,7 @@ def test_run_stream_uses_the_sealed_worker_limits(tmp_path):
                                     'materialize', 'schema', 'size_bytes', 'write_lance'])
 def test_public_terminal_consumes_sealed_execution(tmp_path, monkeypatch, terminal):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     calls = []
     original = DataflowExecution.start
     def observed(execution):
@@ -333,7 +333,7 @@ def test_reduce_program_tree_executes_under_the_sealed_layout(tmp_path):
     with RunContext.start(tmp_path/'run') as run:
         ds = data.from_items([{'k': 1}, {'k': 2}, {'k': 1}]).reduce_by_key('k', fold)
         assert sorted(ds.take_all(), key=lambda r:r['k']) == [{'k':1, 'n':2}, {'k':2, 'n':1}]
-        from demiflow.execution.sealed_plans import load_sealed_plan
+        from demiflow.execution.seal.sealed_plans import load_sealed_plan
         assert len(load_sealed_plan(run.directory, 'action-1')['logical_dag']['nodes']) == 3
 
 

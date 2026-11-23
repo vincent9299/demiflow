@@ -9,10 +9,10 @@ from ..commit import CommitCoordinator
 from ..contracts.training import FitBinding, FitRequest, FitResult, FitSubmissionRejected, InputCopyReceipt, JobLookup, JobRef, ProjectObject, TrainingSnapshotRef
 from ..recovery_contract import RecoveryContractError, SourcePosition, identity
 from ..run_context import RunAction
-from ..run_reader import read_run
-from .index import FitConflict, TrainingIndex
+from demiflow.execution.journal.run_reader import read_run
+from demiflow.execution.journal.training_index import FitConflict, TrainingIndex
 from .store import ModelStore, validate_result
-from .provider_io import ProviderCalls, check_deadlines
+from demiflow.execution.hosts.training_provider_io import ProviderCalls, check_deadlines
 
 
 def _consumer_id(action, occurrence, kind, key=None):
@@ -21,7 +21,7 @@ def _consumer_id(action, occurrence, kind, key=None):
 
 def confirm_table_consumption(action, occurrence, binding, receipt):
     """Finish the retention transaction even if the driver died after final ACK."""
-    from ..run_reader import fit_table_prefix
+    from demiflow.execution.journal.run_reader import fit_table_prefix
     run = action.context
     owner = _consumer_id(action, occurrence, 'table', action.action_id)
     intent = run.journal.source_binding(owner)

@@ -67,7 +67,7 @@ def test_local_chain_full_real_worker(tmp_path):
         assert facts and all(f['status'] == 'acked' for f in facts)
         assert facts[-1]['receipts']['materialize']['data']['rows'] == len(expected)
         from _native_receipt_fixtures import committed_rows
-        from demiflow.execution.state_artifacts import StateArtifacts
+        from demiflow.execution.storage.state_artifacts import StateArtifacts
         assert committed_rows(run, 'action-1', facts[-1]) == expected
         image = StateArtifacts(run).read(facts[-1]['prepared']['state']['dataflow-cut-v3'])
         assert image['cut']['final']
@@ -80,7 +80,7 @@ def test_local_chain_full_real_worker(tmp_path):
     assert pid != os.getpid()
     # Capacity was released after confirmed exit evidence.
     from demiflow.resources.capacity import LocalCapacityPool
-    from demiflow.execution.dataflow_capacity import local_capacity
+    from demiflow.execution.hosts.capacity import local_capacity
     root, capacity = local_capacity()
     pool = LocalCapacityPool(root / 'capacity', capacity=capacity)
     assert pool.snapshot()["charged"] == {"cpu_millis": 0, "memory_bytes": 0}

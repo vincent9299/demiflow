@@ -177,7 +177,7 @@ class WorkerAuthority:
             self.release_temporaries(paths)
 
     def object_namespace(self, logical_root):
-        from ..object_resources import bind_namespace
+        from demiflow.execution.storage.object_resources import bind_namespace
         with self._object_resource_lock:
             return bind_namespace(self, logical_root)
 

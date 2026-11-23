@@ -10,19 +10,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from demiflow.execution import sealed_plans
+from demiflow.execution.seal import sealed_plans
 from _v2_native_fixtures import retarget_history_bindings
 from runtime_v3_history_scenarios import write_legacy_seal
-from demiflow.execution.plan_interpreter import (
-    PlanContractError, interpret_physical_plan, to_wire, validate_worker_assignment,
-)
+from demiflow.execution.seal.plan_interpreter import PlanContractError, interpret_physical_plan, to_wire, validate_worker_assignment
 from demiflow.execution.recovery_contract import document, identity
 from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.sealed_plans import (
-    MAX_BINDINGS_BYTES, MAX_SEALED_PLAN_BYTES, SEALED_PLAN_FACTS_SCHEMA,
-    load_execution_bindings, load_sealed_plan, read_plan_artifact,
-)
+from demiflow.execution.seal.sealed_plans import MAX_BINDINGS_BYTES, MAX_SEALED_PLAN_BYTES, SEALED_PLAN_FACTS_SCHEMA, load_execution_bindings, load_sealed_plan, read_plan_artifact
 from test_execution_layout import (
     MANIFEST_REF, PROFILE, PROFILE_REF, assignment_for, bundle_for, chain_fixture,
     expected_channel_ids, fanout_fixture, stage_id,

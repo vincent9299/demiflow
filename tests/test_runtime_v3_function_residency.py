@@ -80,7 +80,7 @@ def test_actual_function_keeps_stage_state_across_worker_parking(tmp_path, worke
             counter(path, form), concurrency=1)
         materialized = flow.materialize()
         assert materialized.take_all() == [{'i':i, 'count':i+1} for i in range(8)]
-        from demiflow.execution.sealed_plans import load_sealed_plan
+        from demiflow.execution.seal.sealed_plans import load_sealed_plan
         bundle = load_sealed_plan(run.ref.directory, 'action-1')
         maps = [node for node in bundle['graph'].nodes if node.kernel.kind == 'AsyncMapOp']
         assert len(maps) == 2 and maps[0].kernel.state == 'none' and maps[1].kernel.state == 'adapter'
@@ -154,7 +154,7 @@ def test_restore_validates_whole_state_before_mutating_any_slot(tmp_path):
 @pytest.mark.parametrize('form',['cell','bound'])
 def test_actual_function_restore_uses_committed_counter_and_no_prefix_reexecution(tmp_path, monkeypatch, form):
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
     class Interrupted(Exception):
         pass
     path = tmp_path/'calls'
@@ -344,7 +344,7 @@ def test_readonly_task_dependencies_need_no_state_reservation(tmp_path, separate
         return row
     with RunContext.start(tmp_path/'run') as run,data.local_execution(workers=1,worker_mode='thread',partitions=1,batch_rows=3):
         assert data.from_items([{'i':0}]).map(readonly).take_all()==[{'i':0}]
-        from demiflow.execution.sealed_plans import load_sealed_plan
+        from demiflow.execution.seal.sealed_plans import load_sealed_plan
         bundle=load_sealed_plan(run.ref.directory,'action-1')
         node=next(n for n in bundle['graph'].nodes if n.kernel.kind=='MapOp')
         assert node.kernel.state=='none' and node.kernel.configuration['task_batch_rows']==3
@@ -359,7 +359,7 @@ def test_nested_external_state_snapshot_cannot_claim_legacy_task_recovery():
     from test_runtime_v3_k import services,spec,program,InputPort
     from demiflow.data.plan import CallableSpec
     from demiflow.execution.kernels.operator import OperatorKernel
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
     namespace={'outside':[]}
     exec('def callback(row):\n def nested():\n  outside.append(row)\n nested()\n return row',namespace)
     # Component boundary: fake store/journal ports, real kernel and image

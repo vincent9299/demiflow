@@ -22,7 +22,7 @@ from training_action_programs import waiting_trainer
 
 def execute(root, resume, stopped_at):
     if stopped_at == 'ready' and not resume:
-        from demiflow.execution.training.managed_host import ManagedFitHost
+        from demiflow.execution.hosts.training_host import ManagedFitHost
         activate = ManagedFitHost._activate
         def wait_before_activation(self, key, location):
             if (location / 'ready.json').exists():

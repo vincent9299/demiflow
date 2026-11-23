@@ -358,7 +358,7 @@ def _store_image(raw, options, *, store=None):
         import hashlib,os,tempfile
         from pathlib import Path
         from ..collect.image_decode import decode_image
-        from ..execution.block_sink import storage_usage
+        from demiflow.execution.outputs.block_sink import storage_usage
         from ..execution.recovery_contract import RecoveryContractError
         limits=media_limits(options)
         if len(raw)>limits['max_image_bytes']:raise ValueError('Image exceeds max_image_bytes')

@@ -7,7 +7,7 @@ import pytest
 
 from demiflow.execution.contracts.dataflow import BlockPartition
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_publication_budget import TERMINAL_WORKSPACE
+from demiflow.execution.scheduler.dataflow_publication_budget import TERMINAL_WORKSPACE
 from demiflow.execution.dataflow_record_frames import frame_parts
 from demiflow.execution.dataflow_sinks import MANIFEST_MEDIA
 from demiflow.execution.recovery_contract import document, identity
@@ -202,7 +202,7 @@ def test_streamed_manifest_preserves_original_bytes_and_rejects_long_token_befor
 @pytest.mark.parametrize('blocked', [False, True])
 def test_merge_keeps_popped_children_live_before_index_construction(tmp_path, monkeypatch, blocked):
     from demiflow.execution.contracts.dataflow import ArtifactRef
-    from demiflow.execution.dataflow_segments import SEGMENTS_MEDIA, block_chunks
+    from demiflow.execution.storage.segments import SEGMENTS_MEDIA, block_chunks
     from demiflow.execution.exchange.dataflow_bridge import _encode_payload
     with store_fixture(tmp_path) as (run, store, _):
         runner = owner(store, None)

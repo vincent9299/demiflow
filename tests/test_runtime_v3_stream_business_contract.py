@@ -57,7 +57,8 @@ def test_stream_progress_comes_from_intermediate_business_frontiers():
 def test_stream_cleanup_preserves_primary_failure_and_runs_each_owner(monkeypatch, drain_failure):
     from types import SimpleNamespace
     from demiflow.execution import dataflow_api, dataflow_model_observations
-    from demiflow.execution import dataflow_operator_observations, dataflow_stream
+    from demiflow.execution.journal import dataflow_operator_observations
+    from demiflow.execution import dataflow_stream
 
     events = []
     failure = RuntimeError('worker failed')

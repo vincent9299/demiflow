@@ -45,7 +45,7 @@ async def identity(row):
 def capture_images(monkeypatch):
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.dataflow_kernel_pack import PACK_MEDIA, iter_kernel_images
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
     original = DataflowCheckpointCoordinator.commit
     traces = []
     def commit(coordinator, *args, **kwargs):
@@ -349,7 +349,7 @@ def test_repeated_class_factory_is_not_a_shared_instance(tmp_path, monkeypatch):
 
 
 def test_same_function_remains_two_real_invocations(tmp_path):
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     def increment(row):
         return {'id': row['id'] + 1}
     with RunContext.start(tmp_path/'run') as run:

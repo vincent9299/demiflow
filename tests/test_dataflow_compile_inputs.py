@@ -8,8 +8,7 @@ from demiflow import data
 from demiflow.execution import checked
 from demiflow.execution.contracts.dataflow import ActionRequest
 from demiflow.execution.contracts.dataflow_codec import encode_wire
-from demiflow.execution.dataflow_compile_inputs import (
-    CompileDefaults, CompileInputs, ReportBindings, compile_inputs, executor_defaults)
+from demiflow.execution.compiler_support.dataflow_compile_inputs import CompileDefaults, CompileInputs, ReportBindings, compile_inputs, executor_defaults
 from demiflow.planning.dataflow_compile import lower_action
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 

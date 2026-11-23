@@ -16,12 +16,12 @@ from demiflow import data
 from demiflow.execution.contracts.dataflow import Record, ProducerCompletion
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.dataflow_finite_input import validate_finite_members, borrowed_records
-from demiflow.execution.dataflow_segments import FINITE_RECORDS_MEDIA
+from demiflow.execution.storage.segments import FINITE_RECORDS_MEDIA
 from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _encode_record_document
 from demiflow.execution.exchange.dataflow_channels import route_record, seal_scope
 from demiflow.execution.exchange.dataflow_state import RoutingCounters
 from demiflow.execution.kernels.operator import _SpoolPort
-from demiflow.execution.kernels import state_codec
+from demiflow.execution.contracts import state_codec
 from demiflow.execution.recovery_contract import document, identity
 from demiflow.execution.run_context import RunContext
 from test_runtime_v3_artifact_accounting import store_fixture, consumed

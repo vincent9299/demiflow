@@ -152,7 +152,7 @@ def test_one_function_resolves_the_compiler_inputs():
 
 def test_source_tables_equal_the_imported_objects():
     """The source reader must agree with what the engine actually loads."""
-    from demiflow.execution import dataflow_batch_membership
+    from demiflow.execution.kernels import batch_membership as dataflow_batch_membership
     from demiflow.execution.kernels import dataflow as kernels, operator, task_scope
     from demiflow.planning import dataflow_compile as compiler, dataflow_registry as registry
 

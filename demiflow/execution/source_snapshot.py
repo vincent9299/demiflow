@@ -1,6 +1,6 @@
 """Fixed, bounded source capture before any downstream effect is dispatched."""
 from .run_context import RunAction
-from .block_sink import BlockSink
+from demiflow.execution.outputs.block_sink import BlockSink
 from .commit import CommitCoordinator
 from .recovery_contract import SourcePosition, identity
 

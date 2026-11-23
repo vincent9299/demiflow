@@ -290,7 +290,7 @@ def test_opaque_actor_default_attempt_only_is_recorded_and_cannot_resume(tmp_pat
 def test_resume_keeps_sealed_checkpoint_requirement_over_current_default(tmp_path, monkeypatch):
     from demiflow.execution import dataflow_api
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     calls = tmp_path/'calls'
     class RuntimeResourceCounter:
         def __init__(self):

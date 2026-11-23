@@ -24,7 +24,7 @@ def test_actual_ray_public_arrow_delivery_preserves_budget_schema_and_completed_
         physicals.append(execution._physical)
         return result
     monkeypatch.setattr(DataflowExecution, 'prepare', observe)
-    from demiflow.execution.resource_state import RunResourceState
+    from demiflow.execution.hosts.run_state import RunResourceState
     charged = RunResourceState._charged
     def charge(state, db, scope):
         result = charged(state, db, scope)

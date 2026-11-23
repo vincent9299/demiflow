@@ -41,7 +41,7 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
         if handle is None:
             return 0
         execution = handle._execution
-        from .dataflow_operator_observations import stream_observations
+        from demiflow.execution.journal.dataflow_operator_observations import stream_observations
         stream_observations(execution, stats)
         if getattr(execution, '_stream_lance', None) is not None:
             stats.outputs = execution._stream_lance.outputs

@@ -226,8 +226,8 @@ def _install_fakes():
 from demiflow.execution.contracts.dataflow_errors import DataflowError as _FakeDataflowError
 
 # Production modules under test (real, in-tree).
-from demiflow.execution import dataflow_inputs  # noqa: E402
-from demiflow.execution.dataflow_inputs import build_input_handle, InputMaterializedHandle  # noqa: E402
+from demiflow.execution.sources import materialized_input as dataflow_inputs  # noqa: E402
+from demiflow.execution.sources.materialized_input import build_input_handle, InputMaterializedHandle  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -237,7 +237,7 @@ def _reset_state(monkeypatch):
     import demiflow.execution.dataflow_api as api
     import demiflow.planning.dataflow_policy as policy
     import demiflow.planning.dataflow_compile as compiler
-    import demiflow.execution.driver as driver
+    import demiflow.execution.pipeline.driver as driver
     monkeypatch.setattr(engine, "execute_action", _fake_execute_action)
     monkeypatch.setattr(api, "make_action_request", _fake_make_action_request)
     monkeypatch.setattr(api, "run_dataset_action", _fake_run_dataset_action)
@@ -428,7 +428,7 @@ def test_f011(tmp_path):
 # ---------------------------------------------------------------------------
 def test_f012(monkeypatch, tmp_path):
     _binding_assertion()
-    import demiflow.execution.driver as driver
+    import demiflow.execution.pipeline.driver as driver
 
     captured = {}
 

@@ -88,7 +88,7 @@ def snapshot_function(function, *, max_bytes, occurrence=None):
         return {'mode': 'nonrecoverable', 'reason': reason}
     raw = json.dumps(fields, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()
     if len(raw) > max_bytes:
-        from .state_codec import size_error
+        from demiflow.execution.contracts.state_codec import size_error
         raise size_error('task closure state exceeds max_state_bytes', max_bytes, actual=len(raw), occurrence=occurrence)
     return {'mode': 'task_function', 'value': json.loads(raw)}
 
@@ -103,7 +103,7 @@ def restore_function(function, state, *, max_bytes, occurrence=None):
         raise DataflowError('CORRUPT_ARTIFACT', 'invalid task closure state: ' + str(reason))
     raw = json.dumps(fields, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()
     if len(raw) > max_bytes:
-        from .state_codec import size_error
+        from demiflow.execution.contracts.state_codec import size_error
         raise size_error('task closure state exceeds max_state_bytes', max_bytes, actual=len(raw), occurrence=occurrence)
     fields = json.loads(raw)
     for name, cell in zip(function.__code__.co_freevars, function.__closure__ or ()):
@@ -368,7 +368,7 @@ def measurable_task_fields(target, args, kwargs, occurrence):
 
 def _copy_resident_fields(fields, max_bytes, occurrence):
     from ...data.runtime_contract import check_size, RuntimeContractError
-    from .state_codec import size_error
+    from demiflow.execution.contracts.state_codec import size_error
     try:
         check_size(fields, max_bytes)
     except RuntimeContractError as exc:

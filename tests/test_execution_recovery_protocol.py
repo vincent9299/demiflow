@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from demiflow.execution.block_sink import BlockSink
+from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.recovery_contract import (
     RecoveryContractError, RunRef, SourcePosition, UnresolvedCommit,

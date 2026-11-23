@@ -39,7 +39,7 @@
     "never_ran": 11
    }
   },
-  "demiflow.execution.dataflow_control": {
+  "demiflow.execution.hosts.dataflow_control": {
    "status": "undecided",
    "reason": "v3 计划 H045–H048 的交付物，产品代码没有导入方。GPT 评审 2026-11-18：职责已由 dataflow_hosts.ControlMailbox 承担，列为重复实现候选；先把它的合同测试对应到真实生产路径。",
    "importers": [],
@@ -73,7 +73,7 @@
     "never_ran": 0
    }
   },
-  "demiflow.execution.driver": {
+  "demiflow.execution.pipeline.driver": {
    "status": "separate_entry",
    "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
    "measured": {
@@ -105,7 +105,7 @@
     "never_ran": 2
    }
   },
-  "demiflow.execution.local": {
+  "demiflow.execution.hosts.local": {
    "status": "separate_entry",
    "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
    "measured": {
@@ -140,7 +140,7 @@
     "never_ran": 32
    }
   },
-  "demiflow.execution.native_commit_store": {
+  "demiflow.execution.contracts.native_commit_store": {
    "status": "undecided",
    "reason": "2026-11-20 P8批次3 D1已处置为保留：19行Protocol的当前跨进程测量、历史类型依赖、删后历史和真实Ray门槛未齐；不为可选清理新建测量体系。旧74d2f99测量不改绑，详见docs/architecture-upgrade-20261120/D/D1-NATIVE-COMMIT-STORE.md。",
    "importers": [],
@@ -157,7 +157,7 @@
     "never_ran": 9
    }
   },
-  "demiflow.execution.notebook": {
+  "demiflow.execution.pipeline.notebook": {
    "status": "undecided",
    "reason": "给 notebook 用的公开小工具，有测试；产品代码不导入。暂不处理。",
    "importers": [],
@@ -174,7 +174,7 @@
     "never_ran": 6
    }
   },
-  "demiflow.execution.observation": {
+  "demiflow.execution.journal.observation": {
    "status": "separate_entry",
    "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
    "measured": {
@@ -195,7 +195,7 @@
    "reason": "构造立即按已发布契约拒绝已退役的独立操作符检查点；不创建账本。",
    "importers": []
   },
-  "demiflow.execution.package_loader": {
+  "demiflow.execution.pipeline.package_loader": {
    "status": "separate_entry",
    "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
    "measured": {
@@ -211,7 +211,7 @@
     "never_ran": 2
    }
   },
-  "demiflow.execution.plan_interpreter": {
+  "demiflow.execution.seal.plan_interpreter": {
    "status": "history",
    "reason": "sealed_plans 读封存计划时调它的校验函数和常量；PlanContractError 是读取方的错误类型。解释旧物理计划的部分随批次 4 细化到符号。",
    "measured": {
@@ -227,7 +227,7 @@
     "never_ran": 0
    }
   },
-  "demiflow.execution.python_environment": {
+  "demiflow.execution.hosts.python_environment": {
    "status": "separate_entry",
    "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
    "measured": {
@@ -259,7 +259,7 @@
     "never_ran": 2
    }
   },
-  "demiflow.execution.ray": {
+  "demiflow.execution.hosts.ray": {
    "status": "separate_entry",
    "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
    "measured": {
@@ -275,7 +275,7 @@
     "never_ran": 11
    }
   },
-  "demiflow.execution.readiness": {
+  "demiflow.execution.pipeline.readiness": {
    "status": "separate_entry",
    "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
    "measured": {
@@ -307,7 +307,7 @@
     "never_ran": 24
    }
   },
-  "demiflow.execution.sealed_plans": {
+  "demiflow.execution.seal.sealed_plans": {
    "status": "history",
    "reason": "读封存计划：v3 封存的计划和旧运行的计划都经它读（dataflow_history、sealed_plan_facts、publication_facts、图适配器）。保留。",
    "measured": {
@@ -327,7 +327,7 @@
    "status": "live",
    "reason": "公开 Dataset.run_stream 返回的 StreamStats 及其历史类型。"
   },
-  "demiflow.execution.target": {
+  "demiflow.execution.contracts.target": {
    "status": "separate_entry",
    "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
    "measured": {
@@ -343,7 +343,7 @@
     "never_ran": 2
    }
   },
-  "demiflow.execution.timeout": {
+  "demiflow.execution.hosts.timeout": {
    "status": "undecided",
    "reason": "2026-09 的文件，没有导入方，没有测试。批次 3，待确认。",
    "importers": [],

@@ -22,7 +22,7 @@ import pytest
 
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
-from demiflow.execution.block_sink import BlockSink
+from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.exchange.carriage_local import LocalSegmentStore, channel_pair, inline_records
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.executors.local import LocalDatasetExecutor

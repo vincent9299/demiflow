@@ -124,7 +124,7 @@ def native_model_declaration(operation):
         if actor.started:
             raise ValueError('Native search requires an unstarted actor declaration')
         return CallableSpec.create(NativeSearchCall, fn_constructor_args=(identity(actor.recovery_identity()),))
-    from .queue_producer import QueueProducer, producer_facts
+    from demiflow.execution.native_queue.queue_producer import QueueProducer, producer_facts
     if type(actor) is QueueProducer:
         from .dataflow_producer import ProducerCall
         producer_facts(actor)
@@ -132,7 +132,7 @@ def native_model_declaration(operation):
     from .raw_fetch import RawFetch, raw_fetch_facts
     from .queue_ack import QueueAcknowledge, ack_facts
     if type(actor) in (RawFetch, QueueAcknowledge):
-        from .dataflow_acquisition_call import AcquisitionCall
+        from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
         (raw_fetch_facts if type(actor) is RawFetch else ack_facts)(actor)
         return CallableSpec.create(AcquisitionCall, fn_constructor_args=(
             'acquire' if type(actor) is RawFetch else 'finalize', getattr(actor, 'keep_row', True)))

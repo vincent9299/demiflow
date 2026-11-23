@@ -79,7 +79,7 @@ def test_python_callback_uses_original_record_path(tmp_path):
 
 
 def test_fixed_merge_ambiguous_native_commit_never_reinvokes_writer(tmp_path, monkeypatch):
-    from demiflow.execution.lance_sink import LanceSink
+    from demiflow.execution.outputs.lance_sink import LanceSink
     patch, target = _inputs(tmp_path, 3)
     source = lambda: data.read_lance(patch, version=1, batch_size=3)
     directory = tmp_path/'run'

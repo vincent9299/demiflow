@@ -237,7 +237,7 @@ def finalize_aggregate(state: AggregateState, *, spec: KernelSpec) -> TerminalRe
 
 def _merge_block(aggregates, states, rows, *, max_bytes, workspace):
     """Charge each partial together with the current state before user merge code runs."""
-    from . import state_codec
+    from demiflow.execution.contracts import state_codec
 
     for index, aggregate in enumerate(aggregates):
         partial = aggregate.aggregate_partial(rows)
@@ -293,7 +293,7 @@ def aggregate_records(program, read_records, *, services, workspace, batch_eligi
     associative; after a float (or any other non-integral summand), even a run
     of integers must fold against the previous state one row at a time.
     """
-    from . import state_codec
+    from demiflow.execution.contracts import state_codec
     from ..contracts.dataflow_errors import DataflowError
     from contextlib import closing
 

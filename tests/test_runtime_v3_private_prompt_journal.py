@@ -271,7 +271,7 @@ def _private_event(run, store, seed='a', *, scope='first', operation='reserve', 
 def test_duplicate_private_prompt_rpc_is_not_a_new_logical_invocation(tmp_path):
     from concurrent.futures import ThreadPoolExecutor
     from demiflow.execution.dataflow_prompt_journal import bind_private_prompt_contracts
-    from demiflow.execution.dataflow_private_storage import bind_private_storage
+    from demiflow.execution.storage.private_journals import bind_private_storage
     from test_runtime_v3_native_rpc_replay import interrupted_run, service
     path = tmp_path/'private.sqlite'
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority, store, lease):
@@ -296,7 +296,7 @@ def test_duplicate_private_prompt_rpc_is_not_a_new_logical_invocation(tmp_path):
 
 def test_private_prompt_stop_keeps_receipt_and_response_but_refuses_new_reserve(tmp_path):
     from demiflow.execution.dataflow_prompt_journal import bind_private_prompt_contracts
-    from demiflow.execution.dataflow_private_storage import bind_private_storage
+    from demiflow.execution.storage.private_journals import bind_private_storage
     from demiflow.execution.request_limits import COOPERATIVE_STOP_REASON, ServiceStopped
     from test_runtime_v3_native_rpc_replay import interrupted_run, service
     path = tmp_path/'private.sqlite'
@@ -319,7 +319,7 @@ def test_private_prompt_stop_keeps_receipt_and_response_but_refuses_new_reserve(
 
 def test_private_prompt_rpc_cannot_invent_http_retry_policy(tmp_path):
     from demiflow.execution.dataflow_prompt_journal import bind_private_prompt_contracts
-    from demiflow.execution.dataflow_private_storage import bind_private_storage
+    from demiflow.execution.storage.private_journals import bind_private_storage
     from test_runtime_v3_native_rpc_replay import interrupted_run, service
     path = tmp_path/'private.sqlite'
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority, store, lease):
@@ -335,7 +335,7 @@ def test_private_prompt_rpc_cannot_invent_http_retry_policy(tmp_path):
 
 def test_old_classic_requeue_cannot_remove_active_private_driver_intent(tmp_path):
     from demiflow.execution.dataflow_prompt_journal import bind_private_prompt_contracts
-    from demiflow.execution.dataflow_private_storage import bind_private_storage
+    from demiflow.execution.storage.private_journals import bind_private_storage
     from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
     from test_runtime_v3_native_rpc_replay import interrupted_run, service
     path = tmp_path/'private.sqlite'
@@ -356,7 +356,7 @@ def test_old_classic_requeue_cannot_remove_active_private_driver_intent(tmp_path
 
 def test_explicit_original_requeue_requires_fresh_admission_for_a_new_row(tmp_path):
     from demiflow.execution.dataflow_prompt_journal import bind_private_prompt_contracts
-    from demiflow.execution.dataflow_private_storage import bind_private_storage
+    from demiflow.execution.storage.private_journals import bind_private_storage
     from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
     from test_runtime_v3_native_rpc_replay import interrupted_run, service
     path = tmp_path/'private.sqlite'

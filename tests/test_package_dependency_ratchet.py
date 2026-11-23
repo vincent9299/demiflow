@@ -59,16 +59,16 @@ PRE_V3_MODULES = {
         'demiflow.execution.dataflow_stream',
         'demiflow.execution.request_limits',
         'demiflow.execution.worker.graph_execution', 'demiflow.execution.worker.queue_transform'},
-    'demiflow.execution.plan_interpreter': {
+    'demiflow.execution.seal.plan_interpreter': {
         'demiflow.execution.dataflow_history',
         'demiflow.execution.seal.plan',
-        'demiflow.execution.sealed_plan_facts', 'demiflow.execution.sealed_plans',
+        'demiflow.execution.sealed_plan_facts', 'demiflow.execution.seal.sealed_plans',
         'demiflow.planning.dataset_dag',
         'demiflow.workbench.runs.facts'},
     'demiflow.execution.local_tasks': {
         'demiflow.execution.dataset_native'},
-    'demiflow.execution.local': {'demiflow.execution'},
-    'demiflow.execution.ray': {'demiflow.execution'},
+    'demiflow.execution.hosts.local': {'demiflow.execution'},
+    'demiflow.execution.hosts.ray': {'demiflow.execution'},
 }
 
 # Execution modules the plan compiler imports today. Plan compilation and run
@@ -81,13 +81,13 @@ PLANNING_MAY_IMPORT = {
     'demiflow.execution.contracts.dataflow_kinds',
     'demiflow.execution.contracts.errors',
     'demiflow.execution.contracts.relational_region',  # sealed data and pure grant arithmetic
-    'demiflow.execution.dataflow_compile_inputs',
+    'demiflow.execution.compiler_support.dataflow_compile_inputs',
     'demiflow.execution.dataflow_managed_devices',
     'demiflow.execution.dataflow_model_factory',
     'demiflow.execution.dataflow_models',
-    'demiflow.execution.dataflow_native',
+    'demiflow.execution.compiler_support.dataflow_native',
     'demiflow.execution.dataflow_native_limits',
-    'demiflow.execution.dataflow_publication_budget',
+    'demiflow.execution.scheduler.dataflow_publication_budget',
     'demiflow.execution.dataflow_routed_prompt',
     'demiflow.execution.dataflow_schema',
     'demiflow.execution.dataflow_shared',
@@ -97,7 +97,7 @@ PLANNING_MAY_IMPORT = {
     'demiflow.execution.operator_policy',
     'demiflow.execution.payload_limits',
     'demiflow.execution.plan_facts',
-    'demiflow.execution.plan_interpreter',
+    'demiflow.execution.seal.plan_interpreter',
     'demiflow.execution.recovery_contract',
     'demiflow.execution.recovery_identity',
     'demiflow.execution.runtime_limits',
@@ -220,7 +220,7 @@ def _lowering_symbol_modules():
     """
     import re
     kinds = (PACKAGE / 'execution/contracts/dataflow_kinds.py').read_text(encoding='utf-8')
-    native = (PACKAGE / 'execution/dataflow_native.py').read_text(encoding='utf-8')
+    native = (PACKAGE / 'execution/compiler_support/dataflow_native.py').read_text(encoding='utf-8')
     compiler_symbols = re.findall(r'^_(?:MODEL_)?COMPILE = "([a-z_.]+):[A-Za-z_]+"$', kinds, re.M)
     block = native[native.index('DECLARATION_LOWERINGS'):]
     declared = re.findall(r"'([a-z_.]+):[A-Za-z_]+'", block[:block.index('})')])

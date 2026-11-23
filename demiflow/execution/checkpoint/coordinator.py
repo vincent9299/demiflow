@@ -32,7 +32,7 @@ from ..recovery_contract import (
 )
 from ..run_context import RunAction
 from ..run_journal import ExecutionBudgetExceeded
-from ..state_artifacts import StateArtifacts
+from demiflow.execution.storage.state_artifacts import StateArtifacts
 
 # Reserved vector slot named by ARCHITECTURE §6. It is nested inside the
 # native-safe carrier below because native state identifiers forbid '.'.

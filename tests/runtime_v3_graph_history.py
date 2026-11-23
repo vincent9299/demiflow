@@ -4,7 +4,7 @@ import json
 
 
 def committed_rows(run, action_id, reader_id, facts, *, require_final=True):
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from demiflow.execution.storage.objects import RunArtifactStore
     from demiflow.execution.dataflow_replay import PublishedRecordReader
     from demiflow.execution.dataflow_record_frames import document_limit
@@ -70,10 +70,10 @@ def capture_acks(run, action_id):
 
 def acknowledged_ancestor_rows(run, action_id, facts):
     """Read the actual business boundary, not a pre-read source cursor/cut size."""
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from demiflow.execution.storage.objects import RunArtifactStore
     from demiflow.execution.checkpoint.coordinator import _artifact_from_json
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     from demiflow.execution.contracts.dataflow_codec import compute_participant_id
     from demiflow.execution.recovery_contract import identity
     sealed = load_sealed_plan(run.directory, action_id, version='v3')

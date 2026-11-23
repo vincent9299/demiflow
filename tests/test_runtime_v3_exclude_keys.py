@@ -59,8 +59,8 @@ def test_exclude_stream_total_may_exceed_individual_row_bound(tmp_path):
 
 
 def test_public_key_exclusion_uses_only_key_sql_and_bulk_hydrates_survivors(tmp_path, monkeypatch):
-    from demiflow.execution import datafusion
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.hosts import datafusion
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from demiflow.execution.contracts.relational_region import KEY_SQL_SUFFIX
     from demiflow.operators.relational_sql import RelationalSQL
 
@@ -105,8 +105,8 @@ def test_public_key_exclusion_uses_only_key_sql_and_bulk_hydrates_survivors(tmp_
 
 
 def test_fixed_native_key_exclusion_admits_wide_reads_only_for_survivors(tmp_path, monkeypatch):
-    from demiflow.execution import datafusion
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.hosts import datafusion
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from demiflow.execution.contracts.relational_region import KEY_BATCH_SUFFIXES
     from demiflow.operators import relational
     from demiflow.operators.relational_sql import RelationalSQL

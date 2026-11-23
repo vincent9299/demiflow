@@ -10,7 +10,7 @@ from .storage import open_lance_dataset, schema_hash
 from ..execution.recovery_contract import RecoveryContractError, RunRef, document
 from ..execution.run_context import RunContext, current_run
 from ..execution.run_journal import RunJournal
-from ..execution.state_artifacts import atomic_bytes
+from demiflow.execution.storage.state_artifacts import atomic_bytes
 
 _SCHEMA = 'demiflow.registered-native-write.v1'
 _LIMIT = 16384
@@ -75,7 +75,7 @@ def _confirmed(journal, action_id, *, request):
     if (receipt.status != 'committed' or receipt.schema_hash != request['schema_hash']
             or receipt.input_rows != receipt.written_rows):
         raise RecoveryContractError('Original registration receipt differs from declared output')
-    from ..execution.lance_sink import spec_from_identity
+    from demiflow.execution.outputs.lance_sink import spec_from_identity
     action = journal.execution_action(action_id)
     if action is None or action['declaration'].get('kind') != 'write_table':
         raise RecoveryContractError('Registration action declaration is unavailable')

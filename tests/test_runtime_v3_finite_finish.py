@@ -8,7 +8,7 @@ from demiflow import data
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-from demiflow.execution.kernels import state_codec
+from demiflow.execution.contracts import state_codec
 
 
 class Interrupted(Exception):

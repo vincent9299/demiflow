@@ -13,9 +13,8 @@ from demiflow.execution import RunContext
 from demiflow.execution.contracts.dataflow import ArtifactRef
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.dataflow_publication_budget import (
-    PublicationReservation, FIELD, SCHEMA, PHASE_SCHEMA, REF_CARRIER)
-from demiflow.execution.lance_sink import LanceSink
+from demiflow.execution.scheduler.dataflow_publication_budget import PublicationReservation, FIELD, SCHEMA, PHASE_SCHEMA, REF_CARRIER
+from demiflow.execution.outputs.lance_sink import LanceSink
 
 
 class Interrupted(Exception):
@@ -90,7 +89,7 @@ def test_original_wide_join_native_return_loss_reuses_acked_phases(tmp_path, mon
 
 
 def _finite_payloads(execution):
-    from demiflow.execution.dataflow_segments import block_chunks
+    from demiflow.execution.storage.segments import block_chunks
     from demiflow.execution.dataflow_record_frames import frame_stream, decode_frame, decode_document, line_limit
     result = []
     for channel, value in execution._finite_seals.items():
