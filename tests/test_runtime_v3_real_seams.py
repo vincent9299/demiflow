@@ -186,7 +186,7 @@ def test_worker_reads_original_sealed_refs_without_opening_journal(tmp_path, mon
     from demiflow.execution.seal.plan import load_sealed_dataflow
     from demiflow.execution.seal.plan import load_worker_programs as _load_programs
     from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
-    from demiflow.execution.dataflow_hosts import ControlMailbox
+    from demiflow.execution.worker.mailbox import ControlMailbox
     with prepared(tmp_path, data.from_items([{"x": 1}]).map(lambda r: r)) as (ex, services):
         runtime = reader_services(ex, services)
         def forbidden(*args, **kwargs):
@@ -519,7 +519,7 @@ def test_real_join_kernel_uses_same_row_codec_on_write_and_read(tmp_path):
 
 def test_control_cancel_wakes_waiter_without_confirming_unknown_effect(tmp_path):
     import threading
-    from demiflow.execution.dataflow_hosts import ControlMailbox
+    from demiflow.execution.worker.mailbox import ControlMailbox
     from demiflow.execution.contracts.dataflow import WorkerEvent, ControlReply
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     with prepared(tmp_path, data.from_items([])) as (ex, services):

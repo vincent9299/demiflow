@@ -117,7 +117,7 @@ def test_explicit_null_recovery_reference_cannot_become_fresh_execution(tmp_path
 
 
 def test_real_process_assignment_and_restore_launch_stay_below_original_64k(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_hosts import _EndpointBase
+    from demiflow.execution.hosts.endpoints import _EndpointBase
     from demiflow.execution.worker.bootstrap import _MAX_LAUNCH_BYTES
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     observed, restores = [], []

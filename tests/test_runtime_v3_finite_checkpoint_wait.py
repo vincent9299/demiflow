@@ -213,7 +213,7 @@ def test_actual_finite_iterator_reports_pause_before_or_during_finish(pause_firs
 
 def test_busy_event_uses_original_bounded_wire_and_activation_queue(monkeypatch):
     from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire
-    from demiflow.execution.dataflow_hosts import _EndpointBase
+    from demiflow.execution.hosts.endpoints import _EndpointBase
     from test_runtime_v3_c import bounds
     driver, _ = _driver(monkeypatch)
     event = _wait(driver)

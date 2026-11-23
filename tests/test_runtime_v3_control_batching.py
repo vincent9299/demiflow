@@ -9,7 +9,7 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from demiflow.execution.dataflow_hosts import _EndpointBase, LocalHostEndpoint
+from demiflow.execution.hosts.endpoints import _EndpointBase, LocalHostEndpoint
 from demiflow.execution.recovery_contract import document, RecoveryContractError
 from demiflow.execution.worker.bootstrap import (
     ControlFrameReader, send_messages, _MAX_CONTROL_BYTES,
@@ -263,7 +263,7 @@ def test_lifecycle_response_and_events_share_one_reader_and_keep_fencing():
 def test_real_ray_terminal_acks_use_bounded_batch_rpcs(tmp_path, monkeypatch, private_ray_provider):
     import sys
     from demiflow import data
-    from demiflow.execution.dataflow_hosts import RayHostEndpoint
+    from demiflow.execution.hosts.endpoints import RayHostEndpoint
     from demiflow.execution.pipeline.run_context import RunContext
     original = _EndpointBase.flush_business
     terminal = []

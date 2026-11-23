@@ -1,6 +1,6 @@
 """Real ACKed output replays through original read credit before data decoding."""
 from functools import partial
-from demiflow.execution.dataflow_hosts import batch_business_commands
+from demiflow.execution.hosts.endpoints import batch_business_commands
 from demiflow.execution.contracts import record_codec
 import json
 import os

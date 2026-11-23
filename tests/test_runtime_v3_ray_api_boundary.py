@@ -13,7 +13,7 @@ def ray_api_scope(tmp_path_factory):
     from runtime_v3_api_scenarios import _fixtures, _cases
     from runtime_v3_recovery_scenarios import _provider
     import ray
-    import demiflow.execution.dataflow_hosts as hosts
+    import demiflow.execution.hosts.endpoints as hosts
     import demiflow.resources.ray as provider
     assert hosts.ray is ray and provider.ray is ray, 'real Ray must not share a process with carrier doubles'
     assert Path(ray.__file__).is_file() and ray.ObjectRef is ray._raylet.ObjectRef

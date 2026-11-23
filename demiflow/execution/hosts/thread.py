@@ -11,7 +11,7 @@ import threading
 import time
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_hosts import _EndpointBase
+from demiflow.execution.hosts.endpoints import _EndpointBase
 from demiflow.execution.worker.runtime import validate_worker_launch
 
 

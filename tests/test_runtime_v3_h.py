@@ -54,7 +54,7 @@ from demiflow.execution.storage import staging as ARTIFACT_PORT
 from demiflow.execution.seal import runtime_bundle as ART
 from demiflow.execution.hosts import configuration as HOST_DOMAIN
 from demiflow.execution.hosts import dataflow_control as CTRL
-from demiflow.execution import dataflow_hosts as HOSTS
+from demiflow.execution.hosts import endpoints as HOSTS
 from demiflow.execution.action_driver import services as DRIVER_SERVICES
 from demiflow.execution.worker import runtime as WORKER_SERVICES
 from demiflow.execution.contracts.dataflow_errors import DataflowError

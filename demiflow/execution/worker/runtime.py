@@ -108,7 +108,7 @@ def _build_v3_executor(config, *, control):
         raise
     mailbox = config.get("mailbox")
     if mailbox is None:
-        from ..dataflow_hosts import ControlMailbox
+        from demiflow.execution.worker.mailbox import ControlMailbox
         mailbox = ControlMailbox(bounds=services.bounds, check_stop=services.check_stop)
     executor = DataflowWorkerExecutor(services=services, mailbox=mailbox)
     executor._owned_services_cache = Path(owned_cache) if owned_cache is not None else None

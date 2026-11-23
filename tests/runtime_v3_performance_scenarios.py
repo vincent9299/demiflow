@@ -469,7 +469,7 @@ class Observations:
         # call is observed rather than getting an unpatched late import alias.
         from demiflow.execution.executors import dataflow_api
         from demiflow.execution.action_driver import dataflow
-        from demiflow.execution import dataflow_hosts
+        from demiflow.execution.hosts import endpoints as dataflow_hosts
         from demiflow.execution.contracts import dataflow_codec
         for name, counter in (('encode_wire', 'driver_control_encode'), ('decode_wire', 'driver_control_decode')):
             original_codec = getattr(dataflow_codec, name)

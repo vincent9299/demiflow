@@ -11,7 +11,7 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from demiflow.execution import dataflow_hosts as hosts
+from demiflow.execution.hosts import endpoints as hosts
 from demiflow.execution.contracts.dataflow import ExchangeSpec
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.recovery_contract import identity

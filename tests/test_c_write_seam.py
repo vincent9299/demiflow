@@ -220,7 +220,7 @@ def test_relational_drift_fail_closed_before_publication(tmp_path, monkeypatch):
 
 def test_streamed_consumes_sealed_checkpoint_and_stage_limits(tmp_path, monkeypatch):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_hosts import _EndpointBase
+    from demiflow.execution.hosts.endpoints import _EndpointBase
     captured, assignments = [], []
     original = DataflowExecution.start
     original_prepare = _EndpointBase.prepare

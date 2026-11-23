@@ -7,7 +7,7 @@ from concurrent.futures import Future
 import pytest
 from types import SimpleNamespace
 
-from demiflow.execution.dataflow_hosts import LocalHostEndpoint
+from demiflow.execution.hosts.endpoints import LocalHostEndpoint
 from demiflow.execution.contracts.dataflow_codec import _thaw_json
 from test_runtime_v3_native_rpc_replay import interrupted_run, service, event, charged
 
@@ -84,7 +84,7 @@ def test_late_reply_drain_preserves_other_worker_boot_and_original_notify(tmp_pa
 @pytest.mark.parametrize('reason',['cooperative:operator_stop_file','cooperative:run_cancelled'])
 def test_early_stopped_reserve_returns_original_error_reply_and_releases_waiter(tmp_path,reason):
     from concurrent.futures import ThreadPoolExecutor
-    from demiflow.execution.dataflow_hosts import ControlMailbox
+    from demiflow.execution.worker.mailbox import ControlMailbox
     from demiflow.execution.contracts.dataflow_failures import restore_failure
     from demiflow.services.request_limits import ServiceStopped
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority,store,lease):

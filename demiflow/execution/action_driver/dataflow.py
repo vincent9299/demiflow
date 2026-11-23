@@ -33,7 +33,7 @@ from ..seal.plan import (
 from demiflow.execution.sources.snapshots import snapshot_source, plan_source_splits
 from ..dataflow_queue import NativeAcquisitionService
 from demiflow.execution.seal.runtime_bundle import stage_runtime_bundle
-from ..dataflow_hosts import make_host_endpoint
+from demiflow.execution.hosts.endpoints import make_host_endpoint
 from ..exchange.dataflow_channels import close_channels
 from ..exchange.deliveries import DeliveryExchange
 from ...planning.dataflow_compile import lower_action
@@ -435,7 +435,7 @@ class DataflowExecution:
             raise DataflowError('INCOMPATIBLE_HISTORY', 'Completed count differs from its verified source')
         self._check_stop()
         from functools import partial
-        from demiflow.execution.dataflow_hosts import batch_business_commands
+        from demiflow.execution.hosts.endpoints import batch_business_commands
         self._terminal = TerminalSubscription(self._bounds, self._exchange,
             batch_commands=partial(batch_business_commands, ()))
         if previous is None:
@@ -702,7 +702,7 @@ class DataflowExecution:
             raise DataflowError("CANCELLED", "execution is closed")
         self._check_stop()
         from functools import partial
-        from demiflow.execution.dataflow_hosts import batch_business_commands
+        from demiflow.execution.hosts.endpoints import batch_business_commands
         self._terminal = TerminalSubscription(self._bounds, self._exchange,
             batch_commands=partial(batch_business_commands, self._endpoints.values()), store=self._store)
         budget = {"cpu_millis": max(1, int(sum(h.logical_resources.get('cpu_millis', 0)
@@ -1089,7 +1089,7 @@ class DataflowExecution:
             if time.monotonic() >= deadline:
                 break
         self._pending_events = len(events)
-        from ..dataflow_hosts import batch_business_commands
+        from demiflow.execution.hosts.endpoints import batch_business_commands
         from contextlib import nullcontext
         commands = nullcontext() if draining else batch_business_commands(self._endpoints.values())
         self._update_checkpoint_wait_clock()

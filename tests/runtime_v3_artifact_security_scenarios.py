@@ -246,7 +246,7 @@ def artifact_security(fx, fault=None):
     from demiflow import data
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.action_driver import dataflow as dataflow_module
-    from demiflow.execution.dataflow_hosts import _EndpointBase, LocalHostEndpoint, RayHostEndpoint
+    from demiflow.execution.hosts.endpoints import _EndpointBase, LocalHostEndpoint, RayHostEndpoint
     from demiflow.execution.contracts.dataflow_codec import encode_wire
     from demiflow.execution.worker.runtime import _decode_v3_assignment
     from demiflow.execution.recovery_contract import document

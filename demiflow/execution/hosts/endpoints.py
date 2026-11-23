@@ -1,185 +1,24 @@
-"""Multi-host endpoints, connectors and the bounded worker control mailbox (C09).
-
-ControlMailbox is the worker-side bounded outbox/pending/condition table the
-driver polls (drain) and answers (deliver). It holds no large payload and never
-creates unbounded futures: at the pending ceiling it backpressures, and a lost
-driver or cancel wakes every waiter with UNKNOWN_EFFECT evidence rather than
-hanging. Host endpoints and connectors are added below as the lane progresses.
-"""
+"""Local and Ray endpoints, actual process connections and bounded transport."""
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import json
 import sys
-import threading
 import time
 import uuid
 from collections import deque
 from contextlib import contextmanager, ExitStack
 from dataclasses import asdict
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
-from .contracts.dataflow_codec import encode_wire, decode_wire, decode_wire_document
-from .contracts.dataflow_errors import DataflowError
-from .worker.bootstrap import LocalControlConnector
+from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire, event_from_dict as _event_from_dict, reply_frame as _reply_frame
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.worker.bootstrap import LocalControlConnector
 
 if TYPE_CHECKING:
-    from .contracts.dataflow import Bounds, ControlReply, CutRequest, DriverServices, WorkerAssignment, WorkerEvent, WorkerLease
+    from demiflow.execution.contracts.dataflow import Bounds, ControlReply, CutRequest, DriverServices, WorkerAssignment, WorkerEvent, WorkerLease
 
 _RAY_AVAILABLE = importlib.util.find_spec("ray") is not None
-
-
-class _Waiter:
-    __slots__ = ("operation_id", "digest", "reply", "done", "error")
-
-    def __init__(self, operation_id: str, digest: str):
-        self.operation_id = operation_id
-        self.digest = digest
-        self.reply = None
-        self.done = False
-        self.error = None
-
-
-def _wire_digest(value: object, type_name: str, bounds: "Bounds") -> str:
-    return hashlib.sha256(encode_wire(value, type_name=type_name, bounds=bounds)).hexdigest()
-
-
-class ControlMailbox:
-    def __init__(self, *, bounds: "Bounds", check_stop: Callable[[], None],
-                 on_outbox: Callable[[], None] | None = None):
-        self._bounds = bounds
-        self._check_stop = check_stop
-        self._outbox: deque = deque()
-        self._pending: dict[str, _Waiter] = {}
-        self._condition = threading.Condition()
-        self._closed = False
-        self._max = bounds.max_pending_events
-        self._on_outbox = on_outbox
-
-    def request(self, event: "WorkerEvent", *, deadline_ms: int) -> "ControlReply":
-        self._check_stop()
-        digest = _wire_digest(event, "WorkerEvent", self._bounds)
-        deadline = time.monotonic() + deadline_ms / 1000.0
-        owned = False
-        with self._condition:
-            if self._closed:
-                raise DataflowError("CANCELLED", "control mailbox is closed")
-            waiter = self._pending.get(event.operation_id)
-            if waiter is not None:
-                if waiter.digest != digest:
-                    raise DataflowError("INVALID_CONTRACT", "operation id reused with a different payload")
-            else:
-                while len(self._pending) >= self._max or len(self._outbox) >= self._max:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        raise DataflowError("BUDGET_EXCEEDED", "control mailbox pending ceiling reached")
-                    self._condition.wait(remaining)
-                    if self._closed:
-                        raise DataflowError("CANCELLED", "control mailbox is closed")
-                if len(self._pending) >= self._max:
-                    raise DataflowError("BUDGET_EXCEEDED", "control mailbox pending ceiling reached")
-                waiter = _Waiter(event.operation_id, digest)
-                self._pending[event.operation_id] = waiter
-                was_empty = not self._outbox
-                self._outbox.append(event)
-                if was_empty and self._on_outbox is not None:
-                    self._on_outbox()
-                owned = True
-            try:
-                while not waiter.done:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        raise DataflowError("UNKNOWN_EFFECT", "control reply deadline elapsed; remote effect unknown")
-                    self._condition.wait(remaining)
-                if waiter.error is not None:
-                    raise waiter.error
-                if waiter.reply is None:
-                    raise DataflowError("CANCELLED", "control mailbox closed before a reply arrived")
-                return waiter.reply
-            finally:
-                if owned and self._pending.get(event.operation_id) is waiter:
-                    del self._pending[event.operation_id]
-                    self._condition.notify_all()
-
-    def send(self, event):
-        # Notifications share the bounded outbox but never wait for a journal RPC.
-        deadline = time.monotonic() + self._bounds.timeout_ms / 1000
-        with self._condition:
-            while len(self._outbox) >= self._max:
-                self._check_stop()
-                remaining = deadline - time.monotonic()
-                if self._closed or remaining <= 0:
-                    raise DataflowError("DEADLINE_EXCEEDED", "worker notification backpressure deadline")
-                self._condition.wait(min(.05, remaining))
-            if self._closed:
-                raise DataflowError("CANCELLED", "control mailbox closed")
-            was_empty = not self._outbox
-            self._outbox.append(event)
-            if was_empty and self._on_outbox is not None:
-                self._on_outbox()
-            self._condition.notify_all()
-
-    def drain(self, *, max_events: int) -> tuple["WorkerEvent", ...]:
-        if max_events < 1:
-            raise DataflowError("INVALID_CONTRACT", "drain max_events must be positive")
-        limit = min(max_events, self._max)
-        with self._condition:
-            batch = []
-            while self._outbox and len(batch) < limit:
-                batch.append(self._outbox.popleft())
-            self._condition.notify_all()
-            return tuple(batch)
-
-    def deliver(self, reply: "ControlReply") -> None:
-        digest = _wire_digest(reply, "ControlReply", self._bounds)
-        with self._condition:
-            waiter = self._pending.get(reply.operation_id)
-            if waiter is None:
-                return
-            if waiter.done:
-                if waiter.reply is not None and _wire_digest(waiter.reply, "ControlReply", self._bounds) != digest:
-                    raise DataflowError("INVALID_CONTRACT", "conflicting duplicate control reply")
-                return
-            waiter.reply = reply
-            waiter.done = True
-            self._condition.notify_all()
-
-    def cancel_pending(self) -> None:
-        """Wake business RPC waits before joining their owner on cancellation.
-
-        A lost reply remains unknown. The port stays open for lifecycle cleanup;
-        neither cancellation nor a late reply manufactures an effect receipt.
-        """
-        with self._condition:
-            for waiter in self._pending.values():
-                if not waiter.done:
-                    waiter.error = DataflowError('UNKNOWN_EFFECT', 'RPC cancelled; remote effect remains unknown')
-                    waiter.done = True
-            self._condition.notify_all()
-
-    def close(self) -> None:
-        with self._condition:
-            self._closed = True
-            for operation_id in list(self._pending):
-                waiter = self._pending[operation_id]
-                if waiter.done and waiter.reply is not None:
-                    del self._pending[operation_id]
-                    continue
-                if not waiter.done:
-                    waiter.error = DataflowError("UNKNOWN_EFFECT", "driver lost; control effect unknown")
-                    waiter.done = True
-            self._outbox.clear()
-            self._condition.notify_all()
-
-
-def _event_from_dict(data: dict, *, bounds) -> "WorkerEvent":
-    frame = {"schema": "demiflow.runtime_wire.v3", "type": "WorkerEvent", "payload": data}
-    return decode_wire_document(frame, type_name="WorkerEvent", bounds=bounds)
-
-
-def _reply_frame(reply: "ControlReply", *, bounds) -> dict:
-    return {"type": "control_reply", "wire": encode_wire(reply, type_name="ControlReply", bounds=bounds).decode()}
 
 
 class DataflowLocalConnector(LocalControlConnector):
@@ -195,7 +34,7 @@ class DataflowLocalConnector(LocalControlConnector):
         self._bounds_by_allocation = {}
 
     def stage(self, allocation_id, launch_spec):
-        from .contracts.dataflow import Bounds
+        from demiflow.execution.contracts.dataflow import Bounds
         config = launch_spec.get("dataflow_v3")
         if not isinstance(config, dict) or not isinstance(config.get("bounds"), dict):
             raise DataflowError("INVALID_CONTRACT", "v3 launch requires explicit bounds")
@@ -221,19 +60,19 @@ class DataflowLocalConnector(LocalControlConnector):
         # loaded runtime ahead of editable installs or the caller's PYTHONPATH.
         import os
         from pathlib import Path
-        root = str(Path(__file__).resolve().parents[2])
+        root = str(Path(__file__).resolve().parents[3])
         inherited = os.environ.get("PYTHONPATH", "")
         payload["extra_env"]["PYTHONPATH"] = root + (os.pathsep + inherited if inherited else "")
         return payload
 
     def request_cut(self, allocation_id: str, request: "CutRequest") -> None:
-        from .worker.bootstrap import send_message
+        from demiflow.execution.worker.bootstrap import send_message
         bounds = self._bounds_by_allocation[allocation_id]
         send_message(self.driver_socks[allocation_id], {"type": "cut_request", "wire":
             encode_wire(request, type_name="CutRequest", bounds=bounds).decode()})
 
     def deliver_control_reply(self, allocation_id: str, reply: "ControlReply") -> None:
-        from .worker.bootstrap import send_message
+        from demiflow.execution.worker.bootstrap import send_message
         bounds = self._bounds_by_allocation[allocation_id]
         send_message(self.driver_socks[allocation_id], _reply_frame(reply, bounds=bounds))
 
@@ -276,7 +115,7 @@ class _EndpointBase:
     def _build_launch(self, assignment: "WorkerAssignment") -> tuple[dict, dict, dict]:
         run = self._services.action.context
         lease = self._lease
-        from .contracts.dataflow_codec import runtime_scope_id
+        from demiflow.execution.contracts.dataflow_codec import runtime_scope_id
         scope_id = runtime_scope_id(assignment.plan_id, assignment.attempt)
         raw = b"".join(self._services.store.read(lease.grant_ref,
                         max_bytes=assignment.bounds.max_control_bytes))
@@ -342,7 +181,7 @@ class _EndpointBase:
             raise DataflowError("FENCED", "Worker event differs from its allocation/attempt")
 
     def _k3_envelope(self, kind: str, payload: dict) -> dict:
-        from .contracts.envelope import WORKER_PROTOCOL_VERSION
+        from demiflow.execution.contracts.envelope import WORKER_PROTOCOL_VERSION
         run = self._services.action.context
         return {"protocol_version": dict(WORKER_PROTOCOL_VERSION), "kind": kind,
                 "scope_id": self._scope_id, "run_id": run.ref.run_id, "operation_id": uuid.uuid4().hex,
@@ -373,7 +212,7 @@ class _EndpointBase:
         self._business_batch = []
         self._business_bytes = 0
         if hasattr(self, "_sock"):
-            from .worker.bootstrap import _send_encoded_messages
+            from demiflow.execution.worker.bootstrap import _send_encoded_messages
             _send_encoded_messages(self._sock, (raw for _, raw in pending))
         else:
             actor = self._connector._actor(self._allocation_id)
@@ -393,8 +232,8 @@ class _EndpointBase:
         return dict(command, activity_generation=generation)
 
     def send_business(self, command):
-        from .worker.bootstrap import _send_encoded_messages, _MAX_CONTROL_BYTES, _CONTROL_BATCH_EVENTS
-        from .recovery_contract import document
+        from demiflow.execution.worker.bootstrap import _send_encoded_messages, _MAX_CONTROL_BYTES, _CONTROL_BATCH_EVENTS
+        from demiflow.execution.recovery_contract import document
         command = self._activity_command(command)
         raw = document({"type": "dataflow_command", "command": command})
         if getattr(self, '_business_batch', None) is None:
@@ -426,7 +265,7 @@ class _EndpointBase:
 
     def _accept_final_observations(self, result):
         raw = result.get('final_progress', [])
-        from .recovery_contract import document
+        from demiflow.execution.recovery_contract import document
         document(raw, self._services.bounds.max_control_bytes)
         if type(raw) is not list:
             raise DataflowError('INVALID_CONTRACT', 'final observations must be a bounded list')
@@ -502,9 +341,9 @@ class LocalHostEndpoint(_EndpointBase):
         self._argv = (sys.executable, "-B", "-m", "demiflow.execution.worker.bootstrap")
 
     def activate(self, assignment: "WorkerAssignment") -> None:
-        from .contracts.worker import WorkerProtocolModel
-        from .worker.bootstrap import ControlFrameReader
-        from .worker.dataflow_host import make_worker_control_assignment
+        from demiflow.execution.contracts.worker import WorkerProtocolModel
+        from demiflow.execution.worker.bootstrap import ControlFrameReader
+        from demiflow.execution.worker.dataflow_host import make_worker_control_assignment
         if self._assignment != assignment:
             raise DataflowError("FENCED", "worker assignment was not staged before allocation")
         _, grant, manifest_ref = self._build_launch(assignment)
@@ -531,7 +370,7 @@ class LocalHostEndpoint(_EndpointBase):
         self._activated = True
 
     def _receive_registration(self):
-        from .worker.bootstrap import recv_message
+        from demiflow.execution.worker.bootstrap import recv_message
         context = {"allocation_id": self._allocation_id, "boot_id": self._boot_id}
 
         def lost_registration():
@@ -568,7 +407,7 @@ class LocalHostEndpoint(_EndpointBase):
             raise DataflowError("UNKNOWN_EFFECT", "worker control connection terminated before confirmation") from exc
 
     def _send_k3(self, kind: str, payload: dict) -> dict:
-        from .worker.bootstrap import send_message
+        from demiflow.execution.worker.bootstrap import send_message
         self.flush_business()
         envelope = self._k3_envelope(kind, payload)
         send_message(self._sock, envelope)
@@ -641,7 +480,7 @@ def make_host_endpoint(lease: "WorkerLease", *, services: "DriverServices"):
 if _RAY_AVAILABLE:
     import ray
     from ray.exceptions import GetTimeoutError, RayActorError
-    from .hosts.ray_worker_host import RayControlConnector as _RayControlConnector
+    from demiflow.execution.hosts.ray_worker_host import RayControlConnector as _RayControlConnector
 else:
     _RayControlConnector = object
 
@@ -696,7 +535,7 @@ class DataflowRayConnector(_RayControlConnector):
             self._environments.pop(allocation_id, None)
 
     def host_class(self):
-        from .worker.dataflow_host import HostedDataflowWorker
+        from demiflow.execution.worker.dataflow_host import HostedDataflowWorker
         return ray.remote(max_restarts=0, max_task_retries=0, max_concurrency=8)(HostedDataflowWorker)
 
     def placement_options(self, allocation_id):
@@ -779,7 +618,7 @@ class RayHostEndpoint(_EndpointBase):
             raise
 
     def activate(self, assignment: "WorkerAssignment") -> None:
-        from .worker.dataflow_host import make_worker_control_assignment
+        from demiflow.execution.worker.dataflow_host import make_worker_control_assignment
         if self._assignment != assignment:
             raise DataflowError("FENCED", "worker assignment was not staged before allocation")
         binding = self._services.resources.state.read_allocation_identity(self._scope_id, self._allocation_id)

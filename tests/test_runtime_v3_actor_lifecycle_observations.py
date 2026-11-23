@@ -18,7 +18,7 @@ def test_real_process_hooks_survive_cleanup_and_preserve_failures(tmp_path, monk
                 getattr(execution, '_operator_lifecycles', {}).values())
     monkeypatch.setattr(DataflowExecution, 'close', close)
     if phase == 'stale_boot':
-        from demiflow.execution.dataflow_hosts import _EndpointBase
+        from demiflow.execution.hosts.endpoints import _EndpointBase
         accept = _EndpointBase._accept_final_observations
         def stale(endpoint, response):
             if response.get('final_progress'):

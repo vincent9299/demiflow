@@ -6,7 +6,7 @@ import pytest
 from demiflow.execution.contracts import dataflow_codec as codec
 from demiflow.execution.contracts.dataflow import ValueEdge
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_hosts import _event_from_dict
+from demiflow.execution.contracts.dataflow_codec import event_from_dict as _event_from_dict
 from test_runtime_v3_c import make, bounds
 
 

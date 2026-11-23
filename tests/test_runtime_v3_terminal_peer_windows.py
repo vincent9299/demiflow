@@ -1,6 +1,6 @@
 """Actual peer sockets through the original terminal decoder and ACK order."""
 from functools import partial
-from demiflow.execution.dataflow_hosts import batch_business_commands
+from demiflow.execution.hosts.endpoints import batch_business_commands
 from types import SimpleNamespace
 import socket
 

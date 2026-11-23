@@ -1340,3 +1340,14 @@ def sink_non_mapping_values(manifest):
                  or manifest.get('schema_ref') is not None):
         raise DataflowError('CORRUPT_ARTIFACT', 'Sink non_mapping_values contradicts its table metadata')
     return flag
+
+
+def wire_digest(value: object, type_name: str, bounds: "Bounds") -> str:
+    return hashlib.sha256(encode_wire(value, type_name=type_name, bounds=bounds)).hexdigest()
+
+def event_from_dict(data: dict, *, bounds) -> "WorkerEvent":
+    frame = {"schema": "demiflow.runtime_wire.v3", "type": "WorkerEvent", "payload": data}
+    return decode_wire_document(frame, type_name="WorkerEvent", bounds=bounds)
+
+def reply_frame(reply: "ControlReply", *, bounds) -> dict:
+    return {"type": "control_reply", "wire": encode_wire(reply, type_name="ControlReply", bounds=bounds).decode()}

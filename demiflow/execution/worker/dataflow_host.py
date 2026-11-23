@@ -23,7 +23,7 @@ from ..contracts.dataflow_errors import DataflowError
 from ..contracts.envelope import WORKER_PROTOCOL_VERSION
 from ..contracts.errors import ProtocolError
 from ..contracts.worker import validate_assignment
-from ..dataflow_hosts import ControlMailbox
+from demiflow.execution.worker.mailbox import ControlMailbox
 from .runtime import WorkerRuntime
 
 if TYPE_CHECKING:

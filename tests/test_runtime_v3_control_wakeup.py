@@ -7,7 +7,7 @@ from dataclasses import replace
 
 from demiflow.execution.contracts.dataflow import ControlReply, WorkerEvent
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_hosts import ControlMailbox
+from demiflow.execution.worker.mailbox import ControlMailbox
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 
 

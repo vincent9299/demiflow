@@ -21,6 +21,7 @@ CARRIERS = {
     'dataflow_api': ['_native_operation_factory'],
     'dataflow_handles': ['RuntimeActionHandle', 'StoredMaterializedHandle', 'TerminalSubscription'],
     'stream': ['StreamStats'],
+    'dataflow_hosts': ['ControlMailbox', 'DataflowLocalConnector', 'DataflowRayConnector'],
     'dataflow_operator_observations': ['_ObservedTiming'],
     'legacy_queue': ['LegacyQueueHistoryDatasource'],
     'dataflow_inputs': ['InputMaterializedHandle'],

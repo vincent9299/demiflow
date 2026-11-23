@@ -16,7 +16,7 @@ def private_ray_provider():
         pytest.skip('Ray Core is not installed in this interpreter; use the dedicated Ray validation environment')
     import ray
     from pathlib import Path
-    import demiflow.execution.dataflow_hosts as hosts
+    import demiflow.execution.hosts.endpoints as hosts
     import demiflow.resources.ray as resource_provider
     assert Path(ray.__file__).is_file(), 'Ray must be a real installed module'
     assert ray.ObjectRef is ray._raylet.ObjectRef

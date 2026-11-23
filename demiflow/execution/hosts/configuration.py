@@ -46,7 +46,7 @@ def driver_resources(action: "RunAction", policy: RuntimePolicy):
         from demiflow.resources.capacity import LocalCapacityPool
         from demiflow.resources.local import LocalResourceProvider
         from demiflow.resources.process_unit import ManagedProcessUnit
-        from demiflow.execution.dataflow_hosts import DataflowLocalConnector
+        from demiflow.execution.hosts.endpoints import DataflowLocalConnector
         domain, capacity = local_capacity()
         pool = LocalCapacityPool(domain / "capacity", capacity=capacity)
         unit = ManagedProcessUnit(root / "units")
@@ -64,7 +64,7 @@ def driver_resources(action: "RunAction", policy: RuntimePolicy):
         if not _RAY_AVAILABLE:
             raise DataflowError("UNSUPPORTED_CAPABILITY", "Ray Core provider requires the ray package")
         from demiflow.resources.ray import RayResourceProvider
-        from demiflow.execution.dataflow_hosts import DataflowRayConnector
+        from demiflow.execution.hosts.endpoints import DataflowRayConnector
         provider = RayResourceProvider(
             DataflowRayConnector(command_timeout_s=policy.control_timeout_ms / 1000.0,
                                  device_topology=device_topology), device_pool=devices,

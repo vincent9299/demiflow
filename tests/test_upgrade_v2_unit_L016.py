@@ -138,7 +138,7 @@ import test_upgrade_v2_unit_L015 as chain_contract
 def ray_chain_facts(ray_local, tmp_path_factory):
     import builtins
     from demiflow.resources.capacity import LocalCapacityPool
-    from demiflow.execution.dataflow_hosts import DataflowRayConnector, RayHostEndpoint
+    from demiflow.execution.hosts.endpoints import DataflowRayConnector, RayHostEndpoint
     from demiflow.execution.commit import CommitCoordinator
     events, reservations, imports = [], [], []
     original_apply = ResourceManager.apply
@@ -247,7 +247,7 @@ def _repair_owned_resource_terminal(execution):
 def _ray_failure(tmp_path, ray, *, mode, reference=None):
     """Inject one transport/provision fault; execute the real Ray chain driver."""
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_hosts import RayHostEndpoint, DataflowRayConnector
+    from demiflow.execution.hosts.endpoints import RayHostEndpoint, DataflowRayConnector
     from demiflow.execution.scheduler.placement import DataflowScheduler
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.resources.contracts import ResourceError
