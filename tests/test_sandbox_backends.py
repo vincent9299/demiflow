@@ -721,3 +721,30 @@ def test_manage_project_layout_bind_table_and_pow_encode(tmp_path):
     report = check_project(proj, entry='flows/read_demo.py:run', params='configs/read_demo.json')
     assert report['status'] == 'passed', report
     assert report['entries'][0]['status'] == 'checked', report
+
+
+def test_deepseek_tool_call_clips_oversized_write_payload():
+    from demiflow.workbench.conversations.deepseek import DeepSeek
+    from demiflow.workbench.conversations.common import wire
+
+    adapter = DeepSeek.__new__(DeepSeek)
+    adapter.thread = 'sess-1'
+    adapter.items = {}
+    adapter.message_kind = None
+    big_content = 'x' * 50000
+    events = adapter.event({
+        'method': 'session/update',
+        'params': {
+            'sessionId': 'sess-1',
+            'update': {
+                'sessionUpdate': 'tool_call',
+                'toolCallId': 'call_1',
+                'title': 'write',
+                'status': 'in_progress',
+                'rawInput': {'file_path': 'configs/big.json', 'content': big_content},
+            },
+        },
+    })
+    assert events[1][0] == 'item.updated'
+    wire(events[1][1], 65536)
+    assert len(events[1][1]['rawInput']['content']) < 5000
