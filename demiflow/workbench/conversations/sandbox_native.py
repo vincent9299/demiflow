@@ -15,6 +15,13 @@ SECCOMP = ctypes.CDLL(ctypes.util.find_library('seccomp'), use_errno=True)
 READ = (1 << 2) | (1 << 3)
 EXEC = 1 << 0
 WRITE = (1 << 1) | (1 << 4) | (1 << 5) | (1 << 7) | (1 << 8)
+TRUNCATE = 1 << 14
+
+
+def landlock_abi():
+    """Return kernel Landlock ABI version (0 if unavailable)."""
+    abi = LIBC.syscall(444, 0, 0, 1)
+    return int(abi) if abi >= 1 else 0
 
 
 def tree_usage(paths, maximum=8192):
@@ -79,17 +86,21 @@ def landlock(read_paths, write_paths, runtime_paths, identities):
         _pack_ = 1
         _fields_ = [('access', ctypes.c_uint64), ('fd', ctypes.c_int32)]
 
-    # Deliberately use one tested profile on newer kernels as well. Missing
-    # later-ABI operations are denied by seccomp, never silently unhandled.
-    rules = Rules((1 << 13) - 1)
+    # Adaptively enable Landlock ABI 3 TRUNCATE mediation on Linux >= 6.2 so
+    # writable project directories support native truncate/ftruncate while
+    # read-only paths still deny truncation in the kernel. On ABI 1-2 kernels
+    # (e.g. Linux 5.15), truncate remains denied globally by seccomp.
+    handled = ((1 << 13) - 1) | (TRUNCATE if abi >= 3 else 0)
+    write_rights = READ | WRITE | (TRUNCATE if abi >= 3 else 0)
+    rules = Rules(handled)
     descriptor = checked(LIBC.syscall(444, ctypes.byref(rules), ctypes.sizeof(rules), 0), 'Landlock ruleset')
     try:
         for paths, rights in ((read_paths, READ), (runtime_paths, READ | EXEC),
-                              (write_paths, READ | WRITE)):
+                              (write_paths, write_rights)):
             for path in paths:
                 access = rights
                 if not os.path.isdir(path):
-                    access &= EXEC | (1 << 1) | (1 << 2)
+                    access &= EXEC | (1 << 1) | (1 << 2) | (TRUNCATE if abi >= 3 else 0)
                 fd = os.open(path, os.O_PATH | os.O_CLOEXEC | os.O_NOFOLLOW)
                 try:
                     info = os.fstat(fd)
@@ -180,6 +191,8 @@ def seccomp(*, direct_network=False):
         sendto recvfrom sendmsg recvmsg sendmmsg recvmmsg
         socketpair restart_syscall membarrier memfd_create
         statfs fstatfs copy_file_range sendfile splice tee vmsplice'''.split()
+    if landlock_abi() >= 3:
+        allowed.extend(('truncate', 'ftruncate'))
     try:
         for name in allowed:
             if name != 'socketpair':
