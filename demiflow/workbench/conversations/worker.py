@@ -46,6 +46,60 @@ WARM_IDLE_SECONDS = 600
 WARM_SANDBOX_SECONDS = 2400
 
 
+def effective_project_python(project):
+    """Resolve per-project configured read-only Python: None -> workbench default, '' -> disabled."""
+    configured = project.get('python')
+    if configured == '':
+        return None
+    if configured:
+        return configured
+    return sys.executable if project.get('kind') == 'pipeline' else None
+
+
+def _has_code_changes(changes):
+    """True when at least one non-documentation business code/config file changed."""
+    code_dirs = {'flows', 'operators', 'prompts', 'data_tools', 'configs', 'parameters', 'tests', 'src', 'lib'}
+    code_exts = {'.py', '.yaml', '.yml', '.json', '.toml', '.js', '.ts'}
+    for change in changes or ():
+        rel = str(change.get('path') or '').lstrip('/')
+        if not rel:
+            continue
+        parts = rel.split('/')
+        if parts[0] in code_dirs:
+            return True
+        if len(parts) == 1 and Path(rel).suffix.lower() in code_exts:
+            return True
+    return False
+
+
+def _build_rework_prompt(pipeline_checks, review_report):
+    """Construct a bounded structured rework prompt for hard check failures or blocking findings."""
+    issues = []
+    if isinstance(pipeline_checks, dict):
+        for key, label in (('native_flow', '原生数据流检查'), ('project_layout', '项目目录检查')):
+            item = pipeline_checks.get(key)
+            if isinstance(item, dict) and item.get('status') == 'failed':
+                diags = item.get('diagnostics') or []
+                if diags:
+                    for d in diags[:6]:
+                        loc = (d.get('path') or '') + (f":{d['line']}" if d.get('line') else '')
+                        issues.append(f"- [{label} · {d.get('rule', 'ERROR')}] {loc} {d.get('detail', '')}".strip())
+                else:
+                    issues.append(f"- [{label}] 检查未通过，请排查并修复相关改动。")
+    if isinstance(review_report, dict) and review_report.get('status') == 'invalid':
+        for f in (review_report.get('findings') or [])[:6]:
+            if f.get('severity') != 'blocking':
+                continue
+            loc = (f.get('path') or '') + (f":{f['line']}" if f.get('line') else '')
+            parts = [p for p in (f.get('trigger'), f.get('impact')) if p]
+            sug = f"（建议：{f['suggestion']}）" if f.get('suggestion') else ''
+            issues.append(f"- [独立评审阻断] {loc} {' · '.join(parts)}{sug}".strip())
+    if not issues:
+        return None
+    header = '[Forge 自动返工 1/1] 上一轮静态检查或独立评审发现以下阻断项，请直接修复并运行项目 pytest 验证后交付：\n'
+    return (header + '\n'.join(issues))[:8000]
+
+
 def sandbox_spec(deployment, project, session, turn, manifest, config, private_home, *, seconds=None):
     """Assemble only controller-declared scope; no provider-supplied path grants."""
     from demiflow.workbench.conversations.sandbox import SandboxSpec
@@ -95,7 +149,8 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
                 denied.append(cred)
     unique = lambda paths: tuple(sorted({str(path.absolute()) for path in paths}))
     duration = seconds if seconds is not None else max(.1, turn['created'] + deployment.limits.turn_seconds - time.time())
-    return SandboxSpec(read_paths=unique(read), write_paths=unique(writes), runtime_paths=runtime_paths(config),
+    return SandboxSpec(read_paths=unique(read), write_paths=unique(writes),
+        runtime_paths=runtime_paths(config, project_python=effective_project_python(project)),
         protected_paths=unique(protected), denied_paths=unique(denied), private_home=str(private_home),
         role='readonly' if readonly else 'developer',
         seconds=min(3600, max(.1, duration)), rss_bytes=deployment.limits.rss_bytes,
@@ -366,6 +421,9 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         st_config = {**st_config, '_cell_bin': str(control_bridge.bin)}
                 else:
                     standby_lease = tempfile.TemporaryFile(dir=st_home)
+                st_py = effective_project_python(st_project)
+                if st_py:
+                    st_config = {**st_config, '_project_python': st_py}
                 process = launch_provider(
                     mode=deployment.mode, adapter=st_adapter, config=st_config,
                     home=st_provider_home, root=st_project['root'],
@@ -514,6 +572,15 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
             watched = [] if notebook else project['watch']
             excluded = project.get('protected', ()) if guided else ()
             home = deployment.state / session['id']; scratch = home / turn['id']; scratch.mkdir(mode=0o700, exist_ok=True)
+            forge_opts = {}
+            try:
+                opts_file = scratch / 'forge_options.json'
+                if opts_file.is_file():
+                    forge_opts = json.loads(opts_file.read_bytes())
+            except (OSError, ValueError):
+                forge_opts = {}
+            auto_review = bool(forge_opts.get('auto_review'))
+            rework_depth = int(forge_opts.get('rework_depth') or 0)
             broker_home = (home / 'control' / (tid + '-' + turn['epoch']) / 'model'
                            if deployment.mode == 'restricted' else None)
             final, reason, completed = 'failed', None, False
@@ -787,6 +854,9 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                             config = model_broker.child_config
                         if cell_cli:
                             config = {**config, '_cell_bin': str(control_bridge.bin)}
+                    proj_py = effective_project_python(project)
+                    if proj_py:
+                        config = {**config, '_project_python': proj_py}
                     process = launch_provider(mode=deployment.mode, adapter=adapter, config=config,
                         home=provider_home, root=project['root'], lease_fd=lease_fd, sandbox_spec=confined,
                         control_socket=control_bridge.path if control_bridge is not None else None,
@@ -1019,6 +1089,20 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         result['compaction'] = dict(metadata, history_through_sequence=history_boundary)
                         store.event(tid, 'compaction.completed', result['compaction'])
                 report = None
+                if (auto_review and not review_requested and delivery_review is not None and _has_code_changes(changes)
+                        and final == 'completed' and completed and not requested and not saved['stop_at']
+                        and saved['dispatch'] == saved['delivery'] == 'acknowledged'):
+                    if keep_warm:
+                        keep_warm = False
+                        drained, cleanup_err = _teardown_provider(process, transport, provider, model_broker, control_bridge)
+                        if cleanup_err and not reason:
+                            reason = cleanup_err
+                        process = transport = provider = model_broker = control_bridge = None
+                    try:
+                        delivery_review.request({})
+                        review_requested = True
+                    except ValueError:
+                        pass
                 if review_requested:
                     if drained and final == 'completed' and saved['dispatch'] == saved['delivery'] == 'acknowledged':
                         # The author's process and model connection have drained. The
@@ -1049,6 +1133,17 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     else:
                         report = dict(status='incomplete', diagnostics=[dict(detail='开发回合未完成，评审尚未执行。')])
                 result['cleanup'] = 'complete' if drained else 'unknown'
+                if (auto_review and rework_depth == 0 and final == 'completed' and drained
+                        and not saved['stop_at'] and not requested and turn.get('operation') == 'message'):
+                    rework_prompt = _build_rework_prompt(result.get('pipeline_checks'), report)
+                    if rework_prompt:
+                        try:
+                            existing_queue = store.show(session['workspace'], session['id']).get('queued_messages') or []
+                            if not existing_queue:
+                                store.enqueue(session['workspace'], session['id'], tid, 'forge-rework-' + tid, rework_prompt)
+                                result['auto_rework'] = dict(scheduled=True, round=1, max_rounds=1)
+                        except (OSError, ValueError):
+                            pass
                 store.finish_provider(tid, state=final if drained else 'stopping', cleanup=result['cleanup'],
                                       result=result, review=report)
                 send_parent('notify')

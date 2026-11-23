@@ -1,5 +1,6 @@
 """Submit delivery reviews from an author turn and run them after the author drains."""
 from contextlib import ExitStack
+import copy
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -91,11 +92,21 @@ def run_deployment_reviewer(prompt, *, deployment, turn, session, scratch, broke
         spec = broker = channel = None
         if deployment.mode == 'restricted':
             from .model_broker import start_model_broker
+            from .policy import Deployment
+            review_deployment = deployment
+            if hasattr(deployment, 'value') and session['provider'] == 'deepseek' and config.get('effort', 'high') in ('high', 'max'):
+                # Single-shot JSON review over large dependency closures times out at
+                # upstream proxies under high reasoning effort; cap reviewer to low.
+                cloned = copy.deepcopy(deployment.value)
+                for p in cloned['projects'].values():
+                    p.pop('identity', None)
+                cloned['providers']['deepseek']['effort'] = 'low'
+                review_deployment = Deployment(cloned)
             spec = replace(author_spec, role='readonly', seconds=timeout, private_home=temporary, write_paths=(),
                 denied_paths=(*author_spec.denied_paths, author_spec.private_home),
                 read_paths=tuple(path for path in author_spec.read_paths if path == '/etc/ssl/openssl.cnf'))
             # Both brokers debit the existing turn quota under this control directory.
-            broker = start_model_broker(deployment, turn, session, broker_home.with_name('review-model'),
+            broker = start_model_broker(review_deployment, turn, session, broker_home.with_name('review-model'),
                                         defer_handshake=True)
             cleanup.callback(broker.close)
             config = broker.child_config

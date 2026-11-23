@@ -50,6 +50,11 @@ class Codex:
             'features.auth_elicitation': False, 'check_for_update_on_startup': False,
             'mcp_servers': {}, 'plugins': {},
         }
+        if config.get('_project_python'):
+            py_path = Path(config['_project_python'])
+            shell = values['shell_environment_policy.set']
+            shell.update(PATH=str(py_path.parent) + ':' + shell['PATH'],
+                         DEMIFLOW_PROJECT_PYTHON=str(py_path))
         if config.get('_cell_bin'):
             shell = values['shell_environment_policy.set']
             shell.update(PATH=config['_cell_bin'] + ':' + shell['PATH'],

@@ -100,7 +100,8 @@ def prepare_launch(config, home, *, model_channel=None):
             raise _unavailable('DeepSeek review requires the fixed model channel of its host')
         module = executable.parents[1] / 'node_modules/@deepseek-ai/dsh-llm/lib/index.js'
         rows.append(dict(id='review-model', name=str(model_channel), config=dict(provider=route,
-            model=config['model'], token=boundary['token'], llmModule=str(module))))
+            model=config['model'], token=boundary['token'], reasoningEffort=config.get('effort', 'high'),
+            llmModule=str(module))))
     elif boundary is not None:
         raise _unavailable('The host model channel must be attached before starting review')
     elif route == 'deepseek-account':
@@ -226,9 +227,20 @@ def _result(returncode, raw, model, home):
             if completed or not isinstance(reason, dict):
                 raise _unavailable('Invalid DeepSeek review terminal event')
             if reason.get('kind') != 'completed':
+                kind_label = reason.get('kind') if isinstance(reason.get('kind'), str) else ''
                 error = reason.get('error')
                 code = error.get('code') if isinstance(error, dict) else ''
-                suffix = ' (' + code + ')' if isinstance(code, str) and re.fullmatch('[A-Z_]{1,48}', code) else ''
+                msg = error.get('message') if isinstance(error, dict) and isinstance(error.get('message'), str) else ''
+                if any(w in msg.lower() for w in ('http://', 'https://', 'bearer ', 'token', 'sk-')):
+                    msg = ''
+                parts = []
+                if isinstance(code, str) and re.fullmatch('[A-Z_]{1,48}', code) and code != 'UNKNOWN':
+                    parts.append(code)
+                elif kind_label and kind_label != 'error':
+                    parts.append(kind_label[:48])
+                if msg:
+                    parts.append(msg.strip()[:140])
+                suffix = ' (' + ': '.join(parts) + ')' if parts else ''
                 raise _unavailable('DeepSeek review turn failed' + suffix)
             completed = True
         elif kind == 'final':

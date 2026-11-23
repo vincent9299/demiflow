@@ -57,6 +57,23 @@
     const access=button('查看当前开发权限','dc-access'),accessLabel=el('span','dc-access-label');
     access.setAttribute('aria-haspopup','dialog');
     access.append(svg('M7 1.4 12 3.3v3.5c0 2.7-1.8 4.5-5 5.8-3.2-1.3-5-3.1-5-5.8V3.3L7 1.4ZM7 4v3.5M7 9.7h.01'),accessLabel,chevron());
+    let autoReviewEnabled=true;
+    try{const saved=localStorage.getItem('forge-dev-auto-review');if(saved==='0')autoReviewEnabled=false;}catch{}
+    const autoReviewBtn=button('自动评审开关','dc-auto-review');
+    const autoReviewDot=el('span','dc-auto-review-dot');
+    const autoReviewText=el('span','dc-auto-review-label','自动评审');
+    autoReviewBtn.append(autoReviewDot,autoReviewText);
+    const syncAutoReview=()=>{
+      autoReviewBtn.setAttribute('aria-pressed',String(autoReviewEnabled));
+      autoReviewBtn.classList.toggle('is-on',autoReviewEnabled);
+      autoReviewBtn.title=autoReviewEnabled?'已开启：代码改动后自动触发 Forge 独立评审，阻断项自动返工 1 轮（点击关闭）':'已关闭：仅运行免费静态检查（点击开启自动独立评审）';
+    };
+    syncAutoReview();
+    autoReviewBtn.onclick=()=>{
+      autoReviewEnabled=!autoReviewEnabled;
+      try{localStorage.setItem('forge-dev-auto-review',autoReviewEnabled?'1':'0');}catch{}
+      syncAutoReview();
+    };
     const providers=el('select','dc-provider-binding');providers.hidden=true;providers.setAttribute('aria-hidden','true');providers.tabIndex=-1;
     const model=el('div','dc-model'),modelTrigger=button('开发代理','dc-model-trigger'),modelName=el('span','dc-model-name'),effort=el('span','dc-effort');
     modelTrigger.append(modelName,effort,chevron());model.append(modelTrigger);
@@ -93,7 +110,7 @@
         queue.append(line);
       });
     }
-    tools.append(add,access);trailing.append(model,send,stop);row.append(tools,trailing);card.append(input,row,providers,file);form.append(notice,queue,card,dock);
+    tools.append(add,access,autoReviewBtn);trailing.append(model,send,stop);row.append(tools,trailing);card.append(input,row,providers,file);form.append(notice,queue,card,dock);
 
     let cachedMinHeight=null,statsFingerprint='';
     function resize(){if(state.disposed)return;if(cachedMinHeight===null)cachedMinHeight=parseFloat(getComputedStyle(input).minHeight)||36;input.style.height='auto';input.style.height=Math.min(Math.max(input.scrollHeight,cachedMinHeight),220)+'px';}
@@ -253,7 +270,7 @@
       for(const remove of removers)remove();for(const dialog of dialogs){dialog.close();dialog.remove();}dialogs.clear();
       file.value='';form.querySelectorAll('button').forEach(node=>{node.onclick=null;node.onkeydown=null;});addMenu.onkeydown=modelMenu.onkeydown=null;
     }
-    update();return {form,input,send,stop,providers,update,dispose,resize};
+    update();return {form,input,send,stop,providers,update,dispose,resize,get autoReview(){return autoReviewEnabled;}};
   }
   window.ForgeDevelopmentComposer=Object.freeze({create,connectionStatus});
 })();

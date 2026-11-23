@@ -28,7 +28,7 @@ POST_FIELDS = {
     'dev-compact': ({'session_id','submission_id','expected_revision'},set()),
     'dev-prewarm': (set(), {'session_id', 'provider_id', 'session_kind'}),
     'dev-session-create': ({'request_id', 'provider_id'}, {'new_conversation', 'session_kind'}),
-    'dev-turn-start': ({'session_id', 'submission_id', 'expected_revision', 'text'}, {'operation'}),
+    'dev-turn-start': ({'session_id', 'submission_id', 'expected_revision', 'text'}, {'operation', 'auto_review'}),
     'dev-notebook-claim': ({'session_id','turn_id','pending_request_id','expected_digest'},set()),
     'dev-input': ({'session_id', 'turn_id', 'pending_request_id', 'expected_digest', 'answer'}, set()),
     'dev-cancel': ({'session_id', 'turn_id', 'request_id'}, set()),
@@ -138,6 +138,8 @@ def get(server, workspace, root, name, query, *, consumer_closed=None):
 def post(server, workspace, root, name, request, *, consumer_closed=None):
     if name == 'dev-turn-start' and request.get('operation', 'message') not in ('message', 'notebook_cell', 'notebook_cell_cli'):
         reject('Unsupported conversation operation', 'invalid_request')
+    if name == 'dev-turn-start' and 'auto_review' in request and type(request['auto_review']) is not bool:
+        reject('auto_review must be a boolean', 'invalid_request')
     if name == 'dev-session-create' and 'new_conversation' in request and type(request['new_conversation']) is not bool:
         reject('new_conversation must be a boolean', 'invalid_request')
     service = server.development
