@@ -155,9 +155,10 @@ class WorkerGraphRunner:
             budget=self._terminal_spec.configuration.get('terminal_memory') if self._terminal_spec else None,
             frame_call=self._frame_call, coalesce_allowed=lambda: not self._finite)
         self._batch_source = None
-        if (self._terminal_spec and self._terminal_spec.configuration.get('input_carrier') == FIXED_SCAN_BATCHES
+        if (self._terminal_spec and self._terminal_spec.kind == 'write_lance'
+                and self._terminal_spec.configuration.get('input_carrier') == FIXED_SCAN_BATCHES
                 and len(executor._node_specs) == len(executor._graph.nodes) == 2
-                and len(executor._readers) == 1):
+                and len(executor._readers) == len(executor._physical.splits) == 1):
             reader = next(iter(executor._readers.values()))
             if reader.supports_native_batches():
                 self._batch_source = reader

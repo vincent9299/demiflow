@@ -16,10 +16,9 @@ from .run_journal import ExecutionBudgetExceeded
 
 
 class LanceSink(Datasink):
-    def __init__(self, action, spec, *, native_merge=None, exact_merge_source=False):
+    def __init__(self, action, spec, *, exact_merge_source=False):
         self.action, self.run, self.spec = action, action.context, spec
         self.sink_id = "lance"
-        self.native_merge = native_merge
         self.exact_merge_source = exact_merge_source
         self.root = self.run.directory / "materializations" / action.action_id / "lance"
 
@@ -247,14 +246,9 @@ class LanceSink(Datasink):
         if self.spec.mode in {"append", "overwrite"}:
             effective = replace(self.spec, mode="create" if prepared["base_version"] is None else self.spec.mode,
                                 expected_version=prepared["base_version"])
-        merged = None
         if self.spec.mode == 'merge':
             effective = replace(self.spec, expected_version=prepared['base_version'])
-            if self.native_merge is not None:
-                merged = self.native_merge(effective)
-        if merged is not None:
-            receipt = merged
-        elif blocks is not None:
+        if blocks is not None:
             limits = dict(self.run.limits, batch_rows=batch_rows)
             receipt = write_lance(effective, blocks, limits=limits, check_stop=self.run.check_stop,
                                   _source_row_count=prepared['rows'])

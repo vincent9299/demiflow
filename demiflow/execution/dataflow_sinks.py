@@ -667,7 +667,7 @@ class NativeTerminalSink(_DataflowArtifactSink):
         return result
 
     def _has_staged_batches(self, manifest):
-        if (self._configuration.get('input_carrier') != FIXED_SCAN_BATCHES
+        if (self._sink_id != 'write_lance' or self._configuration.get('input_carrier') != FIXED_SCAN_BATCHES
                 or self.native.spec.schema is not None or not manifest['total_rows']
                 or len(manifest['partitions']) != 1):
             return False
