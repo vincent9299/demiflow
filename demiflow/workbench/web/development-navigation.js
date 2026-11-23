@@ -112,6 +112,28 @@
     return idx < 0 ? {name: clean, dir: ''} : {name: clean.slice(idx + 1), dir: clean.slice(0, idx)};
   }
 
+  const IGNORED_DIRS = new Set(['__pycache__', '.pytest_cache', '.mypy_cache', 'node_modules']);
+  const IGNORED_SUFFIXES = ['.pyc', '.pyo'];
+  function ignoredPath(rel) {
+    const clean = String(rel || '').replace(/^\/+/, '');
+    if (!clean) return true;
+    const parts = clean.split('/');
+    if (parts.some(p => !p || p.startsWith('.') || IGNORED_DIRS.has(p) || p.endsWith('.lance'))) return true;
+    const lower = parts[parts.length - 1].toLowerCase();
+    return IGNORED_SUFFIXES.some(ext => lower.endsWith(ext));
+  }
+
+  function chevronIcon() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.classList.add('dev-chevron');
+    const p = document.createElementNS(svg.namespaceURI, 'path');
+    p.setAttribute('d', 'M5 6l3 3.5L11 6');
+    svg.append(p);
+    return svg;
+  }
+
   function filePanel({layout, filesHost, toggle, api, iconButton, onReference, onShowFilesTab, onBadgeChange}) {
     let disposed = false;
     let levels = Object.create(null), expanded = [], treeLoaded = false, projectRootPath = '';
@@ -128,29 +150,116 @@
     let loadEpoch = 0;
     let latestChecks = {native_flow: null, project_layout: null, review: null};
 
-    // === LEFT SIDEBAR: Changed files + Project tree ===
+    // === LEFT SIDEBAR: Changed files + Project tree (collapsible + resizable split) ===
     const explorer = node('div', 'dev-file-explorer');
+    let changedOpen = true, treeOpen = true;
+    let splitRatio = 0.4;
+    try {
+      const saved = Number(localStorage.getItem('forge-dev-explorer-split'));
+      if (Number.isFinite(saved) && saved >= 0.15 && saved <= 0.85) splitRatio = saved;
+    } catch {}
+
     const changedSection = node('div', 'dev-changed-section');
     changedSection.hidden = true;
     const changedHeader = node('div', 'dev-section-header');
+    const changedToggle = node('button', 'dev-section-toggle');
+    changedToggle.type = 'button';
+    changedToggle.setAttribute('aria-expanded', 'true');
     const changedTitle = node('span', 'dev-section-title', '已改文件');
     const changedCount = node('span', 'dev-section-count', '0');
+    changedToggle.append(chevronIcon(), changedTitle, changedCount);
     const changedRefresh = iconButton('刷新变更列表', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
-    changedHeader.append(changedTitle, changedCount, changedRefresh);
+    changedHeader.append(changedToggle, changedRefresh);
     const changedList = node('div', 'dev-changed-list');
     changedSection.append(changedHeader, changedList);
 
+    const splitHandle = node('div', 'dev-split-resizer');
+    splitHandle.setAttribute('role', 'separator');
+    splitHandle.setAttribute('aria-orientation', 'horizontal');
+    splitHandle.setAttribute('aria-label', '调整已改文件与项目目录高度');
+    splitHandle.tabIndex = 0;
+    splitHandle.hidden = true;
+
     const treeSection = node('div', 'dev-tree-section');
     const treeHeader = node('div', 'dev-section-header');
+    const treeToggle = node('button', 'dev-section-toggle');
+    treeToggle.type = 'button';
+    treeToggle.setAttribute('aria-expanded', 'true');
     const treeTitle = node('span', 'dev-section-title', '项目目录');
+    treeToggle.append(chevronIcon(), treeTitle);
     const treeRefresh = iconButton('刷新项目目录', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
-    treeHeader.append(treeTitle, treeRefresh);
+    treeHeader.append(treeToggle, treeRefresh);
     const treeBody = node('div', 'dev-tree-body ' + files.body);
     const treeHost = node('ul', files.level);
     treeBody.append(treeHost);
     treeSection.append(treeHeader, treeBody);
-    explorer.append(changedSection, treeSection);
+    explorer.append(changedSection, splitHandle, treeSection);
     if (filesHost) filesHost.append(explorer);
+
+    function applyExplorerSplit() {
+      const hasChanges = !changedSection.hidden;
+      changedToggle.setAttribute('aria-expanded', String(changedOpen));
+      treeToggle.setAttribute('aria-expanded', String(treeOpen));
+      changedList.hidden = !changedOpen;
+      treeBody.hidden = !treeOpen;
+      changedSection.classList.toggle('is-collapsed', !changedOpen);
+      treeSection.classList.toggle('is-collapsed', !treeOpen);
+      const canResize = hasChanges && changedOpen && treeOpen;
+      splitHandle.hidden = !canResize;
+      splitHandle.setAttribute('aria-valuenow', String(Math.round(splitRatio * 100)));
+      if (!hasChanges) {
+        changedSection.style.flex = '';
+        treeSection.style.flex = treeOpen ? '1 1 0%' : '0 0 auto';
+      } else if (changedOpen && treeOpen) {
+        const pct = Math.round(splitRatio * 1000) / 10;
+        changedSection.style.flex = '0 0 ' + pct + '%';
+        treeSection.style.flex = '1 1 0%';
+      } else if (changedOpen && !treeOpen) {
+        changedSection.style.flex = '1 1 0%';
+        treeSection.style.flex = '0 0 auto';
+      } else if (!changedOpen && treeOpen) {
+        changedSection.style.flex = '0 0 auto';
+        treeSection.style.flex = '1 1 0%';
+      } else {
+        changedSection.style.flex = '0 0 auto';
+        treeSection.style.flex = '0 0 auto';
+      }
+    }
+    function setSplitRatio(next) {
+      splitRatio = Math.max(0.15, Math.min(0.85, next));
+      try { localStorage.setItem('forge-dev-explorer-split', String(splitRatio)); } catch {}
+      applyExplorerSplit();
+    }
+    changedToggle.onclick = () => { changedOpen = !changedOpen; applyExplorerSplit(); };
+    treeToggle.onclick = () => { treeOpen = !treeOpen; applyExplorerSplit(); };
+    splitHandle.ondblclick = () => setSplitRatio(0.4);
+    splitHandle.onkeydown = e => {
+      if (e.key === 'ArrowUp') { e.preventDefault(); setSplitRatio(splitRatio - 0.05); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); setSplitRatio(splitRatio + 0.05); }
+      else if (e.key === 'Home') { e.preventDefault(); setSplitRatio(0.18); }
+      else if (e.key === 'End') { e.preventDefault(); setSplitRatio(0.82); }
+    };
+    splitHandle.onpointerdown = e => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      splitHandle.setPointerCapture(e.pointerId);
+      splitHandle.classList.add('is-dragging');
+      const rect = explorer.getBoundingClientRect();
+      const move = ev => {
+        if (rect.height <= 80) return;
+        setSplitRatio((ev.clientY - rect.top) / rect.height);
+      };
+      const end = () => {
+        splitHandle.classList.remove('is-dragging');
+        splitHandle.removeEventListener('pointermove', move);
+        splitHandle.removeEventListener('pointerup', end);
+        splitHandle.removeEventListener('pointercancel', end);
+      };
+      splitHandle.addEventListener('pointermove', move);
+      splitHandle.addEventListener('pointerup', end);
+      splitHandle.addEventListener('pointercancel', end);
+    };
+    applyExplorerSplit();
 
     const treeRoot = createRoot(treeHost);
     const treeText = (key, args) => ({empty:'空目录',loading:'正在读取…',truncated:'加载更多文件',
@@ -186,7 +295,7 @@
 
     const refBtn = node('button', 'dev-action-btn dev-action-primary', '引用到对话');
     refBtn.type = 'button';
-    const searchBtn = iconButton('在代码中搜索 (Ctrl+F)', 'M11 4a7 7 0 1 0 4.95 11.95L20 20');
+    const searchBtn = iconButton('在代码中搜索 (Ctrl+F)', 'M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14M16.2 16.2L20 20');
     const copyBtn = node('button', 'dev-action-btn', '复制');
     copyBtn.type = 'button';
     const reloadFileBtn = iconButton('刷新当前文件', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
@@ -245,6 +354,7 @@
       const term = filterTerm.trim().toLocaleLowerCase();
       const visible = term ? all.filter(item => item.path.toLocaleLowerCase().includes(term)) : all;
       changedSection.hidden = total === 0;
+      applyExplorerSplit();
       changedList.replaceChildren();
       for (const item of visible) {
         const btn = node('button', 'dev-changed-item');
@@ -573,6 +683,7 @@
       for (const file of items) {
         if (!file || typeof file.path !== 'string') continue;
         const clean = file.path.replace(/^\/+/, '');
+        if (ignoredPath(clean)) continue;
         const status = !file.before ? 'A' : !file.after ? 'D' : 'M';
         const stats = diffStatsFromUnified(file.diff);
         observedChanges.set(clean, {

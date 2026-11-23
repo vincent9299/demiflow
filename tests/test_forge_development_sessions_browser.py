@@ -254,7 +254,7 @@ def test_turn_rail_history_and_project_files_share_the_conversation(tmp_path):
     with conversation_app(tmp_path) as (server, workspace, root):
         (root / 'nested').mkdir()
         (root / 'nested' / 'notes.md').write_text('Project-only document')
-        (root / 'nested' / 'step.py').write_text('print(1)')
+        (root / 'nested' / 'step.py').write_text('print(1)\n' + ''.join(f'x_{i} = {i}\n' for i in range(120)) + 'print("END_MARKER")\n')
         store = server.development.store
         sid = server.development.create_project(workspace, root, 'rail-fixture', 'codex')['id']
         for i in range(25):
@@ -314,7 +314,20 @@ def test_turn_rail_history_and_project_files_share_the_conversation(tmp_path):
             expect(pane).to_be_visible()
             expect(pane.locator('.cm-editor')).to_be_visible()
             expect(pane).to_contain_text('print(1)')
+            # CodeMirror scroller must scroll through full source (not clip at viewport height).
+            scroll_metrics = pane.locator('.cm-scroller').evaluate('n => ({ch: n.clientHeight, sh: n.scrollHeight, ov: getComputedStyle(n).overflowY})')
+            assert scroll_metrics['ov'] in ('auto', 'scroll') and scroll_metrics['sh'] > scroll_metrics['ch'], scroll_metrics
+            pane.locator('.cm-scroller').evaluate('n => { n.scrollTop = n.scrollHeight; }')
+            expect(pane).to_contain_text('END_MARKER')
             assert page.get_by_role('dialog').count() == 0
+            # Collapsible 项目目录 toggle in left Files pane.
+            tree_toggle = sidebar.locator('.dev-tree-section .dev-section-toggle')
+            expect(tree_toggle).to_have_attribute('aria-expanded', 'true')
+            tree_toggle.click()
+            expect(tree_toggle).to_have_attribute('aria-expanded', 'false')
+            expect(sidebar.locator('.dev-tree-body')).to_be_hidden()
+            tree_toggle.click()
+            expect(tree_toggle).to_have_attribute('aria-expanded', 'true')
             pane.get_by_role('button',name='引用到对话',exact=True).click()
             expect(page.get_by_label('开发要求')).to_have_value('草稿\n引用文件：nested/step.py')
             page.get_by_label('开发要求').fill('草稿')
