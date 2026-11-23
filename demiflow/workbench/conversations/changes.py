@@ -11,6 +11,13 @@ from demiflow.workbench.conversations.common import reject
 from demiflow.workbench.conversations.common import safe_path
 
 TEXT_SUFFIXES = {'.py', '.md', '.json', '.yaml', '.yml', '.toml', '.js', '.css', '.html', '.txt'}
+IGNORED_DIRS = {'__pycache__', '.pytest_cache', '.mypy_cache'}
+IGNORED_SUFFIXES = {'.pyc', '.pyo'}
+
+
+def _ignored(rel):
+    parts = rel.split('/')
+    return any(part in IGNORED_DIRS for part in parts) or Path(parts[-1]).suffix in IGNORED_SUFFIXES
 
 
 def capture(root, paths, *, exclude=(), max_files=4096, max_bytes=64 * 1024**2):
@@ -22,7 +29,7 @@ def capture(root, paths, *, exclude=(), max_files=4096, max_bytes=64 * 1024**2):
     excluded = set(exclude)
     while pending:
         rel = pending.pop()
-        if rel in facts or rel in excluded:
+        if rel in facts or rel in excluded or _ignored(rel):
             continue
         visited += 1
         if visited > max_files or time.monotonic() > deadline:
@@ -34,7 +41,7 @@ def capture(root, paths, *, exclude=(), max_files=4096, max_bytes=64 * 1024**2):
             with os.scandir(path) as entries:
                 for entry in entries:
                     child = rel + '/' + entry.name
-                    if child in excluded:
+                    if child in excluded or _ignored(child):
                         continue
                     if len(pending) + visited >= max_files:
                         reject('Source snapshot entry budget exceeded', 'resource_limit')

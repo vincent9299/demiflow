@@ -1,11 +1,13 @@
 // The DSH components render the rail and tree. DemiFlow owns their data and lifetime.
+// CodeMirror 6 (self-hosted MIT bundle) renders the read-only Code Truth & Diff viewer.
 (() => {
+  'use strict';
   const {createRoot, react:{createElement:h}} = DshRuntime;
   const {TurnNavigator, Level, files} = DshWorkbench;
   const node = (tag, cls, text) => {
     const value = document.createElement(tag);
     if (cls) value.className = cls;
-    if (text) value.textContent = text;
+    if (text !== undefined && text !== null) value.textContent = text;
     return value;
   };
   const railText = (key, {turn} = {}) => ({
@@ -94,79 +96,577 @@
     }};
   }
 
-  function filePanel({layout, toggle, api, iconButton}) {
-    const pane = node('aside','development-files');
-    pane.setAttribute('aria-label','项目文件'); pane.hidden = true;
-    const title = node('div','development-files-title','文件');
-    const close = iconButton('关闭项目目录','M6 6l12 12M18 6L6 18');
-    const refresh = iconButton('刷新项目目录','M20 10a8 8 0 1 0-1 7M20 4v6h-6');
-    title.append(close);
-    const header = node('div',files.header), pathLabel = node('span',files.path,'项目根目录');
-    header.append(pathLabel, refresh);
-    const body = node('div',files.body), treeHost = node('ul',files.level);
-    body.append(treeHost); pane.append(title, header, body); layout.append(pane);
-    toggle.setAttribute('aria-expanded','false');
-    const root = createRoot(treeHost);
-    let levels = Object.create(null), expanded = [], disposed = false;
-    const text = (key, args) => ({empty:'空目录',loading:'正在读取…',truncated:'加载更多文件',
-      'entry.other':'文件','error.unavailable':args?.message || '读取失败'})[key] || '读取失败';
-    function render() {
-      root.render(h(Level, {path:'/',tree:{state:{levels,expanded}, t:text, onToggle, onMore:path=>list(path,true),
-        onOpen:openFile}}));
+  function diffStatsFromUnified(text) {
+    if (typeof text !== 'string' || !text) return {added: null, removed: null};
+    let added = 0, removed = 0;
+    for (const line of text.split('\n')) {
+      if (line.startsWith('+') && !line.startsWith('+++')) added++;
+      else if (line.startsWith('-') && !line.startsWith('---')) removed++;
     }
-    async function list(path, more=false) {
+    return {added, removed};
+  }
+
+  function splitPath(rel) {
+    const clean = String(rel || '').replace(/^\/+/, '');
+    const idx = clean.lastIndexOf('/');
+    return idx < 0 ? {name: clean, dir: ''} : {name: clean.slice(idx + 1), dir: clean.slice(0, idx)};
+  }
+
+  function filePanel({layout, filesHost, toggle, api, iconButton, onReference, onShowFilesTab, onBadgeChange}) {
+    let disposed = false;
+    let levels = Object.create(null), expanded = [], treeLoaded = false, projectRootPath = '';
+    let gitChanges = [], gitBranch = '', gitIsRepo = false;
+    const observedChanges = new Map(); // path -> {path, status, added, removed, diff}
+    let filterTerm = '';
+
+    // Open tabs & active code view state
+    const openTabs = []; // array of relative paths (no leading slash), max 8
+    const fileCache = new Map(); // path -> {text, original, status, added, removed, isGit, unifiedDiff, sha256}
+    let activePath = null;
+    let viewMode = 'source'; // 'diff' | 'source'
+    let viewerHandle = null;
+    let loadEpoch = 0;
+    let latestChecks = {native_flow: null, project_layout: null, review: null};
+
+    // === LEFT SIDEBAR: Changed files + Project tree ===
+    const explorer = node('div', 'dev-file-explorer');
+    const changedSection = node('div', 'dev-changed-section');
+    changedSection.hidden = true;
+    const changedHeader = node('div', 'dev-section-header');
+    const changedTitle = node('span', 'dev-section-title', '已改文件');
+    const changedCount = node('span', 'dev-section-count', '0');
+    const changedRefresh = iconButton('刷新变更列表', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
+    changedHeader.append(changedTitle, changedCount, changedRefresh);
+    const changedList = node('div', 'dev-changed-list');
+    changedSection.append(changedHeader, changedList);
+
+    const treeSection = node('div', 'dev-tree-section');
+    const treeHeader = node('div', 'dev-section-header');
+    const treeTitle = node('span', 'dev-section-title', '项目目录');
+    const treeRefresh = iconButton('刷新项目目录', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
+    treeHeader.append(treeTitle, treeRefresh);
+    const treeBody = node('div', 'dev-tree-body ' + files.body);
+    const treeHost = node('ul', files.level);
+    treeBody.append(treeHost);
+    treeSection.append(treeHeader, treeBody);
+    explorer.append(changedSection, treeSection);
+    if (filesHost) filesHost.append(explorer);
+
+    const treeRoot = createRoot(treeHost);
+    const treeText = (key, args) => ({empty:'空目录',loading:'正在读取…',truncated:'加载更多文件',
+      'entry.other':'文件','error.unavailable':args?.message || '读取失败'})[key] || '读取失败';
+
+    // === RIGHT PANE: Code Truth Panel (CodeMirror 6) ===
+    const pane = node('aside', 'development-files');
+    pane.setAttribute('aria-label', '代码面板');
+    pane.hidden = true;
+
+    const tabBar = node('div', 'dev-code-tabbar');
+    const tabList = node('div', 'dev-code-tabs');
+    const closePanelBtn = iconButton('关闭代码面板', 'M6 6l12 12M18 6L6 18');
+    tabBar.append(tabList, closePanelBtn);
+
+    const forgeStrip = node('div', 'dev-forge-strip');
+    forgeStrip.hidden = true;
+
+    const toolbar = node('div', 'dev-code-toolbar');
+    toolbar.hidden = true;
+    const pathMeta = node('div', 'dev-code-pathmeta');
+    const pathText = node('span', 'dev-code-path');
+    const statusPill = node('span', 'dev-code-status');
+    pathMeta.append(pathText, statusPill);
+
+    const toolActions = node('div', 'dev-code-actions');
+    const modeSwitch = node('div', 'dev-code-modes');
+    const diffModeBtn = node('button', 'dev-mode-btn', '变更 Diff');
+    diffModeBtn.type = 'button';
+    const sourceModeBtn = node('button', 'dev-mode-btn', '完整源码');
+    sourceModeBtn.type = 'button';
+    modeSwitch.append(diffModeBtn, sourceModeBtn);
+
+    const refBtn = node('button', 'dev-action-btn dev-action-primary', '引用到对话');
+    refBtn.type = 'button';
+    const searchBtn = iconButton('在代码中搜索 (Ctrl+F)', 'M11 4a7 7 0 1 0 4.95 11.95L20 20');
+    const copyBtn = node('button', 'dev-action-btn', '复制');
+    copyBtn.type = 'button';
+    const reloadFileBtn = iconButton('刷新当前文件', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
+    toolActions.append(modeSwitch, refBtn, searchBtn, copyBtn, reloadFileBtn);
+    toolbar.append(pathMeta, toolActions);
+
+    const viewport = node('div', 'dev-code-viewport');
+    pane.append(tabBar, forgeStrip, toolbar, viewport);
+    layout.append(pane);
+    toggle.setAttribute('aria-expanded', 'false');
+
+    const resize = globalThis.ForgeNavigation?.resizable
+      ? ForgeNavigation.resizable({layout, sidebar:pane, label:'代码面板', right:true, cssVar:'--side-detail-width', minWidth:320, maxWidth:860, minMain:320, active:false})
+      : null;
+
+    function mergedChanges() {
+      const map = new Map();
+      for (const item of gitChanges) {
+        map.set(item.path, {...item, source: 'git'});
+      }
+      for (const [p, obs] of observedChanges.entries()) {
+        const prev = map.get(p);
+        if (prev) {
+          map.set(p, {...prev, diff: obs.diff || prev.diff, source: 'both'});
+        } else {
+          map.set(p, {...obs, source: 'session'});
+        }
+      }
+      return [...map.values()].sort((a, b) => a.path.localeCompare(b.path));
+    }
+
+    function changeFor(rel) {
+      const clean = String(rel || '').replace(/^\/+/, '');
+      const gitHit = gitChanges.find(item => item.path === clean);
+      const obsHit = observedChanges.get(clean);
+      if (!gitHit && !obsHit) return null;
+      return {...(gitHit || {}), ...(obsHit || {}),
+        status: gitHit?.status || obsHit?.status || 'M',
+        added: gitHit?.added ?? obsHit?.added ?? null,
+        removed: gitHit?.removed ?? obsHit?.removed ?? null,
+        diff: obsHit?.diff || null};
+    }
+
+    function destroyViewer() {
+      if (viewerHandle) {
+        try { viewerHandle.destroy(); } catch {}
+        viewerHandle = null;
+      }
+    }
+
+    function renderChangedList() {
+      const all = mergedChanges();
+      const total = all.length;
+      if (typeof onBadgeChange === 'function') onBadgeChange(total);
+      changedCount.textContent = String(total);
+      const term = filterTerm.trim().toLocaleLowerCase();
+      const visible = term ? all.filter(item => item.path.toLocaleLowerCase().includes(term)) : all;
+      changedSection.hidden = total === 0;
+      changedList.replaceChildren();
+      for (const item of visible) {
+        const btn = node('button', 'dev-changed-item');
+        btn.type = 'button';
+        btn.dataset.path = item.path;
+        btn.title = item.path;
+        btn.setAttribute('aria-current', activePath === item.path ? 'true' : 'false');
+        const badge = node('span', 'dev-status-tag dev-status-' + (item.status || 'M').toLowerCase(), item.status || 'M');
+        const {name, dir} = splitPath(item.path);
+        const textWrap = node('span', 'dev-changed-text');
+        textWrap.append(node('span', 'dev-changed-name', name));
+        if (dir) textWrap.append(node('span', 'dev-changed-dir', dir));
+        const stats = node('span', 'dev-changed-stats');
+        if (Number.isFinite(item.added) && item.added > 0) stats.append(node('span', 'dev-stat-add', '+' + item.added));
+        if (Number.isFinite(item.removed) && item.removed > 0) stats.append(node('span', 'dev-stat-del', '-' + item.removed));
+        btn.append(badge, textWrap, stats);
+        btn.onclick = () => openFile(item.path, 'diff');
+        changedList.append(btn);
+      }
+      if (!activePath && !pane.hidden) renderEmptyState();
+    }
+
+    function renderForgeStrip() {
+      const items = [];
+      const checkLabel = status => ({passed:'通过', failed:'发现问题', incomplete:'待核对', not_applicable:'不适用'})[status] || status;
+      const checkTone = status => ({passed:'ok', failed:'bad', incomplete:'warn', not_applicable:'muted'})[status] || 'muted';
+      if (latestChecks.native_flow && latestChecks.native_flow.status !== 'not_applicable') {
+        const c = latestChecks.native_flow;
+        items.push({label: '原生数据流检查', text: checkLabel(c.status), tone: checkTone(c.status),
+          detail: (c.diagnostics || []).map(d => [d.rule, d.path, d.detail].filter(Boolean).join(' · ')).join('\n')});
+      }
+      if (latestChecks.project_layout && latestChecks.project_layout.status !== 'not_applicable') {
+        const c = latestChecks.project_layout;
+        items.push({label: '项目目录检查', text: checkLabel(c.status), tone: checkTone(c.status),
+          detail: (c.diagnostics || []).map(d => [d.rule, d.path, d.detail].filter(Boolean).join(' · ')).join('\n')});
+      }
+      if (latestChecks.review) {
+        const r = latestChecks.review;
+        const rText = ({passed:'已通过', invalid:'需修改', incomplete:'未完成', running:'评审中'})[r] || r;
+        const rTone = ({passed:'ok', invalid:'bad', incomplete:'warn', running:'muted'})[r] || 'muted';
+        items.push({label: '独立评审', text: rText, tone: rTone, detail: ''});
+      }
+      forgeStrip.replaceChildren();
+      forgeStrip.hidden = items.length === 0;
+      if (!items.length) return;
+      forgeStrip.append(node('span', 'dev-forge-strip-label', 'Forge 校验'));
+      for (const item of items) {
+        const pill = node('span', 'dev-forge-pill dev-forge-' + item.tone, item.label + ' · ' + item.text);
+        if (item.detail) pill.title = item.detail;
+        forgeStrip.append(pill);
+      }
+    }
+
+    function renderTabs() {
+      tabList.replaceChildren();
+      for (const rel of openTabs) {
+        const tab = node('div', 'dev-code-tab' + (rel === activePath ? ' is-active' : ''));
+        tab.dataset.path = rel;
+        const selectBtn = node('button', 'dev-code-tab-btn');
+        selectBtn.type = 'button';
+        selectBtn.title = rel;
+        const ch = changeFor(rel);
+        if (ch) selectBtn.append(node('span', 'dev-code-tab-dot dev-status-' + (ch.status || 'M').toLowerCase()));
+        selectBtn.append(node('span', 'dev-code-tab-name', splitPath(rel).name));
+        selectBtn.onclick = () => openFile(rel);
+        const closeBtn = node('button', 'dev-code-tab-close', '×');
+        closeBtn.type = 'button';
+        closeBtn.setAttribute('aria-label', '关闭标签 ' + splitPath(rel).name);
+        closeBtn.onclick = e => { e.stopPropagation(); closeTab(rel); };
+        tab.append(selectBtn, closeBtn);
+        tabList.append(tab);
+      }
+    }
+
+    function renderEmptyState() {
+      destroyViewer();
+      toolbar.hidden = true;
+      viewport.replaceChildren();
+      const empty = node('div', 'dev-code-empty');
+      empty.append(node('h3', null, '代码真相视图'));
+      empty.append(node('p', null, '只读查看项目源码与变更 Diff，围绕待改对象在左侧对话中驱动 Forge 修改。'));
+      const changes = mergedChanges();
+      if (changes.length) {
+        const box = node('div', 'dev-code-empty-changes');
+        box.append(node('div', 'dev-code-empty-label', '近期改动 (' + changes.length + ')'));
+        for (const item of changes.slice(0, 8)) {
+          const btn = node('button', 'dev-changed-item');
+          btn.type = 'button';
+          btn.append(node('span', 'dev-status-tag dev-status-' + (item.status || 'M').toLowerCase(), item.status || 'M'));
+          const {name, dir} = splitPath(item.path);
+          const wrap = node('span', 'dev-changed-text');
+          wrap.append(node('span', 'dev-changed-name', name));
+          if (dir) wrap.append(node('span', 'dev-changed-dir', dir));
+          btn.append(wrap);
+          btn.onclick = () => openFile(item.path, 'diff');
+          box.append(btn);
+        }
+        empty.append(box);
+      }
+      if (typeof onShowFilesTab === 'function') {
+        const browse = node('button', 'dev-action-btn', '在左侧浏览项目文件');
+        browse.type = 'button';
+        browse.onclick = () => onShowFilesTab();
+        empty.append(browse);
+      }
+      viewport.append(empty);
+    }
+
+    function paintActiveCode() {
+      if (!activePath) { renderEmptyState(); return; }
+      const entry = fileCache.get(activePath);
+      if (!entry) return;
+      toolbar.hidden = false;
+      pathText.textContent = activePath;
+      pathText.title = activePath;
+
+      const hasGitDiff = entry.isGit && entry.changed && typeof entry.original === 'string';
+      const hasObsDiff = !hasGitDiff && typeof entry.unifiedDiff === 'string' && entry.unifiedDiff.trim().length > 0;
+      const canDiff = hasGitDiff || hasObsDiff;
+      if (viewMode === 'diff' && !canDiff) viewMode = 'source';
+
+      diffModeBtn.disabled = !canDiff;
+      diffModeBtn.setAttribute('aria-pressed', String(viewMode === 'diff'));
+      sourceModeBtn.setAttribute('aria-pressed', String(viewMode === 'source'));
+      diffModeBtn.classList.toggle('is-active', viewMode === 'diff');
+      sourceModeBtn.classList.toggle('is-active', viewMode === 'source');
+
+      const ch = changeFor(activePath);
+      const st = entry.status && entry.status !== 'clean' ? entry.status : ch?.status;
+      if (st && st !== 'clean') {
+        const added = entry.changed ? entry.added : ch?.added;
+        const removed = entry.changed ? entry.removed : ch?.removed;
+        const parts = [{M:'已修改', A:'新增', D:'已删除'}[st] || st];
+        if (Number.isFinite(added) && added > 0) parts.push('+' + added);
+        if (Number.isFinite(removed) && removed > 0) parts.push('-' + removed);
+        statusPill.textContent = parts.join(' ');
+        statusPill.className = 'dev-code-status dev-status-' + st.toLowerCase();
+        statusPill.hidden = false;
+      } else {
+        statusPill.textContent = '只读';
+        statusPill.className = 'dev-code-status dev-status-clean';
+        statusPill.hidden = false;
+      }
+
+      destroyViewer();
+      viewport.replaceChildren();
+      const host = node('div', 'dev-cm-host');
+      viewport.append(host);
+
+      if (globalThis.ForgeCodeViewer?.mount) {
+        viewerHandle = globalThis.ForgeCodeViewer.mount(host, {
+          path: activePath,
+          mode: viewMode,
+          text: entry.modified ?? '',
+          original: hasGitDiff ? entry.original : null,
+          unifiedDiff: hasObsDiff ? entry.unifiedDiff : null,
+        });
+      } else {
+        const pre = node('pre', 'dev-code-fallback', viewMode === 'diff' && hasObsDiff ? entry.unifiedDiff : (entry.modified ?? ''));
+        host.append(pre);
+      }
+      renderTabs();
+      renderChangedList();
+    }
+
+    async function loadFile(rel, preferredMode, {silent = false} = {}) {
+      const clean = String(rel || '').replace(/^\/+/, '');
+      if (!clean) return;
+      const epoch = ++loadEpoch;
+      activePath = clean;
+      if (!openTabs.includes(clean)) {
+        openTabs.push(clean);
+        while (openTabs.length > 8) openTabs.shift();
+      }
+      renderTabs();
+      renderChangedList();
+      if (!silent) {
+        destroyViewer();
+        toolbar.hidden = false;
+        pathText.textContent = clean;
+        statusPill.hidden = true;
+        viewport.replaceChildren(node('div', 'dev-code-loading', '正在读取源码…'));
+      }
+      try {
+        const data = await api('project-file-diff', {path: clean});
+        if (disposed || epoch !== loadEpoch) return;
+        const obs = observedChanges.get(clean);
+        const entry = {
+          path: clean,
+          isGit: data.is_git === true,
+          status: data.status || 'clean',
+          sha256: data.sha256 || '',
+          original: typeof data.original === 'string' ? data.original : null,
+          modified: typeof data.modified === 'string' ? data.modified : '',
+          changed: data.changed === true,
+          added: data.added || 0,
+          removed: data.removed || 0,
+          unifiedDiff: obs?.diff || null,
+        };
+        fileCache.set(clean, entry);
+        const hasDiff = (entry.isGit && entry.changed && typeof entry.original === 'string') || Boolean(entry.unifiedDiff);
+        if (preferredMode === 'diff' || preferredMode === 'source') {
+          viewMode = preferredMode === 'diff' && hasDiff ? 'diff' : 'source';
+        } else if (!silent) {
+          viewMode = hasDiff ? 'diff' : 'source';
+        }
+        paintActiveCode();
+      } catch (err) {
+        if (disposed || epoch !== loadEpoch) return;
+        destroyViewer();
+        viewport.replaceChildren(node('div', 'dev-code-error', err?.message || '读取文件失败'));
+      }
+    }
+
+    function openFile(path, preferredMode = null) {
+      const clean = String(path || '').replace(/^\/+/, '');
+      if (!clean) return;
+      if (pane.hidden) setOpen(true, {skipFocus: true});
+      loadFile(clean, preferredMode);
+    }
+
+    function closeTab(rel) {
+      const idx = openTabs.indexOf(rel);
+      if (idx < 0) return;
+      openTabs.splice(idx, 1);
+      fileCache.delete(rel);
+      if (activePath === rel) {
+        activePath = openTabs[Math.min(idx, openTabs.length - 1)] || null;
+        if (activePath) loadFile(activePath);
+        else { renderTabs(); renderChangedList(); renderEmptyState(); }
+      } else {
+        renderTabs();
+      }
+    }
+
+    function renderTree() {
+      treeRoot.render(h(Level, {
+        path: '/',
+        tree: {
+          state: {levels, expanded},
+          t: treeText,
+          onToggle,
+          onMore: path => list(path, true),
+          onOpen: path => {
+            const clean = String(path || '').replace(/^\/+/, '');
+            openFile(clean, changeFor(clean) ? 'diff' : 'source');
+          },
+        },
+      }));
+    }
+
+    async function list(path, more = false) {
       const cache = levels, previous = cache[path];
       if (more && (!previous?.level || previous.loading)) return;
       if (more) previous.loading = true;
-      else cache[path] = {kind:'loading'};
-      const pending = cache[path]; render();
+      else cache[path] = {kind: 'loading'};
+      const pending = cache[path]; renderTree();
       try {
-        const page = await api('project-files', {...(path === '/' ? {} : {path:path.slice(1)}),offset:more ? previous.next : 0,limit:50});
+        const page = await api('project-files', {...(path === '/' ? {} : {path: path.slice(1)}), offset: more ? previous.next : 0, limit: 50});
         if (disposed || levels !== cache || cache[path] !== pending) return;
         const entries = more ? previous.level.entries.slice() : [];
-        const count = Object.values(cache).reduce((n,l)=>n+(l.level?.entries.length||0),0);
+        const count = Object.values(cache).reduce((n, l) => n + (l.level?.entries.length || 0), 0);
         if (count + page.entries.length > 1024) throw new Error('已展开的文件较多，请收起部分目录后重试。');
-        for (const row of page.entries) entries.push({name:row.name,type:row.kind === 'directory' ? 'directory' : 'file',preview:row.kind === 'markdown' || row.kind === 'text'});
-        cache[path] = {kind:'ready',level:{entries,truncated:page.next_offset !== null}, next:page.next_offset};
-        if (path === '/') pathLabel.textContent = page.root;
+        for (const row of page.entries) entries.push({name: row.name, type: row.kind === 'directory' ? 'directory' : 'file', preview: row.kind === 'markdown' || row.kind === 'text'});
+        cache[path] = {kind: 'ready', level: {entries, truncated: page.next_offset !== null}, next: page.next_offset};
+        if (path === '/') {
+          treeLoaded = true;
+          projectRootPath = page.root || '';
+          if (projectRootPath) treeTitle.title = projectRootPath;
+        }
       } catch (e) {
         if (disposed || levels !== cache || cache[path] !== pending) return;
-        const failure = {message:e.message};
-        cache[path] = more ? {...previous,loading:false,failure} : {kind:'failed',failure};
+        const failure = {message: e.message};
+        cache[path] = more ? {...previous, loading: false, failure} : {kind: 'failed', failure};
       }
-      render();
+      renderTree();
     }
-    function onToggle(parent,path) {
-      if (!expanded.includes(path)) {expanded.push(path);list(path);return;}
-      const below = p => p===path || p.startsWith(path+'/');
-      expanded = expanded.filter(p=>!below(p));
+
+    function onToggle(parent, path) {
+      if (!expanded.includes(path)) { expanded.push(path); list(path); return; }
+      const below = p => p === path || p.startsWith(path + '/');
+      expanded = expanded.filter(p => !below(p));
       for (const p of Object.keys(levels)) if (below(p)) delete levels[p];
-      render();
+      renderTree();
     }
-    let preview;
-    async function openFile(path) {
-      preview?.remove();
-      const dialog = preview = node('dialog','development-file-preview');
-      const closePreview = iconButton('关闭文件预览','M6 6l12 12M18 6L6 18');
-      const content = node('pre',null,'正在读取…');
-      dialog.append(node('strong',null,path),closePreview,content);pane.append(dialog);
-      dialog.onclose = ()=>dialog.remove(); closePreview.onclick = ()=>dialog.close(); dialog.showModal();
-      try {content.textContent = (await api('project-file-text',{path:path.slice(1)})).text;}
-      catch(e) {content.textContent=e.message;}
+
+    function resetTree() {
+      levels = Object.create(null);
+      expanded = [];
+      treeLoaded = false;
+      treeBody.scrollTop = 0;
+      list('/');
     }
-    function reset() {levels=Object.create(null);expanded=[];body.scrollTop=0;list('/');}
-    const resize = globalThis.ForgeNavigation?.resizable
-      ? ForgeNavigation.resizable({layout,sidebar:pane,label:'项目文件',right:true,cssVar:'--side-detail-width',minWidth:220,maxWidth:720,minMain:320,active:false})
-      : null;
-    function setOpen(value) {
-      pane.hidden=!value;layout.classList.toggle('development-files-open',value);
+
+    let changesInflight = null, changesPending = false;
+    async function refreshChanges() {
+      if (disposed) return;
+      if (changesInflight) { changesPending = true; return changesInflight; }
+      changesInflight = (async () => {
+        try {
+          const data = await api('project-changes');
+          if (disposed) return;
+          gitIsRepo = data.is_git === true;
+          gitBranch = data.branch || '';
+          gitChanges = Array.isArray(data.changes) ? data.changes : [];
+          renderChangedList();
+          if (activePath && !pane.hidden) {
+            loadFile(activePath, null, {silent: true});
+          }
+        } catch {
+          // Non-fatal: keep existing view.
+        } finally {
+          changesInflight = null;
+          if (!disposed && changesPending) {
+            changesPending = false;
+            refreshChanges();
+          }
+        }
+      })();
+      return changesInflight;
+    }
+
+    function recordObservedChanges(items) {
+      if (disposed || !Array.isArray(items) || !items.length) return;
+      let activeTouched = false;
+      for (const file of items) {
+        if (!file || typeof file.path !== 'string') continue;
+        const clean = file.path.replace(/^\/+/, '');
+        const status = !file.before ? 'A' : !file.after ? 'D' : 'M';
+        const stats = diffStatsFromUnified(file.diff);
+        observedChanges.set(clean, {
+          path: clean,
+          status,
+          added: stats.added,
+          removed: stats.removed,
+          diff: typeof file.diff === 'string' ? file.diff : null,
+        });
+        if (clean === activePath) activeTouched = true;
+      }
+      renderChangedList();
+      if (activeTouched && !pane.hidden) loadFile(activePath, null, {silent: true});
+    }
+
+    function recordChecks(checks) {
+      if (disposed || !checks) return;
+      if (checks.native_flow) latestChecks.native_flow = checks.native_flow;
+      if (checks.project_layout) latestChecks.project_layout = checks.project_layout;
+      if (checks.review) latestChecks.review = checks.review;
+      renderForgeStrip();
+    }
+
+    function clearSessionChanges() {
+      observedChanges.clear();
+      latestChecks = {native_flow: null, project_layout: null, review: null};
+      renderForgeStrip();
+      renderChangedList();
+    }
+
+    function setFilter(term) {
+      filterTerm = String(term || '');
+      renderChangedList();
+    }
+
+    function setOpen(value, {skipFocus = false} = {}) {
+      pane.hidden = !value;
+      layout.classList.toggle('development-files-open', value);
       toggle.setAttribute('aria-expanded', String(value));
       resize?.setActive(value && !matchMedia('(max-width:900px)').matches);
-      if (value) {reset();close.focus();} else {levels=Object.create(null);toggle.focus();}
+      if (value) {
+        if (!activePath) renderEmptyState();
+        else paintActiveCode();
+        if (!skipFocus) closePanelBtn.focus();
+      } else {
+        destroyViewer();
+        if (!skipFocus) toggle.focus();
+      }
     }
-    toggle.onclick=()=>setOpen(pane.hidden);close.onclick=()=>setOpen(false);refresh.onclick=reset;
-    pane.onkeydown=e=>{if(e.key==='Escape'&&!preview?.open){e.preventDefault();setOpen(false);}};
-    return {dispose(){disposed=true;resize?.dispose();preview?.remove();root.unmount();}};
+
+    diffModeBtn.onclick = () => { if (!diffModeBtn.disabled) { viewMode = 'diff'; paintActiveCode(); } };
+    sourceModeBtn.onclick = () => { viewMode = 'source'; paintActiveCode(); };
+    searchBtn.onclick = () => { viewerHandle?.openSearch(); };
+    reloadFileBtn.onclick = () => { if (activePath) loadFile(activePath); refreshChanges(); };
+    refBtn.onclick = () => { if (activePath && typeof onReference === 'function') onReference(activePath); };
+    copyBtn.onclick = async () => {
+      const entry = activePath ? fileCache.get(activePath) : null;
+      if (!entry) return;
+      try {
+        await navigator.clipboard.writeText(entry.modified ?? '');
+        copyBtn.textContent = '已复制';
+        setTimeout(() => { if (!disposed) copyBtn.textContent = '复制'; }, 1400);
+      } catch {
+        copyBtn.textContent = '复制失败';
+        setTimeout(() => { if (!disposed) copyBtn.textContent = '复制'; }, 1400);
+      }
+    };
+    toggle.onclick = () => setOpen(pane.hidden);
+    closePanelBtn.onclick = () => setOpen(false);
+    treeRefresh.onclick = () => { resetTree(); refreshChanges(); };
+    changedRefresh.onclick = () => { refreshChanges(); };
+    pane.onkeydown = e => { if (e.key === 'Escape') { e.preventDefault(); setOpen(false); } };
+
+    // Load git changes badge on mount so the left "文件" tab shows live change count immediately.
+    refreshChanges();
+
+    return {
+      openFile,
+      setOpen,
+      isOpen: () => !pane.hidden,
+      ensureTreeLoaded() { if (!treeLoaded) list('/'); refreshChanges(); },
+      resetTree,
+      refreshChanges,
+      recordObservedChanges,
+      recordChecks,
+      clearSessionChanges,
+      setFilter,
+      dispose() {
+        disposed = true;
+        destroyViewer();
+        resize?.dispose();
+        treeRoot.unmount();
+      },
+    };
   }
-  globalThis.DevelopmentNavigation = {turnRail,filePanel};
+  globalThis.DevelopmentNavigation = {turnRail, filePanel};
 })();

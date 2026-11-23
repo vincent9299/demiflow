@@ -217,3 +217,4 @@
 .python-editor .tok-definition,.python-editor .tok-typeName,.python-editor .tok-className{color:#1d4ed8}
 .op-flow-references{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0 16px;color:#52525b;font-size:12px}
 .op-tree-group>.op-legacy-heading{padding:6px 8px;color:#71717a;font-size:12px;cursor:pointer}
+.definition-behavior-title{margin:14px 0 6px;font-size:11px;font-weight:600;letter-spacing:.03em;color:#71717a}

@@ -1,7 +1,9 @@
 """Read-only Markdown navigation, one bounded directory or document per request."""
+import difflib
 import hashlib
 import os
 from pathlib import Path
+import subprocess
 
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.schema import ForgeError
@@ -11,9 +13,11 @@ from demiflow.forge.project_io import relative_path
 DIRECTORY_ENTRIES = 4096
 DIRECTORY_BYTES = 512 * 1024
 DOCUMENT_BYTES = 1024 * 1024
+DIFF_LIMIT = 200
 MARKDOWN = {'.md', '.markdown'}
 TEXT = MARKDOWN | {'.py', '.js', '.ts', '.css', '.html', '.sh', '.json', '.yaml', '.yml', '.toml', '.txt', '.csv'}
 SKIP = {'node_modules', '__pycache__', 'venv', 'env'}
+CHANGE_SKIP = SKIP | {'runs', 'data', 'datasets', 'outputs', 'results'}
 
 
 def _path(root, value, *, directory=False):
@@ -72,3 +76,168 @@ def read(root, path, *, project_text=False):
         raise ForgeError('Document no longer exists', code='not_found') from exc
     except (OSError, UnicodeError) as exc:
         raise ForgeError('Document must be a readable UTF-8 file', code='invalid_request') from exc
+
+
+def _git_run(root, args):
+    env = {**os.environ, 'GIT_OPTIONAL_LOCKS': '0'}
+    try:
+        return subprocess.run(
+            ['git', '-C', str(root), *args],
+            capture_output=True, timeout=3, env=env, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _git_repo(root):
+    base = no_symlinks(Path(root).absolute())
+    top = _git_run(base, ['rev-parse', '--show-toplevel'])
+    if not top or top.returncode != 0:
+        return None
+    toplevel = Path(top.stdout.decode('utf-8', 'replace').strip()).resolve()
+    try:
+        rel = base.resolve().relative_to(toplevel).as_posix()
+    except ValueError:
+        return None
+    prefix = '' if rel in {'', '.'} else rel + '/'
+    if prefix:
+        tracked = _git_run(base, ['ls-files', '--', '.'])
+        if not tracked or tracked.returncode != 0 or not tracked.stdout.strip():
+            return None
+    branch_proc = _git_run(base, ['rev-parse', '--abbrev-ref', 'HEAD'])
+    branch = branch_proc.stdout.decode('utf-8', 'replace').strip() if branch_proc and branch_proc.returncode == 0 else ''
+    return base, toplevel, prefix, branch
+
+
+def _strip_prefix(git_path, prefix):
+    if not prefix:
+        return git_path
+    return git_path[len(prefix):] if git_path.startswith(prefix) else None
+
+
+def _visible_change_path(rel):
+    if not rel or len(rel.encode('utf-8')) > 1024 or any(ord(c) < 32 for c in rel) or '\\' in rel:
+        return False
+    parts = rel.split('/')
+    return (len(parts) <= 24 and not any(
+        not p or p in {'.', '..'} or p.startswith('.') or p in CHANGE_SKIP or p.endswith('.lance')
+        for p in parts
+    ))
+
+
+def git_changes(root):
+    """Return bounded git working-tree changes scoped strictly inside the project root."""
+    repo = _git_repo(root)
+    if repo is None:
+        return dict(is_git=False, branch='', changes=[], truncated=False)
+    base, _, prefix, branch = repo
+    status_proc = _git_run(base, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.'])
+    if not status_proc or status_proc.returncode != 0:
+        return dict(is_git=True, branch=branch, changes=[], truncated=False)
+    stats = {}
+    numstat = _git_run(base, ['diff', '--numstat', 'HEAD', '--', '.'])
+    if numstat and numstat.returncode == 0:
+        for line in numstat.stdout.decode('utf-8', 'replace').splitlines():
+            cols = line.split('\t', 2)
+            if len(cols) == 3:
+                rel = _strip_prefix(cols[2], prefix)
+                if rel:
+                    a = int(cols[0]) if cols[0].isdigit() else None
+                    r = int(cols[1]) if cols[1].isdigit() else None
+                    stats[rel] = (a, r)
+    tokens = status_proc.stdout.split(b'\0')
+    rows, seen, truncated = [], set(), False
+    index = 0
+    while index < len(tokens):
+        entry = tokens[index]; index += 1
+        if len(entry) < 4:
+            continue
+        code = entry[:2].decode('ascii', 'replace')
+        raw_path = entry[3:].decode('utf-8', 'replace')
+        if code[0] in {'R', 'C'} or code[1] in {'R', 'C'}:
+            index += 1
+        rel = _strip_prefix(raw_path, prefix)
+        if not rel or rel in seen or not _visible_change_path(rel):
+            continue
+        seen.add(rel)
+        if len(rows) >= DIFF_LIMIT:
+            truncated = True
+            break
+        if code == '??' or 'A' in code:
+            kind = 'A'
+        elif 'D' in code:
+            kind = 'D'
+        else:
+            kind = 'M'
+        suffix = Path(rel).suffix.lower()
+        preview = suffix in TEXT
+        added, removed = stats.get(rel, (None, None))
+        if kind == 'A' and added is None and preview:
+            try:
+                target = _path(base, rel)
+                if target.is_file() and not target.is_symlink() and target.stat().st_size <= 256 * 1024:
+                    added = len(target.read_bytes().splitlines())
+                    removed = 0
+            except (ForgeError, OSError):
+                pass
+        rows.append(dict(path=rel, status=kind, added=added, removed=removed, preview=preview))
+    rows.sort(key=lambda item: item['path'].casefold())
+    return dict(is_git=True, branch=branch, changes=rows, truncated=truncated)
+
+
+def file_diff(root, path):
+    """Read bounded current file text and git HEAD baseline for side/unified diff viewing."""
+    target = _path(root, path)
+    if target.suffix.lower() not in TEXT:
+        raise ForgeError('File type cannot be previewed', code='invalid_request')
+    modified, sha256, exists = '', '', False
+    if target.exists():
+        try:
+            raw = read_bounded(target, DOCUMENT_BYTES)
+            modified = raw.decode('utf-8')
+            sha256 = hashlib.sha256(raw).hexdigest()
+            exists = True
+        except (OSError, UnicodeError) as exc:
+            raise ForgeError('Document must be a readable UTF-8 file', code='invalid_request') from exc
+    repo = _git_repo(root)
+    if repo is None:
+        if not exists:
+            raise ForgeError('Document no longer exists', code='not_found')
+        return dict(path=path, is_git=False, status='clean', sha256=sha256,
+                    original=None, modified=modified, changed=False, added=0, removed=0)
+    base, _, prefix, _ = repo
+    git_rel = prefix + path
+    head_proc = _git_run(base, ['show', 'HEAD:' + git_rel])
+    has_head = bool(head_proc and head_proc.returncode == 0)
+    original = None
+    if has_head:
+        if len(head_proc.stdout) > DOCUMENT_BYTES:
+            raise ForgeError('Document baseline exceeds preview budget', code='resource_limit')
+        try:
+            original = head_proc.stdout.decode('utf-8')
+        except UnicodeError:
+            original = None
+    if not exists and not has_head:
+        raise ForgeError('Document no longer exists', code='not_found')
+    if not exists and has_head:
+        status = 'D'
+    elif exists and not has_head:
+        status = 'A'
+    elif original is not None and original != modified:
+        status = 'M'
+    else:
+        status = 'clean'
+    added = removed = 0
+    if status == 'A':
+        added = len(modified.splitlines())
+    elif status == 'D' and original is not None:
+        removed = len(original.splitlines())
+    elif status == 'M' and original is not None:
+        for line in difflib.unified_diff(original.splitlines(), modified.splitlines(), n=0):
+            if line.startswith('+') and not line.startswith('+++'):
+                added += 1
+            elif line.startswith('-') and not line.startswith('---'):
+                removed += 1
+    return dict(path=path, is_git=True, status=status, sha256=sha256,
+                original=original if status in {'M', 'D', 'clean'} else '',
+                modified=modified, changed=status != 'clean', added=added, removed=removed)
