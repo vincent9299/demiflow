@@ -499,7 +499,7 @@ def test_p1_materialize_uses_one_action_on_the_original_provider(monkeypatch, na
     from demiflow.data.plan import LogicalPlan
     from demiflow.data.sources import ItemsSource
     from demiflow.execution import checked
-    from demiflow.execution.executors import dataset_runtime
+    from demiflow.execution import dataset_runtime
 
     source, plan = ItemsSource([{'id': 1}]), LogicalPlan()
     completed = []
@@ -546,33 +546,6 @@ def test_graph_request_uses_its_configured_executor_once(fake_action, monkeypatc
     request, timeout = requests[0]
     assert request.provider == {'local': 'local', 'ray': 'ray_core'}[provider] and timeout == 120
     assert request.source.declaration['routing'] == 'broadcast'
-
-
-# ---------------------------------------------------------------------------
-# F018-F019 dataset_native
-# ---------------------------------------------------------------------------
-def test_f018(fake_action, monkeypatch):
-    _binding_assertion()
-    from demiflow.execution.executors.dataset_native import execute
-    from demiflow.data.plan import LogicalPlan
-    from demiflow.data.sources import ItemsSource
-    from demiflow.execution.dataflow_api import declare_action_v3
-    from demiflow.execution import run_context
-    source, plan = ItemsSource([{"id": 1}]), LogicalPlan()
-    fake_action.__class__.declaration = declare_action_v3(source, plan,
-        kind='iter_rows', arguments={}, sink_declaration=None)
-    monkeypatch.setattr(run_context, 'current_run', lambda: fake_action.context)
-    STATE.run_result = (row for row in [{"id": 1}, {"id": 2}])
-    out = list(execute(_FakeExecutor(), source, plan))
-    assert out == [{"id": 1}, {"id": 2}]
-    assert len(STATE.run_calls) == 1
-    assert STATE.run_calls[0].kind == "iter_rows"
-    import pyarrow as pa
-    table = pa.table({'id': [1, 2]})
-    STATE.run_result = (batch for batch in [table])
-    out_arrow = list(execute(_FakeExecutor(), source, plan, arrow=True))
-    assert out_arrow == table.to_batches()
-    assert STATE.run_calls[1].kind == "iter_batches"
 
 
 # ---------------------------------------------------------------------------

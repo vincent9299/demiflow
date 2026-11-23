@@ -7,7 +7,6 @@ from demiflow import data
 from demiflow.execution.checked import CheckedExecution, current as current_checked
 from demiflow.execution.dataflow_compile_inputs import executor_defaults
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.native_resources import dataset_session
 from demiflow.execution.run_context import RunContext, current_run
 from demiflow.execution.run_journal import RunJournal
 
@@ -41,8 +40,6 @@ def test_host_configuration_reuses_journal_and_closes_on_exit(tmp_path, monkeypa
             assert executor_defaults(executor).batch_rows == 11
             assert executor._planning_policy.max_parallelism == 1
             assert not executor.resource_root.exists() and not executor.diagnostics_root.exists()
-            native = dataset_session(executor, tmp_path / 'scratch')
-            assert native.diagnostics == tmp_path / 'diagnostics'
             if failure is not None:
                 raise failure
 
@@ -57,14 +54,13 @@ def test_host_configuration_reuses_journal_and_closes_on_exit(tmp_path, monkeypa
     assert list(tmp_path.rglob(journal.path.name)) == [journal.path]
 
 
-def test_ordinary_defaults_and_native_diagnostics_fallback(tmp_path):
+def test_ordinary_block_and_host_defaults(tmp_path):
     with RunContext.start(tmp_path / 'ordinary') as owner, data.local_execution(workers=1):
         executor = data.range(1)._executor
         assert executor.resource_root == Path.cwd()
         assert executor.diagnostics_root is None
         assert executor_defaults(executor).block_size == 256
         assert executor_defaults(executor).batch_rows == 8192
-        assert dataset_session(executor, tmp_path / 'scratch').diagnostics == owner.directory / 'diagnostics/native'
 
 
 @pytest.mark.parametrize('value', [0, -1, True, '4'])

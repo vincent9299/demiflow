@@ -1,104 +1,37 @@
-"""A014 · iter_stream_rows borrows an outer action; only owner completes."""
+"""The Dataset execution port owns iteration, bounded take and early close."""
+from contextlib import closing
+
 import pytest
 
 from demiflow import data
-from demiflow.data.plan import CallableSpec, FilterOp, MapOp, LogicalPlan
-from _runtime_v3_executor_scope import observed_source
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.recovery_identity import plan_identity
 from demiflow.execution.run_context import RunContext, current_action
-from demiflow.execution.stream_delivery import iter_stream_rows
 
 
-def _stream_ds():
-    return data.from_items([{"id": i} for i in range(5)]).map(
-        lambda r: r, execution="inline", concurrency=1)
+def test_public_take_records_one_action_and_rejects_negative_limit_before_work(tmp_path):
+    with RunContext.start(tmp_path / 'run') as run, data.local_execution(worker_mode='thread'):
+        ds = data.from_items([{'id':i} for i in range(6)])
+        with pytest.raises(ValueError, match='non-negative'):
+            ds.take(-1)
+        assert run.position == 0
+        assert ds.take(3) == [{'id': 0}, {'id': 1}, {'id': 2}]
+        assert run.position == 1 and current_action() is None
 
 
-def test_self_created_delivery_delivers_rows(tmp_path):
-    ds = _stream_ds()
-    with RunContext.start(tmp_path / "run") as run:
-        rows = list(iter_stream_rows(ds._executor, ds._source, ds._plan, limit=5))
-        assert [r["id"] for r in rows] == [0, 1, 2, 3, 4]
-        assert current_action() is None
-
-
-def test_zero_limit_yields_nothing(tmp_path):
-    ds = _stream_ds()
-    source, marker = observed_source(tmp_path)
-    with RunContext.start(tmp_path / "run") as run:
-        assert list(iter_stream_rows(ds._executor, source, ds._plan, limit=0)) == []
-        assert not marker.exists()
-        with run.journal._connection() as db:
-            assert db.execute('SELECT count(*) FROM runtime_actions').fetchone()[0] == 0
-
-
-def test_borrow_explicit_action_does_not_complete(tmp_path):
-    ds = _stream_ds()
-    with RunContext.start(tmp_path / "run") as run:
-        declaration = plan_identity("take", ds._source, ds._plan)
-        with run.action(declaration) as outer:
-            rows = list(iter_stream_rows(ds._executor, ds._source, ds._plan,
-                                         limit=5, action=outer))
-            assert [r["id"] for r in rows] == [0, 1, 2, 3, 4]
-            assert outer.record["result"] is None
-            outer.complete({"kind": "take", "delivery": "completed"})
-        assert outer.record["result"] is not None
-
-
-def test_borrow_via_current_action(tmp_path):
-    ds = _stream_ds()
-    with RunContext.start(tmp_path / "run") as run:
-        with run.action(plan_identity("take", ds._source, ds._plan)) as outer:
-            assert current_action() is outer
-            rows = list(iter_stream_rows(ds._executor, ds._source, ds._plan, limit=3))
-            assert [r["id"] for r in rows] == [0, 1, 2]
-            assert outer.record["result"] is None
-            outer.complete({"kind": "take", "delivery": "completed"})
-
-
-def test_borrow_rejects_foreign_source(tmp_path):
-    ds = _stream_ds()
-    foreign = data.from_items([{"x": 1}])._source
-    with RunContext.start(tmp_path / "run") as run:
-        with run.action(plan_identity("take", ds._source, ds._plan)) as outer:
-            with pytest.raises(RecoveryContractError, match="source differs"):
-                list(iter_stream_rows(ds._executor, foreign, ds._plan, action=outer))
-            outer.complete({"kind": "take", "delivery": "completed"})
-
-
-def test_borrow_rejects_foreign_plan(tmp_path):
-    ds = _stream_ds()
-    foreign_plan = ds._plan.append(FilterOp(CallableSpec.create(lambda r: True)))
-    with RunContext.start(tmp_path / "run") as run:
-        with run.action(plan_identity("take", ds._source, ds._plan)) as outer:
-            with pytest.raises(RecoveryContractError, match="plan differs"):
-                list(iter_stream_rows(ds._executor, ds._source, foreign_plan, action=outer))
-            outer.complete({"kind": "take", "delivery": "completed"})
-
-
-def test_borrow_rejects_foreign_run(tmp_path):
-    ds = _stream_ds()
-    with RunContext.start(tmp_path / "r1") as run1:
-        with run1.action(plan_identity("take", ds._source, ds._plan)) as outer:
-            outer.complete({"kind": "take", "delivery": "completed"})
-    with RunContext.start(tmp_path / "r2"):
-        with pytest.raises(RecoveryContractError, match="different run"):
-            list(iter_stream_rows(ds._executor, ds._source, ds._plan, action=outer))
-
-
-def test_invalid_limit_rejected(tmp_path):
-    ds = _stream_ds()
-    with RunContext.start(tmp_path / "run"):
-        with pytest.raises(ValueError, match="nonnegative"):
-            list(iter_stream_rows(ds._executor, ds._source, ds._plan, limit=-1))
-
-def test_borrow_rejects_same_length_different_operation_before_read(tmp_path):
-    ds = _stream_ds()
-    foreign = LogicalPlan((MapOp(CallableSpec.create(lambda row: {'different': True})),))
-    with RunContext.start(tmp_path / 'run') as run:
-        with run.action(plan_identity('take', ds._source, ds._plan)) as outer:
-            with pytest.raises(RecoveryContractError, match='plan differs'):
-                list(iter_stream_rows(ds._executor, ds._source, foreign, action=outer))
-            assert outer.record['result'] is None
-            outer.complete({'kind': 'take', 'delivery': 'not-executed'})
+@pytest.mark.parametrize('format', ['rows', 'pyarrow'])
+def test_public_delivery_closes_original_action_and_releases_workers(tmp_path, format):
+    with RunContext.start(tmp_path / 'run') as run, data.local_execution(worker_mode='thread'):
+        ds = data.range(32)
+        results = ds.iter_rows() if format == 'rows' else ds.iter_batches(batch_format=format, batch_size=2)
+        assert run.position == 0
+        with closing(results) as iterator:
+            first = next(iterator)
+            if format == 'rows':
+                assert first == {'id': 0}
+            else:
+                assert first.to_pylist() == [{'id': 0}, {'id': 1}]
+            assert current_action().record['result'] is None
+        assert run.journal.execution_action('action-1')['result']['delivery'] == 'closed'
+        assert current_action() is None and run.position == 1
+        commits = run.journal.execution_commits('action-1')
+        assert commits and all(commit['status'] == 'acked' for commit in commits)
+        assert ds._executor._last_metadata.diagnostics['state'] in {'succeeded', 'closed'}
