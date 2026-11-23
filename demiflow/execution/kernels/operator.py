@@ -413,6 +413,25 @@ class _SpoolRecords:
             self._iterator.close()
 
 
+def _exceeds_record_batch(records, services):
+    """At a tight business byte boundary charge exact typed bytes for source IPC rows."""
+    maximum = services.bounds.max_batch_bytes
+    if sum(record.encoded_bytes for record in records) <= maximum:
+        return False
+    from ..arrow_payload import batch_cache
+    from ..arrow_payload import ARROW_BATCH_MEDIA, mapped_row_bytes
+    total = 0
+    for record in records:
+        if record.payload_ref is not None and record.payload_ref.media_type == ARROW_BATCH_MEDIA:
+            batch, index = batch_cache(services.store, services.bounds, services=services).locate(record)
+            total += mapped_row_bytes(batch, index, services.bounds.max_row_bytes)
+        else:
+            total += record.encoded_bytes
+        if total > maximum:
+            return True
+    return False
+
+
 class OperatorKernel:
     """K016: the only concrete Kernel; construction performs no execution."""
 
@@ -868,7 +887,7 @@ class OperatorKernel:
             # A pathological arrival skew fails explicitly, never grows memory
             # without limit or changes the committed batch's payload/order.
             if (len(self._batch) >= self._max_batch + bounds.max_pending_events
-                    or sum(r.encoded_bytes for r in self._batch) + record.encoded_bytes > bounds.max_batch_bytes):
+                    or _exceeds_record_batch((*self._batch, record), self._services)):
                 raise _err('BUDGET_EXCEEDED', 'native replay reorder exceeds the original batch window')
             if not self._batch:
                 interval = self._spec.configuration.get('flush_interval')
@@ -889,7 +908,7 @@ class OperatorKernel:
             index=len(self._batch)
             if index >= len(expected) or member(record,self._services.bounds) != expected[index]:
                 raise _err('INCOMPATIBLE_HISTORY','Native replay batch changed original record membership or payload')
-        if sum(r.encoded_bytes for r in self._batch) + record.encoded_bytes > self._services.bounds.max_batch_bytes:
+        if _exceeds_record_batch((*self._batch, record), self._services):
             raise _err("BUDGET_EXCEEDED", "declared business batch exceeds max_batch_bytes")
         if not self._batch:
             interval=self._spec.configuration.get('flush_interval')
@@ -1407,7 +1426,7 @@ class OperatorKernel:
         self._batch = list(image["batch"])
         self._batch_scan = None
         if (len(self._batch) > self._max_batch + self._services.bounds.max_pending_events
-                or sum(r.encoded_bytes for r in self._batch) > self._services.bounds.max_batch_bytes):
+                or _exceeds_record_batch(self._batch, self._services)):
             raise _err('BUDGET_EXCEEDED', 'restored native batch exceeds the original batch window')
         self._batch_ordinal = image.get('batch_ordinal',image.get('call_ordinal',0))
         if type(self._batch_ordinal) is not int or self._batch_ordinal < 0:

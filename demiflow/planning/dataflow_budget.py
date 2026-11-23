@@ -165,6 +165,17 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
         # Queue tasks were settled by their original authority already;
         # this terminal only publishes the result manifest, without Arrow.
         native_publication = publishes_natively(request.sink)
+    if request.kind == 'write_lance' and len(request.plan.operations) == 1:
+        from ..data.plan import MapBatchesOp
+        from ..data.sources import LanceSource
+        from ..lance.model import LanceScanSpec, LanceWriteSpec
+        operation = request.plan.operations[0]
+        sink = next((program.value for program in request.programs if program.name == 'write_lance'), None)
+        if (type(request.source) is LanceSource and type(request.source.query) is LanceScanSpec
+                and request.source.native_options is None and type(operation) is MapBatchesOp
+                and operation.batch_format == 'pyarrow'
+                and operation.native_options is None and type(sink) is LanceWriteSpec and sink.schema is not None):
+            configuration['input_carrier'] = 'mapped_arrow.v1'
     if native_publication:
         from ..execution.dataflow_publication_budget import FIELD, SCHEMA
         # A native consumer can still hold its previous yielded Arrow

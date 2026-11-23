@@ -641,6 +641,8 @@ class FileReader(_BaseReader):
 
 
 class LanceReader(_BaseReader):
+    batch_carrier = 'original_scan_batches'
+
     """Fixed-version fragment/row offset; projection/filter/search keep original semantics."""
 
     def _setup(self, split: SourceSplit) -> None:
@@ -663,6 +665,9 @@ class LanceReader(_BaseReader):
             from .arrow_payload import ArrowBatchCache, ArrowPayload
             ref = ArtifactRef(**saved)
             cache = ArrowBatchCache(self._services.store, self._services.bounds, services=self._services)
+            from .arrow_payload import ARROW_BATCH_MEDIA
+            if ref.media_type != ARROW_BATCH_MEDIA:
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'Lance cursor does not reference a source batch')
             batch, header = cache.load(ref)
             if (header['source_id'] != self._snapshot.source_id or header['split_id'] != split.split_id
                     or header['version'] != self._version or header['fragment_id'] != target_fragment
@@ -714,7 +719,8 @@ class LanceReader(_BaseReader):
             self._schema_ref = self._schemas.put(batch.schema)
             from .arrow_payload import publish_batch, ArrowPayload, fallback_row
             carrier = (publish_batch(batch, reader=self, fragment_id=fragment_id, start=start)
-                       if getattr(self, '_arrow_enabled', True) else None)
+                       if (self.batch_carrier is not None or (batch.num_rows > 1 and
+                           self._snapshot.immutable_identity.get('record_carrier_v1') == 'arrow_batch')) else None)
             if carrier is not None:
                 ref, sizes = carrier
                 for size in sizes:
@@ -725,6 +731,18 @@ class LanceReader(_BaseReader):
                 if part.nbytes > self._services.bounds.max_row_bytes:
                     raise DataflowError('BUDGET_EXCEEDED', 'Lance row exceeds max_row_bytes')
                 yield fallback_row(batch, index)
+        def scan_batches(fragments=None):
+            batches = _iter_scan(exact, batch_size=batch_rows, fragments=fragments)
+            if self.batch_carrier == 'mapped_arrow.v1':
+                # A scanner may admit just one worst-case row per fetch. Group
+                # its *actual* small buffers before creating an IPC artifact.
+                from .arrow_payload import _MAX_ROWS as ARROW_MAX_ROWS
+                from .arrow_payload import compact_scan_batches
+                target = limit_value(self._services, 'batch_rows', self._plan.query.batch_size or ARROW_MAX_ROWS)
+                yield from compact_scan_batches(batches, services=self._services, target_rows=target)
+            else:
+                yield from batches
+
         if isinstance(exact, LanceVectorSearchSpec):
             index = 0
             for batch in _iter_vector(exact, batch_size=batch_rows):
@@ -734,7 +752,7 @@ class LanceReader(_BaseReader):
             return
         if self._global:
             row_offset = 0
-            for batch in _iter_scan(exact, batch_size=batch_rows):
+            for batch in scan_batches():
                 for row in rows(batch, 0, row_offset):
                     yield 0, row_offset, row
                     row_offset += 1
@@ -746,7 +764,7 @@ class LanceReader(_BaseReader):
             if fragment is None:
                 raise DataflowError("SOURCE_CHANGED", f"Lance fragment missing: {fragment_id}")
             row_offset = 0
-            for batch in _iter_scan(exact, batch_size=batch_rows, fragments=[fragment]):
+            for batch in scan_batches([fragment]):
                 for row in rows(batch, fragment_id, row_offset):
                     yield fragment_id, row_offset, row
                     row_offset += 1

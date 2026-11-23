@@ -78,10 +78,10 @@ class WorkerGraphRunner:
         self._consumed_deliveries = set()
         self._memory_frontiers = {}
         physical = executor._physical
-        from ..arrow_payload import allows_batch_carrier
-        arrow_enabled = allows_batch_carrier(executor._graph, physical)
+        from ..arrow_payload import batch_carrier
+        carrier = batch_carrier(executor._graph, physical)
         for reader in executor._readers.values():
-            reader._arrow_enabled = arrow_enabled
+            reader.batch_carrier = carrier
             reader._shared_frame_call = self._frame_call
         self._park_mode = (any(e.mode == 'durable_incremental' for e in physical.exchanges)
             and sum(s.resident_bytes * s.replica_target for s in physical.stages)
