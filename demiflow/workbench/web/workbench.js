@@ -1640,7 +1640,7 @@
         if(data().run&&!run&&!busy){await openRun(data().run,data().attempt,data().mode);return;}
         if(force&&run)await observer.refresh();
         if(run&&!data().graph)await fetchGraph(state.capture(),{preserveSelection:true});
-        else if(activePage==='flows'&&(graphChanged||force||!data().graph)&&!run&&!busy){
+        else if(activePage==='flows'&&(graphChanged||force||!data().graph)&&!run&&!busy&&!previewBusy){
           if(Object.keys(getDraft().values).length)message('项目内容已变化；配置草稿保留，请核对后再保存。');
           else if(working.entry)await fetchGraph(state.capture(),{preserveSelection:true,refresh:true});
         }
