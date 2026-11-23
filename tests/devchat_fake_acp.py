@@ -53,7 +53,8 @@ for line in sys.stdin:
                 sessionUpdate='agent_message_chunk',messageId='message-2',content=dict(type='text',text='已找到输入，下一步可以开发过滤流程。')))))
             send(dict(id=value['id'],result=dict(stopReason='end_turn')))
             continue
-        if '## 当前版本 DemiFlow 原生 API' in params['prompt'][0]['text']:
+        (Path.home() / 'received-request.txt').write_text(params['prompt'][0]['text'])
+        if '## 当前版本 DemiFlow 原生 API' in params['prompt'][0]['text'] or '# DemiForge 项目开发' in params['prompt'][0]['text']:
             (Path.home() / 'received-context.txt').write_text(params['prompt'][0]['text'])
         if 'stream fixture' in params['prompt'][0]['text']:
             send(dict(method='session/update',params=dict(sessionId='acp-fixture',update=dict(
