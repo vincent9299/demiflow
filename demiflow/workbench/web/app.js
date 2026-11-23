@@ -902,7 +902,7 @@
     dialog.append($('h2','项目设置'),$('p',project.name),path);
     if(projectManageEnabled){
       const pySection=$('section',undefined,'project-python-settings');
-      pySection.append($('strong','开发测试 Python 环境（沙箱只读）'));
+      pySection.append($('strong','项目 Python 环境（开发测试与数据分析共用）'));
       const modeSelect=$('select',undefined,'project-python-select');modeSelect.setAttribute('aria-label','Python 环境模式');
       modeSelect.append(new Option('继承工作台默认环境','default'),new Option('自定义项目虚拟环境 (venv / conda)','custom'),new Option('不挂载 Python 环境','disabled'));
       const currentPy=project.python;
@@ -914,7 +914,7 @@
       const syncPyUi=()=>{
         const m=modeSelect.value;
         pyInput.hidden=m!=='custom';
-        pyHint.textContent=m==='default'?('当前默认：'+(projectDefaultPython||'工作台宿主 Python')+'（仅开放只读执行与 pytest，不可写入环境目录）'):m==='disabled'?'沙箱内仅保留系统 /usr/bin，不挂载项目 Python 环境。':'填写该项目的 venv 或 conda Python 绝对路径，工作台将以只读方式加入开发沙箱 PATH。';
+        pyHint.textContent=m==='default'?('当前默认：'+(projectDefaultPython||'工作台宿主 Python')+'（同时用于开发测试与 Notebook 内核，环境目录只读）'):m==='disabled'?'开发沙箱不挂载 Python；Notebook 内核也将暂停启动，不会回退到平台 Python。':'填写该项目的 venv 或 conda Python 绝对路径（需安装 ipykernel 供 Notebook 内核使用，工作台将以只读方式挂载）。';
       };
       modeSelect.onchange=syncPyUi;syncPyUi();
       const savePy=button('保存 Python 环境',async()=>{
@@ -925,13 +925,45 @@
         try{
           await api('project-python',{},{workspace_id:project.workspace_id,expected:projectDigest,python:payloadPy});
           await refreshProjects();
-          pyMsg.textContent='已保存，新发起的开发回合将使用此只读 Python 环境。';pyMsg.dataset.tone='ok';pyMsg.hidden=false;
+          pyMsg.textContent='已保存。新发起的开发回合及重启后的 Notebook 内核将使用此环境。';pyMsg.dataset.tone='ok';pyMsg.hidden=false;
         }catch(err){
           pyMsg.textContent=err?.message||'保存失败';pyMsg.dataset.tone='error';pyMsg.hidden=false;
         }finally{savePy.disabled=false;}
       },pySection);
       pySection.insertBefore(modeSelect,savePy);pySection.insertBefore(pyInput,savePy);pySection.insertBefore(pyHint,savePy);pySection.append(pyMsg);
       dialog.append(pySection);
+
+      const nbSection=$('section',undefined,'project-python-settings');
+      nbSection.append($('strong','Notebook 内核沙箱（只读硬隔离）'));
+      const nbSelect=$('select',undefined,'project-python-select');nbSelect.setAttribute('aria-label','Notebook 内核沙箱模式');
+      nbSelect.append(new Option('只读沙箱（默认，Landlock 硬隔离项目源码）','readonly'),new Option('关闭沙箱（允许内核自由读写）','off'));
+      const currentSb=project.notebook_sandbox||{mode:'readonly',write_paths:[]};
+      nbSelect.value=currentSb.mode==='off'?'off':'readonly';
+      const nbWrites=$('input',undefined,'project-python-input');nbWrites.type='text';nbWrites.setAttribute('aria-label','允许内核写入的项目相对子目录');
+      nbWrites.placeholder='可选，逗号分隔项目相对子目录，如 notebooks/outputs, data/annotations';
+      nbWrites.value=(currentSb.write_paths||[]).join(', ');
+      const nbHint=$('p','','muted small project-python-hint');
+      const nbMsg=$('p','','small project-python-msg');nbMsg.hidden=true;
+      const syncNbUi=()=>{
+        const ro=nbSelect.value==='readonly';
+        nbWrites.hidden=!ro;
+        nbHint.textContent=ro?'项目源码、其他 Notebook、数据目录与 Python 环境全部只读；仅内核私有临时目录与上方白名单子目录可写。':'关闭后内核拥有与宿主相同的读写权限，仅在确需无隔离执行时使用。';
+      };
+      nbSelect.onchange=syncNbUi;syncNbUi();
+      const saveNb=button('保存内核沙箱配置',async()=>{
+        const mode=nbSelect.value;
+        const write_paths=mode==='readonly'?nbWrites.value.split(/[,，\n]/).map(s=>s.trim()).filter(Boolean):[];
+        saveNb.disabled=true;nbMsg.hidden=true;
+        try{
+          await api('project-notebook-sandbox',{},{workspace_id:project.workspace_id,expected:projectDigest,mode,write_paths});
+          await refreshProjects();
+          nbMsg.textContent='已保存，重启或新建 Notebook 内核后生效。';nbMsg.dataset.tone='ok';nbMsg.hidden=false;
+        }catch(err){
+          nbMsg.textContent=err?.message||'保存失败';nbMsg.dataset.tone='error';nbMsg.hidden=false;
+        }finally{saveNb.disabled=false;}
+      },nbSection);
+      nbSection.insertBefore(nbSelect,saveNb);nbSection.insertBefore(nbWrites,saveNb);nbSection.insertBefore(nbHint,saveNb);nbSection.append(nbMsg);
+      dialog.append(nbSection);
     }
     if(projectRemovalEnabled)button('移除项目 '+project.name,()=>{dialog.close();removeProjectDialog(project);},dialog);
     else dialog.append($('p','此服务未授予项目管理权限。','notice'));

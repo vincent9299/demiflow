@@ -123,6 +123,7 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
                 active_cred = cred_path
                 read.append(cred_path)
     readonly = turn.get('operation') in ('compact', 'notebook_cell', 'notebook_cell_cli')
+    notebook_op = turn.get('operation') in ('notebook_cell', 'notebook_cell_cli')
     writes = [] if readonly else [root / name for name in project['writes']]
     protected = [root / name for name in ('.git', '.forge', 'AGENTS.md', 'workspace.json', 'PIPELINE_SPEC.md')]
     protected.extend(path for path in sources if path.name in {'AGENTS.md', 'PIPELINE_SPEC.md'})
@@ -150,7 +151,7 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
     unique = lambda paths: tuple(sorted({str(path.absolute()) for path in paths}))
     duration = seconds if seconds is not None else max(.1, turn['created'] + deployment.limits.turn_seconds - time.time())
     return SandboxSpec(read_paths=unique(read), write_paths=unique(writes),
-        runtime_paths=runtime_paths(config, project_python=effective_project_python(project)),
+        runtime_paths=runtime_paths(config, project_python=None if notebook_op else effective_project_python(project)),
         protected_paths=unique(protected), denied_paths=unique(denied), private_home=str(private_home),
         role='readonly' if readonly else 'developer',
         seconds=min(3600, max(.1, duration)), rss_bytes=deployment.limits.rss_bytes,
@@ -421,7 +422,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         st_config = {**st_config, '_cell_bin': str(control_bridge.bin)}
                 else:
                     standby_lease = tempfile.TemporaryFile(dir=st_home)
-                st_py = effective_project_python(st_project)
+                st_py = None if st_notebook else effective_project_python(st_project)
                 if st_py:
                     st_config = {**st_config, '_project_python': st_py}
                 process = launch_provider(
@@ -854,7 +855,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                             config = model_broker.child_config
                         if cell_cli:
                             config = {**config, '_cell_bin': str(control_bridge.bin)}
-                    proj_py = effective_project_python(project)
+                    proj_py = None if notebook else effective_project_python(project)
                     if proj_py:
                         config = {**config, '_project_python': proj_py}
                     process = launch_provider(mode=deployment.mode, adapter=adapter, config=config,

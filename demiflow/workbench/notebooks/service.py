@@ -88,6 +88,7 @@ class Notebooks:
                 if current.grants != grants:
                     self._grants(current.state, grants)
                     current.grants = grants
+                self._write_kernel_config(project, root, current.state)
                 return current
             if current:
                 self._retire(current)
@@ -142,12 +143,15 @@ class Notebooks:
             kernel_settings = state / 'settings/@jupyterlab/apputils-extension'
             kernel_settings.mkdir(parents=True, exist_ok=True)
             self._create(kernel_settings/'kernels-settings.jupyterlab-settings', {'commsOverSubshells': 'disabled'})
-            # Native kernel imports the same reviewed platform and works at the
-            # project root. This is a trusted Python environment, not a sandbox.
+            # Native kernel uses the project's configured Python (never silently
+            # falling back when disabled or missing ipykernel) and enforces
+            # configurable Landlock read-only confinement on the project root.
+            self._write_kernel_config(project, root, state)
+            launcher = Path(__file__).with_name('kernel_launcher.py')
             kernelspec = state / 'data/kernels/python3'
             kernelspec.mkdir(parents=True, mode=0o700, exist_ok=True)
-            self._create(kernelspec / 'kernel.json', dict(argv=[str(self.python), '-m', 'ipykernel_launcher',
-                '-f', '{connection_file}'], display_name='Python 3', language='python',
+            self._create(kernelspec / 'kernel.json', dict(argv=[str(self.python), '-I', '-B', str(launcher),
+                str(state / 'kernel-config.json'), '{connection_file}'], display_name='Python 3', language='python',
                 env={'PYTHONPATH': str(code_root), 'DEMIFLOW_NOTEBOOK_ROOT': str(root)}))
             env = dict(os.environ, JUPYTER_RUNTIME_DIR=str(state/'runtime'),
                 JUPYTER_CONFIG_DIR=str(state/'config'), JUPYTER_DATA_DIR=str(state/'data'),
@@ -213,6 +217,55 @@ class Notebooks:
         temporary.write_text(json.dumps(grants))
         temporary.chmod(0o600)
         temporary.replace(state / 'grants.json')
+
+    def _project_kernel_policy(self, project, root):
+        from demiflow.workbench.projects import registry as console
+        from demiflow.workbench.projects import workspace as ws
+        item = {}
+        try:
+            item = self.server.inventory()['projects'].get(project, {})
+        except Exception:
+            item = {}
+        configured_py = item.get('python')
+        if configured_py is None:
+            kernel_python = str(self.python)
+        elif configured_py == '':
+            kernel_python = ''
+        else:
+            kernel_python = configured_py
+        sandbox = console.notebook_sandbox(item)
+        locations = []
+        try:
+            _, control = ws.load_workspace_control(root)
+            for loc in control.get('locations', {}).values():
+                locations.append(str(ws.location_root(root, loc)))
+        except Exception:
+            pass
+        return kernel_python, sandbox, sorted(set(locations))
+
+    def _write_kernel_config(self, project, root, state):
+        kernel_python, sandbox, locations = self._project_kernel_policy(project, root)
+        code_root = Path(__file__).resolve().parents[3]
+        payload = {
+            'python': kernel_python,
+            'root': str(root),
+            'code_root': str(code_root),
+            'runtime_dir': str(state / 'runtime'),
+            'tmp_dir': str(state / 'kernel-tmp'),
+            'sandbox_mode': sandbox['mode'],
+            'write_paths': sandbox['write_paths'],
+            'locations': locations,
+        }
+        temporary = state / 'kernel-config.tmp'
+        temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+        temporary.chmod(0o600)
+        temporary.replace(state / 'kernel-config.json')
+
+    def refresh_kernel_config(self, project):
+        with self.lock:
+            instance = self.instances.get(project)
+            if instance is not None and instance.process.poll() is None:
+                self._write_kernel_config(project, instance.root, instance.state)
 
     @staticmethod
     def _create(path, value):

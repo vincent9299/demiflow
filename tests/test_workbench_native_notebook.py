@@ -402,6 +402,8 @@ def test_dictionary_resolved_request_stays_fixed_across_rebind_and_navigation(br
 
 def test_reuse_annotation_tool_preset_in_native_notebook(browser,native_project):
     root,path,key=native_project
+    # This test asserts an annotation widget writing directly into project root.
+    registry.set_notebook_sandbox(path,key,expected=registry.projects(registry.load_registry(path))['digest'],mode='off')
     folder=root/'data_tools'
     folder.mkdir()
     (folder/'ratings.py').write_text(
