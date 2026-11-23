@@ -314,7 +314,7 @@ def _invoke_scoped(instance, value, records, spec):
 def _business_miss(exc, cfg):
     from demiflow.data.runtime_contract import RuntimeContractError
     from demiflow.execution.recovery_contract import RecoveryContractError
-    from demiflow.execution.request_limits import ServiceStopped
+    from demiflow.services.request_limits import ServiceStopped
     from demiflow.operator_llm.journal import UncertainPromptCall
     # Only the callback deadline class certifies that cancellation drained;
     # ordinary control/budget/unknown-effect failures can never become a miss.

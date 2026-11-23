@@ -22,7 +22,7 @@ class StreamStats:
         self.miss[reason] = self.miss.get(reason, 0) + 1
 
     def observe_duration(self, name, seconds):
-        from .request_limits import LatencySummary
+        from demiflow.execution.journal.run_telemetry import LatencySummary
         if name not in self.timings:
             self.timings[name] = LatencySummary()
         self.timings[name].observe(seconds)

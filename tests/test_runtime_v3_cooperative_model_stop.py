@@ -14,7 +14,7 @@ from demiflow.execution.dataflow_authority import _ref_to_json
 from demiflow.execution.contracts.dataflow_failures import failure_payload, restore_failure
 from demiflow.execution.operator_bindings.dataflow_model_journal import _rpc_operation_id
 from demiflow.execution.kernels.async_instance import AsyncInstance
-from demiflow.execution.request_limits import COOPERATIVE_STOP_REASON, COOPERATIVE_RUN_STOP_REASON, ServiceStopped, drain_on_service_stop
+from demiflow.services.request_limits import COOPERATIVE_STOP_REASON, COOPERATIVE_RUN_STOP_REASON, ServiceStopped, drain_on_service_stop
 from test_runtime_v3_private_embedding_journal import (
     service, interrupted_run, private_graph, private_event, bind_private_embedding_contracts, charged)
 from test_runtime_v3_native_rpc_replay import event
@@ -207,7 +207,7 @@ def test_handle_requires_original_run_cancel_fact_to_drain(tmp_path):
                                     'terminal handle closed before completion', 'terminal deadline exceeded'])
 def test_original_worker_cancel_reason_survives_cleanup_drain(reason):
     from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
-    from demiflow.execution.request_limits import cooperative_stop_error
+    from demiflow.services.request_limits import cooperative_stop_error
     services=SimpleNamespace(bounds=SimpleNamespace(timeout_ms=1000,max_pending_events=8,
         max_row_bytes=1024,max_batch_bytes=4096),check_stop=lambda:None)
     executor=DataflowWorkerExecutor(services=services,mailbox=SimpleNamespace())

@@ -18,7 +18,8 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 import httpx
-from demiflow.execution.request_limits import RequestGate, ServiceStopped, LatencySummary
+from demiflow.services.request_limits import RequestGate, ServiceStopped
+from demiflow.execution.journal.run_telemetry import LatencySummary
 from .connection_manager import ConnectionManager, ConnectionCapacityError
 
 

@@ -16,7 +16,7 @@ import sys
 import tempfile
 import time
 
-from demiflow.execution.request_limits import RequestGate
+from demiflow.services.request_limits import RequestGate
 from .config import SearchConfig, baseline_id, RUNTIME_VERSION, runtime_id, digest, resolve, public, validate_language
 
 

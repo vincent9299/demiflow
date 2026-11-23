@@ -14,7 +14,7 @@ from .cosio import COSCreds, COSIO
 from .raw_contract import origin, wire_quantum
 from .web import URLPolicy
 from ..execution.recovery_contract import RecoveryContractError
-from ..execution.request_limits import RequestGate
+from demiflow.services.request_limits import RequestGate
 from ..secrets import resolve, Secret
 
 

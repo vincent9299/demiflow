@@ -121,7 +121,7 @@ async def test_stream_actor_late_binding_reuses_original_row_fact(tmp_path, engi
     from demiflow.collect.operators import SearchWeb
     from demiflow.execution.recovery_contract import identity
     from demiflow.execution.row_scope import RowScope, set_row_scope
-    from demiflow.execution.stream_resources import StreamResources
+    from demiflow.execution.worker.stream_resources import StreamResources
 
     session = _session(tmp_path, engines)
     actor = SearchWeb('queries', 'found', session, None, 5, 2)

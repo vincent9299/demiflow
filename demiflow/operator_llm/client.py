@@ -533,11 +533,11 @@ class AsyncOperatorLLMClient:
         # must not discard a paid response already in flight. Keep the original
         # request deadline and persist its outcome; do not publish a row after
         # cancellation. Explicit caller cancellation still aborts promptly.
-        from demiflow.execution.request_limits import drain_on_service_stop
+        from demiflow.services.request_limits import drain_on_service_stop
         return await drain_on_service_stop(self._execute(request), enabled=bool(self.journal))
 
     async def execute_retry(self, retry):
-        from demiflow.execution.request_limits import drain_on_service_stop
+        from demiflow.services.request_limits import drain_on_service_stop
         return await drain_on_service_stop(self._execute(retry.request, retry=retry), enabled=True)
 
     async def _execute(self,request, *, retry=None):

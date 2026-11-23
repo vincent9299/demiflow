@@ -557,7 +557,7 @@ class PromptActor(BoundOperatorLLMMap):
         self._call_validations = {}
         self.environment = None
         self.label = operation.prompt_name
-        from demiflow.execution.stream_resources import CallMetrics
+        from demiflow.execution.journal.run_telemetry import CallMetrics
         self.call_metrics = CallMetrics()
 
     async def __call__(self, row):
@@ -587,7 +587,7 @@ class PromptActor(BoundOperatorLLMMap):
         except Exception as exc:
             self._observe_call(getattr(exc,'call',{}), error=True)
             from ..services import ModelServiceError
-            from demiflow.execution.request_limits import ServiceStopped
+            from demiflow.services.request_limits import ServiceStopped
             import sqlite3
             from ..data.runtime_contract import RuntimeContractError
             if isinstance(exc, RuntimeContractError) or isinstance(exc, (ModelServiceError, ServiceStopped, OSError, sqlite3.Error)) and not isinstance(exc, TimeoutError):

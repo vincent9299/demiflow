@@ -134,7 +134,7 @@ async def test_gate_stalls_reports_held_slots():
 
 async def test_stream_clients_close_only_after_the_last_real_borrower(clean_policy, monkeypatch):
     from demiflow.collect import llm
-    from demiflow.execution.stream_resources import StreamResources
+    from demiflow.execution.worker.stream_resources import StreamResources
     name = 'lifecycle-test'
     monkeypatch.setattr(llm, '_ENDPOINT_CFG', {})
     llm.register_endpoint(name, base_url='http://localhost', model='test')

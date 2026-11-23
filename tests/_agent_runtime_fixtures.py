@@ -51,7 +51,7 @@ def resume_collect(dataset, reference):
 
 def call_metrics(row):
     """Aggregate returned worker trace, never the unexecuted driver declaration."""
-    from demiflow.execution.stream_resources import CallMetrics
+    from demiflow.execution.journal.run_telemetry import CallMetrics
     call = row.get('call') or row['error']['call']
     metrics = CallMetrics()
     turns = call.get('environment', {}).get('turns')

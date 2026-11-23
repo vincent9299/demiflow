@@ -86,7 +86,7 @@ def test_early_stopped_reserve_returns_original_error_reply_and_releases_waiter(
     from concurrent.futures import ThreadPoolExecutor
     from demiflow.execution.dataflow_hosts import ControlMailbox
     from demiflow.execution.contracts.dataflow_failures import restore_failure
-    from demiflow.execution.request_limits import ServiceStopped
+    from demiflow.services.request_limits import ServiceStopped
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority,store,lease):
         admitted=event(run,store,'admitted')
         assert authority.dispatch(admitted).status=='ok'

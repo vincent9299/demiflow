@@ -171,7 +171,7 @@ def test_focused_reading_fallback_and_invalid_policy():
 def test_platform_boundary_has_no_business_imports():
     import ast
     root=Path(__file__).parents[1]/'demiflow'
-    for path in [* (root/'collect').glob('*.py'),* (root/'services').rglob('*.py'),root/'execution/stream_resources.py']:
+    for path in [* (root/'collect').glob('*.py'),* (root/'services').rglob('*.py'),root/'execution/worker/stream_resources.py']:
         tree=ast.parse(path.read_text())
         for node in ast.walk(tree):
             if isinstance(node,ast.ImportFrom):

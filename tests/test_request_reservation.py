@@ -1,7 +1,7 @@
 import asyncio
 import time
 
-from demiflow.execution.request_limits import RequestGate
+from demiflow.services.request_limits import RequestGate
 
 
 def test_unpaced_preparations_overlap_without_exceeding_capacity():

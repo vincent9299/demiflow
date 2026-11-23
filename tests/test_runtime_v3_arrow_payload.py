@@ -378,7 +378,7 @@ def test_real_committed_cut_inside_arrow_batch_resumes_once(tmp_path, monkeypatc
     # Slow the real reader only; no fake graph, source, cut or checkpoint ACK.
     probe = tmp_path/'arrow-probe'/'sitecustomize.py'
     with probe.open('a') as stream:
-        stream.write("\nfrom demiflow.execution.source_readers import LanceReader\nimport time\n_original_next=LanceReader.next_record\ndef _slow_next(self):\n    time.sleep(.02)\n    return _original_next(self)\nLanceReader.next_record=_slow_next\n")
+        stream.write("\nfrom demiflow.execution.sources.source_readers import LanceReader\nimport time\n_original_next=LanceReader.next_record\ndef _slow_next(self):\n    time.sleep(.02)\n    return _original_next(self)\nLanceReader.next_record=_slow_next\n")
     table = source_table(64)
     uri, target = str(tmp_path/'input.lance'), str(tmp_path/'output.lance')
     lance.write_dataset(table, uri)

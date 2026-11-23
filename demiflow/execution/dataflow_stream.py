@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from .contracts.dataflow_errors import DataflowError
 from .action_driver.dataflow import execute_action
 from .kernels.async_instance import AsyncInstance
-from .request_limits import ServiceStopped
+from demiflow.services.request_limits import ServiceStopped
 from .stream import StreamStats
 
 
@@ -110,7 +110,7 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
         body_failed = True
         failure = exc
         if isinstance(exc, ServiceStopped) and str(exc) == 'operator_stop_file' and handle is not None:
-            from .request_limits import COOPERATIVE_STOP_REASON
+            from demiflow.services.request_limits import COOPERATIVE_STOP_REASON
             try:
                 handle._execution.cancel(COOPERATIVE_STOP_REASON)
             except BaseException as cleanup:

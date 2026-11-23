@@ -219,3 +219,19 @@ class SearchRuntime:
         finally:
             await self.task
             self.task = None
+
+
+def prepare_search_bindings(actors):
+    """Select actual search owners once; bind each at its original start boundary."""
+    from functools import partial
+    from demiflow.collect.search_contract import is_native_search_actor
+    from demiflow.execution.native_queue.queue_producer import QueueProducer
+    from demiflow.execution.run_context import current_action
+    searches = {id(actor) for actor in actors if is_native_search_actor(actor)}
+    if not searches:
+        return {}
+    producer = next((actor for actor in actors if type(actor) is QueueProducer), None)
+    def bind(actor):
+        effects = SearchEffects.for_actor(current_action(), actor, actor.node_id, producer=producer)
+        actor.bind_search_effects(effects)
+    return {id(actor): partial(bind, actor) for actor in actors if id(actor) in searches}

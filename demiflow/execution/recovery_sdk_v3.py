@@ -46,7 +46,7 @@ _REVISIONS = {
         '1c38779585642c638837951296a61ac58cf3f47298fcab83ed1153f69e14e1d0',
         '0ab9e3db6f4dffe74c2f614ac887ce0a69749910b083db63eaa95c819652cbcf'),
     'demiflow.data.result_cache': (
-        '2ac2ab41bb6a1b4eda601b8c06f78e7c0bc74caf638d9c54afe6360190a4912b',
+        '87d713a525abf2ec713521b77da1008fbd0a04e399b1b9cd97ec6bc54af04270',
         'dc6858f90a4ea48fb5c950027e405084d9f820ba26b3159592b38a9f42d46788'),
 }
 _REVISIONS.update({'demiflow.data.read_api': ('a2ca56b3a7b3faf33fafca97480bc56ceda4cbd16ad02d4d600f618912538a78',
@@ -278,8 +278,9 @@ def function_pin(fn, source, source_hash, code):
     if fn.__module__ == 'demiflow.data.dataset' and root_name == 'Dataset.fit':
         # The additive v4 method never existed in the audited v3 file.
         return source_hash, code
-    if fn.__module__ == 'demiflow.data.result_cache' and root_name == '_state_policy':
-        # Its runtime type test changed; the function itself keeps its new pin.
+    if fn.__module__ == 'demiflow.data.result_cache' and root_name in {
+            '_state_policy', 'CacheCall.bind_checkpoint_cache', 'CacheCall.snapshot_state', 'CacheCall.restore_state'}:
+        # Runtime state binding changed; these definitions retain their actual pins.
         return source_hash, code
     retained = _RETAINED_METHODS.get(fn.__module__)
     if retained is not None:
@@ -520,7 +521,18 @@ _LAYOUT_SOURCE_TYPES = {'demiflow.execution.pipeline.package_loader.pipeline_bun
                                                                                    '__delattr__': ['b3643ae6b000d3dbaef565d5123848369a914f27b73d7c0883eff96b5d23362f',
                                                                                                    'b3643ae6b000d3dbaef565d5123848369a914f27b73d7c0883eff96b5d23362f'],
                                                                                    '__hash__': ['986337d6ad34cee1491223e7ff2ced824e3a808a3584c4c16592b7838a0b2cab',
-                                                                                                '986337d6ad34cee1491223e7ff2ced824e3a808a3584c4c16592b7838a0b2cab']}}}
+                                                                                                '986337d6ad34cee1491223e7ff2ced824e3a808a3584c4c16592b7838a0b2cab']}},
+ 'demiflow.execution.worker.stream_resources.ObservedQueue': {'old_module': 'demiflow.execution.request_limits',
+                                                              'old_source': '54bc1fa489826c74c7d67432fdeaba9fb9e54131d681936b5c2ea18180c117e9',
+                                                              'source': 'eae0a023e00556cb643445e64c076695aec23873731ca48a2caf029a2bc5dfe4',
+                                                              'methods': {'__init__': ['e57607d3509439597143d7ee612488134c85410e28ccbf043567b8c32b9a48c7',
+                                                                                       'e57607d3509439597143d7ee612488134c85410e28ccbf043567b8c32b9a48c7'],
+                                                                          'full': ['0ac55e8e05d6c22d5d7ea8695916bfb5f01fcfd97c6c4375a6e4d8f9a7e37b81',
+                                                                                   '0ac55e8e05d6c22d5d7ea8695916bfb5f01fcfd97c6c4375a6e4d8f9a7e37b81'],
+                                                                          'put_nowait': ['d203473f5863a2c2c391765c94e7d049fa22e061fcd4093e4a36161bb91961aa',
+                                                                                         '6dc19610b1f055108b41dce283f6fe31f77a1b76cdb577635a06549224c802bb'],
+                                                                          'get_nowait': ['a34929c61ee5e66df278413202ab479035d962d86a2edcbae66e127c430cc438',
+                                                                                         '77a333d49524d51dbca48bd3cabe16888a3f14302718cc5ff73ff0a5d6fa4495']}}}
 
 def _layout_source_type(value):
     module_name = getattr(value, '__module__', None)
@@ -574,6 +586,14 @@ def _layout_source_type(value):
                 if (method.__globals__ is not vars(module)
                         or code != identity(code_record(declared))):
                     return None
+                if method.__closure__:
+                    if method.__code__.co_freevars != ('__class__',):
+                        return None
+                    try:
+                        if method.__closure__[0].cell_contents is not cls:
+                            return None
+                    except ValueError:
+                        return None
                 # Python -OO removes docstrings. Authenticate against the
                 # same compilation mode, while preserving that mode's old pin.
                 original_code = identity(code_record(default_codes[method.__qualname__]))

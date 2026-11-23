@@ -244,7 +244,7 @@ class AsyncInstance:
                 _CALLBACK_WORK.reset(token)
 
     def _cancellation_reason(self):
-        from ..request_limits import cooperative_stop_error
+        from demiflow.services.request_limits import cooperative_stop_error
         return cooperative_stop_error(self._stop_reason)
 
     def start(self):
@@ -307,7 +307,7 @@ class AsyncInstance:
         """Stop admission; only fixed cooperative reasons drain paid calls."""
         if self._shared is not None:
             return self._shared.base.request_stop(reason)
-        from ..request_limits import cooperative_stop_error
+        from demiflow.services.request_limits import cooperative_stop_error
         if not self._stopping.is_set():
             self._stop_reason = reason if cooperative_stop_error(reason) is not None else None
         self._stopping.set()

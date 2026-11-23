@@ -1774,7 +1774,7 @@ class WorkerGraphRunner:
 
     def close(self):
         self.e._cancel_event.set()
-        from demiflow.execution.request_limits import cooperative_stop_error
+        from demiflow.services.request_limits import cooperative_stop_error
         if cooperative_stop_error(self.e._cancel_reason) is None:
             self.e._mailbox.cancel_pending()
         self.wake()

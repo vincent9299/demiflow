@@ -13,7 +13,7 @@ from contextlib import closing
 import pytest
 
 from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.run_telemetry import Telemetry, latest, series
+from demiflow.execution.journal.run_telemetry import Telemetry, latest, series
 from demiflow.workbench.projects import index
 from demiflow.workbench.runs import domain as run_domain
 from demiflow.workbench.runs import requests as run_requests

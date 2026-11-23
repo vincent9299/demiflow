@@ -57,7 +57,7 @@ PRE_V3_MODULES = {
         'demiflow.data.dataset',
         'demiflow.data.execution_contract',  # TYPE_CHECKING only: original StreamStats identity
         'demiflow.execution.dataflow_stream',
-        'demiflow.execution.request_limits',
+        'demiflow.services.request_limits',
         'demiflow.execution.worker.graph_execution', 'demiflow.execution.worker.queue_transform'},
     'demiflow.execution.seal.plan_interpreter': {
         'demiflow.execution.dataflow_history',
@@ -89,7 +89,6 @@ PLANNING_MAY_IMPORT = {
     'demiflow.execution.scheduler.dataflow_publication_budget',
     'demiflow.execution.dataflow_routed_prompt',
     'demiflow.execution.dataflow_schema',
-    'demiflow.execution.kernels.shared',
     'demiflow.execution.kernels.reducer_memory',
     'demiflow.execution.kernels.shuffle_order',
     'demiflow.execution.kernels.task_scope',

@@ -9,9 +9,9 @@ from pathlib import Path
 import time
 import uuid
 
-from demiflow.execution.request_limits import RequestGate, drain_on_service_stop
+from demiflow.services.request_limits import RequestGate, drain_on_service_stop
 from demiflow.execution.blocking_io import BlockingIOPool
-from demiflow.execution.stream_resources import CallMetrics
+from demiflow.execution.journal.run_telemetry import CallMetrics
 from demiflow.operator_llm.errors import PromptBudgetExceededError
 from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
 from demiflow.operator_llm.stream_recovery import native_request_budget

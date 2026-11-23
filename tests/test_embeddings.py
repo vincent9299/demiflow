@@ -309,7 +309,7 @@ def test_budget_without_journal_is_atomic_across_workers(server):
 
 @pytest.mark.parametrize('prefetch', [0, 2])
 def test_cooperative_stop_drains_only_admitted_calls(server, tmp_path, monkeypatch, prefetch):
-    from demiflow.execution.request_limits import ServiceStopped
+    from demiflow.services.request_limits import ServiceStopped
     stop = tmp_path / 'STOP'
     server['delay'] = .15
     def stop_after_two():

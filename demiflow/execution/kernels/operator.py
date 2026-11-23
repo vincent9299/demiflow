@@ -675,10 +675,14 @@ class OperatorKernel:
                 self._services.journal.restrict_recovery(self._occurrence)
             state_owner = (self._shared_actor.binding['state_owner']
                            if self._shared_actor is not None else self._occurrence)
+            from demiflow.execution.kernels.task_scope import snapshot_resident_function, restore_resident_function
+            from demiflow.execution.kernels.operator_state import snapshot_auto_state, restore_auto_state
             instance.bind_checkpoint_cache(_hash_id(['cache-state-owner-v1',
                 self._services.assignment.run_id, self._services.assignment.action_id,
                 state_owner, self._partition_id, slot if self._worker_scope else 0,
-                (self._task_ordinal or 0) if self._task_rows and self._shared_actor is None else None]))
+                (self._task_ordinal or 0) if self._task_rows and self._shared_actor is None else None]),
+                snapshot_function=snapshot_resident_function, restore_function=restore_resident_function,
+                snapshot_instance=snapshot_auto_state, restore_instance=restore_auto_state)
             from demiflow.execution.dataflow_models import bind_cached_model_services
             bind_cached_model_services(instance.fn, services=self._services, node_id=self._occurrence)
         import inspect

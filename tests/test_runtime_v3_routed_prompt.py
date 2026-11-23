@@ -234,7 +234,7 @@ def test_routed_declaration_refuses_live_or_changed_children(change):
     elif change == 'gates':
         actor.gates['a'] = object()
     else:
-        from demiflow.execution.request_limits import RequestGate
+        from demiflow.services.request_limits import RequestGate
         actor.actors['a']._runtime.request_gate = RequestGate(1)
     with pytest.raises((ValueError, DataflowError), match='declaration|capacity|copies differ'):
         native_model_declaration(operation)
@@ -243,7 +243,7 @@ def test_routed_declaration_refuses_live_or_changed_children(change):
 @pytest.mark.parametrize('reason', ['cooperative:operator_stop_file','cooperative:run_cancelled'])
 def test_routed_global_stop_is_not_provider_route_failure(tmp_path,routed_server,monkeypatch,reason):
     from demiflow.execution.dataflow_authority import DriverJournalService
-    from demiflow.execution.request_limits import ServiceStopped
+    from demiflow.services.request_limits import ServiceStopped
     original=DriverJournalService.native_request
     def stop_after_original_reservation(owner,command,**kwargs):
         reply=original(owner,command,**kwargs)

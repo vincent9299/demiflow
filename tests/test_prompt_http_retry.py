@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from demiflow.data.api import DataAPI
-from demiflow.execution.request_limits import RequestGate, ServiceStopped
+from demiflow.services.request_limits import RequestGate, ServiceStopped
 from demiflow.operator_llm.call_ref import journal_totals, read_call
 from demiflow.operator_llm.errors import PromptBudgetExceededError, PromptResponseContractError
 from demiflow.operator_llm.http_retry import http_error_retry_policy

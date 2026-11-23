@@ -8,7 +8,7 @@ from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from .request_limits import RequestGate
+from demiflow.services.request_limits import RequestGate
 
 
 DEFAULTS = dict(min_concurrency=1, initial_concurrency=4, max_concurrency=16,

@@ -2,7 +2,7 @@ import asyncio
 import json
 import pytest
 from demiflow.execution.adaptive_requests import AdaptiveRequestGate, request_admission_policy
-from demiflow.execution.request_limits import ServiceStopped
+from demiflow.services.request_limits import ServiceStopped
 
 
 def test_grow_shrink_drain_and_fatal_state(tmp_path,monkeypatch):

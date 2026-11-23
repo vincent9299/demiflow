@@ -244,7 +244,7 @@ def test_stop_file_waits_for_thread_before_cleanup(data, tmp_path):
             assert finished.is_set()
             closed.append(True)
     plan = data.from_items([{'i': 0}]).map(Work, execution='thread', callable_scope='worker')
-    from demiflow.execution.request_limits import ServiceStopped
+    from demiflow.services.request_limits import ServiceStopped
     async def run():
         stop = tmp_path / 'STOP'
         task = asyncio.create_task(asyncio.to_thread(plan.run_stream, stop_file=stop))

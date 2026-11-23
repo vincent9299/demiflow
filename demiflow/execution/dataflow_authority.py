@@ -708,7 +708,7 @@ class DriverJournalService:
     def _check_model_admission(self):
         reason = self._model_admission_stop
         if reason is not None:
-            from .request_limits import cooperative_stop_error
+            from demiflow.services.request_limits import cooperative_stop_error
             cooperative = cooperative_stop_error(reason)
             if cooperative is not None:
                 raise cooperative

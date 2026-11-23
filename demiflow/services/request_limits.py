@@ -1,4 +1,5 @@
 """Run-scoped admission, host pacing and fatal service circuit boundaries."""
+
 import asyncio
 import time
 from contextlib import asynccontextmanager
@@ -144,61 +145,3 @@ class RequestGate:
         async with self.reserve() as permit:
             async with permit:
                 yield
-
-
-class LatencySummary:
-    """Bounded histogram; quantiles are upper bounds in 0.25-second buckets."""
-    def __init__(self):
-        self.buckets={};self.count=0;self.total=0.
-    def observe(self,seconds):
-        import math
-        # Values above one day occupy one overflow bucket, explicitly labelled.
-        bucket=min(345601,max(0,math.ceil(seconds*4)))
-        self.buckets[bucket]=self.buckets.get(bucket,0)+1
-        self.count+=1;self.total+=seconds
-    def summary(self):
-        import math
-        result={'count':self.count,'total_s':self.total,'bucket_s':.25,'overflow_count':self.buckets.get(345601,0)}
-        for label,p in [('p50_upper_s',.5),('p95_upper_s',.95)]:
-            cumulative=0;result[label]=None
-            for bucket,n in sorted(self.buckets.items()):
-                cumulative+=n
-                if cumulative>=math.ceil(self.count*p):
-                    result[label]=bucket/4 if bucket<345601 else None;break
-        return result
-
-
-class ObservedQueue(asyncio.Queue):
-    def __init__(self, depth, *, max_item_bytes=None, max_bytes=None):
-        if max_item_bytes is not None and (type(max_item_bytes) is not int or max_item_bytes < 1):
-            raise ValueError('Queue item byte budget must be positive')
-        if max_bytes is not None and (max_item_bytes is None or max_bytes < max_item_bytes):
-            raise ValueError('Queue byte capacity must cover one maximum item')
-        super().__init__(depth);self.peak=0;self.wait=LatencySummary()
-        self.max_item_bytes, self.max_bytes = max_item_bytes, max_bytes
-        self.bytes = self.peak_bytes = 0
-
-    def full(self):
-        # Reserve a complete item before admission. Workers own dequeued rows;
-        # their independent in-flight allowance is admitted with the plan.
-        return super().full() or self.max_bytes is not None and self.bytes + self.max_item_bytes > self.max_bytes
-
-    def put_nowait(self,item):
-        size = 0
-        if self.max_item_bytes is not None:
-            from ..data.runtime_contract import check_size
-            from .row_scope import ScopedRow
-            size = check_size(item.row if type(item) is ScopedRow else item, self.max_item_bytes)
-            if type(item) is ScopedRow:
-                size += 256
-                if size > self.max_item_bytes:
-                    raise ValueError("Native sidecar exceeds queue item budget")
-        super().put_nowait((time.monotonic(),item,size))
-        self.bytes += size
-        self.peak_bytes = max(self.peak_bytes, self.bytes)
-        self.peak=max(self.peak,self.qsize())
-    def get_nowait(self):
-        queued,item,size=super().get_nowait()
-        self.bytes -= size
-        self.wait.observe(time.monotonic()-queued)
-        return item

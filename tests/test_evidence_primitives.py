@@ -9,7 +9,7 @@ import pytest
 from demiflow import data
 from demiflow.collect.documents import store_document,read_document,DocumentError
 from demiflow.collect.web import WebClient
-from demiflow.execution.request_limits import RequestGate,ServiceStopped
+from demiflow.services.request_limits import RequestGate, ServiceStopped
 from demiflow.execution.native_queue.stream_lance import StreamLanceWriter
 
 

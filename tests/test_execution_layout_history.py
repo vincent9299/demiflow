@@ -24,6 +24,7 @@ CARRIERS = {
     'literal_source': ['LiteralSourceReference'],
     'contracts.pipeline': ['PipelineBundleRef', 'PipelineExecutionEnvironment'],
     'requirements': ['FrozenRequirements', 'ResolvedWheel', 'PythonEnvironmentResolution'],
+    'request_limits': ['ObservedQueue'],
 }
 
 
@@ -55,7 +56,8 @@ for key, value in [('legacy_read_task', source.get_read_tasks(1)[0]), ('legacy_r
     result[key] = base64.b64encode(buffer.getvalue()).decode()
 from demiflow import data
 from demiflow.data.guards import require
-for fn in [data.from_items, data.read_legacy_queue_records, require]:
+from demiflow.data.result_cache import selected
+for fn in [data.from_items, data.read_legacy_queue_records, require, selected]:
     result['public.' + fn.__name__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
 from demiflow import Dataset
 result['public.Dataset'] = [base64.b64encode(pickle.dumps(Dataset, protocol=5)).decode(), describe(Dataset)]
@@ -192,3 +194,33 @@ def test_changed_dataset_prompt_method_is_not_normalized_to_old_code(original_ca
     monkeypatch.setattr(method, '__code__', method.__code__.replace(co_consts=(*method.__code__.co_consts, 'changed')))
     after = describe(Dataset)
     assert after != before
+
+
+def test_relocated_queue_class_keeps_budgets_and_order(original_carriers):
+    raw = base64.b64decode(original_carriers['ObservedQueue'][0])
+    queue = load_payload([raw])(2, max_item_bytes=4096, max_bytes=8192)
+    queue.put_nowait({'id': 1})
+    queue.put_nowait({'id': 2})
+    assert queue.full()
+    assert [queue.get_nowait(), queue.get_nowait()] == [{'id': 1}, {'id': 2}]
+    assert queue.bytes == 0 and queue.wait.count == 2
+
+
+def test_relocated_queue_method_rejects_foreign_class_cell(original_carriers, monkeypatch):
+    from types import FunctionType, CellType
+    from demiflow.execution.worker.stream_resources import ObservedQueue
+    method = ObservedQueue.full
+    wrong = FunctionType(method.__code__, method.__globals__, method.__name__, method.__defaults__, (CellType(object),))
+    wrong.__module__, wrong.__qualname__ = method.__module__, method.__qualname__
+    monkeypatch.setattr(ObservedQueue, 'full', wrong)
+    raw = base64.b64decode(original_carriers['ObservedQueue'][0])
+    with pytest.raises(DataflowError, match='audited definition'):
+        load_payload([raw])
+
+
+def test_published_unchanged_cache_callback_keeps_measured_identity(original_carriers):
+    raw, expected = original_carriers['public.selected']
+    selected = load_payload([base64.b64decode(raw)])
+    assert describe(selected) == expected
+    assert selected(lambda row: row['id'] > 0, {'id': 1}) is True
+    assert selected(lambda row: row['id'] > 0, {'id': -1}) is False

@@ -190,7 +190,7 @@ def native_model_declaration(operation):
         from ..inference import _resolve_request_gate
         expected = _resolve_request_gate(policy=policy, gate=None, concurrency=actor.concurrency)
         if expected is None:
-            from .request_limits import RequestGate
+            from demiflow.services.request_limits import RequestGate
             expected = RequestGate(actor.concurrency)
         if type(expected) is not type(actor.request_gate) or getattr(expected, 'policy', None) != getattr(actor.request_gate, 'policy', None):
             raise DataflowError('INVALID_CONTRACT', 'Embedding request gate differs from its declared policy')

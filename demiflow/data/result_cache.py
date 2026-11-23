@@ -40,7 +40,7 @@ def _state_policy(value):
     """Retain function bindings at the existing native function-state boundary."""
     from demiflow.execution.compiler_support.operator_policy import classify_operator_state
     from demiflow.execution.compiler_support.operator_policy import function_residency_kind
-    from demiflow.execution.kernels.task_scope import snapshot_resident_function
+    from demiflow.execution.compiler_support.operator_policy import _resident_slots
     owner = _state_owner(value)
     if owner is None:
         return owner, 'none', None
@@ -50,8 +50,8 @@ def _state_policy(value):
     if policy.mode == 'function':
         kind = function_residency_kind(value)
         if kind == 'nonrecoverable':
-            image = snapshot_resident_function(value, max_bytes=1)
-            return owner, kind, image['reason']
+            _, _, reason = _resident_slots(value)
+            return owner, kind, reason
         return owner, 'function_slots_v1' if kind == 'adapter' else 'none', None
     # Actor hooks own the actor, not mutable values bound outside that actor.
     # Reuse the existing function call-binding admission without serializing an
@@ -103,13 +103,16 @@ class CacheCall:
             setattr(self, name, getattr(fn, name, default))
         self.hard_timeout = getattr(fn, 'hard_timeout', None)
 
-    def bind_checkpoint_cache(self, owner):
+    def bind_checkpoint_cache(self, owner, *, snapshot_function, restore_function,
+                              snapshot_instance, restore_instance):
         """Bind stable native state ownership, without changing result keys.
 
         A result's creator tag is only provenance. The authenticated operator
         image is the sole authority for whether this owner's state includes it.
         Other owners keep the original result-only sharing semantics.
         """
+        self._snapshot_function, self._restore_function = snapshot_function, restore_function
+        self._snapshot_instance, self._restore_instance = snapshot_instance, restore_instance
         if (self.validate_runtime_state() is not None
                 or not any(_state_policy(value)[1] not in ('none', 'nonrecoverable')
                            for value in (self.fn, self.when, self.cache_when))):
@@ -206,8 +209,6 @@ class CacheCall:
         return restriction
 
     async def snapshot_state(self):
-        from demiflow.execution.kernels.operator_state import snapshot_auto_state
-        from ..execution.kernels.task_scope import snapshot_resident_function
         result = {}
         restriction = self.validate_runtime_state()
         if restriction is not None:
@@ -219,7 +220,7 @@ class CacheCall:
             if mode == 'none':
                 result[name] = None
             elif mode == 'function_slots_v1':
-                result[name] = snapshot_resident_function(value, max_bytes=self.max_input_bytes)
+                result[name] = self._snapshot_function(value, max_bytes=self.max_input_bytes)
             elif mode == 'nonrecoverable':
                 result[name] = {'mode': mode, 'reason': reason}
             elif mode == 'hooks':
@@ -228,7 +229,7 @@ class CacheCall:
                     state = await state
                 result[name] = {'mode': 'hooks', 'value': state}
             elif mode == 'auto_json':
-                result[name] = {'mode': 'auto_json', 'value': snapshot_auto_state(owner,
+                result[name] = {'mode': 'auto_json', 'value': self._snapshot_instance(owner,
                     max_bytes=self.max_input_bytes)}
         if hasattr(self, '_cache_owner'):
             result['cache_frontier'] = {'owner': self._cache_owner,
@@ -239,10 +240,8 @@ class CacheCall:
         return result
 
     async def restore_state(self, state):
-        from demiflow.execution.kernels.operator_state import restore_auto_state
         from ..execution.recovery_contract import RecoveryContractError
         from ..execution.contracts.dataflow_errors import DataflowError
-        from ..execution.kernels.task_scope import restore_resident_function
         if set(state) - {'cache_frontier'} != {'fn', 'when', 'cache_when'}:
             raise RecoveryContractError('Cached callable state ownership differs')
         for name in ('fn', 'when', 'cache_when'):
@@ -275,9 +274,9 @@ class CacheCall:
             value = getattr(self, name)
             owner = _state_owner(value)
             if image['mode'] == 'function_slots_v1':
-                restore_resident_function(value, image, max_bytes=self.max_input_bytes)
+                self._restore_function(value, image, max_bytes=self.max_input_bytes)
             elif image['mode'] == 'auto_json':
-                restore_auto_state(owner, image['value'], max_bytes=self.max_input_bytes)
+                self._restore_instance(owner, image['value'], max_bytes=self.max_input_bytes)
             elif image['mode'] == 'hooks':
                 restored = owner.restore_state(image['value'])
                 if inspect.isawaitable(restored):

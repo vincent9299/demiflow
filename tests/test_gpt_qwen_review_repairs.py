@@ -162,7 +162,7 @@ def test_runtime_resource_execution_is_honest_and_resume_fails_closed(tmp_path):
 
 
 def test_cleanup_cancellation_still_closes_all_owners():
-    from demiflow.execution.stream_resources import StreamResources
+    from demiflow.execution.worker.stream_resources import StreamResources
     events = []
     class First:
         async def aclose(self):

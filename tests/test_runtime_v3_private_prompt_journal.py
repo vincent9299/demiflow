@@ -297,7 +297,7 @@ def test_duplicate_private_prompt_rpc_is_not_a_new_logical_invocation(tmp_path):
 def test_private_prompt_stop_keeps_receipt_and_response_but_refuses_new_reserve(tmp_path):
     from demiflow.execution.dataflow_prompt_journal import bind_private_prompt_contracts
     from demiflow.execution.storage.private_journals import bind_private_storage
-    from demiflow.execution.request_limits import COOPERATIVE_STOP_REASON, ServiceStopped
+    from demiflow.services.request_limits import COOPERATIVE_STOP_REASON, ServiceStopped
     from test_runtime_v3_native_rpc_replay import interrupted_run, service
     path = tmp_path/'private.sqlite'
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority, store, lease):

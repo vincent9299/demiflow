@@ -49,7 +49,7 @@ from demiflow.operator_llm.journal import UncertainPromptCall
 from demiflow.embeddings.payload import EmbeddingProtocolError
 _KNOWN.update({cls.__module__ + '.' + cls.__qualname__: cls
                for cls in (UncertainPromptCall, EmbeddingProtocolError)})
-from demiflow.execution.request_limits import ServiceStopped
+from demiflow.services.request_limits import ServiceStopped
 _KNOWN[ServiceStopped.__module__ + '.' + ServiceStopped.__qualname__] = ServiceStopped
 _HTTP_TYPE = 'httpx.HTTPStatusError'
 

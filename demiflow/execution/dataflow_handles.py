@@ -140,7 +140,7 @@ class RuntimeActionHandle:
                 context = getattr(action, 'context', None)
                 journal = getattr(context, 'journal', None)
                 if journal is not None and journal.execution_status()['status'] in {'stopping', 'cancelled'}:
-                    from demiflow.execution.request_limits import COOPERATIVE_RUN_STOP_REASON
+                    from demiflow.services.request_limits import COOPERATIVE_RUN_STOP_REASON
                     reason = COOPERATIVE_RUN_STOP_REASON
                 self._execution.cancel(reason)
             except Exception as exc:

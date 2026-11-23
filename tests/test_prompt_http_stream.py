@@ -15,7 +15,7 @@ from demiflow.operator_llm.http_stream import ChatCompletionStream
 from demiflow.operator_llm.model import OperatorLLMRequest, PromptModel, TextPart
 from demiflow.operator_llm.call_ref import PromptRecordRef, journal_totals
 from demiflow.operator_llm.journal import UncertainPromptCall
-from demiflow.execution.request_limits import RequestGate, ServiceStopped
+from demiflow.services.request_limits import RequestGate, ServiceStopped
 from demiflow.execution.run_context import RunContext
 from test_map_prompt_async import PACK, prompt
 
