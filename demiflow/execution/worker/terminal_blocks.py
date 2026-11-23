@@ -416,6 +416,93 @@ class TerminalBlocks:
             if sum(f.rows for _, f in self.blocks.values()) != self.rows or sum(f.bytes for _, f in self.blocks.values()) != self.bytes:
                 raise DataflowError('CORRUPT_ARTIFACT', 'terminal partition totals disagree with manifest')
 
+    def scalar_workspace(self, *, services, retained):
+        # The sealed index reservation and any previous worker-side Arrow
+        # parent are still live beside this scalar's input and result.
+        from ..dataflow_record_frames import resident_limit
+        memory = resident_limit(self.bounds, services) - self._metadata_limit - retained
+        cached = getattr(self.services.store, '_arrow_payload_cache', None)
+        if cached is not None and cached.ref is not None:
+            from ..dataflow_record_frames import metadata_bytes
+            memory -= cached.ref.size_bytes + cached.batch.get_total_buffer_size() + metadata_bytes(cached.header)
+        return memory
+
+    def records(self, partitions, *, codec_call):
+        """Replay the exact sealed prefix. The consumer shares its retained
+        block/state charge with segment traversal, physical reads and decoding.
+        """
+        from ..contracts.dataflow import ArtifactRef
+        from ..dataflow_record_frames import admit_workspace, metadata_bytes, raw_workspace
+        from ..exchange.dataflow_bridge import _decode_payload
+        from ..dataflow_record_frames import decode_frame, decode_document, frame_stream, line_limit, read_chunk_bytes
+        from ..dataflow_record_frames import read_document
+        from ..kernels.dataflow import _materialize_row
+        from ..arrow_payload import ArrowBatchCache, is_arrow_record
+        index_bytes = 0
+        stream = None
+        arrow = ArrowBatchCache(self.services.store, self.bounds, services=self.services)
+
+        def reader_bytes():
+            return index_bytes + (0 if arrow.ref is None else
+                arrow.ref.size_bytes + arrow.batch.get_total_buffer_size() + metadata_bytes(arrow.header))
+
+        def retain_index(size):
+            nonlocal index_bytes
+            index_bytes = size
+
+        def index_call(function, *args, **kwargs):
+            return codec_call(function, *args, retained_input=reader_bytes() + stream.buffered_bytes, **kwargs)
+
+        for part in partitions:
+            chunks = block_chunks(self.services.store, ArtifactRef(**part['data_ref']), self.bounds,
+                chunk_bytes=read_chunk_bytes(self.bounds, self.services),
+                frame_call=index_call, on_retained=retain_index)
+            stream = frame_stream(chunks, self.bounds, services=self.services,
+                check_workspace=lambda peak: codec_call(admit_workspace, peak, self.bounds, retained_input=reader_bytes()))
+            try:
+                while True:
+                    self.services.check_stop()
+                    line = stream.readline(line_limit(self.bounds))
+                    if not line:
+                        break
+                    held = reader_bytes() + stream.buffered_bytes
+                    raw, item = codec_call(decode_frame, line, self.bounds, retained_input=held)
+                    del line
+                    # The decoder's admitted reconstruction peak also bounds
+                    # the resulting inline record and its later thawed row.
+                    measured = []
+                    record = codec_call(decode_document, raw, record_id=item['record_id'],
+                        sequence=item['sequence'], bounds=self.bounds, retained_input=held,
+                        check_workspace=measured.append)
+                    del raw, item
+                    charge = measured[0]
+                    size = record.encoded_bytes
+                    if size > min(self.bounds.max_row_bytes, self.bounds.max_batch_bytes):
+                        raise DataflowError('BUDGET_EXCEEDED', 'aggregate row exceeds its sealed payload budget')
+                    if record.inline is not None:
+                        row = _materialize_row(record, self.services)
+                    elif is_arrow_record(record):
+                        # IPC authentication, cached parent, and row conversion
+                        # share the exact same grant as the aggregate block.
+                        codec_call(admit_workspace, charge + 12 * record.payload_ref.size_bytes + 16384,
+                                   self.bounds, retained_input=held)
+                        row = arrow.row(record)
+                        from ..dataflow_record_frames import _typed_shape
+                        charge = _typed_shape(row, self.bounds.max_resident_bytes)[1] + 512
+                    else:
+                        raw = codec_call(read_document, record.payload_ref, self.services.store, self.bounds,
+                                         retained_input=held + charge, _maximum=self.bounds.max_row_bytes)
+                        charge += raw_workspace(raw)
+                        codec_call(admit_workspace, charge, self.bounds, retained_input=held)
+                        row = _decode_payload(raw, max_bytes=self.bounds.max_row_bytes)
+                        del raw
+                    del record
+                    yield row, size, charge, reader_bytes() + stream.buffered_bytes
+                    del row
+            finally:
+                stream.close()
+                arrow.close()
+
     def stream(self):
         from ..dataflow_record_frames import frame_stream, read_chunk_bytes
         owner = self

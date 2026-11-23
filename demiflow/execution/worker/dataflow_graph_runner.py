@@ -1529,6 +1529,27 @@ class WorkerGraphRunner:
     def _parkable_credits(self):
         return self._park_mode and set(self._credits) == set(self._credit_payloads)
 
+    def _final_scalar(self, blocks, partitions):
+        from .dataflow_terminal import aggregate_scalar, terminal_scalar
+        if self._terminal_spec.kind != 'aggregate':
+            return terminal_scalar(blocks.stream(), spec=self._terminal_spec, services=self.services,
+                                   schema_ref=self._terminal_schema_ref)
+        from functools import partial
+        from ..kernels.aggregate import aggregate_records
+        occurrence = next(occ for occ, node in self.e._node_specs.items() if node.kind == 'terminal')
+        program = self.services.programs.get(occurrence)
+        if program is None or program.kind != 'aggregate':
+            raise DataflowError('INVALID_CONTRACT', 'terminal aggregate programs are not sealed')
+        # The index keeps its sealed metadata reservation. Subtract the other
+        # live worker owners even when stages share a larger assignment.
+        memory = self._terminal_spec.configuration.get('terminal_memory', {})
+        workspace = self._frame_call(blocks.scalar_workspace)
+        workspace = min(workspace, memory.get('payload_bytes', workspace))
+        values = aggregate_records(program.value, partial(blocks.records, partitions),
+                                   services=self.services, workspace=workspace,
+            batch_eligible=self._terminal_spec.configuration.get("integer_aggregate_blocks") is True)
+        return aggregate_scalar(values, max_bytes=self.bounds.max_state_bytes)
+
     def snapshot(self, request):
         if ((self._queue and self._sealed_cut != request.cut_id)
                 or (self._credits and not self._parkable_credits())):
@@ -1577,10 +1598,7 @@ class WorkerGraphRunner:
                         manifest['non_mapping_values'] = True
                     with blocks.hold_metadata(manifest):
                         if request.final:
-                            from .dataflow_terminal import terminal_scalar
-                            occurrence = next(occ for occ, node in self.e._node_specs.items() if node.kind == 'terminal')
-                            manifest['scalar'] = terminal_scalar(blocks.stream(), spec=self._terminal_spec,
-                                services=self.services, occurrence_id=occurrence, schema_ref=self._terminal_schema_ref)
+                            manifest['scalar'] = self._final_scalar(blocks, partitions)
                         size, chunks = blocks.manifest_chunks(manifest)
                         try:
                             sinks[sink_id] = self.services.store.put(chunks, max_bytes=size, media_type=MANIFEST_MEDIA)

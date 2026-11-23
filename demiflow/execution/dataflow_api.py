@@ -244,6 +244,10 @@ def resolve_action_runtime(request: ActionRequest):
     if declared is not None:
         from .dataflow_native_limits import effective_native_limits
         native = intersect_native_limits(native, effective_native_limits(declared, limits))
+    if request.kind == 'aggregate' and not request.action.replaying:
+        block_rows = min(getattr(executor, '_block_size', limits['batch_rows']),
+                         limits['batch_rows'], getattr(local, 'batch_rows', limits['batch_rows']))
+        native = intersect_native_limits(native, {'batch_rows': block_rows})
     if native is not None:
         for name in ('memory_bytes', 'max_rss_bytes', 'max_scratch_bytes', 'max_row_bytes', 'batch_rows'):
             if name in native:

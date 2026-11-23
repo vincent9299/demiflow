@@ -13,17 +13,10 @@ from ..kernels.dataflow import _materialize_row
 from ..kernels import state_codec
 
 
-def terminal_scalar(stream, *, spec, services, occurrence_id, schema_ref=None):
+def terminal_scalar(stream, *, spec, services, schema_ref=None):
     kind = spec.kind
-    if kind not in ('schema', 'columns', 'size_bytes', 'aggregate', 'collect_summary'):
+    if kind not in ('schema', 'columns', 'size_bytes', 'collect_summary'):
         return None
-    aggregates = ()
-    if kind == 'aggregate':
-        program = services.programs.get(occurrence_id)
-        if program is None or program.kind != 'aggregate':
-            raise DataflowError('INVALID_CONTRACT', 'terminal aggregate programs are not sealed')
-        aggregates = program.value if isinstance(program.value, tuple) else (program.value,)
-        states = [a.initial_state() for a in aggregates]
     rows, size, schema = 0, 0, None
     from ..record_schema import RecordSchemas
     schemas = RecordSchemas(services)
@@ -47,28 +40,14 @@ def terminal_scalar(stream, *, spec, services, occurrence_id, schema_ref=None):
             if kind == 'size_bytes':
                 continue
             row = _materialize_row(record, services)
-            if aggregates:
-                for index, aggregate in enumerate(aggregates):
-                    partial = aggregate.aggregate_partial((row,))
-                    # Admit coexistence before user merge can allocate a copy.
-                    state_codec.dumps([states, partial], max_bytes=services.bounds.max_state_bytes)
-                    states[index] = aggregate.merge_states(states[index], partial)
-                    state_codec.dumps(states, max_bytes=services.bounds.max_state_bytes)
-            else:
-                if not isinstance(row, Mapping):
-                    raise DataflowError('INVALID_CONTRACT',
-                        kind + ' requires mapping rows; this result contains non-mapping business values')
-                import pyarrow as pa
-                next_schema = schemas.read(record.schema_ref)
-                if next_schema is None:
-                    next_schema = pa.Table.from_pylist([row]).schema
-                schema = next_schema if schema is None else pa.unify_schemas([schema, next_schema], promote_options='permissive')
-        if kind == 'aggregate':
-            values = {a.name: a.finalize_state(state) for a, state in zip(aggregates, states)}
-            # Typed data permits bytes/tuple/IEEE aggregate results without
-            # weakening the control plane's strict-JSON scalar contract.
-            encoded = state_codec.dumps(values, max_bytes=services.bounds.max_state_bytes)
-            return {'typed_result': base64.b64encode(encoded).decode()}
+            if not isinstance(row, Mapping):
+                raise DataflowError('INVALID_CONTRACT',
+                    kind + ' requires mapping rows; this result contains non-mapping business values')
+            import pyarrow as pa
+            next_schema = schemas.read(record.schema_ref)
+            if next_schema is None:
+                next_schema = pa.Table.from_pylist([row]).schema
+            schema = next_schema if schema is None else pa.unify_schemas([schema, next_schema], promote_options='permissive')
         if kind == 'size_bytes':
             return size
         if schema is None:
@@ -78,3 +57,8 @@ def terminal_scalar(stream, *, spec, services, occurrence_id, schema_ref=None):
                 'arrow_schema': base64.b64encode(schema.serialize().to_pybytes()).decode()}
     finally:
         stream.seek(0, 2)
+
+
+def aggregate_scalar(values, *, max_bytes):
+    """Deliver the original typed manifest scalar after the kernel finishes."""
+    return {'typed_result': base64.b64encode(state_codec.dumps(values, max_bytes=max_bytes)).decode()}

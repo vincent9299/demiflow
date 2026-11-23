@@ -162,6 +162,7 @@ COMPILER_KEYS: Mapping[str, ConfigurationKey] = {key.name: key for key in (
     _key('callable_scope', 'lowering', _text, 'stream option: one callable per stage or per worker'),
     _key('native_operation', 'lowering', lambda v: _text(v) and v in NATIVE_OPERATIONS, 'the service a recognised declaration performs'),
     _key('native_key', 'lowering', _text, 'declaration key of an acquire or search service'),
+    _key('integer_aggregate_blocks', 'budget', _flag, 'allow the sealed builtin reducer to combine exact integer rows'),
     _key('terminal_memory', 'budget', _terminal_memory, 'terminal index and payload windows, or one bounded workspace; bytes'),
     _key('publication_workspace', 'budget', _publication, 'resident window of a native publication; bytes'),
     _key('input_carrier', 'budget', _text, 'the terminal consumes stored row references from its producer'),
@@ -217,7 +218,7 @@ MODEL_KEYS: Mapping[str, frozenset] = {
                         'search_spec', 'node_id'}),
     'document': frozenset({'request', 'output', 'node_id'}),
 }
-TERMINAL_KEYS = frozenset({'kind', 'arguments', 'terminal_memory', 'publication_workspace', 'input_carrier',
+TERMINAL_KEYS = frozenset({'integer_aggregate_blocks', 'kind', 'arguments', 'terminal_memory', 'publication_workspace', 'input_carrier',
                            'graph_result'})
 SCHEMA_KEY = 'declared_arrow_schema'
 

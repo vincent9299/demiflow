@@ -820,8 +820,13 @@ class _Capture:
             raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
         semantic = {"kind": request.kind, "arguments": _plain(request.arguments)}
         budget = terminal_budget(request, self.nodes, producer, bounds=self.bounds, semantic=semantic)
+        configuration = budget.configuration
+        if request.kind == "aggregate":
+            from ..data.aggregate import Count, Sum
+            if request.programs and all(type(program.value) in (Count, Sum) for program in request.programs):
+                configuration = {**configuration, "integer_aggregate_blocks": True}
         kernel = KernelSpec(
-            kind=request.kind, implementation_ref=None, configuration=budget.configuration,
+            kind=request.kind, implementation_ref=None, configuration=configuration,
             inputs=(replace(_input_port("main", request.kind), requirement='finite_complete')
                     if budget.phased_publication else _input_port("main", request.kind),),
             state="none", effect="pure", resource_role="cpu",

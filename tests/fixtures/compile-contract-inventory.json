@@ -39,6 +39,7 @@
    "StreamLanceSink"
   ],
   "planning.compiler": [
+   "Count",
    "DatasourceSource",
    "FileSource",
    "FitJobNode",
@@ -53,6 +54,7 @@
    "RangeSource",
    "SqlSource",
    "StreamPrependOp",
+   "Sum",
    "UnionSource"
   ],
   "planning.legacy_traits": [
@@ -262,6 +264,9 @@
    ],
    "inputs": [
     "execution/kernels/operator.py"
+   ],
+   "integer_aggregate_blocks": [
+    "execution/worker/dataflow_graph_runner.py"
    ],
    "keys": [
     "execution/kernels/block_partition.py",
