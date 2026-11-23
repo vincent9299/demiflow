@@ -5,12 +5,14 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+from demiflow.execution.contracts.relational_region import REDUCER_MEMORY_FIELD
 
 from demiflow import data
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.seal.sealed_plans import load_sealed_plan
-from demiflow.execution.kernels import reducer_memory
+from demiflow.operators import reducer_memory
+from demiflow.operators import relational as reducer_compute
 
 
 def _flow(reducer,initial,*,region):
@@ -125,7 +127,7 @@ def test_changed_initial_is_rejected_before_deepcopy(monkeypatch):
     initial={'pad':[0]*64}
     memory=reducer_memory.declare(initial,budget)
     spec=make('KernelSpec',kind='reduce',configuration={'on':['k'],'occurrence_id':'reduce-test',
-        'reducer_program':'reduce',reducer_memory.FIELD:memory})
+        'reducer_program':'reduce',REDUCER_MEMORY_FIELD:memory})
     grant=reducer_resident_bytes(memory,budget)
     stage=make('StageSpec',resident_bytes=grant,profile=ResourceProfile(requests={'cpu_millis':1000,'memory_bytes':grant}))
     program=CallableSpec.create(lambda state,row:{'k':row['k']},fn_args=(initial,))
@@ -136,7 +138,7 @@ def test_changed_initial_is_rejected_before_deepcopy(monkeypatch):
     def forbidden(*args,**kwargs):
         copies.append(True)
         raise AssertionError('copy must not start before admission')
-    monkeypatch.setattr(relational.copy,'deepcopy',forbidden)
+    monkeypatch.setattr(reducer_compute.copy,'deepcopy',forbidden)
     row={'k':1}
     with pytest.raises(DataflowError):
         list(relational.reduce_ordered_groups(iter([('key',row,record(row))]),spec=spec,services=svc))
@@ -155,23 +157,35 @@ def test_yielded_peers_are_alias_aware_and_release_on_finish_error_and_close():
     initial={'shared':b'x'*1000}
     memory=reducer_memory.declare(initial,budget)
     out=record({'k':1})
-    peers=reducer_memory.yielded_peers(initial,initial,out,memory,budget)
+    peers=reducer_memory.yielded_peers(initial,initial,(out.inline,out.source_position),memory,budget)
     assert peers==reducer_memory.measure_tree(initial,max_bytes=65536,max_nodes=100).retained
-    for mode in ('finish','error','close'):
+    for mode in ('finish','error','close','cancel'):
+        closed=[]
+        checked=[]
+        def check_stop():
+            checked.append(True)
+            if mode=='cancel' and len(checked)==3:
+                raise DataflowError('CANCELLED','controlled cancellation')
         def reducer(state,row):
             if mode=='error' and row['k']==3:
                 raise ValueError('controlled third-group failure')
             return {'k':row['k'],'shared':state['shared']}
         spec=make('KernelSpec',kind='reduce',configuration={'on':['k'],'occurrence_id':'reduce-test',
-            'reducer_program':'reduce',reducer_memory.FIELD:memory})
+            'reducer_program':'reduce',REDUCER_MEMORY_FIELD:memory})
         grant=reducer_resident_bytes(memory,budget)
         stage=make('StageSpec',resident_bytes=grant,profile=ResourceProfile(requests={'cpu_millis':1000,'memory_bytes':grant}))
         program=CallableSpec.create(reducer,fn_args=(initial,))
         svc=SimpleNamespace(bounds=budget,store=None,assignment=SimpleNamespace(stages=(stage,)),
-            programs={'reduce':LoadedProgram('callable',program,'0'*64)},check_stop=lambda:None)
+            programs={'reduce':LoadedProgram('callable',program,'0'*64)},check_stop=check_stop)
         owner=OperatorKernel(spec,services=svc,partition_id='p0')
         rows=[{'k':i} for i in (1,2,3)]
-        folded=reduce_ordered_groups(iter((str(row['k']),row,record(row)) for row in rows),
+        def source():
+            try:
+                for row in rows:
+                    yield str(row['k']),row,record(row)
+            finally:
+                closed.append(True)
+        folded=reduce_ordered_groups(source(),
             spec=spec,services=svc,retain=owner.retain_reducer_peers)
         assert owner.retained_resident_bytes==0
         first=next(folded)
@@ -182,9 +196,13 @@ def test_yielded_peers_are_alias_aware_and_release_on_finish_error_and_close():
         elif mode=='error':
             with pytest.raises(ValueError,match='third-group'):
                 list(folded)
+        elif mode=='cancel':
+            with pytest.raises(DataflowError,match='controlled cancellation'):
+                list(folded)
         else:
             assert [r.inline['k'] for r in folded]==[2,3]
         assert owner.retained_resident_bytes==0
+        assert closed==[True]
 
 
 def test_numpy_view_charges_its_unique_owner_before_serialization(monkeypatch):
@@ -260,7 +278,7 @@ def test_legacy_unfinished_reduce_validates_original_grant_without_rewriting_sea
         with store_fixture(tmp_path/str(grant)) as (_,store,_):
             svc=SimpleNamespace(bounds=budget,store=store,assignment=SimpleNamespace(stages=(stage,)),
                 programs={'reduce':LoadedProgram('callable',initial_program,'0'*64)},check_stop=lambda:None)
-            original_copy=relational.copy.deepcopy
+            original_copy=reducer_compute.copy.deepcopy
             original_pickle=reducer_memory.pickle.Pickler
             def copy(*args,**kwargs):
                 copies.append(args[0] is initial)
@@ -273,7 +291,7 @@ def test_legacy_unfinished_reduce_validates_original_grant_without_rewriting_sea
                     reads.append(i)
                     yield record({'k':1,'i':i},i)
             with monkeypatch.context() as patch:
-                patch.setattr(relational.copy,'deepcopy',copy)
+                patch.setattr(reducer_compute.copy,'deepcopy',copy)
                 patch.setattr(reducer_memory.pickle,'Pickler',pickle)
                 if grant==65536:
                     with pytest.raises(DataflowError,match='known copies exceed'):
@@ -284,7 +302,7 @@ def test_legacy_unfinished_reduce_validates_original_grant_without_rewriting_sea
                     assert [dict(r.inline) for r in actual]==[{'k':1,'n':2}]
                     assert reads==[0,1] and calls==[1,1] and copies.count(True)==1 and len(encodes)==2
             assert json.dumps(_thaw_json(spec.configuration),sort_keys=True)==original_config
-            assert reducer_memory.FIELD not in spec.configuration
+            assert REDUCER_MEMORY_FIELD not in spec.configuration
             assert svc.assignment.stages==(stage,) and stage.stage_id=='original-legacy-stage'
             assert stage.resident_bytes==stage.profile.requests['memory_bytes']==grant
     assert initial=={'pad':[0]*4096,'n':0}

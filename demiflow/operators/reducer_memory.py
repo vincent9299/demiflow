@@ -1,19 +1,14 @@
-"""Reducer-owned heap/copy windows within the original resident grant.
+"""Reducer computation's original bounded object/copy/encoding accounting.
 
-The serialized-state ceiling keeps its existing meaning. This module accounts
-for the known retained objects and platform copies separately; user callback
-and custom copy/reduce hooks remain user allocations, not a promised RSS cap.
+No worker assignment, runtime service, or Record is inspected here. The caller
+supplies the already admitted limits and roots owned by its output codec.
 """
 from dataclasses import dataclass
 import gc
 import pickle
 import sys
 import types
-
-from ..contracts.dataflow_errors import DataflowError
-
-from ..contracts.relational_region import (REDUCER_MEMORY_FIELD as FIELD,
-                                           reducer_contract, reducer_resident_bytes)
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 def _error(code, message):
@@ -137,7 +132,7 @@ def measure_tree(value, *, max_bytes, max_nodes, max_copy_bytes=None,
     return TreeSize(retained, copied, 512 * mutable + 256 * deepest, len(seen))
 
 
-def yielded_peers(initial, state, output, value, bounds, *, pending=()):
+def yielded_peers(initial, state, excluded_roots, value, bounds, *, pending=()):
     """Known peers at a suspended yield, excluding the codec-owned Record.
 
     There is one shared traversal for initial/current/next row/group keys. The
@@ -147,7 +142,7 @@ def yielded_peers(initial, state, output, value, bounds, *, pending=()):
     measured = measure_tree(initial,
         max_bytes=value['initial_bytes'] + value['state_resident_bytes'] + 3 * bounds.max_row_bytes,
         max_nodes=value['inspection_nodes'], additional_roots=(state, *pending),
-        excluded_roots=(output.inline, output.source_position))
+        excluded_roots=excluded_roots)
     return measured.retained + (7 * bounds.max_row_bytes if pending else 0)
 
 
@@ -168,17 +163,6 @@ def declare(initial, bounds):
             'copy_workspace_bytes': size.copy_workspace,
             'state_resident_bytes': state, 'inspection_bytes': inspection,
             'inspection_nodes': nodes}
-
-
-
-
-def sort_window(bounds, *, key_only):
-    from .ordering import SortWindow
-    row = bounds.max_row_bytes
-    chunk = min(65536, max(1, row // 64))
-    return SortWindow(resident_bytes=8 * row, run_bytes=2 * row,
-        frame_bytes=max(1,(7 * row - 2 * chunk)//8), read_chunk_bytes=chunk,
-        merge_fan_in=2, key_only=key_only, merge_resident_bytes=7 * row)
 
 
 def check_initial(initial, value):
@@ -207,11 +191,3 @@ def check_state(state, value, *, serialized_limit):
     # Preserve the exact pickle protocol and one serialization invocation, but
     # don't retain a growing BytesIO/full encoded copy merely to count bytes.
     pickle.Pickler(Counter(),protocol=pickle.HIGHEST_PROTOCOL).dump(state)
-
-
-def check_grant(value, bounds, assignment, *, join_depth=None):
-    required = reducer_resident_bytes(value,bounds,join_depth=join_depth)
-    stages = getattr(assignment,'stages',())
-    available = sum(min(stage.resident_bytes,stage.profile.requests['memory_bytes']) for stage in stages)
-    if stages and (available < required or required > bounds.max_resident_bytes):
-        raise _error('RESOURCE_INFEASIBLE','Reducer known copies exceed the admitted resident grant')

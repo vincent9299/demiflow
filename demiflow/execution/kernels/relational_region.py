@@ -291,7 +291,7 @@ class RelationalRegionRuntime:
     def _ordered_groups(self, arena, chains, spec):
         from .relational import _group_sort_spec, reduce_ordered_groups, batch_ordered_groups, admit_reducer
         from .ordering import build_sort_runs, merge_sort_runs
-        from .reducer_memory import sort_window
+        from demiflow.operators.ordering import reducer_sort_window as sort_window
         from demiflow.operators.relational import group_key as group_key, group_key_values
         keys = tuple(spec.configuration['on'])
         if spec.kind == 'reduce':

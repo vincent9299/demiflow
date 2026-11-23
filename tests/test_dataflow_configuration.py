@@ -9,6 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from demiflow.execution.contracts.relational_region import REDUCER_MEMORY_FIELD
 
 from demiflow.planning import dataflow_configuration as schema
 from demiflow.planning.dataflow_compile import _plain
@@ -62,15 +63,16 @@ def test_every_key_the_corpus_produces_has_one_writer(graphs):
 def test_names_owned_by_other_modules_are_mirrored_exactly():
     from demiflow.execution import dataflow_managed_devices, dataflow_schema
     from demiflow.execution.scheduler import dataflow_publication_budget
-    from demiflow.execution.kernels import reducer_memory, shuffle_order, task_scope
+    from demiflow.execution.kernels import shuffle_order
+    from demiflow.execution.contracts.dataflow_kinds import TASK_KINDS
     from demiflow.planning import dataflow_compile
     assert dataflow_publication_budget.FIELD == 'publication_workspace' in schema.COMPILER_KEYS
     assert {dataflow_publication_budget.SCHEMA, dataflow_publication_budget.PHASE_SCHEMA} == schema.PUBLICATION_SCHEMAS
-    assert reducer_memory.FIELD == 'reducer_memory_v1' in schema.COMPILER_KEYS
+    assert REDUCER_MEMORY_FIELD == 'reducer_memory_v1' in schema.COMPILER_KEYS
     assert shuffle_order.FIELD == 'shuffle_order_version' in schema.COMPILER_KEYS
     assert dataflow_schema.KEY == schema.SCHEMA_KEY
     assert dataflow_managed_devices._KEY == 'managed_http_devices' in schema.MODEL_KEYS['prompt']
-    assert task_scope.TASK_KINDS == schema.TASK_KINDS
+    assert TASK_KINDS == schema.TASK_KINDS
     assert dataflow_compile._NON_SEMANTIC_FIELDS | {'callable', 'native_options', 'stream_options'} == schema.NOT_COPIED
 
 

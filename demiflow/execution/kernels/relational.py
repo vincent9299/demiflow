@@ -12,11 +12,10 @@ groups on disk. K007 concatenates inputs in port order preserving multiplicity.
 """
 from __future__ import annotations
 from demiflow.execution.contracts.dataflow import stage_resident_bytes
+from demiflow.execution.contracts.relational_region import reducer_resident_bytes
 
 from demiflow.operators.relational import merge_join_rows
-import copy
 import itertools
-import pickle
 from collections.abc import Iterator, Mapping
 from dataclasses import replace
 from typing import Any
@@ -245,7 +244,7 @@ def _ordered_group_rows(
         for record in records:
             _group_key(_materialize_row(record, services), on)
             yield record
-    from demiflow.execution.kernels.reducer_memory import sort_window
+    from demiflow.operators.ordering import reducer_sort_window as sort_window
     from demiflow.execution.contracts.relational_region import reducer_contract as contract
     window = sort_window(services.bounds,key_only=False) if memory is not None or contract(spec) is not None else None
     runs = build_sort_runs(keyed_records(), spec=sort_spec, services=services,window=window)
@@ -255,11 +254,7 @@ def _ordered_group_rows(
         del row, record
 
 
-def _initial_state(spec: KernelSpec, services: RuntimeServices) -> Any:
-    program_key = spec.configuration.get("initial_program")
-    if program_key is not None:
-        return copy.deepcopy(_program(services, program_key, "callable"))
-    return copy.deepcopy(spec.configuration.get("initial"))
+
 
 
 def reduce_partition(
@@ -272,8 +267,16 @@ def reduce_partition(
                                      spec=spec, services=services, retain=retain)
 
 
+def check_grant(value, bounds, assignment, *, join_depth=None):
+    required = reducer_resident_bytes(value,bounds,join_depth=join_depth)
+    stages = getattr(assignment,'stages',())
+    available = sum(min(stage.resident_bytes,stage.profile.requests['memory_bytes']) for stage in stages)
+    if stages and (available < required or required > bounds.max_resident_bytes):
+        raise _err('RESOURCE_INFEASIBLE','Reducer known copies exceed the admitted resident grant')
+
+
 def admit_reducer(spec, services, *, join_depth=None):
-    from demiflow.execution.kernels.reducer_memory import declare, check_initial, check_grant
+    from demiflow.operators.reducer_memory import declare, check_initial
     from demiflow.execution.contracts.relational_region import reducer_contract as contract
     from demiflow.data.plan import CallableSpec
     memory = contract(spec)
@@ -296,7 +299,6 @@ def admit_reducer(spec, services, *, join_depth=None):
 
 def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeServices, memory_join_depth=None, retain=None):
     """One original sequential fold; caller proves complete ordered key groups."""
-    from demiflow.execution.kernels.reducer_memory import check_initial, check_state, yielded_peers
     memory = admit_reducer(spec,services,join_depth=memory_join_depth)
     on = tuple(_cfg(spec, "on"))
     if not on:
@@ -323,8 +325,6 @@ def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeService
         raise _err("INVALID_CONTRACT", "reducer program must be callable")
     occurrence = _occurrence(spec)
     budget = _OutputBudget(spec, services, streaming=True)
-    max_state = services.bounds.max_state_bytes
-    sequence = 0
 
     def output(state,key,sequence):
         record_id = _hash_id([RECORD_DOMAIN, occurrence, "reduce", key])
@@ -332,53 +332,26 @@ def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeService
         budget.charge(out)
         return out
 
-    missing = object()
-    current_key, state = missing, None
     iterator = iter(ordered)
-    try:
-        # Do not let itertools.groupby keep the previous row alive while the
-        # producer hydrates the next one. Only the group key and state survive.
-        for key,row,_record in iterator:
-            _check_stop(services)
-            if current_key is missing or key != current_key:
-                if current_key is not missing and state is not None:
-                    out=output(state,current_key,sequence)
-                    sequence+=1
-                    if memory is not None and retain is not None:
-                        retain(yielded_peers(initial,state,out,memory,services.bounds,
-                                            pending=(row,current_key,key)))
-                    try:
-                        yield out
-                    finally:
-                        if retain is not None:
-                            retain(0)
-                    del out
-                state=None  # previous group cannot coexist with the next deepcopy
-                current_key=key
-                if memory is not None:
-                    check_initial(initial,memory)
-                state=copy.deepcopy(initial)
-            if validation is not None:
-                validation.inputs((state,row),fn_kwargs)
-            state=reducer(state,row,**fn_kwargs)
-            if validation is not None:
-                state=validation.output(state)
-            if memory is not None:
-                check_state(state,memory,serialized_limit=max_state)
-            elif max_state>0 and len(pickle.dumps(state,protocol=pickle.HIGHEST_PROTOCOL))>max_state:
-                raise _err('BUDGET_EXCEEDED','reducer state exceeds max_state_bytes')
-            del row,_record
-        if current_key is not missing and state is not None:
-            out=output(state,current_key,sequence)
-            if memory is not None and retain is not None:
-                retain(yielded_peers(initial,state,out,memory,services.bounds))
-            yield out
-    finally:
-        if retain is not None:
-            retain(0)
-        close=getattr(iterator,'close',None)
-        if close is not None:
-            close()
+    def rows():
+        try:
+            for key,row,record in iterator:
+                yield key,row
+                del row,record
+        finally:
+            close=getattr(iterator,'close',None)
+            if close is not None:
+                close()
+
+    def output_roots(record):
+        return record.inline,record.source_position
+
+    from demiflow.operators.relational import reduce_ordered_groups as fold
+    yield from fold(rows(),reducer=reducer,initial=initial,fn_kwargs=fn_kwargs,
+                    validation=validation,memory=memory,bounds=services.bounds,
+                    output=output,output_roots=output_roots,
+                    check_stop=services.check_stop,retain=retain)
+
 
 
 def union_inputs(

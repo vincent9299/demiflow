@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import copy
+import pickle
 from demiflow.execution.contracts.record_codec import canonical_record_json as _canonical
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 
@@ -296,3 +298,63 @@ def group_key_values(raw):
             return {value(k): value(v) for k, v in payload}
         raise DataflowError('CORRUPT_ARTIFACT', 'unknown tag in a finite join key')
     return tuple(value(token) for token in json.loads(raw))
+
+
+def reduce_ordered_groups(ordered, *, reducer, initial, fn_kwargs, validation,
+                          memory, bounds, output, output_roots, check_stop, retain=None):
+    """Original sequential key-group fold over rows and explicit bound ports.
+
+    Group order, initial copying, state validation and suspended-yield accounting
+    remain here. The partition binding owns its output record and runtime budget.
+    """
+    from demiflow.operators.reducer_memory import check_initial, check_state, yielded_peers
+    max_state = bounds.max_state_bytes
+    sequence = 0
+
+    missing = object()
+    current_key, state = missing, None
+    iterator = iter(ordered)
+    try:
+        # Do not let itertools.groupby keep the previous row alive while the
+        # producer hydrates the next one. Only the group key and state survive.
+        for key,row in iterator:
+            check_stop()
+            if current_key is missing or key != current_key:
+                if current_key is not missing and state is not None:
+                    out=output(state,current_key,sequence)
+                    sequence+=1
+                    if memory is not None and retain is not None:
+                        retain(yielded_peers(initial,state,output_roots(out),memory,bounds,
+                                            pending=(row,current_key,key)))
+                    try:
+                        yield out
+                    finally:
+                        if retain is not None:
+                            retain(0)
+                    del out
+                state=None  # previous group cannot coexist with the next deepcopy
+                current_key=key
+                if memory is not None:
+                    check_initial(initial,memory)
+                state=copy.deepcopy(initial)
+            if validation is not None:
+                validation.inputs((state,row),fn_kwargs)
+            state=reducer(state,row,**fn_kwargs)
+            if validation is not None:
+                state=validation.output(state)
+            if memory is not None:
+                check_state(state,memory,serialized_limit=max_state)
+            elif max_state>0 and len(pickle.dumps(state,protocol=pickle.HIGHEST_PROTOCOL))>max_state:
+                raise DataflowError('BUDGET_EXCEEDED','reducer state exceeds max_state_bytes')
+            del row
+        if current_key is not missing and state is not None:
+            out=output(state,current_key,sequence)
+            if memory is not None and retain is not None:
+                retain(yielded_peers(initial,state,output_roots(out),memory,bounds))
+            yield out
+    finally:
+        if retain is not None:
+            retain(0)
+        close=getattr(iterator,'close',None)
+        if close is not None:
+            close()

@@ -12,7 +12,8 @@ import hashlib
 import sys
 
 from demiflow.execution.kernels.dataflow import _err, _seed, _materialize_row, _input_row_bytes
-from demiflow.execution.kernels.ordering import OrderingServices, SortWindow, _build_sort_runs, merge_sort_runs, _release_runs, _provenance
+from demiflow.execution.kernels.ordering import OrderingServices, _build_sort_runs, merge_sort_runs, _release_runs, _provenance
+from demiflow.operators.ordering import SortWindow
 from demiflow.execution.contracts.record_codec import resident_limit, raw_workspace, _typed_shape, _json_shape, _record_metadata
 from demiflow.execution.storage.streams import read_document
 from demiflow.execution.contracts.record_codec import _encode_payload, _decode_payload

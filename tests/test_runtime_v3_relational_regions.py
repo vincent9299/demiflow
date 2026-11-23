@@ -208,7 +208,8 @@ def test_sort_subwindow_uses_original_store_and_closes_readers(tmp_path,monkeypa
     from types import SimpleNamespace
     import pytest
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.kernels.ordering import SortWindow,build_sort_runs,merge_sort_runs
+    from demiflow.operators.ordering import SortWindow
+    from demiflow.execution.kernels.ordering import build_sort_runs, merge_sort_runs
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_finite_borrow import fixture,record
     from test_runtime_v3_c import make

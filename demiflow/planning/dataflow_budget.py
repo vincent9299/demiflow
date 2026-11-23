@@ -120,7 +120,8 @@ def relational_profile(kind, source, bounds):
         profile = ResourceProfile(requests=requests, limits=profile.limits, requirements=profile.requirements)
     reducer_memory = None
     if kind == 'reduce':
-        from ..execution.kernels.reducer_memory import declare, FIELD
+        from demiflow.operators.reducer_memory import declare
+        from demiflow.execution.contracts.relational_region import REDUCER_MEMORY_FIELD as FIELD
         from demiflow.execution.contracts.relational_region import reducer_resident_bytes as resident_bytes
         declared = declare(source.initial, bounds)
         profile = ResourceProfile(requests={**profile.requests,
