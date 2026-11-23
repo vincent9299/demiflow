@@ -2,7 +2,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
-from demiflow.execution import publication_facts as facts
+from demiflow.execution.journal import publication_facts as facts
+from demiflow.execution.storage.object_resources import object_namespace
 from demiflow.execution.recovery_contract import RecoveryContractError
 
 
@@ -38,9 +39,9 @@ def test_object_namespace_matches_the_host_fabricated_context(tmp_path):
     run_id = 'b' * 32
     for logical in (str(tmp_path / 'objects'), (tmp_path / 'objects').as_uri()):
         fabricated = SimpleNamespace(ref=SimpleNamespace(run_id=run_id))
-        assert facts.object_namespace(run_id, logical) == namespace_record(fabricated, logical)
+        assert object_namespace(run_id, logical) == namespace_record(fabricated, logical)
     with pytest.raises(RecoveryContractError):
-        facts.object_namespace(run_id, 's3://bucket/objects')
+        object_namespace(run_id, 's3://bucket/objects')
 
 
 def test_engine_module_does_not_load_hosts():
@@ -48,7 +49,7 @@ def test_engine_module_does_not_load_hosts():
     import sys
     root_dir = Path(__file__).resolve().parents[1]
     result = subprocess.run([sys.executable, '-I', '-B', '-c',
-        'import sys;sys.path.insert(0,sys.argv[1]);import demiflow.execution.publication_facts;'
+        'import sys;sys.path.insert(0,sys.argv[1]);import demiflow.execution.journal.publication_facts;'
         'assert not any(n.startswith(("demiflow.workbench","demiflow.forge")) for n in sys.modules)',
         str(root_dir)], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr

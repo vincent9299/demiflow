@@ -142,7 +142,7 @@ def original_native_history(root):
     from demiflow.execution.checkpoint.history import validate_resume_compatibility
     from demiflow.workbench.runs.facts import read_sealed_plan
     # The workbench no longer re-exports the engine reader under a private name (P4).
-    from demiflow.execution.publication_facts import inspect_write_receipt as _native_execution_receipt
+    from demiflow.execution.journal.publication_facts import inspect_write_receipt as _native_execution_receipt
 
     assert Path(demiflow.__file__).resolve().is_relative_to(WORKTREE)
     assert root.resolve().is_relative_to(Path("/tmp"))

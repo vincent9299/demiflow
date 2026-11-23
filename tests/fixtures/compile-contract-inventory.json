@@ -283,7 +283,7 @@
    ],
    "input_carrier": [
     "execution/action_driver/dataflow.py",
-    "execution/dataflow_sinks.py",
+    "execution/outputs/sinks.py",
     "execution/worker/dataflow_graph_runner.py",
     "planning/dataflow_configuration.py",
     "planning/dataflow_fusion.py",
@@ -407,7 +407,7 @@
     "planning/dataflow_training.py"
    ],
    "partition_id": [
-    "execution/dataflow_sinks.py"
+    "execution/outputs/sinks.py"
    ],
    "payload_columns": [
     "execution/lance_key_source.py"
@@ -490,7 +490,7 @@
    ],
    "sink_id": [
     "execution/action_driver/dataflow.py",
-    "execution/dataflow_sinks.py",
+    "execution/outputs/sinks.py",
     "execution/worker/dataflow_graph_runner.py",
     "planning/dataflow_training.py"
    ],

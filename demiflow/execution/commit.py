@@ -223,3 +223,8 @@ class CommitCoordinator:
                 expected="checkpoint_committed", status="acked")
         fault_point("after_acked", context.commit_id)
         return self.journal.execution_commit(context.commit_id)
+
+
+def commit_write_context(action, commit_id):
+    """The write context a sink's ``inspect`` expects for one recorded commit."""
+    return CommitCoordinator(action)._context(commit_id)

@@ -4,6 +4,8 @@ All resource identity and allocation authority belongs to the existing RunJourna
 The one small native owner marker is not a request journal or a cross-run index.
 """
 
+from types import SimpleNamespace
+
 import hashlib
 import uuid
 import os
@@ -255,3 +257,12 @@ def validate_image_bytes(run, raw, *, limits, decode_policy, decode):
         validated[validation_key] = True
         while len(validated) > 256:
             validated.popitem(last=False)
+
+
+def object_namespace(run_id, logical_root):
+    """The object-root record a run with ``run_id`` owns under ``logical_root``.
+
+    Hosts compare journal ``object_roots`` records against this instead of
+    fabricating a context for ``object_resources.namespace_record``.
+    """
+    return namespace_record(SimpleNamespace(ref=SimpleNamespace(run_id=run_id)), logical_root)

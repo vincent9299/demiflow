@@ -20,6 +20,8 @@ from demiflow.execution.outputs.lance_sink import LanceSink
 from .commit import CommitCoordinator
 from .run_context import RunAction
 
+from demiflow.execution.outputs.lance_sink import _BatchSink
+
 SCHEMA = 'demiflow.stream_lance.v3'
 
 
@@ -252,52 +254,7 @@ class _NativeWriter(StreamLanceWriter):
                 self._target_lock.__exit__(None,None,None);self._target_lock=None
 
 
-class _BatchSink:
-    """Native prepared table publication, or verified reference-only receipt."""
-    sink_id='lance'
-    def __init__(self, scope, declaration):
-        self.scope,self.declaration=scope,declaration
-        spec=declaration['spec']
-        if spec is not None:
-            from demiflow.execution.outputs.lance_sink import spec_from_identity
-            self.native=LanceSink(scope,spec_from_identity(spec))
-            self._marker=self.native._marker  # Original coordinator releases its atomic marker staging grant.
-        else:self.native=None
 
-    def prepare(self, blocks, context):
-        return {'native':self.native.prepare(blocks,context) if self.native else None,
-                'reference':self.declaration['reference'],'request_key':self.declaration['request_key']}
-
-    def inspect(self, prepared, context):
-        if prepared['request_key']!=self.declaration['request_key']:
-            raise DataflowError('CORRUPT_ARTIFACT','Stream prepared request differs')
-        if prepared['reference'] != self.declaration['reference']:
-            raise DataflowError('CORRUPT_ARTIFACT','Stream prepared reference differs from its declaration')
-        if (prepared['native'] is None) != (self.native is None):
-            raise DataflowError('CORRUPT_ARTIFACT','Stream prepared native sink differs from its declaration')
-        if self.native:
-            receipt=self.native.inspect(prepared['native'],context)
-            if receipt is None:return None
-            version=receipt['data']['committed_version']
-            reference={'uri':self.native.spec.uri,'version':version}
-            native=receipt['data']
-        else:
-            reference=prepared['reference'];native=None
-            if reference is not None:
-                from ..lance.storage import open_lance_dataset
-                from ..lance.schema import schema_identity
-                table=open_lance_dataset(reference['uri'],reference['version'],None)
-                if schema_identity(table.schema)!=self.declaration['schema_identity']:
-                    raise DataflowError('CORRUPT_ARTIFACT','Stream saved reference schema differs')
-        return {'commit_id':context.commit_id,'sink_id':'lance','status':'committed',
-                'data':{'reference':reference,'native':native,'request_key':self.declaration['request_key']}}
-
-    def commit(self, prepared, context):
-        if self.native:self.native.commit(prepared['native'],context)
-        return self.inspect(prepared,context)
-
-    def abort(self, prepared, context):
-        if self.native:self.native.abort(prepared['native'],context)
 
 
 class NativeStreamLanceService:

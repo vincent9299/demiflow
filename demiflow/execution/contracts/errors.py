@@ -81,3 +81,10 @@ class PlanContractError(RecoveryContractError):
 def require_plan_contract(condition, reason, detail):
     if not condition:
         raise PlanContractError(reason, detail)
+
+
+class PublicationMismatch(RecoveryContractError):
+    """A prepared native publication contradicts its sealed output identity."""
+
+class PreparedPublicationUnresolved(RecoveryContractError):
+    """Native sink inspection could not conclude a prepared publication."""

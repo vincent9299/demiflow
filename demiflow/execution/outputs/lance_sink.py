@@ -1,4 +1,8 @@
 """Durable Lance adapter around the existing native writer and its CAS marker."""
+
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+
+from demiflow.execution.contracts.errors import PublicationMismatch
 from dataclasses import replace
 import hashlib
 import os
@@ -299,3 +303,118 @@ def spec_from_identity(value):
     if schema is not None:
         fields['schema'] = pa.ipc.read_schema(pa.BufferReader(bytes.fromhex(schema['arrow_schema'])))
     return LanceWriteSpec(**fields)
+
+
+def _validate_metadata(actual, version):
+    if (type(actual) is not dict or type(actual.get('version')) is not int or actual['version'] != version
+            or type(actual.get('schema_hash')) is not str or not actual['schema_hash']
+            or type(actual.get('schema_identity')) is not str or not actual['schema_identity']
+            or type(actual.get('row_count')) is not int or actual['row_count'] < 0):
+        raise PublicationMismatch('Invalid fixed-version metadata response')
+
+def verify_target_write_receipt(parsed, declaration, intent, *, expected_uri,
+                                require_current_head, deadline, metadata_reader, check_deadline):
+    """Verify this target's original receipt; the caller owns historical selection."""
+    from demiflow.lance.preview import snapshot_metadata
+    if declaration is not None:
+        if declaration.get('kind') != 'write_table':
+            raise PublicationMismatch('Output is not an original native write action')
+        request_hash = spec_from_identity(declaration['sink']).content_hash
+        if intent is not None and intent.get('request_hash') != request_hash:
+            raise PublicationMismatch('Write observation differs from original declaration')
+    elif intent is not None:
+        request_hash = intent['request_hash']
+    else:
+        raise PublicationMismatch('Write receipt has no original request identity')
+    if parsed.uri != expected_uri or parsed.request_hash != request_hash:
+        raise PublicationMismatch('Write receipt identity differs')
+    check_deadline(deadline)
+    actual = (metadata_reader or snapshot_metadata)(expected_uri, parsed.committed_version)
+    _validate_metadata(actual, parsed.committed_version)
+    check_deadline(deadline)
+    if actual['schema_hash'] != parsed.schema_hash or actual['row_count'] != parsed.written_rows:
+        raise PublicationMismatch('Committed table differs from receipt')
+    if require_current_head:
+        if inspect_lance(expected_uri).resolved_version != parsed.committed_version:
+            raise PublicationMismatch('Output head differs from owned version')
+        if intent is None:
+            raise PublicationMismatch('Committed write has no original intent')
+        dataset = open_lance_dataset(expected_uri, parsed.committed_version, ())
+        transaction = dataset.read_transaction(parsed.committed_version)
+        if transaction.transaction_properties.get('__lance_commit_message') != 'demiflow-lance:' + intent['operation_id']:
+            raise PublicationMismatch('Output operation marker differs')
+    return actual
+
+
+def verify_target_stage(*, expected_uri, version, expected_schema_identity,
+                        require_current_head, deadline, metadata_reader, check_deadline):
+    """Verify the fixed target version selected by the historical reader."""
+    from demiflow.lance.preview import snapshot_metadata
+    check_deadline(deadline)
+    actual = (metadata_reader or snapshot_metadata)(expected_uri, version)
+    _validate_metadata(actual, version)
+    check_deadline(deadline)
+    if actual['schema_identity'] != expected_schema_identity:
+        raise PublicationMismatch('Committed stage schema differs')
+    if require_current_head and inspect_lance(expected_uri).resolved_version != version:
+        raise PublicationMismatch('Stage head differs from owned version')
+    return actual
+
+
+def inspect_prepared_write(native_action, spec, prepared, *, make_context):
+    """Recreate the original target/composite, then inspect with the original context."""
+    sink = LanceSink(native_action, spec)
+    composite = type(prepared) is dict and {'objects', 'rows'} <= set(prepared)
+    if composite:
+        from demiflow.execution.outputs.object_sink import ObjectRowsSink
+        sink = ObjectRowsSink.for_inspection(native_action, sink, prepared)
+    receipt = sink.inspect(prepared, make_context())
+    return receipt
+
+
+class _BatchSink:
+    """Native prepared table publication, or verified reference-only receipt."""
+    sink_id='lance'
+    def __init__(self, scope, declaration):
+        self.scope,self.declaration=scope,declaration
+        spec=declaration['spec']
+        if spec is not None:
+            from demiflow.execution.outputs.lance_sink import spec_from_identity
+            self.native=LanceSink(scope,spec_from_identity(spec))
+            self._marker=self.native._marker  # Original coordinator releases its atomic marker staging grant.
+        else:self.native=None
+
+    def prepare(self, blocks, context):
+        return {'native':self.native.prepare(blocks,context) if self.native else None,
+                'reference':self.declaration['reference'],'request_key':self.declaration['request_key']}
+
+    def inspect(self, prepared, context):
+        if prepared['request_key']!=self.declaration['request_key']:
+            raise DataflowError('CORRUPT_ARTIFACT','Stream prepared request differs')
+        if prepared['reference'] != self.declaration['reference']:
+            raise DataflowError('CORRUPT_ARTIFACT','Stream prepared reference differs from its declaration')
+        if (prepared['native'] is None) != (self.native is None):
+            raise DataflowError('CORRUPT_ARTIFACT','Stream prepared native sink differs from its declaration')
+        if self.native:
+            receipt=self.native.inspect(prepared['native'],context)
+            if receipt is None:return None
+            version=receipt['data']['committed_version']
+            reference={'uri':self.native.spec.uri,'version':version}
+            native=receipt['data']
+        else:
+            reference=prepared['reference'];native=None
+            if reference is not None:
+                from demiflow.lance.storage import open_lance_dataset
+                from demiflow.lance.schema import schema_identity
+                table=open_lance_dataset(reference['uri'],reference['version'],None)
+                if schema_identity(table.schema)!=self.declaration['schema_identity']:
+                    raise DataflowError('CORRUPT_ARTIFACT','Stream saved reference schema differs')
+        return {'commit_id':context.commit_id,'sink_id':'lance','status':'committed',
+                'data':{'reference':reference,'native':native,'request_key':self.declaration['request_key']}}
+
+    def commit(self, prepared, context):
+        if self.native:self.native.commit(prepared['native'],context)
+        return self.inspect(prepared,context)
+
+    def abort(self, prepared, context):
+        if self.native:self.native.abort(prepared['native'],context)

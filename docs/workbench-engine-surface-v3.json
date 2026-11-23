@@ -86,11 +86,11 @@
         "PlanContractError"
       ],
       "PreparedPublicationUnresolved": [
-        "demiflow.execution.publication_facts",
+        "demiflow.execution.contracts.errors",
         "PreparedPublicationUnresolved"
       ],
       "PublicationMismatch": [
-        "demiflow.execution.publication_facts",
+        "demiflow.execution.contracts.errors",
         "PublicationMismatch"
       ],
       "RunReadError": [
@@ -102,11 +102,11 @@
         "VERSION"
       ],
       "action_recovery_facts": [
-        "demiflow.execution.publication_facts",
+        "demiflow.execution.journal.run_reader",
         "action_recovery_facts"
       ],
       "admit_prepared_stage": [
-        "demiflow.execution.publication_facts",
+        "demiflow.execution.journal.publication_facts",
         "admit_prepared_stage"
       ],
       "build_logical_plan_view": [
@@ -178,11 +178,11 @@
         "stream_residency"
       ],
       "verify_published_output": [
-        "demiflow.execution.publication_facts",
+        "demiflow.execution.journal.publication_facts",
         "verify_published_output"
       ],
       "verify_write_receipt": [
-        "demiflow.execution.publication_facts",
+        "demiflow.execution.journal.publication_facts",
         "verify_write_receipt"
       ]
     }

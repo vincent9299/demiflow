@@ -42,6 +42,10 @@ CARRIERS = {
     'adaptive_requests': ['AdaptiveRequestGate'],
     'blocking_io': ['BlockingIOPool'],
     'inference_options': ['normalize_call_options'],
+    'publication_facts': ['PublicationMismatch', 'PreparedPublicationUnresolved',
+        'action_recovery_facts', 'admit_prepared_stage', 'commit_write_context',
+        'inspect_write_receipt', 'object_namespace', 'observation_action',
+        'observation_context', 'verify_published_output', 'verify_write_receipt'],
 }
 
 
@@ -434,3 +438,37 @@ def test_original_model_journal_requires_plain_method_slot(original_carriers, mo
     monkeypatch.setattr(ObjectSink, name, descriptor(method))
     raw, expected = original_carriers['public.RunPromptJournal']
     assert describe(load_payload([base64.b64decode(raw)])) != expected
+
+
+@pytest.mark.parametrize('name,helper', [
+    ('verify_write_receipt', 'verify_target_write_receipt'),
+    ('verify_published_output', 'verify_target_stage'),
+    ('inspect_write_receipt', 'inspect_prepared_write'),
+])
+def test_original_publication_requires_actual_target_validator(original_carriers, monkeypatch, name, helper):
+    from demiflow.execution.outputs import lance_sink
+    function = vars(lance_sink)[helper]
+    monkeypatch.setattr(function, '__code__', function.__code__.replace(co_consts=(*function.__code__.co_consts, 'changed')))
+    with pytest.raises(DataflowError, match='audited definition'):
+        load_payload([base64.b64decode(original_carriers[name][0])])
+
+
+@pytest.mark.parametrize('change', ['property', 'staticmethod', 'classmethod', 'body', 'closure'])
+def test_original_recovery_fact_requires_real_borrowed_connection(original_carriers, monkeypatch, change):
+    from demiflow.execution.journal.run_reader import _ReadonlyJournal
+    wrapper = vars(_ReadonlyJournal)['_connection']
+    if change in ('property', 'staticmethod', 'classmethod'):
+        import builtins
+        monkeypatch.setattr(_ReadonlyJournal, '_connection', getattr(builtins, change)(wrapper))
+    elif change == 'body':
+        original = vars(wrapper)['__wrapped__']
+        monkeypatch.setattr(original, '__code__', original.__code__.replace(co_consts=(*original.__code__.co_consts, 'changed')))
+    else:
+        import contextlib
+        @contextlib.contextmanager
+        def foreign(self):
+            yield None
+        monkeypatch.setattr(foreign, '__wrapped__', vars(wrapper)['__wrapped__'])
+        monkeypatch.setattr(_ReadonlyJournal, '_connection', foreign)
+    with pytest.raises(DataflowError, match='audited definition'):
+        load_payload([base64.b64decode(original_carriers['action_recovery_facts'][0])])

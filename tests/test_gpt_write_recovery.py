@@ -223,7 +223,7 @@ def test_r_c_existing_native_commit_recovers_without_republication(tmp_path):
     before = journal.execution_commits('action-1')
     assert len(before) == 1 and before[0]['status'] == 'prepared'
     # The workbench no longer re-exports the engine reader under a private name (P4).
-    from demiflow.execution.publication_facts import inspect_write_receipt as _native_execution_receipt
+    from demiflow.execution.journal.publication_facts import inspect_write_receipt as _native_execution_receipt
     projected = _native_execution_receipt(journal, 'action-1')
     assert projected['committed_version'] == 1
     assert journal.execution_commits('action-1') == before

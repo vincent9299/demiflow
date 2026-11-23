@@ -20,6 +20,9 @@ with the host. Failures raise ``RunReadError``; its ``code`` is one of
 The SQL was moved from ``workbench/runs/view.py``, ``storage.py``, ``domain.py``
 and ``requests.py`` without changing what it selects or how it is bounded.
 """
+
+from demiflow.execution.contracts.errors import PublicationMismatch
+_STREAM_LANCE_SCHEMA = 'demiflow.stream_lance.v3'
 from contextlib import closing, contextmanager
 import hashlib
 import json
@@ -799,10 +802,11 @@ class _ReadonlyJournal:
     Each connection is a short, bounded read. Native publication helpers can
     inspect their own receipts without borrowing a live writer or its leases.
     """
-    def __init__(self, directory, *, attempt=None, deadline=None):
+    def __init__(self, directory, *, attempt=None, deadline=None, connection=None):
         self.directory = Path(directory)
         self.path = self.directory / 'run.sqlite'
         self.attempt, self.deadline = attempt, deadline
+        self._borrowed_connection = connection
 
     def check_read(self):
         if self.deadline is not None and time.monotonic() >= self.deadline:
@@ -810,10 +814,13 @@ class _ReadonlyJournal:
 
     @contextmanager
     def _connection(self):
-        self.check_read()
-        with read_run(self.directory, deadline=self.deadline) as reader:
-            yield reader.db
-        self.check_read()
+        if self._borrowed_connection is not None:
+            yield self._borrowed_connection
+        else:
+            self.check_read()
+            with read_run(self.directory, deadline=self.deadline) as reader:
+                yield reader.db
+            self.check_read()
 
     def _one(self, table, column='document', *, where='', args=(), maximum=MAX_DOCUMENT_BYTES):
         # This helper is private; its fixed callers own all SQL identifiers.
@@ -1121,7 +1128,7 @@ class _StorageObservation:
 
 def _checked_native_roots(value):
     """Original namespace ownership algorithm, kept inside its native domain."""
-    from demiflow.execution.publication_facts import object_namespace
+    from demiflow.execution.storage.object_resources import object_namespace
     identity = value['identity']
     run_id = identity.get('run_id') if identity else None
     if identity is not None and (type(run_id) is not str or len(run_id) != 32 or any(c not in '0123456789abcdef' for c in run_id)):
@@ -1151,3 +1158,71 @@ def observe_storage(directory=None, *, directory_fd=None, deadline=None):
             observation._check()
     finally:
         observation.close()
+
+
+def _check_deadline(deadline):
+    import time
+    import math
+    if deadline is not None and (type(deadline) not in (int, float) or not math.isfinite(deadline)):
+        raise RecoveryContractError('Invalid publication read deadline')
+    if deadline is not None and time.monotonic() >= deadline:
+        raise RecoveryContractError('Publication read deadline exceeded')
+
+def _publication_snapshot(directory, action_id, attempt, deadline):
+    _check_deadline(deadline)
+    with read_run(directory, deadline=deadline) as reader:
+        state, _ = reader.state(attempt)
+        selected = state.get('attempt', 1)
+        projection = reader.output_projection(selected, action_id)
+        current, effective, _ = reader._output_selection(selected, action_id)
+        return projection, current, effective
+
+def _latest_stream_lance_scope(journal, parent, node):
+    """Newest ``stream_lance.v3`` commit scope of one occurrence, or ``None``.
+
+    Old journals have no ``runtime_commit_scopes`` table; that is absence, not
+    an error.
+    """
+    with journal._connection() as db:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE name='runtime_commit_scopes'").fetchone():
+            return None
+        return db.execute(
+            "SELECT scope_id,substr(declaration,1,65537) FROM runtime_commit_scopes WHERE parent_action_id=? "
+            "AND json_extract(declaration,'$.node_id')=? AND json_extract(declaration,'$.schema')=? "
+            "ORDER BY CAST(json_extract(declaration,'$.request.ordinal') AS INTEGER) DESC,scope_id DESC LIMIT 1",
+            (parent, node, _STREAM_LANCE_SCHEMA)).fetchone()
+
+def action_recovery_facts(directory, action_id, *, attempt=None, deadline=None):
+    """Journal-only recovery eligibility; never proof that a target is absent."""
+    from demiflow.execution.run_context import create_target_absent_binding
+    _check_deadline(deadline)
+    # The readonly protocol shares this single transaction for the entire fact.
+    with read_run(directory, deadline=deadline) as reader:
+        journal = _ReadonlyJournal(directory, attempt=attempt, deadline=deadline,
+                                   connection=reader.db)
+        state, current = reader.state(attempt)
+        selected = state.get('attempt', 1)
+        facts, _, _ = reader._output_selection(selected, action_id)
+        native = journal.execution_action(action_id)
+        identity = journal.recovery_identity()
+        binding = (create_target_absent_binding(identity['run_id'], action_id, native['declaration'], facts.get('intent'))
+                   if native is not None and identity is not None else None)
+        absence = journal.source_binding(action_id + '-create-target-absent')
+        if absence is not None:
+            from demiflow.execution.outputs.lance_sink import spec_from_identity
+            if native is None or identity is None or type(absence) is not dict:
+                raise PublicationMismatch('Create absence has no original native action')
+            spec = spec_from_identity(native['declaration']['sink'])
+            recorded = create_target_absent_binding(identity['run_id'], action_id, native['declaration'],
+                dict(kind='write_table', spec=spec.to_dict(), request_hash=absence.get('request_hash'),
+                     operation_id=absence.get('operation_id')))
+            if recorded is None or absence != recorded:
+                raise PublicationMismatch('Create absence binding differs from original action')
+        restricted = journal.source_binding(action_id + '-state-recovery-restriction')
+        return dict(action_id=action_id, attempt=selected, current_attempt=current,
+                    revision=(reader.document('execution_state', 65536) or {}).get('revision', 0),
+                    native_action_present=native is not None,
+                    native_completed=native is not None and native['result'] is not None,
+                    recovery_restricted=native is not None and native['result'] is None and restricted is not None,
+                    absence_eligible=binding is not None and journal.latest_execution_commit(action_id) is None,
+                    absence_recorded=absence is not None)

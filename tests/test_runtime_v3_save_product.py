@@ -333,7 +333,7 @@ else:
     stage=next(o for o in stopped['outputs'] if o['name']=='stage')
     assert stage['result'] is None and lance.dataset(stage['uri']).version==1
     if not foreign:
-        from demiflow.execution.dataflow_stream_lance import _BatchSink
+        from demiflow.execution.outputs.lance_sink import _BatchSink
         from demiflow.execution.recovery_contract import UnresolvedCommit
         def unknown_inspection(*args, **kwargs):
             raise UnresolvedCommit('native inspection is indeterminate')

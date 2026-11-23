@@ -7,7 +7,7 @@ import sqlite3
 import pytest
 
 from demiflow.execution.journal import run_reader
-from demiflow.execution.publication_facts import object_namespace
+from demiflow.execution.storage.object_resources import object_namespace
 from demiflow.execution.recovery_contract import RecoveryContractError
 
 

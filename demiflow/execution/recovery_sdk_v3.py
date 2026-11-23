@@ -575,7 +575,14 @@ def _layout_dependencies_match(entry):
             fn = type.__dict__['__dict__'].__get__(fn).get(parts[1])
         elif len(parts) != 1:
             return False
-        if type(fn) is not FunctionType or fn.__globals__ is not vars(module) or fn.__closure__:
+        if type(fn) is not FunctionType:
+            return False
+        bound = fn
+        if item.get('contextmanager', False):
+            fn = _contextmanager_original(fn, module)
+            if fn is None:
+                return False
+        if fn.__globals__ is not vars(module) or fn.__closure__:
             return False
         source = Path(module.__file__).read_bytes()
         if sha256(source).hexdigest() != item['source']:
@@ -587,7 +594,7 @@ def _layout_dependencies_match(entry):
                 or fn.__defaults__ != item['defaults'] or fn.__kwdefaults__ != item['kwdefaults']):
             return False
         for owner, name in item['bindings']:
-            if vars(import_module(owner)).get(name) is not fn:
+            if vars(import_module(owner)).get(name) is not bound:
                 return False
     return True
 

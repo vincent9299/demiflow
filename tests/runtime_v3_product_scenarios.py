@@ -61,7 +61,7 @@ def read_native_execution(workspace, run_id, *, attempt, owned_root):
     from demiflow.execution.run_journal import RunJournal
     from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from demiflow.workbench.runs import manager as runs, facts
-    from demiflow.execution.publication_facts import inspect_write_receipt
+    from demiflow.execution.journal.publication_facts import inspect_write_receipt
     from demiflow.workbench.graph import model
 
     workspace = _owned(workspace, owned_root)
