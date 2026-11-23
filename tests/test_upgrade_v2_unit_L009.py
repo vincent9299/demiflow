@@ -4,8 +4,9 @@ import sqlite3
 
 import pytest
 
-from demiflow.execution.dataflow_history import load_execution_version, validate_resume_compatibility
-from demiflow.execution.seal.plan_interpreter import PlanContractError
+from demiflow.execution.journal.dataflow_history import load_execution_version
+from demiflow.execution.checkpoint.history import validate_resume_compatibility
+from demiflow.execution.contracts.errors import PlanContractError
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.seal.plan import load_native_execution
 from demiflow.execution.seal.sealed_plans import load_execution_bindings, load_sealed_plan

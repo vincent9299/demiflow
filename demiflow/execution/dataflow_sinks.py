@@ -841,7 +841,8 @@ def inspect_native_write_receipt(journal, action_id):
     """Project a v3 native publication without starting code or changing history."""
     from demiflow.execution.publication_facts import observation_action, commit_write_context
     from demiflow.execution.outputs.lance_sink import LanceSink, spec_from_identity
-    from demiflow.execution.seal.sealed_plans import _v3_read_store
+    from demiflow.execution.seal.sealed_plans import sealed_read_bounds
+    from demiflow.execution.storage.objects import readonly_run_store
     from demiflow.execution.seal.plan import load_dataflow
     binding = journal.recovery_identity()
     action = journal.execution_action(action_id)
@@ -854,7 +855,8 @@ def inspect_native_write_receipt(journal, action_id):
     seal = journal.source_binding(action_id + '-dataflow-sealed')
     if seal is None:
         return None
-    store, bounds = _v3_read_store(journal.directory, store_id=seal['physical_ref']['store_id'])
+    bounds = sealed_read_bounds()
+    store = readonly_run_store(journal.directory, store_id=seal['physical_ref']['store_id'], bounds=bounds)
     graph, physical, _ = load_dataflow(journal.directory, action_id, store=store, bounds=bounds, _reader=journal)
     native_action = observation_action(journal, action_id, action['declaration'], binding)
     native = LanceSink(native_action, spec_from_identity(action['declaration']['sink']))

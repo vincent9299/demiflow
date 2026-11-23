@@ -7,6 +7,8 @@ from the E1 sink-output ``artifact_manifest`` (paged-artifacts-v1), which stays
 owned by the commit path.
 """
 
+from demiflow.execution.contracts.errors import require_plan_contract as _require
+
 import json
 import hashlib
 import re
@@ -222,3 +224,16 @@ def verify_manifest(value, ref):
 def encoded(value):return json.dumps(value,ensure_ascii=False,sort_keys=True,indent=2).encode()+b'\n'
 
 def digest(value):return hashlib.sha256(value if isinstance(value,bytes) else encoded(value)).hexdigest()
+
+
+def validate_plan_artifact_ref(ref, prefix):
+    _require(type(ref) is dict and set(ref) == {"path", "sha256", "bytes"},
+             "invalid_contract", prefix + " ref key set is unsupported")
+    path = ref["path"]
+    _require(type(path) is str and path and not Path(path).is_absolute()
+             and ".." not in Path(path).parts,
+             "invalid_contract", prefix + " path must be run-relative")
+    _require(type(ref["sha256"]) is str and _SHA256.fullmatch(ref["sha256"]) is not None,
+             "invalid_contract", prefix + " sha256 must be 64 lowercase hex")
+    _require(type(ref["bytes"]) is int and ref["bytes"] >= 0,
+             "invalid_contract", prefix + " bytes must be nonnegative")

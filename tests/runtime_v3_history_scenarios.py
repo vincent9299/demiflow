@@ -138,7 +138,8 @@ def original_native_history(root):
     from demiflow.execution.run_context import RunContext
     from demiflow.execution.recovery_contract import RunRef
     from demiflow.execution.recovery_identity import platform_identity
-    from demiflow.execution.dataflow_history import load_execution_version, validate_resume_compatibility
+    from demiflow.execution.journal.dataflow_history import load_execution_version
+    from demiflow.execution.checkpoint.history import validate_resume_compatibility
     from demiflow.workbench.runs.facts import read_sealed_plan
     # The workbench no longer re-exports the engine reader under a private name (P4).
     from demiflow.execution.publication_facts import inspect_write_receipt as _native_execution_receipt

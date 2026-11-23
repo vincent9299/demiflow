@@ -414,7 +414,7 @@ def test_snapshot_kind_is_the_registered_semantic_kind(tmp_path):
 
 def test_real_workbench_and_history_read_original_v3_store(tmp_path):
     from demiflow.workbench.runs.facts import read_sealed_plan
-    from demiflow.execution.dataflow_history import load_execution_version
+    from demiflow.execution.journal.dataflow_history import load_execution_version
     with prepared(tmp_path, data.from_items([{"x": 1}]).map(lambda r: r)) as (ex, services):
         root = services.action.context.directory
         before = sorted(str(p.relative_to(root)) for p in root.rglob("*"))
@@ -464,7 +464,8 @@ def test_real_sort_spill_preserves_typed_records_and_provenance(tmp_path):
 
 
 def test_resume_validation_reads_wire_plan_and_checks_platform_pin(tmp_path):
-    from demiflow.execution.dataflow_history import load_execution_version, validate_resume_compatibility
+    from demiflow.execution.journal.dataflow_history import load_execution_version
+    from demiflow.execution.checkpoint.history import validate_resume_compatibility
     from demiflow.execution.recovery_identity import platform_identity
     with prepared(tmp_path, data.from_items([{"x": 1}])) as (ex, services):
         binding = load_execution_version(services.action.context.directory,

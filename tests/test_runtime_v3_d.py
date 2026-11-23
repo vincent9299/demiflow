@@ -508,7 +508,7 @@ def _install_fakes():
     setattr(contracts_pkg, "dataflow_errors", errors)
 
     # -- history (W001/W002/W003) --
-    history = types.ModuleType("demiflow.execution.dataflow_history")
+    history = types.ModuleType("demiflow.execution.journal.dataflow_history")
     history.state = {"binding": None, "supported": True, "image": None}
 
     def load_execution_version(directory, action_id, *, max_bytes):
@@ -533,6 +533,10 @@ def _install_fakes():
     history.validate_resume_compatibility = validate_resume_compatibility
     history.translate_native_checkpoint = translate_native_checkpoint
     sys.modules[history.__name__] = history
+    recovery_history = types.ModuleType("demiflow.execution.checkpoint.history")
+    recovery_history.validate_resume_compatibility = validate_resume_compatibility
+    recovery_history.translate_native_checkpoint = translate_native_checkpoint
+    sys.modules[recovery_history.__name__] = recovery_history
 
 
 _install_fakes()

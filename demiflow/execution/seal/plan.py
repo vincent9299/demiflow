@@ -665,8 +665,15 @@ def load_dataflow(directory: Path, action_id: str, *, store, bounds: Bounds, _re
         raise DataflowError("INCOMPATIBLE_HISTORY", "Run journal is absent")
     facts = journal.source_binding(action_id + _SEAL_KEY)
     if facts is None:
-        from ..dataflow_history import load_execution_version
-        binding = load_execution_version(directory, action_id, max_bytes=bounds.max_state_bytes)
+        from demiflow.execution.seal.history import load_native_binding
+        native = journal.source_binding(action_id + "-sealed-plan")
+        if native is None:
+            raise DataflowError("INCOMPATIBLE_HISTORY",
+                               "action has no sealed plan facts (pre-seal run); cannot bind a historical execution")
+        identity = journal.recovery_identity()
+        run_id = identity.get("run_id") if type(identity) is dict else None
+        binding = load_native_binding(run_id, Path(directory), action_id, native,
+                                      max_bytes=bounds.max_state_bytes)
         raise DataflowError("INCOMPATIBLE_HISTORY",
                             "Historical action schema " + str(binding.schema_version)
                             + " is not a v3 sealed dataflow")
@@ -812,7 +819,8 @@ def validate_graph_replay(action, declaration, credit):
 
 def load_native_execution(run, action_id, *, execution_id):
     """Read one published v2 placement, using only its immutable F1 and bindings."""
-    from demiflow.execution.seal.plan_interpreter import PlanContractError, interpret_physical_plan
+    from demiflow.execution.contracts.errors import PlanContractError
+    from demiflow.execution.seal.plan_interpreter import interpret_physical_plan
     from demiflow.execution.seal.sealed_plans import load_execution_bindings, load_sealed_plan
 
     sealed = load_sealed_plan(run.directory, action_id, version='v2')

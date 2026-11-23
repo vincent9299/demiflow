@@ -3,7 +3,8 @@ from dataclasses import replace
 
 import pytest
 
-from demiflow.execution.seal.plan_interpreter import PlanContractError, interpret_physical_plan, validate_worker_assignment
+from demiflow.execution.contracts.errors import PlanContractError
+from demiflow.execution.seal.plan_interpreter import interpret_physical_plan, validate_worker_assignment
 from demiflow.execution.seal.sealed_plans import load_execution_bindings, load_sealed_plan
 from test_execution_layout import assignment_for, expected_channel_ids
 from test_sealed_execution_bindings import sealed_chain, workdir

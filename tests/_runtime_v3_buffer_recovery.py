@@ -7,7 +7,8 @@ from demiflow.execution.contracts import state_codec
 from demiflow.execution.kernels.operator import IMAGE_MEDIA_TYPE
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.storage.state_artifacts import StateArtifacts
-from demiflow.execution.seal.sealed_plans import _v3_read_store, load_sealed_plan
+from demiflow.execution.seal.sealed_plans import load_sealed_plan, sealed_read_bounds
+from demiflow.execution.storage.objects import readonly_run_store
 
 
 def images_at(run, fact, kind):
@@ -22,7 +23,8 @@ def images_at(run, fact, kind):
             if ref.media_type != IMAGE_MEDIA_TYPE:
                 # Other refs are finite-port indices and worker frontiers.
                 continue
-            store, _ = _v3_read_store(run.directory, store_id=ref.store_id)
+            read_bounds = sealed_read_bounds()
+            store = readonly_run_store(run.directory, store_id=ref.store_id, bounds=read_bounds)
             try:
                 raw = b''.join(store.read(ref, max_bytes=run.limits['max_state_bytes']))
                 snapshot = state_codec.loads(raw, max_bytes=run.limits['max_state_bytes'])

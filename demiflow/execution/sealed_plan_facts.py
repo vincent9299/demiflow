@@ -9,7 +9,7 @@ generation. These readers name those facts once, in the engine.
 Read-only: the journal is only read, sealed artifacts are loaded through the
 existing bounded readers, nothing is recompiled and no plan is re-sealed.
 """
-from demiflow.execution.seal.plan_interpreter import PlanContractError
+from demiflow.execution.contracts.errors import PlanContractError
 
 __all__ = ['PlanContractError', 'recovery_restriction', 'sealed_plan_view',
            'sealed_plan_binding', 'identity_bridge', 'read_action_plan', 'read_verified_identity_bridge']
@@ -45,7 +45,7 @@ def sealed_plan_view(directory, action_id, *, journal=None):
     if marker is None:
         return None
     from demiflow.execution.seal.sealed_plans import load_sealed_plan
-    from .dataflow_history import build_plan_view
+    from demiflow.execution.journal.dataflow_history import build_plan_view
     bundle = load_sealed_plan(directory, action_id)
     view = build_plan_view(bundle['graph'], bundle['sealed'], bundle['physical'], observations=())
     return dict(version=bundle['version'], action_id=action_id,
@@ -81,7 +81,7 @@ def identity_bridge(directory, action_id, *, max_bytes, journal=None):
     ref = _journal(directory, journal).source_binding(action_id + _IDENTITY_BRIDGE)
     if ref is None:
         return None
-    from demiflow.execution.seal.sealed_plans import read_plan_artifact
+    from demiflow.execution.storage.reading import read_plan_artifact
     return dict(ref=ref, bridge=read_plan_artifact(directory, ref, max_bytes=max_bytes))
 
 
@@ -164,7 +164,7 @@ def read_action_plan(directory, action_id, *, max_bytes, deadline=None):
     restriction = journal.source_binding(action_id + _RECOVERY_RESTRICTION)
     if marker is not None:
         from demiflow.execution.seal.sealed_plans import load_sealed_plan
-        from .dataflow_history import build_plan_view
+        from demiflow.execution.journal.dataflow_history import build_plan_view
         if type(marker) is not dict:
             raise PlanContractError('invalid_contract', 'Invalid v3 seal marker')
         references = [marker.get(key) for key in ('logical_ref', 'physical_ref', 'code_pin_ref', 'identity_bridge_ref', 'constants_ref')]
@@ -223,7 +223,7 @@ def read_action_plan(directory, action_id, *, max_bytes, deadline=None):
 def read_verified_identity_bridge(directory, action_id, *, expected_dag_id, expected_report_digest,
                                   max_bytes, deadline=None):
     from demiflow.execution.journal.run_reader import _ReadonlyJournal
-    from demiflow.execution.seal.sealed_plans import read_plan_artifact
+    from demiflow.execution.storage.reading import read_plan_artifact
     def bounded(value, maximum=128):
         return type(value) is str and 1 <= len(value) <= maximum
     if (not bounded(action_id) or not bounded(expected_dag_id) or not bounded(expected_report_digest,64)

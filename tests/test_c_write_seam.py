@@ -81,11 +81,13 @@ def assert_sealed_readable(run_dir, run, expected_kinds):
 
 
 def read_program_evidence(run_dir, action_id):
-    from demiflow.execution.seal.sealed_plans import _v3_read_store
+    from demiflow.execution.seal.sealed_plans import sealed_read_bounds
+    from demiflow.execution.storage.objects import readonly_run_store
     import json
     bundle = load_sealed_plan(run_dir, action_id, version="v3")
     sealed = bundle["sealed"]
-    store, bounds = _v3_read_store(run_dir, store_id=sealed.code_pin_ref.store_id)
+    bounds = sealed_read_bounds()
+    store = readonly_run_store(run_dir, store_id=sealed.code_pin_ref.store_id, bounds=bounds)
     pin_bytes = b"".join(store.read(sealed.code_pin_ref, max_bytes=bounds.max_control_bytes))
     pin = json.loads(pin_bytes)
     manifests = []
@@ -293,7 +295,7 @@ def test_identity_bridge_carrier_survives_run_exit(tmp_path):
     reads it back after the run, with every entry four-way identity linked.
     """
     from demiflow.execution.seal.identity_bridge import build_identity_bridge, seal_identity_bridge
-    from demiflow.execution.seal.sealed_plans import read_plan_artifact
+    from demiflow.execution.storage.reading import read_plan_artifact
     from demiflow.planning.dag import compile_logical_dag
     from demiflow.workbench.runs import facts
 

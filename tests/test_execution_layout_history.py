@@ -38,6 +38,7 @@ CARRIERS = {
     'checked': ['CheckedExecution'],
     'managed_native': ['NativeExecution'],
     'run_journal': ['RunJournal'],
+    'plan_interpreter': ['PlanContractError'],
     'adaptive_requests': ['AdaptiveRequestGate'],
     'blocking_io': ['BlockingIOPool'],
     'inference_options': ['normalize_call_options'],
@@ -92,6 +93,9 @@ result['offline_class_global'] = base64.b64encode(pickle.dumps(RemoteOfflineProm
 result['public.Dataset'] = [base64.b64encode(pickle.dumps(Dataset, protocol=5)).decode(), describe(Dataset)]
 from demiflow.data.result_cache import CachedMap, CachedSyncMap
 for fn in [CachedMap.__call__, CachedMap._io, CachedSyncMap.__call__, CachedSyncMap.__init__]:
+    result['public.' + fn.__qualname__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
+from demiflow.operator_llm.stream_recovery import RunPromptJournal, NativePromptRecovery, native_request_budget
+for fn in [RunPromptJournal, NativePromptRecovery, native_request_budget, RunPromptJournal.check_recovery, RunPromptJournal.media_references, NativePromptRecovery.delivery_trace, NativePromptRecovery.bind_client]:
     result['public.' + fn.__qualname__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
 from demiflow import PipelineBundleRef
 buffer = io.BytesIO(); ProgramPickler(buffer, protocol=5).dump(PipelineBundleRef.load)
@@ -388,3 +392,35 @@ def test_changed_request_policy_cannot_keep_original_pin(original_carriers, monk
     original = request_admission_config.__code__
     monkeypatch.setattr(request_admission_config, '__code__', original.replace(co_consts=(*original.co_consts, 'changed')))
     assert describe(request_admission_config) != original_carriers['public.request_admission_config'][1]
+
+
+@pytest.mark.parametrize('name', ['RunPromptJournal', 'NativePromptRecovery', 'native_request_budget',
+    'RunPromptJournal.check_recovery', 'RunPromptJournal.media_references',
+    'NativePromptRecovery.delivery_trace', 'NativePromptRecovery.bind_client'])
+def test_original_model_journal_capture_remains_exact(original_carriers, name):
+    raw, expected = original_carriers['public.' + name]
+    assert describe(load_payload([base64.b64decode(raw)])) == expected
+
+
+@pytest.mark.parametrize('module,name', [
+    ('demiflow.execution.outputs.object_sink', 'ObjectSink.reference_name'),
+    ('demiflow.execution.outputs.object_sink', 'ObjectSink._record_object'),
+    ('demiflow.execution.outputs.object_sink', 'ObjectSink._flush_page'),
+    ('demiflow.execution.storage.object_resources', 'object_name'),
+    ('demiflow.execution.storage.object_resources', 'verify_object'),
+])
+def test_original_model_journal_requires_actual_media_operation(original_carriers, monkeypatch, module, name):
+    import importlib
+    value = importlib.import_module(module)
+    for part in name.split('.'):
+        value = vars(value)[part]
+    monkeypatch.setattr(value, '__code__', value.__code__.replace(co_consts=(*value.__code__.co_consts, 'changed')))
+    raw, expected = original_carriers['public.RunPromptJournal']
+    assert describe(load_payload([base64.b64decode(raw)])) != expected
+
+
+def test_original_model_journal_requires_bound_media_verifier(original_carriers, monkeypatch):
+    from demiflow.execution.outputs import object_sink
+    monkeypatch.setattr(object_sink, 'verify_object', lambda *args, **kwargs: None)
+    raw, expected = original_carriers['public.RunPromptJournal']
+    assert describe(load_payload([base64.b64decode(raw)])) != expected

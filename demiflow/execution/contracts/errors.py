@@ -5,6 +5,13 @@ Resource-domain codes are owned by resource protocol v1 (future module A,
 only. Engine-domain codes describe protocol/control facts, never business
 success or whether a paid effect may be retried.
 """
+
+MAX_DETAIL = 512
+_REASONS = frozenset({
+    "missing_plan", "missing_bindings", "unsafe_artifact", "artifact_too_large",
+    "corrupt_artifact", "identity_mismatch", "invalid_contract",
+    "unsupported_layout", "invalid_assignment",
+})
 from ..recovery_contract import RecoveryContractError
 
 ENGINE_ERROR_CODES = frozenset({
@@ -56,3 +63,21 @@ class ReservationError(RecoveryContractError):
         self.code = code
         self.call_id = call_id
         self.retriable = retriable
+
+
+class PlanContractError(RecoveryContractError):
+    """A sealed input cannot be interpreted or an assignment contradicts it.
+
+    Consumers branch on ``.reason`` only; the message string is not a contract.
+    """
+
+    def __init__(self, reason, detail=""):
+        if reason not in _REASONS:
+            raise ValueError("Unknown plan contract reason: " + str(reason))
+        self.reason = reason
+        self.detail = str(detail)[:MAX_DETAIL]
+        super().__init__(self.detail)
+
+def require_plan_contract(condition, reason, detail):
+    if not condition:
+        raise PlanContractError(reason, detail)

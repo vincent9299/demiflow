@@ -524,7 +524,8 @@ class DataflowCheckpointCoordinator:
             return image
 
     def _recover_historical(self, sinks) -> RecoveryImage:
-        from demiflow.execution.dataflow_history import load_execution_version, translate_native_checkpoint, validate_resume_compatibility
+        from demiflow.execution.journal.dataflow_history import load_execution_version
+        from demiflow.execution.checkpoint.history import translate_native_checkpoint, validate_resume_compatibility
         directory = self._action.context.directory
         binding = load_execution_version(directory, self._action.action_id,
                                          max_bytes=self._physical.bounds.max_state_bytes)

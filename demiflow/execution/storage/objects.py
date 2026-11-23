@@ -608,3 +608,16 @@ def _file_digest(path: Path, *, max_bytes: int) -> str:
     finally:
         os.close(fd)
     return digest.hexdigest()
+
+
+def readonly_run_store(directory, *, store_id, bounds):
+    """Single adjustable v3 read point (W007/W008).
+
+    Builds the run-rooted artifact store and read bounds used to load a v3 sealed
+    dataflow. The root is the writer's .dataflow-store directory and the domain
+    comes from its authenticated artifact reference. Reading history creates no
+    directories, reservations or journal writes.
+    """
+    store = RunArtifactStore(root=Path(directory).absolute() / ".dataflow-store", store_id=store_id,
+                             journal=None, bounds=bounds, readonly=True)
+    return store

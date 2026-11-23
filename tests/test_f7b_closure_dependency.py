@@ -423,7 +423,8 @@ def _assert_sealed_helper(run, helper, source):
     import hashlib
     import json
     from demiflow.execution.seal.plan import CODE_PIN_MEDIA, _read_json
-    from demiflow.execution.seal.sealed_plans import _v3_read_store, load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan, sealed_read_bounds
+    from demiflow.execution.storage.objects import readonly_run_store
 
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
     with run.journal._connection() as db:
@@ -433,7 +434,8 @@ def _assert_sealed_helper(run, helper, source):
     for seal in seals:
         bundle = load_sealed_plan(run.directory, seal['action_id'])
         ref = bundle['sealed'].code_pin_ref
-        store, bounds = _v3_read_store(run.directory, store_id=ref.store_id)
+        bounds = sealed_read_bounds()
+        store = readonly_run_store(run.directory, store_id=ref.store_id, bounds=bounds)
         pins = _read_json(store, ref, max_bytes=bounds.max_control_bytes, media_type=CODE_PIN_MEDIA)
         matches.extend(pin['imports'][helper] for pin in pins['programs'].values()
                        if helper in pin.get('imports', {}))

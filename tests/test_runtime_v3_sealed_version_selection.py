@@ -7,7 +7,7 @@ import sys
 import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.seal.plan_interpreter import PlanContractError
+from demiflow.execution.contracts.errors import PlanContractError
 from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
 

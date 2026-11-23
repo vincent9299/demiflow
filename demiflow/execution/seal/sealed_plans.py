@@ -11,7 +11,11 @@ import json
 from pathlib import Path
 
 from demiflow.execution.recovery_contract import RecoveryContractError, identifier, identity
-from demiflow.execution.seal.plan_interpreter import EXECUTION_BINDINGS_SCHEMA, EXECUTION_BINDINGS_SCHEMA_V2, PlanContractError, _validate_artifact_ref, _validate_bindings, _validate_manifest_ref
+from demiflow.execution.contracts.errors import require_plan_contract as _require
+from demiflow.execution.storage.reading import read_plan_artifact
+from demiflow.execution.seal.plan_interpreter import EXECUTION_BINDINGS_SCHEMA, EXECUTION_BINDINGS_SCHEMA_V2, _validate_bindings, _validate_manifest_ref
+from demiflow.execution.contracts.errors import PlanContractError
+from demiflow.execution.contracts.artifact import validate_plan_artifact_ref as _validate_artifact_ref
 from demiflow.execution.run_journal import RunJournal
 from demiflow.planning.dag import validate_logical_dag, validate_physical_execution_plan
 
@@ -26,9 +30,7 @@ _SEALED_PLAN_KEY = "-sealed-plan"
 _BINDINGS_KEY = "-execution-bindings"
 
 
-def _require(condition, reason, detail):
-    if not condition:
-        raise PlanContractError(reason, detail)
+
 
 
 def _check_action_id(action_id):
@@ -38,43 +40,7 @@ def _check_action_id(action_id):
         raise PlanContractError("invalid_contract", "action_id invalid: " + str(exc))
 
 
-def read_plan_artifact(directory, ref, *, max_bytes) -> dict:
-    """Bounded, run-relative, symlink-refusing, digest-gated carrier read."""
-    _validate_artifact_ref(ref, "artifact")
-    _require(type(max_bytes) is int and max_bytes >= 0,
-             "invalid_contract", "max_bytes must be a nonnegative int")
-    if ref["bytes"] > max_bytes:
-        raise PlanContractError("artifact_too_large", "declared artifact bytes exceed the read budget")
-    root = Path(directory)
-    path = root / Path(ref["path"])
-    if any(item.is_symlink() for item in (path, *path.parents)):
-        raise PlanContractError("unsafe_artifact", "artifact path contains a symlink")
-    resolved, root_resolved = path.resolve(), root.resolve()
-    if resolved != root_resolved and root_resolved not in resolved.parents:
-        raise PlanContractError("unsafe_artifact", "artifact path escapes the run directory")
-    if not path.exists():
-        raise PlanContractError("corrupt_artifact", "artifact carrier is missing")
-    if not path.is_file():
-        raise PlanContractError("unsafe_artifact", "artifact carrier is not a regular file")
-    actual = path.stat().st_size
-    if actual > max_bytes:
-        raise PlanContractError("artifact_too_large", "artifact carrier exceeds the read budget")
-    if actual != ref["bytes"]:
-        raise PlanContractError("corrupt_artifact", "artifact carrier length differs")
-    with path.open("rb") as stream:
-        raw = stream.read(max_bytes + 1)
-    if len(raw) > max_bytes:
-        raise PlanContractError("artifact_too_large", "artifact carrier exceeds the read budget")
-    if len(raw) != ref["bytes"]:
-        raise PlanContractError("corrupt_artifact", "artifact carrier changed while reading")
-    if hashlib.sha256(raw).hexdigest() != ref["sha256"]:
-        raise PlanContractError("corrupt_artifact", "artifact carrier digest differs")
-    try:
-        value = json.loads(raw)
-    except ValueError:
-        raise PlanContractError("corrupt_artifact", "artifact carrier is not valid JSON")
-    _require(type(value) is dict, "invalid_contract", "artifact carrier is not a JSON object")
-    return value
+
 
 
 def _validate_f1(facts, journal, action_id):
@@ -100,7 +66,7 @@ def _validate_f1(facts, journal, action_id):
              "invalid_contract", "sealed_at must be an int or string")
 
 
-def _v3_read_bounds():
+def sealed_read_bounds():
     from demiflow.execution.contracts.dataflow import Bounds
     return Bounds(max_nodes=4096, max_edges=8192, max_partitions=4096, max_depth=128,
                     max_control_bytes=MAX_SEALED_PLAN_BYTES, max_row_bytes=1024 * 1024,
@@ -110,27 +76,17 @@ def _v3_read_bounds():
                     timeout_ms=60000)
 
 
-def _v3_read_store(directory, *, store_id):
-    """Single adjustable v3 read point (W007/W008).
 
-    Builds the run-rooted artifact store and read bounds used to load a v3 sealed
-    dataflow. The root is the writer's .dataflow-store directory and the domain
-    comes from its authenticated artifact reference. Reading history creates no
-    directories, reservations or journal writes.
-    """
-    from demiflow.execution.storage.objects import RunArtifactStore
-    bounds = _v3_read_bounds()
-    store = RunArtifactStore(root=Path(directory).absolute() / ".dataflow-store", store_id=store_id,
-                             journal=None, bounds=bounds, readonly=True)
-    return store, bounds
 
 
 def _load_sealed_v3(directory, action_id, marker, *, _reader=None, _max_carrier_bytes=None, _deadline=None):
     """v3 branch: read and fully validate the original artifacts via load_dataflow."""
     from demiflow.execution.seal.plan import load_dataflow
-    from demiflow.execution.dataflow_history import _ref_from_json
+    from demiflow.execution.contracts.dataflow_codec import decode_history_reference as _ref_from_json
     ref = _ref_from_json(marker["physical_ref"], "physical_ref")
-    store, bounds = _v3_read_store(directory, store_id=ref.store_id)
+    from demiflow.execution.storage.objects import readonly_run_store
+    bounds = sealed_read_bounds()
+    store = readonly_run_store(directory, store_id=ref.store_id, bounds=bounds)
     graph, physical, sealed = load_dataflow(Path(directory), action_id, store=store, bounds=bounds, _reader=_reader,
                                              _max_carrier_bytes=_max_carrier_bytes, _deadline=_deadline)
     return {"version": "v4" if marker["schema"] == "demiflow.dataflow_seal.v4" else "v3", "facts": marker, "graph": graph,
@@ -195,9 +151,11 @@ def _load_bindings_v3(directory, action_id, sealed_plan):
     Reads only the v3 bridge carrier; v2 driver placement / worker groups are not
     part of this layout and are rejected rather than misread as worker facts.
     """
-    from demiflow.execution.dataflow_history import _store_read_json, _ref_json
+    from demiflow.execution.storage.reading import read_json_artifact as _store_read_json
+    from demiflow.execution.contracts.dataflow_codec import artifact_reference_fields as _ref_json
     graph, physical, sealed = sealed_plan["graph"], sealed_plan["physical"], sealed_plan["sealed"]
-    store, _ = _v3_read_store(directory, store_id=sealed.physical_ref.store_id)
+    from demiflow.execution.storage.objects import readonly_run_store
+    store = readonly_run_store(directory, store_id=sealed.physical_ref.store_id, bounds=sealed_read_bounds())
     ref = sealed.identity_bridge_ref
     doc = _store_read_json(store, ref, max_bytes=MAX_BINDINGS_BYTES)
     _require(doc.get("action_id") == action_id,

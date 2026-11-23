@@ -567,7 +567,8 @@ def _layout_dependencies_match(entry):
     from importlib import import_module
     for item in entry.get('dependencies', ()):
         module = import_module(item['module'])
-        fn = vars(module).get(item['name'])
+        owners = _owners(module, item['name'])
+        fn = owners[0] if owners else None
         if type(fn) is not FunctionType or fn.__globals__ is not vars(module) or fn.__closure__:
             return False
         source = Path(module.__file__).read_bytes()
@@ -580,7 +581,8 @@ def _layout_dependencies_match(entry):
                 or fn.__defaults__ != item['defaults'] or fn.__kwdefaults__ != item['kwdefaults']):
             return False
         for owner, name in item['bindings']:
-            if vars(import_module(owner)).get(name) is not fn:
+            bound = _owners(import_module(owner), name)
+            if not bound or bound[0] is not fn:
                 return False
     return True
 

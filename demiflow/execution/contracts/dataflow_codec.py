@@ -10,6 +10,10 @@ output is allocated. Identity formulas (IDENTITY.md) live here exactly once:
 """
 from __future__ import annotations
 
+from demiflow.execution.contracts.dataflow_errors import DataflowError as _err
+_JSON_MEDIA = "application/json"
+RUN_STORE_ID = "run"
+
 from demiflow.execution.recovery_contract import document, identity
 
 import math
@@ -1277,3 +1281,26 @@ def image_request_budget(action_id):
 def artifact_reference_fields(ref: "ArtifactRef") -> dict:
     return {"digest": ref.digest, "size_bytes": ref.size_bytes, "store_id": ref.store_id,
             "key": ref.key, "media_type": ref.media_type}
+
+
+def history_carrier_reference(ref, *, media_type=_JSON_MEDIA):
+    """Present a run-relative {path, sha256, bytes} carrier as an ArtifactRef."""
+    return ArtifactRef(digest=ref["sha256"], size_bytes=ref["bytes"],
+                       store_id=RUN_STORE_ID, key=ref["path"], media_type=media_type)
+
+def decode_history_reference(value, label):
+    if type(value) is not dict or set(value) != {"digest", "size_bytes", "store_id", "key", "media_type"}:
+        raise _err("INVALID_CONTRACT", label + " is not a closed artifact reference")
+    try:
+        return ArtifactRef(digest=value["digest"], size_bytes=value["size_bytes"],
+                           store_id=value["store_id"], key=value["key"],
+                           media_type=value["media_type"])
+    except DataflowError:
+        raise
+    except (ValueError, TypeError) as exc:
+        raise _err("INVALID_CONTRACT", label + " invalid: " + str(exc))
+
+def history_reference_list(value):
+    if type(value) is not list:
+        raise _err("INVALID_CONTRACT", "sealed reference sequence is not a list")
+    return value

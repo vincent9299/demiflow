@@ -1,7 +1,7 @@
 """Pure interpretation of sealed execution inputs into a read-only layout.
 
-This module owns the four frozen data classes, the contract error type and the
-single ``to_wire`` conversion shared by every consumer. It never reads files,
+This module owns the sealed layout values and the single ``to_wire`` conversion.
+Shared errors and artifact-reference validation belong to the protocol contracts. It never reads files,
 never imports the sealed-plan reader and never re-derives business semantics:
 it only validates and explains the already-sealed logical dag / physical plan /
 execution bindings. The stronger relational checks here close the gaps the v1
@@ -12,12 +12,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass
-from pathlib import Path
 import re
 from types import MappingProxyType
 
 from demiflow.execution.recovery_contract import RecoveryContractError, document, identifier, identity
-from demiflow.execution.contracts.errors import ProtocolError
+from demiflow.execution.contracts.errors import ProtocolError, PlanContractError, require_plan_contract as _require
+from demiflow.execution.contracts.artifact import validate_plan_artifact_ref as _validate_artifact_ref
 from demiflow.execution.contracts.worker import validate_assignment
 from demiflow.planning.dag import partition_id_for, validate_channel_plan, validate_logical_dag, validate_physical_execution_plan
 from demiflow.planning.graph_channels import RouteTable, materialize_channels
@@ -27,13 +27,9 @@ ReadonlyDocument = Mapping[str, object]
 
 EXECUTION_BINDINGS_SCHEMA = "demiflow.execution_bindings.v1"
 SUPPORTED_SLICES = frozenset({"chain_v1", "queue_transform_v1", "static_fanout_v1"})
-MAX_DETAIL = 512
 
-_REASONS = frozenset({
-    "missing_plan", "missing_bindings", "unsafe_artifact", "artifact_too_large",
-    "corrupt_artifact", "identity_mismatch", "invalid_contract",
-    "unsupported_layout", "invalid_assignment",
-})
+
+
 _BINDINGS_KEYS = frozenset({
     "schema", "run_id", "action_id", "dag_id", "plan_id", "artifact_manifest_ref",
     "supported_slice", "profiles", "programs", "driver_stage_ids",
@@ -76,18 +72,7 @@ _STAGE_BUDGET_KEYS = frozenset({"inflight_rows", "inflight_bytes", "output_bytes
 _V2_SOURCE_KIND = {"native_driver_v1": "fixed_source"}
 
 
-class PlanContractError(RecoveryContractError):
-    """A sealed input cannot be interpreted or an assignment contradicts it.
 
-    Consumers branch on ``.reason`` only; the message string is not a contract.
-    """
-
-    def __init__(self, reason, detail=""):
-        if reason not in _REASONS:
-            raise ValueError("Unknown plan contract reason: " + str(reason))
-        self.reason = reason
-        self.detail = str(detail)[:MAX_DETAIL]
-        super().__init__(self.detail)
 
 
 @dataclass(frozen=True)
@@ -157,9 +142,7 @@ class ExecutionLayout:
     executions: tuple[ExecutionPlacement, ...] = ()
 
 
-def _require(condition, reason, detail):
-    if not condition:
-        raise PlanContractError(reason, detail)
+
 
 
 def _freeze(value):
@@ -204,17 +187,7 @@ def _validate_manifest_ref(ref):
     _check_identifier(ref["sha256"], "manifest sha256")
 
 
-def _validate_artifact_ref(ref, prefix):
-    _require(type(ref) is dict and set(ref) == {"path", "sha256", "bytes"},
-             "invalid_contract", prefix + " ref key set is unsupported")
-    path = ref["path"]
-    _require(type(path) is str and path and not Path(path).is_absolute()
-             and ".." not in Path(path).parts,
-             "invalid_contract", prefix + " path must be run-relative")
-    _require(type(ref["sha256"]) is str and _SHA256.fullmatch(ref["sha256"]) is not None,
-             "invalid_contract", prefix + " sha256 must be 64 lowercase hex")
-    _require(type(ref["bytes"]) is int and ref["bytes"] >= 0,
-             "invalid_contract", prefix + " bytes must be nonnegative")
+
 
 
 def _validate_program_ref(ref):

@@ -12,7 +12,7 @@ import demiflow
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp
 from demiflow.data.sources import ItemsSource, RangeSource
 from demiflow.execution.local_kernel import KeyedSource, PlanInput, UnionSource
-from demiflow.execution.seal.plan_interpreter import PlanContractError
+from demiflow.execution.contracts.errors import PlanContractError
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
 from demiflow.planning.dag import _operation_semantics, compile_logical_dag
 from demiflow.planning.dataset_dag import ProgramSlice, compile_dataset_logical_dag

@@ -145,7 +145,7 @@ def admit_prepared_stage(journal, directory, *, parents, report_node_id, uri,
     inconclusive. Other ``RecoveryContractError`` come from the sealed bridge and
     stage binding checks, exactly as before the move.
     """
-    from demiflow.execution.seal.sealed_plans import read_plan_artifact
+    from demiflow.execution.storage.reading import read_plan_artifact
     from demiflow.execution.journal.dataflow_stage_facts import stage_binding
     from .dataflow_stream_lance import _BatchSink
     from demiflow.execution.journal.run_reader import _ReadonlyJournal

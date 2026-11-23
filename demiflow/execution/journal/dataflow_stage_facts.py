@@ -6,7 +6,7 @@ receipts, suitable for the checked-product adapter and historical result reads.
 """
 import json
 from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.seal.sealed_plans import read_plan_artifact
+from demiflow.execution.storage.reading import read_plan_artifact
 
 SCHEMA = 'demiflow.native_stage_commit.v3'
 _NATIVE = 'demiflow.stream_lance.v3'

@@ -440,7 +440,8 @@ def test_known_inflight_model_response_crosses_barrier_and_recovers_once(tmp_pat
     import demiflow.execution.operator_bindings.dataflow_model_factory as factories
     from demiflow.execution.run_journal import RunJournal
     from demiflow.execution.storage.state_artifacts import StateArtifacts
-    from demiflow.execution.seal.sealed_plans import _v3_read_store
+    from demiflow.execution.seal.sealed_plans import sealed_read_bounds
+    from demiflow.execution.storage.objects import readonly_run_store
     from demiflow.execution.contracts.dataflow import ArtifactRef
     from demiflow.execution.contracts import state_codec
     from demiflow.execution.kernels.operator import IMAGE_MEDIA_TYPE
@@ -483,7 +484,8 @@ def test_known_inflight_model_response_crosses_barrier_and_recovers_once(tmp_pat
     carrier = StateArtifacts(run).read(first['prepared']['state']['dataflow-cut-v3'])
     assert not carrier['cut']['final']
     marker = run.journal.source_binding('action-1-dataflow-sealed')
-    store, bounds = _v3_read_store(run.directory, store_id=marker['physical_ref']['store_id'])
+    bounds = sealed_read_bounds()
+    store = readonly_run_store(run.directory, store_id=marker['physical_ref']['store_id'], bounds=bounds)
     pending = []
     for contribution in carrier['contributions']:
         for value in contribution['operator_states'].values():

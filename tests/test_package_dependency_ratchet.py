@@ -60,10 +60,8 @@ PRE_V3_MODULES = {
         'demiflow.services.request_limits',
         'demiflow.execution.worker.graph_execution', 'demiflow.execution.worker.queue_transform'},
     'demiflow.execution.seal.plan_interpreter': {
-        'demiflow.execution.dataflow_history',
         'demiflow.execution.seal.plan',
         'demiflow.execution.sealed_plan_facts', 'demiflow.execution.seal.sealed_plans',
-        'demiflow.planning.dataset_dag',
         'demiflow.workbench.runs.facts'},
     'demiflow.execution.hosts.local': {'demiflow.execution'},
     'demiflow.execution.hosts.ray': {'demiflow.execution'},
@@ -87,7 +85,6 @@ PLANNING_MAY_IMPORT = {
     'demiflow.execution.compiler_support.operator_policy',
     'demiflow.execution.payload_limits',
     'demiflow.execution.plan_facts',
-    'demiflow.execution.seal.plan_interpreter',
     'demiflow.execution.recovery_contract',
     'demiflow.execution.recovery_identity',
     'demiflow.execution.runtime_limits',

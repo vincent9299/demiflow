@@ -22,7 +22,8 @@ import pytest
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.contracts.worker import ASSIGNMENT_SCHEMA
-from demiflow.execution.seal.plan_interpreter import EXECUTION_BINDINGS_SCHEMA, SUPPORTED_SLICES, ChannelBinding, CheckpointPolicy, ExecutionLayout, PlanContractError, WorkerPlacement, _freeze, interpret_physical_plan, to_wire, validate_worker_assignment
+from demiflow.execution.seal.plan_interpreter import EXECUTION_BINDINGS_SCHEMA, SUPPORTED_SLICES, ChannelBinding, CheckpointPolicy, ExecutionLayout, WorkerPlacement, _freeze, interpret_physical_plan, to_wire, validate_worker_assignment
+from demiflow.execution.contracts.errors import PlanContractError
 from demiflow.execution.recovery_contract import RecoveryContractError, document, identity
 from demiflow.planning.dag import (
     LOGICAL_DAG_SCHEMA, _DEFAULT_TRAITS, build_channel_plan, channel_id_for,

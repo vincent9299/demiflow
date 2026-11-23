@@ -4,7 +4,8 @@ import shutil
 
 import pytest
 
-from demiflow.execution.seal.plan_interpreter import EXECUTION_BINDINGS_SCHEMA, EXECUTION_BINDINGS_SCHEMA_V2, PlanContractError
+from demiflow.execution.seal.plan_interpreter import EXECUTION_BINDINGS_SCHEMA, EXECUTION_BINDINGS_SCHEMA_V2
+from demiflow.execution.contracts.errors import PlanContractError
 from demiflow.execution.seal.sealed_plans import load_execution_bindings, load_sealed_plan
 from test_execution_layout import chain_fixture
 import _v2_native_fixtures as fx
