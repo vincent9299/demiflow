@@ -209,7 +209,7 @@ def test_only_engine_symbols_are_resolved():
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.planning.dataflow_compile import _lowering
     for symbol in ('os:system', 'json.decoder:JSONDecoder', 'demiflow.execution.operator_bindings.dataflow_models', 'build_model_factory',
-                   'demiflow.execution.dataflow_models:not_a_function', 'demiflow.execution.dataflow_models:__doc__'):
+                   'demiflow.execution.operator_bindings.dataflow_models:not_a_function', 'demiflow.execution.operator_bindings.dataflow_models:__doc__'):
         with pytest.raises(DataflowError) as refused:
             _lowering(symbol)
         assert refused.value.code == 'INVALID_CONTRACT', symbol

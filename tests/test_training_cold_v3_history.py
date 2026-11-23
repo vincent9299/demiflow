@@ -78,7 +78,10 @@ with scope as run:
         from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp
         from demiflow.data.sources import ItemsSource
         from demiflow.execution.action_driver.dataflow import DataflowExecution
-        from demiflow.execution.dataflow_terminals import materialized_handle
+        if (Path(demiflow.__file__).parent / 'execution/outputs/terminals.py').is_file():
+            from demiflow.execution.outputs.terminals import materialized_handle
+        else:
+            from demiflow.execution.dataflow_terminals import materialized_handle
         from demiflow.execution.executors.local import LocalDatasetExecutor
         from historical_business import score
         source = ItemsSource(tuple({'id': i, 'group': ('even', 'odd')[i % 2]} for i in range(24)))
