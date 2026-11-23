@@ -474,7 +474,6 @@ class RunArtifactStore:
     def retain_observed(self, ref, *, owner, observe, chunk_bytes):
         """Share the existing pin's checksum pass with a bounded content observer."""
         from .lease import shared_access
-        from itertools import chain
         with self.file_slots(self.READ_FILES), shared_access(self._root, self._lease_identity,
                                                             require_protocol=self._protocol_required):
             verified = False
@@ -484,7 +483,7 @@ class RunArtifactStore:
                 verified = True
             chunks = verified_chunks()
             try:
-                observe(chain(chunks))
+                observe(chunk for chunk in chunks)
                 # A reader may decline its optional proof, but a pin always verifies every byte.
                 for _ in chunks:
                     pass
