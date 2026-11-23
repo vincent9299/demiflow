@@ -164,6 +164,7 @@
     "execution/outputs/terminals.py"
    ],
    "arguments": [
+    "execution/contracts/relational_region.py",
     "execution/dataflow_native_limits.py",
     "execution/seal/plan.py",
     "execution/worker/dataflow_graph_runner.py",
@@ -193,6 +194,9 @@
     "execution/kernels/operator.py",
     "planning/dataflow_place.py",
     "planning/dataflow_thread_fusion.py"
+   ],
+   "columns": [
+    "execution/contracts/relational_region.py"
    ],
    "concurrency": [
     "execution/dataflow_model_observations.py",
@@ -292,7 +296,9 @@
     "planning/dataflow_configuration.py"
    ],
    "lance_key_source": [
+    "execution/contracts/relational_region.py",
     "execution/lance_key_source.py",
+    "execution/worker/dataflow_graph_runner.py",
     "planning/dataflow_configuration.py",
     "planning/dataflow_relational_regions.py"
    ],
@@ -367,6 +373,7 @@
     "execution/contracts/relational_region.py",
     "execution/kernels/lance_keys.py",
     "execution/kernels/relational_region.py",
+    "execution/worker/key_exclusion.py",
     "planning/dataflow_place.py",
     "planning/dataflow_relational_regions.py"
    ],
