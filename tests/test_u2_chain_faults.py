@@ -1,4 +1,4 @@
-"""U2 S4 fault matrix: F2 worker crash, F3 driver restart, F4 writer stall.
+"""U2 S4 fault matrix: worker loss and driver restart.
 
 These compose the frozen recovery contract through the real Local chain rather
 than re-proving it at unit level (the CMT/AUT groups already do that). F2 kills a
@@ -7,17 +7,11 @@ without duplicating that prefix. F3 faults the driver's single commit authority
 at ``after_prepared``, resumes the run under a new fence/attempt and proves the
 prepared cut is reconciled before any recompute (source trace) and published
 exactly once; a completed chain short-circuits re-entry without a second worker.
-F4 drives the worker executor's cancel grace: a stalled owned writer is isolated
-(quarantine) while a converging one releases cleanly. The driver run-lease
-retention during quarantine is the E1 finalizer, already covered by the barrier
-trio. No GPU/multi-host claims.
 """
 import json
 import os
 import signal
 import sys
-import threading
-import time
 import uuid
 from pathlib import Path
 
@@ -31,7 +25,6 @@ from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.worker.execution import WorkerChainExecutor
 from demiflow.resources.capacity import LocalCapacityPool
 from demiflow.resources.process_unit import ManagedProcessUnit
 
@@ -63,7 +56,7 @@ def _plan(double, items_count=10):
 
 def _dataset(double):
     items, plan, expected = _plan(double)
-    executor = LocalDatasetExecutor(workers=1, unified_chain=True)
+    executor = LocalDatasetExecutor(workers=1)
     return Dataset(ItemsSource(items), plan, executor), expected
 
 
@@ -240,62 +233,3 @@ def test_f3_completed_chain_short_circuits_reentry(tmp_path):
     records = action_process_records(run2, _chain_child_id(run2))
     assert len(records) == 1, "completed chain re-entry provisioned a second worker"
     assert_released(tmp_path / 'run')
-
-
-# ---------------- F4: cancel grace convergence / quarantine isolation ----------------
-
-class _FakeAuthority:
-    def __init__(self, grace_s):
-        self.limits = {"cancel_grace_s": grace_s}
-        self._local_cancel = False
-        self.quarantined = []
-
-    def cancel_local(self):
-        self._local_cancel = True
-
-    def quarantine_worker(self, worker):
-        if worker not in self.quarantined:
-            self.quarantined.append(worker)
-
-
-def _executor(authority):
-    launch_spec = {"execution": {"source_child_id": "source", "output_child_id": "chain",
-                                 "plan_ref": {}, "source_reference": {}, "channel_id": "c"}}
-    executor = WorkerChainExecutor(launch_spec, send=lambda message: None)
-    executor.authority = authority
-    return executor
-
-
-def test_f4_stalled_writer_is_quarantined_after_grace():
-    authority = _FakeAuthority(grace_s=0.05)
-    executor = _executor(authority)
-    release = threading.Event()
-    stalled = threading.Thread(target=release.wait, name="stalled-writer", daemon=True)
-    stalled.start()
-    executor._thread = stalled
-    try:
-        with pytest.raises(RecoveryContractError, match="cancel grace"):
-            executor.cancel({})
-        assert authority._local_cancel is True
-        assert stalled in authority.quarantined  # owned writer isolated, not killed
-        assert stalled.is_alive()
-    finally:
-        release.set()
-        stalled.join(timeout=2)
-
-
-def test_f4_converging_writer_releases_without_quarantine():
-    authority = _FakeAuthority(grace_s=2.0)
-    executor = _executor(authority)
-
-    def run_until_cancel():
-        while not authority._local_cancel:
-            time.sleep(0.01)
-
-    thread = threading.Thread(target=run_until_cancel, name="converging-writer", daemon=True)
-    thread.start()
-    executor._thread = thread
-    executor.cancel({})  # cancel_local converges the writer within grace
-    thread.join(timeout=2)
-    assert not thread.is_alive()
-    assert authority.quarantined == []

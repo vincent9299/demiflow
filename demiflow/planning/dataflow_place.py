@@ -175,7 +175,8 @@ def partition_stages(
                 or memory.get('schema') == TERMINAL_WORKSPACE):
             resident = kernel.profile.requests['memory_bytes']
         if kernel.kind == 'reduce':
-            from ..execution.kernels.reducer_memory import contract, resident_bytes
+            from demiflow.execution.contracts.relational_region import reducer_resident_bytes as resident_bytes
+            from demiflow.execution.contracts.relational_region import reducer_contract as contract
             reducer_memory = contract(kernel)
             if reducer_memory is not None:
                 resident = resident_bytes(reducer_memory,bounds)
@@ -909,6 +910,30 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
                                         publication_workspace_bytes=publication, publication_reservation=reservation)
 
 
+def _join_arrow_snapshots(graph, snapshots, splits, stages):
+    """Keep a fixed Lance probe columnar up to a co-located finite hash join."""
+    from .dataflow_compile import _plain
+    from ..execution.contracts.relational_region import TYPED_JOIN_SUFFIX
+    if len(stages) == 1 and stages[0].stage_id.endswith(TYPED_JOIN_SUFFIX):
+        return tuple(replace(source, immutable_identity={**_plain(source.immutable_identity),
+            'record_carrier_v1': 'mapped_arrow'}) for source in snapshots)
+    # The probe reaches this one worker directly, in source order. A hash
+    # exchange, a UDF, a fork or another consumer may need the original row.
+    if (graph.jobs or len(graph.nodes) != 4 or len(graph.edges) != 3 or len(snapshots) != 2
+            or len(splits) != 2 or len(stages) != 1 or len(stages[0].partitions) != 1):
+        return snapshots
+    nodes = _node_map(graph)
+    for edge in graph.edges:
+        join = nodes[edge.consumer].kernel
+        if (edge.input_port == 'left' and nodes[edge.producer].kernel.kind == 'lance'
+                and join.kind == 'join' and join.configuration.get('how', 'inner') in ('inner', 'semi')
+                and len(join.configuration.get('on', ())) == 1):
+            return tuple(replace(source, immutable_identity={**_plain(source.immutable_identity),
+                'record_carrier_v1': 'arrow_batch'}) if source.source_id == edge.producer else source
+                         for source in snapshots)
+    return snapshots
+
+
 def compile_physical_dataflow(
     graph: DataflowGraph,
     snapshots: tuple[SourceSnapshot, ...],
@@ -918,6 +943,7 @@ def compile_physical_dataflow(
     hosts: tuple[HostDescriptor, ...],
     bounds: Bounds,
     constants_ref: ArtifactRef,
+    _allow_offset_sql: bool = True,
 ) -> PhysicalDataflow:
     _check_bounds(bounds)
     snapshot_ids = {snapshot.source_id for snapshot in snapshots}
@@ -957,20 +983,36 @@ def compile_physical_dataflow(
         from .dataflow_thread_fusion import fuse_thread_suffix
         stages = fuse_thread_suffix(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
         from .dataflow_relational_regions import fuse_relational_regions
-        stages = fuse_relational_regions(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
+        stages = fuse_relational_regions(graph, stages, policy=policy, bounds=bounds, hosts=hosts,
+                                        snapshots=snapshots if _allow_offset_sql else ())
         from .dataflow_finite_fusion import fuse_finite_suffix
         stages = fuse_finite_suffix(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
     stages = select_fusion_groups(graph, stages, policy=policy)
     from .dataflow_graph_adapter import specialize_graph_stages, specialize_graph_exchanges
     stages = specialize_graph_stages(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
     stages = tuple(stage for stage in stages if not refs.intersection(stage.occurrences))
+    if _allow_offset_sql:
+        from .dataflow_relational_regions import place_key_exclusion, place_join_probe, place_typed_join
+        stages = place_join_probe(graph, snapshots, splits, stages, policy=policy, bounds=bounds, hosts=hosts)
+        stages = place_key_exclusion(graph, snapshots, splits, stages, policy=policy, bounds=bounds, hosts=hosts)
+        stages = place_typed_join(graph, snapshots, splits, stages, policy=policy, bounds=bounds, hosts=hosts)
     jobs, values = physical_values(graph, stages)
     exchanges = plan_exchanges(graph, stages, policy=policy, bounds=bounds)
     exchanges = specialize_graph_exchanges(graph, stages, exchanges, bounds=bounds)
     exchanges = _share_exchange_storage(exchanges, bounds)
     graph_requested_exchanges = exchanges
-    exchanges, residency = _select_budgeted_residency(
-        graph, snapshots, stages, exchanges, hosts=hosts, bounds=bounds, policy=policy)
+    try:
+        exchanges, residency = _select_budgeted_residency(
+            graph, snapshots, stages, exchanges, hosts=hosts, bounds=bounds, policy=policy)
+    except DataflowError as exc:
+        from ..execution.contracts.relational_region import JOIN_PROBE_SUFFIX, KEY_BATCH_ARROW_SUFFIX, needs_native_offsets
+        if exc.code != 'RESOURCE_INFEASIBLE' or not any(
+                needs_native_offsets(s) or s.stage_id.endswith((KEY_BATCH_ARROW_SUFFIX, JOIN_PROBE_SUFFIX)) for s in stages):
+            raise
+        # A larger optional stage may not coexist with other mandatory
+        # reservations. Retry only this fresh physical choice, before sealing.
+        return compile_physical_dataflow(graph, snapshots, splits, policy=policy, hosts=hosts, bounds=bounds,
+                                         constants_ref=constants_ref, _allow_offset_sql=False)
     from .dataflow_graph_adapter import pack_graph_residency
     exchanges, residency = pack_graph_residency(graph, stages, exchanges, residency,
         requested=graph_requested_exchanges, hosts=hosts, bounds=bounds, policy=policy)
@@ -1020,7 +1062,7 @@ def compile_physical_dataflow(
         exchanges=exchanges,
         residency=residency,
         scopes=scopes,
-        sources=snapshots,
+        sources=_join_arrow_snapshots(graph, snapshots, splits, stages),
         splits=splits,
         policy=policy,
         bounds=bounds,

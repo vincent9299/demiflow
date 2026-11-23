@@ -89,6 +89,16 @@ def _factory_identity(factory: Any) -> dict[str, Any]:
     return {"callable": name, "code_digest": hashlib.sha256(document(payload)).hexdigest()}
 
 
+def verified_materialized_count(source, *, recheck=None):
+    from .dataflow_handles import StoredMaterializedHandle
+    if type(source.handle) is not StoredMaterializedHandle:
+        return None
+    rows = source.handle.verified_row_count(recheck=recheck)
+    if source.row_count is not None and source.row_count != rows:
+        return None
+    return rows
+
+
 def _source_facts(source: SourcePlan) -> dict[str, Any]:
     """Canonical, Json-safe semantic facts used for identity and matching."""
     if isinstance(source, ItemsSource):
@@ -218,6 +228,14 @@ def snapshot_source(
         immutable = {"kind": "FileSource", "format": source.format,
                      "file_count": len(entries), "manifest_digest": manifest_ref.digest,
                      "options_digest": _options_digest(source.options)}
+        if source.format == 'csv':
+            from .csv_source import csv_spec
+            declared = csv_spec(source)
+            if declared is not None:
+                import pyarrow as pa
+                from .dataflow_schema import encode, KEY
+                immutable[KEY] = encode(pa.schema([(name, pa.string())
+                    for name in declared['columns']]), bounds=bounds)
     elif isinstance(source, SqlSource):
         kind, finite = "SqlSource", True
         snapshot_id = source.options.get("snapshot_id")

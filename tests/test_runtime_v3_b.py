@@ -332,6 +332,10 @@ def test_b008(tmp_path):
         item.worker.accept_receipt(identity('B-receipt'), cut_id=cut.cut_id)
         item.worker.accept_receipt(identity('B-receipt'), cut_id=cut.cut_id)
         assert cut.cut_id not in item.worker._snapshot_contributions
+        following = _cut(item, sequence=1)
+        item.worker.snapshot(following)
+        item.worker.accept_receipt(identity('B-receipt'), cut_id=cut.cut_id)
+        assert following.cut_id in item.worker._snapshot_contributions
         with pytest.raises(DataflowError, match='conflicting receipt'):
             item.worker.accept_receipt(identity('B-conflict'), cut_id=cut.cut_id)
         with pytest.raises(DataflowError, match='unknown cut'):

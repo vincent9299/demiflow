@@ -10,7 +10,7 @@ pickle roundtrip alone:
   only) made the driver walk the full module namespace (pinning the UDF's own
   module via its siblings) while the worker reached the minimal carried subset ->
   ``code-pin differs`` on an UNCHANGED first run. ``_module_registered_by_value``
-  (public registry, parent-package aware) + the opcode-exact ``_code_global_names``
+  (public registry, parent-package aware) + the opcode-exact ``code_global_names``
   (mirrors cloudpickle ``_extract_code_globals``) unify both sides. Bound by a REAL
   workbench prepare/start/show run (fixed-version Lance -> normalize_question
   map(concurrency=1) -> materialize -> write_lance) through an independent managed
@@ -44,7 +44,7 @@ from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunContext, RunAction
 
 from test_stage2_unified_plan import (
-    LIMITS, _crash_hook, _load_modules, _map_plan, _topology,
+    LIMITS, _crash_hook, _load_modules, _map_plan,
 )
 from test_forge_runs import base, root, custom, execute, rows
 
@@ -68,7 +68,9 @@ def sealed(tmp_path):
         run.journal.bind_execution_action(run.fence, "main-action", declaration)
         action = RunAction(run, "main-action", declaration)
         try:
-            yield SimpleNamespace(run=run, action=action)
+            from runtime_v3_program_probe import program_store
+            with program_store(action) as (store, bounds):
+                yield SimpleNamespace(run=run, action=action, store=store, bounds=bounds)
         finally:
             record = run.journal.execution_action("main-action")
             if record is not None and record["result"] is None:
@@ -167,7 +169,7 @@ def run(*, source, target):
 
 def test_f9_by_value_registration_roundtrip(tmp_path, monkeypatch):
     import cloudpickle
-    from demiflow.execution.chain import plan_code_pin, _is_by_reference_udf
+    from demiflow.execution.seal.business_sources import plan_code_pin, _is_by_reference_udf
     suffix = uuid.uuid4().hex[:8]
     helper_name, rules_name = "f9rt_helper_" + suffix, "f9rt_rules_" + suffix
     sources = {
@@ -218,8 +220,7 @@ def test_f7c_default_edit_same_run_resume_refuses(tmp_path, monkeypatch, form):
     with pytest.raises(DataflowError) as crashed:
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 pipeline().materialize().take_all()
     # SIGKILL belongs to an actual managed child, never pytest's thread host.
     assert crashed.value.code == 'UNKNOWN_EFFECT'
@@ -236,8 +237,7 @@ def test_f7c_default_edit_same_run_resume_refuses(tmp_path, monkeypatch, form):
     importlib.reload(sys.modules[helper])
     with pytest.raises(DataflowError, match="Loaded program code differs from the sealed pin") as excinfo:
         with RunContext.resume(reference):
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 pipeline().materialize().take_all()
     assert not isinstance(excinfo.value, TimeoutError)
     assert excinfo.value.code == 'INVALID_CONTRACT'  # existing v3 code-pin rejection vocabulary
@@ -249,26 +249,26 @@ def test_f7c_default_edit_same_run_resume_refuses(tmp_path, monkeypatch, form):
 
 @pytest.mark.parametrize("form", FORMS)
 def test_f7c_default_edit_worker_load_gate_refuses(sealed, tmp_path, monkeypatch, form):
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, stage_plan_artifact, verify_loaded_plan)
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_program_probe import worker_loader
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7cg3_" + form)
     transform = FACTORIES[form](helper_mod)
     plan = _map_plan(transform)
     assert helper in _business_dependency_manifest(plan), "default-arg helper must be pinned"
-    plan_ref = stage_plan_artifact(sealed.action, plan)
-    topology, _, _ = _topology(sealed, plan, plan_ref)
-    verify_loaded_plan(plan, plan_ref, topology["operators"])      # unedited passes
+    load = worker_loader(sealed, plan.operations[0].callable)
+    load()      # unedited passes
     paths[helper].write_text("def delta():\n    return 9999\n")
     importlib.reload(sys.modules[helper])
-    with pytest.raises(RecoveryContractError, match="code-pin differs"):
-        verify_loaded_plan(_map_plan(transform), plan_ref, topology["operators"])
+    with pytest.raises(DataflowError, match="Loaded program code differs"):
+        load()
 
 
 # === F7c: unedited manifest stable + a clean capturing run succeeds (no false refuse) ===
 
 @pytest.mark.parametrize("form", FORMS)
 def test_f7c_default_unedited_manifest_stable(tmp_path, monkeypatch, form):
-    from demiflow.execution.chain import _business_dependency_manifest
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7cg2_" + form)
     plan = _map_plan(FACTORIES[form](helper_mod))
     first = _business_dependency_manifest(plan)
@@ -284,8 +284,7 @@ def test_f7c_default_clean_run_succeeds(tmp_path, monkeypatch, form):
     rows_in = [{"x": i} for i in range(8)]
     root = tmp_path / "run"
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             out = (data.from_items(rows_in).map_async(transform, concurrency=1)
                    .materialize().take_all())
     assert {r["input"]: r["value"] for r in out} == {i: i + 1 for i in range(8)}
@@ -294,7 +293,7 @@ def test_f7c_default_clean_run_succeeds(tmp_path, monkeypatch, form):
 # === Regression guards: F7b cell capture still pinned; no-capture stays empty ===
 
 def test_regression_cell_capture_still_pinned(tmp_path, monkeypatch):
-    from demiflow.execution.chain import _business_dependency_manifest
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7creg_cell")
 
     def transform(row):
@@ -304,14 +303,13 @@ def test_regression_cell_capture_still_pinned(tmp_path, monkeypatch):
 
 
 def test_regression_no_capture_by_value_dependencies_empty(sealed):
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, stage_plan_artifact, verify_loaded_plan)
+    from runtime_v3_program_probe import worker_loader
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
 
     def v1(row):
         return {**row, "score": row["x"] + 1}
 
     plan = _map_plan(v1)
     assert _business_dependency_manifest(plan) == {}
-    plan_ref = stage_plan_artifact(sealed.action, plan)
-    topology, _, _ = _topology(sealed, plan, plan_ref)
-    verify_loaded_plan(plan, plan_ref, topology["operators"])
+    load = worker_loader(sealed, plan.operations[0].callable)
+    load()

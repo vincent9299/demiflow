@@ -69,7 +69,7 @@ def _execute(tmp_path, spec, readers, n):
     from _native_graph_fixtures import (HISTORICAL_MEMORY, HISTORICAL_WORKERS,
         assert_native_graph, assert_managed_graph)
     # bbd93ff graph.py:812 used source_rows when graph_spec omitted cut_rows.
-    executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS)
     with RunContext.start(tmp_path / "run", limits={
             "memory_bytes": HISTORICAL_MEMORY, "checkpoint_rows": n,
             "checkpoint_interval_ms": 60000}) as run:
@@ -142,15 +142,13 @@ def test_local_graph_slow_target_does_not_block_unrelated(tmp_path):
     assert result["egress_rows"] == n
 
 
-def test_graph_seam_default_off(tmp_path):
-    # D6: the default in-driver path never provisions a graph worker host.
+def test_public_materialize_uses_default_local_provider(tmp_path):
     items = tuple({"x": i} for i in range(10))
 
     def double(row):
         return {**row, "x": row["x"] * 2}
 
     executor = LocalDatasetExecutor(workers=1)
-    assert executor._unified_graph is False
     from demiflow.data.dataset import Dataset
     dataset = Dataset(ItemsSource(items), _stream_map(double), executor)
     with RunContext.start(tmp_path / "run",

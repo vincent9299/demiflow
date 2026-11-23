@@ -42,9 +42,9 @@ _PLAN_KEYS = frozenset({
     "producer_partitions", "consumer_partitions", "route_epoch",
     "credit_budget", "storage_bytes", "read_domain", "scope_id", "reason",
 })
-from ..arrow_payload import ARROW_BATCH_MEDIA
+from ..arrow_payload import ARROW_MEDIA_TYPES
 _DATA_MEDIA_TYPES = frozenset({RECORD_MEDIA_TYPE, SEGMENT_MEDIA_TYPE, SEAL_MEDIA_TYPE,
-                               STATE_MEDIA_TYPE, "application/octet-stream", ARROW_BATCH_MEDIA})
+                               STATE_MEDIA_TYPE, "application/octet-stream", *ARROW_MEDIA_TYPES})
 
 
 def _fail(code, message):
@@ -374,7 +374,7 @@ def _validate_record(record):
         _validate_artifact_ref(record.payload_ref, "payload_ref")
         if record.payload_ref.media_type not in _DATA_MEDIA_TYPES:
             _fail("INVALID_CONTRACT", "payload_ref media_type is not a data encoding")
-        if record.payload_ref.media_type != ARROW_BATCH_MEDIA and record.encoded_bytes != record.payload_ref.size_bytes:
+        if record.payload_ref.media_type not in ARROW_MEDIA_TYPES and record.encoded_bytes != record.payload_ref.size_bytes:
             _fail("INVALID_CONTRACT", "record encoded_bytes misreports the ref payload size")
     return record
 
@@ -506,7 +506,7 @@ def _decode_record_document(raw, *, record_id, sequence, max_bytes,
     _validate_artifact_ref(ref, "record document ref")
     if ref.media_type not in _DATA_MEDIA_TYPES:
         _fail("INVALID_CONTRACT", "record document ref media_type is not a data encoding")
-    if ref.media_type != ARROW_BATCH_MEDIA and doc["eb"] != ref.size_bytes:
+    if ref.media_type not in ARROW_MEDIA_TYPES and doc["eb"] != ref.size_bytes:
         _fail("CORRUPT_ARTIFACT", "record document ref size mismatch")
     return Record(record_id=record_id, source_position=doc["sp"], payload_ref=ref,
                   inline=None, encoded_bytes=doc["eb"], sequence=sequence, schema_ref=schema_ref, block_partition=block_partition)

@@ -3,6 +3,7 @@ import json
 from dataclasses import asdict
 from collections.abc import Mapping
 
+from ..dataflow_record_frames import raw_workspace
 from ..contracts.dataflow import Record, ArtifactRef, AggregateState
 from ..contracts.dataflow_errors import DataflowError
 from ..exchange.dataflow_bridge import _encode_value, _decode_value, _encode_record_document, _decode_record_document
@@ -50,6 +51,35 @@ def record_fragment(record, *, max_bytes, services=None, retained=0):
     return raw
 
 
+def spool_fragment_workspace(raw, maximum):
+    """Decode projection for one unchanged state-codec record fragment."""
+    outer = 2 * raw_workspace(raw, typed=False)
+    if outer > maximum:
+        raise DataflowError('BUDGET_EXCEEDED', 'ordering input record exceeds its reader subwindow')
+    item = json.loads(raw)
+    if item[0] != 'record':
+        raise DataflowError('CORRUPT_ARTIFACT', 'ordering input fragment is not a record')
+    size = outer + raw_workspace(item[3].encode('utf-8')) + 256
+    if size + 4096 > maximum:
+        raise DataflowError('BUDGET_EXCEEDED', 'decoded ordering input record exceeds its reader subwindow')
+    return size
+
+
+def admit_spool_image(raw, maximum):
+    """Pre-admit an existing bounded segment before decoding its record list."""
+    outer = 2 * raw_workspace(raw, typed=False)
+    if outer > maximum:
+        raise DataflowError('BUDGET_EXCEEDED', 'ordering input segment exceeds its reader subwindow')
+    envelope = json.loads(raw)
+    held = outer
+    for item in envelope[1][1]:
+        if item[0] != 'record':
+            raise DataflowError('CORRUPT_ARTIFACT', 'ordering input segment contains a non-record')
+        held += raw_workspace(item[3].encode('utf-8'))
+        if held > maximum:
+            raise DataflowError('BUDGET_EXCEEDED', 'decoded ordering segment exceeds its reader subwindow')
+
+
 def record_list_chunks(fragments):
     yield RECORD_LIST_PREFIX
     for index, raw in enumerate(fragments):
@@ -57,6 +87,76 @@ def record_list_chunks(fragments):
             yield b','
         yield raw
     yield RECORD_LIST_SUFFIX
+
+
+def measure(value, *, max_bytes, workspace_bytes):
+    """Preflight the existing kernel encoding before constructing a packed tree.
+
+    Count occurrences, including aliased children which JSON will expand again.
+    Return retained bytes and the peak workspace charged to this encoding.
+    """
+    import sys
+    from ..dataflow_record_frames import _admit, _json_shape, _typed_shape, _record_metadata
+    wire = len(b'["demiflow.kernel-state.v3",]')
+    native = 0
+    tree = 0
+
+    def peak():
+        # JSON may hold encoder chunks plus a four-byte Unicode result.
+        # The UTF-8 encoding and later base64 scalar fit this same window.
+        return native + tree + 10 * wire + 1024
+
+    def add(size, held, temporary):
+        nonlocal wire, native, tree
+        wire += size
+        native += held
+        tree += temporary
+        if wire > max_bytes:
+            raise DataflowError('BUDGET_EXCEEDED', 'kernel image exceeds state byte budget')
+        _admit(peak(), workspace_bytes)
+
+    def visit(item, depth):
+        if depth > 64:
+            raise DataflowError('BUDGET_EXCEEDED', 'kernel state exceeds bounded nesting depth')
+        if isinstance(item, Mapping):
+            count = len(item)
+            add(len(b'["dict",[]]') + max(0, count - 1) + 3 * count,
+                sys.getsizeof(item), 256 + 112 * count)
+            for key, child in item.items():
+                visit(key, depth + 1)
+                visit(child, depth + 1)
+        elif isinstance(item, (list, tuple)):
+            count = len(item)
+            tag = b'["tuple",[]]' if isinstance(item, tuple) else b'["list",[]]'
+            add(len(tag) + max(0, count - 1), sys.getsizeof(item), 256 + 16 * count)
+            for child in item:
+                visit(child, depth + 1)
+        elif isinstance(item, Record):
+            # An embedded Record carries an escaped document. Admit the old
+            # document encoder before computing its exact JSON string length.
+            from ..dataflow_record_frames import _string_size
+            n, held, temporary = _typed_shape(item.inline, max_bytes)
+            metadata, meta_held = _json_shape(_record_metadata(item), max_bytes)
+            _admit(native + tree + 10 * wire + held + temporary
+                                  + meta_held + 10 * (metadata + n) + 2048, workspace_bytes)
+            raw = _encode_record_document(item, max_bytes=max_bytes).decode()
+            add(len(b'["record",,,]') + _string_size(item.record_id)
+                + len(str(item.sequence)) + _string_size(raw), held + meta_held,
+                len(raw) * 4 + 256)
+        elif isinstance(item, ArtifactRef):
+            n, held = _json_shape(asdict(item), max_bytes)
+            add(len(b'["ref",]') + n, held, held + 256)
+        elif isinstance(item, AggregateState):
+            add(len(b'["aggregate",]'), 64, 128)
+            visit(asdict(item), depth + 1)
+        else:
+            # These are the original encode_value leaves (including arrays,
+            # typed sets, binary and temporal scalars).
+            n, held, temporary = _typed_shape(item, min(max_bytes, workspace_bytes))
+            add(len(b'["value",]') + n, held, temporary + 96)
+
+    visit(value, 0)
+    return native, peak()
 
 
 def dumps(value, *, max_bytes, occurrence=None, admit=None):

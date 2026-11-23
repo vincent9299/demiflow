@@ -59,3 +59,11 @@ def runtime_v3_fixture(tmp_path, request) -> Iterator[RuntimeV3Fixture]:
     finally:
         assert_tree_binding()
         fixture.close()
+
+@pytest.fixture(scope='session')
+def legacy_seal_writer(tmp_path_factory):
+    """Last released SDK containing the v1/v2 writers, in its own import root."""
+    from runtime_v3_history_scenarios import _extract_original
+    checkout, _ = _extract_original(tmp_path_factory.mktemp('legacy-seal-writer'),
+                                    '3d7b4e8c6a844cfbeeb072958bf5b013d648fca0')
+    return checkout

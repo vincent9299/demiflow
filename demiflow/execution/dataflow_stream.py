@@ -66,6 +66,16 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
             callbacks.resolve(on_progress(stats))
             reported = frontier
 
+    def note_cleanup_error(label, error):
+        if error is failure:
+            return
+        try:
+            failure.add_note(label + str(error))
+        except BaseException:
+            # Diagnostics are optional. Exceptions may fail to format and Python
+            # 3.10 does not provide add_note. All remaining owners must still close.
+            pass
+
     try:
         if stop_file is not None and Path(stop_file).exists():
             raise ServiceStopped('operator_stop_file')
@@ -104,31 +114,38 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
             try:
                 handle._execution.cancel(COOPERATIVE_STOP_REASON)
             except BaseException as cleanup:
-                failure.add_note('cooperative stop: ' + str(cleanup))
+                note_cleanup_error('cooperative stop: ', cleanup)
         raise
     finally:
         if handle is not None:
             handle._execution._observe_progress = None
         request.action._observation_rows = 0
-        observe()
-        def finish_observations():
-            observe()
-            if handle is not None:
-                from .dataflow_api import record_execution_metadata
-                record_execution_metadata(request, handle._execution)
-                from .dataflow_model_observations import finish_journal_audit
-                finish_journal_audit(handle._execution, stats)
-        for cleanup in (handle.close if handle is not None else None, finish_observations,
-                        (lambda: callbacks.resolve(on_drain(stats), closing=True)) if on_drain else None,
-                        callbacks.close):
-            if cleanup is None:
-                continue
+        def cleanup(operation, *args):
+            nonlocal failure
             try:
-                cleanup()
+                operation(*args)
             except BaseException as exc:
                 if failure is None:
                     failure = exc
                 else:
-                    failure.add_note('stream cleanup: ' + str(exc))
+                    note_cleanup_error('stream cleanup: ', exc)
+
+        if handle is not None:
+            def record_metadata():
+                from .dataflow_api import record_execution_metadata
+                record_execution_metadata(request, handle._execution)
+
+            def finish_audit():
+                from .dataflow_model_observations import finish_journal_audit
+                finish_journal_audit(handle._execution, stats)
+
+            cleanup(observe)
+            cleanup(handle.close)
+            cleanup(observe)
+            cleanup(record_metadata)
+            cleanup(finish_audit)
+        if on_drain is not None:
+            cleanup(lambda: callbacks.resolve(on_drain(stats), closing=True))
+        cleanup(callbacks.close)
         if failure is not None and not body_failed:
             raise failure

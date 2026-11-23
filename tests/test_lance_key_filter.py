@@ -100,3 +100,102 @@ def _assert_resource_cleanup(run):
     with run.journal._connection() as db:
         assert db.execute('SELECT COUNT(*) FROM resource_allocations').fetchone()[0] > 0
         assert db.execute("SELECT COUNT(*) FROM resource_allocations WHERE cleanup!='CONFIRMED'").fetchone()[0] == 0
+
+
+def test_close_after_first_survivor_can_resume_full_ordered_result(tmp_path):
+    from test_runtime_v3_terminal_replay_admission import InterruptedAfterAction
+
+    n = 2049
+    source = lance.write_dataset(pa.table({'key': range(n)}), tmp_path / 'source',
+                                 max_rows_per_file=256, max_rows_per_group=256)
+    keys = lance.write_dataset(pa.table({'key': range(0, n, 3)}), tmp_path / 'keys')
+    expected = [i for i in range(n) if i % 3]
+
+    def output():
+        left = data.read_lance(source.uri, version=source.version, batch_size=128)
+        right = data.read_lance(keys.uri, version=keys.version)
+        return left.exclude_keys(right, on='key').iter_rows()
+
+    def local():
+        return data.local_execution(worker_mode='thread', workers=2, partitions=1,
+                                    memory_bytes=1 << 30, temp_directory=str(tmp_path))
+
+    with pytest.raises(InterruptedAfterAction):
+        with RunContext.start(tmp_path / 'run', limits={'memory_bytes': 1 << 30}) as run, local():
+            ref = run.ref
+            rows = output()
+            assert next(rows) == {'key': expected[0]}
+            rows.close()
+            prefix = run.journal.execution_commits('action-1')[-1]
+            assert prefix['status'] == 'acked'
+            manifest = prefix['prepared']['sinks']['iter_rows']['manifest']
+            assert not manifest['final'] and 0 < manifest['total_rows'] < len(expected)
+            raise InterruptedAfterAction()
+
+    with RunContext.resume(ref) as run, local():
+        assert [row['key'] for row in output()] == expected
+        commits = run.journal.execution_commits('action-1')
+        assert prefix in commits and commits[-1]['prepared']['sinks']['iter_rows']['manifest']['final']
+
+
+def test_right_scan_reads_only_the_required_composite_columns(tmp_path, monkeypatch):
+    from demiflow.lance import read
+
+    left = lance.write_dataset(pa.table({
+        'k': ['a', 'a', 'b', None], 'n': [1, 2, 1, 1],
+    }), tmp_path / 'left')
+    right = lance.write_dataset(pa.table({
+        'raw': ['a', 'b'], 'n': [1, 1], 'keep': [True, False],
+        'wide': [b'x' * 131072] * 2,
+    }), tmp_path / 'right')
+    version = right.version
+    uri = right.uri
+    lance.write_dataset(pa.table({
+        'raw': ['b'], 'n': [1], 'keep': [True], 'wide': [b'new'],
+    }), uri, mode='overwrite')
+    scans = []
+    scan = read._iter_scan
+
+    def observed(query, **options):
+        for batch in scan(query, **options):
+            if query.uri == uri:
+                scans.append((query.version, query.filter, query.limit, tuple(batch.schema.names)))
+            yield batch
+
+    monkeypatch.setattr(read, '_iter_scan', observed)
+    with RunContext.start(tmp_path / 'run', limits={'max_row_bytes': 16384}), data.local_execution(
+            workers=2, partitions=1, worker_mode='thread'):
+        rhs = data.read_lance(uri, version=version, columns=['raw', 'wide', 'n'],
+                              filter='keep = true', limit=1)
+        rhs = rhs.rename_columns(['k', 'renamed_wide', 'n']).select_columns(['renamed_wide', 'k', 'n'])
+        output = data.read_lance(left.uri, version=1).exclude_keys(rhs, on=['k', 'n'])
+        assert list(output.iter_rows()) == [
+            {'k': 'a', 'n': 2}, {'k': 'b', 'n': 1}, {'k': None, 'n': 1},
+        ]
+    assert scans == [(version, 'keep = true', 1, ('raw', 'n'))]
+
+
+def test_right_scan_keeps_callback_input_and_other_consumers(tmp_path):
+    left = lance.write_dataset(pa.table({'k': ['a', 'b', 'c']}), tmp_path / 'left')
+    right = lance.write_dataset(pa.table({
+        'raw': ['a'], 'alternate': ['b'], 'keep': [True], 'wide': [b'z' * 131072],
+    }), tmp_path / 'right')
+    with RunContext.start(tmp_path / 'run', limits={'max_row_bytes': 16384}), data.local_execution(
+            workers=2, partitions=1, worker_mode='thread'):
+        lhs = data.read_lance(left.uri, version=1)
+        rhs = data.read_lance(right.uri, version=1)
+        callback = rhs.select_columns(['raw', 'keep']).map(lambda r: {'k': r['raw'] if r['keep'] else 'c'})
+        rename = rhs.select_columns(['alternate']).rename_columns({'alternate': 'k'})
+        results = lhs.exclude_keys(callback, on='k').union(lhs.exclude_keys(rename, on='k'))
+        assert [row['k'] for row in results.iter_rows()] == ['b', 'c', 'a', 'c']
+
+
+def test_right_projection_keeps_errors_in_unused_expressions(tmp_path):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+
+    left = lance.write_dataset(pa.table({'k': ['a', 'b']}), tmp_path / 'left')
+    right = lance.write_dataset(pa.table({'k': ['a', 'a'], 'textnum': ['1', 'junk']}), tmp_path / 'right')
+    with pytest.raises(DataflowError, match="Cannot cast string 'junk'"):
+        with RunContext.start(tmp_path / 'run'), data.local_execution(workers=2, partitions=1, worker_mode='thread'):
+            rhs = data.read_lance(right.uri, version=1, projection={'k': 'k', 'aux': 'cast(textnum as int)'})
+            list(data.read_lance(left.uri, version=1).exclude_keys(rhs, on='k').iter_rows())

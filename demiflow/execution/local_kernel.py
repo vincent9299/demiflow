@@ -61,8 +61,8 @@ class LocalExecutionSession:
 @contextmanager
 def local_execution(*, workers=4, worker_mode=None, partitions=None,
                     batch_rows=8192, memory_bytes=256 * 1024 * 1024,
-                    temp_directory=None, native_resources=None, inherited_native_resources=None, unified_chain=True,
-                    unified_queue_chain=True, planning=None, resource_root=None,
+                    temp_directory=None, native_resources=None, inherited_native_resources=None,
+                    planning=None, resource_root=None,
                     diagnostics_root=None, block_size=256):
     """Bind existing Dataset readers to a single-machine partition executor.
 
@@ -83,19 +83,6 @@ def local_execution(*, workers=4, worker_mode=None, partitions=None,
     current run's diagnostics fallback. Neither option creates a directory here.
     block_size controls the executor's source blocks independently of batch_rows;
     its ordinary default remains 256. Managed hosts may explicitly bind both.
-    unified_chain selects the platform-side unified Runtime for stream-op
-    materialize (fixed-source chain in one managed worker, single native commit
-    authority). It defaults to True for the workbench Local stream-materialize
-    slice; pass unified_chain=False for the byte-unchanged legacy in-driver
-    fallback. Queue/incremental flows use run_stream (untouched by this seam) and
-    open queues fail closed before any capture.
-    unified_queue_chain selects the unified queue settlement carrier (MVP-2 A1):
-    the driver keeps the queue lifecycle, RawFetch acquisition and finalize_task
-    byte-unchanged, and only the by-value pure-maps suffix runs in a managed
-    worker. It defaults to True for the workbench Local queue settlement slice;
-    the S8.5 narrow gate routes a by-reference, fetch-only or non-serializable
-    suffix to the byte-unchanged legacy in-driver write_queue_datasink fallback.
-    Pass unified_queue_chain=False for the explicit legacy in-driver path.
     """
     from ..data.execution_contract import _current_executor, _use_executor
     from .executors.local import LocalDatasetExecutor
@@ -120,14 +107,11 @@ def local_execution(*, workers=4, worker_mode=None, partitions=None,
     executor = LocalDatasetExecutor(workers=workers, local_kernel=options,
                                     resource_root=resource_root, diagnostics_root=diagnostics_root,
                                     block_size=block_size,
-                                    planning_policy=planning_policy,
-                                    unified_chain=unified_chain,
-                                    unified_queue_chain=unified_queue_chain)
+                                    planning_policy=planning_policy)
     from .run_context import execution_scope
     try:
         with execution_scope() as run, _use_executor(executor):
             executor._run_ref = run.ref
             yield LocalExecutionSession(executor)
     finally:
-        executor._local_kernel_closed = True
         executor.close()

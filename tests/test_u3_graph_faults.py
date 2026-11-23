@@ -25,7 +25,7 @@ from demiflow.data.sources import ItemsSource
 from demiflow.execution.block_sink import BlockSink
 from demiflow.execution.exchange.carriage_local import LocalSegmentStore, channel_pair, inline_records
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.graph import run_local_graph
+from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.run_context import RunAction, RunContext
@@ -113,7 +113,7 @@ def test_consumer_crash_recovers_whole_graph_exactly_once(tmp_path):
 
     spec, readers, n = _spec({"c0": crashing_target, "c1": None},
                              n=24, cut_rows=8)
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=1)
     limits = {"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
               "checkpoint_interval_ms": 60000}
     with pytest.raises((RecoveryContractError, OSError, DataflowError)) as failure:
@@ -165,7 +165,7 @@ def test_stage_failure_seals_nothing(tmp_path):
     with pytest.raises(RuntimeError, match='target stage failed'):
         with RunContext.start(tmp_path / "run", limits=limits) as run:
             with run.action({"kind": "materialize", "source": {"fixture": "u3-graph-stage-fail"}}) as execution:
-                run_local_graph(spec, control_timeout_s=10)
+                LocalDatasetExecutor().materialize_graph(spec, control_timeout_s=10)
                 execution.complete(dict(kind="graph-materialized"))
     journal_facts = run.journal.execution_commits("action-1")
     acked = [fact for fact in journal_facts if fact['status'] == 'acked']
@@ -198,7 +198,7 @@ def test_sealed_storage_exhaustion_fails_early_without_publication(tmp_path):
     with pytest.raises(DataflowError, match='^BUDGET_EXCEEDED: graph storage budget cannot admit every declared channel$') as failure:
         with RunContext.start(tmp_path / "run", limits=limits) as run:
             with run.action({"kind": "materialize", "source": {"fixture": "u3-graph-sealed-exhaust"}}) as execution:
-                run_local_graph(spec, control_timeout_s=8)
+                LocalDatasetExecutor().materialize_graph(spec, control_timeout_s=8)
                 execution.complete(dict(kind="graph-materialized"))
     assert time.monotonic() - start < 30, "sealed exhaustion deadlocked instead of failing early"
     assert failure.value.code == 'BUDGET_EXCEEDED'

@@ -8,7 +8,7 @@ import shutil
 
 import pytest
 
-from demiflow.execution.native_plan import load_native_execution
+from demiflow.execution.seal.plan import load_native_execution
 from demiflow.execution.plan_interpreter import ExecutionPlacement, PlanContractError
 from demiflow.execution.run_context import RunContext
 from test_execution_layout import chain_fixture
@@ -24,9 +24,9 @@ def workdir():
         shutil.rmtree(path, ignore_errors=True)
 
 
-def test_load_native_execution_locates_placement(workdir):
+def test_load_native_execution_locates_placement(workdir, legacy_seal_writer):
     n = fx.native_v2_doc(backend="datafusion", recovery="final_commit")
-    sealed = fx.seal_native_run(workdir / "run", n)
+    sealed = fx.seal_existing_format(legacy_seal_writer, workdir / "run", n, native=True)
     run = RunContext(sealed.root)
     layout, placement = load_native_execution(run, sealed.action_id, execution_id=n.execution_id)
     assert layout.supported_slice == "native_driver_v1"
@@ -35,19 +35,27 @@ def test_load_native_execution_locates_placement(workdir):
     assert placement.backend == "datafusion"
     assert placement.recovery == "final_commit"
     assert list(placement.stage_ids) == n.op_stages
+    assert placement.stage_limits == {stage["stage_id"]: stage["budgets"]
+                                      for stage in n.pp["stages"] if stage["stage_id"] in n.op_stages}
+    assert layout.checkpoint.checkpoint_rows == n.doc["checkpoint_rows"]
+    recovery = n.pp["recovery"]
+    assert (layout.checkpoint.interval_ms, layout.checkpoint.unconfirmed_rows,
+            layout.checkpoint.unconfirmed_bytes) == (
+        recovery["checkpoint_interval_ms"], recovery["unconfirmed_rows"], recovery["unconfirmed_bytes"])
+    assert tuple(op["stage_id"] for op in placement.programs[0]["operator_bindings"]) == tuple(n.op_stages)
 
 
-def test_unknown_execution_id_rejected(workdir):
+def test_unknown_execution_id_rejected(workdir, legacy_seal_writer):
     n = fx.native_v2_doc()
-    sealed = fx.seal_native_run(workdir / "run", n)
+    sealed = fx.seal_existing_format(legacy_seal_writer, workdir / "run", n, native=True)
     run = RunContext(sealed.root)
     with pytest.raises(PlanContractError) as exc:
         load_native_execution(run, sealed.action_id, execution_id="absent-execution")
     assert exc.value.reason == "invalid_contract"
 
 
-def test_v1_run_exposes_no_native_execution(workdir):
-    sealed = fx.seal_v1_run(workdir / "run", chain_fixture())
+def test_v1_run_exposes_no_native_execution(workdir, legacy_seal_writer):
+    sealed = fx.seal_existing_format(legacy_seal_writer, workdir / "run", chain_fixture(), native=False)
     run = RunContext(sealed.root)
     with pytest.raises(PlanContractError) as exc:
         load_native_execution(run, sealed.action_id, execution_id="any")

@@ -78,7 +78,7 @@ def test_core_has_no_transitive_run_worker_or_application_dependency(graph, name
 def test_index_cannot_reach_domain_source_or_platform_readers(graph):
     path = forbidden_path(graph, PROJECTS + '.index', lambda module:
         module == PROJECTS + '.workspace' or module.startswith('demiflow.workbench.runs')
-        or module.startswith('demiflow.execution.host'))
+        or module == 'demiflow.execution.host' or module.startswith('demiflow.execution.host.'))
     assert path is None, ' -> '.join(path or [])
 
 

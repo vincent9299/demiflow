@@ -318,6 +318,8 @@ def compile_kernel_spec(
         for field in fields(operation)
         if field.name not in _NON_SEMANTIC_FIELDS | {"callable", "native_options", "stream_options"}
     }
+    if kind == 'SortOp':
+        configuration['wide_body_refs'] = True
     if kind == 'RandomShuffleOp':
         # New plans opt in. A sealed graph without this field keeps the exact
         # original occurrence/record-id shuffle formula when loaded or resumed.
@@ -706,12 +708,14 @@ class _Capture:
             profile=profile, output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
         )
+        if kind == 'join':
+            kernel = replace(kernel, configuration={**_plain(kernel.configuration), 'small_right_index': True})
         if reducer_memory is not None:
             field, declared = reducer_memory
             kernel = replace(kernel, configuration={**_plain(kernel.configuration), field: declared})
         if isinstance(source, KeyedSource) and source.kind == "exclude_keys":
             configuration = _plain(kernel.configuration)
-            configuration.update(lance_key_source=self.nodes[child_indices[0][0]].occurrence_id,
+            configuration.update(bulk_key_hydration=True, lance_key_source=self.nodes[child_indices[0][0]].occurrence_id,
                                  payload_columns=list(source.left.source.query.columns))
             kernel = replace(kernel, configuration=configuration)
         index = self._add_node("relational", kernel, semantic, {}, code_identity, None)
@@ -832,8 +836,13 @@ class _Capture:
             raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
         semantic = {"kind": request.kind, "arguments": _plain(request.arguments)}
         budget = terminal_budget(request, self.nodes, producer, bounds=self.bounds, semantic=semantic)
+        configuration = budget.configuration
+        if request.kind == "aggregate":
+            from ..data.aggregate import Count, Sum
+            if request.programs and all(type(program.value) in (Count, Sum) for program in request.programs):
+                configuration = {**configuration, "integer_aggregate_blocks": True}
         kernel = KernelSpec(
-            kind=request.kind, implementation_ref=None, configuration=budget.configuration,
+            kind=request.kind, implementation_ref=None, configuration=configuration,
             inputs=(replace(_input_port("main", request.kind), requirement='finite_complete')
                     if budget.phased_publication else _input_port("main", request.kind),),
             state="none", effect="pure", resource_role="cpu",
@@ -956,6 +965,12 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None, on_com
         from .dataflow_provenance import compiled_provenance
         on_compiled(compiled_provenance(graph, sources=capture.alias_source, operations=capture.alias_op))
     return compiled
+
+
+def is_materialized_count(request):
+    """The declaration alone determines eligibility. Source integrity belongs to the reader."""
+    return (request.kind == "count" and type(request.source) is MaterializedSource
+            and not request.plan.operations)
 
 
 def lower_action(request: ActionRequest, *, bounds: Bounds, inputs=None, on_compiled=None,

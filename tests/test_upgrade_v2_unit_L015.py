@@ -1,7 +1,7 @@
 """L015's sealed-placement/authority obligations on the actual unified chain.
 
-The v2 driver AST is retired. These tests run its compatibility entry through
-v3, then inspect original sealed artifacts, actual assignments and allocations.
+Each test binds one v3 request to the run it owns, then checks original seals,
+actual assignments and allocations.
 """
 import json
 import os
@@ -9,12 +9,17 @@ from pathlib import Path
 
 import pytest
 
-from demiflow.execution import chain
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.seal.plan import load_dataflow
 from demiflow.execution.recovery_identity import plan_identity
 from demiflow.execution.run_context import RunContext
 from test_runtime_v3_chain_compatibility import _entry
+
+
+def _materialize(dataset):
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
+    request = make_action_request(dataset._executor, dataset._source, dataset._plan, kind='materialize', arguments={})
+    return run_dataset_action(request)
 
 
 def _identity(row):
@@ -55,10 +60,10 @@ def actual_chain(tmp_path_factory):
         patch.setattr(DataflowExecution, '_assignment', assign)
         patch.setattr(CommitCoordinator, 'commit', commit)
         with RunContext.start(root / 'run', limits={'memory_bytes': 32 * 2**20,
-                'max_row_bytes': 4096, 'max_batch_bytes': 16384}) as run, _entry(root) as (api, executor, entry):
+                'max_row_bytes': 4096, 'max_batch_bytes': 16384}) as run, _entry(root) as api:
             dataset = api.from_items([{'id': 1}, {'id': 2}]).map(_identity)
             with run.action(plan_identity('materialize', dataset._source, dataset._plan)) as action:
-                result = entry(executor, dataset)
+                result = _materialize(dataset)
                 try:
                     assert list(result.rows()) == [{'id': 1}, {'id': 2}]
                     assert len(executions) == 1 and assignments
@@ -131,10 +136,10 @@ def test_driver_holds_the_only_commit_authority(actual_chain):
 def test_failure_terminal_releases_the_resource_scope(tmp_path):
     run = None
     with pytest.raises(ValueError, match='owned chain failure'):
-        with RunContext.start(tmp_path / 'run') as run, _entry(tmp_path) as (api, executor, entry):
+        with RunContext.start(tmp_path / 'run') as run, _entry(tmp_path) as api:
             ds = api.from_items([{'id': 1}]).map(_fail)
             with run.action(plan_identity('materialize', ds._source, ds._plan)):
-                entry(executor, ds)
+                _materialize(ds)
     with run.journal._connection() as db:
         cleanup = db.execute('SELECT cleanup FROM resource_allocations').fetchall()
     assert cleanup and all(value == ('CONFIRMED',) for value in cleanup)
@@ -147,10 +152,10 @@ def test_restore_point_comes_from_the_terminal_journal(tmp_path):
     marker = tmp_path / 'calls'
     reference, first_plan, original_commits = None, None, None
     with pytest.raises(Interrupted):
-        with RunContext.start(tmp_path / 'run') as run, _entry(tmp_path) as (api, executor, entry):
+        with RunContext.start(tmp_path / 'run') as run, _entry(tmp_path) as api:
             ds = api.from_items([{'id': 1}, {'id': 2}]).map(_mark, fn_kwargs={'path': str(marker)})
             with run.action(plan_identity('materialize', ds._source, ds._plan)) as action:
-                result = entry(executor, ds)
+                result = _materialize(ds)
                 result.release()
                 reference = run.ref
                 first_plan = run.journal.source_binding('action-1-dataflow-sealed')
@@ -158,10 +163,10 @@ def test_restore_point_comes_from_the_terminal_journal(tmp_path):
                 assert original_commits and all(item['status'] == 'acked' for item in original_commits)
                 raise Interrupted()
     original_calls = marker.read_bytes()
-    with RunContext.resume(reference) as run, _entry(tmp_path) as (api, executor, entry):
+    with RunContext.resume(reference) as run, _entry(tmp_path) as api:
         ds = api.from_items([{'id': 1}, {'id': 2}]).map(_mark, fn_kwargs={'path': str(marker)})
         with run.action(plan_identity('materialize', ds._source, ds._plan)) as action:
-            result = entry(executor, ds)
+            result = _materialize(ds)
             try:
                 assert list(result.rows()) == [{'id': 1}, {'id': 2}]
                 assert marker.read_bytes() == original_calls

@@ -160,11 +160,10 @@ def test_replace_plan_returns_original_dataset_type_with_executor_and_stages():
     assert original._source is not source and not original._plan.operations
 
 
-def test_keys_single_implementation_used_by_existing_runtime():
-    from demiflow.data import local_relational, relational_declaration
-    assert local_relational.keys is relational_declaration.keys
-    assert local_relational.keys('key') == ['key']
-    assert local_relational.keys(('key', 'other')) == ['key', 'other']
+def test_relational_binding_normalizes_key_declarations_once():
+    from demiflow.data.relational_declaration import keys
+    assert keys('key') == ['key']
+    assert keys(('key', 'other')) == ['key', 'other']
 
 
 def test_cold_compose_and_native_validation_do_not_load_runtime_owners():

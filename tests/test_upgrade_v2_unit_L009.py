@@ -1,181 +1,44 @@
-"""L009 unit: execute_native_plan verifies then dispatches the sealed backend.
-
-The layout is built by the REAL interpreter from the fixture v2 bundle; the action
-authority is the real RunContext._ACTION contextvar seam. The backend entrypoints
-(L010 dataset_native.execute / L011 arrow_batch_sink.execute) do not yet accept the
-sealed ``execution=`` placement, so they are injected at the boundary as recording
-generator doubles, and the source-inclusive code-pin (L042) is injected as a double.
-This proves dispatch-by-sealed-backend, verify-before-execute, and finally-release
-on normal/early-close/error. It is a wiring/unit test, NOT an integration pass.
-"""
-import contextlib
-import dataclasses
+"""The original v2 placement can be read and checked without a native dispatch path."""
+import hashlib
+import sqlite3
 
 import pytest
 
-from demiflow.execution import arrow_batch_sink, chain, dataset_native, run_context
-from demiflow.execution.native_plan import execute_native_plan
-from demiflow.execution.plan_interpreter import PlanContractError, interpret_physical_plan
-from demiflow.execution.recovery_contract import RecoveryContractError, identity
-from demiflow.execution.recovery_identity import describe
-from demiflow.execution.run_context import RunAction
-from test_execution_layout import PROGRAM_REF
-import _v2_native_fixtures as fx
-
-ACTION = "native-action"
-ROWS = [{"x": 1, "a": 2, "b": 4}, {"x": 2, "a": 3, "b": 6}]
+from demiflow.execution.dataflow_history import load_execution_version, validate_resume_compatibility
+from demiflow.execution.plan_interpreter import PlanContractError
+from demiflow.execution.run_context import RunContext
+from demiflow.execution.seal.plan import load_native_execution
+from demiflow.execution.sealed_plans import load_execution_bindings, load_sealed_plan
+from runtime_v3_history_scenarios import OriginalCarrierReader
+from test_runtime_v3_sealed_version_selection import dual_seal
 
 
-def _fake_pin(plan, *, source=None):
-    return {"ops": len(plan.operations), "src": describe(source)}
+def test_read_published_native_placement_without_executing_or_replacing_it(dual_seal):
+    root, action_id = dual_seal
+    run = RunContext(root)
+    seal = load_sealed_plan(root, action_id, version="v2")
+    bindings = load_execution_bindings(root, action_id, sealed_plan=seal)
+    expected = bindings["document"]["executions"][0]
+    layout, placement = load_native_execution(run, action_id, execution_id=expected["execution_id"])
+    assert placement in layout.executions
+    assert (placement.backend, placement.recovery) == (expected["backend"], expected["recovery"])
+    assert not run.journal.execution_commits(action_id)
+    with pytest.raises(PlanContractError, match="execution_id is absent"):
+        load_native_execution(run, action_id, execution_id="unknown")
 
 
-@contextlib.contextmanager
-def _action_authority(action_id=ACTION):
-    action = RunAction(None, action_id, {"kind": "chain-materialize"})
-    token = run_context._ACTION.set(action)
-    try:
-        yield action
-    finally:
-        run_context._ACTION.reset(token)
-
-
-def _layout(monkeypatch, *, backend="datafusion", matching_pin=True):
-    source, plan = fx.native_source_plan()
-    program_ref = ({**PROGRAM_REF, "code_pin_digest": identity(_fake_pin(plan, source=source))}
-                   if matching_pin else None)
-    n = fx.native_v2_doc(ACTION, backend=backend, program_ref=program_ref)
-    monkeypatch.setattr(chain, "plan_code_pin", _fake_pin)
-    layout = interpret_physical_plan(n.ld, n.pp, bindings=n.bundle, manifest_ref=n.mref)
-    return source, plan, layout, n
-
-
-def _install_backends(monkeypatch, rows=ROWS):
-    dataset_calls, arrow_calls = [], []
-
-    def make(record):
-        def execute(executor, source, plan, *args, **kwargs):
-            entry = {"args": args, "kwargs": kwargs, "closed": False}
-            record.append(entry)
-            try:
-                yield from rows
-            finally:
-                entry["closed"] = True
-        return execute
-
-    monkeypatch.setattr(dataset_native, "execute", make(dataset_calls))
-    monkeypatch.setattr(arrow_batch_sink, "execute", make(arrow_calls))
-    return dataset_calls, arrow_calls
-
-
-def test_dispatches_sealed_backend_and_yields_rows(monkeypatch):
-    source, plan, layout, n = _layout(monkeypatch, backend="datafusion")
-    dataset_calls, arrow_calls = _install_backends(monkeypatch)
-    sentinel = object()
-    with _action_authority():
-        out = list(execute_native_plan(object(), source, plan, layout=layout,
-                                       execution_id=n.execution_id, arrow=True, sink_schema=sentinel))
-    assert out == ROWS
-    assert arrow_calls == [] and len(dataset_calls) == 1
-    call = dataset_calls[0]
-    assert call["kwargs"]["execution"] is layout.executions[0]
-    assert call["kwargs"]["arrow"] is True
-    assert call["kwargs"]["sink_schema"] is sentinel
-
-
-def test_arrow_batch_backend_dispatch(monkeypatch):
-    source, plan, layout, n = _layout(monkeypatch, backend="arrow_batch")
-    dataset_calls, arrow_calls = _install_backends(monkeypatch)
-    sentinel = object()
-    with _action_authority():
-        out = list(execute_native_plan(object(), source, plan, layout=layout,
-                                       execution_id=n.execution_id, sink_schema=sentinel))
-    assert out == ROWS
-    assert dataset_calls == [] and len(arrow_calls) == 1
-    call = arrow_calls[0]
-    # arrow entrypoint takes schema positionally plus the sealed execution
-    assert call["args"] == (sentinel,)
-    assert call["kwargs"]["execution"] is layout.executions[0]
-
-
-def test_finally_closes_backend_on_normal_completion(monkeypatch):
-    source, plan, layout, n = _layout(monkeypatch)
-    dataset_calls, _ = _install_backends(monkeypatch)
-    with _action_authority():
-        list(execute_native_plan(object(), source, plan, layout=layout, execution_id=n.execution_id))
-    assert dataset_calls[0]["closed"] is True
-
-
-def test_finally_closes_backend_on_early_close(monkeypatch):
-    source, plan, layout, n = _layout(monkeypatch)
-    dataset_calls, _ = _install_backends(monkeypatch)
-    with _action_authority():
-        gen = execute_native_plan(object(), source, plan, layout=layout, execution_id=n.execution_id)
-        assert next(gen) == ROWS[0]
-        gen.close()
-    assert dataset_calls[0]["closed"] is True
-
-
-def test_finally_closes_backend_on_error(monkeypatch):
-    source, plan, layout, n = _layout(monkeypatch)
-    calls = []
-
-    def failing(executor, source, plan, *args, **kwargs):
-        entry = {"closed": False}
-        calls.append(entry)
-        try:
-            yield ROWS[0]
-            raise RuntimeError("backend blew up")
-        finally:
-            entry["closed"] = True
-
-    monkeypatch.setattr(dataset_native, "execute", failing)
-    with _action_authority():
-        gen = execute_native_plan(object(), source, plan, layout=layout, execution_id=n.execution_id)
-        assert next(gen) == ROWS[0]
-        with pytest.raises(RuntimeError, match="backend blew up"):
-            next(gen)
-    assert calls[0]["closed"] is True
-
-
-def test_unknown_execution_id_rejected(monkeypatch):
-    source, plan, layout, n = _layout(monkeypatch)
-    dataset_calls, arrow_calls = _install_backends(monkeypatch)
-    with _action_authority():
-        with pytest.raises(PlanContractError) as exc:
-            list(execute_native_plan(object(), source, plan, layout=layout, execution_id="absent"))
-    assert exc.value.reason == "invalid_contract"
-    assert dataset_calls == [] and arrow_calls == []
-
-
-def test_no_active_action_rejected(monkeypatch):
-    source, plan, layout, n = _layout(monkeypatch)
-    dataset_calls, arrow_calls = _install_backends(monkeypatch)
-    # no _action_authority: current_action() is None
-    with pytest.raises(PlanContractError) as exc:
-        list(execute_native_plan(object(), source, plan, layout=layout, execution_id=n.execution_id))
-    assert exc.value.reason == "invalid_contract"
-    assert dataset_calls == [] and arrow_calls == []
-
-
-def test_verify_failure_blocks_dispatch(monkeypatch):
-    # default PROGRAM_REF digest does not match the recomputed source-inclusive pin
-    source, plan, layout, n = _layout(monkeypatch, matching_pin=False)
-    dataset_calls, arrow_calls = _install_backends(monkeypatch)
-    with _action_authority():
-        with pytest.raises(RecoveryContractError):
-            list(execute_native_plan(object(), source, plan, layout=layout, execution_id=n.execution_id))
-    assert dataset_calls == [] and arrow_calls == []
-
-
-def test_worker_placement_refused(monkeypatch):
-    source, plan, layout, n = _layout(monkeypatch)
-    dataset_calls, arrow_calls = _install_backends(monkeypatch)
-    worker = dataclasses.replace(layout.executions[0], placement="worker", group_id="g1")
-    layout = dataclasses.replace(layout, executions=(worker,))
-    with _action_authority():
-        with pytest.raises(PlanContractError) as exc:
-            list(execute_native_plan(object(), source, plan, layout=layout,
-                                     execution_id=worker.execution_id))
-    assert exc.value.reason == "unsupported_layout"
-    assert dataset_calls == [] and arrow_calls == []
+def test_native_only_published_layout_has_no_automatic_resume_adapter(dual_seal):
+    root, action_id = dual_seal
+    # This test's original writer produced both seals for independent selection.
+    # Leave the published v2 carriers untouched and remove only its v3 marker.
+    with sqlite3.connect(root / "run.sqlite") as db:
+        db.execute("DELETE FROM runtime_sources WHERE action_id=?", (action_id + "-dataflow-sealed",))
+    seal = load_sealed_plan(root, action_id, version="v2")
+    carrier = root / seal["facts"]["physical_plan_ref"]["path"]
+    before = hashlib.sha256(carrier.read_bytes()).digest()
+    binding = load_execution_version(root, action_id, max_bytes=4 * 1024**2)
+    report = validate_resume_compatibility(binding, store=OriginalCarrierReader(root))
+    assert not report.supported
+    assert any("adapter" in reason for reason in report.reasons)
+    assert hashlib.sha256(carrier.read_bytes()).digest() == before
+    assert not RunContext(root).journal.execution_commits(action_id)

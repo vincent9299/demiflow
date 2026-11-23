@@ -18,8 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from demiflow.execution import chain
-from demiflow.execution.run_context import RunContext, RunAction
+from runtime_v3_history_scenarios import write_legacy_seal
 from demiflow.execution.run_journal import RunJournal
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.graph import model
@@ -44,7 +43,7 @@ def _carrier_ref(raw):
 
 
 @pytest.fixture
-def bridged(tmp_path):
+def bridged(tmp_path, legacy_seal_writer):
     """A finished run with a sealed plan AND a C-shaped identity bridge bound."""
     root = tmp_path
     run_id = 'r' + '0' * 24
@@ -59,23 +58,16 @@ def bridged(tmp_path):
     bridge = _bridge_document(action_id, dag['dag_id'], report_digest, entries)
     raw = json.dumps(bridge, ensure_ascii=False, sort_keys=True).encode()
     ref = _carrier_ref(raw)
-    with RunContext.start(target) as run:
-        declaration = {'kind': 'chain-materialize', 'source': {'source_id': 'fixed'}}
-        run.journal.bind_execution_action(run.fence, action_id, declaration)
-        action = RunAction(run, action_id, declaration)
-        f1 = chain.seal_plan_facts(run, action, dag, physical, manifest_ref, 1794527206071)
-        carrier = target / ref['path']
-        carrier.parent.mkdir(parents=True, exist_ok=True)
-        carrier.write_bytes(raw)
-        run.journal.bind_source(run.fence, action_id + '-identity-bridge', ref)
-        run.journal.complete_execution_action(run.fence, action_id, {'kind': 'test-complete'})
+    f1 = write_legacy_seal(legacy_seal_writer, target, action_id=action_id,
+                           logical_dag=dag, physical_plan=physical, manifest_ref=manifest_ref,
+                           sealed_at=1794527206071, bridge=(bridge, ref))['facts']
     return SimpleNamespace(root=root, run_id=run_id, target=target, action_id=action_id,
                            logical_dag=dag, physical=physical, f1=f1, bridge=bridge, ref=ref,
                            report_digest=report_digest, entries=entries)
 
 
 @pytest.fixture
-def sealed(tmp_path):
+def sealed(tmp_path, legacy_seal_writer):
     """A finished run with a sealed plan but NO bridge (historical / pre-bridge)."""
     root = tmp_path
     run_id = 'r' + '1' * 24
@@ -83,12 +75,9 @@ def sealed(tmp_path):
     target.mkdir(parents=True)
     action_id = 'n3'
     dag, physical, manifest_ref = _executed_plan(action_id, run_id)
-    with RunContext.start(target) as run:
-        declaration = {'kind': 'chain-materialize', 'source': {'source_id': 'fixed'}}
-        run.journal.bind_execution_action(run.fence, action_id, declaration)
-        action = RunAction(run, action_id, declaration)
-        f1 = chain.seal_plan_facts(run, action, dag, physical, manifest_ref, 1794527206071)
-        run.journal.complete_execution_action(run.fence, action_id, {'kind': 'test-complete'})
+    f1 = write_legacy_seal(legacy_seal_writer, target, action_id=action_id,
+                           logical_dag=dag, physical_plan=physical, manifest_ref=manifest_ref,
+                           sealed_at=1794527206071)['facts']
     return SimpleNamespace(root=root, run_id=run_id, target=target, action_id=action_id,
                            logical_dag=dag, physical=physical, f1=f1)
 

@@ -124,3 +124,111 @@ def test_other_live_view_infeasibility_rejects_before_sort_read(tmp_path,monkeyp
                     next(ordering.merge_sort_runs(runs,spec=spec,services=runtime))
             assert not called and store.open_file_slots==2
         finally:other.close()
+
+
+def test_sort_accounts_for_initial_runs_and_body_during_intermediate_write(tmp_path, monkeypatch):
+    """Original runs belong to the caller and coexist with each new output."""
+    with sorted_runs(tmp_path, 8) as (runtime, spec, _, runs):
+        body = 75_000
+        initial = sum(ref.size_bytes for ref in runs)
+        first_output = sum(ref.size_bytes for ref in runs[:2])
+        narrow = replace(runtime, bounds=replace(runtime.bounds, max_open_files=10,
+            max_spill_bytes=body + initial + first_output - 1))
+        with monkeypatch.context() as guard:
+            def no_write(*args, **kwargs):
+                pytest.fail('sort opened a spill writer before accounting for its live inputs')
+            guard.setattr(runtime.store, 'put', no_write)
+            with pytest.raises(DataflowError, match='merge spill'):
+                list(ordering.merge_sort_runs(runs, spec=spec, services=narrow, body_bytes=body))
+        assert all(runtime.store.inspect(ref) for ref in runs)
+        assert runtime.store.open_file_slots == 1
+
+
+@pytest.mark.parametrize('end', ['cancel', 'corrupt', 'close'])
+def test_wide_sort_releases_its_extent_and_readers_on_every_exit(tmp_path, monkeypatch, end):
+    from demiflow.execution.dataflow_scratch import KernelScratch
+    from test_runtime_v3_artifact_accounting import store_fixture
+    from test_runtime_v3_c import make
+    from test_runtime_v3_finite_borrow import fixture, record
+
+    with store_fixture(tmp_path, ceiling=16 << 20) as (_, store, _):
+        services, _ = fixture(store)
+        services.bounds = replace(services.bounds, max_resident_bytes=512 << 10,
+                                  max_spill_bytes=8 << 20)
+        _, metadata, window = ordering.sort_windows(services)
+        extents = []
+        retained = []
+        append = KernelScratch.append
+        read_at = KernelScratch.read_at
+
+        def measured(extent, raw):
+            extents.append(extent)
+            return append(extent, raw)
+
+        def stop_after_body():
+            if end == 'cancel' and extents:
+                raise DataflowError('CANCELLED', 'cancel during sort')
+
+        def read_body(extent, offset, length):
+            raw = read_at(extent, offset, length)
+            return bytes([raw[0] ^ 1]) + raw[1:] if end == 'corrupt' else raw
+
+        monkeypatch.setattr(KernelScratch, 'append', measured)
+        monkeypatch.setattr(KernelScratch, 'read_at', read_body)
+        services.check_stop = stop_after_body
+        rows = 24
+        records = (record({'k': i % 5, 'body': b'v' * 27_000}, i) for i in range(rows))
+        spec = make('KernelSpec', kind='SortOp', configuration={'keys': ['k']})
+        result = ordering.sort_with_body_references(records, spec=spec, services=services,
+            rows=rows, window=window, retain=retained.append, metadata_bytes=metadata)
+        if end == 'close':
+            assert next(result).inline['k'] == 0
+            result.close()
+        else:
+            with pytest.raises(DataflowError) as failure:
+                next(result)
+            assert failure.value.code == ('CANCELLED' if end == 'cancel' else 'CORRUPT_ARTIFACT')
+        assert len(extents) == (1 if end == 'cancel' else rows)
+        assert len({id(extent) for extent in extents}) == 1
+        assert extents[0].fd is None and not extents[0].path.exists()
+        assert not retained or retained[-1] == 0
+        assert store.open_file_slots == 1
+
+
+def test_sort_reuses_published_payload_reference_and_falls_back_with_narrow_file_window(tmp_path, monkeypatch):
+    from demiflow.execution.dataflow_scratch import KernelScratch
+    from test_runtime_v3_artifact_accounting import store_fixture
+    from test_runtime_v3_c import make
+    from test_runtime_v3_finite_borrow import fixture, record
+
+    with store_fixture(tmp_path, ceiling=32 << 20) as (_, store, _):
+        services, _ = fixture(store)
+        services.bounds = replace(services.bounds, max_resident_bytes=2 << 20,
+                                  max_row_bytes=131072, max_spill_bytes=20 << 20)
+        rows = 40
+        inline = []
+        for i in range(rows):
+            row = {'k': i % 3, 'body': b'w' * 52_000}
+            raw = _encode_payload(row, max_bytes=131072)
+            inline.append(replace(record({'k': i % 3}, i), inline=row, encoded_bytes=len(raw)))
+        spec = make('KernelSpec', kind='SortOp', configuration={'keys': ['k']})
+        raw = _encode_payload(dict(inline[0].inline), max_bytes=131072)
+        payload = store.put(iter([raw]), max_bytes=len(raw), media_type='application/octet-stream')
+        referenced = [replace(row, inline=None, payload_ref=payload, encoded_bytes=len(raw)) for row in inline]
+
+        def no_copy(*args, **kwargs):
+            pytest.fail('published bodies and narrow file budgets must not allocate temporary extents')
+        monkeypatch.setattr(KernelScratch, '__enter__', no_copy)
+        for records, slots in [(referenced, 256), (inline, 10)]:
+            services.bounds = replace(services.bounds, max_open_files=slots)
+            _, metadata, window = ordering.sort_windows(services)
+            result = list(ordering.sort_with_body_references(iter(records), spec=spec, services=services,
+                rows=rows, window=window, retain=lambda charge: None, metadata_bytes=metadata))
+            if records is referenced:
+                assert [rec.payload_ref for rec in result] == [payload] * rows
+                assert [rec.sequence for rec in result] == list(range(rows))
+                assert b''.join(store.read(payload, max_bytes=len(raw))) == raw
+            else:
+                assert [r.sequence for r in result] == sorted(range(rows), key=lambda i: i % 3)
+                assert all(rec.inline['body'] == b'w' * 52_000 for rec in result)
+            assert store.open_file_slots == 1

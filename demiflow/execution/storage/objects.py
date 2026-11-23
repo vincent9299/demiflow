@@ -366,6 +366,7 @@ class RunArtifactStore:
             # unlink. Release that physical ownership before refunding budget.
             staging.unlink()
             _sync_directory(self._staging)
+            staging = None  # Already removed durably before refunding its staging space.
             self._journal.artifact(ArtifactCommand(identity([operation_id, 'settle']),
                 'settle_staging', ref, operation_id, size))
             settled = True
@@ -475,6 +476,55 @@ class RunArtifactStore:
         with self.file_slots(self.READ_FILES), shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
             if not self._inspect(ref):
                 raise DataflowError('UNKNOWN_EFFECT', 'Cannot pin an absent artifact')
+            self._retain(ref, owner=owner)
+
+    def object_signature(self, ref):
+        """Identify the current readable local object without opening its payload."""
+        from ..artifact_proof import ArtifactProofs
+        path = self._object_path(ref)
+        try:
+            metadata = path.stat()
+        except FileNotFoundError:
+            return None
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_size != ref.size_bytes
+                or not os.access(path, os.R_OK, effective_ids=True)):
+            return None
+        return ArtifactProofs.signature(metadata)
+
+    def reusable_signature(self, ref, *, witness):
+        """Establish that a later write cannot share the timestamp of the checksum pass."""
+        import time
+        stamp = self.object_signature(ref)
+        if stamp is None:
+            return None
+        now = time.time_ns()
+        # Artifacts precede their publication. A later ctime already observed on the
+        # same filesystem proves its clock has advanced past this object's write tick.
+        # Otherwise apply the same conservative age window as ArtifactProofs.verify.
+        if witness and stamp[0] == witness[0] and stamp[-1] < witness[-1] <= now:
+            return stamp
+        return stamp if stamp[-1] < now - 2_000_000_000 else None
+
+    def retain_observed(self, ref, *, owner, observe, chunk_bytes):
+        """Share the existing pin's checksum pass with a bounded content observer."""
+        from .lease import shared_access
+        with self.file_slots(self.READ_FILES), shared_access(self._root, self._lease_identity,
+                                                            require_protocol=self._protocol_required):
+            verified = False
+            def verified_chunks():
+                nonlocal verified
+                yield from self._read(ref, max_bytes=max(1, ref.size_bytes), chunk_bytes=chunk_bytes)
+                verified = True
+            chunks = verified_chunks()
+            try:
+                observe(chunk for chunk in chunks)
+                # A reader may decline its optional proof, but a pin always verifies every byte.
+                for _ in chunks:
+                    pass
+            finally:
+                chunks.close()
+            if not verified:
+                raise DataflowError('INVALID_CONTRACT', 'Cannot pin an unverified artifact')
             self._retain(ref, owner=owner)
 
     def _retain(self, ref, *, owner):

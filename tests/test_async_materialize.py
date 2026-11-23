@@ -48,7 +48,7 @@ class CountingActor:
 
 
 def test_async_materialize_spills_reuses_and_writes(tmp_path):
-    executor = LocalDatasetExecutor(workers=1, block_size=2, materialize_memory_limit=1)
+    executor = LocalDatasetExecutor(workers=1, block_size=2)
     event_path = tmp_path / "actor-events"
     data, actor = DataAPI(executor), CountingActor(event_path)
     cached = (
@@ -86,7 +86,7 @@ def test_async_materialize_spills_reuses_and_writes(tmp_path):
 
 
 def test_failed_materialize_cleans_only_its_spills(tmp_path):
-    executor = LocalDatasetExecutor(workers=1, block_size=1, materialize_memory_limit=1)
+    executor = LocalDatasetExecutor(workers=1, block_size=1)
     data = DataAPI(executor)
     previous = data.from_items([{'i': -1}]).materialize()
     handle = previous._source.handle
@@ -164,7 +164,7 @@ def test_batch_materialize_reuses_complete_batches(tmp_path):
 
 def test_wide_rows_spill_before_row_limit_and_restore_individually(tmp_path, monkeypatch):
     from demiflow.execution.exchange import dataflow_bridge
-    executor = LocalDatasetExecutor(workers=1, block_size=256, materialize_memory_limit=1024)
+    executor = LocalDatasetExecutor(workers=1, block_size=256)
     def rows():
         for i in range(6):
             yield {'i': i, 'payload': str(i) * 2048, 'nested': [i]}

@@ -46,3 +46,13 @@ class ProtocolError(RecoveryContractError):
 
     def to_dict(self):
         return {"code": self.code, "reason": self.reason, "retriable": self.retriable}
+
+
+class ReservationError(RecoveryContractError):
+    """A call cannot be admitted or released under the recorded reservation."""
+
+    def __init__(self, code, message, *, call_id=None, retriable=False):
+        super().__init__(message)
+        self.code = code
+        self.call_id = call_id
+        self.retriable = retriable

@@ -4,7 +4,6 @@ import functools
 import threading
 from types import SimpleNamespace
 
-import cloudpickle
 import pyarrow as pa
 import pytest
 
@@ -31,61 +30,50 @@ def test_prompt_long_enum_preserves_historical_native_bytes(size):
         for key in ('concurrency', 'queue_depth', 'catch', 'hard_timeout', 'execution') if hasattr(op, key)}}
     assert identity(operation_identity(op)) == identity(historical)
     assert identity(plan_identity('materialize', ds._source, ds._plan)['operations'][0]) == identity(historical)
-    from demiflow.execution.chain import plan_code_pin, _stable_code_identity
-    assert plan_code_pin(ds._plan)['operations'] == _stable_code_identity([historical])
+    from demiflow.execution.seal.business_sources import plan_code_pin, stable_code_identity
+    assert plan_code_pin(ds._plan)['operations'] == stable_code_identity([historical])
 
 
-def _encoded(callback):
-    return cloudpickle.dumps(data.from_items([{'v': 1}]).map_batches(
-        callback, batch_format='pyarrow')._plan.operations[0])
+def _cast_in_grant(table, schema, memory, monkeypatch):
+    import base64
+    from demiflow.resources import capacity
+    from demiflow.execution.dataset_native import _cast_sink_batch
+
+    monkeypatch.setattr(capacity, 'inherited_envelope', lambda: {'memory_bytes': memory})
+    schema_bytes = base64.b64encode(schema.serialize()).decode('ascii')
+    return _cast_sink_batch(table, schema_bytes=schema_bytes, max_bytes=memory)
 
 
 @pytest.mark.parametrize('before,after', [(pa.int64(), pa.float64()), (pa.int8(), pa.int64())])
-def test_arrow_cast_requires_live_sum_before_allocating(tmp_path, before, after):
-    from demiflow.execution.arrow_batch_sink import apply_batch
+def test_arrow_cast_requires_live_sum_before_allocating(monkeypatch, before, after):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
     table = pa.table({'v': pa.array([7] * 20000, type=before)})
     schema = pa.schema([('v', after)])
-    one_copy = 20000 * 8 + 2500
-    path = str(tmp_path/'out.arrow')
-    with pytest.raises(RecoveryContractError, match='cast live input and output'):
-        apply_batch(table, _encoded(lambda t: t), path, schema,
-                    max_bytes=1024**2, memory_bytes=one_copy)
-    assert not (tmp_path/'out.arrow').exists()
-    result = apply_batch(table, _encoded(lambda t: t), path, schema,
-                         max_bytes=1024**2, memory_bytes=1024**2)
-    assert result.value.rows == 20000
-    with pa.OSFile(path) as f:
-        assert pa.ipc.open_stream(f).read_all().equals(table.cast(schema))
+    with pytest.raises(DataflowError, match='input and cast output'):
+        _cast_in_grant(table, schema, 20000 * 8 + 2500, monkeypatch)
+    assert _cast_in_grant(table, schema, 1024**2, monkeypatch).equals(table.cast(schema))
 
 
-def test_arrow_sum_rejection_does_not_call_cast(tmp_path, monkeypatch):
-    from demiflow.execution import arrow_batch_sink as sink
+def test_arrow_sum_rejection_does_not_allocate(monkeypatch):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
     table = pa.table({'v': list(range(10000))})
-    real = sink._cast_allocation
-    calls = []
-    def reserve(table, schema):
-        calls.append(1)
-        return real(table, schema)
-    monkeypatch.setattr(sink, '_cast_allocation', reserve)
-    # The allocation estimate is consulted before any new conversion buffers.
-    pool = pa.proxy_memory_pool(pa.default_memory_pool())
+    schema = pa.schema([('v', pa.float64())])
     old_pool = pa.default_memory_pool()
-    pa.set_memory_pool(pool)
+    pool = pa.proxy_memory_pool(old_pool)
     try:
-        with pytest.raises(RecoveryContractError, match='cast live input and output'):
-            sink.apply_batch(table, _encoded(lambda t: t), str(tmp_path/'out.arrow'),
-                pa.schema([('v', pa.float64())]), 1024**2, memory_bytes=81250)
-        assert calls == [1] and pool.max_memory() == 0
+        pa.set_memory_pool(pool)
+        with pytest.raises(DataflowError, match='input and cast output'):
+            _cast_in_grant(table, schema, 81250, monkeypatch)
+        assert pool.max_memory() < table.nbytes
     finally:
         pa.set_memory_pool(old_pool)
 
 
-def test_arrow_schema_noop_uses_shared_buffers(tmp_path):
-    from demiflow.execution.arrow_batch_sink import apply_batch
+def test_arrow_schema_noop_uses_shared_buffers(monkeypatch):
     table = pa.table({'v': [1, 2, 3]})
-    result = apply_batch(table, _encoded(lambda t: t), str(tmp_path/'out.arrow'),
-                         table.schema, 4096, memory_bytes=table.get_total_buffer_size())
-    assert result.value.rows == 3
+    result = _cast_in_grant(table, table.schema, table.get_total_buffer_size(), monkeypatch)
+    assert result.equals(table)
+    assert result.column(0).chunk(0).buffers()[1].address == table.column(0).chunk(0).buffers()[1].address
 
 
 class CountFactory:
@@ -185,7 +173,7 @@ def test_cleanup_cancellation_still_closes_all_owners():
             raise asyncio.CancelledError()
     async def close():
         with pytest.raises(BaseExceptionGroup):
-            await StreamResources([First(), Last()]).close(action_cleanups=False)
+            await StreamResources([First(), Last()]).close()
     asyncio.run(close())
     assert events == ['last', 'first']
 
@@ -235,39 +223,6 @@ def test_folded_predicate_uses_actual_stage_concurrency(tmp_path):
     with RunContext.start(tmp_path/'run'):
         assert sorted(ds.materialize().take_all(), key=lambda r: r['i']) == [{'i': i} for i in range(6)]
     assert observed.read_text().splitlines() == [str(i) for i in range(1, 7)]
-
-
-def test_map_cleanup_cancellation_does_not_abandon_sibling_workers():
-    from demiflow.execution.stream_map import StreamMapRuntime
-    runtime = StreamMapRuntime(SimpleNamespace(stream_options=None))
-    events = []
-    class Worker:
-        def __init__(self, n):
-            self.n = n
-        async def aclose(self):
-            events.append(self.n)
-            if self.n == 1:
-                raise asyncio.CancelledError()
-    runtime.workers = [Worker(1), Worker(2)]
-    with pytest.raises(BaseExceptionGroup):
-        asyncio.run(runtime.aclose())
-    assert events == [1, 2]
-
-
-def test_registration_failure_closes_actor_even_if_stop_fails():
-    from test_upgrade_v2_unit_S012 import Lifecycle, FailingRegister, worker
-    class BrokenStop(Lifecycle):
-        async def astop(self):
-            self.stops += 1
-            raise RuntimeError('stop failed')
-    actor = BrokenStop()
-    w = worker(actor, FailingRegister(RuntimeError('registration failed')))
-    with pytest.raises(RuntimeError, match='registration failed'):
-        asyncio.run(w.prepare())
-    # CallableSpec constructs the execution-owned instance. Inspect that instance,
-    # as S012 does, rather than the original declaration object copied into it.
-    executed = w.callable._fn
-    assert executed.stops == executed.closes == 1
 
 
 def test_runtime_resource_inventory_is_bounded_before_copying_fields():

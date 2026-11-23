@@ -22,7 +22,7 @@ from dataclasses import replace
 from typing import Mapping, NamedTuple
 
 from ..data.plan import LogicalOp
-from ..execution.contracts.dataflow import Bounds
+from ..execution.contracts.dataflow import FIXED_SCAN_BATCHES, Bounds
 from ..execution.contracts.dataflow_errors import DataflowError
 from ..resources.contracts import ResourceProfile
 
@@ -120,13 +120,35 @@ def relational_profile(kind, source, bounds):
         profile = ResourceProfile(requests=requests, limits=profile.limits, requirements=profile.requirements)
     reducer_memory = None
     if kind == 'reduce':
-        from ..execution.kernels.reducer_memory import declare, resident_bytes, FIELD
+        from ..execution.kernels.reducer_memory import declare, FIELD
+        from demiflow.execution.contracts.relational_region import reducer_resident_bytes as resident_bytes
         declared = declare(source.initial, bounds)
         profile = ResourceProfile(requests={**profile.requests,
             'memory_bytes':resident_bytes(declared,bounds)},
             limits=profile.limits,requirements=profile.requirements)
         reducer_memory = (FIELD, declared)
     return profile, reducer_memory
+
+
+def _lance_input_carrier(request):
+    from ..data.plan import MapBatchesOp
+    from ..data.sources import LanceSource
+    from ..lance.model import LanceScanSpec, LanceWriteSpec
+    source, operations = request.source, request.plan.operations
+    sink = next((p.value for p in request.programs if p.name == 'write_lance'), None)
+    if (type(source) is not LanceSource or type(source.query) is not LanceScanSpec
+            or source.native_options is not None or type(sink) is not LanceWriteSpec):
+        return None
+    query = source.query
+    if (not operations and sink.mode == 'merge' and query.version is not None
+            and not query.filter and not query.projection and query.limit is None):
+        return FIXED_SCAN_BATCHES
+    if len(operations) == 1 and sink.schema is not None:
+        operation = operations[0]
+        if (type(operation) is MapBatchesOp and operation.batch_format == 'pyarrow'
+                and operation.native_options is None):
+            return 'mapped_arrow.v1'
+    return None
 
 
 def terminal_budget(request, nodes, producer, *, bounds, semantic):
@@ -166,6 +188,10 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
         # Queue tasks were settled by their original authority already;
         # this terminal only publishes the result manifest, without Arrow.
         native_publication = publishes_natively(request.sink)
+    if request.kind == 'write_lance':
+        carrier = _lance_input_carrier(request)
+        if carrier is not None:
+            configuration['input_carrier'] = carrier
     if native_publication:
         from ..execution.dataflow_publication_budget import FIELD, SCHEMA
         # A native consumer can still hold its previous yielded Arrow

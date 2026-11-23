@@ -64,8 +64,4 @@ def publish_prompt_usage(executor, execution):
 
 
 def executor_prompt_usage(executor):
-    totals = dict(getattr(executor, '_dataflow_prompt_usage', empty_usage()))
-    for coordinator in executor._prompt_coordinators.values():
-        for key, value in coordinator.usage().to_dict().items():
-            totals[key] += value
-    return totals
+    return dict(getattr(executor, '_dataflow_prompt_usage', empty_usage()))

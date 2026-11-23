@@ -303,8 +303,6 @@ class Dataset:
         """Retired facade; execution-owned recovery uses the platform RunRef."""
         from ..execution.capabilities import require_action
         require_action('checkpoint')
-        from .local_relational import checkpoint
-        return checkpoint(self,path,version)
 
     @_flow_api("checkpoint_async", datasets=("self",), execution="action")
     async def checkpoint_async(self, path, *, version):
@@ -545,24 +543,6 @@ class Dataset:
                 raise ValueError('thread execution cannot enforce hard_timeout; use callable I/O deadlines')
             if inspect.iscoroutinefunction(fn) or inspect.iscoroutinefunction(getattr(fn, '__call__', None)):
                 raise TypeError('thread execution requires a synchronous callable')
-        if checkpoint is not None:
-            if execution != 'inline':
-                raise ValueError('operator checkpoint currently requires inline execution')
-            from pathlib import Path
-            from ..execution.operator_checkpoint import OperatorCheckpoint, CheckpointedCallable
-            if isinstance(checkpoint, dict):
-                checkpoint_path = checkpoint.get('path')
-                checkpoint_operator = checkpoint.get('operator', checkpoint_operator)
-                checkpoint_lease_s = checkpoint.get('lease_s', checkpoint_lease_s)
-            else:
-                checkpoint_path = checkpoint
-            if not checkpoint_path:
-                raise ValueError('map_async checkpoint requires a path')
-            ledger = OperatorCheckpoint(Path(checkpoint_path),
-                operator=checkpoint_operator or lbl, lease_s=checkpoint_lease_s)
-            fn = CheckpointedCallable(fn, ledger, checkpoint_operator or lbl)
-            owner = fn
-            is_actor = True
         operation = AsyncMapOp(
             CallableSpec.create(fn.__call__ if is_actor and not inspect.ismethod(fn) else fn),
             conc,
@@ -608,21 +588,6 @@ class Dataset:
         from .flow_contract import normalize_stream_parameters
         policy = normalize_stream_parameters(dict(max_batch=max_batch, flush_interval=flush_interval,
             concurrency=concurrency, queue_depth=queue_depth, hard_timeout=hard_timeout), batch=True, effective=False)
-        if checkpoint is not None:
-            from pathlib import Path
-            from ..execution.operator_checkpoint import OperatorCheckpoint, CheckpointedCallable
-            if isinstance(checkpoint, dict):
-                checkpoint_path = checkpoint.get('path')
-                checkpoint_operator = checkpoint.get('operator', checkpoint_operator)
-                checkpoint_lease_s = checkpoint.get('lease_s', checkpoint_lease_s)
-            else:
-                checkpoint_path = checkpoint
-            if not checkpoint_path:
-                raise ValueError('batch_map checkpoint requires a path')
-            ledger = OperatorCheckpoint(Path(checkpoint_path),
-                operator=checkpoint_operator or label or getattr(fn, '__name__', 'batch_map'),
-                lease_s=checkpoint_lease_s)
-            fn = CheckpointedCallable(fn, ledger, checkpoint_operator or label or 'batch_map')
         import inspect
         owner = fn.__self__ if inspect.ismethod(fn) else fn
         owns_instance = not inspect.isclass(owner) and not (inspect.isfunction(owner) or inspect.isbuiltin(owner))
@@ -1106,112 +1071,6 @@ class Dataset:
             stall_timeout, stop_file, source_batch_size,
         ))
 
-    def _run_stream(self, *, source=None, plan=None, consume=None, on_progress=None,
-                    on_drain=None, log_every=0, cancellation=None, queue_factory=None,
-                    stall_timeout=None, stop_file=None, source_batch_size=None,
-                    checkpoint=None, progress=None, source_iter=None, stage_limits=None):
-        """One native driver for public consumption and internal materialization."""
-        from ..execution.stream import run_stream as _run_stream
-        from ..execution.capabilities import validate_stream_plan
-        source = self._source if source is None else source
-        plan = self._plan if plan is None else plan
-        validate_stream_plan(plan)
-        if getattr(self._executor, 'NAME', None) != 'local':
-            from ..errors import UnsupportedExecutionOptionError
-            raise UnsupportedExecutionOptionError('run_stream is only supported by the local executor')
-        import inspect
-        from ..execution.stream_resources import StreamResources
-        if source_batch_size is None:source_batch_size=1
-        from ..execution.queue_execution import queue_source as native_queue_source
-        task_source = native_queue_source(source)
-        if task_source is not None and source_batch_size!=1:
-            from ..execution.recovery_contract import RecoveryContractError
-            raise RecoveryContractError('Queue sources require source_batch_size=1 before claiming tasks')
-        explicit_queue = task_source is not None and task_source.parent is None
-        if explicit_queue:
-            from ..execution.queue_execution import configure_explicit
-            from ..execution.run_context import current_action
-            configure_explicit(task_source,plan,current_action())
-            source_iter=task_source.rows()
-        resources = StreamResources(((task_source,) if task_source is not None else ()) + self._stages,queue_factory)
-        from ..execution.queue_producer import producer_actor
-        producer_node = producer_actor(plan)
-        unit_driver = None
-        if producer_node is not None:
-            if source_batch_size!=1:
-                from ..execution.recovery_contract import RecoveryContractError
-                raise RecoveryContractError('Incremental producers require source_batch_size=1')
-            from ..execution.run_context import current_action
-            unit_driver = producer_node[1]
-            unit_driver.configure(current_action(), source, plan)
-            source_iter = unit_driver.rows()
-            source_batch_size = 1
-        artifact_outputs=None
-        if progress is None:
-            from ..execution.run_context import current_action
-            active=current_action()
-            if active is not None:
-                from ..execution.object_sink import image_object_specs,ObjectRowsSink
-                specs=image_object_specs(plan)
-                if specs and not hasattr(active,'object_sinks'):
-                    holder=ObjectRowsSink(active,object_specs=specs)
-                    active.object_sinks=holder.object_sinks
-                    artifact_outputs={store.sink_id:(store,None) for store in holder.object_sinks.values()}
-                for index,actor in enumerate(resources.actors):
-                    bind=getattr(actor,'bind_execution',None)
-                    if bind is not None:bind(active.context,active.action_id+'-node-'+str(index))
-        from ..execution.checked import current
-        from ..execution.run_context import admit_stream
-        admit_stream(plan, source_batch_size=source_batch_size)
-        if checkpoint is not None:
-            from ..execution.stream_checkpoint import StreamCheckpoint
-            if not isinstance(checkpoint, StreamCheckpoint):
-                raise TypeError('checkpoint requires StreamCheckpoint')
-            checkpoint.validate_sinks([a for a in resources.actors if getattr(a, 'is_stream_sink', False)])
-            sink_names = {a.stage for a in resources.actors if getattr(a, 'is_stream_sink', False)}
-            if set(checkpoint.state['outputs']) - sink_names:
-                raise ValueError('Checkpoint stages are missing from the resumed graph')
-            for actor in resources.actors:
-                if getattr(actor, 'is_stream_sink', False):
-                    if actor.mode != 'append':
-                        raise ValueError('A checkpoint graph requires append sinks')
-                    actor.checkpoint = checkpoint
-        if type(source_batch_size) is not int or not 1<=source_batch_size<=256:
-            raise ValueError('source_batch_size must be 1..256')
-        async def drain(stats):
-            resources.snapshot(stats)
-            checked = current()
-            if checkpoint is not None and checked is not None:
-                with checkpoint.lock:
-                    checkpoint.validate_ownership()
-                    checked.record(checked.active, 'checkpoint_commits', {
-                        'checkpoint': checked.checkpoint_facts(checkpoint),
-                        'outputs': dict(checkpoint.state['outputs']), 'revision': checkpoint.state['revision'],
-                        'pending': checkpoint.state['pending'] is not None})
-                    checked.checkpoint_commits(checkpoint)
-            if on_drain is not None:
-                result = on_drain(stats)
-                if inspect.isawaitable(result): await result
-
-        rows = self._executor._apply_plan(source, LogicalPlan()) if source_iter is None else source_iter
-        stats = _run_stream(
-            rows, plan, consume=consume,
-            on_progress=on_progress, on_drain=drain, log_every=log_every,
-            cancellation=cancellation, queue_factory=resources.make_queue,
-            on_start=resources.prepare, on_close=resources.close, stall_timeout=stall_timeout,
-            stop_file=stop_file, source_batch_size=source_batch_size, progress=progress, unit_driver=unit_driver,
-            on_stop=task_source.request_stop if task_source is not None else None,
-            stage_limits=stage_limits,
-        )
-        if explicit_queue:
-            task_source.assert_settled()
-            active=current_action()
-            active.complete(dict(kind='run_stream',queue=task_source.snapshot_metrics()))
-        if artifact_outputs is not None:
-            from ..execution.commit import CommitCoordinator
-            from ..execution.recovery_contract import SourcePosition
-            CommitCoordinator(active).commit(1,outputs=artifact_outputs,position=SourcePosition(active.semantic_id,1))
-        return stats
 
     def map_batches(
         self, fn: Callable[..., Any], *, batch_size: Optional[int] = None,

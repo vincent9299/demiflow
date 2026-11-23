@@ -25,7 +25,7 @@ def test_single_worker_partition_wave_resume_keeps_original_membership(graph_env
     spec.update(exchange_mode=mode, routing=routing, key_fields=['group'], target_field='group',
                 target_classes={'a': ['left'], 'b': ['right']},
                 credit_budget={'rows': 8, 'bytes': 8*1024**2})
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=1)
     limits = {'checkpoint_rows': 8, 'checkpoint_unconfirmed_rows': 8,
               'checkpoint_interval_ms': 60000, 'timeout_s': 120}
     retire, finish = DataflowExecution._retire_phase, DataflowExecution.finish
@@ -114,7 +114,7 @@ def test_explicit_graph_storage_is_sealed_and_not_silently_enlarged(graph_enviro
     with pytest.raises(DataflowError, match='(?i)storage|spill'):
         with RunContext.start(graph_environment/'run') as run:
             with run.action({'kind': 'materialize', 'source': {'fixture': 'one-byte-storage'}}):
-                LocalDatasetExecutor(workers=workers, unified_graph=True).materialize_graph(spec)
+                LocalDatasetExecutor(workers=workers).materialize_graph(spec)
     assert not run.journal.execution_commits('action-1')
     assert not (graph_environment/'ancestor.jsonl').exists()
 
@@ -134,7 +134,7 @@ def test_graph_storage_remains_per_channel_under_original_aggregate_grant(graph_
     spec.update(exchange_mode=mode, storage_bytes=amount)
     with RunContext.start(graph_environment/'run', limits={'timeout_s': 120}) as run:
         with run.action({'kind': 'materialize', 'source': {'fixture': 'per-channel-storage'}}) as action:
-            result = LocalDatasetExecutor(workers=1, unified_graph=True).materialize_graph(spec)
+            result = LocalDatasetExecutor(workers=1).materialize_graph(spec)
             assert result['target_rows'] == {'left': 3, 'right': 3}
             action.complete({'kind': 'graph-materialized'})
         sealed = load_sealed_plan(run.directory, action.action_id, version='v3')

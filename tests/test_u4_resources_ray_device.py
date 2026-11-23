@@ -14,7 +14,7 @@ import pytest
 ray = pytest.importorskip("ray")
 
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.worker.ray_host import RayControlConnector
+from demiflow.execution.hosts.ray_worker_host import RayControlConnector
 from demiflow.resources.contracts import (
     RESOURCE_PROTOCOL_VERSION, ResourceError, ResourceProfile, WorkerLaunchSpec, WorkerRequest,
 )

@@ -23,7 +23,7 @@ import pytest
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.block_sink import BlockSink
-from demiflow.execution.graph import run_local_graph
+from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.resources.capacity import LocalCapacityPool
 from demiflow.resources.process_unit import ManagedProcessUnit
@@ -102,7 +102,7 @@ def _run_default_graph(tmp_path, special, n=8, cut_rows=4):
             with run.action({"kind": "materialize",
                              "source": {"fixture": "type-fidelity"}}) as execution:
                 action_id = execution.action_id
-                result = run_local_graph(spec, control_timeout_s=15)
+                result = LocalDatasetExecutor().materialize_graph(spec, control_timeout_s=15)
                 execution.complete(dict(kind="graph-materialized"))
             facts = run.journal.execution_commits(action_id)
             rows = {rid: _committed_rows(run, action_id, rid, facts) for rid in readers}

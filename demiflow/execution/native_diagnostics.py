@@ -20,9 +20,10 @@ class LimitedWriter:
         self.stream, self.remaining = stream, maximum
 
     def write(self, raw):
-        if len(raw) > self.remaining:
+        size = memoryview(raw).nbytes
+        if size > self.remaining:
             raise ValueError("Native result IPC byte budget exceeded")
-        self.remaining -= len(raw)
+        self.remaining -= size
         return self.stream.write(raw)
 
 

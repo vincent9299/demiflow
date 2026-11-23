@@ -23,9 +23,9 @@ def workdir():
         shutil.rmtree(path, ignore_errors=True)
 
 
-def test_load_sealed_plan_v2_run(workdir):
+def test_load_sealed_plan_v2_run(workdir, legacy_seal_writer):
     n = fx.native_v2_doc()
-    sealed = fx.seal_native_run(workdir / "run", n)
+    sealed = fx.seal_existing_format(legacy_seal_writer, workdir / "run", n, native=True)
     sp = load_sealed_plan(sealed.root, sealed.action_id)
     assert set(sp) == {"facts", "logical_dag", "physical_plan"}
     assert sp["facts"]["schema"] == SEALED_PLAN_FACTS_SCHEMA
@@ -36,17 +36,17 @@ def test_load_sealed_plan_v2_run(workdir):
     assert sp["physical_plan"] == n.pp
 
 
-def test_load_sealed_plan_v1_run(workdir):
+def test_load_sealed_plan_v1_run(workdir, legacy_seal_writer):
     v1 = chain_fixture()
-    sealed = fx.seal_v1_run(workdir / "run", v1)
+    sealed = fx.seal_existing_format(legacy_seal_writer, workdir / "run", v1, native=False)
     sp = load_sealed_plan(sealed.root, sealed.action_id)
     assert sp["logical_dag"] == v1.ld
     assert sp["physical_plan"] == v1.pp
 
 
-def test_load_sealed_plan_without_bindings(workdir):
+def test_load_sealed_plan_without_bindings(workdir, legacy_seal_writer):
     n = fx.native_v2_doc()
-    sealed = fx.seal_native_run(workdir / "run", n, with_bindings=False)
+    sealed = fx.seal_existing_format(legacy_seal_writer, workdir / "run", n, native=True, with_bindings=False)
     sp = load_sealed_plan(sealed.root, sealed.action_id)
     assert sp["facts"]["action_id"] == sealed.action_id
 

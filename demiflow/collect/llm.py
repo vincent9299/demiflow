@@ -23,6 +23,8 @@ from typing import Optional
 
 import httpx
 
+from .client_scope import ClientPool
+
 
 class AsyncLLMClient:
     """OpenAI 兼容端点的进程级共享客户端（一个端点一个实例）。
@@ -105,7 +107,13 @@ def encode_image_b64(data: bytes, *, max_edge: int = 768,
 # ---------------------------------------------------------------------------
 
 _ENDPOINT_CFG: dict[str, dict] = {}
-_ENDPOINT_CLIENTS: dict[str, AsyncLLMClient] = {}
+
+
+async def _close_stream_pool(client):
+    await client.aclose()
+
+
+_ENDPOINT_CLIENTS = ClientPool(_close_stream_pool)
 # 冒烟注入缝：优先于惰性构造，且不被 reconfigure_endpoint 清除
 # （编排启动期按并发 reconfigure 池上限是常规动作，注入必须存活）
 _INJECTED: dict[str, AsyncLLMClient] = {}
@@ -115,11 +123,11 @@ def register_endpoint(name: str, *, base_url: str, model: str,
                       max_connections: int = 56, timeout: float = 600.0,
                       base_url_env: str = "", model_env: str = "") -> None:
     """声明一个 LLM 端点资源（重复注册后者覆盖；改配置用 reconfigure）。"""
-    _ENDPOINT_CFG[name] = dict(base_url=base_url, model=model,
+    generation = _ENDPOINT_CFG.get(name, {}).get('generation', 0) + 1
+    _ENDPOINT_CFG[name] = dict(generation=generation, base_url=base_url, model=model,
                                 max_connections=max_connections,
                                 timeout=timeout, base_url_env=base_url_env,
                                 model_env=model_env)
-    _ENDPOINT_CLIENTS.pop(name, None)
 
 
 def reconfigure_endpoint(name: str, **overrides) -> None:
@@ -127,26 +135,26 @@ def reconfigure_endpoint(name: str, **overrides) -> None:
     if name not in _ENDPOINT_CFG:
         raise KeyError(f"未声明的端点资源：{name}")
     _ENDPOINT_CFG[name].update(overrides)
-    _ENDPOINT_CLIENTS.pop(name, None)
+    _ENDPOINT_CFG[name]['generation'] += 1
 
 
 def get_llm_client(name: str) -> AsyncLLMClient:
     """取端点的共享客户端（注入优先，惰性建；env 覆盖 base_url/model）。"""
     if name in _INJECTED:
         return _INJECTED[name]
-    if name not in _ENDPOINT_CLIENTS:
-        cfg = _ENDPOINT_CFG.get(name)
-        if cfg is None:
-            raise KeyError(f"未声明的端点资源：{name}"
+    cfg = _ENDPOINT_CFG.get(name)
+    if cfg is None:
+        raise KeyError(f"未声明的端点资源：{name}"
                            f"（已声明：{sorted(_ENDPOINT_CFG) or '无'}）")
+    def create():
         base_url = (os.environ.get(cfg["base_url_env"], cfg["base_url"])
                     if cfg["base_url_env"] else cfg["base_url"])
         model = (os.environ.get(cfg["model_env"], cfg["model"])
                  if cfg["model_env"] else cfg["model"])
-        _ENDPOINT_CLIENTS[name] = AsyncLLMClient(
+        return AsyncLLMClient(
             base_url=base_url, model=model,
             max_connections=cfg["max_connections"], timeout=cfg["timeout"])
-    return _ENDPOINT_CLIENTS[name]
+    return _ENDPOINT_CLIENTS.get((name, cfg['generation']), create)
 
 
 def inject_endpoint_client(name: str, client: AsyncLLMClient) -> None:
@@ -156,20 +164,7 @@ def inject_endpoint_client(name: str, client: AsyncLLMClient) -> None:
 
 async def close_all_llm() -> None:
     """平台收尾：关全部端点客户端（run_stream 退出期统一调用）。"""
-    for client in list(_ENDPOINT_CLIENTS.values()) + list(_INJECTED.values()):
+    await _ENDPOINT_CLIENTS.close_unscoped()
+    for client in list(_INJECTED.values()):
         await client.aclose()
-    _ENDPOINT_CLIENTS.clear()
     _INJECTED.clear()
-
-
-async def _close_stream_pool():
-    # Only module-created endpoint clients belong to the stream's pool.
-    # Injected clients keep their explicitly declared external ownership.
-    clients = list(_ENDPOINT_CLIENTS.values())
-    _ENDPOINT_CLIENTS.clear()
-    for client in clients:
-        await client.aclose()
-
-
-from ..execution.resource_registry import register_stream_cleanup as _register_cleanup
-_register_cleanup('collect.llm', _close_stream_pool)

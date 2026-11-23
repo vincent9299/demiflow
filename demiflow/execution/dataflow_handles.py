@@ -218,7 +218,7 @@ class RuntimeActionHandle:
                 > self._bounds.max_resident_bytes):
             raise _error('BUDGET_EXCEEDED', 'collected bytes exceed the driver resident budget')
 
-    def _read_records(self):
+    def _read_records(self, *, values=False):
         maximum = _PULL_CREDIT_RECORDS
         kind = getattr(self.request, 'kind', None)
         if kind in {'take', 'take_batch'}:
@@ -242,12 +242,13 @@ class RuntimeActionHandle:
         try:
             if read is not None:
                 bounded = kind in {'take', 'take_all', 'take_batch'} or self._read_admission is not None
+                options = {'batch_values': True} if values and self.request.kind == 'iter_rows' else {}
                 records = read(max_records=maximum, deadline_ms=0, admit=admit if bounded else None,
-                               admit_workspace=workspace if bounded else None)
+                               admit_workspace=workspace if bounded else None, **options)
             else:
                 records = self._subscription.read(max_records=maximum, deadline_ms=0)
             self._conversion_read_start = self._yielded_rows
-            self._conversion_read_sizes = tuple(record.encoded_bytes for record in records)
+            self._conversion_read_sizes = () if values else tuple(record.encoded_bytes for record in records)
             return records
         except BaseException as exc:
             # An admission/decode error is as authoritative as a worker failure;
@@ -257,14 +258,37 @@ class RuntimeActionHandle:
 
     # -- ActionHandle surface ----------------------------------------------
     def rows(self) -> Iterator["Record"]:
+        return self._start_rows(values=False)
+
+    def values(self):
+        """Incremental public row values; keep the same ACK, result and early-close lifecycle."""
+        return self._start_rows(values=True)
+
+    def _start_rows(self, *, values):
         self._check_open()
         with self._lock:
             if self._rows_started:
                 raise _error("INVALID_CONTRACT", "terminal output is already being consumed")
             self._rows_started = True
-        return self._iter_records()
+        return self._iter_records(values=values)
 
-    def _iter_records(self) -> Iterator["Record"]:
+    def _deliver(self, records, values):
+        from .outputs.arrow_rows import PublishedArrowRows
+        from .dataflow_terminals import _record_row
+        while records:
+            record = records.popleft()
+            if isinstance(record, PublishedArrowRows):
+                for row in record.values():
+                    self._yielded_rows += 1
+                    yield row
+                self._yielded_bytes += record.batch.nbytes
+            else:
+                self._yielded_rows += 1
+                self._yielded_bytes += record.encoded_bytes
+                yield _record_row(record, self) if values else record
+            del record
+
+    def _iter_records(self, *, values=False):
         deadline = self._deadline()
         completed = False
         try:
@@ -275,11 +299,8 @@ class RuntimeActionHandle:
                     self._raise_deadline()
                 status = self._pump(min(_CONTROL_POLL_MS, remaining_ms))
                 from collections import deque
-                records = deque(self._read_records())
-                while records:
-                    self._yielded_rows += 1
-                    self._yielded_bytes += records[0].encoded_bytes
-                    yield records.popleft()
+                records = deque(self._read_records(values=values))
+                yield from self._deliver(records, values)
                 del records
                 if status.state == "failed":
                     failure = self._terminal_failure()
@@ -287,14 +308,11 @@ class RuntimeActionHandle:
                     raise failure
                 if status.state in ("succeeded", "cancelled"):
                     while True:
-                        tail = deque(self._read_records())
+                        tail = deque(self._read_records(values=values))
                         if not tail:
                             del tail
                             break
-                        while tail:
-                            self._yielded_rows += 1
-                            self._yielded_bytes += tail[0].encoded_bytes
-                            yield tail.popleft()
+                        yield from self._deliver(tail, values)
                         del tail
                     if status.state == "cancelled":
                         failure = _error("CANCELLED", "action cancelled while reading output")
@@ -470,12 +488,16 @@ class StoredMaterializedHandle:
         self._schema = None
         self._declared_schema_ref = None
         self._declared_schema = None
+        from .storage.objects import RunArtifactStore
+        self._count_proof = {} if type(store) is RunArtifactStore else None
+        self._verified_frame_rows = 0
         pinned: list["ArtifactRef"] = []
         blocks, pinned_tree_count = (), 0
         try:
             store.retain(self._manifest_ref, owner=owner)
             pinned.append(self._manifest_ref)
             manifest = self._read_manifest()
+            witness = store.object_signature(self._manifest_ref) if self._count_proof is not None else None
             blocks = tuple(_artifact_ref(entry) for entry in manifest["blocks"])
             rows = manifest["rows"]
             if result.rows is not None and result.rows != rows:
@@ -483,8 +505,10 @@ class StoredMaterializedHandle:
             from .dataflow_segments import tree_refs
             for block in blocks:
                 for ref in tree_refs(store, block, self._bounds):
-                    store.retain(ref, owner=owner)
+                    self._retain_block(ref, witness)
                     pinned_tree_count += 1
+            if self._verified_frame_rows != rows:
+                self._count_proof = None
             self._blocks = blocks
             self._rows = rows
             self._schema = manifest.get("columns")
@@ -508,6 +532,91 @@ class StoredMaterializedHandle:
                 except Exception:
                     pass
             raise
+
+    def _retain_block(self, ref, witness):
+        from .dataflow_segments import RECORDS_MEDIA, SEGMENTS_MEDIA
+        from .dataflow_record_frames import (decode_document, decode_frame, frame_stream,
+                                             line_limit, read_chunk_bytes)
+        proof = self._count_proof
+        budget = min(self._bounds.max_state_bytes, self._bounds.max_resident_bytes // 8)
+        if (proof is None or len(proof) >= budget // 1024
+                or ref.media_type not in (RECORDS_MEDIA, SEGMENTS_MEDIA)):
+            self._count_proof = None
+            self._store.retain(ref, owner=self._owner)
+            return
+        before = self._store.reusable_signature(ref, witness=witness)
+        if before is None:
+            self._count_proof = None
+            self._store.retain(ref, owner=self._owner)
+            return
+        if ref.media_type == SEGMENTS_MEDIA:
+            self._store.retain(ref, owner=self._owner)
+        else:
+            def observe(chunks):
+                stream = frame_stream(chunks, self._bounds)
+                try:
+                    while line := stream.readline(line_limit(self._bounds)):
+                        raw, item = decode_frame(line, self._bounds, retained=stream.buffered_bytes)
+                        record = decode_document(raw, record_id=item['record_id'],
+                            sequence=item['sequence'], bounds=self._bounds, retained=stream.buffered_bytes)
+                        self._verified_frame_rows += 1
+                        for dependency in (record.payload_ref, record.schema_ref):
+                            if dependency is None or dependency in proof:
+                                continue
+                            if len(proof) >= budget // 1024:
+                                self._count_proof = None
+                                return
+                            stamp = self._store.reusable_signature(dependency, witness=witness)
+                            if (stamp is None or not self._store.inspect(dependency)
+                                    or stamp != self._store.object_signature(dependency)):
+                                self._count_proof = None
+                                return
+                            proof[dependency] = stamp
+                except (ValueError, DataflowError):
+                    # A historical frame without a reusable proof keeps its original read path.
+                    self._count_proof = None
+                finally:
+                    stream.close()
+            self._store.retain_observed(ref, owner=self._owner, observe=observe,
+                                        chunk_bytes=read_chunk_bytes(self._bounds))
+        if before != self._store.object_signature(ref):
+            self._count_proof = None
+        elif self._count_proof is not None:
+            proof[ref] = before
+
+    def verified_row_count(self, *, recheck=None):
+        """Only the live pin owner can reuse a checksum established at publication."""
+        with self._lock:
+            self._check_open()
+            if self._count_proof is None and recheck is None:
+                return None
+            manifest = self._read_manifest()
+            if manifest['rows'] != self._rows:
+                raise _error("CORRUPT_ARTIFACT", "materialized row count differs from manifest")
+            if self._declared_schema_ref is not None and not self._store.inspect(self._declared_schema_ref):
+                raise _error("CORRUPT_ARTIFACT", "materialized schema is absent")
+            if self._count_proof is None:
+                if tuple(map(_artifact_ref, manifest['blocks'])) != self._blocks:
+                    raise _error("CORRUPT_ARTIFACT", "materialized blocks differ from the sealed manifest")
+                # Reopening an already completed direct count cannot launch a new
+                # scan action. Its existing reader authenticates frames and payloads.
+                rows = self._iter_rows(with_schema=True)
+                try:
+                    for _ in rows:
+                        recheck()
+                finally:
+                    rows.close()
+                return self._rows
+            for ref, stamp in self._count_proof.items():
+                if self._store.object_signature(ref) != stamp:
+                    # A metadata change invalidates reuse of the previous checksum.
+                    # Authenticate the changed reference before accepting the old result.
+                    if not self._store.inspect(ref):
+                        raise _error("UNKNOWN_EFFECT", "materialized block is absent")
+                    if recheck is None:
+                        return None
+                    recheck()
+            return self._rows
 
     def _read_manifest(self) -> dict:
         if self._manifest_ref.size_bytes > self._bounds.max_control_bytes:
@@ -557,6 +666,7 @@ class StoredMaterializedHandle:
         from .storage.objects import RunArtifactStore
         self._store = RunArtifactStore(root=state["root"], store_id=state["store_id"],
             journal=None, bounds=state["bounds"], readonly=True)
+        self._count_proof = None
         self._bounds = state["bounds"]
         self._manifest_ref, self._blocks = state["manifest"], state["blocks"]
         self._rows, self._schema = state["rows"], state["schema"]
@@ -667,3 +777,4 @@ class StoredMaterializedHandle:
             # An unknown/failed unpin remains retryable. Immutable data and
             # committed owners remain intact throughout a partial release.
             self._released = True
+            self._count_proof = None

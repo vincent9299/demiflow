@@ -238,7 +238,7 @@ class Uses(ast.NodeVisitor):
         if reflective and node.args:
             base = self.origin(node.args[0])
             base = SURFACE['result_origins'].get(base, base)
-            if base in SURFACE['objects'] or base and base.startswith(('opaque:', 'demiflow.execution.host')):
+            if base in SURFACE['objects'] or (base and (base.startswith('opaque:') or _host_interface(base))):
                 self.problem(node, 'reflective native access requires explicit contract')
         if name in ('importlib.import_module', 'builtins.__import__') or direct == '__import__':
             if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
@@ -274,6 +274,16 @@ def test_approved_objects_do_not_leak_members_or_opaque_configuration():
     assert not errors, errors
 
 
+def _host_interface(target):
+    return target == 'demiflow.execution.host' or target.startswith('demiflow.execution.host.')
+
+
+def test_host_interface_uses_complete_package_name():
+    assert _host_interface('demiflow.execution.host')
+    assert _host_interface('demiflow.execution.host.inspection')
+    assert not _host_interface('demiflow.execution.hosts.ray_worker_host')
+
+
 def test_native_core_never_imports_host_or_product():
     errors = []
     for package in ('execution', 'planning', 'data', 'pipeline'):
@@ -283,7 +293,7 @@ def test_native_core_never_imports_host_or_product():
             relative = str(path.relative_to(REPO))
             for node, module, name, _ in _imports(ast.parse(path.read_text()), relative):
                 target = module + '.' + name
-                if target.startswith(('demiflow.workbench', 'demiflow.forge', 'demiflow.execution.host')):
+                if target.startswith(('demiflow.workbench', 'demiflow.forge')) or _host_interface(target):
                     errors.append((relative, node.lineno, target))
     assert not errors, errors
 

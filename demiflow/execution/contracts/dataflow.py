@@ -57,6 +57,9 @@ _JSON_MAX_DEPTH = 32
 _JSON_MAX_NODES = 65536
 _ROW_MAX_DEPTH = 64
 
+# A fixed source is staged as native batches in its co-located terminal.
+FIXED_SCAN_BATCHES = 'fixed_scan_batches.v1'
+
 _PROVIDERS = frozenset({"local", "ray_core"})
 _MODES = frozenset({"memory_incremental", "durable_incremental", "finite_sealed"})
 _RECOVERIES = frozenset({"checkpoint", "final_commit", "delivery_only", "attempt_only"})
@@ -1544,6 +1547,10 @@ class RuntimeServices:
     check_stop: Callable[[], None]
     constants: Mapping[str, Json]
     programs: Mapping[str, LoadedProgram]
+
+    # Installed by the worker host. SQL and all relational semantics belong
+    # to the operator; this one port supervises the process under the grant.
+    query_region_offsets: Callable[..., list[tuple[int | None, ...]] | bytearray] | None = None
 
     def __post_init__(self):
         if not isinstance(self.bounds, Bounds):

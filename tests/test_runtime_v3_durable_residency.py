@@ -268,3 +268,88 @@ def test_park_metadata_rechecks_bound_after_actual_cut_proofs_grow(schema):
     controller._exchange._parked['delivery']['producer_cut'] = 'a'*64
     with pytest.raises(RecoveryContractError, match='budget'):
         controller.metadata(False, ())
+
+
+def _sort_row(row):
+    i = row['id']
+    return {'key': i % 3, 'i': i, 'value': b'x' * 12000}
+
+
+@pytest.mark.parametrize('finish', ['continue', 'restart', 'close'])
+def test_last_sealed_sort_keeps_worker_until_a_real_exit(tmp_path, monkeypatch, finish):
+    """Keep the last iterator across ACK; a cold restart can rebuild from its cut."""
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+    from demiflow.execution.kernels import ordering
+
+    class Interrupted(Exception):
+        pass
+
+    run_ref = None
+    expected = sorted(range(48), key=lambda i: i % 3)
+    runs = []
+    retired = []
+    acked = []
+    seen = []
+    sort = ordering.sort_with_body_references
+    handle = DataflowExecution._handle_event
+    retire = DataflowExecution._retire_phase
+    resume = DataflowExecution._continue_after_cut
+
+    def observed(records, **kwargs):
+        runs.append(kwargs['rows'])
+        return sort(records, **kwargs)
+
+    def event(execution, message):
+        value = handle(execution, message)
+        if message.kind == 'terminal':
+            seen.append(message.payload['record_id'])
+            if len(seen) == 2:
+                execution.request_checkpoint()
+        return value
+
+    def rotation(execution, image):
+        retired.append(execution._durable_residency.can_drain_in_place())
+        return retire(execution, image)
+
+    def after_ack(execution):
+        image = execution._restore_image
+        if seen and execution._durable_residency.can_drain_in_place():
+            assert execution._action.context.journal.execution_commit(image.commit_id)['status'] == 'acked'
+            acked.append(image.commit_id)
+            if finish == 'restart':
+                raise Interrupted
+        return resume(execution)
+
+    def rows():
+        return data.range(len(expected)).map(_sort_row).sort('key').iter_rows()
+
+    limits = {'memory_bytes': 2 << 20, 'max_row_bytes': 48000, 'max_batch_bytes': 360000,
+              'checkpoint_interval_ms': 60000}
+    provider = dict(workers=1, partitions=1, worker_mode='thread')
+    with monkeypatch.context() as patch:
+        patch.setattr(ordering, 'sort_with_body_references', observed)
+        patch.setattr(DataflowExecution, '_handle_event', event)
+        patch.setattr(DataflowExecution, '_retire_phase', rotation)
+        patch.setattr(DataflowExecution, '_continue_after_cut', after_ack)
+        try:
+            with RunContext.start(tmp_path/'run', limits=limits) as run, data.local_execution(**provider):
+                run_ref = run.ref
+                it = rows()
+                if finish == 'close':
+                    assert next(it)['i'] == expected[0]
+                    it.close()
+                    assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
+                else:
+                    assert [r['i'] for r in it] == expected
+        except Interrupted:
+            assert finish == 'restart'
+        assert retired and not any(retired), 'earlier cohorts must still rotate'
+        assert runs == [len(expected)], 'parking must not rebuild a live external sort'
+        if finish != 'close':
+            assert acked, 'exercise a non-final ACK under the live sort worker'
+    if finish == 'restart':
+        with RunContext.resume(run_ref) as recovered, data.local_execution(**provider):
+            assert [r['i'] for r in rows()] == expected
+            assert recovered.journal.execution_commit(acked[-1])['status'] == 'acked'
+            commits, states = facts(recovered)
+            assert states[-1]['cut']['final'] and all(f['status'] == 'acked' for f in commits)

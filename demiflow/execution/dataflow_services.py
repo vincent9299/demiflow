@@ -290,9 +290,13 @@ def make_runtime_services(assignment: WorkerAssignment, *, transport: "ControlTr
             guard.check()
             transport.check_stop()
             journal.check_lease()
+        from .contracts.relational_region import needs_native_offsets
+        query_region_offsets = None
+        if any(needs_native_offsets(stage) for stage in assignment.stages):
+            from .datafusion import query_region_offsets
         return RuntimeServices(store=store, journal=journal, bounds=bounds, assignment=assignment,
                                clock_ms=_now_ms, check_stop=check_stop,
-                               constants=constants, programs=programs)
+                               constants=constants, programs=programs, query_region_offsets=query_region_offsets)
     except BaseException as failure:
         try:
             store.close()

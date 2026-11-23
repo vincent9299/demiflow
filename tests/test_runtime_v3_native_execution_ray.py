@@ -10,12 +10,11 @@ import pyarrow as pa
 from demiflow.data.api import DataAPI
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.executors.ray import RayDatasetExecutor
-from demiflow.execution.dataset_native import execute
 from demiflow.execution.run_context import RunContext
-from test_runtime_v3_native_execution_binding import source, placement, MiB
+from test_runtime_v3_native_execution_binding import source, MiB
 
 
-def test_actual_ray_native_adapter_preserves_budget_schema_and_completed_result(tmp_path, monkeypatch):
+def test_actual_ray_public_arrow_delivery_preserves_budget_schema_and_completed_result(tmp_path, monkeypatch):
     ray = pytest.importorskip('ray')
     assert not ray.is_initialized()
     physicals, charges = [], []
@@ -37,13 +36,12 @@ def test_actual_ray_native_adapter_preserves_budget_schema_and_completed_result(
     class Interrupted(Exception):
         pass
     uri = source(tmp_path)
-    schema = pa.schema([('id', pa.int32())], metadata={b'backend': b'same-runtime'})
-    executor = RayDatasetExecutor(workers=2)
+    schema = pa.schema([('id', pa.int64())])
+    executor = RayDatasetExecutor(workers=2, native_resources={'batch_rows': 2})
     api = DataAPI(executor=executor)
     def consume():
         ds = api.read_lance(uri, version=1).select_columns(['id'])
-        return list(execute(executor, ds._source, ds._plan, arrow=True,
-                            execution=placement(), sink_schema=schema))
+        return list(ds.iter_batches(batch_size=2, batch_format='pyarrow'))
     try:
         ray.init(address='local', num_cpus=4, num_gpus=0, include_dashboard=False,
             object_store_memory=128*MiB,
@@ -64,12 +62,12 @@ def test_actual_ray_native_adapter_preserves_budget_schema_and_completed_result(
             assert run.journal.execution_commits('action-1') == commits
             assert run.position == 1
         assert not launches
-        assert pa.Table.from_batches(actual).equals(pa.Table.from_batches(expected), check_metadata=True)
+        assert pa.concat_tables(actual).equals(pa.concat_tables(expected), check_metadata=True)
         assert sum(map(len, actual)) == 8
-        assert all(isinstance(batch, pa.RecordBatch) and len(batch) <= 2
+        assert all(isinstance(batch, pa.Table) and len(batch) <= 2
                    and batch.schema.equals(schema, check_metadata=True) for batch in actual)
         assert physicals and all(p.policy.provider == 'ray_core' for p in physicals)
-        assert all(edge.credit_rows <= 2 and edge.credit_bytes <= MiB for p in physicals for edge in p.exchanges)
+        assert all(p.bounds.max_resident_bytes <= 32*MiB and p.policy.native_limits['batch_rows'] == 2 for p in physicals)
         assert len({p.plan_id for p in physicals}) == 1
         assert charges and any(c['cpu_millis'] for c in charges)
         with sqlite3.connect(str(Path(ref.directory)/'run.sqlite')) as db:

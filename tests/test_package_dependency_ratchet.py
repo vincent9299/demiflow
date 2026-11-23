@@ -26,7 +26,7 @@ LEAVES = {'resources', '_compat'}    # import no other demiflow package
 # (importer package, imported package) -> most private-name imports allowed.
 # 'root' is the top-level modules of ``demiflow/`` (errors, objects, cli, ...).
 PRIVATE_IMPORT_BUDGET = {
-    ('execution', 'data'): 7, ('execution', 'lance'): 10, ('workbench', 'resources'): 8,
+    ('execution', 'lance'): 10, ('workbench', 'resources'): 8,
     ('execution', 'planning'): 5, ('execution', 'root'): 4, ('root', 'operator_llm'): 3,
     ('data', 'root'): 3, ('execution', 'operator_llm'): 3, ('execution', 'resources'): 3,
     ('workbench', 'execution'): 3, ('data', 'execution'): 2, ('execution', 'services'): 2,
@@ -53,26 +53,20 @@ P1_ASSEMBLY_IMPORTS = {
 # Listing a module here does not say it can be deleted. It says: do not build new
 # code on it without deciding that on purpose. Value: today's importers.
 PRE_V3_MODULES = {
-    'demiflow.execution.chain': {
-        'demiflow.execution.dataflow_code', 'demiflow.execution.seal.plan',
-        'demiflow.execution.graph', 'demiflow.execution.kernels.task_scope',
-        'demiflow.execution.native_plan', 'demiflow.execution.queue_chain',
-        'demiflow.execution.worker.bootstrap', 'demiflow.execution.worker.execution',
-        'demiflow.execution.worker.graph_execution', 'demiflow.execution.worker.queue_transform'},
     'demiflow.execution.stream': {
         'demiflow.data.dataset',
         'demiflow.data.execution_contract',  # TYPE_CHECKING only: original StreamStats identity
         'demiflow.execution.dataflow_stream',
-        'demiflow.execution.request_limits', 'demiflow.execution.worker.execution',
+        'demiflow.execution.request_limits',
         'demiflow.execution.worker.graph_execution', 'demiflow.execution.worker.queue_transform'},
     'demiflow.execution.plan_interpreter': {
-        'demiflow.execution.chain', 'demiflow.execution.dataflow_history',
-        'demiflow.execution.graph', 'demiflow.execution.native_plan',
+        'demiflow.execution.dataflow_history',
+        'demiflow.execution.seal.plan',
         'demiflow.execution.sealed_plan_facts', 'demiflow.execution.sealed_plans',
-        'demiflow.execution.worker.layout', 'demiflow.planning.dataset_dag',
+        'demiflow.planning.dataset_dag',
         'demiflow.workbench.runs.facts'},
     'demiflow.execution.local_tasks': {
-        'demiflow.execution.arrow_batch_sink', 'demiflow.execution.dataset_native'},
+        'demiflow.execution.dataset_native'},
     'demiflow.execution.local': {'demiflow.execution'},
     'demiflow.execution.ray': {'demiflow.execution'},
 }
@@ -86,6 +80,7 @@ PLANNING_MAY_IMPORT = {
     'demiflow.execution.contracts.dataflow_errors',
     'demiflow.execution.contracts.dataflow_kinds',
     'demiflow.execution.contracts.errors',
+    'demiflow.execution.contracts.relational_region',  # sealed data and pure grant arithmetic
     'demiflow.execution.dataflow_compile_inputs',
     'demiflow.execution.dataflow_managed_devices',
     'demiflow.execution.dataflow_model_factory',
@@ -105,9 +100,7 @@ PLANNING_MAY_IMPORT = {
     'demiflow.execution.plan_interpreter',
     'demiflow.execution.recovery_contract',
     'demiflow.execution.recovery_identity',
-    'demiflow.execution.reservation',
     'demiflow.execution.runtime_limits',
-    'demiflow.execution.sealed_plans',
 }
 
 

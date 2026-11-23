@@ -2,8 +2,8 @@
 
 Single-host Ray Core (env-ray, ray 2.60.0 Core only, no ray[data]) is semantic-
 adaptation evidence only (design §8): no multi-host/GPU/performance claim. The
-whole operator chain runs in one named Ray actor hosting the *same* WorkerRuntime
-+ WorkerChainExecutor + WorkerStreamProgress as the Local process worker; the
+operator chain runs in a named Ray actor hosting the same sealed DataflowWorkerExecutor
+as the Local process worker; the
 driver owns the control plane, the fixed source capture and the single commit
 authority. Control is actor methods (driver->worker) plus a bounded outbox pull
 (worker->driver); result blocks hand off as staging descriptors on the shared
@@ -43,7 +43,7 @@ from demiflow.resources.contracts import (
 )
 from demiflow.resources.manager import ResourceManager
 from demiflow.resources.ray import RayResourceProvider
-from demiflow.execution.worker.ray_host import RayControlConnector
+from demiflow.execution.hosts.ray_worker_host import RayControlConnector
 
 pytestmark = [
     pytest.mark.ray,
@@ -185,7 +185,7 @@ def test_sem_local_ray_equivalence(tmp_path, ray_cluster, monkeypatch):
     limits = {"checkpoint_rows": 4, "checkpoint_interval_ms": 60000}
 
     local_dir = tmp_path / "local-run"
-    local_executor = LocalDatasetExecutor(workers=1, unified_chain=True)
+    local_executor = LocalDatasetExecutor(workers=1)
     local_dataset = Dataset(ItemsSource(items), plan, local_executor)
     with RunContext.start(local_dir, limits=limits) as local_run:
         local_rows = local_dataset.materialize().take_all()
@@ -198,7 +198,7 @@ def test_sem_local_ray_equivalence(tmp_path, ray_cluster, monkeypatch):
         local_k6 = _k6_shapes(local_run, next(e for e in executions if e._action.context is local_run), expected)
 
     ray_dir = tmp_path / "ray-run"
-    ray_executor = RayDatasetExecutor(workers=1, unified_chain=True)
+    ray_executor = RayDatasetExecutor(workers=1)
     ray_dataset = Dataset(ItemsSource(items), plan, ray_executor)
     with RunContext.start(ray_dir, limits=limits) as ray_run:
         ray_rows = ray_dataset.materialize().take_all()
@@ -244,7 +244,7 @@ def test_ray_actor_death_recovers_acked_prefix_exactly_once(tmp_path, ray_cluste
         return {**row, "x": row["x"] * 2}
 
     items, plan, expected = _plan(double)
-    executor = RayDatasetExecutor(workers=1, unified_chain=True)
+    executor = RayDatasetExecutor(workers=1)
     dataset = Dataset(ItemsSource(items), plan, executor)
     with pytest.raises(DataflowError, match='UNKNOWN_EFFECT') as failure:
         with RunContext.start(tmp_path / "run",

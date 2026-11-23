@@ -145,12 +145,15 @@ def test_plain_python_stream_admission_precedes_source_and_actor_calls(tmp_path)
     assert not list((tmp_path / 'run').rglob('*.pkl'))
 
 
-def test_native_queue_byte_budget_applies_without_checked_context(tmp_path):
-    import asyncio
-    from demiflow.execution.stream_resources import StreamResources
-    with RunContext.start(tmp_path / 'run', limits={'max_row_bytes': 64, 'max_batch_bytes': 1024}) as run:
-        queue = StreamResources([]).make_queue(2)
-        assert queue.max_bytes == 128
-        with pytest.raises(Exception, match='byte budget|bytes|size'):
-            asyncio.run(queue.put({'value': 'x' * 256}))
-        assert queue.qsize() == 0
+def test_byte_limit_refuses_oversize_input_before_any_callback(tmp_path):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    calls = tmp_path / 'calls'
+
+    def seen(row):
+        calls.write_text('called')
+        return row
+
+    with pytest.raises(DataflowError, match='BUDGET_EXCEEDED'):
+        with RunContext.start(tmp_path / 'run', limits={'max_row_bytes': 64, 'max_batch_bytes': 1024}):
+            data.from_items([{'value': 'x' * 256}]).map(seen).take_all()
+    assert not calls.exists()

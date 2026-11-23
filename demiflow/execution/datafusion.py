@@ -182,6 +182,133 @@ def _stop(process):
         process.wait(timeout=5)
 
 
+def _start_sql_worker(request, env, log, descriptors):
+    from ..resources.process_observation import inherited_unit
+    return subprocess.Popen(
+        [sys.executable, '-m', 'demiflow.execution.datafusion_worker', str(request)],
+        env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+        start_new_session=True, pass_fds=(*descriptors, *inherited_unit()))
+
+
+def _worker_environment(threads):
+    env = os.environ.copy()
+    env['PYTHONPATH'] = os.pathsep.join(str(p or Path.cwd()) for p in sys.path)
+    for name in ('TOKIO_WORKER_THREADS', 'RAYON_NUM_THREADS', 'OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS'):
+        env[name] = str(threads)
+    return env
+
+
+def query_region_offsets(sql, *, tables, max_pairs, rss_bytes, check_stop, selection=False,
+                         key_functions=()):
+    """Use one already-granted CPU and RSS window for a complete finite relation.
+
+    Each input is an ordered sequence of (canonical binary key or null, spool
+    offset), or a compact typed-key column for a left-row selection. The
+    relation kernel owns SQL, join semantics, and offset hydration.
+    Anonymous IPC consumes part of the same grant; no storage or result commits.
+    """
+    import pickle
+    import psutil
+    from .native_diagnostics import LimitedWriter
+    from .contracts.dataflow_errors import DataflowError
+    if type(max_pairs) is not int or max_pairs < 0 or type(rss_bytes) is not int or rss_bytes <= 0:
+        raise DataflowError('INVALID_CONTRACT', 'invalid native relation window')
+    check_stop()
+    # Keep both anonymous files plus the child's interpreter and Arrow pool
+    # inside the declared total. Callers separately own their input/output lists.
+    wire_limit = rss_bytes // 16
+    if selection:
+        import pyarrow as pa
+        from .contracts.relational_region import selection_wire_bytes
+        wire_limit = selection_wire_bytes(rss_bytes)
+        if (max_pairs + 7) // 8 > wire_limit:
+            raise DataflowError('BUDGET_EXCEEDED', 'native row selection exceeds its window')
+    if type(sql) is not str or not sql.strip() or type(tables) is not dict or not tables:
+        raise DataflowError('INVALID_CONTRACT', 'invalid native relation query or bindings')
+    if len(sql) >= wire_limit or len(sql.encode()) >= wire_limit:
+        raise DataflowError('BUDGET_EXCEEDED', 'native relation SQL exceeds its memory window')
+    import pyarrow as pa
+    input_bytes = 0
+    for name, rows in tables.items():
+        if type(name) is not str or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name):
+            raise DataflowError('INVALID_CONTRACT', 'invalid native relation input name')
+        if isinstance(rows, pa.Table):
+            if (selection or len(rows.schema.names) != len(set(rows.schema.names))
+                    or 'off' not in rows.schema.names or rows.schema.field('off').type != pa.int64()):
+                raise DataflowError('INVALID_CONTRACT', 'native typed input needs unique columns and int64 offsets')
+            input_bytes += rows.get_total_buffer_size() + sum(512 * c.num_chunks for c in rows.columns)
+            if input_bytes + 4096 > wire_limit or len(rows) > wire_limit // 8:
+                raise DataflowError('BUDGET_EXCEEDED', 'native typed input exceeds its window')
+            continue
+        if selection:
+            if not isinstance(rows, pa.ChunkedArray) or not (
+                    pa.types.is_binary(rows.type) or pa.types.is_integer(rows.type)
+                    or pa.types.is_boolean(rows.type) or pa.types.is_string(rows.type)
+                    or pa.types.is_large_string(rows.type)):
+                raise DataflowError('INVALID_CONTRACT', 'native selection requires a bounded primitive key column')
+            input_bytes += rows.get_total_buffer_size() + 512 * rows.num_chunks
+            if input_bytes + 4096 > wire_limit or len(rows) > wire_limit // 8:
+                raise DataflowError('BUDGET_EXCEEDED', 'native key selection exceeds its window')
+            continue
+        if not isinstance(rows, (list, tuple)):
+            raise DataflowError('INVALID_CONTRACT', 'native relation input must be a finite key table')
+        for index, (key, offset) in enumerate(rows):
+            if index % 1024 == 0:
+                check_stop()
+            if (key is not None and type(key) is not bytes or type(offset) is not int
+                    or not 0 <= offset < 2**63):
+                raise DataflowError('INVALID_CONTRACT', 'invalid canonical key or input offset')
+            input_bytes += (len(key) if key is not None else 0) + 128
+            if input_bytes > wire_limit:
+                raise DataflowError('BUDGET_EXCEEDED', 'native relation input exceeds its memory window')
+    with (tempfile.TemporaryFile(dir='/dev/shm') as request,
+          tempfile.TemporaryFile(dir='/dev/shm') as result):
+        spec = dict(region_offsets=True, selection=selection, tables=tables, sql=sql, max_pairs=max_pairs, parent_pid=os.getpid(),
+                    result_fd=result.fileno(), options={'threads': 1}, slot=0, rss_bytes=rss_bytes,
+                    wire_limit=wire_limit, key_functions=key_functions)
+        try:
+            pickle.dump(spec, LimitedWriter(request, wire_limit), protocol=5)
+        except ValueError as exc:
+            raise DataflowError('BUDGET_EXCEEDED', 'native relation request exceeds its memory window') from exc
+        request_bound = request.tell()
+        request.flush()
+        request.seek(0)
+        check_stop()
+        process = _start_sql_worker(f'/proc/self/fd/{request.fileno()}', _worker_environment(1),
+                                    subprocess.DEVNULL, (request.fileno(), result.fileno()))
+        try:
+            observed = psutil.Process(process.pid)
+            while process.poll() is None:
+                check_stop()
+                try:
+                    rss = observed.memory_info().rss
+                except psutil.NoSuchProcess:
+                    break
+                if rss + request_bound + wire_limit > rss_bytes:
+                    raise DataflowError('BUDGET_EXCEEDED', 'native relation child exceeded its granted RSS')
+                try:
+                    process.wait(timeout=.05)
+                except subprocess.TimeoutExpired:
+                    pass
+            check_stop()
+            if process.wait() != 0:
+                raise DataflowError('INTERNAL_PROTOCOL', 'native relation child exited without a result')
+            if not 0 < os.fstat(result.fileno()).st_size <= wire_limit:
+                raise DataflowError('INTERNAL_PROTOCOL', 'invalid native relation response size')
+            result.seek(0)
+            status, value = pickle.load(result)
+            if status == 'complete':
+                if selection and (type(value) is not bytearray or len(value) != (max_pairs + 7) // 8):
+                    raise DataflowError('INTERNAL_PROTOCOL', 'invalid native row selection')
+                return value
+            if status == 'budget':
+                raise DataflowError('BUDGET_EXCEEDED', value)
+            raise DataflowError('INTERNAL_PROTOCOL', value)
+        finally:
+            _stop(process)
+            process.wait()
+
+
 class DataFusionSession:
     """Internal query session, sharing admission slots by directory.
 
@@ -494,10 +621,7 @@ class DataFusionSession:
                 save_diagnostic(diagnostic / 'query.json', {'sql': sql})
             else:
                 (diagnostic / 'query.sql').write_text(sql)
-        env = os.environ.copy()
-        env['PYTHONPATH'] = os.pathsep.join(str(p or Path.cwd()) for p in sys.path)
-        for name in ('TOKIO_WORKER_THREADS', 'RAYON_NUM_THREADS', 'OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS'):
-            env[name] = str(self.options.threads)
+        env = _worker_environment(self.options.threads)
         env['LANCE_MEM_POOL_SIZE'] = str(min(1024**3, self.options.memory_bytes // 4))
         if lance_merge is not None:
             # Lance embeds its own DataFusion runtime. Configure only this
@@ -521,16 +645,12 @@ class DataFusionSession:
                   'peak_rss_bytes': 0, 'peak_scratch_bytes': 0, 'guard': None, 'sample_interval_s': 0.1,
                   'cgroup_memory_policy': 'current-minus-clean-inactive-file-v1',
                   'options': asdict(options), 'slot': slot, 'reserved_slots': len(lock), 'started_at': time.time()}
-        from ..resources.process_observation import inherited_unit
-        unit_fds = inherited_unit()
         process = None
         pipe_log = None
         started = time.monotonic()
         try:
             with (nullcontext(subprocess.PIPE) if self.managed_diagnostics else (diagnostic / 'worker.log').open('w')) as log:
-                process = subprocess.Popen([sys.executable, '-m', 'demiflow.execution.datafusion_worker', str(payload)],
-                    env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
-                    pass_fds=tuple(item.fileno() for item in lock) + unit_fds)
+                process = _start_sql_worker(payload, env, log, tuple(item.fileno() for item in lock))
                 if self.managed_diagnostics:
                     pipe_log = PipeLog(process.stdout, diagnostic)
                 owned = psutil.Process(process.pid)

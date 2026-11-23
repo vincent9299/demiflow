@@ -16,10 +16,9 @@ import sys
 import pytest
 
 from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.reservation import (
-    LEGACY_PREFETCH, MAX_ACTIVE_RECORDS, CallBudget, ReservationError, ReserveGate,
-    derive_prefetch, usable_budget,
-)
+from demiflow.execution.reservation import MAX_ACTIVE_RECORDS, CallBudget, ReserveGate, usable_budget
+from demiflow.planning.dataflow_graph_adapter import LEGACY_PREFETCH, derive_prefetch
+from demiflow.execution.contracts.errors import ReservationError
 from demiflow.operator_llm.journal import PromptJournal, UncertainPromptCall, request_key
 
 
@@ -262,11 +261,9 @@ def test_derive_prefetch_caps_to_admitted_budget():
 
 
 def test_derive_prefetch_max_pending_protocol_floor():
-    # The alignment buffer must hold a full credit grant of envelopes; a tiny
-    # admitted budget never tightens max_pending below that protocol floor.
-    bounds = derive_prefetch(4, max_pending_floor=64)
-    assert bounds == {"append_slots": 4, "source_batch_size": 4,
-                      "queue_depth": 4, "max_pending": 64}
+    # A protocol floor larger than admission must be rejected before sealing.
+    with pytest.raises(ReservationError, match="floor exceeds"):
+        derive_prefetch(4, max_pending_floor=64)
     assert derive_prefetch(4)["max_pending"] == 4  # default floor is 1
     assert derive_prefetch(200, max_pending_floor=64)["max_pending"] == 200
     with pytest.raises(ReservationError):
@@ -382,13 +379,17 @@ def _mini_graph_spec(prefetch_slots=None):
 def _run_graph(tmp_path, spec):
     from demiflow.execution.executors.local import LocalDatasetExecutor
     from demiflow.execution.run_context import RunContext
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=1)
     with RunContext.start(tmp_path / "run",
                           limits={"checkpoint_rows": 8, "checkpoint_interval_ms": 60000}) as run:
         with run.action({"kind": "materialize", "source": {"fixture": "rsv"}}) as execution:
             result = executor.materialize_graph(spec)
             execution.complete(dict(kind="graph-materialized", workers=result["workers"]))
-    return result
+        from demiflow.execution.sealed_plans import load_sealed_plan
+        sealed = load_sealed_plan(run.directory, execution.action_id, version='v3')
+    router = next(node.occurrence_id for node in sealed['graph'].nodes if 'graph_route' in node.kernel.configuration)
+    routed = {edge.edge_id for edge in sealed['graph'].edges if router in (edge.producer, edge.consumer)}
+    return result, [exchange for exchange in sealed['physical'].exchanges if exchange.edge_id in routed]
 
 
 @pytest.fixture
@@ -401,48 +402,20 @@ def pidfds_available():
 
 
 @pytestmark_linux
-def test_graph_configured_prefetch_injected_and_correct(tmp_path, monkeypatch, pidfds_available):
-    from demiflow.execution.graph import GraphLocalConnector
-    captured = {}
-    original = GraphLocalConnector.stage
-
-    def spy(self, allocation_id, launch_spec, data_fds):
-        captured[allocation_id] = launch_spec
-        return original(self, allocation_id, launch_spec, data_fds)
-
-    monkeypatch.setattr(GraphLocalConnector, "stage", spy)
+def test_graph_configured_prefetch_binds_published_credit(tmp_path, pidfds_available):
     spec, readers, n = _mini_graph_spec(prefetch_slots=4)
-    result = _run_graph(tmp_path, spec)
+    with pytest.raises(ReservationError, match="explicit credit rows exceed"):
+        _run_graph(tmp_path / "invalid", spec)
+    del spec["credit_budget"]
+    result, exchanges = _run_graph(tmp_path / "admitted", spec)
     assert result["egress_rows"] == n
-    for rid in readers:
-        assert result["target_rows"][rid] == n
-    # Every worker spec carries the derived prefetch; the ancestor queue depth is
-    # capped to the admitted inflight budget. max_pending floors at the credit
-    # grant (64 rows) so the alignment buffer never overflows below one grant.
-    assert len(captured) == 3  # one ancestor + two targets
-    for launch_spec in captured.values():
-        assert launch_spec["graph"]["prefetch"] == derive_prefetch(4, max_pending_floor=64)
-    ancestor = [s for s in captured.values() if "output_channels" in s["graph"]]
-    assert len(ancestor) == 1
-    assert ancestor[0]["graph"]["queue_depth"] == 4
+    assert result["target_rows"] == dict.fromkeys(readers, n)
+    assert exchanges and all(0 < exchange.credit_rows <= 4 for exchange in exchanges)
 
 
 @pytestmark_linux
-def test_graph_default_path_injects_no_prefetch_key(tmp_path, monkeypatch, pidfds_available):
-    from demiflow.execution.graph import GraphLocalConnector
-    captured = {}
-    original = GraphLocalConnector.stage
-
-    def spy(self, allocation_id, launch_spec, data_fds):
-        captured[allocation_id] = launch_spec
-        return original(self, allocation_id, launch_spec, data_fds)
-
-    monkeypatch.setattr(GraphLocalConnector, "stage", spy)
-    spec, readers, n = _mini_graph_spec()  # no prefetch_slots
-    result = _run_graph(tmp_path, spec)
-    for rid in readers:
-        assert result["target_rows"][rid] == n
-    for launch_spec in captured.values():
-        assert "prefetch" not in launch_spec["graph"]  # default path byte-identical
-    ancestor = [s for s in captured.values() if "output_channels" in s["graph"]]
-    assert ancestor[0]["graph"]["queue_depth"] == 4096  # legacy default unchanged
+def test_graph_default_explicit_credit_visible_in_published_plan(tmp_path, pidfds_available):
+    spec, readers, n = _mini_graph_spec()
+    result, exchanges = _run_graph(tmp_path, spec)
+    assert result["target_rows"] == dict.fromkeys(readers, n)
+    assert exchanges and all(0 < exchange.credit_rows <= spec["credit_budget"]["rows"] for exchange in exchanges)

@@ -147,10 +147,11 @@ def fragment_inventory_hash(fragments) -> str:
 
 
 def _iter_scan(
-    query: LanceScanSpec, *, batch_size: int, fragments=None,
-    expected_schema: pa.Schema | None = None, offset: int = 0,
+    query: LanceScanSpec, *, batch_size: int, fragments=None, dataset=None,
+    expected_schema: pa.Schema | None = None, offset: int = 0, batch_bytes: int | None = None,
 ) -> Iterator[pa.RecordBatch]:
-    dataset = open_lance_dataset(query.uri, query.version, query.storage_options)
+    if dataset is None:
+        dataset = open_lance_dataset(query.uri, query.version, query.storage_options)
     schema = dataset.schema
     if not isinstance(schema, pa.Schema):
         raise LanceExecutionError("Lance returned a non-Arrow schema")
@@ -160,7 +161,9 @@ def _iter_scan(
     scanner = dataset.scanner(
         columns=dict(query.projection) if query.projection else (list(query.columns) or None), filter=query.filter,
         limit=None if query.limit is None else max(0,query.limit-offset), batch_size=query.batch_size or batch_size, fragments=fragments,
-        **({'offset':offset,'scan_in_order':True} if offset else {}),
+        **({'offset': offset} if offset else {}),
+        **({'scan_in_order': True} if offset or batch_bytes is not None else {}),
+        **({'batch_size_bytes': batch_bytes, 'io_buffer_size': batch_bytes} if batch_bytes is not None else {}),
         **{name: getattr(query, name) for name in ('batch_readahead', 'fragment_readahead')
            if getattr(query, name) is not None},
     )

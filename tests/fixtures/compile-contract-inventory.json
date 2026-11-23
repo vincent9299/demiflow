@@ -39,6 +39,7 @@
    "StreamLanceSink"
   ],
   "planning.compiler": [
+   "Count",
    "DatasourceSource",
    "FileSource",
    "FitJobNode",
@@ -53,6 +54,7 @@
    "RangeSource",
    "SqlSource",
    "StreamPrependOp",
+   "Sum",
    "UnionSource"
   ],
   "planning.legacy_traits": [
@@ -137,13 +139,15 @@
    "FIELD": [
     "execution/dataflow_publication_budget.py",
     "execution/kernels/operator.py",
-    "execution/kernels/reducer_memory.py",
     "execution/kernels/shuffle_order.py",
     "planning/dataflow_budget.py",
     "planning/dataflow_compile.py"
    ],
    "KEY": [
     "execution/dataflow_schema.py"
+   ],
+   "REDUCER_MEMORY_FIELD": [
+    "execution/contracts/relational_region.py"
    ],
    "_KEY": [
     "execution/dataflow_managed_devices.py"
@@ -157,12 +161,13 @@
     "planning/dataflow_shared.py"
    ],
    "ancestor": [
-    "planning/dataflow_graph_adapter.py"
+    "execution/outputs/terminals.py"
    ],
    "arguments": [
+    "execution/contracts/relational_region.py",
     "execution/dataflow_native_limits.py",
+    "execution/seal/plan.py",
     "execution/worker/dataflow_graph_runner.py",
-    "planning/dataflow_graph_adapter.py",
     "planning/dataflow_place.py"
    ],
    "batch_size": [
@@ -170,6 +175,9 @@
     "execution/kernels/operator.py",
     "planning/dataflow_compile.py",
     "planning/dataflow_configuration.py"
+   ],
+   "bulk_key_hydration": [
+    "execution/kernels/lance_keys.py"
    ],
    "cache": [
     "execution/dataflow_models.py"
@@ -186,6 +194,10 @@
     "execution/kernels/operator.py",
     "planning/dataflow_place.py",
     "planning/dataflow_thread_fusion.py"
+   ],
+   "columns": [
+    "execution/contracts/relational_region.py",
+    "planning/dataflow_relational_regions.py"
    ],
    "concurrency": [
     "execution/dataflow_model_observations.py",
@@ -228,8 +240,8 @@
     "planning/dataflow_graph_adapter.py"
    ],
    "graph_observe": [
-    "execution/worker/dataflow_graph_runner.py",
-    "planning/dataflow_graph_adapter.py"
+    "execution/journal/run_telemetry.py",
+    "execution/worker/dataflow_graph_runner.py"
    ],
    "graph_private_tag": [
     "planning/dataflow_graph_adapter.py"
@@ -239,9 +251,10 @@
    ],
    "graph_result": [
     "execution/action_driver/dataflow.py",
-    "planning/dataflow_graph_adapter.py"
+    "execution/outputs/terminals.py"
    ],
    "graph_route": [
+    "execution/seal/plan.py",
     "planning/dataflow_graph_adapter.py",
     "planning/dataflow_single_worker.py",
     "planning/dataflow_thread_fusion.py"
@@ -250,7 +263,10 @@
     "execution/kernels/operator.py"
    ],
    "how": [
-    "execution/kernels/relational_region.py"
+    "execution/contracts/relational_region.py",
+    "execution/kernels/relational.py",
+    "execution/kernels/relational_region.py",
+    "planning/dataflow_place.py"
    ],
    "initial": [
     "execution/kernels/relational.py"
@@ -259,12 +275,19 @@
     "execution/kernels/relational.py"
    ],
    "input_carrier": [
+    "execution/action_driver/dataflow.py",
+    "execution/arrow_payload.py",
+    "execution/dataflow_sinks.py",
     "execution/worker/dataflow_graph_runner.py",
     "planning/dataflow_configuration.py",
+    "planning/dataflow_fusion.py",
     "planning/dataflow_place.py"
    ],
    "inputs": [
     "execution/kernels/operator.py"
+   ],
+   "integer_aggregate_blocks": [
+    "execution/worker/dataflow_graph_runner.py"
    ],
    "keys": [
     "execution/kernels/block_partition.py",
@@ -275,8 +298,10 @@
     "planning/dataflow_configuration.py"
    ],
    "lance_key_source": [
-    "execution/kernels/lance_keys.py",
-    "planning/dataflow_configuration.py"
+    "execution/contracts/relational_region.py",
+    "execution/lance_key_source.py",
+    "planning/dataflow_configuration.py",
+    "planning/dataflow_relational_regions.py"
    ],
    "limit": [
     "execution/kernels/operator.py",
@@ -309,10 +334,14 @@
     "execution/kernels/operator.py"
    ],
    "max_rows": [
+    "execution/contracts/relational_region.py",
     "execution/kernels/operator.py"
    ],
    "monitor_schemas": [
     "planning/dataflow_training.py"
+   ],
+   "names": [
+    "planning/dataflow_relational_regions.py"
    ],
    "native_key": [
     "execution/dataflow_fetch.py",
@@ -345,8 +374,14 @@
     "planning/dataflow_configuration.py"
    ],
    "on": [
+    "execution/contracts/relational_region.py",
     "execution/kernels/lance_keys.py",
+    "execution/kernels/operator.py",
+    "execution/kernels/relational.py",
     "execution/kernels/relational_region.py",
+    "execution/worker/dataflow_graph_runner.py",
+    "execution/worker/key_exclusion.py",
+    "planning/dataflow_place.py",
     "planning/dataflow_relational_regions.py"
    ],
    "output": [
@@ -366,7 +401,7 @@
     "execution/dataflow_sinks.py"
    ],
    "payload_columns": [
-    "execution/kernels/lance_keys.py"
+    "execution/lance_key_source.py"
    ],
    "predict_input_schema": [
     "planning/dataflow_training.py"
@@ -409,6 +444,8 @@
     "execution/dataflow_models.py"
    ],
    "right_on": [
+    "execution/kernels/operator.py",
+    "execution/kernels/relational.py",
     "execution/kernels/relational_region.py"
    ],
    "routes": [
@@ -448,6 +485,10 @@
     "execution/worker/dataflow_graph_runner.py",
     "planning/dataflow_training.py"
    ],
+   "small_right_index": [
+    "execution/contracts/relational_region.py",
+    "execution/kernels/relational.py"
+   ],
    "sort": [
     "execution/kernels/block_partition.py",
     "execution/kernels/ordering.py"
@@ -477,7 +518,7 @@
     "execution/kernels/block_partition.py"
    ],
    "targets": [
-    "planning/dataflow_graph_adapter.py"
+    "execution/outputs/terminals.py"
    ],
    "task_batch_rows": [
     "execution/contracts/dataflow.py",
@@ -508,11 +549,17 @@
    ],
    "train_schema": [
     "planning/dataflow_training.py"
+   ],
+   "wide_body_refs": [
+    "execution/kernels/operator.py"
    ]
   },
   "written": {
    "actor_binding_version": [
     "planning/dataflow_shared.py"
+   ],
+   "bulk_key_hydration": [
+    "planning/dataflow_compile.py"
    ],
    "callable_scope": [
     "planning/dataflow_compile.py"
@@ -581,6 +628,9 @@
    "sink_id": [
     "planning/dataflow_training.py"
    ],
+   "small_right_index": [
+    "planning/dataflow_compile.py"
+   ],
    "streaming_map": [
     "planning/dataflow_compile.py"
    ],
@@ -601,6 +651,9 @@
    ],
    "thread_attempt": [
     "execution/seal/plan.py"
+   ],
+   "wide_body_refs": [
+    "planning/dataflow_compile.py"
    ]
   }
  },
@@ -771,11 +824,7 @@
   ],
   "preflight_result_used": []
  },
- "implicit_inputs": [
-  "planning/dataflow_graph_adapter.py::graph_result: journal = execution.request.action.context.journal",
-  "planning/dataflow_graph_adapter.py::validate_graph_replay: bundle = load_sealed_plan(action.context.directory, action.action_id)",
-  "planning/dataflow_graph_adapter.py::validate_graph_replay: if action.context.journal.source_binding(action.action_id + '-dataflow-sealed') is None:"
- ],
+ "implicit_inputs": [],
  "input_resolver": [
   "execution/dataflow_compile_inputs.py::compile_inputs: context = current()",
   "execution/dataflow_compile_inputs.py::compile_inputs: return CompileInputs(defaults=executor_defaults(getattr(request.action, '_dataflow_executor', None)),",

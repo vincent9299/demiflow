@@ -103,7 +103,7 @@ def test_empty_reset_excludes_writer(tmp_path):
 def test_materialized_release_invalidates_aliases_and_keeps_other_cache(tmp_path):
     from demiflow.data.api import DataAPI
     from demiflow.execution.executors.local import LocalDatasetExecutor
-    executor = LocalDatasetExecutor(materialize_memory_limit=1)
+    executor = LocalDatasetExecutor()
     api = DataAPI(executor=executor)
     first = api.from_items([{'value': 'a' * 1000}]).materialize()
     alias = first.map(lambda row: row)
@@ -118,35 +118,21 @@ def test_materialized_release_invalidates_aliases_and_keeps_other_cache(tmp_path
     executor.close()
 
 
-def test_sort_pool_failure_does_not_repeat_input(tmp_path, monkeypatch):
-    import demiflow.data.local_relational as rel
-    from concurrent.futures import Future
-    from concurrent.futures.process import BrokenProcessPool
-    class Broken:
-        def __init__(self, **kw): pass
-        def __enter__(self): return self
-        def __exit__(self, *args): self.shutdown()
-        def shutdown(self, **kw): pass
-        def submit(self, fn, *args):
-            future = Future()
-            future.set_exception(BrokenProcessPool())
-            return future
-    monkeypatch.setattr(rel, 'ProcessPoolExecutor', Broken)
-    seen = []
+def test_public_sort_consumes_nonrepeatable_input_only_once(tmp_path):
+    from demiflow import data
+    from demiflow.execution import RunContext
+    seen = tmp_path/'visits'
+
     def rows():
-        for i in range(50):
-            seen.append(i)
-            yield {'k': str(50 - i), 'text': 'x' * 250000}
-    actual = list(rel.sorted_rows(rows(), ['k'], tmp_path, 8*1024*1024, workers=2))
-    assert len(seen) == len(actual) == 50
-    assert [k for k, _ in actual] == sorted(k for k, _ in actual)
+        with seen.open('x') as log:
+            for value in range(50):
+                print(value, file=log)
+                yield {'k': 50-value}
 
-
-def test_sort_workers_override(monkeypatch):
-    from demiflow.execution.executors.local import LocalDatasetExecutor
-    monkeypatch.setenv('DEMIFLOW_LOCAL_SORT_WORKERS', '1')
-    assert LocalDatasetExecutor(workers=8)._sort_workers == 1
-    assert LocalDatasetExecutor(workers=8, sort_workers=2)._sort_workers == 2
+    with RunContext.start(tmp_path/'run'), data.local_execution(workers=1, worker_mode='thread'):
+        actual = data.from_iter(rows).sort('k').take_all()
+    assert actual == [{'k': value} for value in range(1, 51)]
+    assert seen.read_text().splitlines() == list(map(str, range(50)))
 
 
 def test_isolated_stage_returns_or_propagates():

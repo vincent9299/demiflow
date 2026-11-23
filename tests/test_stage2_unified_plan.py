@@ -326,8 +326,7 @@ def test_real_representative_chain_executes_with_pinned_business_code(tmp_path, 
     biz, _ = _load_biz(tmp_path, monkeypatch)
     root = tmp_path / "run"
     with RunContext.start(root, limits=LIMITS) as run:
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             rows = _pipeline(biz, 8).materialize().take_all()
         # The single journal sealed a code-pin binding for the executed plan.
         assert _code_pin_keys(run), "no code-pin binding sealed in the driver journal"
@@ -364,8 +363,7 @@ def test_real_chain_kill_recovers_per_record_equality(tmp_path, monkeypatch):
     with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 _pipeline(biz, 8, hook).materialize().take_all()
     assert_worker_killed(marker, root)
     assert_released(root)
@@ -375,8 +373,7 @@ def test_real_chain_kill_recovers_per_record_equality(tmp_path, monkeypatch):
         pre = [f for f in run2.journal.execution_commits(child) if f["status"] == "acked"]
         assert pre, "no acked prefix survived the worker crash"
         pre_by_id = {f["commit_id"]: f for f in pre}
-        with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="process", partitions=1):
             rows = _pipeline(biz, 8, hook).materialize().take_all()
         # Per-record equality: the recovered settlement equals the clean business output.
         assert {r["concept_id"]: r for r in rows} == expected
@@ -394,12 +391,6 @@ def test_real_chain_kill_recovers_per_record_equality(tmp_path, monkeypatch):
             owner = db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()
         assert owner == (run2.attempt, run2.fence)              # crash never moved ownership
     assert before_processes.keys() < process_records(root).keys()
-    # unknown-not-replayed: the chain worker shares the legacy recovery gate whose
-    # production check_recovery fail-closes a persisted unknown paid effect (the
-    # representative chain's fake model produces none, so the gate is bound structurally).
-    from demiflow.execution.stream_materialize import StreamStageProgress
-    from demiflow.execution.worker.progress import WorkerStreamProgress
-    assert WorkerStreamProgress.bind_stages is StreamStageProgress.bind_stages
     assert_released(tmp_path / "run")
 
 
@@ -420,8 +411,7 @@ def test_code_edit_after_seal_refuses_resume_then_unedited_recovers(tmp_path, mo
     with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 _pipeline(biz, 8, hook).materialize().take_all()
     assert_worker_killed(marker, root)
     assert_released(root)
@@ -431,7 +421,7 @@ def test_code_edit_after_seal_refuses_resume_then_unedited_recovers(tmp_path, mo
     # catch this. Resume must fail-closed (no silent value change). The driver has
     # two code-sensitive resume gates: the existing action-declaration identity
     # (bind_execution_action, which embeds the code-sensitive plan identity) fires
-    # first; the new per-plan code-pin gate (stage_plan_artifact) is defense in depth
+    # first; the worker program code-pin gate is defense in depth
     # and is proven in isolation by test_resume_code_pin_gate_fail_closes below. The
     # worker load-time code-pin gate (the actual gap-4 fix) is proven by
     # test_worker_load_gate_fail_closes_edited_code.
@@ -439,8 +429,7 @@ def test_code_edit_after_seal_refuses_resume_then_unedited_recovers(tmp_path, mo
     importlib.reload(biz)
     with pytest.raises(RecoveryContractError):
         with RunContext.resume(reference) as run2:
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 _pipeline(biz, 8, hook).materialize().take_all()
     # The unedited-recovery equality contrast is bound by
     # test_real_chain_kill_recovers_per_record_equality (same kill scenario, no edit
@@ -459,7 +448,9 @@ def sealed(tmp_path):
         run.journal.bind_execution_action(run.fence, "main-action", declaration)
         action = RunAction(run, "main-action", declaration)
         try:
-            yield SimpleNamespace(run=run, action=action)
+            from runtime_v3_program_probe import program_store
+            with program_store(action) as (store, bounds):
+                yield SimpleNamespace(run=run, action=action, store=store, bounds=bounds)
         finally:
             record = run.journal.execution_action("main-action")
             if record is not None and record["result"] is None:
@@ -472,90 +463,46 @@ def _map_plan(*functions):
     return LogicalPlan(tuple(MapOp(CallableSpec.create(f)) for f in functions))
 
 
-def _topology(sealed, plan, plan_ref):
-    from demiflow.data.sources import ItemsSource
-    from demiflow.execution.chain import compile_chain_topology
-    source = ItemsSource(items=({"x": 1}, {"x": 2}))
-    return compile_chain_topology(
-        sealed.action, source, plan, {"source_id": identity(["test-source"]), "data": {}},
-        output_child_id="main-action-chain", host_id="local", plan_ref=plan_ref)
+def test_worker_rejects_code_different_from_the_sealed_expectation(sealed):
+    from runtime_v3_program_probe import stage_callable
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.seal.plan import verify_dataflow_program
+
+    def first(row):
+        return row["x"] + 1
+
+    def changed(row):
+        return row["x"] + 9999
+
+    settings = {'store': sealed.store, 'bounds': sealed.bounds}
+    first_ref, first_manifest = stage_callable(_map_plan(first).operations[0].callable, **settings)
+    changed_ref, _ = stage_callable(_map_plan(changed).operations[0].callable, **settings)
+    assert verify_dataflow_program(first_ref, expected_pin=first_manifest['code_identity'],
+                                   **settings).value.target({'x': 1}) == 2
+    with pytest.raises(DataflowError, match="pin differs"):
+        verify_dataflow_program(changed_ref, expected_pin=first_manifest['code_identity'], **settings)
 
 
-def test_worker_load_gate_fail_closes_edited_code(sealed):
-    from demiflow.execution.chain import stage_plan_artifact, verify_loaded_plan
-
-    def v1(row):
-        return {**row, "score": row["x"] + 1}
-
-    plan1 = _map_plan(v1)
-    plan_ref = stage_plan_artifact(sealed.action, plan1)
-    topology, _, _ = _topology(sealed, plan1, plan_ref)
-    # The genuine loaded plan passes both bindings.
-    verify_loaded_plan(plan1, plan_ref, topology["operators"])
-    # Edited business code (same structure, different body) -> code-pin fail-closed.
-    def v2(row):
-        return {**row, "score": row["x"] + 9999}
-
-    plan2 = _map_plan(v2)
-    with pytest.raises(RecoveryContractError, match="code-pin differs"):
-        verify_loaded_plan(plan2, plan_ref, topology["operators"])
-
-
-def test_resume_code_pin_gate_fail_closes(sealed, tmp_path, monkeypatch):
-    # The per-plan driver resume gate in isolation, on the exact gap-4 scenario:
-    # by-reference business code (importable module) whose pickle bytes are UNCHANGED
-    # by an edit, so only the code-sensitive code-pin can catch it. Re-staging the
-    # same action with edited code fail-closes against the sealed binding before any
-    # worker is launched.
+def test_reference_pickle_unchanged_but_sealed_worker_refuses_source_edit(sealed, tmp_path, monkeypatch):
     import cloudpickle
-    import hashlib
-    from demiflow.execution.chain import stage_plan_artifact
+    from runtime_v3_program_probe import stage_callable
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.seal.plan import verify_dataflow_program
+
     biz, path = _load_biz(tmp_path, monkeypatch, offset=1)
-    plan1 = _map_plan(biz.fetch_request, biz.fetch, biz.analyze, biz.fetch_result)
-    first = stage_plan_artifact(sealed.action, plan1)
-    again = stage_plan_artifact(sealed.action, plan1)
-    assert again["code_pin_digest"] == first["code_pin_digest"]
-    assert again["sha256"] == first["sha256"]
-    # Edit the actual business function; the by-reference pickle bytes are unchanged.
+    settings = {'store': sealed.store, 'bounds': sealed.bounds}
+    spec = _map_plan(biz.analyze).operations[0].callable
+    original_pickle = cloudpickle.dumps(spec)
+    first_ref, manifest = stage_callable(spec, **settings)
     path.write_text(_biz_source(9999))
     importlib.reload(biz)
-    plan2 = _map_plan(biz.fetch_request, biz.fetch, biz.analyze, biz.fetch_result)
-    assert hashlib.sha256(cloudpickle.dumps(plan2)).hexdigest() == first["sha256"]
-    with pytest.raises(RecoveryContractError,
-                       match="Business code changed since the plan was sealed"):
-        stage_plan_artifact(sealed.action, plan2)
-
-
-# --- Gate 5: loaded plan identity == sealed logical_dag (chain) ---
-
-def test_plan_identity_binds_sealed_logical_dag(sealed):
-    from demiflow.execution.chain import stage_plan_artifact, verify_loaded_plan
-
-    def f(row):
-        return row
-
-    def g(row):
-        return row
-
-    plan = _map_plan(f, g)
-    plan_ref = stage_plan_artifact(sealed.action, plan)
-    topology, logical_dag, _ = _topology(sealed, plan, plan_ref)
-    # The K1 manifest binds the code-pin via the existing definition_ref slot (D6);
-    # bundle_digest stays the plan-bundle pickle digest (frozen contract unchanged).
-    mref = topology["artifact_manifest_ref"]
-    manifest = json.loads((sealed.run.directory / (mref["sha256"] + ".json")).read_text())
-    entry = manifest["business"]["entrypoints"][0]
-    assert entry["definition_ref"]["sha256"] == plan_ref["code_pin_digest"]
-    assert manifest["business"]["bundle_digest"] == "sha256:" + plan_ref["sha256"]
-    # The genuine plan's recomputed operator ids equal the sealed logical_dag operators.
-    verify_loaded_plan(plan, plan_ref, topology["operators"])
-    assert topology["operators"] == [
-        {"logical_node_id": n["logical_node_id"], "occurrence_id": n["occurrence_id"]}
-        for n in logical_dag["nodes"][1:-1]]
-    # A sealed logical_dag whose operator ids do not match the loaded plan fail-closes.
-    wrong = [{"logical_node_id": identity(["bogus"]), "occurrence_id": identity(["bogus-occ"])}]
-    with pytest.raises(RecoveryContractError, match="operator identity differs"):
-        verify_loaded_plan(plan, plan_ref, wrong)
+    edited = _map_plan(biz.analyze).operations[0].callable
+    assert original_pickle == cloudpickle.dumps(edited)
+    changed_ref, changed_manifest = stage_callable(edited, **settings)
+    assert changed_ref != first_ref
+    assert changed_manifest['code_identity'] != manifest['code_identity']
+    with pytest.raises(DataflowError, match='Loaded program code differs'):
+        verify_dataflow_program(first_ref, expected_pin=manifest['code_identity'], **settings)
 
 
 # --- Gate 5: carrier binds the same sealed plan (functional, queue settlement) ---
@@ -601,8 +548,7 @@ def test_chain_failure_releases_capacity(tmp_path, monkeypatch):
     root = tmp_path / "run"
     with pytest.raises(RuntimeError):
         with RunContext.start(root, limits=LIMITS):
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="thread", partitions=1):
                 _pipeline(biz, 8).materialize().take_all()
     assert faulted, "the after_prepared fault window did not fire"
     pool = LocalCapacityPool(tmp_path / "run-resources" / "capacity", capacity=CAPACITY)
@@ -619,8 +565,7 @@ def test_chain_success_releases_capacity(tmp_path, monkeypatch):
     biz, _ = _load_biz(tmp_path, monkeypatch)
     root = tmp_path / "run"
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             rows = _pipeline(biz, 8).materialize().take_all()
     assert {r["concept_id"]: r for r in rows} == _expected(slice_rows, {})
     pool = LocalCapacityPool(tmp_path / "run-resources" / "capacity", capacity=CAPACITY)
@@ -632,8 +577,8 @@ def test_chain_success_releases_capacity(tmp_path, monkeypatch):
 # --- Gate 4: worker zero CommitCoordinator (AST) + driver single journal (spy) ---
 
 def test_worker_constructs_zero_commit_coordinator():
-    import demiflow.execution.worker.execution as chain_worker
-    for module in (chain_worker,):
+    from demiflow.execution.worker import dataflow_execution, dataflow_graph_runner, dataflow_host
+    for module in (dataflow_execution, dataflow_graph_runner, dataflow_host):
         tree = ast.parse(Path(module.__file__).read_text())
         referenced, imported_modules = set(), set()
         for node in ast.walk(tree):
@@ -667,8 +612,7 @@ def test_chain_settlement_in_driver_single_journal(tmp_path, monkeypatch):
     monkeypatch.setattr(commits.CommitCoordinator, "__init__", spy)
     root = tmp_path / "run"
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             _pipeline(biz, 8).materialize().take_all()
     # Every CommitCoordinator construction happened in the driver process; the
     # managed worker (separate pid) constructed none, all share one journal directory.
@@ -708,19 +652,19 @@ def _direct_graph(tmp_path, monkeypatch, prefix):
 
 # F7-a: helper-only edit -> worker LOAD gate recomputes from its own imports -> refuse.
 def test_f7a_helper_only_edit_worker_load_gate_refuses(sealed, tmp_path, monkeypatch):
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, stage_plan_artifact, verify_loaded_plan)
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_program_probe import worker_loader
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     biz, paths, helper = _direct_graph(tmp_path, monkeypatch, "f7a")
     plan = _map_plan(biz.transform)
     assert helper in _business_dependency_manifest(plan)
-    plan_ref = stage_plan_artifact(sealed.action, plan)
-    topology, _, _ = _topology(sealed, plan, plan_ref)
-    verify_loaded_plan(plan, plan_ref, topology["operators"])      # unedited passes
+    load = worker_loader(sealed, plan.operations[0].callable)
+    load()      # unedited passes
     # Edit ONLY the helper; biz source + by-reference pickle bytes are unchanged.
     paths[helper].write_text("def delta():\n    return 9999\n")
     importlib.reload(sys.modules[helper])
-    with pytest.raises(RecoveryContractError, match="code-pin differs"):
-        verify_loaded_plan(_map_plan(biz.transform), plan_ref, topology["operators"])
+    with pytest.raises(DataflowError, match="Loaded program code differs"):
+        load()
 
 
 # F7-b: helper-only edit -> SAME RunRef recovery explicitly refused (not mix/timeout).
@@ -740,8 +684,7 @@ def test_f7b_helper_only_edit_same_run_resume_refuses(tmp_path, monkeypatch):
     with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 pipeline().materialize().take_all()
     # Unedited code runs to the crash point: driver/worker manifests agree (F7-d).
     assert_worker_killed(marker, root)
@@ -750,8 +693,7 @@ def test_f7b_helper_only_edit_same_run_resume_refuses(tmp_path, monkeypatch):
     importlib.reload(sys.modules[helper])
     with pytest.raises((RecoveryContractError, DataflowError), match="code") as excinfo:
         with RunContext.resume(reference):
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 pipeline().materialize().take_all()
     if isinstance(excinfo.value, DataflowError):
         assert excinfo.value.code == "INVALID_CONTRACT"
@@ -763,31 +705,26 @@ def test_f7b_helper_only_edit_same_run_resume_refuses(tmp_path, monkeypatch):
 
 # F7-transitive: edit ONLY the transitive leaf helper2 -> load + resume refuse.
 def test_f7_transitive_helper2_edit_refuses(sealed, tmp_path, monkeypatch):
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, stage_plan_artifact, verify_loaded_plan)
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_program_probe import worker_loader
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     biz, paths, (biz_name, dep_name, h2_name) = _f7_graph(tmp_path, monkeypatch)
     plan = _map_plan(biz.transform)
     manifest = _business_dependency_manifest(plan)
     assert {biz_name, dep_name, h2_name} <= set(manifest), "transitive closure must pin helper2"
-    plan_ref = stage_plan_artifact(sealed.action, plan)
-    topology, _, _ = _topology(sealed, plan, plan_ref)
-    verify_loaded_plan(plan, plan_ref, topology["operators"])
+    load = worker_loader(sealed, plan.operations[0].callable)
+    load()
     paths[h2_name].write_text("def base():\n    return 9999\n")
     importlib.reload(sys.modules[h2_name])
-    plan2 = _map_plan(biz.transform)
-    with pytest.raises(RecoveryContractError, match="code-pin differs"):
-        verify_loaded_plan(plan2, plan_ref, topology["operators"])
-    with pytest.raises(RecoveryContractError,
-                       match="Business code changed since the plan was sealed"):
-        stage_plan_artifact(sealed.action, plan2)
+    with pytest.raises(DataflowError, match="Loaded program code differs"):
+        load()
 
 
 # F7-boundary: platform/stdlib/third-party skip; business helper pin (classification).
 def test_f7_boundary_classification(tmp_path, monkeypatch):
     import pytest as third_party
     import demiflow.objects as platform_mod
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, _classify_dependency_module)
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest, _classify_dependency_module
     assert _classify_dependency_module(os) is None                 # stdlib
     assert _classify_dependency_module(platform_mod) is None       # platform demiflow.*
     assert _classify_dependency_module(third_party) is None        # site-packages
@@ -810,8 +747,7 @@ def test_f7_boundary_classification(tmp_path, monkeypatch):
 # F7-e: module count over-run and dynamic no-source business dep fail-closed.
 def test_f7e_budget_and_dynamic_fail_closed(tmp_path, monkeypatch):
     import types
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, _classify_dependency_module)
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest, _classify_dependency_module
     dynamic = types.ModuleType("f7_dynamic_" + uuid.uuid4().hex[:8])
     with pytest.raises(RecoveryContractError, match="no resolvable source"):
         _classify_dependency_module(dynamic)
@@ -840,30 +776,25 @@ def _capacity_snapshot(tmp_path):
 
 # F8-a: chain LOAD failure (helper edited between seal and worker load) -> F8 frame.
 def test_f8a_chain_load_failure_identifiable_releases_capacity(tmp_path, monkeypatch):
-    from demiflow.execution import chain
+    from demiflow.execution.seal import plan as sealing
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
     biz, paths, helper = _direct_graph(tmp_path, monkeypatch, "f8a")
-    original_stage = chain.stage_plan_artifact
+    original_stage = sealing._stage_one_program
 
-    def stage_then_edit(action, plan):
-        ref = original_stage(action, plan)
-        # Edit AFTER the driver seals the code-pin, BEFORE the worker re-imports:
-        # the worker's recomputed manifest differs -> load gate fails (_pending None).
-        paths[helper].write_text("def delta():\n    return 9999\n")
+    def stage_then_edit(declaration, **options):
+        ref = original_stage(declaration, **options)
+        if declaration.callable_spec is not None and declaration.callable_spec.target is biz.transform:
+            paths[helper].write_text("def delta():\n    return 9999\n")
         return ref
 
-    monkeypatch.setattr(chain, "stage_plan_artifact", stage_then_edit)
-    original_run = chain.run_local_chain
-    monkeypatch.setattr(chain, "run_local_chain",
-                        lambda *a, **k: original_run(*a, **k, control_timeout_s=5))
+    monkeypatch.setattr(sealing, "_stage_one_program", stage_then_edit)
     root = tmp_path / "run"
-    with pytest.raises(RecoveryContractError, match="Worker failed") as excinfo:
+    with pytest.raises((DataflowError, RuntimeError), match="code differs") as excinfo:
         with RunContext.start(root, limits=LIMITS):
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="thread", partitions=1):
                 (data.from_items([{"x": i} for i in range(4)])
                  .map_async(biz.transform, concurrency=1).materialize().take_all())
     assert not isinstance(excinfo.value, TimeoutError)
-    assert "code-pin differs" in str(excinfo.value)
     snap = _capacity_snapshot(tmp_path)
     assert snap["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
     assert snap["active"] == []
@@ -874,28 +805,25 @@ def test_f8b_queue_load_failure_identifiable_releases_capacity(tmp_path, monkeyp
     from test_mvp2_queue_unified import _config, _settle
     from test_queue_v2_boundaries import seed
     from test_raw_fetch import origin_server
-    from demiflow.execution import chain, queue_chain
+    from demiflow.execution.seal import plan as sealing
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.queue import QueueChannel
-    cfg = _config(tmp_path, "f8b")
+    cfg = _config(tmp_path, 'f8b')
     root = tmp_path / "run"
-    original_stage = chain.stage_plan_artifact
+    original_stage = sealing._stage_one_program
 
-    def stage_then_corrupt(action, plan):
-        ref = original_stage(action, plan)
-        artifact = action.context.directory / ref["path"]
-        artifact.write_bytes(artifact.read_bytes() + b"\x00corrupt")
+    def stage_then_corrupt(declaration, **options):
+        ref = original_stage(declaration, **options)
+        path = root / '.dataflow-store' / ref.store_id / 'objects' / ref.digest
+        path.write_bytes(path.read_bytes() + b"corrupt")
         return ref
 
-    monkeypatch.setattr(chain, "stage_plan_artifact", stage_then_corrupt)
-    original_run = queue_chain.run_local_queue_chain
-    monkeypatch.setattr(queue_chain, "run_local_queue_chain",
-                        lambda *a, **k: original_run(*a, **k, control_timeout_s=5))
+    monkeypatch.setattr(sealing, "_stage_one_program", stage_then_corrupt)
     with origin_server() as (url, calls):
         seed(QueueChannel(cfg), tmp_path / "seed", url)
-        with pytest.raises(RecoveryContractError, match="Worker failed") as excinfo:
+        with pytest.raises((DataflowError, RuntimeError), match="size differs|do not match") as excinfo:
             _settle(cfg, root, url=url, unified_queue_chain=True)
     assert not isinstance(excinfo.value, TimeoutError)
-    assert "digest differs" in str(excinfo.value)
     snap = _capacity_snapshot(tmp_path)
     assert snap["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
     assert snap["active"] == []
@@ -903,19 +831,14 @@ def test_f8b_queue_load_failure_identifiable_releases_capacity(tmp_path, monkeyp
 
 # F8-c: chain ROW error outside an outstanding cut (_pending None) -> F8 frame.
 def test_f8c_chain_row_error_identifiable_releases_capacity(tmp_path, monkeypatch):
-    from demiflow.execution import chain
     bizname = "f8c_biz_" + uuid.uuid4().hex[:8]
     sources = {bizname: ("def boom(row):\n    if row['x'] == 0:\n"
                          "        raise RuntimeError('boom-row-error')\n    return row\n")}
     biz, _ = _load_modules(tmp_path, monkeypatch, sources, bizname)
-    original_run = chain.run_local_chain
-    monkeypatch.setattr(chain, "run_local_chain",
-                        lambda *a, **k: original_run(*a, **k, control_timeout_s=5))
     root = tmp_path / "run"
     with pytest.raises(RecoveryContractError, match="Worker failed") as excinfo:
         with RunContext.start(root, limits=LIMITS):
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="thread", partitions=1):
                 (data.from_items([{"x": i} for i in range(4)])
                  .map_async(biz.boom, concurrency=1).materialize().take_all())
     assert not isinstance(excinfo.value, TimeoutError)
@@ -958,8 +881,7 @@ def test_s4b_real_rows_unavailable_carry_real_sha(tmp_path, monkeypatch):
     biz, _ = _load_biz(tmp_path, monkeypatch)
     root = tmp_path / "run"
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             rows = _pipeline(biz, 8).materialize().take_all()
     by_id = {r["concept_id"]: r for r in rows}
     assert by_id == _expected(slice_rows, {})
@@ -988,8 +910,7 @@ def test_s4c_two_row_types_execute_recover_equality(tmp_path, monkeypatch):
     with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 _pipeline_items(biz, mixed, hook).materialize().take_all()
     assert_worker_killed(marker, root)
     assert_released(root)
@@ -998,8 +919,7 @@ def test_s4c_two_row_types_execute_recover_equality(tmp_path, monkeypatch):
         pre = [f for f in run2.journal.execution_commits(child) if f["status"] == "acked"]
         assert pre, "no acked prefix survived the worker crash"
         pre_by_id = {f["commit_id"]: f for f in pre}
-        with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="process", partitions=1):
             rows = _pipeline_items(biz, mixed, hook).materialize().take_all()
         assert {r["concept_id"]: r for r in rows} == expected
         assert {r["status"] for r in rows} == {"ok", "unavailable"}   # both row types
@@ -1011,8 +931,4 @@ def test_s4c_two_row_types_execute_recover_equality(tmp_path, monkeypatch):
         for commit_id, before in pre_by_id.items():
             assert post_by_id[commit_id]["receipts"] == before["receipts"]
         assert len(post_by_id) > len(pre_by_id)
-    # unknown-not-replayed is bound structurally (the fake model produces no paid effect).
-    from demiflow.execution.stream_materialize import StreamStageProgress
-    from demiflow.execution.worker.progress import WorkerStreamProgress
-    assert WorkerStreamProgress.bind_stages is StreamStageProgress.bind_stages
     assert_released(tmp_path / "run")

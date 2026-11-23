@@ -12,6 +12,7 @@ import time
 
 from .contracts.dataflow_errors import DataflowError
 from .dataflow_hosts import _EndpointBase
+from .worker.runtime import validate_worker_launch
 
 
 class _ThreadUnit:
@@ -119,6 +120,7 @@ class DataflowThreadConnector:
         self.units = {}
 
     def stage(self, allocation_id, launch_spec):
+        validate_worker_launch(launch_spec)
         if allocation_id in self._staged and self._staged[allocation_id] != launch_spec:
             raise DataflowError('FENCED', 'thread allocation launch changed')
         self._staged[allocation_id] = launch_spec

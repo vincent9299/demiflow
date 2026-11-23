@@ -233,3 +233,153 @@ def finalize_aggregate(state: AggregateState, *, spec: KernelSpec) -> TerminalRe
         kind="aggregate", rows=state.count, scalar=scalar, result_ref=result_ref,
         write_result=None, complete=True, completion="source_exhausted",
     )
+
+
+def _merge_block(aggregates, states, rows, *, max_bytes, workspace):
+    """Charge each partial together with the current state before user merge code runs."""
+    from . import state_codec
+
+    for index, aggregate in enumerate(aggregates):
+        partial = aggregate.aggregate_partial(rows)
+        state_codec.measure([states, partial], max_bytes=max_bytes, workspace_bytes=workspace)
+        state_codec.dumps([states, partial], max_bytes=max_bytes)
+        states[index] = aggregate.merge_states(states[index], partial)
+        del partial
+        state_bytes, _ = state_codec.measure(states, max_bytes=max_bytes, workspace_bytes=workspace)
+        state_codec.dumps(states, max_bytes=max_bytes)
+    return state_bytes
+
+
+def _integer_block_columns(aggregates, states):
+    """Inspect the native lifecycle without depending on its instance layout.
+
+    These classes are pinned by the original program seal. A subclass or an
+    instance shadowing a class attribute can run arbitrary callback code.
+    """
+    from demiflow.data.aggregate import Count, Sum
+    columns, sums = [], []
+    for aggregate, state in zip(aggregates, states):
+        kind = type(aggregate)
+        if kind not in (Count, Sum) or any(hasattr(kind, name) for name in vars(aggregate)):
+            return None
+        if type(aggregate.ignore_nulls) is not bool:
+            return None
+        if state is not None and (type(state) is not int or state.bit_length() > 64):
+            return None
+        column = aggregate.get_target_column()
+        if column is not None:
+            if type(column) is not str:
+                return None
+            columns.append(column)
+            if kind is Sum:
+                sums.append(column)
+    return columns, sums
+
+
+def _exact_integer_row(row, columns, sums):
+    if not isinstance(row, Mapping) or any(column not in row for column in columns):
+        return False
+    for column in sums:
+        value = row[column]
+        if value is not None and (type(value) not in (int, bool) or value.bit_length() > 64):
+            return False
+    return True
+
+
+def aggregate_records(program, read_records, *, services, workspace, batch_eligible):
+    """Reduce the durable input in order under its original worker grant.
+
+    Only exact, unmodified Count/Sum implementations may batch. Integers are
+    associative; after a float (or any other non-integral summand), even a run
+    of integers must fold against the previous state one row at a time.
+    """
+    from . import state_codec
+    from ..contracts.dataflow_errors import DataflowError
+    from contextlib import closing
+
+    aggregates = program if isinstance(program, tuple) else (program,)
+    states = [a.initial_state() for a in aggregates]
+    bounds = services.bounds
+    state_bytes, _ = state_codec.measure(states, max_bytes=bounds.max_state_bytes, workspace_bytes=workspace)
+    max_rows = min((services.constants.get('native_limits') or {}).get('batch_rows', 1),
+                   bounds.max_pending_events, bounds.max_output_rows)
+    eligible = _integer_block_columns(aggregates, states) if batch_eligible and max_rows > 1 else None
+    batchable = eligible is not None
+    columns, sums = eligible if batchable else ((), ())
+    state_room = state_bytes
+    if batchable:
+        # Any prefix (and a whole partial) sums no more than max_output_rows
+        # signed 64-bit magnitudes plus its initial integer. Size the larger
+        # representation with the original codec before buffering input.
+        worst = -(1 << (65 + bounds.max_output_rows.bit_length()))
+        try:
+            # Match initial_states' list capacity as well as its length.
+            _, state_room = state_codec.measure([[worst for _ in states], worst],
+                max_bytes=bounds.max_state_bytes, workspace_bytes=workspace)
+        except DataflowError as error:
+            if error.code != 'BUDGET_EXCEEDED':
+                raise
+            batchable = False
+    block = []
+    payload = retained = 0
+
+    def flush():
+        nonlocal payload, retained, state_bytes
+        if block:
+            state_bytes = _merge_block(aggregates, states, tuple(block),
+                                       max_bytes=bounds.max_state_bytes, workspace=state_room)
+            block.clear()
+        payload = retained = 0
+
+    from ..dataflow_record_frames import resident_limit
+    grant = resident_limit(bounds, services)
+
+    def codec_call(function, *args, retained_input=0, **kwargs):
+        # Every admission below is side-effect free until the checked
+        # allocation. If the pending block occupies the last room, fold it
+        # exactly once, then retry the same input/offset.
+        nonlocal batchable
+        reserve = state_room if batchable else state_bytes
+        try:
+            return function(*args, services=services, retained=grant - workspace + retained + reserve + retained_input, **kwargs)
+        except DataflowError as error:
+            if not batchable or error.code != 'BUDGET_EXCEEDED' or 'codec_workspace_bytes' not in error.context:
+                raise
+            peak = error.context['codec_workspace_bytes'] - (grant - workspace + retained + reserve)
+        flush()
+        if peak > workspace - state_room:
+            # An indivisible frame can reclaim the optional block scratch too.
+            batchable = False
+        reserve = state_room if batchable else state_bytes
+        return function(*args, services=services, retained=grant - workspace + reserve + retained_input, **kwargs)
+
+    with closing(read_records(codec_call=codec_call)) as records:
+        for row, size, record_room, reader_room in records:
+            if batchable and not _exact_integer_row(row, columns, sums):
+                flush()
+                batchable = False
+            if batchable:
+                # The already admitted decode workspace bounds the thawed
+                # row. List growth and both temporary Sum column lists coexist.
+                charge = record_room + 64
+                if block and (payload + size > bounds.max_batch_bytes
+                              or reader_room + retained + charge + state_room > workspace):
+                    flush()
+                if reader_room + charge + state_room <= workspace:
+                    block.append(row)
+                    retained += charge
+                    payload += size
+                    if len(block) == max_rows:
+                        flush()
+                    del row
+                    continue
+            # The public singleton callback sees the same thawed value and
+            # order as older cuts; it may observe row boundaries or mutate it.
+            state_bytes = _merge_block(aggregates, states, (row,), max_bytes=bounds.max_state_bytes,
+                                       workspace=workspace - reader_room - record_room)
+            del row
+    flush()
+    values = {a.name: a.finalize_state(value) for a, value in zip(aggregates, states)}
+    state_codec.measure(values, max_bytes=bounds.max_state_bytes,
+                        workspace_bytes=workspace - state_bytes)
+    return values

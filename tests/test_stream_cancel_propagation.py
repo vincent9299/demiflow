@@ -3,30 +3,10 @@ import asyncio
 import pytest
 from demiflow import data
 from _worker_event_fixtures import emit, events
-from demiflow.execution.stream import _arun, _materialize, StreamStats
-
-
-def test_external_cancellation_cannot_return_partial_success():
-    async def scenario():
-        entered = asyncio.Event()
-        async def blocked(row):
-            entered.set()
-            await asyncio.Event().wait()
-        dataset = data.from_items([{'i': i} for i in range(1000)]).map_async(blocked, concurrency=1, queue_depth=1)
-        stages = _materialize(dataset._plan)
-        task = asyncio.create_task(_arun(iter([{'i': i} for i in range(1000)]), stages, StreamStats(),
-                                        on_progress=None, on_drain=None, log_every=0, cancellation=None))
-        await asyncio.wait_for(entered.wait(), 2)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(task, 5)
-    asyncio.run(scenario())
 
 
 def test_operator_stop_file_drains_admitted_work(tmp_path, monkeypatch):
     from demiflow.execution.request_limits import ServiceStopped
-    import demiflow.execution.stream as runtime
-    monkeypatch.setattr(runtime, '_WATCHDOG_INTERVAL', .01)
     stop = tmp_path / 'STOP'
     observed = str(tmp_path / "actual-cancellation.jsonl")
     drained = []

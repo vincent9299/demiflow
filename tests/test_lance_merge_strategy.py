@@ -36,7 +36,6 @@ def test_dataset_merge_strategy_and_values(tmp_path, monkeypatch, scope, policy,
     source_ds = lance.write_dataset(changes, source)
     modes = []
     import demiflow.lance.mutate as mutation
-    import demiflow.execution.lance_merge as managed
     original_selection = mutation._merge_write_mode
 
     def capture(*args):
@@ -45,7 +44,6 @@ def test_dataset_merge_strategy_and_values(tmp_path, monkeypatch, scope, policy,
         return mode
 
     monkeypatch.setattr(mutation, '_merge_write_mode', capture)
-    monkeypatch.setattr(managed, '_merge_write_mode', capture)
     options = {'limit': 1} if scope == 'limited' else {'filter': 'id < 2'} if scope == 'filtered' else {}
     receipt = data.read_lance(source, version=source_ds.version, **options).write_lance(
         target, mode='merge', on='id', update_columns=changes.schema.names[1:],

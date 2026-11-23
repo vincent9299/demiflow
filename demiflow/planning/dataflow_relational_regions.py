@@ -1,131 +1,13 @@
-"""Versioned, optional same-key finite compute regions in the original graph.
+"""Choose finite relational fusion and place its sealed stages within the admitted grant."""
+from dataclasses import replace
 
-No source, UDF, exchange authority or logical occurrence is replaced. A region
-owns one synchronous loop and one bounded payload/reference arena. Old sealed
-stages have no region marker and can never opt into this interpretation.
-"""
-from dataclasses import dataclass, replace
-
-from ..execution.contracts.dataflow_errors import DataflowError
-from ..execution.recovery_contract import identity
+from ..execution.contracts.relational_region import (
+    MAX_JOIN_DEPTH, SQL_CHILD_RSS, describe_region, region_key_fields, region_resident_bytes,
+)
 from ..resources.contracts import ResourceProfile
 
-PREFIX = 'relational-v1-'
-MAX_JOIN_DEPTH = 2
 
-
-@dataclass(frozen=True)
-class RelationalRegionInput:
-    edge_id: str
-    consumer: str
-    port: str
-    fields: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class RelationalRegionPlan:
-    region_id: str
-    occurrences: tuple[str, ...]
-    exit_occurrence: str
-    inputs: tuple[RelationalRegionInput, ...]
-    internal_edges: tuple[str, ...]
-    join_depth: int
-    ordered_groups: bool
-    reducer_memory: tuple[tuple[str,int], ...] = ()
-
-
-def _fields(node, port):
-    config = node.kernel.configuration
-    return tuple(config.get('right_on') or config['on']) if port == 'right' else tuple(config['on'])
-
-
-def _describe(graph, members):
-    nodes = {n.occurrence_id: n for n in graph.nodes}
-    selected = set(members)
-    incoming = {occ: [] for occ in members}
-    outgoing = {occ: [] for occ in members}
-    for edge in graph.edges:
-        if edge.consumer in selected:
-            incoming[edge.consumer].append(edge)
-        if edge.producer in selected:
-            outgoing[edge.producer].append(edge)
-    exits = [occ for occ in members if not any(e.consumer in selected for e in outgoing[occ])]
-    if len(exits) != 1 or len(members) < 2:
-        return None
-    terminal = exits[0]
-    if any(nodes[o].kernel.kind not in ('join', 'reduce') for o in members):
-        return None
-    if any(nodes[o].kernel.kind == 'reduce' and o != terminal for o in members):
-        return None
-    depth, external, inner = {}, [], []
-    for occ in members:
-        node = nodes[occ]
-        if (node.kernel.effect != 'pure' or node.kernel.resource_role != 'cpu'
-                or not node.kernel.inputs or any(p.requirement != 'finite_complete' for p in node.kernel.inputs)
-                or node.kernel.profile.limits or node.kernel.profile.requirements
-                or set(node.kernel.profile.requests) - {'cpu_millis', 'memory_bytes'}):
-            return None
-        if occ != terminal and (len(outgoing[occ]) != 1 or outgoing[occ][0].consumer not in selected):
-            return None
-        parents = []
-        for edge in incoming[occ]:
-            fields = _fields(node, edge.input_port)
-            if edge.producer in selected:
-                producer = nodes[edge.producer]
-                if producer.kernel.kind != 'join' or tuple(producer.kernel.configuration['on']) != fields:
-                    return None
-                if edge.producer not in depth:
-                    return None
-                parents.append(depth[edge.producer])
-                inner.append(edge.edge_id)
-            else:
-                external.append(RelationalRegionInput(edge.edge_id, occ, edge.input_port, fields))
-        depth[occ] = max(parents, default=0) + (node.kernel.kind == 'join')
-    maximum = max(depth.values())
-    if not 1 <= maximum <= MAX_JOIN_DEPTH:
-        return None
-    payload = ['relational-region-v1', members, terminal,
-               [(x.edge_id, x.consumer, x.port, x.fields) for x in external], inner, maximum]
-    from ..execution.kernels.reducer_memory import contract
-    memory = contract(nodes[terminal].kernel) if nodes[terminal].kernel.kind == 'reduce' else None
-    if nodes[terminal].kernel.kind == 'reduce' and memory is None:
-        return None
-    if memory is not None:
-        payload.append(['reducer-memory-v1',dict(memory)])
-    return RelationalRegionPlan(PREFIX + identity(payload), tuple(members), terminal,
-                                tuple(external), tuple(inner), maximum,
-                                nodes[terminal].kernel.kind == 'reduce',
-                                tuple(sorted(memory.items())) if memory is not None else ())
-
-
-def interpret_region(graph, stage):
-    if not stage.stage_id.startswith(PREFIX):
-        return None
-    from ..execution.kernels.reducer_memory import contract
-    if any(n.occurrence_id in stage.occurrences and n.kernel.kind == 'reduce'
-           and contract(n.kernel) is None for n in graph.nodes):
-        raise DataflowError('INCOMPATIBLE_HISTORY',
-            'sealed relational region predates its reducer resident declaration; cannot infer a new grant')
-    plan = _describe(graph, stage.occurrences)
-    if plan is None or plan.region_id != stage.stage_id or len(stage.partitions) != 1:
-        raise DataflowError('INCOMPATIBLE_HISTORY', 'sealed relational region differs from original graph')
-    return plan
-
-
-def region_resident_bytes(plan, bounds):
-    # Only references (not hydrated parent rows) are retained between joins.
-    # Hydration has at most depth+1 input/result rows, two codec/copy rows and
-    # one output handoff. Input preparation reuses that window sequentially.
-    # One bounded index and traversal metadata use the remaining fixed window.
-    metadata = min(4 * 1024**2, max(4096,
-        min(bounds.max_control_bytes, bounds.max_resident_bytes) // 16))
-    if plan.ordered_groups:
-        from ..execution.kernels.reducer_memory import resident_bytes
-        return resident_bytes(dict(plan.reducer_memory),bounds,join_depth=plan.join_depth)
-    return bounds.max_batch_bytes + (plan.join_depth + 4) * bounds.max_row_bytes + metadata
-
-
-def fuse_relational_regions(graph, stages, *, policy, bounds, hosts):
+def fuse_relational_regions(graph, stages, *, policy, bounds, hosts, snapshots=()):
     if not policy.fusion:
         return stages
     nodes = {n.occurrence_id: n for n in graph.nodes}
@@ -135,10 +17,20 @@ def fuse_relational_regions(graph, stages, *, policy, bounds, hosts):
     for edge in graph.edges:
         incoming.setdefault(edge.consumer, []).append(edge)
         outgoing.setdefault(edge.producer, []).append(edge)
+    fixed_lance = {snap.source_id for snap in snapshots if snap.kind == 'lance'
+                   and type(snap.immutable_identity.get('version')) is int}
+    def fixed_source(occurrence):
+        while nodes[occurrence].kernel.kind == 'SelectColumnsOp':
+            upstream = incoming.get(occurrence, ())
+            if len(upstream) != 1:
+                return False
+            occurrence = upstream[0].producer
+        return occurrence in fixed_lance
+
     used, replacements = set(), {}
     for node in reversed(graph.nodes):
         root = node.occurrence_id
-        if root in used or node.kernel.kind not in ('join', 'reduce'):
+        if root in used or node.kernel.kind not in ('join', 'reduce', 'groups'):
             continue
         chosen = {root}
         def visit(occ, depth):
@@ -147,13 +39,13 @@ def fuse_relational_regions(graph, stages, *, policy, bounds, hosts):
                 next_depth = depth + (parent.kernel.kind == 'join')
                 if (parent.occurrence_id in used or parent.kernel.kind != 'join'
                         or next_depth > MAX_JOIN_DEPTH or len(outgoing.get(edge.producer, ())) != 1
-                        or tuple(parent.kernel.configuration['on']) != _fields(nodes[occ], edge.input_port)):
+                        or tuple(parent.kernel.configuration['on']) != region_key_fields(nodes[occ], edge.input_port)):
                     continue
                 chosen.add(edge.producer)
                 visit(edge.producer, next_depth)
         visit(root, int(node.kernel.kind == 'join'))
         members = tuple(sorted(chosen, key=order.__getitem__))
-        plan = _describe(graph, members)
+        plan = describe_region(graph, members)
         if plan is None:
             continue
         selected = [owners[o] for o in members]
@@ -164,6 +56,21 @@ def fuse_relational_regions(graph, stages, *, policy, bounds, hosts):
         resident = region_resident_bytes(plan, bounds)
         control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
         cpu = max(s.profile.requests['cpu_millis'] for s in selected)
+        # Choose the native variant only for provably fixed typed leaves with
+        # no callable between them and the region. A sealed legacy region or
+        # a smaller provider grant keeps its original bounded hash algorithm.
+        edges = {e.edge_id:e for e in graph.edges}
+        if (fixed_lance and all(fixed_source(edges[i.edge_id].producer) for i in plan.inputs)
+                and (policy.native_limits or {}).get('max_rss_bytes', SQL_CHILD_RSS) >= SQL_CHILD_RSS):
+            native = describe_region(graph, members, sql_offsets=True)
+            if native is not None:
+                requested = region_resident_bytes(native, bounds)
+                cpu_needed = max(cpu, 1000)
+                if requested + control <= bounds.max_resident_bytes and any(
+                        requested <= h.logical_resources.get('memory_bytes', 0)
+                        and cpu_needed <= h.logical_resources.get('cpu_millis', h.logical_resources.get('cpu', 0)*1000)
+                        for h in hosts):
+                    plan, resident, cpu = native, requested, cpu_needed
         if resident + control > bounds.max_resident_bytes or not any(
                 resident <= h.logical_resources.get('memory_bytes', 0)
                 and cpu <= h.logical_resources.get('cpu_millis', h.logical_resources.get('cpu', 0) * 1000)
@@ -179,3 +86,271 @@ def fuse_relational_regions(graph, stages, *, policy, bounds, hosts):
         used.update(members)
     return tuple(replacements[s.stage_id] if s.stage_id in replacements else s
                  for s in stages if s.stage_id in replacements or not any(o in used for o in s.occurrences))
+
+
+def place_join_probe(graph, snapshots, splits, stages, *, policy, bounds, hosts):
+    from ..execution.contracts.relational_region import JOIN_PROBE_SUFFIX, JOIN_PROBE_WINDOW, fixed_join_inputs
+    shape = fixed_join_inputs(graph)
+    if not policy.fusion or not shape or len(splits) != 2 or {s.source_id for s in splits} != set(shape[:2]):
+        return stages
+    source = {snap.source_id:snap for snap in snapshots}
+    left, right, _ = shape
+    build = source[right].immutable_identity
+    count = build.get('row_count', build.get('count'))
+    scan = source[left].immutable_identity
+    if (type(scan.get('version')) is not int or type(count) is not int or count > JOIN_PROBE_WINDOW // 192
+            or any(s.locator.get('global_query') for s in splits)
+            or any(len(s.partitions) != 1 or s.replica_target != 1 or s.profile.limits or s.profile.requirements
+                   or set(s.profile.requests) - {'cpu_millis','memory_bytes'} for s in stages)):
+        return stages
+    resident = sum(s.resident_bytes for s in stages) + JOIN_PROBE_WINDOW
+    cpu = max(s.profile.requests['cpu_millis'] for s in stages)
+    control = min(bounds.max_control_bytes, bounds.max_resident_bytes // 8)
+    if resident + control > bounds.max_resident_bytes or not any(
+            h.logical_resources.get('memory_bytes', 0) >= resident and
+            h.logical_resources.get('cpu_millis', h.logical_resources.get('cpu', 0)*1000) >= cpu for h in hosts):
+        return stages
+    marker = stages[0].stage_id + JOIN_PROBE_SUFFIX
+    return (replace(stages[0], stage_id=marker, partitions=(marker + '-p0',),
+        occurrences=tuple(n.occurrence_id for n in graph.nodes),
+        profile=ResourceProfile(requests={'cpu_millis':cpu, 'memory_bytes':resident}),
+        replica_min=1, replica_target=1, replica_max=1, resident_bytes=resident,
+        output_bytes=sum(s.output_bytes for s in stages), state_bytes=sum(s.state_bytes for s in stages),
+        kernel_refs=tuple(dict.fromkeys(ref for s in stages for ref in s.kernel_refs))),)
+
+
+def _column_lineage(kernel, origins):
+    """Map declared output names to their Lance inputs after a structural operation."""
+    from collections.abc import Mapping
+
+    if kernel.kind == 'SelectColumnsOp':
+        names = kernel.configuration['columns']
+        if len(set(names)) == len(names) and all(k in origins for k in names):
+            return {k: origins[k] for k in names}
+    elif kernel.kind == 'DropColumnsOp':
+        names = kernel.configuration['columns']
+        if all(k in origins for k in names):
+            return {k: origin for k, origin in origins.items() if k not in names}
+    elif kernel.kind == 'RenameColumnsOp':
+        names = kernel.configuration['names']
+        targets = [names.get(k, k) for k in origins] if isinstance(names, Mapping) else names
+        if len(targets) == len(origins) and len(set(targets)) == len(targets):
+            return dict(zip(targets, origins.values()))
+    elif kernel.kind == 'LimitOp':
+        return origins
+    return None
+
+
+def _build_read_columns(source, names, nodes, outgoing, build_path):
+    structural = {'SelectColumnsOp', 'DropColumnsOp', 'RenameColumnsOp', 'LimitOp'}
+    if len(set(names)) != len(names):
+        return {}
+    required, projections = set(), []
+    pending = [(source, dict(zip(names, names)))]
+    while pending:
+        current, origins = pending.pop()
+        for edge in outgoing.get(current, ()):
+            node = nodes[edge.consumer]
+            if node.kernel.kind == 'exclude_keys' and edge.input_port == 'right':
+                keys = node.kernel.configuration['on']
+                if any(k not in origins for k in keys):
+                    return {}
+                required.update(origins[k] for k in keys)
+            elif node.occurrence_id in build_path and node.kernel.kind in structural:
+                outputs = _column_lineage(node.kernel, origins)
+                if outputs is None:  # Keep the original missing-column/rename failure.
+                    return {}
+                projections.append((node, origins, outputs))
+                pending.append((node.occurrence_id, outputs))
+            else:
+                # An unknown callback or unrelated consumer sees its full input.
+                required.update(origins.values())
+    if not required or len(required) == len(names):
+        return {}
+    bindings = {source: {'read_columns': [name for name in names if name in required]}}
+    for node, inputs, outputs in projections:
+        kind, config = node.kernel.kind, node.kernel.configuration
+        if kind == 'LimitOp':
+            continue
+        if kind == 'DropColumnsOp':
+            # Presence was checked using the original fixed schema. A pruned
+            # column need not be fetched solely to test its name in every row.
+            columns = [k for k in config['columns'] if inputs[k] in required]
+        else:
+            columns = [name for name, origin in outputs.items() if origin in required]
+        if kind == 'RenameColumnsOp':
+            # Positional renames retain the relative order of surviving slots.
+            # A mapping also becomes this already resolved list of output names.
+            bindings[node.occurrence_id] = {'column_binding': columns}
+        elif columns != list(config['columns']):
+            bindings[node.occurrence_id] = {'column_binding': columns}
+    return bindings
+
+
+def exclusion_read_bindings(graph, scan_columns):
+    """Plan finite build-side column reads without evaluating a source or callable."""
+    if graph.jobs or not any(n.kernel.kind == 'exclude_keys' for n in graph.nodes):
+        return {}
+    nodes = {n.occurrence_id: n for n in graph.nodes}
+    incoming, outgoing = {}, {}
+    build_path = set()
+    for edge in graph.edges:
+        incoming.setdefault(edge.consumer, []).append(edge.producer)
+        outgoing.setdefault(edge.producer, []).append(edge)
+        if nodes[edge.consumer].kernel.kind == 'exclude_keys' and edge.input_port == 'right':
+            build_path.add(edge.producer)
+    # Follow only ordinary unary links; joins, jobs and forks into unrelated
+    # consumers never acquire an implicit right-key-only interpretation.
+    pending = list(build_path)
+    while pending:
+        current = pending.pop()
+        parents = incoming.get(current, ())
+        if nodes[current].kind == 'transform' and len(parents) == 1 and parents[0] not in build_path:
+            build_path.add(parents[0])
+            pending.append(parents[0])
+    bindings = {}
+    for source, names in scan_columns:
+        if source in build_path:
+            bindings.update(_build_read_columns(source, names, nodes, outgoing, build_path))
+    return bindings
+
+
+def place_key_exclusion(graph, snapshots, splits, stages, *, policy, bounds, hosts):
+    """Admit the SQL process inside the stage that already owns a pinned left scan's anti join."""
+    from ..execution.contracts.relational_region import KEY_SQL_SUFFIX, SQL_CHILD_RSS, SQL_PARENT_WINDOW
+
+    fixed = {s.source_id for s in snapshots if s.kind == 'lance' and
+             type(s.immutable_identity.get('version')) is int}
+    exclusion = {n.occurrence_id for n in graph.nodes if n.kernel.kind == 'exclude_keys'
+                 and n.kernel.configuration.get('lance_key_source') in fixed}
+    if not exclusion:
+        return stages
+    from ..execution.contracts.relational_region import (KEY_BATCH_SQL_SUFFIX, KEY_BATCH_ARROW_SUFFIX,
+        KEY_SET_WINDOW, fixed_key_inputs)
+    sql_allowed = (policy.native_limits or {}).get('max_rss_bytes', SQL_CHILD_RSS) >= SQL_CHILD_RSS
+    shape = fixed_key_inputs(graph)
+    if (policy.fusion and shape and set(shape[:2]) <= fixed and len(splits) == 2
+            and {s.source_id for s in splits} == set(shape[:2])
+            and all(not s.locator.get('global_query') for s in splits)
+            and all(s.replica_target == 1 and len(s.partitions) == 1 and not s.profile.limits
+                    and not s.profile.requirements and not set(s.profile.requests) - {'cpu_millis', 'memory_bytes'}
+                    for s in stages)):
+        base = sum(s.resident_bytes for s in stages)
+        cpu = max(1000, *(s.profile.requests['cpu_millis'] for s in stages))
+        control = min(bounds.max_control_bytes, bounds.max_resident_bytes // 8)
+        choices = [(KEY_BATCH_SQL_SUFFIX, SQL_CHILD_RSS + SQL_PARENT_WINDOW)] if sql_allowed else []
+        choices.append((KEY_BATCH_ARROW_SUFFIX, KEY_SET_WINDOW))
+        for suffix, reserved in choices:
+            total = base + reserved
+            if total + control > bounds.max_resident_bytes or not any(
+                    h.logical_resources.get('memory_bytes', 0) >= total and
+                    h.logical_resources.get('cpu_millis', h.logical_resources.get('cpu', 0)*1000) >= cpu
+                    for h in hosts):
+                continue
+            marker = stages[0].stage_id + suffix
+            return (replace(stages[0], stage_id=marker, partitions=(marker+'-p0',),
+                occurrences=tuple(n.occurrence_id for n in graph.nodes),
+                profile=ResourceProfile(requests={'cpu_millis': cpu, 'memory_bytes': total}),
+                replica_min=1, replica_target=1, replica_max=1, resident_bytes=total,
+                output_bytes=sum(s.output_bytes for s in stages), state_bytes=sum(s.state_bytes for s in stages),
+                kernel_refs=tuple(dict.fromkeys(k for s in stages for k in s.kernel_refs))),)
+    if not sql_allowed:
+        return stages
+    result = []
+    for stage in stages:
+        if exclusion.isdisjoint(stage.occurrences):
+            result.append(stage)
+            continue
+        resident = stage.resident_bytes + SQL_CHILD_RSS + SQL_PARENT_WINDOW
+        cpu = max(1000, stage.profile.requests['cpu_millis'])
+        limits = stage.profile.limits or {}
+        if (resident > min(bounds.max_resident_bytes, limits.get('memory_bytes', resident))
+                or cpu > limits.get('cpu_millis', cpu)
+                or not any(resident <= h.logical_resources.get('memory_bytes', 0) and
+                           cpu <= h.logical_resources.get('cpu_millis', h.logical_resources.get('cpu', 0)*1000)
+                           for h in hosts)):
+            result.append(stage)
+            continue
+        profile = replace(stage.profile, requests={**stage.profile.requests,
+            'cpu_millis': cpu, 'memory_bytes': resident})
+        result.append(replace(stage, stage_id=stage.stage_id + KEY_SQL_SUFFIX,
+                              profile=profile, resident_bytes=resident))
+    return tuple(result)
+
+
+def place_typed_join(graph, snapshots, splits, stages, *, policy, bounds, hosts):
+    """Choose original typed SQL from fixed source declarations, never source I/O."""
+    import base64
+    import pyarrow as pa
+    from ..execution.contracts.relational_region import TYPED_JOIN_SUFFIX, SQL_CHILD_RSS, SQL_PARENT_WINDOW
+
+    if (not policy.fusion or graph.jobs or len(graph.sources) != 2 or len(graph.terminals) != 1
+            or len(splits) != 2 or {s.source_id for s in splits} != set(graph.sources)
+            or any(s.locator.get('global_query') for s in splits)
+            or (policy.native_limits or {}).get('max_rss_bytes', SQL_CHILD_RSS) < SQL_CHILD_RSS):
+        return stages
+    nodes = {n.occurrence_id: n for n in graph.nodes}
+    joins = [n for n in graph.nodes if n.kernel.kind == 'join']
+    structural = {'SelectColumnsOp', 'DropColumnsOp', 'RenameColumnsOp', 'LimitOp'}
+    if (len(joins) != 1 or any(n.kind not in ('source', 'terminal') and n.kernel.kind not in
+            structural | {'join'} for n in graph.nodes) or any(n.kind != 'terminal' and n.kernel.effect != 'pure' for n in graph.nodes)):
+        return stages
+    incoming, outgoing = {}, {}
+    for edge in graph.edges:
+        incoming.setdefault(edge.consumer, []).append(edge)
+        outgoing.setdefault(edge.producer, []).append(edge)
+    if any(len(edges) != 1 for edges in outgoing.values()):
+        return stages
+    schemas = {}
+    for source in snapshots:
+        value = source.immutable_identity.get('declared_arrow_schema')
+        if (source.kind not in ('file', 'lance') or value is None or len(value) > bounds.max_control_bytes * 2
+                or source.kind == 'file' and source.immutable_identity.get('format') != 'csv'):
+            return stages
+        schema = pa.ipc.read_schema(pa.BufferReader(base64.b64decode(value, validate=True)))
+        if len(schema.names) != len(set(schema.names)):
+            return stages
+        schemas[source.source_id] = {field.name: field.type for field in schema}
+    # Only the paths before the join need a declared schema. After the join,
+    # original row operators retain their missing-column/error timing.
+    def columns(occ):
+        if occ in schemas:
+            return schemas[occ]
+        edges = incoming.get(occ, ())
+        if len(edges) != 1 or nodes[occ].kernel.kind not in structural:
+            return None
+        base = columns(edges[0].producer)
+        return None if base is None else _column_lineage(nodes[occ].kernel, base)
+    join = joins[0]
+    parents = {e.input_port: e.producer for e in incoming.get(join.occurrence_id, ())}
+    if set(parents) != {'left', 'right'}:
+        return stages
+    left, right = columns(parents['left']), columns(parents['right'])
+    cfg = join.kernel.configuration
+    lk, rk = tuple(cfg['on']), tuple(cfg.get('right_on') or cfg['on'])
+    def supported(dtype):
+        if (pa.types.is_null(dtype) or pa.types.is_string(dtype) or pa.types.is_large_string(dtype)
+                or pa.types.is_integer(dtype) or pa.types.is_floating(dtype) or pa.types.is_boolean(dtype)):
+            return True
+        if pa.types.is_list(dtype) or pa.types.is_large_list(dtype) or pa.types.is_fixed_size_list(dtype):
+            return supported(dtype.value_type)
+        return pa.types.is_struct(dtype) and all(supported(field.type) for field in dtype)
+    if (left is None or right is None or len(lk) != len(rk) or not lk
+            or any(k not in left or r not in right or left[k] != right[r] or not supported(left[k]) for k, r in zip(lk, rk))
+            or any(len(s.partitions) != 1 or s.replica_target != 1 or s.profile.limits or s.profile.requirements
+                   or set(s.profile.requests) - {'cpu_millis', 'memory_bytes'} for s in stages)):
+        return stages
+    resident = sum(s.resident_bytes for s in stages) + SQL_CHILD_RSS + SQL_PARENT_WINDOW
+    cpu = max(1000, *(s.profile.requests['cpu_millis'] for s in stages))
+    control = min(bounds.max_control_bytes, bounds.max_resident_bytes // 8)
+    if resident + control > bounds.max_resident_bytes or not any(
+            h.logical_resources.get('memory_bytes', 0) >= resident and
+            h.logical_resources.get('cpu_millis', h.logical_resources.get('cpu', 0) * 1000) >= cpu for h in hosts):
+        return stages
+    marker = stages[0].stage_id + TYPED_JOIN_SUFFIX
+    return (replace(stages[0], stage_id=marker, partitions=(marker + '-p0',),
+        occurrences=tuple(n.occurrence_id for n in graph.nodes),
+        profile=ResourceProfile(requests={'cpu_millis': cpu, 'memory_bytes': resident}),
+        replica_min=1, replica_target=1, replica_max=1, resident_bytes=resident,
+        output_bytes=sum(s.output_bytes for s in stages), state_bytes=sum(s.state_bytes for s in stages),
+        kernel_refs=tuple(dict.fromkeys(ref for s in stages for ref in s.kernel_refs))),)

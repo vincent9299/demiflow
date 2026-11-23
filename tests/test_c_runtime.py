@@ -23,7 +23,6 @@ from demiflow.execution.plan_interpreter import (
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
 from demiflow.execution.sealed_plans import (
     load_execution_bindings, load_sealed_plan, read_plan_artifact,
-    seal_execution_bindings,
 )
 from demiflow.resources.contracts import ResourceProfile
 from test_execution_layout import (
@@ -44,33 +43,9 @@ def workdir():
         shutil.rmtree(path, ignore_errors=True)
 
 
-def _bind(run, action_id):
-    from demiflow.execution.run_context import RunAction
-    declaration = {"kind": "chain-materialize", "source": {"source_id": "fixed"}}
-    run.journal.bind_execution_action(run.fence, action_id, declaration)
-    return RunAction(run, action_id, declaration)
-
-
-def _sealed_chain(workdir, action_id="c-action"):
-    from demiflow.execution import chain
-    from demiflow.execution.run_context import RunContext
-    fx = chain_fixture(action_id=action_id)
-    root = workdir / "run"
-    with RunContext.start(root) as run:
-        action = _bind(run, action_id)
-        sealed_at = int(run.journal.recovery_identity()["started_at"] * 1000)
-        chain.seal_plan_facts(run, action, fx.ld, fx.pp, fx.mref, sealed_at)
-        seal_execution_bindings(
-            run, action, logical_dag=fx.ld, physical_plan=fx.pp,
-            profiles=fx.doc["profiles"], programs=fx.doc["programs"],
-            driver_stage_ids=fx.doc["driver_stage_ids"],
-            source_bindings=fx.doc["source_bindings"],
-            channel_options=fx.doc["channel_options"],
-            checkpoint_rows=fx.doc["checkpoint_rows"],
-            supported_slice=fx.doc["supported_slice"])
-        run_id = run.ref.run_id
-        run.journal.complete_execution_action(run.fence, action_id, {"kind": "test"})
-    return SimpleNamespace(root=root, run_id=run_id, fx=fx, action_id=action_id)
+def _sealed_chain(workdir, legacy_seal_writer, action_id="c-action"):
+    from test_sealed_execution_bindings import _sealed
+    return _sealed(workdir, legacy_seal_writer, chain_fixture(action_id=action_id), action_id)
 
 
 # ---------------------------------------------------------------------------
@@ -78,8 +53,8 @@ def _sealed_chain(workdir, action_id="c-action"):
 # ---------------------------------------------------------------------------
 
 class TestScenario1Interpretation:
-    def test_interpret_real_b_chain(self, workdir):
-        sc = _sealed_chain(workdir)
+    def test_interpret_real_b_chain(self, workdir, legacy_seal_writer):
+        sc = _sealed_chain(workdir, legacy_seal_writer)
         sp = load_sealed_plan(sc.root, sc.action_id)
         bindings = load_execution_bindings(sc.root, sc.action_id, sealed_plan=sp)
         layout = interpret_physical_plan(sp["logical_dag"], sp["physical_plan"],
@@ -91,23 +66,6 @@ class TestScenario1Interpretation:
         assert layout.supported_slice == "chain_v1"
         assert layout.bindings_ref == bindings["ref"]
 
-    def test_load_worker_layout_real(self, workdir):
-        from demiflow.execution.worker.layout import load_worker_layout
-        sc = _sealed_chain(workdir)
-        sp = load_sealed_plan(sc.root, sc.action_id)
-        bindings = load_execution_bindings(sc.root, sc.action_id, sealed_plan=sp)
-        authority = MagicMock()
-        authority.directory = sc.root
-        launch_spec = {"execution_plan": {
-            "action_id": sc.action_id, "group_id": "g0",
-            "bindings_ref": bindings["ref"]}}
-        placement, policy, limits = load_worker_layout(launch_spec, authority, {})
-        assert placement.group_id == "g0"
-        assert isinstance(policy, CheckpointPolicy)
-        assert policy.checkpoint_rows == sc.fx.doc["checkpoint_rows"]
-        assert len(limits) == len(sc.fx.operation_nodes)
-        for idx, budget in limits.items():
-            assert set(budget) == {"inflight_rows", "inflight_bytes", "output_bytes"}
 
 
 # ---------------------------------------------------------------------------
@@ -120,8 +78,8 @@ class TestScenario2Profile:
         profile = ResourceProfile(**wire)
         assert profile.requests["cpu_millis"] == PROFILE["requests"]["cpu_millis"]
 
-    def test_sealed_profile_from_layout(self, workdir):
-        sc = _sealed_chain(workdir)
+    def test_sealed_profile_from_layout(self, workdir, legacy_seal_writer):
+        sc = _sealed_chain(workdir, legacy_seal_writer)
         sp = load_sealed_plan(sc.root, sc.action_id)
         bindings = load_execution_bindings(sc.root, sc.action_id, sealed_plan=sp)
         layout = interpret_physical_plan(sp["logical_dag"], sp["physical_plan"],
@@ -137,8 +95,8 @@ class TestScenario2Profile:
 # ---------------------------------------------------------------------------
 
 class TestScenario3CheckpointPolicy:
-    def test_layout_checkpoint_is_policy(self, workdir):
-        sc = _sealed_chain(workdir)
+    def test_layout_checkpoint_is_policy(self, workdir, legacy_seal_writer):
+        sc = _sealed_chain(workdir, legacy_seal_writer)
         sp = load_sealed_plan(sc.root, sc.action_id)
         bindings = load_execution_bindings(sc.root, sc.action_id, sealed_plan=sp)
         layout = interpret_physical_plan(sp["logical_dag"], sp["physical_plan"],
@@ -148,45 +106,14 @@ class TestScenario3CheckpointPolicy:
         assert layout.checkpoint.checkpoint_rows == sc.fx.doc["checkpoint_rows"]
         assert layout.checkpoint.interval_ms == sc.fx.pp["recovery"]["checkpoint_interval_ms"]
 
-    def test_progress_uses_policy_rows(self):
-        from demiflow.execution.worker.progress import WorkerStreamProgress
-        action = MagicMock()
-        action.context.limits = {"checkpoint_rows": 999, "max_row_bytes": 4096,
-                                 "checkpoint_interval_ms": 1000,
-                                 "checkpoint_unconfirmed_rows": 2,
-                                 "checkpoint_unconfirmed_bytes": 1024}
-        action.context.directory = Path("/tmp/demiflow-c-test")
-        policy = CheckpointPolicy(checkpoint_rows=42, interval_ms=5000,
-                                  unconfirmed_rows=4, unconfirmed_bytes=64 * 1024 ** 2)
-        progress = WorkerStreamProgress.__new__(WorkerStreamProgress)
-        progress.run = action.context
-        progress.checkpoint_policy = policy
-        progress.batch_rows = (policy.checkpoint_rows if policy is not None
-                               else progress.run.limits["checkpoint_rows"])
-        assert progress.batch_rows == 42
-
-    def test_barrier_interval_from_policy(self):
-        from demiflow.execution.stream_barrier import CheckpointControl
-        progress = MagicMock()
-        progress.checkpoint_policy = CheckpointPolicy(
-            checkpoint_rows=100, interval_ms=2500, unconfirmed_rows=4,
-            unconfirmed_bytes=64 * 1024 ** 2)
-        progress.run.limits = {"checkpoint_interval_ms": 9999}
-        ctrl = CheckpointControl.__new__(CheckpointControl)
-        ctrl.progress = progress
-        policy = getattr(progress, "checkpoint_policy", None)
-        interval = (policy.interval_ms / 1000 if policy is not None
-                    else progress.run.limits["checkpoint_interval_ms"] / 1000)
-        assert interval == 2.5
-
 
 # ---------------------------------------------------------------------------
 # Scenario 4: stage_limits reach actual queues
 # ---------------------------------------------------------------------------
 
 class TestScenario4StageLimits:
-    def test_stage_limits_from_layout_budgets(self, workdir):
-        sc = _sealed_chain(workdir)
+    def test_stage_limits_from_layout_budgets(self, workdir, legacy_seal_writer):
+        sc = _sealed_chain(workdir, legacy_seal_writer)
         sp = load_sealed_plan(sc.root, sc.action_id)
         bindings = load_execution_bindings(sc.root, sc.action_id, sealed_plan=sp)
         layout = interpret_physical_plan(sp["logical_dag"], sp["physical_plan"],
@@ -203,32 +130,6 @@ class TestScenario4StageLimits:
             assert budget["inflight_rows"] >= 1
             assert budget["inflight_bytes"] >= 1
             assert budget["output_bytes"] >= 1
-
-    def test_materialize_applies_budgets(self):
-        from demiflow.data.plan import AsyncMapOp, CallableSpec, LogicalPlan
-        from demiflow.execution.stream import _materialize
-        ops = tuple(AsyncMapOp(CallableSpec.create(lambda r: r), 1, 1, (),
-                               f"op{i}", None, "inline") for i in range(3))
-        plan = LogicalPlan(ops)
-        limits = {0: {"inflight_rows": 8, "inflight_bytes": 8192, "output_bytes": 1024},
-                  2: {"inflight_rows": 4, "inflight_bytes": 4096, "output_bytes": 512}}
-        stages = _materialize(plan, stage_limits=limits)
-        assert stages[0].stage_budget == limits[0]
-        assert stages[1].stage_budget is None
-        assert stages[2].stage_budget == limits[2]
-
-    def test_filter_fold_preserves_index(self):
-        from demiflow.data.plan import AsyncMapOp, CallableSpec, FilterOp, LogicalPlan
-        from demiflow.execution.stream import _materialize
-        ops = (AsyncMapOp(CallableSpec.create(lambda r: r), 1, 1, (), "a", None, "inline"),
-               FilterOp(CallableSpec.create(lambda r: True)),
-               AsyncMapOp(CallableSpec.create(lambda r: r), 1, 1, (), "b", None, "inline"))
-        plan = LogicalPlan(ops)
-        limits = {2: {"inflight_rows": 16, "inflight_bytes": 16384, "output_bytes": 1024}}
-        stages = _materialize(plan, stage_limits=limits)
-        assert len(stages) == 2
-        assert stages[1].operation_index == 2
-        assert stages[1].stage_budget == limits[2]
 
 
 # ---------------------------------------------------------------------------
@@ -341,8 +242,8 @@ class TestScenario7BindingsIntegrity:
             read_plan_artifact(workdir, ref, max_bytes=4 * 1024 ** 2)
         assert exc.value.reason == "corrupt_artifact"
 
-    def test_missing_bindings_rejected(self, workdir):
-        sc = _sealed_chain(workdir)
+    def test_missing_bindings_rejected(self, workdir, legacy_seal_writer):
+        sc = _sealed_chain(workdir, legacy_seal_writer)
         sp = load_sealed_plan(sc.root, sc.action_id)
         import sqlite3
         with sqlite3.connect(sc.root / "run.sqlite") as db:
@@ -358,8 +259,8 @@ class TestScenario7BindingsIntegrity:
 # ---------------------------------------------------------------------------
 
 class TestScenario8AssignmentValidation:
-    def test_mismatched_stages_rejected(self, workdir):
-        sc = _sealed_chain(workdir)
+    def test_mismatched_stages_rejected(self, workdir, legacy_seal_writer):
+        sc = _sealed_chain(workdir, legacy_seal_writer)
         sp = load_sealed_plan(sc.root, sc.action_id)
         bindings = load_execution_bindings(sc.root, sc.action_id, sealed_plan=sp)
         layout = interpret_physical_plan(sp["logical_dag"], sp["physical_plan"],
@@ -382,9 +283,9 @@ class TestScenario8AssignmentValidation:
             validate_worker_assignment(layout, assignment, group_id="g0")
         assert exc.value.reason == "invalid_assignment"
 
-    def test_valid_assignment_accepted(self, workdir):
+    def test_valid_assignment_accepted(self, workdir, legacy_seal_writer):
         from test_execution_layout import assignment_for, expected_channel_ids
-        sc = _sealed_chain(workdir)
+        sc = _sealed_chain(workdir, legacy_seal_writer)
         sp = load_sealed_plan(sc.root, sc.action_id)
         bindings = load_execution_bindings(sc.root, sc.action_id, sealed_plan=sp)
         layout = interpret_physical_plan(sp["logical_dag"], sp["physical_plan"],
@@ -402,22 +303,12 @@ class TestScenario8AssignmentValidation:
 # ---------------------------------------------------------------------------
 
 class TestScenario9LegacyPath:
-    def test_no_execution_plan_returns_none(self, workdir):
-        from demiflow.execution.worker.layout import load_worker_layout
-        authority = MagicMock()
-        authority.directory = workdir
-        assert load_worker_layout({}, authority, {}) is None
 
     def test_run_stream_default_no_limits(self):
-        from demiflow.data.plan import AsyncMapOp, CallableSpec, LogicalPlan
-        from demiflow.execution.stream import run_stream
-        ops = (AsyncMapOp(CallableSpec.create(lambda r: r), 1, 1, (), "op0", None, "inline"),)
-        plan = LogicalPlan(ops)
-        rows = [{"x": 1}, {"x": 2}]
-        collected = []
-        stats = run_stream(iter(rows), plan, consume=lambda r: collected.append(r))
-        assert len(collected) == 2
-        assert stats.emitted == 2
+        from demiflow import data
+        rows = [{'x': 1}, {'x': 2}]
+        ds = data.from_items(rows).map_async(lambda row: row)
+        assert ds.run_stream().emitted == len(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -430,8 +321,8 @@ class TestScenario10RecoverySealedInputs:
             load_sealed_plan(workdir, "nonexistent-action")
         assert exc.value.reason == "missing_plan"
 
-    def test_sealed_artifact_digest_verified(self, workdir):
-        sc = _sealed_chain(workdir)
+    def test_sealed_artifact_digest_verified(self, workdir, legacy_seal_writer):
+        sc = _sealed_chain(workdir, legacy_seal_writer)
         sp = load_sealed_plan(sc.root, sc.action_id)
         dag_path = sc.root / sp["facts"]["logical_dag_ref"]["path"]
         original = dag_path.read_bytes()
@@ -441,8 +332,8 @@ class TestScenario10RecoverySealedInputs:
         assert exc.value.reason == "corrupt_artifact"
         dag_path.write_bytes(original)
 
-    def test_seal_interpret_roundtrip(self, workdir):
-        sc = _sealed_chain(workdir)
+    def test_seal_interpret_roundtrip(self, workdir, legacy_seal_writer):
+        sc = _sealed_chain(workdir, legacy_seal_writer)
         sp = load_sealed_plan(sc.root, sc.action_id)
         bindings = load_execution_bindings(sc.root, sc.action_id, sealed_plan=sp)
         layout = interpret_physical_plan(sp["logical_dag"], sp["physical_plan"],

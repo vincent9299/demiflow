@@ -1,5 +1,6 @@
 """Public Dataset proofs: genuine managed workers and native commit journal."""
 import math
+import os
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,96 @@ def test_public_filter_count(tmp_path):
     with RunContext.start(tmp_path / 'run') as run, data.local_execution():
         assert data.from_items(_rows()).filter(lambda r: r['n'] % 2 == 0).count() == 3
         assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
+
+
+def test_materialized_count_uses_authenticated_rows_and_records_action(tmp_path):
+    with RunContext.start(tmp_path / 'run') as run, data.local_execution():
+        stored = data.from_items(_rows()).map(lambda row: row).materialize()
+        assert stored.count() == 6
+        assert stored.execution_metadata().diagnostics['observed_worker_count'] == 0
+        receipt = run.journal.execution_action('action-2')['result']
+        assert receipt == {'kind': 'count', 'scalar': 6, 'source': stored._source.handle.recovery_reference}
+        assert stored.filter(lambda row: row['n'] > 3).count() == 2
+        assert stored.execution_metadata().diagnostics['observed_worker_count'] > 0
+        stored.release()
+        with pytest.raises(RuntimeError, match='release'):
+            stored.count()
+
+
+@pytest.mark.parametrize('damage', ['missing', 'same-size', 'manifest'])
+def test_materialized_count_rejects_damaged_input(tmp_path, damage):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.dataflow_segments import segment_refs
+    with pytest.raises(DataflowError) as rejected, RunContext.start(tmp_path / 'run') as run, data.local_execution():
+        stored = data.from_items(_rows()).map(lambda row: row).materialize()
+        handle = stored._source.handle
+        ref = handle._manifest_ref if damage == 'manifest' else next(
+            ref for block in handle._blocks for ref in segment_refs(handle._store, block, handle._bounds)
+            if ref.size_bytes)
+        path = handle._store._object_path(ref)
+        original = path.read_bytes()
+        try:
+            if damage == 'missing':
+                path.unlink()
+            else:
+                with path.open('r+b') as payload:
+                    payload.write(bytes([original[0] ^ 1]))
+            stored.count()
+        finally:
+            path.write_bytes(original)
+            stored.release()
+    assert rejected.value.code in {"UNKNOWN_EFFECT", "INVALID_CONTRACT", "CORRUPT_ARTIFACT"}
+    assert run.journal.execution_action('action-2')['result'] is None
+
+
+@pytest.mark.parametrize('change', ['mtime', 'replace-before-reopen', 'damaged', 'missing'])
+def test_completed_direct_count_reopens_its_receipt_without_sealing(tmp_path, change):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.dataflow_segments import segment_refs
+
+    def materialize():
+        return data.from_items(_rows()).map(lambda row: row).materialize()
+
+    root = tmp_path / 'run'
+    with pytest.raises(KeyboardInterrupt), RunContext.start(root) as run, data.local_execution():
+        ref = run.ref
+        stored = materialize()
+        assert stored.count() == 6
+        receipt = run.journal.execution_action('action-2')['result']
+        handle = stored._source.handle
+        leaf = next(leaf for block in handle._blocks for leaf in segment_refs(handle._store, block, handle._bounds))
+        path = handle._store._object_path(leaf)
+        stored.release()
+        raise KeyboardInterrupt
+
+    if change == 'replace-before-reopen':
+        replacement = path.with_suffix('.replacement')
+        replacement.write_bytes(path.read_bytes())
+        os.replace(replacement, path)
+    with RunContext.resume(ref) as run, data.local_execution():
+        stored = materialize()
+        try:
+            if change == 'mtime':
+                os.utime(path)
+            if change in ('damaged', 'missing'):
+                if change == 'missing':
+                    path.unlink()
+                else:
+                    with path.open('r+b') as block:
+                        byte = block.read(1)
+                        block.seek(0)
+                        block.write(bytes([byte[0] ^ 1]))
+                with pytest.raises(DataflowError) as rejected:
+                    stored.count()
+                assert rejected.value.code in ('CORRUPT_ARTIFACT', 'INVALID_CONTRACT', 'UNKNOWN_EFFECT')
+            else:
+                assert stored.count() == 6
+                assert stored.execution_metadata().diagnostics['observed_worker_count'] == 0
+            assert run.journal.source_binding('action-2-dataflow-sealed') is None
+            assert not run.journal.execution_commits('action-2')
+            assert run.journal.execution_action('action-2')['result'] == receipt
+        finally:
+            stored.release()
 
 
 def test_public_union_take_all(tmp_path):

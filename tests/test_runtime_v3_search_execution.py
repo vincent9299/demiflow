@@ -159,8 +159,6 @@ def test_ordinary_stream_lifecycle_does_not_import_http_client():
         import sys
         sys.modules['httpx'] = None
         from demiflow import data
-        from demiflow.execution.stream import run_stream
-        from demiflow.execution.stream_resources import StreamResources
 
         class Actor:
             async def astart(self):
@@ -171,12 +169,9 @@ def test_ordinary_stream_lifecycle_does_not_import_http_client():
 
         actor = Actor()
         rows = [{'id': 1}]
-        plan = data.from_items(rows).map_async(actor, concurrency=1, queue_depth=1)._plan
-        seen = []
-        resources = StreamResources([actor])
-        stats = run_stream(iter(rows), plan, consume=seen.append,
-                           on_start=resources.prepare, on_close=resources.close)
-        assert stats.emitted == 1 and seen == [{'id': 2}], seen
+        ds = data.from_items(rows).map_async(actor, concurrency=1, queue_depth=1)
+        assert ds.take_all() == [{'id': 2}]
+        assert ds.run_stream().emitted == 1
         assert 'demiflow.collect.operators' not in sys.modules
     """)
     subprocess.run([sys.executable, '-B', '-c', probe], check=True, timeout=30)

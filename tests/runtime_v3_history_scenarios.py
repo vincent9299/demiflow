@@ -36,7 +36,7 @@ def prompt_identities():
     from demiflow.execution.recovery_contract import identity
     from demiflow.execution.recovery_identity import plan_identity
     from demiflow.execution.plan_facts import operation_facts
-    from demiflow.execution.chain import plan_code_pin
+    from demiflow.execution.seal.business_sources import plan_code_pin
 
     golden = json.loads(GOLDEN.read_text())
     text = golden["prompt"]
@@ -231,3 +231,55 @@ def original_native_history(root):
                                 "Unlisted historical carrier families; not inferred from protocol labels"]}
     (root / "history-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
     return evidence
+
+
+def write_legacy_seal(checkout, directory, *, action_id, logical_dag, physical_plan,
+                      manifest_ref, sealed_at=None, bridge=None, bindings=None):
+    """Write real v1/v2 history in a process importing only the published SDK."""
+    script = """
+import json, sys
+from pathlib import Path
+import demiflow
+from demiflow.execution.chain import seal_plan_facts
+from demiflow.execution.run_context import RunContext, RunAction
+from demiflow.execution.sealed_plans import seal_execution_bindings
+
+assert Path(demiflow.__file__).resolve().parents[1] == Path(sys.argv[1])
+params = json.load(sys.stdin)
+root = Path(sys.argv[2])
+action_id = params['action_id']
+with RunContext.start(root) as run:
+    declaration = {'kind': 'chain-materialize', 'source': {'source_id': 'fixed'}}
+    run.journal.bind_execution_action(run.fence, action_id, declaration)
+    action = RunAction(run, action_id, declaration)
+    timestamp = params['sealed_at']
+    if timestamp is None:
+        timestamp = int(run.journal.recovery_identity()['started_at'] * 1000)
+    facts = seal_plan_facts(run, action, params['logical_dag'], params['physical_plan'],
+                            params['manifest_ref'], timestamp)
+    if params['bridge'] is not None:
+        bridge, ref = params['bridge']
+        path = root / ref['path']
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(json.dumps(bridge, ensure_ascii=False, sort_keys=True).encode())
+        run.journal.bind_source(run.fence, action_id + '-identity-bridge', ref)
+    ref = None
+    if params['bindings'] is not None:
+        args = dict(logical_dag=params['logical_dag'], physical_plan=params['physical_plan'],
+                    **params['bindings'])
+        ref = seal_execution_bindings(run, action, **args)
+        path = root / ref['path']
+        mtime = path.stat().st_mtime_ns
+        assert seal_execution_bindings(run, action, **args) == ref
+        assert path.stat().st_mtime_ns == mtime
+        assert run.journal.source_binding(action_id + '-execution-bindings') == ref
+    run.journal.complete_execution_action(run.fence, action_id, {'kind': 'test-complete'})
+print(json.dumps({'facts': facts, 'ref': ref}))
+"""
+    request = dict(action_id=action_id, logical_dag=logical_dag, physical_plan=physical_plan,
+                   manifest_ref=manifest_ref, sealed_at=sealed_at, bridge=bridge, bindings=bindings)
+    result = subprocess.run([sys.executable, '-B', '-c', script, str(checkout), str(directory)],
+                            cwd=checkout, env=dict(os.environ, PYTHONPATH=str(checkout)),
+                            input=json.dumps(request), text=True, capture_output=True, timeout=90)
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)

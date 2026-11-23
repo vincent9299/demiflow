@@ -16,6 +16,7 @@ import json
 from typing import TYPE_CHECKING
 
 from ..contracts.dataflow import (
+    FIXED_SCAN_BATCHES,
     ActionHandle, ActionRequest, ArtifactRef, Bounds, ControlReply, CutContribution,
     CutRequest, DriverServices, ExecutionStatus, PhysicalDataflow, ReadyWork,
     RecoveryImage, RuntimePolicy, SealedExecution, TerminalResult, WorkerAssignment,
@@ -51,7 +52,7 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bounds) -> ActionHandle:
+def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bounds, after_prepare=None) -> ActionHandle:
     from ..plan_capture import current_capture
     capture = current_capture()
     if capture is not None:
@@ -59,8 +60,11 @@ def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bou
     services = make_driver_services(request.action, policy=policy, bounds=bounds)
     execution = DataflowExecution(request, services=services)
     try:
-        execution.prepare()
-        execution.start()
+        if not execution.read_materialized_count():
+            execution.prepare()
+            if after_prepare is not None:
+                after_prepare()
+            execution.start()
         return open_terminal(request, execution=execution)
     except BaseException as failure:
         execution._failure = failure
@@ -75,6 +79,59 @@ def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bou
         except Exception as observation:
             failure.add_note('Execution metadata also failed: ' + str(observation))
         raise
+
+
+def run_graph_action(request, *, control_timeout_s):
+    from dataclasses import replace
+    from ..dataflow_api import resolve_action_runtime, record_execution_metadata
+    from ...planning.dataflow_graph_adapter import graph_credit
+    from ..seal.plan import validate_graph_replay
+    policy, bounds = resolve_action_runtime(request)
+    declaration = request.source.declaration
+    if 'queue_depth' in declaration:
+        depth = declaration['queue_depth']
+        if type(depth) is not int or depth < 1:
+            raise ValueError('graph queue_depth must be a positive integer')
+        bounds = replace(bounds, max_pending_events=min(bounds.max_pending_events, depth))
+    if 'cut_rows' in declaration:
+        rows = declaration['cut_rows']
+        if type(rows) is not int or rows < 1:
+            raise ValueError('graph cut_rows must be a positive integer')
+        policy = replace(policy, checkpoint_rows=min(policy.checkpoint_rows, rows))
+    if type(control_timeout_s) not in (int, float) or control_timeout_s <= 0:
+        raise ValueError('graph control timeout must be positive')
+    policy = replace(policy, control_timeout_ms=min(policy.control_timeout_ms, int(control_timeout_s * 1000)))
+    # Credit rejection precedes source snapshot/read, program construction and
+    # worker provisioning. The same solver seals the actual exchange windows.
+    credit = graph_credit(declaration, bounds=bounds)
+    validate_graph_replay(request.action, declaration, credit)
+    handle = execute_action(request, policy=policy, bounds=bounds)
+    primary_failure = None
+    try:
+        result = handle.result()
+        return handle._execution.graph_result(result)
+    except BaseException as exc:
+        primary_failure = exc
+        raise
+    finally:
+        # Close drains final observations. A failure while projecting them
+        # must not replace the business failure or prevent remaining cleanup.
+        failure = primary_failure
+        for label, cleanup in (
+                ('Graph cleanup also failed: ', handle.close),
+                ('Execution metadata also failed: ', lambda: record_execution_metadata(request, handle._execution))):
+            try:
+                cleanup()
+            except BaseException as exc:
+                if failure is None:
+                    failure = exc
+                elif exc is not failure:
+                    try:
+                        failure.add_note(label + str(exc))
+                    except BaseException:
+                        pass
+        if primary_failure is None and failure is not None:
+            raise failure
 
 
 class DataflowExecution:
@@ -158,6 +215,7 @@ class DataflowExecution:
         self._source_done = set()
         self._source_credit_needs_rotation = False
         self._node_metrics = {}
+        self._graph_finished = {}
         self._observed_workers = {}
         self._current_worker_observations = {}
         self._observed_worker_count = 0
@@ -192,7 +250,11 @@ class DataflowExecution:
         self._idle.clear()
         for allocation_id, endpoint in self._endpoints.items():
             endpoint.send_business({"kind": "pause"})
-            endpoint.send_business({"kind": "satisfy"})
+            # Reaching a declared terminal limit completes its demand. An
+            # iterator close or stream stop only asks to checkpoint a prefix:
+            # source EOI alone cannot prove every finite kernel emitted its rows.
+            if self._limit is not None and self._terminal_seen >= self._limit:
+                endpoint.send_business({"kind": "satisfy"})
             # This is permission to stop this live source owner, not proof that
             # its input was exhausted. A prefix cut must remain non-final.
             lease = self._scheduler.leases[allocation_id]
@@ -350,6 +412,40 @@ class DataflowExecution:
         for partition in lease.partition_ids:
             self._by_partition[partition] = endpoint
 
+    def read_materialized_count(self):
+        from ...planning.dataflow_compile import is_materialized_count
+        if not is_materialized_count(self._request):
+            return False
+        from ..checked import current
+        if (self._request.arguments or self._request.programs or current() is not None
+                or self._action.context.journal.source_binding(self._action.action_id + "-dataflow-sealed")):
+            return False
+        from ..dataflow_sources import verified_materialized_count
+        self._check_stop()
+        source = self._request.source
+        previous = self._action.record['result']
+        if previous is not None and (previous.get('kind') != 'count'
+                                     or previous.get('source') != source.handle.recovery_reference):
+            raise DataflowError('INCOMPATIBLE_HISTORY', 'Completed count belongs to another source')
+        rows = verified_materialized_count(source, recheck=self._check_stop if previous is not None else None)
+        if rows is None or rows > self._bounds.max_output_rows:
+            if previous is not None:
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'Cannot verify completed count with its original limits')
+            return False
+        receipt = {"kind": "count", "scalar": rows, "source": source.handle.recovery_reference}
+        if previous is not None and (type(previous.get('scalar')) is not int or receipt != previous):
+            raise DataflowError('INCOMPATIBLE_HISTORY', 'Completed count differs from its verified source')
+        self._check_stop()
+        self._terminal = TerminalSubscription(self._bounds, self._exchange, ())
+        if previous is None:
+            self._action.complete(receipt)
+        self._started = True
+        self._confirmed_rows = rows
+        self._terminal_result = TerminalResult(kind="count", rows=rows, scalar=rows, result_ref=None,
+            write_result=None, complete=True, completion="source_exhausted")
+        self._state = "succeeded"
+        return True
+
     # -- E003 prepare -----------------------------------------------------
     def prepare(self) -> SealedExecution:
         if self._prepared:
@@ -416,11 +512,46 @@ class DataflowExecution:
                         target_partitions=self._policy.default_partitions, bounds=self._bounds)
                 snapshots.append(snapshot)
                 splits.extend(source_splits)
-            constants_ref = resolve_execution_constants(graph, action=self._action, store=self._store,
-                                                        policy=self._policy)
+            pinned_batch = (len(splits) == 1 and self._policy.fusion and any(
+                node.kind == 'terminal' and node.kernel.configuration.get('input_carrier') == FIXED_SCAN_BATCHES
+                for node in graph.nodes))
+            if pinned_batch:
+                from dataclasses import replace
+                context = self._action.context
+                if ('checkpoint_rows' not in context.explicit_limits
+                        and self._policy.checkpoint_rows == context.limits['checkpoint_rows']):
+                    self._policy = replace(self._policy, checkpoint_rows=context.limits['checkpoint_unconfirmed_rows'])
+                if 'batch_rows' in context.explicit_limits:
+                    native = dict(self._policy.native_limits or {})
+                    native['batch_rows'] = min(context.limits['batch_rows'],
+                                               native.get('batch_rows', context.limits['batch_rows']))
+                    self._policy = replace(self._policy, native_limits=native)
+            from ...planning.dataflow_relational_regions import exclusion_read_bindings
+            from ..dataflow_schema import KEY, decode
+            scan_columns = (
+                (source.source_id, decode(source.immutable_identity[KEY], bounds=self._bounds).names)
+                for source in snapshots
+                if source.kind == 'lance' and KEY in source.immutable_identity
+                and source.immutable_identity['query']['kind'] == 'scan'
+            )
+            constants_ref = resolve_execution_constants(
+                graph, action=self._action, store=self._store, policy=self._policy,
+                column_bindings=exclusion_read_bindings(graph, scan_columns))
             physical = compile_physical_dataflow(
                 graph, tuple(snapshots), tuple(splits), policy=self._policy, hosts=self._services.hosts,
                 bounds=self._bounds, constants_ref=constants_ref)
+            from ..contracts.relational_region import JOIN_PROBE_SUFFIX, KEY_BATCH_SUFFIXES
+            context = self._action.context
+            if (any(s.stage_id.endswith((*KEY_BATCH_SUFFIXES, JOIN_PROBE_SUFFIX)) for s in physical.stages)
+                    and 'checkpoint_rows' not in context.explicit_limits
+                    and self._policy.checkpoint_rows == context.limits['checkpoint_rows']
+                    and self._policy.checkpoint_rows < context.limits['checkpoint_unconfirmed_rows']):
+                # Co-located deterministic scans can use the already authorized
+                # source window. Explicit cuts and unconfirmed limits remain binding.
+                from dataclasses import replace
+                self._policy = replace(self._policy, checkpoint_rows=context.limits['checkpoint_unconfirmed_rows'])
+                physical = compile_physical_dataflow(graph, tuple(snapshots), tuple(splits), policy=self._policy,
+                    hosts=self._services.hosts, bounds=self._bounds, constants_ref=constants_ref)
             from ..checked import current
             from ..identity_bridge import build_identity_bridge
             from ..contracts.dataflow import thaw_record_value
@@ -568,7 +699,7 @@ class DataflowExecution:
         if self._closed or self._cancelled:
             raise DataflowError("CANCELLED", "execution is closed")
         self._check_stop()
-        self._terminal = TerminalSubscription(self._bounds, self._exchange, self._endpoints.values())
+        self._terminal = TerminalSubscription(self._bounds, self._exchange, self._endpoints.values(), store=self._store)
         budget = {"cpu_millis": max(1, int(sum(h.logical_resources.get('cpu_millis', 0)
                                              for h in self._services.hosts))),
                   "memory_bytes": self._bounds.max_resident_bytes,
@@ -617,9 +748,12 @@ class DataflowExecution:
             from ..kernels import state_codec
             from ..dataflow_kernel_pack import read_kernel_image
             from ..contracts.dataflow_codec import compute_participant_id
+            from ..recovery_contract import identity
             partitions = {compute_participant_id(stage.stage_id, partition): partition
                           for stage in self._physical.stages for partition in stage.partitions}
             transforms = {n.occurrence_id for n in self._graph.nodes if n.kind == "transform"}
+            terminal_inputs = {edge.edge_id for edge in self._graph.edges
+                               if edge.consumer in self._graph.terminals}
             from ..dataflow_residency import participants_for
             residency = self._checkpoint.residency or {}
             retired = set(residency.get('completed_stages', ()))
@@ -633,6 +767,20 @@ class DataflowExecution:
                     parts |= member_partitions(self._physical, residency, 'active')
                 retired_ids = set(participant_ids(self._physical, parts))
             for contribution in self._restore_image.contributions:
+                # Older iterator-close cuts can mark the terminal's input
+                # closed while a finite kernel still has an unproduced suffix.
+                # This is not evidence of satisfying the declared action: the
+                # completed/limit-satisfied branch above already handled that.
+                # Refuse before any participant starts, rather than replaying
+                # these closures as proof of a new final publication.
+                frontier_ref = contribution.operator_states.get(identity(
+                    ['worker-frontier', partitions[contribution.participant_id]]))
+                if frontier_ref is not None:
+                    frontier = json.loads(b''.join(self._store.read(
+                        frontier_ref, max_bytes=self._bounds.max_state_bytes)))
+                    if terminal_inputs.intersection(frontier.get('closed_inputs', ())):
+                        raise DataflowError('INCOMPATIBLE_HISTORY',
+                            'incomplete action closed its terminal input without satisfying its declared demand')
                 if contribution.participant_id in retired_ids:
                     continue  # Its original ACKed output is restored, not its actor.
                 for occ, ref in contribution.operator_states.items():
@@ -874,6 +1022,8 @@ class DataflowExecution:
         if self._cancelled:
             return ExecutionStatus(state='cancelled', pending_events=0, confirmed_rows=self._confirmed_rows)
         self._check_stop()
+        if self._state == "succeeded" and self._physical is None:
+            return ExecutionStatus(state=self._state, pending_events=0, confirmed_rows=self._confirmed_rows)
         if self._waiting_for_fit:
             self._launch_phase()
             if self._waiting_for_fit:
@@ -1072,8 +1222,8 @@ class DataflowExecution:
             observe_models(self, event, payload)
             from ..dataflow_operator_observations import observe_operator
             observe_operator(self, event, payload)
-            from ...planning.dataflow_graph_adapter import observe_graph_progress
-            observe_graph_progress(self, event, payload)
+            from ..journal.run_telemetry import observe_graph_progress
+            observe_graph_progress(self._graph_finished, self._graph, self._bounds, payload)
             key = self._report_keys.get(occ)
             if key is not None:
                 self._checked.progress(key, **{k: metrics[k] - old[k] for k in metrics})
@@ -1089,8 +1239,16 @@ class DataflowExecution:
                 if not any(n in self._graph.terminals for st in self._physical.stages
                            if st.stage_id == lease.stage_id for n in st.occurrences):
                     raise DataflowError("FENCED", "non-terminal allocation emitted a terminal record")
+                count = 1
+                if 'result_batch' in payload:
+                    from ..contracts.relational_region import KEY_BATCH_SUFFIXES
+                    count = payload.get('rows')
+                    if (self._request.kind != 'iter_rows' or not lease.stage_id.endswith(KEY_BATCH_SUFFIXES)
+                            or type(count) is not int or not 0 < count <= self._bounds.max_output_rows - self._terminal_seen
+                            or type(payload.get('sequence')) is not int or payload['sequence'] != self._terminal_seen):
+                        raise DataflowError('FENCED', 'terminal Arrow batch differs from its declared delivery range')
                 self._terminal.receive(payload, endpoint)
-                self._terminal_seen += 1
+                self._terminal_seen += count
                 if self._limit is not None and self._terminal_seen >= self._limit:
                     self.satisfy_terminal()
             else:
@@ -1106,7 +1264,17 @@ class DataflowExecution:
             if payload["scope"] == "input_satisfied":
                 spec = next((x for x in self._physical.exchanges if x.edge_id == payload["edge_id"]), None)
                 consumer = payload["consumer_partition"]
-                if spec is None or consumer not in lease.partition_ids or consumer not in spec.consumer_partitions:
+                if spec is None:
+                    # Internal edges have the same completion fact as transport
+                    # edges, with both ends owned by this one sealed assignment.
+                    edge = next((e for e in self._graph.edges if e.edge_id == payload['edge_id']), None)
+                    stage = next((s for s in endpoint._assignment.stages if edge is not None
+                                  and {edge.producer, edge.consumer} <= set(s.occurrences)), None)
+                    if stage is None or consumer not in lease.partition_ids or consumer not in stage.partitions:
+                        raise DataflowError('FENCED', 'internal input completion differs from sealed membership')
+                    self._satisfied_consumers.setdefault(edge.edge_id, set()).add(consumer)
+                    return
+                if consumer not in lease.partition_ids or consumer not in spec.consumer_partitions:
                     raise DataflowError("FENCED", "input completion differs from physical consumer membership")
                 done = self._satisfied_consumers.setdefault(spec.edge_id, set())
                 done.add(consumer)
@@ -1227,8 +1395,19 @@ class DataflowExecution:
                             for key, credit in shares.items()):
                         self._source_credit_needs_rotation = True
         elif event.kind == "cut":
-            from ..contracts.dataflow_codec import decode_wire
-            raw = b"".join(self._store.read(event.payload_ref, max_bytes=self._bounds.max_control_bytes))
+            from ..contracts.dataflow_codec import decode_wire, encode_wire
+            if event.payload_ref is not None:
+                raw = b"".join(self._store.read(event.payload_ref, max_bytes=self._bounds.max_control_bytes))
+            else:
+                if set(event.payload) != {'contribution'} or type(event.payload['contribution']) is not str:
+                    raise DataflowError('INVALID_CONTRACT', 'cut event needs its original encoded contribution')
+                from ..recovery_contract import MAX_DOCUMENT_BYTES
+                limit = min(self._bounds.max_control_bytes, MAX_DOCUMENT_BYTES)
+                if len(encode_wire(event, type_name='WorkerEvent', bounds=self._bounds)) > limit:
+                    raise DataflowError('BUDGET_EXCEEDED', 'cut event exceeds the control envelope')
+                raw = event.payload['contribution'].encode('utf-8')
+                if len(raw) > limit // 4:
+                    raise DataflowError('BUDGET_EXCEEDED', 'inline cut exceeds its control allowance')
             contribution = decode_wire(raw, type_name="CutContribution", bounds=self._bounds)
             from ..contracts.dataflow_codec import compute_participant_id
             expected = {compute_participant_id(lease.stage_id, p) for p in lease.partition_ids}
@@ -1255,6 +1434,11 @@ class DataflowExecution:
             spec = next((x for x in self._physical.exchanges if x.edge_id == edge.edge_id), None)
             if spec is not None and set(spec.consumer_partitions) <= self._satisfied_consumers.get(edge.edge_id, set()):
                 continue
+            if spec is None:
+                stage = next((s for s in self._physical.stages
+                              if {edge.producer, edge.consumer} <= set(s.occurrences)), None)
+                if stage is not None and set(stage.partitions) <= self._satisfied_consumers.get(edge.edge_id, set()):
+                    continue
             if not self._source_demand_satisfied(edge.consumer):
                 return False
         return True
@@ -1382,6 +1566,11 @@ class DataflowExecution:
                     endpoint.send_business({'kind': 'pause'})
             elif self._stopping:
                 self._set_result(image)
+            elif not all_workers <= self._done and durable.can_drain_in_place():
+                # The same admitted owners can finish against their sealed
+                # inputs. ACK the real cut and keep their live output iterators.
+                durable.committed(image, False)
+                self._continue_after_cut()
             else:
                 self._retire_phase(image)
         elif all_workers <= self._done and self._phase_index < len(self._phases) - 1:
@@ -1399,12 +1588,15 @@ class DataflowExecution:
         elif self._stopping or all_workers <= self._done:
             self._set_result(image)
         else:
-            self._cut = None
-            self._contributions.clear()
-            self._idle.clear()
-            self._checkpoint_requested = False
-            self._checkpoint_deferred.clear()
-            self._resume_workers()
+            self._continue_after_cut()
+
+    def _continue_after_cut(self):
+        self._cut = None
+        self._contributions.clear()
+        self._idle.clear()
+        self._checkpoint_requested = False
+        self._checkpoint_deferred.clear()
+        self._resume_workers()
 
     def _resume_workers(self, *, publishing=False):
         # Shares sum to the original run ceilings, never one full allowance per
@@ -1498,6 +1690,13 @@ class DataflowExecution:
         limits = self._action.context.limits
         if len(sources) > min(limits['checkpoint_unconfirmed_rows'], limits['checkpoint_unconfirmed_bytes']):
             return  # A serial source grant rotates only at a real ACK boundary.
+        if (len(self._endpoints) == 1 and len(self._graph.nodes) == 2 and len(sources) == 1
+                and self._publication_frontiers[0] - self._last_checkpoint_rows
+                >= limits['checkpoint_unconfirmed_rows']):
+            # A single source connected directly to its terminal exhausted the
+            # entire admitted row window. Its sealed prefix cannot release any
+            # credit until the real receipt; an early resume can only go idle.
+            return
         from ..recovery_contract import identity
         commit_id = identity([self._run_id(), self._action.action_id, self._cut.sequence])
         fact = self._action.context.journal.execution_commit(commit_id)
@@ -1576,6 +1775,17 @@ class DataflowExecution:
         self._state = "succeeded"
 
     # -- E006 finish ------------------------------------------------------
+    def graph_result(self, result):
+        from ..journal.run_telemetry import committed_graph_metrics
+        from ..outputs.terminals import graph_result
+
+        committed = committed_graph_metrics(self._graph, self._physical, self._restore_image,
+            self._store, max_state_bytes=self._bounds.max_state_bytes)
+        action = self.request.action
+        return graph_result(self._graph, self._physical, committed, self._graph_finished,
+            action.context.journal.execution_commits(action.action_id), result.result_ref,
+            workers=self._observed_worker_count)
+
     def finish(self):
         if self._failure is not None:
             raise self._failure
@@ -1747,7 +1957,10 @@ class DataflowExecution:
         if physical_closed and stopped:
             self._store.close()
             from ..storage.gc import collect_published_orphans, defer_run_gc
-            if getattr(self._action.context, '_native_prompt_journal', None) is not None:
+            if self._physical is None and self._state == 'succeeded':
+                # A direct metadata read published no artifacts to collect.
+                pass
+            elif getattr(self._action.context, '_native_prompt_journal', None) is not None:
                 defer_run_gc(self._action.context, self._bounds)
                 self._published_gc = {'removed':0,'bytes':0,'blocked':'Deferred until original native journal closes'}
             else:

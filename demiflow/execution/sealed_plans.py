@@ -1,10 +1,4 @@
-"""Sealing and bounded safe reading of sealed execution inputs.
-
-This module owns the durable side: it seals the execution-bindings document into
-a content-addressed in-run carrier referenced through the existing journal
-``<action_id>-execution-bindings`` source-binding slot, and reads back the F1
-sealed plan plus its bindings. It imports the interpreter one-way for the shared
-contract types and validation; the interpreter never imports this reader.
+"""Read and authenticate sealed plans and their published execution bindings.
 
 Reading is engine-neutral: no workbench/forge import, no business Python, no
 plan pickle. Every carrier read is run-relative, symlink-refusing, length- and
@@ -16,17 +10,16 @@ import hashlib
 import json
 from pathlib import Path
 
-from .recovery_contract import RecoveryContractError, document, identifier, identity
+from .recovery_contract import RecoveryContractError, identifier, identity
 from .plan_interpreter import (
     EXECUTION_BINDINGS_SCHEMA, EXECUTION_BINDINGS_SCHEMA_V2, PlanContractError,
     _validate_artifact_ref, _validate_bindings, _validate_manifest_ref,
 )
 from .run_journal import RunJournal
-from .state_artifacts import atomic_bytes
 from ..planning.dag import validate_logical_dag, validate_physical_execution_plan
 
 SEALED_PLAN_FACTS_SCHEMA = "demiflow.sealed_plan_facts.v1"
-MAX_SEALED_PLAN_BYTES = 4 * 1024 ** 2   # mirrors chain.MAX_SEALED_PLAN_BYTES
+MAX_SEALED_PLAN_BYTES = 4 * 1024 ** 2
 MAX_BINDINGS_BYTES = 4 * 1024 ** 2
 
 _F1_KEYS = frozenset({"schema", "run_id", "action_id", "dag_id", "plan_id",
@@ -34,7 +27,6 @@ _F1_KEYS = frozenset({"schema", "run_id", "action_id", "dag_id", "plan_id",
                       "sealed_at"})
 _SEALED_PLAN_KEY = "-sealed-plan"
 _BINDINGS_KEY = "-execution-bindings"
-_BINDINGS_DIR = ("scratch", "chain-execution-bindings")
 
 
 def _require(condition, reason, detail):
@@ -257,62 +249,3 @@ def load_execution_bindings(directory, action_id, *, sealed_plan) -> dict:
     _validate_bindings(doc, sealed_plan["logical_dag"], sealed_plan["physical_plan"],
                        facts["artifact_manifest_ref"])
     return {"ref": ref, "document": doc}
-
-
-def seal_execution_bindings(run, action, *, logical_dag, physical_plan, profiles,
-                            programs, driver_stage_ids, source_bindings,
-                            channel_options, checkpoint_rows, supported_slice,
-                            executions=None) -> dict:
-    """Seal the execution-bindings document; idempotent re-seal must be identical.
-
-    The carrier is content-addressed and unregistered (mirroring F1) so it survives
-    run teardown for audit. The reference is bound through the existing immutable
-    journal source-binding slot; no new journal table is introduced.
-    """
-    action_id = action.action_id
-    _check_action_id(action_id)
-    try:
-        validate_logical_dag(logical_dag)
-        validate_physical_execution_plan(physical_plan)
-    except (ValueError, RecoveryContractError) as exc:
-        raise PlanContractError("invalid_contract", str(exc))
-    manifest_ref = physical_plan["artifact_manifest_ref"]
-    if executions is None:
-        doc = {"schema": EXECUTION_BINDINGS_SCHEMA, "run_id": run.ref.run_id,
-               "action_id": action_id, "dag_id": logical_dag["dag_id"],
-               "plan_id": physical_plan["plan_id"], "artifact_manifest_ref": manifest_ref,
-               "supported_slice": supported_slice, "profiles": profiles, "programs": programs,
-               "driver_stage_ids": driver_stage_ids, "source_bindings": source_bindings,
-               "channel_options": channel_options, "checkpoint_rows": checkpoint_rows}
-    else:
-        _require(not programs, "invalid_contract",
-                 "v2 bindings must pass an empty programs sequence")
-        doc = {"schema": EXECUTION_BINDINGS_SCHEMA_V2, "run_id": run.ref.run_id,
-               "action_id": action_id, "dag_id": logical_dag["dag_id"],
-               "plan_id": physical_plan["plan_id"], "artifact_manifest_ref": manifest_ref,
-               "supported_slice": supported_slice, "profiles": profiles, "executions": executions,
-               "driver_stage_ids": driver_stage_ids, "source_bindings": source_bindings,
-               "channel_options": channel_options, "checkpoint_rows": checkpoint_rows}
-    _validate_bindings(doc, logical_dag, physical_plan, manifest_ref)
-    try:
-        raw = document(doc, MAX_BINDINGS_BYTES)
-    except RecoveryContractError as exc:
-        raise PlanContractError("artifact_too_large", str(exc))
-    digest = hashlib.sha256(raw).hexdigest()
-    path = run.directory.joinpath(*_BINDINGS_DIR, digest + ".json")
-    ref = {"path": str(path.relative_to(run.directory)), "sha256": digest, "bytes": len(raw)}
-    key = action_id + _BINDINGS_KEY
-    existing = run.journal.source_binding(key)
-    if existing is not None and existing != ref:
-        raise PlanContractError("identity_mismatch",
-                                "execution bindings already sealed with a different reference")
-    if any(item.is_symlink() for item in (path, *path.parents)):
-        raise PlanContractError("unsafe_artifact", "execution-bindings path contains a symlink")
-    with run.journal.publication_guard(run.fence):
-        if not path.exists():
-            atomic_bytes(path, raw)
-        elif path.read_bytes() != raw:
-            raise PlanContractError("corrupt_artifact",
-                                    "existing execution-bindings artifact is corrupt")
-    run.journal.bind_source(run.fence, key, ref)
-    return ref

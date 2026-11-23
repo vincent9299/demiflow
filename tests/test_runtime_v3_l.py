@@ -243,21 +243,15 @@ def _assert_no_fallback(ex, engine, call):
 def test_l001(ex, engine, _no_ray_data):
     assert LocalDatasetExecutor.NAME == 'local'
     assert ex.NAME == 'local'
-    # Same construction params only change provider, never the engine route.
-    other = LocalDatasetExecutor(workers=2, unified_chain=False, unified_graph=False,
-                                 unified_queue_chain=False)
+    other = LocalDatasetExecutor(workers=2)
     assert other.NAME == 'local'
-    assert other._unified_chain is False
-    # unified_chain=False must not silently restore old semantics: a public
-    # action still forwards to the unified entry, not a retired route.
     engine.result = [{'id': 0}]
     Dataset(_source(), _plan(), other).take(1)
     assert engine.execute_calls == [('take', engine.requests[-1].plan_id)]
     other.close()
-    with pytest.raises(ValueError):
-        LocalDatasetExecutor(sort_workers=0)
-    with pytest.raises(ValueError):
-        LocalDatasetExecutor(sort_workers=True)
+    for option in ('unified_chain', 'unified_graph', 'unified_queue_chain', 'sort_workers'):
+        with pytest.raises(TypeError, match=option):
+            LocalDatasetExecutor(**{option: 1})
     _assert_retired_absent()
 
 
@@ -537,18 +531,10 @@ def test_l021(ex, engine, tmp_path):
 # L022 close — release only this executor's scope.
 # --------------------------------------------------------------------------- #
 def test_l022(ex, engine, tmp_path):
-    pool = ex.executor  # force pool creation
-    assert ex._pool is pool
-    spill = tmp_path / 'demiflow-block-test.pkl'
-    spill.write_bytes(b'x')
-    ex._spill_paths.add(str(spill))
-    ex._spill_bytes = 1
     # Another run's neutral handle must not be touched by this close.
     other_handle = FakeInputHandle([{'id': 9}])
     ex.close()
-    assert ex._pool is None
-    assert not spill.exists()
-    assert ex._spill_paths == set() and ex._spill_bytes == 0
+    assert ex._local_kernel_closed and not hasattr(ex, 'executor')
     assert other_handle.released is False
     assert engine.execute_calls == [], 'close must not run an action'
     ex.close()  # idempotent
@@ -585,22 +571,10 @@ def test_l023(ex, engine):
 # --------------------------------------------------------------------------- #
 def test_l024(ex, engine):
     from demiflow.operator_llm.model import OperatorLLMUsage
-    class _Coordinator:
-        def __init__(self, usage):
-            self._usage = usage
-        def usage(self):
-            return self._usage
-
-    first = OperatorLLMUsage(2, 3, 3, 2, 1, 5, 7)
-    second = OperatorLLMUsage(3, 4, 4, 3, 1, 7, 11)
     observed = OperatorLLMUsage(1, 2, 2, 1, 1, 13, 17).to_dict()
-    ex._prompt_coordinators['node-a'] = _Coordinator(first)
-    ex._prompt_coordinators['node-b'] = _Coordinator(second)
     ex._dataflow_prompt_usage = observed.copy()
-    expected = {key: value + second.to_dict()[key] + observed[key]
-                for key, value in first.to_dict().items()}
-    assert ex.operator_llm_usage() == expected
-    assert ex.operator_llm_usage() == expected  # reading metrics is not accounting again
+    assert ex.operator_llm_usage() == observed
+    assert ex.operator_llm_usage() == observed  # reading metrics is not accounting again
     assert ex._dataflow_prompt_usage == observed
     assert engine.execute_calls == [], 'usage must not recompute or impose a budget'
     assert engine.requests == []
@@ -616,19 +590,21 @@ def test_l024(ex, engine):
 # L026 materialize_graph — delegate to thin translator, no independent driver.
 # --------------------------------------------------------------------------- #
 def test_l026(ex, engine, monkeypatch):
-    import demiflow.execution.graph as graph_mod
+    from demiflow.execution.executors import graph as graph_mod
+    from demiflow.execution.action_driver import dataflow as graph_driver
     import demiflow.execution.run_context as run_context_mod
 
     seen = {}
 
-    def fake_run_local_graph(graph_spec, **kwargs):
+    def graph_request(graph_spec, executor):
         seen['graph_spec'] = graph_spec
         # F015 thin translator forwards to the same unified execute_action entry.
         request = engine.make_action_request(ex, _source(), _plan(),
                                              kind='materialize', arguments={})
-        return engine.run_dataset_action(request)
+        return request
 
-    monkeypatch.setattr(graph_mod, 'run_local_graph', fake_run_local_graph)
+    monkeypatch.setattr(graph_mod, 'graph_action_request', graph_request)
+    monkeypatch.setattr(graph_driver, 'run_graph_action', lambda request, **kwargs: engine.run_dataset_action(request))
     monkeypatch.setattr(run_context_mod, 'current_action', lambda: None)
     graph_spec = object()
     with pytest.raises(RuntimeError, match='native action context'):

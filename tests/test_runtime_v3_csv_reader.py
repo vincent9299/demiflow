@@ -9,7 +9,7 @@ import pyarrow.csv as pacsv
 import pytest
 
 from demiflow.data.sources import FileSource
-from demiflow.execution.contracts.dataflow import ProgramDeclaration
+from demiflow.execution.contracts.dataflow import ArtifactRef, ProgramDeclaration
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.seal.plan import _stage_one_program, verify_dataflow_program
 from demiflow.execution.recovery_contract import identity
@@ -156,15 +156,9 @@ def test_csv_invalid_row_handler_runs_and_business_helper_drift_refuses_loaded_p
                                       store=services.store, bounds=services.bounds)
     restored = verified.value.options['parse_options'].invalid_row_handler
     assert restored(None) == 'skip'
-    from types import SimpleNamespace
-    from demiflow.data.plan import LogicalPlan
-    from demiflow.execution.chain import snapshot_code_sources
-    from demiflow.execution.run_context import RunContext
-    with RunContext.start(tmp_path / 'archive-run') as run:
-        archives = snapshot_code_sources(SimpleNamespace(context=run), LogicalPlan(()), source=source)
-        assert {str(helper), str(handler_path)} <= {item['source'] for item in archives}
-        for item in archives:
-            assert (run.directory / item['path']).read_bytes() == Path(item['source']).read_bytes()
+    for name, path in ((helper_name, helper), (handler_name, handler_path)):
+        archive_ref = ArtifactRef(**manifest['business_sources'][name])
+        assert b''.join(services.store.read(archive_ref, max_bytes=archive_ref.size_bytes)) == path.read_bytes()
     helper.write_text('def decision():\n    return "error"\n')
     try:
         with pytest.raises(DataflowError, match='Loaded program code differs'):

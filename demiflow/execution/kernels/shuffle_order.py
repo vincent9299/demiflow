@@ -6,36 +6,18 @@ keys are changed. A first sort makes identical row occurrences adjacent; the
 second hashes the seed, row digest and per-row duplicate ordinal. Only the last
 typed key is retained, never a table-sized counter dictionary.
 """
-from copy import copy
 from dataclasses import dataclass, replace
 import hashlib
-import json
 import sys
 
 from .dataflow import _err, _seed, _materialize_row, _input_row_bytes
-from .ordering import SortWindow, _build_sort_runs, merge_sort_runs, _release_runs, _provenance
-from ..dataflow_record_frames import resident_limit, raw_workspace, read_document, metadata_bytes, _typed_shape, _json_shape, _record_metadata
+from .ordering import OrderingServices, SortWindow, _build_sort_runs, merge_sort_runs, _release_runs, _provenance
+from ..dataflow_record_frames import resident_limit, raw_workspace, read_document, _typed_shape, _json_shape, _record_metadata
 from ..exchange.dataflow_bridge import _encode_payload, _decode_payload
 
 FIELD = 'shuffle_order_version'
 VERSION = 'typed-multiset-v1'
 _DOMAIN = b'demiflow-shuffle-typed-multiset-v1\x00'
-
-
-class _WindowServices:
-    """Borrow existing service ports, including the finite-stop wrapper.
-
-    Only bounds narrow; rebuilding RuntimeServices would copy its mappings and
-    would discard the real worker's finite computation cancellation view.
-    """
-    __slots__ = ('_original', 'bounds')
-
-    def __init__(self, original, resident_bytes):
-        self._original = original
-        self.bounds = replace(original.bounds, max_resident_bytes=resident_bytes)
-
-    def __getattr__(self, name):
-        return getattr(self._original, name)
 
 
 @dataclass(frozen=True)
@@ -80,52 +62,6 @@ def shuffle_windows(services):
     return ShuffleWindows(grant, 3 * grant // 8, metadata, window)
 
 
-def input_records(port, services, windows):
-    """Borrow the same immutable spool under the reserved input subwindow."""
-    scoped = copy(port)
-    scoped._services = _WindowServices(services, windows.input_bytes)
-    held = metadata_bytes((port._refs, port._borrowed, port._pending, port._borrowed_proofs))
-    if held > windows.metadata_bytes:
-        raise _err('BUDGET_EXCEEDED', 'shuffle retained input descriptors exceed their reserved window')
-    scoped._shuffle_input_window = windows.input_bytes - held
-    if scoped._shuffle_input_window < 1:
-        raise _err('BUDGET_EXCEEDED', 'shuffle input descriptors exceed their reader subwindow')
-    def call(function, *args, _frame_retained=0, **kwargs):
-        return function(*args, services=scoped._services,
-            retained=held + _frame_retained, **kwargs)
-    scoped._shuffle_frame_call = call
-    return scoped.records(), replace(windows, input_metadata_bytes=held)
-
-
-def spool_fragment_workspace(raw, maximum):
-    """Decode projection for one unchanged state-codec record fragment."""
-    outer = 2 * raw_workspace(raw, typed=False)
-    if outer > maximum:
-        raise _err('BUDGET_EXCEEDED', 'shuffle input record exceeds its reader subwindow')
-    item = json.loads(raw)
-    if item[0] != 'record':
-        raise _err('CORRUPT_ARTIFACT', 'shuffle input fragment is not a record')
-    size = outer + raw_workspace(item[3].encode('utf-8')) + 256
-    if size + 4096 > maximum:
-        raise _err('BUDGET_EXCEEDED', 'decoded shuffle input record exceeds its reader subwindow')
-    return size
-
-
-def admit_spool_image(raw, maximum):
-    """Pre-admit an existing bounded segment before decoding its record list."""
-    outer = 2 * raw_workspace(raw, typed=False)
-    if outer > maximum:
-        raise _err('BUDGET_EXCEEDED', 'shuffle input segment exceeds its reader subwindow')
-    envelope = json.loads(raw)
-    held = outer
-    for item in envelope[1][1]:
-        if item[0] != 'record':
-            raise _err('CORRUPT_ARTIFACT', 'shuffle input segment contains a non-record')
-        held += raw_workspace(item[3].encode('utf-8'))
-        if held > maximum:
-            raise _err('BUDGET_EXCEEDED', 'decoded shuffle segment exceeds its reader subwindow')
-
-
 class _TypedKeys:
     def __init__(self, services, window, *, seed=None):
         self.services, self.window, self.seed = services, window, seed
@@ -141,7 +77,7 @@ class _TypedKeys:
         if record.inline is not None:
             row = record.inline
         else:
-            scoped = _WindowServices(services, window.codec_bytes)
+            scoped = OrderingServices(services, window.codec_bytes)
             from ..arrow_payload import is_arrow_record
             if is_arrow_record(record):
                 row = _materialize_row(record, scoped)

@@ -21,7 +21,7 @@ from time import time_ns
 
 from ...data.datasink import Datasink
 from ...data.plan import CallableSpec, LogicalPlan, MapOp
-from ..chain import _stable_code_identity, plan_code_pin
+from .business_sources import stable_code_identity, plan_code_pin
 from ..contracts.dataflow import (
     ArtifactRef, Bounds, CompiledDataflow, DataflowGraph, LoadedProgram,
     PhysicalDataflow, ProgramDeclaration, SealedExecution, thaw_json,
@@ -194,7 +194,7 @@ def _base_code_identity_from_value(kind: str, value):
             except NotImplementedError as exc:
                 raise DataflowError("INVALID_CONTRACT",
                                     "Sink program lacks a durable recovery identity") from exc
-            return {"sink": _stable_code_identity(describe(type(value))),
+            return {"sink": stable_code_identity(describe(type(value))),
                     "declaration": declaration}
     except RecoveryContractError as exc:
         raise DataflowError("INVALID_CONTRACT", "Program code-pin refused: " + str(exc)) from exc
@@ -202,7 +202,7 @@ def _base_code_identity_from_value(kind: str, value):
 
 
 def _code_identity_from_value(kind, value, *, sources=None):
-    from ..dataflow_code import business_sources, source_identity
+    from .business_sources import business_sources, source_identity
     return {**_base_code_identity_from_value(kind, value),
             'imports': source_identity(business_sources(kind, value) if sources is None else sources)}
 
@@ -238,7 +238,7 @@ def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds
         literal = literal_reference(value, bounds)
         if literal is not None:
             value = literal
-    from ..dataflow_code import business_sources, stage_sources
+    from .business_sources import business_sources, stage_sources
     sources = business_sources(kind, value)
     code_identity = _code_identity_from_value(kind, value, sources=sources)
     manifest = {"schema": PROGRAM_SCHEMA, "occurrence_id": declaration.occurrence_id,
@@ -285,7 +285,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
         if binding is None or binding['owner'] in shared_payloads:
             continue
         from ..dataflow_program_pickle import stage_payload
-        from ..dataflow_code import business_sources, source_identity, stage_sources, MAX_SOURCES
+        from .business_sources import business_sources, source_identity, stage_sources, MAX_SOURCES
         sources = {}
         for occ in binding['members']:
             member = declarations[occ]
@@ -378,7 +378,7 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
     if 'shared_actor' in manifest and (type(shared_sources) is not dict or set(shared_sources) != {'refs', 'imports'}):
         raise DataflowError('CORRUPT_ARTIFACT', 'Shared actor program has no complete source bundle')
     if cache is not None:
-        from ..dataflow_code import mount_sources
+        from .business_sources import mount_sources
         if shared_sources is not None:
             mount_sources(shared_sources['refs'], shared_sources['imports'], store=store, cache=cache)
         mount_sources(manifest.get('business_sources', {}), code_identity.get('imports', {}),
@@ -440,7 +440,7 @@ def verify_completed_live_program(ref, *, expected_pin, declaration, store, boun
     original final ACKed cut before using it to read an already published result.
     Current declarations are inspected, never instantiated or invoked.
     """
-    from ..dataflow_code import MAX_SOURCES, source_media
+    from .business_sources import MAX_SOURCES, source_media
     from ..dataflow_thread_programs import marker
     manifest = _read_json(store, ref, max_bytes=bounds.max_control_bytes, media_type=PROGRAM_MEDIA)
     if type(manifest) is not dict:
@@ -516,7 +516,8 @@ def _generate_constants(graph: DataflowGraph) -> dict:
     return constants
 
 
-def resolve_execution_constants(graph: DataflowGraph, *, action: RunAction, store, policy=None) -> ArtifactRef:
+def resolve_execution_constants(graph: DataflowGraph, *, action: RunAction, store, policy=None,
+                                column_bindings=None) -> ArtifactRef:
     if not isinstance(graph, DataflowGraph):
         raise DataflowError("INVALID_CONTRACT", "resolve_execution_constants requires a DataflowGraph")
     if not isinstance(action, RunAction):
@@ -528,6 +529,8 @@ def resolve_execution_constants(graph: DataflowGraph, *, action: RunAction, stor
         # Recovery reads the original constants; never re-generate seed=None.
         return _artifact_from_json(existing)
     constants = _generate_constants(graph)
+    for occurrence, binding in (column_bindings or {}).items():
+        constants.setdefault(occurrence, {}).update(binding)
     from ..dataflow_managed_devices import service_constants
     for occurrence, value in service_constants(graph, policy=policy).items():
         constants.setdefault(occurrence, {}).update(value)
@@ -781,3 +784,36 @@ def verify_action_programs(action, graph, physical, sealed, *, store, bounds):
         verify_dataflow_program(node.program_ref, expected_pin=expected, store=store,
                                 bounds=bounds, live_binding=live_binding)
     return pending
+
+
+def validate_graph_replay(action, declaration, credit):
+    """Verify original routing and admitted credit before creating any graph workers."""
+    if action.context.journal.source_binding(action.action_id + _SEAL_KEY) is None:
+        return
+    from ..sealed_plans import load_sealed_plan
+    bundle = load_sealed_plan(action.context.directory, action.action_id)
+    graph, physical = bundle['graph'], bundle['physical']
+    originals = [node.kernel.configuration['arguments'].get('graph') for node in graph.nodes if node.occurrence_id in graph.terminals]
+    if [thaw_json(value) for value in originals] != [declaration]:
+        raise DataflowError('INCOMPATIBLE_HISTORY', 'graph declaration differs from the sealed routing')
+    router = next(node.occurrence_id for node in graph.nodes if 'graph_route' in node.kernel.configuration)
+    selected = {edge.edge_id for edge in graph.edges if edge.producer == router or edge.consumer == router}
+    for exchange in physical.exchanges:
+        if exchange.edge_id in selected and (exchange.credit_rows > credit['rows'] or exchange.credit_bytes > credit['bytes']):
+            raise DataflowError('BUDGET_EXCEEDED', 'sealed graph credit exceeds the current admitted grant')
+
+
+def load_native_execution(run, action_id, *, execution_id):
+    """Read one published v2 placement, using only its immutable F1 and bindings."""
+    from ..plan_interpreter import PlanContractError, interpret_physical_plan
+    from ..sealed_plans import load_execution_bindings, load_sealed_plan
+
+    sealed = load_sealed_plan(run.directory, action_id, version='v2')
+    bindings = load_execution_bindings(run.directory, action_id, sealed_plan=sealed)
+    layout = interpret_physical_plan(sealed["logical_dag"], sealed["physical_plan"],
+                                     bindings=bindings,
+                                     manifest_ref=sealed["facts"]["artifact_manifest_ref"])
+    matches = [entry for entry in layout.executions if entry.execution_id == execution_id]
+    if len(matches) != 1:
+        raise PlanContractError("invalid_contract", "execution_id is absent or ambiguous in the sealed layout")
+    return layout, matches[0]

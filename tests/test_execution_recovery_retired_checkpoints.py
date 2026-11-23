@@ -9,7 +9,7 @@ from demiflow.execution import RecoveryContractError
 
 
 @pytest.mark.parametrize('entry', ['checkpoint', 'checkpoint_async', 'checkpoint_lance',
-                                   'checkpoint_lance_async', 'native_jsonl', 'native_lance'])
+                                   'checkpoint_lance_async', 'native_lance'])
 @pytest.mark.parametrize('cached', [False, True])
 def test_retired_entry_rejects_before_input_files_or_worker(entry, cached, tmp_path, monkeypatch):
     calls = []
@@ -29,10 +29,7 @@ def test_retired_entry_rejects_before_input_files_or_worker(entry, cached, tmp_p
     import demiflow.lance.checkpoint as legacy_lance
     monkeypatch.setattr(legacy_lance, 'read_checkpoint_record', unexpected)
     with pytest.raises(RecoveryContractError, match='Explicit checkpoint orchestration is retired'):
-        if entry == 'native_jsonl':
-            from demiflow.data.local_relational import checkpoint
-            checkpoint(rows, target, 'v1')
-        elif entry == 'native_lance':
+        if entry == 'native_lance':
             legacy_lance.checkpoint_lance(rows, str(target), schema=None, fingerprint='v1')
         else:
             arguments = {'schema': None, 'fingerprint': 'v1'} if 'lance' in entry else {'version': 'v1'}

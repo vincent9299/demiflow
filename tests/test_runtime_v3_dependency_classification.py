@@ -1,4 +1,5 @@
 """Installed symlink libraries remain environment-owned; business code stays pinned."""
+from dataclasses import asdict
 import importlib
 import importlib.util
 import json
@@ -12,7 +13,9 @@ import types
 import pytest
 
 from demiflow import data
-from demiflow.execution import chain
+from demiflow.execution.seal import business_sources
+from demiflow.execution.contracts.dataflow import ArtifactRef
+from runtime_v3_program_probe import program_store, stage_callable
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunContext, RunAction
 
@@ -38,7 +41,7 @@ def test_installation_package_symlink_is_not_business(tmp_path, monkeypatch):
     _installation(monkeypatch, site)
     module = _module('library', site/'library'/'__init__.py')
     assert Path(module.__file__).resolve() == actual/'__init__.py'
-    assert chain._classify_dependency_module(module) is None
+    assert business_sources._classify_dependency_module(module) is None
 
 
 @pytest.mark.parametrize('kind', ['same_name', 'fake_site_packages', 'business_symlink', 'editable', 'dotdot'])
@@ -64,7 +67,7 @@ def test_business_paths_do_not_acquire_installation_exemption(tmp_path, monkeypa
     elif kind == 'dotdot':
         filename = site/'..'/'business'/'site-packages'/'numpy.py'
     module = _module('numpy', filename)
-    assert chain._classify_dependency_module(module) == source.resolve()
+    assert business_sources._classify_dependency_module(module) == source.resolve()
 
 
 def test_source_and_module_path_must_agree_on_installation(tmp_path, monkeypatch):
@@ -76,12 +79,12 @@ def test_source_and_module_path_must_agree_on_installation(tmp_path, monkeypatch
     _installation(monkeypatch, site)
     original = inspect.getsourcefile
     monkeypatch.setattr(inspect, 'getsourcefile', lambda value: str(source) if value is module else original(value))
-    assert chain._classify_dependency_module(module) == source
+    assert business_sources._classify_dependency_module(module) == source
 
 
 @pytest.mark.parametrize('name', ['numpy', 'pandas', 'pyarrow', 'pytest'])
 def test_real_installed_third_party_is_environment_owned(name):
-    assert chain._classify_dependency_module(importlib.import_module(name)) is None
+    assert business_sources._classify_dependency_module(importlib.import_module(name)) is None
 
 
 def _load(path, name, monkeypatch):
@@ -104,35 +107,54 @@ def test_actual_pin_archive_and_fresh_worker_helper_drift(tmp_path, monkeypatch,
     _load(helper, helper_name, monkeypatch)
     module = _load(rule, rule_name, monkeypatch)
     plan = data.from_items([{'x': 1}]).map(module.transform)._plan
-    pin = chain.plan_code_pin(plan)
+    pin = business_sources.plan_code_pin(plan)
     assert set(pin['dependencies']) == {helper_name, rule_name}
     with RunContext.start(tmp_path/'run') as run:
         declaration = {'kind': 'chain-materialize', 'source': {'source_id': 'fixture'}}
         run.journal.bind_execution_action(run.fence, 'main-action', declaration)
         action = RunAction(run, 'main-action', declaration)
-        ref = chain.stage_plan_artifact(action, plan)
-        assert {Path(item['source']) for item in ref['code_sources']} == {helper, rule}
-        ref_file = tmp_path/'plan-ref.json'; ref_file.write_text(json.dumps(ref))
-        script = '''import cloudpickle,json,pathlib,sys
-from demiflow.execution.chain import verify_loaded_plan,plan_code_pin
-ref=json.loads(pathlib.Path(sys.argv[2]).read_text())
-plan=cloudpickle.loads((pathlib.Path(sys.argv[1])/ref['path']).read_bytes())
-verify_loaded_plan(plan,ref,None)
-print(json.dumps(plan_code_pin(plan),sort_keys=True))
-'''
-        env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(tmp_path), str(Path.cwd()), str(Path.cwd()/'tests')]),
-                   PYTHONDONTWRITEBYTECODE='1')
-        def worker():
-            return subprocess.run([sys.executable, '-B', '-c', script, str(run.directory), str(ref_file)],
-                                  capture_output=True, text=True, env=env, timeout=30)
-        unchanged = worker()
-        assert unchanged.returncode == 0, unchanged.stderr
-        assert json.loads(unchanged.stdout) == pin
-        archived = {item['path']: (run.directory/item['path']).read_bytes() for item in ref['code_sources']}
-        helper.write_text('def delta():\n    return 9999\n')
-        changed = worker()
-        assert changed.returncode != 0 and 'code-pin differs' in changed.stderr
-        assert all((run.directory/path).read_bytes() == raw for path, raw in archived.items())
+        with program_store(action) as (store, bounds):
+            ref, manifest = stage_callable(plan.operations[0].callable, store=store, bounds=bounds)
+            sources = {name: ArtifactRef(**item) for name, item in manifest['business_sources'].items()}
+            assert set(sources) == {helper_name, rule_name}
+
+            def archived():
+                return {name: b''.join(store.read(item, max_bytes=item.size_bytes)) for name, item in sources.items()}
+
+            original = archived()
+            assert original == {helper_name: helper.read_bytes(), rule_name: rule.read_bytes()}
+            params = {'root': str(run.directory / '.dataflow-store'), 'ref': asdict(ref),
+                      'bounds': asdict(bounds), 'code_identity': manifest['code_identity']}
+            script = """
+import json, pathlib, sys
+from demiflow.execution.contracts.dataflow import ArtifactRef, Bounds
+from demiflow.execution.seal.plan import verify_dataflow_program
+from demiflow.execution.storage.objects import RunArtifactStore
+params = json.load(sys.stdin)
+ref = ArtifactRef(**params['ref'])
+bounds = Bounds(**params['bounds'])
+store = RunArtifactStore(root=pathlib.Path(params['root']), store_id=ref.store_id,
+                         journal=None, readonly=True, bounds=bounds)
+try:
+    program = verify_dataflow_program(ref, expected_pin=params['code_identity'], store=store, bounds=bounds)
+    print(json.dumps(program.value.target({'x': 2})))
+finally:
+    store.close()
+"""
+            env = dict(os.environ, PYTHONPATH=os.pathsep.join((str(tmp_path), str(Path.cwd()))),
+                       PYTHONDONTWRITEBYTECODE='1')
+
+            def worker():
+                return subprocess.run([sys.executable, '-B', '-c', script], input=json.dumps(params),
+                                      capture_output=True, text=True, env=env, timeout=30)
+
+            unchanged = worker()
+            assert unchanged.returncode == 0, unchanged.stderr
+            assert json.loads(unchanged.stdout) == {'x': 3}
+            helper.write_text('def delta():\n    return 9999\n')
+            changed = worker()
+            assert changed.returncode != 0 and 'Loaded program code differs' in changed.stderr
+            assert archived() == original
         run.journal.complete_execution_action(run.fence, 'main-action', {'kind': 'test-complete'})
 
 
@@ -143,7 +165,7 @@ def _captured_plan(module):
 
 
 def test_module_count_limit_is_independent_of_source_size(tmp_path):
-    assert chain._DEP_MAX_MODULES == 64
+    assert business_sources._DEP_MAX_MODULES == 64
     modules = []
     for index in range(65):
         path = tmp_path/f'business_{index}.py'; path.write_text('VALUE = 1\n')
@@ -151,10 +173,10 @@ def test_module_count_limit_is_independent_of_source_size(tmp_path):
     for current, next_module in zip(modules, modules[1:]):
         current.next = next_module
     with pytest.raises(RecoveryContractError, match='manifest exceeds budget'):
-        chain.plan_code_pin(_captured_plan(modules[0]))
+        business_sources.plan_code_pin(_captured_plan(modules[0]))
     path = tmp_path/'wide_business.py'
     with path.open('wb') as stream:
         for _ in range(129):
             stream.write(b'#' + b'x'*65534 + b'\n')
-    pin = chain.plan_code_pin(_captured_plan(_module('owned_wide_business', path)))
+    pin = business_sources.plan_code_pin(_captured_plan(_module('owned_wide_business', path)))
     assert pin['dependencies']['owned_wide_business']['bytes'] == path.stat().st_size

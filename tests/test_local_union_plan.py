@@ -90,14 +90,16 @@ def test_union_accepts_shuffle_and_keeps_each_independent_source(tmp_path):
 def test_many_plain_unions_do_not_allocate_identity_worker_layers(tmp_path, monkeypatch):
     import lance
     import pyarrow as pa
-    from demiflow.execution.dataset_native import Engine
-    from demiflow.data.sources import IterableSource
-    original = Engine.python_rows
-    def checked(self, executor, source, plan):
-        if isinstance(source, IterableSource) and not plan.operations:
-            raise AssertionError('Plain union allocated an identity worker layer')
-        yield from original(self, executor, source, plan)
-    monkeypatch.setattr(Engine, 'python_rows', checked)
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+    prepared = []
+    prepare = DataflowExecution.prepare
+
+    def inspect(execution):
+        result = prepare(execution)
+        prepared.append([node.kernel.kind for node in execution._graph.nodes])
+        return result
+
+    monkeypatch.setattr(DataflowExecution, 'prepare', inspect)
     uri = str(tmp_path/'source.lance')
     lance.write_dataset(pa.table({'key':['a'], 'n':[1]}), uri)
     with data.local_execution(workers=2, partitions=2, temp_directory=str(tmp_path)):
@@ -108,6 +110,8 @@ def test_many_plain_unions_do_not_allocate_identity_worker_layers(tmp_path, monk
         assert len(combined._source.inputs) == 15
         actual = combined.reduce_by_key('key', lambda s,r: {'key':r['key'], 'n':(s['n'] if s else 0)+r['n']}).take_all()
     assert actual == [{'key':'a', 'n':15}]
+    assert len(prepared) == 1
+    assert 'MapOp' not in prepared[0] and 'MapBatchesOp' not in prepared[0]
 
 
 def test_union_flatten_keeps_intervening_transform_scope(tmp_path):

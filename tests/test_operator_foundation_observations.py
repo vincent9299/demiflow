@@ -53,16 +53,29 @@ def test_historical_read_does_not_create_observation_table(tmp_path):
     assert journal.path.read_bytes() == before
 
 
-def test_local_task_fused_counters_match_real_expansion_and_filter(tmp_path):
-    import cloudpickle
-    from demiflow.data.plan import CallableSpec, MapOp, FilterOp, FlatMapOp
-    from demiflow.execution.local_tasks import _map_task, _rows
-    operations = (MapOp(CallableSpec(lambda row: {'x': row['x'] + 1})),
-                  FilterOp(CallableSpec(lambda row: row['x'] % 2 == 0)),
-                  FlatMapOp(CallableSpec(lambda row: [{'x': row['x']}, {'x': row['x'] + 10}])))
-    identities = tuple(('action', str(i), 0) for i in range(3))
-    result = _map_task([{'x': i} for i in range(4)], cloudpickle.dumps(operations), tmp_path / 'part', identities)
-    assert list(_rows(result.value)) == [{'x': 2}, {'x': 12}, {'x': 4}, {'x': 14}]
-    assert [counts for _, counts in result.observations] == [
-        {'rows_input': 4, 'rows_output': 4, 'calls': 4}, {'rows_input': 4, 'rows_output': 2, 'calls': 4},
-        {'rows_input': 2, 'rows_output': 4, 'calls': 2}]
+def test_worker_metrics_match_real_expansion_and_filter(tmp_path, monkeypatch):
+    from demiflow import data
+    from demiflow.execution import RunContext
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+
+    finished = []
+    accept = DataflowExecution._handle_event
+
+    def observe(execution, event):
+        result = accept(execution, event)
+        if event.kind == 'progress':
+            occurrence = event.payload['occurrence_id']
+            metrics = event.payload['metrics']
+            node = next(node for node in execution._graph.nodes if node.occurrence_id == occurrence)
+            finished.append((node.kernel.kind, metrics['rows_input'], metrics['rows_output']))
+        return result
+
+    monkeypatch.setattr(DataflowExecution, '_handle_event', observe)
+    with RunContext.start(tmp_path/'run'), data.local_execution(workers=1, partitions=1):
+        result = (data.range(4).map(lambda row: {'x': row['id'] + 1})
+                  .filter(lambda row: row['x'] % 2 == 0)
+                  .flat_map(lambda row: [row, {'x': row['x'] + 10}]).take_all())
+    assert result == [{'x': 2}, {'x': 12}, {'x': 4}, {'x': 14}]
+    assert ('MapOp', 4, 4) in finished
+    assert ('FilterOp', 4, 2) in finished
+    assert ('FlatMapOp', 2, 4) in finished

@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from itertools import islice
 from dataclasses import asdict
 
-from ..contracts.dataflow import ArtifactRef, CutContribution, WorkerStep
+from ..contracts.dataflow import FIXED_SCAN_BATCHES, ArtifactRef, CutContribution, WorkerStep
 from ..contracts.dataflow_errors import DataflowError
 from ..exchange.dataflow_bridge import _encode_record_document, _decode_record_document
 from ..exchange.dataflow_channels import reserve_credit, _route_record_document, snapshot_channels
@@ -29,6 +29,9 @@ from ..dataflow_record_frames import (encode_document, decode_document, document
 
 
 class WorkerGraphRunner:
+    _fixed_key_exclusion = None
+    _join_probe = None
+
     def __init__(self, executor):
         self.e = executor
         self.services = executor._services
@@ -78,10 +81,10 @@ class WorkerGraphRunner:
         self._consumed_deliveries = set()
         self._memory_frontiers = {}
         physical = executor._physical
-        from ..arrow_payload import allows_batch_carrier
-        arrow_enabled = allows_batch_carrier(executor._graph, physical)
+        from ..arrow_payload import batch_carrier
+        carrier = batch_carrier(executor._graph, physical)
         for reader in executor._readers.values():
-            reader._arrow_enabled = arrow_enabled
+            reader.batch_carrier = carrier
             reader._shared_frame_call = self._frame_call
         self._park_mode = (any(e.mode == 'durable_incremental' for e in physical.exchanges)
             and sum(s.resident_bytes * s.replica_target for s in physical.stages)
@@ -154,6 +157,33 @@ class WorkerGraphRunner:
             declaration=declaration, partitioned=not scalar,
             budget=self._terminal_spec.configuration.get('terminal_memory') if self._terminal_spec else None,
             frame_call=self._frame_call, coalesce_allowed=lambda: not self._finite)
+        self._batch_source = None
+        if (self._terminal_spec and self._terminal_spec.kind == 'write_lance'
+                and self._terminal_spec.configuration.get('input_carrier') == FIXED_SCAN_BATCHES
+                and len(executor._node_specs) == len(executor._graph.nodes) == 2
+                and len(executor._readers) == len(executor._physical.splits) == 1):
+            reader = next(iter(executor._readers.values()))
+            if reader.supports_native_batches():
+                self._batch_source = reader
+        from .key_exclusion import FixedKeyExclusion
+        self._fixed_key_exclusion = FixedKeyExclusion.open(self)
+        from ..contracts.relational_region import JOIN_PROBE_SUFFIX, fixed_join_inputs
+        if any(stage.stage_id.endswith(JOIN_PROBE_SUFFIX) for stage in executor.assignment.stages):
+            shape = fixed_join_inputs(executor._graph)
+            if shape is None:
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'join probe differs from its sealed graph')
+            left, right, join = shape
+            splits = {split.source_id:split.split_id for split in executor.assignment.source_splits}
+            if {left, right} != set(splits):
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'join probe differs from its original source splits')
+            field, = executor._node_specs[join].kernel.configuration['on']
+            scan = executor._readers[splits[left]].pinned_keys(field, positions=True)
+            if scan is not None and scan.probe_payload_is_bounded():
+                right_edge, = [e.edge_id for e in self._incoming[join] if e.input_port == 'right']
+                self._join_probe = (splits[left], right_edge, join, scan)
+                self._join_probe_values = None
+            elif scan is not None:
+                scan.close()
         args = self._terminal_spec.configuration.get('arguments', {}) if self._terminal_spec else {}
         self._limit = (args.get('limit') if self._terminal_spec and self._terminal_spec.kind == 'take'
                        else args.get('batch_size', 20) if self._terminal_spec and self._terminal_spec.kind == 'take_batch'
@@ -370,6 +400,8 @@ class WorkerGraphRunner:
                 max_bytes=self.bounds.max_state_bytes)))
             if frontier.get('schema') != 'demiflow.worker-frontier.v3':
                 raise DataflowError('INCOMPATIBLE_HISTORY', 'unknown worker completion frontier')
+            if bool(frontier.get('fixed_key_batches')) != (self._fixed_key_exclusion is not None):
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'fixed key input strategy differs from the saved cut')
             self._finished = set(frontier['nodes'])
             self._finished_splits = set(frontier['splits'])
             self._finished_inputs = {tuple(x) for x in frontier['inputs']}
@@ -456,9 +488,8 @@ class WorkerGraphRunner:
                     'partitions': [{'data_ref': value['ref'], 'rows': value['count'], 'bytes': size}]})
         for edge_id in self._closed_inputs:
             edge = next(e for e in self.e._graph.edges if e.edge_id == edge_id)
-            if edge.producer not in self.e._node_specs:
-                self._send('eoi', {'scope': 'input_satisfied', 'edge_id': edge_id,
-                                   'consumer_partition': self.partition})
+            self._send('eoi', {'scope': 'input_satisfied', 'edge_id': edge_id,
+                               'consumer_partition': self.partition})
         self._thread = threading.Thread(target=copy_context().run, args=(self._run,), name='dataflow-business', daemon=True)
         self._thread.start()
         from ...resources.capacity import track_owned_thread
@@ -471,6 +502,28 @@ class WorkerGraphRunner:
 
     def _send(self, kind, payload=None, ref=None):
         self.e._mailbox.send(self.e._event(kind, payload=payload, payload_ref=ref))
+
+    def _send_cut(self, request):
+        from ..contracts.dataflow_codec import encode_wire
+        from ..recovery_contract import MAX_DOCUMENT_BYTES
+        raw = encode_wire(self.snapshot(request), type_name='CutContribution', bounds=self.bounds)
+        # A cut contribution contains bounded control metadata and references.
+        # Its durable owner is the coordinator. Leave ample room for escaping
+        # and the host envelope; the full event still goes through the wire codec.
+        limit = min(self.bounds.max_control_bytes, MAX_DOCUMENT_BYTES)
+        if len(raw) <= limit // 4:
+            event = self.e._event('cut', payload={'contribution': raw.decode('utf-8')})
+            try:
+                encoded = encode_wire(event, type_name='WorkerEvent', bounds=self.bounds)
+            except DataflowError as exc:
+                if exc.code != 'BUDGET_EXCEEDED':
+                    raise
+            else:
+                if len(encoded) <= limit:
+                    self.e._mailbox.send(event)
+                    return
+        ref = self.services.store.put(iter([raw]), max_bytes=len(raw), media_type='application/json')
+        self._send('cut', ref=ref)
 
     def _checkpoint_wait_notification(self):
         # Called under the same lock as pause/activity admission. This is live
@@ -732,6 +785,143 @@ class WorkerGraphRunner:
             frames.close()
         return processed
 
+    def _advance_join_probe(self, source, split_id, credit):
+        """Only confirmed non-matches may skip the usual finite input port."""
+        from ...operators.relational import matching_indices
+        _, _, join, scan = self._join_probe
+        if self._join_probe_values is None:
+            kernel = self.e._kernels[(join, self.partition)]
+            self._join_probe_values = kernel.fixed_probe_values(scan.dtype)
+            if self._join_probe_values is None:
+                scan.close()
+                self._join_probe = None
+                return False
+        rows = self._source_quantum if self._publication_overlap else self._source_quantum - self._source_rows_since_cut
+        size = self.bounds.max_batch_bytes
+        if credit is not None:
+            available = credit['bytes'] - self._unconfirmed_bytes
+            rows = min(rows, credit['rows'] - self._unconfirmed_rows,
+                       max(1, available // self.bounds.max_row_bytes))
+            size = min(size, available)
+        step = scan.next_probe(rows, size)
+        if step is None:
+            self._finish_source_split(split_id, source)
+            return True
+        item, count, charged = step
+        if count:
+            fragment, offset, batch = item
+            matched = matching_indices(batch.column(0), self._join_probe_values)
+            if credit and credit['bytes'] < self.bounds.max_row_bytes and len(matched) < count:
+                # This cut can reject even a legal, nonmatching source record.
+                # Read it normally to preserve the original byte-limit outcome.
+                import pyarrow as pa
+                matched = pa.array(range(count), type=pa.int64())
+            # Only unmatched rows advance as a projection. Matched rows advance
+            # as their original records, charged exactly once against source credit.
+            charged = ((count - len(matched)) * charged + count - 1) // count
+            for record in scan.matched_records(fragment, offset, batch, matched):
+                charged += record.encoded_bytes
+                if credit and self._unconfirmed_bytes + charged > credit['bytes']:
+                    raise DataflowError('BUDGET_EXCEEDED', 'join probe exceeds unconfirmed source bytes')
+                self._output(source, record)
+            self._metrics[source]['rows_output'] += count-len(matched)
+            self._metrics[join]['rows_input'] += count-len(matched)
+            self._dirty_metrics.update((source, join))
+            self._source_rows_since_cut += count
+            self._unconfirmed_rows += count
+            self._unconfirmed_bytes += charged
+        if not self._publication_overlap and self._source_rows_since_cut >= self._source_quantum:
+            self._paused = True
+            self._flush_metrics()
+        return True
+
+    def _advance_batch(self, source, split_id, credit):
+        """Transfer a co-located source batch within the same cut and credit window."""
+        rows, size = self.bounds.max_output_rows, self.bounds.max_batch_bytes
+        if credit is not None:
+            rows = min(rows, credit['rows'] - self._unconfirmed_rows)
+            size = min(size, credit['bytes'] - self._unconfirmed_bytes)
+        if not self._publication_overlap:
+            rows = min(rows, self._source_quantum - self._source_rows_since_cut)
+        batch = self._batch_source.next_arrow_batch(rows, size)
+        if batch is None:
+            self._finish_source_split(split_id, source)
+            return
+        if self._terminal_schema_ref is None:
+            from ..record_schema import RecordSchemas
+            self._terminal_schema_ref = RecordSchemas(self.services).put(batch.schema)
+            self._set_terminal_columns(batch.schema, schema=True)
+        self._terminal_blocks.append_arrow_batch(batch)
+        self._terminal_rows, self._terminal_bytes = self._terminal_blocks.rows, self._terminal_blocks.bytes
+        count = batch.num_rows
+        terminal = self.e._graph.terminals[0]
+        self._metrics[source]['rows_output'] += count
+        self._metrics[terminal]['rows_input'] += count
+        self._metrics[terminal]['rows_output'] += count
+        self._dirty_metrics.update((source, terminal))
+        self._source_rows_since_cut += count
+        self._unconfirmed_rows += count
+        self._unconfirmed_bytes += batch.nbytes
+        if not self._publication_overlap and self._source_rows_since_cut >= self._source_quantum:
+            self._paused = True
+            self._flush_metrics()
+
+    def _accept_arrow_result(self, terminal_occurrence, batch, *, positions, producer,
+                             source_split, version):
+        """Seal each ordered output batch once and advertise that same leaf under ACK credit."""
+        import pyarrow as pa
+        from ..dataflow_native_limits import sealed_execution_ceilings
+        from ..dataflow_record_frames import admit_workspace
+        from ..outputs.arrow_rows import pack_result, validate_row_sizes
+        from ..record_schema import RecordSchemas
+        caps = sealed_execution_ceilings(self.e._graph)
+        row_budget = min(self.bounds.max_row_bytes, producer.kernel.output_bound_bytes or self.bounds.max_row_bytes)
+        validate_row_sizes(batch, row_budget)
+        if not batch.num_rows:
+            return
+        if self._terminal_schema_ref is None:
+            self._terminal_schema_ref = RecordSchemas(self.services).put(batch.schema)
+            self._set_terminal_columns(batch.schema, schema=True)
+        size_limit = min(self.bounds.max_batch_bytes, caps.get('inflight_bytes', self.bounds.max_batch_bytes))
+        start = 0
+        while start < batch.num_rows:
+            count = min(batch.num_rows - start, caps.get('inflight_rows', batch.num_rows))
+            while True:
+                packed = pack_result(batch.slice(start, count), positions.slice(start, count),
+                    source_id=source_split.source_id, split_id=source_split.split_id, version=version,
+                    occurrence=producer.occurrence_id, sequence=self._terminal_rows, bounds=self.bounds)
+                size = pa.ipc.get_record_batch_size(packed) + len(packed.schema.serialize()) + 8
+                if size <= size_limit:
+                    break
+                if count == 1:
+                    raise DataflowError('BUDGET_EXCEEDED', 'terminal Arrow row exceeds admitted transfer bytes')
+                count //= 2
+            # Only one leased IPC leaf may await acknowledgement. Cursor movement
+            # and cuts outside this call observe the complete processed source prefix.
+            deadline = time.monotonic() + self.bounds.timeout_ms / 1000
+            with self._condition:
+                while self._credits:
+                    if self.e._cancel_event.is_set():
+                        raise DataflowError('CANCELLED', 'business execution cancelled')
+                    if time.monotonic() >= deadline:
+                        raise DataflowError('DEADLINE_EXCEEDED', 'terminal Arrow delivery credit deadline')
+                    self._condition.wait(.01)
+            self.services.check_stop()
+            self._frame_call(admit_workspace, packed.get_total_buffer_size() + 2 * size + 65536, self.bounds)
+            first = self._terminal_rows
+            ref = self._terminal_blocks.append_arrow_batch(packed)
+            self._terminal_rows, self._terminal_bytes = self._terminal_blocks.rows, self._terminal_blocks.bytes
+            delivery = self.e._next_operation_id('terminal')
+            with self._condition:
+                self._credits[delivery] = (None, None)
+            self._send('terminal', {'delivery_id': delivery, 'producer_partition': self.partition,
+                'result_batch': _artifact_json(ref), 'rows': count, 'sequence': first,
+                'schema_ref': _artifact_json(self._terminal_schema_ref)})
+            self._metrics[terminal_occurrence]['rows_input'] += count
+            self._metrics[terminal_occurrence]['rows_output'] += count
+            self._dirty_metrics.add(terminal_occurrence)
+            start += count
+
     def step(self, *, max_records, deadline_ms):
         if max_records <= 0 or deadline_ms <= 0:
             raise DataflowError('INVALID_CONTRACT', 'step budgets must be positive')
@@ -793,7 +983,9 @@ class WorkerGraphRunner:
                 raise DataflowError('INVALID_CONTRACT', 'unknown business command')
             processed += 1
         if self._sealed_cut is None and not self._paused and not self._cut:
-            for split_id, reader in self.e._readers.items():
+            if self._fixed_key_exclusion is not None:
+                processed += self._fixed_key_exclusion.step(self)
+            for split_id, reader in (() if self._fixed_key_exclusion else self.e._readers.items()):
                 if split_id in self._finished_splits:
                     continue
                 self.services.check_stop()
@@ -809,8 +1001,18 @@ class WorkerGraphRunner:
                 if self._park_mode and not self._park_can_output(source):
                     self._paused = True
                     break
+                if self._join_probe is not None and split_id == self._join_probe[0]:
+                    if self._join_probe[1] not in self._finished_ports:
+                        continue
+                    if self._advance_join_probe(source, split_id, credit):
+                        processed += 1
+                        break
                 from ..dataflow_source_context import source_run_scope
                 with source_run_scope(self.e._source_run):
+                    if reader is self._batch_source:
+                        self._advance_batch(source, split_id, credit)
+                        processed += 1
+                        break
                     poll = reader.next_record()
                 if poll.status == 'record':
                     if credit is not None and self._unconfirmed_bytes + poll.record.encoded_bytes > credit['bytes']:
@@ -837,7 +1039,8 @@ class WorkerGraphRunner:
                     self._finish_node(occ)
         if (self._sealed_cut is None and not (self._paused and self._idle_sent)
                 and (command is None or command['kind'] not in ('cut', 'receipt'))):
-            processed += self._advance_input_completions(max_records=max_records, deadline_ms=deadline_ms)
+            if self._fixed_key_exclusion is None:
+                processed += self._advance_input_completions(max_records=max_records, deadline_ms=deadline_ms)
         if time.monotonic() - self._metrics_at >= .5:
             self._flush_metrics()
         done = set(self.e._node_specs).issubset(self._finished)
@@ -882,11 +1085,7 @@ class WorkerGraphRunner:
             self._send('idle', {'done': done, 'activity_generation': idle_generation,
                 'source_done': set(self.e._readers) <= self._finished_splits})
         if snapshot_request is not None and self._cut is snapshot_request:
-            from ..contracts.dataflow_codec import encode_wire
-            contribution = self.snapshot(snapshot_request)
-            raw = encode_wire(contribution, type_name='CutContribution', bounds=self.bounds)
-            ref = self.services.store.put(iter([raw]), max_bytes=len(raw), media_type='application/json')
-            self._send('cut', ref=ref)
+            self._send_cut(snapshot_request)
             self._cut = None
         return WorkerStep(processed=processed, blocked=not bool(processed), end_of_input=done, events=())
 
@@ -1237,9 +1436,8 @@ class WorkerGraphRunner:
             self._closed_inputs.add(edge.edge_id)
             if edge.producer in self.e._node_specs:
                 self._close_output(edge.edge_id)
-            else:
-                self._send('eoi', {'scope': 'input_satisfied', 'edge_id': edge.edge_id,
-                                   'consumer_partition': self.partition})
+            self._send('eoi', {'scope': 'input_satisfied', 'edge_id': edge.edge_id,
+                               'consumer_partition': self.partition})
 
     def _close_output(self, edge_id):
         edge = next(e for e in self.e._graph.edges if e.edge_id == edge_id)
@@ -1487,6 +1685,27 @@ class WorkerGraphRunner:
     def _parkable_credits(self):
         return self._park_mode and set(self._credits) == set(self._credit_payloads)
 
+    def _final_scalar(self, blocks, partitions):
+        from .dataflow_terminal import aggregate_scalar, terminal_scalar
+        if self._terminal_spec.kind != 'aggregate':
+            return terminal_scalar(blocks.stream(), spec=self._terminal_spec, services=self.services,
+                                   schema_ref=self._terminal_schema_ref)
+        from functools import partial
+        from ..kernels.aggregate import aggregate_records
+        occurrence = next(occ for occ, node in self.e._node_specs.items() if node.kind == 'terminal')
+        program = self.services.programs.get(occurrence)
+        if program is None or program.kind != 'aggregate':
+            raise DataflowError('INVALID_CONTRACT', 'terminal aggregate programs are not sealed')
+        # The index keeps its sealed metadata reservation. Subtract the other
+        # live worker owners even when stages share a larger assignment.
+        memory = self._terminal_spec.configuration.get('terminal_memory', {})
+        workspace = self._frame_call(blocks.scalar_workspace)
+        workspace = min(workspace, memory.get('payload_bytes', workspace))
+        values = aggregate_records(program.value, partial(blocks.records, partitions),
+                                   services=self.services, workspace=workspace,
+            batch_eligible=self._terminal_spec.configuration.get("integer_aggregate_blocks") is True)
+        return aggregate_scalar(values, max_bytes=self.bounds.max_state_bytes)
+
     def snapshot(self, request):
         if ((self._queue and self._sealed_cut != request.cut_id)
                 or (self._credits and not self._parkable_credits())):
@@ -1504,6 +1723,7 @@ class WorkerGraphRunner:
                 states[identity(['finite-spool', spec.channel_id])] = self.services.store.put(
                     iter([raw]), max_bytes=len(raw), media_type='application/json')
         frontier = document({'schema': 'demiflow.worker-frontier.v3',
+            **({'fixed_key_batches': True} if self._fixed_key_exclusion is not None else {}),
             'nodes': sorted(self._finished), 'splits': sorted(self._finished_splits),
             'inputs': [list(x) for x in sorted(self._finished_inputs)],
             'finished_ports': sorted(self._finished_ports),
@@ -1535,10 +1755,7 @@ class WorkerGraphRunner:
                         manifest['non_mapping_values'] = True
                     with blocks.hold_metadata(manifest):
                         if request.final:
-                            from .dataflow_terminal import terminal_scalar
-                            occurrence = next(occ for occ, node in self.e._node_specs.items() if node.kind == 'terminal')
-                            manifest['scalar'] = terminal_scalar(blocks.stream(), spec=self._terminal_spec,
-                                services=self.services, occurrence_id=occurrence, schema_ref=self._terminal_schema_ref)
+                            manifest['scalar'] = self._final_scalar(blocks, partitions)
                         size, chunks = blocks.manifest_chunks(manifest)
                         try:
                             sinks[sink_id] = self.services.store.put(chunks, max_bytes=size, media_type=MANIFEST_MEDIA)
@@ -1566,6 +1783,11 @@ class WorkerGraphRunner:
         for iterator in self._active_finishes.values():
             iterator.close()
         self._active_finishes.clear()
+        if self._fixed_key_exclusion is not None:
+            self._fixed_key_exclusion.close()
+        if self._join_probe is not None:
+            self._join_probe[3].close()
+            self._join_probe_values = self._join_probe = None
         self._finite_input.close()
         self._peer.close()
         self._terminal_blocks.close()

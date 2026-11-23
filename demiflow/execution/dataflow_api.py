@@ -247,6 +247,10 @@ def resolve_action_runtime(request: ActionRequest):
     if declared is not None:
         from .dataflow_native_limits import effective_native_limits
         native = intersect_native_limits(native, effective_native_limits(declared, limits))
+    if request.kind == 'aggregate' and not request.action.replaying:
+        block_rows = min(getattr(executor, '_block_size', limits['batch_rows']),
+                         limits['batch_rows'], getattr(local, 'batch_rows', limits['batch_rows']))
+        native = intersect_native_limits(native, {'batch_rows': block_rows})
     if native is not None:
         for name in ('max_rss_bytes', 'max_scratch_bytes', 'max_row_bytes', 'batch_rows'):
             if name in native:
@@ -282,10 +286,24 @@ def run_dataset_action(request: ActionRequest) -> object:
     if request.kind != 'write_datasink':
         return _run_dataset_action(request)
     sink = request.sink
-    try:
+    started = False
+
+    def start_sink():
+        nonlocal started
+        started = True
         sink.on_write_start()
-        result = _run_dataset_action(request)
+
+    try:
+        if request.action.replaying:
+            # Authenticating the original sealed program may reject a resume.
+            # Until it succeeds even the failure hook is a business side effect.
+            result = _run_dataset_action(request, after_prepare=start_sink)
+        else:
+            start_sink()
+            result = _run_dataset_action(request)
     except BaseException as failure:
+        if not started:
+            raise
         try:
             sink.on_write_failed(failure)
         except BaseException as callback:
@@ -301,9 +319,12 @@ def run_dataset_action(request: ActionRequest) -> object:
     return result
 
 
-def _run_dataset_action(request: ActionRequest) -> object:
+def _run_dataset_action(request: ActionRequest, *, after_prepare=None) -> object:
     policy, bounds = resolve_action_runtime(request)
-    handle = execute_action(request, policy=policy, bounds=bounds)
+    if after_prepare is None:
+        handle = execute_action(request, policy=policy, bounds=bounds)
+    else:
+        handle = execute_action(request, policy=policy, bounds=bounds, after_prepare=after_prepare)
     from .dataflow_terminals import (collect_rows, iterate_rows, iterate_batches,
                                      materialized_handle, write_result, inspect_result,
                                      _convert_batch)

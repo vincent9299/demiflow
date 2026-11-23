@@ -39,7 +39,7 @@ from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunContext, RunAction
 
 from test_stage2_unified_plan import (
-    LIMITS, _crash_hook, _load_modules, _map_plan, _topology,
+    LIMITS, _crash_hook, _load_modules, _map_plan,
 )
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
@@ -55,7 +55,9 @@ def sealed(tmp_path):
         run.journal.bind_execution_action(run.fence, "main-action", declaration)
         action = RunAction(run, "main-action", declaration)
         try:
-            yield SimpleNamespace(run=run, action=action)
+            from runtime_v3_program_probe import program_store
+            with program_store(action) as (store, bounds):
+                yield SimpleNamespace(run=run, action=action, store=store, bounds=bounds)
         finally:
             record = run.journal.execution_action("main-action")
             if record is not None and record["result"] is None:
@@ -168,8 +170,7 @@ def _assert_capture_resume_code_pin(tmp_path, monkeypatch, form, owner_factory):
         with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
             with RunContext.start(root, limits=LIMITS) as run:
                 reference = run.ref
-                with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                          unified_chain=True):
+                with data.local_execution(workers=1, worker_mode="process", partitions=1):
                     pipeline().materialize().take_all()
         assert_worker_killed(marker, root)
         assert_released(root)
@@ -182,8 +183,7 @@ def _assert_capture_resume_code_pin(tmp_path, monkeypatch, form, owner_factory):
         pre = [f for f in run.journal.execution_commits(materialize_action_id(run))
                if f["status"] == "acked"]
         assert pre
-        with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="process", partitions=1):
             rows = control_pipeline().materialize().take_all()
         assert rows == [{"input": i, "value": i + 1} for i in range(8)]
         after = {f["commit_id"]: f for f in run.journal.execution_commits(materialize_action_id(run))}
@@ -197,8 +197,7 @@ def _assert_capture_resume_code_pin(tmp_path, monkeypatch, form, owner_factory):
     importlib.reload(sys.modules[helper])
     with pytest.raises((RecoveryContractError, DataflowError), match="code") as excinfo:
         with RunContext.resume(reference):
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 pipeline().materialize().take_all()
     if isinstance(excinfo.value, DataflowError):
         assert excinfo.value.code == "INVALID_CONTRACT"
@@ -216,26 +215,26 @@ def test_g1_closure_helper_edit_same_run_resume_refuses(tmp_path, monkeypatch, f
 
 @pytest.mark.parametrize("form", FORMS)
 def test_g3_closure_helper_edit_worker_load_gate_refuses(sealed, tmp_path, monkeypatch, form):
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, stage_plan_artifact, verify_loaded_plan)
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_program_probe import worker_loader
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7bg3_" + form)
     transform = FACTORIES[form](helper_mod)
     plan = _map_plan(transform)
     assert helper in _business_dependency_manifest(plan), "captured helper must be pinned"
-    plan_ref = stage_plan_artifact(sealed.action, plan)
-    topology, _, _ = _topology(sealed, plan, plan_ref)
-    verify_loaded_plan(plan, plan_ref, topology["operators"])      # unedited passes
+    load = worker_loader(sealed, plan.operations[0].callable)
+    load()      # unedited passes
     paths[helper].write_text("def delta():\n    return 9999\n")
     importlib.reload(sys.modules[helper])
-    with pytest.raises(RecoveryContractError, match="code-pin differs"):
-        verify_loaded_plan(_map_plan(transform), plan_ref, topology["operators"])
+    with pytest.raises(DataflowError, match="Loaded program code differs"):
+        load()
 
 
 # --- G2: unedited manifest stable + captured helper pinned (three forms) ---
 
 @pytest.mark.parametrize("form", FORMS)
 def test_g2_closure_unedited_manifest_stable(tmp_path, monkeypatch, form):
-    from demiflow.execution.chain import _business_dependency_manifest
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7bg2_" + form)
     plan = _map_plan(FACTORIES[form](helper_mod))
     first = _business_dependency_manifest(plan)
@@ -247,17 +246,16 @@ def test_g2_closure_unedited_manifest_stable(tmp_path, monkeypatch, form):
 # --- G2 control: a by-value closure with NO capture pins nothing (no regression) ---
 
 def test_g2_no_capture_by_value_dependencies_empty(sealed):
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, stage_plan_artifact, verify_loaded_plan)
+    from runtime_v3_program_probe import worker_loader
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
 
     def v1(row):
         return {**row, "score": row["x"] + 1}
 
     plan = _map_plan(v1)
     assert _business_dependency_manifest(plan) == {}
-    plan_ref = stage_plan_artifact(sealed.action, plan)
-    topology, _, _ = _topology(sealed, plan, plan_ref)
-    verify_loaded_plan(plan, plan_ref, topology["operators"])
+    load = worker_loader(sealed, plan.operations[0].callable)
+    load()
 
 
 # --- G2: a clean full run with a capturing closure succeeds (no false refuse) ---
@@ -269,8 +267,7 @@ def test_g2_closure_clean_run_succeeds(tmp_path, monkeypatch, form):
     rows_in = [{"x": i} for i in range(8)]
     root = tmp_path / "run"
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             rows = (data.from_items(rows_in).map_async(transform, concurrency=1)
                     .materialize().take_all())
     assert {r["input"]: r["value"] for r in rows} == {i: i + 1 for i in range(8)}
@@ -280,8 +277,9 @@ def test_g2_closure_clean_run_succeeds(tmp_path, monkeypatch, form):
 
 @pytest.mark.parametrize("container", ["list", "dict"])
 def test_g2_container_capture_pinned_and_edit_refuses(sealed, tmp_path, monkeypatch, container):
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, stage_plan_artifact, verify_loaded_plan)
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_program_probe import worker_loader
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7bcont_" + container)
     if container == "list":
         captured = [helper_mod]
@@ -295,19 +293,18 @@ def test_g2_container_capture_pinned_and_edit_refuses(sealed, tmp_path, monkeypa
             return {"input": row["x"], "value": row["x"] + captured["m"].delta()}
     plan = _map_plan(transform)
     assert helper in _business_dependency_manifest(plan)
-    plan_ref = stage_plan_artifact(sealed.action, plan)
-    topology, _, _ = _topology(sealed, plan, plan_ref)
-    verify_loaded_plan(plan, plan_ref, topology["operators"])
+    load = worker_loader(sealed, plan.operations[0].callable)
+    load()
     paths[helper].write_text("def delta():\n    return 9999\n")
     importlib.reload(sys.modules[helper])
-    with pytest.raises(RecoveryContractError, match="code-pin differs"):
-        verify_loaded_plan(_map_plan(transform), plan_ref, topology["operators"])
+    with pytest.raises(DataflowError, match="Loaded program code differs"):
+        load()
 
 
 # --- R2 by-reference business class instance: type module AND __dict__ module pinned ---
 
 def test_g2_by_reference_class_instance_type_module_pinned(tmp_path, monkeypatch):
-    from demiflow.execution.chain import _business_dependency_manifest
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     suffix = uuid.uuid4().hex[:8]
     modelname, helper = "f7bmodel_" + suffix, "f7bmhelper_" + suffix
     sources = {
@@ -330,7 +327,7 @@ def test_g2_by_reference_class_instance_type_module_pinned(tmp_path, monkeypatch
 # --- G6: instance<->function mutual capture cycle terminates, helper still pinned ---
 
 def test_g6_instance_function_cycle_terminates(tmp_path, monkeypatch):
-    from demiflow.execution.chain import _business_dependency_manifest
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7bcyc")
 
     class Node:
@@ -355,7 +352,7 @@ def test_g6_instance_function_cycle_terminates(tmp_path, monkeypatch):
 
 def test_g6_dynamic_captured_module_refuses(tmp_path):
     import types
-    from demiflow.execution.chain import _business_dependency_manifest
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     dynamic = types.ModuleType("f7bdyn_" + uuid.uuid4().hex[:8])
     dynamic.delta = lambda: 1
 
@@ -369,8 +366,8 @@ def test_g6_dynamic_captured_module_refuses(tmp_path):
 # --- G6: function / value / byte walk budgets fail-closed for by-value captures ---
 
 def test_g6_function_budget_refuses(tmp_path, monkeypatch):
-    import demiflow.execution.chain as chain_mod
-    from demiflow.execution.chain import _business_dependency_manifest
+    import demiflow.execution.seal.business_sources as chain_mod
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7bfb")
     monkeypatch.setattr(chain_mod, "_DEP_MAX_FUNCTIONS", 1)
 
@@ -385,8 +382,8 @@ def test_g6_function_budget_refuses(tmp_path, monkeypatch):
 
 
 def test_g6_value_budget_refuses(tmp_path, monkeypatch):
-    import demiflow.execution.chain as chain_mod
-    from demiflow.execution.chain import _business_dependency_manifest
+    import demiflow.execution.seal.business_sources as chain_mod
+    from demiflow.execution.seal.business_sources import _business_dependency_manifest
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7bvb")
     monkeypatch.setattr(chain_mod, "_DEP_MAX_NODES", 1)
     with pytest.raises(RecoveryContractError, match="value budget"):
@@ -397,13 +394,10 @@ def test_g6_value_budget_refuses(tmp_path, monkeypatch):
 #     managed worker through queue_chain's shared stage_plan_artifact seam ---
 
 def test_g4_queue_closure_end_to_end_seals_helper(tmp_path, monkeypatch):
-    from test_mvp2_queue_unified import (
-        _config, _make_builder, _seed_tasks, _resources, _managed_worker_pids)
+    from test_mvp2_queue_unified import _config, _make_builder, _seed_tasks
+    from runtime_v3_owned_crash import process_records
     from test_raw_fetch import origin_server
-    from demiflow.collect import FetchPolicy, HttpSource
     from demiflow.execution.queue_sinks import QueueResultSink
-    from demiflow.objects import LocalObjectStore
-    from test_stage2_unified_plan import _code_pin_keys
 
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7bg4")
 
@@ -413,56 +407,74 @@ def test_g4_queue_closure_end_to_end_seals_helper(tmp_path, monkeypatch):
 
     cfg = _config(tmp_path, 'g4')
     root = tmp_path / 'run'
-    policy = FetchPolicy(max_object_bytes=131072, http=HttpSource(allow_private=True))
-    fetched = data.read_queue(cfg, pool='p').fetch(
-        store=LocalObjectStore(tmp_path / 'objects'), policy=policy, concurrency=1)
-
     build = _make_builder(1, label_fn=label_fn)
     with origin_server() as (url, calls):
         channel, _ = _seed_tasks(cfg, tmp_path / 'seed', url, 1)
         with RunContext.start(root, limits=LIMITS) as run:
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                      unified_queue_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 build(cfg, root, url).write_datasink(QueueResultSink(cfg, pool='p'))
-            keys = _code_pin_keys(run)
-            assert keys, "queue carrier sealed no code-pin binding"
-            deps = {}
-            for key in keys:
-                deps.update(run.journal.source_binding(key).get("dependencies", {}))
-            assert helper in deps, "captured helper not sealed through the queue seam"
+            _assert_sealed_helper(run, helper, paths[helper])
     assert channel.state('p')['counts'] == {'done_ok': 1}
-    pids = _managed_worker_pids(_resources(root))
-    assert pids and os.getpid() not in pids
+    records = process_records(root)
+    assert records and all(record['identity']['pid'] != os.getpid() for _, record in records.values())
+
+
+def _assert_sealed_helper(run, helper, source):
+    import hashlib
+    import json
+    from demiflow.execution.seal.plan import CODE_PIN_MEDIA, _read_json
+    from demiflow.execution.sealed_plans import _v3_read_store, load_sealed_plan
+
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    with run.journal._connection() as db:
+        seals = [json.loads(row[0]) for row in db.execute(
+            "SELECT document FROM runtime_sources WHERE action_id LIKE '%-dataflow-sealed'")]
+    matches = []
+    for seal in seals:
+        bundle = load_sealed_plan(run.directory, seal['action_id'])
+        ref = bundle['sealed'].code_pin_ref
+        store, bounds = _v3_read_store(run.directory, store_id=ref.store_id)
+        pins = _read_json(store, ref, max_bytes=bounds.max_control_bytes, media_type=CODE_PIN_MEDIA)
+        matches.extend(pin['imports'][helper] for pin in pins['programs'].values()
+                       if helper in pin.get('imports', {}))
+    assert matches and all(record['sha256'] == digest for record in matches)
 
 
 # --- G4 queue: edit the captured helper -> the shared resume seam refuses ---
 
 def test_g4_queue_seam_edit_refuses(sealed, tmp_path, monkeypatch):
-    from demiflow.execution.chain import stage_plan_artifact
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_program_probe import worker_loader
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7bg4n")
 
     def label_fn(row):
         helper_mod.delta()
         return {**row, 'label': 'downloaded' if row['status'] == 'ok' else 'failed'}
 
-    stage_plan_artifact(sealed.action, _map_plan(label_fn))
+    load = worker_loader(sealed, _map_plan(label_fn).operations[0].callable)
+    load()
     paths[helper].write_text("def delta():\n    return 9999\n")
     importlib.reload(sys.modules[helper])
-    with pytest.raises(RecoveryContractError,
-                       match="Business code changed since the plan was sealed"):
-        stage_plan_artifact(sealed.action, _map_plan(label_fn))
+    with pytest.raises(DataflowError, match="Loaded program code differs"):
+        load()
 
 
-# --- G4 ray: structural routing proof (ray not installed; Local-priority honest note) ---
 
-def test_g4_ray_routes_same_seam():
-    import inspect
-    from demiflow.execution import chain
-    src = inspect.getsource(chain.run_ray_chain)
-    # run_ray_chain stages + compiles through the SAME seam as run_local_chain, so
-    # the by-value dependency walk and both code-pin gates flow to ray unchanged.
-    assert "stage_plan_artifact(" in src
-    assert "compile_chain_topology(" in src
-    # Honest scope: ray runtime is not installed here; full-chain ray runtime
-    # consistency is deferred (Local-priority). The closure-pin logic is shared
-    # worker code and the structural routing is proven above.
+@pytest.mark.ray
+def test_g4_ray_worker_uses_sealed_captured_dependency(tmp_path, monkeypatch):
+    ray = pytest.importorskip('ray')
+    from demiflow.data.dataset import Dataset
+    from demiflow.data.sources import ItemsSource
+    from demiflow.execution.executors.ray import RayDatasetExecutor
+
+    helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, 'g4_ray')
+    transform = _make_module_cell(helper_mod)
+    assert not ray.is_initialized()
+    ray.init(address='local', num_cpus=2, include_dashboard=False)
+    try:
+        with RunContext.start(tmp_path / 'run', limits=LIMITS) as run:
+            dataset = Dataset(ItemsSource(({'x': 7},)), _map_plan(transform), RayDatasetExecutor())
+            assert dataset.take_all() == [{'input': 7, 'value': 8}]
+            _assert_sealed_helper(run, helper, paths[helper])
+    finally:
+        ray.shutdown()

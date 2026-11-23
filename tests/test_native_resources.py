@@ -2,15 +2,12 @@
 from dataclasses import replace
 import fcntl
 import json
-from pathlib import Path
-from types import SimpleNamespace
 
 import pyarrow as pa
 import pytest
 
 from demiflow import data
 from demiflow.execution import datafusion as native
-from demiflow.execution import native_resources as resources
 from demiflow.execution.local_kernel import LocalKernelOptions
 
 GiB = 2**30
@@ -82,34 +79,21 @@ def test_two_slot_reservation_and_exception_release(tmp_path, capacity):
             pass
 
 
-def test_default_session_unchanged_and_budget_snapshot(tmp_path, monkeypatch):
-    monkeypatch.setattr(resources, '_cpu_capacity', lambda: 16)
-    monkeypatch.setattr(resources, '_cgroup_memory', lambda: (0, 256*GiB))
-    executor = SimpleNamespace(resource_root=tmp_path, _local_kernel=None)
-    default = resources.dataset_session(executor, tmp_path)
-    assert (default.options.memory_bytes, default.options.max_rss_bytes,
-        default.options.threads, default.options.max_scratch_bytes) == (8*GiB, 24*GiB, 8, 128*GiB)
+def test_public_native_budget_is_snapshotted():
     supplied = dict(memory_bytes=2*GiB, max_rss_bytes=6*GiB, threads=2)
-    executor._local_kernel = LocalKernelOptions(native_resources=supplied)
+    options = LocalKernelOptions(native_resources=supplied)
     supplied['max_rss_bytes'] = 99*GiB
-    explicit = resources.dataset_session(executor, tmp_path)
-    assert explicit.resources == default.resources
-    assert explicit._slot_capacity == default._slot_capacity
-    assert explicit.options.max_rss_bytes == 6*GiB
-    assert explicit.options.cgroup_headroom_bytes == 2*GiB
-    assert replace(executor._local_kernel).native_resources == executor._local_kernel.native_resources
+    assert dict(options.native_resources)['max_rss_bytes'] == 6*GiB
+    assert replace(options).native_resources == options.native_resources
 
 
 @pytest.mark.parametrize('budget', [
     {'engine': 'other'}, {'threads': True}, {'memory_bytes': -1},
     {'timeout_s': float('nan')}, {'admission_timeout_s': float('inf')},
-    {'max_rss_bytes': 48*GiB}, {'cgroup_headroom_bytes': 1},
-    {'memory_bytes': GiB, 'max_rss_bytes': GiB},
 ])
-def test_budget_rejects_invalid_values_expansion_and_disabled_protection(tmp_path, budget):
+def test_public_native_resources_rejects_invalid_declarations(budget):
     with pytest.raises(ValueError):
-        options = LocalKernelOptions(native_resources=budget)
-        resources.dataset_session(SimpleNamespace(resource_root=tmp_path, _local_kernel=options), tmp_path)
+        LocalKernelOptions(native_resources=budget)
 
 
 def test_real_dataset_uses_explicit_limits_and_preserves_join_multiplicity(tmp_path, monkeypatch):

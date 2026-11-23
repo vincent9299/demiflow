@@ -9,12 +9,15 @@ never reads the pickle or manifest); cross-group callees that are not yet merged
 the individual tests, never stubbed in production code.
 """
 import copy
+import hashlib
+import json
+import sqlite3
 from types import SimpleNamespace
 
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.plan_interpreter import EXECUTION_BINDINGS_SCHEMA_V2
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.recovery_contract import document, identity
 from demiflow.execution.recovery_identity import describe, source_identity
 from demiflow.planning.dag import (
     _operation_semantics, channel_id_for, compile_logical_dag,
@@ -120,87 +123,35 @@ def make_workdir():
     return Path(tempfile.mkdtemp(prefix="demiflow-lcontract-", dir="/tmp"))
 
 
-def active_native_run(root, n):
-    """Yield (run, action) with F1 sealed and the action bound, run still open."""
-    import contextlib
-    from demiflow.execution import chain
-    from demiflow.execution.run_context import RunAction, RunContext
+def seal_existing_format(writer, root, plan, *, native, with_bindings=True, executions=None):
+    """Return the references written by a separately imported published writer."""
+    from runtime_v3_history_scenarios import write_legacy_seal
 
-    @contextlib.contextmanager
-    def _cm():
-        with RunContext.start(root) as run:
-            declaration = {"kind": "chain-materialize", "source": {"source_id": "fixed"}}
-            run.journal.bind_execution_action(run.fence, n.action_id, declaration)
-            action = RunAction(run, n.action_id, declaration)
-            sealed_at = int(run.journal.recovery_identity()["started_at"] * 1000)
-            chain.seal_plan_facts(run, action, n.ld, n.pp, n.mref, sealed_at)
-            yield run, action
-            run.journal.complete_execution_action(run.fence, n.action_id, {"kind": "test-complete"})
-    return _cm()
-
-
-def seal_bindings(run, action, n, *, executions=None, programs=None):
-    from demiflow.execution.sealed_plans import seal_execution_bindings
-    doc = n.doc
-    return seal_execution_bindings(
-        run, action, logical_dag=n.ld, physical_plan=n.pp,
-        profiles=doc["profiles"], programs=[] if programs is None else programs,
-        driver_stage_ids=doc["driver_stage_ids"], source_bindings=doc["source_bindings"],
-        channel_options=doc["channel_options"], checkpoint_rows=doc["checkpoint_rows"],
-        supported_slice=doc["supported_slice"],
-        executions=doc["executions"] if executions is None else executions)
+    bindings = None
+    if with_bindings:
+        document = plan.doc
+        bindings = {name: document[name] for name in (
+            "profiles", "driver_stage_ids", "source_bindings", "channel_options",
+            "checkpoint_rows", "supported_slice",
+        )}
+        bindings["programs"] = [] if native else document["programs"]
+        if native:
+            bindings["executions"] = document["executions"] if executions is None else executions
+    result = write_legacy_seal(writer, root, action_id=plan.action_id, logical_dag=plan.ld,
+                               physical_plan=plan.pp, manifest_ref=plan.mref, bindings=bindings)
+    return SimpleNamespace(root=root, run_id=result["facts"]["run_id"], action_id=plan.action_id,
+                           ref=result["ref"], n=plan)
 
 
-def seal_native_run(root, n, *, with_bindings=True, executions=None):
-    """Seal a real v2 run (F1 + execution-bindings) through the original authorities.
-
-    Uses the fixture's compiled ld/pp/doc directly, so no F004 compiler is needed;
-    the carrier, journal slot and idempotent re-seal are the real durable path.
-    """
-    from demiflow.execution import chain
-    from demiflow.execution.run_context import RunAction, RunContext
-    from demiflow.execution.sealed_plans import seal_execution_bindings
-    with RunContext.start(root) as run:
-        declaration = {"kind": "chain-materialize", "source": {"source_id": "fixed"}}
-        run.journal.bind_execution_action(run.fence, n.action_id, declaration)
-        action = RunAction(run, n.action_id, declaration)
-        sealed_at = int(run.journal.recovery_identity()["started_at"] * 1000)
-        chain.seal_plan_facts(run, action, n.ld, n.pp, n.mref, sealed_at)
-        ref = None
-        if with_bindings:
-            doc = n.doc
-            ref = seal_execution_bindings(
-                run, action, logical_dag=n.ld, physical_plan=n.pp,
-                profiles=doc["profiles"], programs=[],
-                driver_stage_ids=doc["driver_stage_ids"],
-                source_bindings=doc["source_bindings"],
-                channel_options=doc["channel_options"],
-                checkpoint_rows=doc["checkpoint_rows"],
-                supported_slice=doc["supported_slice"],
-                executions=doc["executions"] if executions is None else executions)
-        run_id = run.ref.run_id
-        run.journal.complete_execution_action(run.fence, n.action_id, {"kind": "test-complete"})
-    return SimpleNamespace(root=root, run_id=run_id, action_id=n.action_id, ref=ref, n=n)
-
-
-def seal_v1_run(root, v1):
-    """Seal a real v1 run (chain_fixture) for schema-dispatch comparison."""
-    from demiflow.execution import chain
-    from demiflow.execution.run_context import RunAction, RunContext
-    from demiflow.execution.sealed_plans import seal_execution_bindings
-    with RunContext.start(root) as run:
-        declaration = {"kind": "chain-materialize", "source": {"source_id": "fixed"}}
-        run.journal.bind_execution_action(run.fence, v1.action_id, declaration)
-        action = RunAction(run, v1.action_id, declaration)
-        sealed_at = int(run.journal.recovery_identity()["started_at"] * 1000)
-        chain.seal_plan_facts(run, action, v1.ld, v1.pp, v1.mref, sealed_at)
-        doc = v1.doc
-        ref = seal_execution_bindings(
-            run, action, logical_dag=v1.ld, physical_plan=v1.pp,
-            profiles=doc["profiles"], programs=doc["programs"],
-            driver_stage_ids=doc["driver_stage_ids"], source_bindings=doc["source_bindings"],
-            channel_options=doc["channel_options"], checkpoint_rows=doc["checkpoint_rows"],
-            supported_slice=doc["supported_slice"])
-        run_id = run.ref.run_id
-        run.journal.complete_execution_action(run.fence, v1.action_id, {"kind": "test-complete"})
-    return SimpleNamespace(root=root, run_id=run_id, action_id=v1.action_id, ref=ref, n=v1)
+def retarget_history_bindings(root, action_id, new_doc):
+    raw = document(new_doc)
+    digest = hashlib.sha256(raw).hexdigest()
+    rel = "scratch/chain-execution-bindings/" + digest + ".json"
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(raw)
+    ref = {"path": rel, "sha256": digest, "bytes": len(raw)}
+    key = action_id + "-execution-bindings"
+    with sqlite3.connect(root / "run.sqlite") as db:
+        db.execute("UPDATE runtime_sources SET document=? WHERE action_id=?", (json.dumps(ref), key))
+    return ref

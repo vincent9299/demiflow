@@ -9,7 +9,7 @@ import pytest
 
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.reservation import ReservationError
+from demiflow.execution.contracts.errors import ReservationError
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.planning.dataflow_graph_adapter import graph_credit
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
@@ -93,13 +93,14 @@ def test_recovery_byte_grant_guard_is_present(graph_environment):
             old=load_sealed_plan(run.directory,action.action_id,version='v3')['physical']
             facts=run.journal.execution_commits(action.action_id)
             raise Interrupted()
-    from demiflow.execution.graph import _graph_action_request
-    from demiflow.planning.dataflow_graph_adapter import validate_graph_replay
+    from demiflow.execution.executors.graph import graph_action_request
+    from demiflow.execution.seal.plan import validate_graph_replay
     with pytest.raises(DataflowError, match='sealed graph credit') as error:
         with RunContext.resume(ref) as run:
             with run.action({'kind':'materialize','source':{'fixture':'credit-replay'}}):
-                request = _graph_action_request(spec, LocalDatasetExecutor(workers=3))
-                validate_graph_replay(request, bounds=_bounds(batch=8192))
+                request = graph_action_request(spec, LocalDatasetExecutor(workers=3))
+                validate_graph_replay(request.action, request.source.declaration,
+                    graph_credit(request.source.declaration, bounds=_bounds(batch=8192)))
     assert error.value.code=='BUDGET_EXCEEDED'
     assert run.journal.execution_commits('action-1')==facts
     assert load_sealed_plan(run.directory,'action-1',version='v3')['physical']==old
