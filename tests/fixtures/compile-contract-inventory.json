@@ -505,6 +505,9 @@
    ],
    "train_schema": [
     "planning/dataflow_training.py"
+   ],
+   "wide_body_refs": [
+    "execution/kernels/operator.py"
    ]
   },
   "written": {
@@ -601,6 +604,9 @@
    ],
    "thread_attempt": [
     "execution/seal/plan.py"
+   ],
+   "wide_body_refs": [
+    "planning/dataflow_compile.py"
    ]
   }
  },
