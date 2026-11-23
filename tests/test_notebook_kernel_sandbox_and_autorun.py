@@ -86,10 +86,10 @@ def test_developer_sandbox_includes_declared_readonly_external_locations_only(tm
     (proj / 'workspace.json').write_text(json.dumps({
         'name': 'demo',
         'locations': {
-            'ext_ro': {'kind': 'local', 'root': str(ext_ro), 'read_only': True},
-            'ext_rw': {'kind': 'local', 'root': str(ext_rw), 'read_only': False},
-            'bad_ancestor': {'kind': 'local', 'root': str(tmp_path), 'read_only': True},
-            'bad_state': {'kind': 'local', 'root': str(state), 'read_only': True},
+            'ext_ro': {'root': str(ext_ro), 'writable': False},
+            'ext_rw': {'root': str(ext_rw), 'writable': True},
+            'bad_ancestor': {'root': str(tmp_path), 'writable': False},
+            'bad_state': {'root': str(state), 'writable': False},
         },
     }), encoding='utf-8')
 
