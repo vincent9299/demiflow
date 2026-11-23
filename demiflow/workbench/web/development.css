@@ -95,9 +95,9 @@ dialog pre{max-width:75vw;max-height:65vh;overflow:auto;white-space:pre-wrap;ove
   .development-layout.development-files-open[data-sidebar=closed]{grid-template-columns:0 minmax(0,1fr) var(--side-detail-width,minmax(360px,46%))}
 }
 .dev-sidebar-tabs{display:flex;align-items:stretch;gap:16px;padding:0 4px;margin:0 0 10px;border-bottom:1px solid #e4e4e7;background:transparent;border-radius:0;flex:none}
-.dev-sidebar-tab{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:0;border:0;border-radius:0;background:transparent;color:#71717a;font:inherit;font-size:12.5px;font-weight:500;padding:6px 0 8px;cursor:pointer;line-height:20px;white-space:nowrap;transition:color .12s,box-shadow .12s}
-.dev-sidebar-tab:hover{color:#09090b}
-.dev-sidebar-tab.is-active{background:transparent;color:#09090b;font-weight:600;box-shadow:inset 0 -2px #09090b}
+.dev-sidebar-tab{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:0;border:0;border-radius:0;background:transparent;box-shadow:none;color:#71717a;font:inherit;font-size:12.5px;font-weight:500;padding:6px 0 8px;cursor:pointer;line-height:20px;white-space:nowrap;transition:color .12s,box-shadow .12s}
+.dev-sidebar-tab:hover{background:transparent;border-color:transparent;box-shadow:none;color:#09090b}
+.dev-sidebar-tab.is-active,.dev-sidebar-tab.is-active:hover{background:transparent;color:#09090b;font-weight:600;box-shadow:inset 0 -2px #09090b}
 .dev-change-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 5px;border-radius:999px;background:#ececef;color:#3f3f46;font-size:10.5px;font-weight:600;line-height:1}
 .dev-sidebar-tab.is-active .dev-change-badge{background:#18181b;color:#fff}
 .dev-sidebar-pane{display:flex;flex-direction:column;min-height:0;flex:1;overflow:hidden}
