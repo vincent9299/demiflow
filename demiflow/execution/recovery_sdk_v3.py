@@ -567,8 +567,14 @@ def _layout_dependencies_match(entry):
     from importlib import import_module
     for item in entry.get('dependencies', ()):
         module = import_module(item['module'])
-        owners = _owners(module, item['name'])
-        fn = owners[0] if owners else None
+        parts = item['name'].split('.')
+        fn = vars(module).get(parts[0])
+        if len(parts) == 2 and isinstance(fn, type):
+            # These dependencies are real ordinary methods, not properties or
+            # static/class method descriptors with a different call shape.
+            fn = type.__dict__['__dict__'].__get__(fn).get(parts[1])
+        elif len(parts) != 1:
+            return False
         if type(fn) is not FunctionType or fn.__globals__ is not vars(module) or fn.__closure__:
             return False
         source = Path(module.__file__).read_bytes()
@@ -581,8 +587,7 @@ def _layout_dependencies_match(entry):
                 or fn.__defaults__ != item['defaults'] or fn.__kwdefaults__ != item['kwdefaults']):
             return False
         for owner, name in item['bindings']:
-            bound = _owners(import_module(owner), name)
-            if not bound or bound[0] is not fn:
+            if vars(import_module(owner)).get(name) is not fn:
                 return False
     return True
 

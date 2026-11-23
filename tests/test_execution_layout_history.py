@@ -424,3 +424,13 @@ def test_original_model_journal_requires_bound_media_verifier(original_carriers,
     monkeypatch.setattr(object_sink, 'verify_object', lambda *args, **kwargs: None)
     raw, expected = original_carriers['public.RunPromptJournal']
     assert describe(load_payload([base64.b64decode(raw)])) != expected
+
+
+@pytest.mark.parametrize('descriptor', [property, staticmethod, classmethod])
+@pytest.mark.parametrize('name', ['reference_name', '_record_object', '_flush_page'])
+def test_original_model_journal_requires_plain_method_slot(original_carriers, monkeypatch, descriptor, name):
+    from demiflow.execution.outputs.object_sink import ObjectSink
+    method = vars(ObjectSink)[name]
+    monkeypatch.setattr(ObjectSink, name, descriptor(method))
+    raw, expected = original_carriers['public.RunPromptJournal']
+    assert describe(load_payload([base64.b64decode(raw)])) != expected
