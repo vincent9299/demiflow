@@ -175,7 +175,7 @@
    "status": "undecided",
    "reason": "v3 的 DataflowRayConnector 继承这里的 RayControlConnector；_RayWorkerHost 属于 11-09 那一代。需要在 Ray 环境里测量后细化到符号。",
    "importers": [
-    "demiflow.execution.dataflow_hosts"
+    "demiflow.execution.hosts.endpoints"
    ],
    "measured": {
     "at": "74d2f99",
