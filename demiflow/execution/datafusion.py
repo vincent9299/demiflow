@@ -272,8 +272,6 @@ def query_region_offsets(sql, *, tables, max_pairs, rss_bytes, check_stop):
             status, value = pickle.load(result)
             if status == 'complete':
                 return value
-            if status == 'overflow':
-                return None
             if status == 'budget':
                 raise DataflowError('BUDGET_EXCEEDED', value)
             raise DataflowError('INTERNAL_PROTOCOL', value)

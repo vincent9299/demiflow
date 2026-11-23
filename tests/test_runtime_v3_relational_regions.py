@@ -361,3 +361,32 @@ def test_skewed_bucket_refuses_unbounded_native_sort_before_spawning(tmp_path, m
             {'k':keys[0],'a':i} for i in range(34)]
         _, _, counters = native_region_evidence(local)
         assert counters[0]['offset_sql_queries'] == 0
+
+
+def test_public_join_propagates_overflow_after_sql_started(tmp_path, monkeypatch):
+    import lance
+    import pyarrow as pa
+    import pytest
+    from demiflow.execution import datafusion
+    from demiflow.execution.kernels import relational_region
+
+    for name in ('a', 'b', 'c'):
+        lance.write_dataset(pa.table({'k': [3, 6, 9], name: [1, 2, 3]}), str(tmp_path / name))
+    original = datafusion.query_region_offsets
+    launched = []
+    def reduce_output_budget(sql, **kwargs):
+        launched.append(True)
+        kwargs['max_pairs'] = 0
+        return original(sql, **kwargs)
+    def unexpected_hash(*args, **kwargs):
+        pytest.fail('SQL has started; replaying the action with hash join is invalid')
+    monkeypatch.setattr(datafusion, 'query_region_offsets', reduce_output_budget)
+    monkeypatch.setattr(relational_region, 'hash_join_pairs', unexpected_hash)
+    with pytest.raises(Exception, match='more offset pairs than admitted'):
+        with RunContext.start(tmp_path / 'run', limits={'memory_bytes': 1 << 30,
+                'max_row_bytes': 65536, 'max_batch_bytes': 1 << 20}) as run, data.local_execution(
+                workers=2, partitions=2, worker_mode='thread', memory_bytes=1 << 30):
+            a, b, c = [data.read_lance(str(tmp_path / name), version=1) for name in ('a', 'b', 'c')]
+            a.join(b, on='k').join(c, on='k').take_all()
+    assert launched == [True]
+    assert run.journal.execution_action('action-1')['result'] is None

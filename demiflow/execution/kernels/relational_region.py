@@ -177,8 +177,6 @@ class RelationalRegionRuntime:
             max_pairs=upper, rss_bytes=SQL_CHILD_RSS, check_stop=self.services.check_stop)
         self.counters['offset_sql_queries'] += 1
         self.counters['offset_sql_inputs'] += sum(len(table) for table in tables.values())
-        if pairs is None:
-            return None
         self.counters['offset_sql_pairs'] += len(pairs)
         return pairs, leaf_refs
 
