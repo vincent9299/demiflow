@@ -458,6 +458,42 @@ class RunArtifactStore:
                 raise DataflowError('UNKNOWN_EFFECT', 'Cannot pin an absent artifact')
             self._retain(ref, owner=owner)
 
+    def object_signature(self, ref):
+        """Identify the current readable local object without opening its payload."""
+        from ..artifact_proof import ArtifactProofs
+        path = self._object_path(ref)
+        try:
+            metadata = path.stat()
+        except FileNotFoundError:
+            return None
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_size != ref.size_bytes
+                or not os.access(path, os.R_OK, effective_ids=True)):
+            return None
+        return ArtifactProofs.signature(metadata)
+
+    def retain_observed(self, ref, *, owner, observe, chunk_bytes):
+        """Share the existing pin's checksum pass with a bounded content observer."""
+        from .lease import shared_access
+        from itertools import chain
+        with self.file_slots(self.READ_FILES), shared_access(self._root, self._lease_identity,
+                                                            require_protocol=self._protocol_required):
+            verified = False
+            def verified_chunks():
+                nonlocal verified
+                yield from self._read(ref, max_bytes=max(1, ref.size_bytes), chunk_bytes=chunk_bytes)
+                verified = True
+            chunks = verified_chunks()
+            try:
+                observe(chain(chunks))
+                # A reader may decline its optional proof, but a pin always verifies every byte.
+                for _ in chunks:
+                    pass
+            finally:
+                chunks.close()
+            if not verified:
+                raise DataflowError('INVALID_CONTRACT', 'Cannot pin an unverified artifact')
+            self._retain(ref, owner=owner)
+
     def _retain(self, ref, *, owner):
         if self._readonly:
             raise DataflowError("FENCED", "historical artifact store is read-only")

@@ -59,8 +59,9 @@ def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bou
     services = make_driver_services(request.action, policy=policy, bounds=bounds)
     execution = DataflowExecution(request, services=services)
     try:
-        execution.prepare()
-        execution.start()
+        if not execution.read_materialized_count():
+            execution.prepare()
+            execution.start()
         return open_terminal(request, execution=execution)
     except BaseException as failure:
         execution._failure = failure
@@ -403,6 +404,28 @@ class DataflowExecution:
                                         len(self._active_worker_allocations))
         for partition in lease.partition_ids:
             self._by_partition[partition] = endpoint
+
+    def read_materialized_count(self):
+        from ...planning.dataflow_compile import is_materialized_count
+        if not is_materialized_count(self._request):
+            return False
+        from ..checked import current
+        if (self._request.arguments or self._request.programs or current() is not None
+                or self._action.context.journal.source_binding(self._action.action_id + "-dataflow-sealed")):
+            return False
+        from ..dataflow_sources import verified_materialized_count
+        self._check_stop()
+        rows = verified_materialized_count(self._request.source)
+        if rows is None or rows > self._bounds.max_output_rows:
+            return False
+        self._check_stop()
+        self._terminal = TerminalSubscription(self._bounds, self._exchange, ())
+        self._started = True
+        self._confirmed_rows = rows
+        self._terminal_result = TerminalResult(kind="count", rows=rows, scalar=rows, result_ref=None,
+            write_result=None, complete=True, completion="source_exhausted")
+        self._state = "succeeded"
+        return True
 
     # -- E003 prepare -----------------------------------------------------
     def prepare(self) -> SealedExecution:
@@ -927,6 +950,8 @@ class DataflowExecution:
         if self._cancelled:
             return ExecutionStatus(state='cancelled', pending_events=0, confirmed_rows=self._confirmed_rows)
         self._check_stop()
+        if self._terminal_result is not None and self._physical is None:
+            return ExecutionStatus(state=self._state, pending_events=0, confirmed_rows=self._confirmed_rows)
         if self._waiting_for_fit:
             self._launch_phase()
             if self._waiting_for_fit:
@@ -1811,7 +1836,10 @@ class DataflowExecution:
         if physical_closed and stopped:
             self._store.close()
             from ..storage.gc import collect_published_orphans, defer_run_gc
-            if getattr(self._action.context, '_native_prompt_journal', None) is not None:
+            if self._physical is None and self._state == 'succeeded':
+                # A direct metadata read published no artifacts to collect.
+                pass
+            elif getattr(self._action.context, '_native_prompt_journal', None) is not None:
                 defer_run_gc(self._action.context, self._bounds)
                 self._published_gc = {'removed':0,'bytes':0,'blocked':'Deferred until original native journal closes'}
             else:

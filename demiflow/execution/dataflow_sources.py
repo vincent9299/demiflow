@@ -89,6 +89,16 @@ def _factory_identity(factory: Any) -> dict[str, Any]:
     return {"callable": name, "code_digest": hashlib.sha256(document(payload)).hexdigest()}
 
 
+def verified_materialized_count(source):
+    from .dataflow_handles import StoredMaterializedHandle
+    if type(source.handle) is not StoredMaterializedHandle:
+        return None
+    rows = source.handle.verified_row_count()
+    if source.row_count is not None and source.row_count != rows:
+        return None
+    return rows
+
+
 def _source_facts(source: SourcePlan) -> dict[str, Any]:
     """Canonical, Json-safe semantic facts used for identity and matching."""
     if isinstance(source, ItemsSource):

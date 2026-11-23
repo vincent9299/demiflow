@@ -946,6 +946,12 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None, on_com
     return compiled
 
 
+def is_materialized_count(request):
+    """The declaration alone determines eligibility. Source integrity belongs to the reader."""
+    return (request.kind == "count" and type(request.source) is MaterializedSource
+            and not request.plan.operations)
+
+
 def lower_action(request: ActionRequest, *, bounds: Bounds, inputs=None, on_compiled=None,
                  _configuration_purpose=_NEW) -> CompiledDataflow:
     """Compile terminal collect/statistics/write semantics into the graph.

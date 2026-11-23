@@ -470,6 +470,9 @@ class StoredMaterializedHandle:
         self._schema = None
         self._declared_schema_ref = None
         self._declared_schema = None
+        from .storage.objects import RunArtifactStore
+        self._count_proof = {} if type(store) is RunArtifactStore else None
+        self._verified_frame_rows = 0
         pinned: list["ArtifactRef"] = []
         blocks, pinned_tree_count = (), 0
         try:
@@ -483,8 +486,10 @@ class StoredMaterializedHandle:
             from .dataflow_segments import tree_refs
             for block in blocks:
                 for ref in tree_refs(store, block, self._bounds):
-                    store.retain(ref, owner=owner)
+                    self._retain_block(ref)
                     pinned_tree_count += 1
+            if self._verified_frame_rows != rows:
+                self._count_proof = None
             self._blocks = blocks
             self._rows = rows
             self._schema = manifest.get("columns")
@@ -508,6 +513,68 @@ class StoredMaterializedHandle:
                 except Exception:
                     pass
             raise
+
+    def _retain_block(self, ref):
+        from .dataflow_segments import RECORDS_MEDIA, SEGMENTS_MEDIA
+        from .dataflow_record_frames import (decode_document, decode_frame, frame_stream,
+                                             line_limit, read_chunk_bytes)
+        proof = self._count_proof
+        budget = min(self._bounds.max_state_bytes, self._bounds.max_resident_bytes // 8)
+        if (proof is None or len(proof) >= budget // 1024
+                or ref.media_type not in (RECORDS_MEDIA, SEGMENTS_MEDIA)):
+            self._count_proof = None
+            self._store.retain(ref, owner=self._owner)
+            return
+        before = self._store.object_signature(ref)
+        if ref.media_type == SEGMENTS_MEDIA:
+            self._store.retain(ref, owner=self._owner)
+        else:
+            def observe(chunks):
+                stream = frame_stream(chunks, self._bounds)
+                try:
+                    while line := stream.readline(line_limit(self._bounds)):
+                        raw, item = decode_frame(line, self._bounds, retained=stream.buffered_bytes)
+                        record = decode_document(raw, record_id=item['record_id'],
+                            sequence=item['sequence'], bounds=self._bounds, retained=stream.buffered_bytes)
+                        self._verified_frame_rows += 1
+                        for dependency in (record.payload_ref, record.schema_ref):
+                            if dependency is None or dependency in proof:
+                                continue
+                            if len(proof) >= budget // 1024:
+                                self._count_proof = None
+                                return
+                            stamp = self._store.object_signature(dependency)
+                            if (stamp is None or not self._store.inspect(dependency)
+                                    or stamp != self._store.object_signature(dependency)):
+                                self._count_proof = None
+                                return
+                            proof[dependency] = stamp
+                except (ValueError, DataflowError):
+                    # A historical frame without a reusable proof keeps its original read path.
+                    self._count_proof = None
+                finally:
+                    stream.close()
+            self._store.retain_observed(ref, owner=self._owner, observe=observe,
+                                        chunk_bytes=read_chunk_bytes(self._bounds))
+        if before is None or before != self._store.object_signature(ref):
+            self._count_proof = None
+        elif self._count_proof is not None:
+            proof[ref] = before
+
+    def verified_row_count(self):
+        """Only the live pin owner can reuse a checksum established at publication."""
+        with self._lock:
+            self._check_open()
+            if self._count_proof is None:
+                return None
+            manifest = self._read_manifest()
+            if manifest['rows'] != self._rows:
+                raise _error("CORRUPT_ARTIFACT", "materialized row count differs from manifest")
+            if self._declared_schema_ref is not None and not self._store.inspect(self._declared_schema_ref):
+                raise _error("CORRUPT_ARTIFACT", "materialized schema is absent")
+            if any(self._store.object_signature(ref) != stamp for ref, stamp in self._count_proof.items()):
+                return None
+            return self._rows
 
     def _read_manifest(self) -> dict:
         if self._manifest_ref.size_bytes > self._bounds.max_control_bytes:
@@ -557,6 +624,7 @@ class StoredMaterializedHandle:
         from .storage.objects import RunArtifactStore
         self._store = RunArtifactStore(root=state["root"], store_id=state["store_id"],
             journal=None, bounds=state["bounds"], readonly=True)
+        self._count_proof = None
         self._bounds = state["bounds"]
         self._manifest_ref, self._blocks = state["manifest"], state["blocks"]
         self._rows, self._schema = state["rows"], state["schema"]
