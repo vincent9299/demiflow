@@ -507,25 +507,39 @@ def test_reference_pickle_unchanged_but_sealed_worker_refuses_source_edit(sealed
 
 # --- Gate 5: carrier binds the same sealed plan (functional, queue settlement) ---
 
-def test_carrier_binds_same_sealed_plan(tmp_path):
-    import sqlite3
+def test_carrier_binds_same_sealed_plan(tmp_path, monkeypatch):
     from test_mvp2_queue_unified import _config, _settle
     from test_queue_v2_boundaries import seed
     from test_raw_fetch import origin_server
     from demiflow.execution.queue import QueueChannel
+    from demiflow.execution.action_driver import dataflow as driver
+    from demiflow.execution.seal.plan import load_dataflow
+
+    sealed_plans = []
+    seal = driver.seal_dataflow
+    def observe(action, graph, physical, **options):
+        sealed = seal(action, graph, physical, **options)
+        sealed_plans.append((action.action_id, graph, physical, sealed, options['store']))
+        return sealed
+    monkeypatch.setattr(driver, 'seal_dataflow', observe)
     cfg = _config(tmp_path, "carrier")
     root = tmp_path / "run"
     with origin_server() as (url, calls):
         seed(QueueChannel(cfg), tmp_path / "seed", url)
-        _settle(cfg, root, url=url, unified_queue_chain=True)
+        _settle(cfg, root, url=url)
     assert calls['/file'] == 1
-    # The carrier sealed a code-pin binding in the driver journal (same mechanism as
-    # the chain); the managed worker completing the settlement proves its load-time
-    # verify_loaded_plan accepted the sealed plan + sealed_operators.
-    with sqlite3.connect(root / "run.sqlite") as db:
-        keys = [r[0] for r in db.execute(
-            "SELECT action_id FROM runtime_sources WHERE action_id LIKE '%-code-pin-%'")]
-    assert keys, "carrier sealed no code-pin binding"
+    assert sealed_plans, "queue action did not use the single driver seal"
+    for action_id, graph, physical, sealed, store in sealed_plans:
+        assert sealed.programs
+        assert tuple(node.program_ref for node in (*graph.nodes, *graph.jobs)
+                     if node.program_ref is not None) == sealed.programs
+        # Read the actual persisted binding and content-checked program refs;
+        # the retired chain's '-code-pin-' row is not the current seal format.
+        assert load_dataflow(root, action_id, store=store, bounds=physical.bounds) == (
+            graph, physical, sealed)
+    channel = QueueChannel(cfg)
+    assert channel.state('p')['queue_drained']
+    assert channel.state('p')['counts'] == {'done_ok': 1}
 
 
 # --- Gate 3: chain failure / success releases capacity (F6) ---
@@ -822,7 +836,7 @@ def test_f8b_queue_load_failure_identifiable_releases_capacity(tmp_path, monkeyp
     with origin_server() as (url, calls):
         seed(QueueChannel(cfg), tmp_path / "seed", url)
         with pytest.raises((DataflowError, RuntimeError), match="size differs|do not match") as excinfo:
-            _settle(cfg, root, url=url, unified_queue_chain=True)
+            _settle(cfg, root, url=url)
     assert not isinstance(excinfo.value, TimeoutError)
     snap = _capacity_snapshot(tmp_path)
     assert snap["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
