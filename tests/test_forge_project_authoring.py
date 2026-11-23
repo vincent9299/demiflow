@@ -39,13 +39,13 @@ def test_interrupted_registration_rechecks_and_completes(candidate, monkeypatch)
         patch.setattr(project, 'write_control', before_manifest)
         with pytest.raises(OSError, match='interrupted'):
             project.register_flow(candidate, 'flows/counts.py:run')
-    default = candidate / 'parameters/counts.json'
+    default = candidate / 'configs/counts.json'
     assert json.loads(default.read_bytes()) == {'format': 'demiflow_forge_flow_parameters_v2', 'arguments': {}}
     assert project.load_project(candidate)[1]['entries'] == {}
     assert project.register_flow(candidate, 'flows/counts.py:run')['status'] == 'registered'
     assert project.register_flow(candidate, 'flows/counts.py:run')['status'] == 'unchanged'
     with pytest.raises(ForgeError, match='existing parameter binding'):
-        project.register_flow(candidate, 'flows/counts.py:run', params='parameters/different.json')
+        project.register_flow(candidate, 'flows/counts.py:run', params='configs/different.json')
 
 
 def test_registration_rejects_changes_to_checked_source(candidate, monkeypatch):

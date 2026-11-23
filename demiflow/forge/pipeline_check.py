@@ -245,6 +245,17 @@ def _definition(root, path, deadline, exclude, sources, published):
         if tools:
             _check_agent_tools(root, tools, deadline=deadline, exclude=exclude, sources=sources)
         return dict(path=path, format=format_name, symbols=list(names), scope='definition')
+    if relative.parts[0] == 'configs' and relative.suffix in {'.json', '.yaml', '.yml'}:
+        raw = read_bounded(relative_path(root, path), 1024**2)
+        _record(sources, path, sha256(raw).hexdigest())
+        if relative.suffix == '.json':
+            decode_control(raw)
+        return dict(path=path, format=relative.suffix.lstrip('.'), symbols=[], scope='definition')
+    if relative.parts[0] == 'notebooks' and relative.suffix == '.ipynb':
+        raw = read_bounded(relative_path(root, path), 4 * 1024**2)
+        _record(sources, path, sha256(raw).hexdigest())
+        decode_control(raw)
+        return dict(path=path, format='ipynb', symbols=[], scope='definition')
     if relative.parts[0] == 'data_tools':
         if published:
             return dict(path=path, symbols=list(published), roles=published, scope='definition')

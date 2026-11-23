@@ -156,7 +156,8 @@ def discover_project_sources(root, *, exclude=(), include_roles=True):
     seen = 0
     for role in roles:
         pending = [root / role]
-        suffixes = {'.yaml', '.yml', '.json'} if role == 'prompts' else {'.py'}
+        suffixes = ({'.yaml', '.yml', '.json'} if role in {'prompts', 'configs'}
+                    else {'.ipynb'} if role == 'notebooks' else {'.py'})
         while pending:
             folder = pending.pop()
             if not visible(folder.relative_to(root)) or not no_symlinks(folder).exists():
@@ -356,7 +357,7 @@ def register_flow(root, entry, *, params=None, authorize=None, table_resolver=No
             raise ForgeError('Choose an existing parameter binding for this entry', code='conflict')
     elif len(value['entries']) >= 256:
         raise ForgeError('Registered entry count exceeds the project limit', code='resource_limit')
-    selected = params if params is not None else f'parameters/{source.stem}.json'
+    selected = params if params is not None else f'configs/{source.stem}.json'
     parameter_file = validate_parameter_path(root, selected)
     if params is None and any(selected in items for items in value['entries'].values()):
         raise ForgeError('Default parameter path is bound to another entry', code='conflict')

@@ -112,7 +112,7 @@
     return idx < 0 ? {name: clean, dir: ''} : {name: clean.slice(idx + 1), dir: clean.slice(0, idx)};
   }
 
-  const IGNORED_DIRS = new Set(['__pycache__', '.pytest_cache', '.mypy_cache', 'node_modules']);
+  const IGNORED_DIRS = new Set(['__pycache__', '.pytest_cache', '.mypy_cache', 'node_modules', 'logs']);
   const IGNORED_SUFFIXES = ['.pyc', '.pyo'];
   function ignoredPath(rel) {
     const clean = String(rel || '').replace(/^\/+/, '');
@@ -1080,25 +1080,26 @@
       paintOperatorTree();
     }
 
-    // === OUTLINE SIDEBAR (Flows + Code Ops + Prompt Ops, collapsible & vertically resizable) + TYPE-AWARE RIGHT PANEL ===
-    let opIndex = null, opFlows = [], opSelected = null, opSelectedFlow = null, opRevision = 'current', opDetail = null, opSeq = 0, opLoading = null;
+    // === OUTLINE SIDEBAR (Flows + Configs + Code Ops + Prompt Ops, collapsible & vertically resizable) + TYPE-AWARE RIGHT PANEL ===
+    let opIndex = null, opFlows = [], opConfigs = [], opSelected = null, opSelectedFlow = null, opSelectedConfig = null, opRevision = 'current', opDetail = null, opSeq = 0, opLoading = null;
     const opStorageKey = project ? 'demiflow.operator-selection.' + project : '';
     try { if (opStorageKey) opSelected = sessionStorage.getItem(opStorageKey); } catch {}
     const opCodeType = item => ({class: '可调用类', async_function: '异步函数', function: '函数'})[item.definition_type] || 'Python 定义';
     const opVisible = item => item.kind === 'prompt' || item.export_status === 'declared' || (item.export_status === 'legacy' && item.flow_references?.length) || item.id === opSelected;
 
+    const OUTLINE_KEYS = ['flows', 'configs', 'code', 'prompt'];
     let outlineExplorer = null;
     const outlineSections = {}; // key -> {section, toggle, count, list, open}
     const outlineHandles = [];
-    let outlineWeights = [0.28, 0.42, 0.30];
+    let outlineWeights = [0.22, 0.20, 0.32, 0.26];
     try {
       const saved = JSON.parse(localStorage.getItem('forge-dev-outline-splits') || 'null');
-      if (Array.isArray(saved) && saved.length === 3 && saved.every(n => Number.isFinite(n) && n >= 0.1)) outlineWeights = saved;
+      if (Array.isArray(saved) && saved.length === OUTLINE_KEYS.length && saved.every(n => Number.isFinite(n) && n >= 0.08)) outlineWeights = saved;
     } catch {}
 
     function applyOutlineSplits() {
       if (!outlineExplorer) return;
-      const keys = ['flows', 'code', 'prompt'];
+      const keys = OUTLINE_KEYS;
       const openKeys = keys.filter(k => outlineSections[k]?.open);
       const totalWeight = openKeys.reduce((sum, k) => sum + outlineWeights[keys.indexOf(k)], 0) || 1;
       for (const k of keys) {
@@ -1114,9 +1115,12 @@
           s.section.style.flex = '0 0 auto';
         }
       }
-      // Show a drag handle only when both the section above it and at least one section below it are open.
-      if (outlineHandles[0]) outlineHandles[0].hidden = !(outlineSections.flows?.open && (outlineSections.code?.open || outlineSections.prompt?.open));
-      if (outlineHandles[1]) outlineHandles[1].hidden = !(outlineSections.code?.open && outlineSections.prompt?.open);
+      // Show each drag handle only when the section above it and at least one section below it are open.
+      for (let i = 0; i < outlineHandles.length; i++) {
+        const upperOpen = Boolean(outlineSections[keys[i]]?.open);
+        const anyLowerOpen = keys.slice(i + 1).some(k => outlineSections[k]?.open);
+        outlineHandles[i].hidden = !(upperOpen && anyLowerOpen);
+      }
     }
 
     function wireOutlineDrag(handle, upperIdx, lowerIdx) {
@@ -1125,8 +1129,11 @@
         e.preventDefault();
         handle.setPointerCapture(e.pointerId);
         handle.classList.add('is-dragging');
-        const keys = ['flows', 'code', 'prompt'];
-        const actualLower = outlineSections[keys[lowerIdx]]?.open ? lowerIdx : (lowerIdx === 1 && outlineSections.prompt?.open ? 2 : -1);
+        const keys = OUTLINE_KEYS;
+        let actualLower = -1;
+        for (let j = lowerIdx; j < keys.length; j++) {
+          if (outlineSections[keys[j]]?.open) { actualLower = j; break; }
+        }
         if (actualLower < 0) return;
         const startY = e.clientY;
         const totalH = Math.max(120, outlineExplorer.getBoundingClientRect().height);
@@ -1135,7 +1142,7 @@
         const openSum = keys.reduce((acc, k, idx) => acc + (outlineSections[k]?.open ? outlineWeights[idx] : 0), 0) || 1;
         const move = ev => {
           const delta = ((ev.clientY - startY) / totalH) * openSum;
-          const nextUpper = Math.max(0.12, Math.min(sumPair - 0.12, startUpper + delta));
+          const nextUpper = Math.max(0.10, Math.min(sumPair - 0.10, startUpper + delta));
           outlineWeights[upperIdx] = nextUpper;
           outlineWeights[actualLower] = sumPair - nextUpper;
           applyOutlineSplits();
@@ -1156,7 +1163,8 @@
     if (operatorsHost) {
       outlineExplorer = node('div', 'dev-outline-explorer');
       const specs = [
-        ['flows', '管道', '调整管道与代码算子高度'],
+        ['flows', '管道', '调整管道与配置高度'],
+        ['configs', '配置', '调整配置与代码算子高度'],
         ['code', '代码算子', '调整代码算子与 Prompt 算子高度'],
         ['prompt', 'Prompt 算子', null],
       ];
@@ -1268,9 +1276,40 @@
       }
     }
 
+    function paintConfigsOutline() {
+      const sec = outlineSections.configs;
+      if (!sec) return;
+      sec.list.replaceChildren();
+      const term = filterTerm.trim().toLocaleLowerCase();
+      const matches = opConfigs.filter(c => [c.name, c.path, c.flowTitle].join(' ').toLocaleLowerCase().includes(term));
+      sec.count.textContent = String(matches.length);
+      for (const c of matches) {
+        const b = node('button', 'op-tree-leaf dev-outline-flow');
+        b.type = 'button';
+        b.dataset.configPath = c.path;
+        b.title = c.path + (c.flowTitle ? ' · ' + c.flowTitle : '');
+        b.setAttribute('aria-pressed', String(paneMode === 'file' && opSelectedConfig === c.path && activePath === c.path));
+        const textWrap = node('span', 'dev-outline-flow-text');
+        textWrap.append(node('span', 'dev-outline-flow-name', c.name));
+        textWrap.append(node('span', 'dev-outline-flow-entry', c.flowTitle ? c.flowTitle + ' · ' + c.path : c.path));
+        b.append(node('span', 'op-glyph is-config', '{}'), textWrap);
+        b.onclick = () => {
+          opSelectedConfig = c.path;
+          opSelectedFlow = null;
+          openFile(c.path, changeFor(c.path) ? 'diff' : 'source');
+          paintOperatorTree();
+        };
+        sec.list.append(b);
+      }
+      if (!matches.length) {
+        sec.list.append(node('p', 'op-muted dev-op-pad', term ? '无匹配配置' : '暂无配置文件'));
+      }
+    }
+
     function paintOperatorTree() {
       if (!outlineExplorer) return;
       paintFlowsOutline();
+      paintConfigsOutline();
       paintOperatorGroup(outlineSections.code?.list, outlineSections.code?.count, 'code');
       paintOperatorGroup(outlineSections.prompt?.list, outlineSections.prompt?.count, 'prompt');
     }
@@ -1489,16 +1528,42 @@
       if (opLoading && !force) return opLoading;
       opLoading = (async () => {
         try {
-          const [data, ctx] = await Promise.all([
+          const [data, ctx, cfgSearch] = await Promise.all([
             api('project-operators'),
             api('context').catch(() => null),
+            api('project-files', {query: 'configs/', limit: 50}).catch(() => null),
           ]);
           if (disposed) return;
           opIndex = data;
           const seen = new Map();
-          for (const e of ctx?.project?.entries || []) seen.set(e.entry, {entry: e.entry, title: e.entry});
-          for (const f of ctx?.flows || []) seen.set(f.entry, {entry: f.entry, title: f.title || f.name || f.description?.split('\n')[0] || f.entry});
+          for (const e of ctx?.project?.entries || []) seen.set(e.entry, {entry: e.entry, title: e.entry, params: e.params || []});
+          for (const f of ctx?.flows || []) {
+            const prev = seen.get(f.entry);
+            seen.set(f.entry, {
+              entry: f.entry,
+              title: f.title || f.name || f.description?.split('\n')[0] || f.entry,
+              params: f.params || prev?.params || [],
+            });
+          }
           opFlows = [...seen.values()];
+          const cfgMap = new Map();
+          for (const f of opFlows) {
+            const list = Array.isArray(f.params) ? f.params : (f.params ? [f.params] : []);
+            for (const p of list) {
+              if (typeof p !== 'string' || !p) continue;
+              if (!cfgMap.has(p)) {
+                cfgMap.set(p, {path: p, name: splitPath(p).name, flowTitle: f.title !== f.entry ? f.title : '', bound: true});
+              }
+            }
+          }
+          for (const row of cfgSearch?.entries || []) {
+            if (!row?.path || !row.path.startsWith('configs/')) continue;
+            if (!/\.(json|ya?ml|toml)$/i.test(row.path)) continue;
+            if (!cfgMap.has(row.path)) {
+              cfgMap.set(row.path, {path: row.path, name: splitPath(row.path).name, flowTitle: '', bound: false});
+            }
+          }
+          opConfigs = [...cfgMap.values()].sort((a, b) => (Number(b.bound) - Number(a.bound)) || a.path.localeCompare(b.path));
           if (!opSelected || !opIndex.definitions?.some(d => d.id === opSelected)) {
             const first = opIndex.definitions?.find(opVisible);
             if (first) opSelected = first.id;
