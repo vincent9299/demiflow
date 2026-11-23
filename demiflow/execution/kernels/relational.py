@@ -334,23 +334,23 @@ def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeService
 
     iterator = iter(ordered)
     def rows():
-        try:
-            for key,row,record in iterator:
-                yield key,row
-                del row,record
-        finally:
-            close=getattr(iterator,'close',None)
-            if close is not None:
-                close()
+        for key,row,record in iterator:
+            yield key,row
+            del row,record
 
     def output_roots(record):
         return record.inline,record.source_position
 
     from demiflow.operators.relational import reduce_ordered_groups as fold
-    yield from fold(rows(),reducer=reducer,initial=initial,fn_kwargs=fn_kwargs,
-                    validation=validation,memory=memory,bounds=services.bounds,
-                    output=output,output_roots=output_roots,
-                    check_stop=services.check_stop,retain=retain)
+    try:
+        yield from fold(rows(),reducer=reducer,initial=initial,fn_kwargs=fn_kwargs,
+                        validation=validation,memory=memory,bounds=services.bounds,
+                        output=output,output_roots=output_roots,
+                        check_stop=services.check_stop,retain=retain)
+    finally:
+        close=getattr(iterator,'close',None)
+        if close is not None:
+            close()
 
 
 

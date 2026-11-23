@@ -205,6 +205,44 @@ def test_yielded_peers_are_alias_aware_and_release_on_finish_error_and_close():
         assert closed==[True]
 
 
+@pytest.mark.parametrize('close_fails',[False,True])
+def test_exhausted_custom_input_closes_after_final_group_and_retained_release(close_fails):
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.contracts.dataflow import LoadedProgram
+    from demiflow.execution.kernels.relational import reduce_ordered_groups
+    from test_runtime_v3_c import bounds,make
+    from test_runtime_v3_finite_borrow import record
+    events=[]
+    row={'k':1}
+    class Input:
+        def __init__(self): self.read=False
+        def __iter__(self): return self
+        def __next__(self):
+            if self.read:
+                events.append('exhausted')
+                raise StopIteration
+            self.read=True
+            return 'key',row,record(row)
+        def close(self):
+            events.append('close')
+            if close_fails: raise RuntimeError('original input close failed')
+    spec=make('KernelSpec',kind='reduce',configuration={'on':['k'],
+        'occurrence_id':'reduce-close-order','reducer_program':'reduce'})
+    program=CallableSpec.create(lambda state,row:row,fn_args=(None,))
+    svc=SimpleNamespace(bounds=bounds(),assignment=SimpleNamespace(stages=()),store=None,
+        programs={'reduce':LoadedProgram('callable',program,'0'*64)},check_stop=lambda:None)
+    folded=reduce_ordered_groups(Input(),spec=spec,services=svc,
+        retain=lambda size:events.append(('retain',size)))
+    assert dict(next(folded).inline)==row
+    events.append('result')
+    assert events==['exhausted','result']
+    if close_fails:
+        with pytest.raises(RuntimeError,match='original input close failed'): next(folded)
+    else:
+        with pytest.raises(StopIteration): next(folded)
+    assert events==['exhausted','result',('retain',0),'close']
+
+
 def test_numpy_view_charges_its_unique_owner_before_serialization(monkeypatch):
     import numpy as np
     from test_runtime_v3_c import bounds

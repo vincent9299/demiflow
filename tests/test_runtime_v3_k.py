@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from demiflow.operators import ordering as algorithm_ordering
 
 TREE = Path(__file__).resolve().parents[1]
 _THIS_FILE = str(Path(__file__).resolve())
@@ -620,14 +621,14 @@ def test_k010():
 # K011 shuffle_key
 # ---------------------------------------------------------------------------
 def test_k011():
-    a = ko.shuffle_key("rec-1", seed=7, occurrence_id="occ")
-    b = ko.shuffle_key("rec-1", seed=7, occurrence_id="occ")
+    a = algorithm_ordering.shuffle_key("rec-1", seed=7, occurrence_id="occ")
+    b = algorithm_ordering.shuffle_key("rec-1", seed=7, occurrence_id="occ")
     assert a == b and isinstance(a, bytes) and len(a) == 32
-    assert ko.shuffle_key("rec-1", seed=8, occurrence_id="occ") != a
-    assert ko.shuffle_key("rec-1", seed=7, occurrence_id="other") != a
-    assert ko.shuffle_key("rec-2", seed=7, occurrence_id="occ") != a
+    assert algorithm_ordering.shuffle_key("rec-1", seed=8, occurrence_id="occ") != a
+    assert algorithm_ordering.shuffle_key("rec-1", seed=7, occurrence_id="other") != a
+    assert algorithm_ordering.shuffle_key("rec-2", seed=7, occurrence_id="occ") != a
     with pytest.raises(DataflowError):
-        ko.shuffle_key("", seed=7, occurrence_id="occ")
+        algorithm_ordering.shuffle_key("", seed=7, occurrence_id="occ")
 
 
 # ---------------------------------------------------------------------------

@@ -15,7 +15,6 @@ from demiflow.execution.contracts.dataflow import stage_resident_bytes
 
 import hashlib
 import heapq
-import struct
 import sys
 from contextlib import closing, ExitStack
 from dataclasses import replace
@@ -32,7 +31,7 @@ from demiflow.execution.contracts.dataflow import (
 )
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 
-from demiflow.execution.contracts.record_codec import _encode_payload, _decode_payload, _encode_record_document, _decode_record_document
+from demiflow.execution.contracts.record_codec import _typed_shape, _encode_payload, _decode_payload, _encode_record_document, _decode_record_document
 from demiflow.execution.contracts.dataflow import thaw_record_value
 
 from demiflow.execution.kernels.dataflow import RECORD_MEDIA_TYPE, _check_stop, _cfg, _err, _input_row_bytes, _materialize_row, _occurrence, _seed
@@ -40,7 +39,12 @@ from demiflow.operators.ordering import shuffle_key_bytes as _shuffle_key_bytes
 from demiflow.execution.contracts.record_codec import canonical_record_json as _canonical, record_identity as _hash_id
 
 from demiflow.operators.ordering import MAX_SORT_MERGE_FAN_IN as _MERGE_FAN_IN, SortWindow
-_FRAME_OVERHEAD = 256
+from demiflow.operators.ordering import (
+    SORT_FRAME_OVERHEAD as _FRAME_OVERHEAD, retained_frame_bytes as _retained_frame_bytes,
+    sort_value_token as _value_token, sort_field_token as _field_token,
+    encode_sort_frame as _frame_bytes, MergeReadBudget as _MergeReadBudget,
+    SortFrameReader as _FrameReader,
+)
 
 
 class OrderingServices:
@@ -62,83 +66,22 @@ class OrderingServices:
 
 
 
-def _retained_frame_bytes(key, provenance, encoded):
-    # Encoded bytes and decoded comparison tokens coexist in the retained run.
-    # Count the actual closed builtin tree (including container allocation),
-    # without invoking user methods or pretending encoding is its only copy.
-    def size(value):
-        if type(value) is tuple:
-            return sys.getsizeof(value) + sum(size(item) for item in value)
-        if type(value) in (bytes, str, int):
-            return sys.getsizeof(value)
-        raise _err('INTERNAL_PROTOCOL', 'unexpected sort comparison token')
-    return size(key) + size(provenance) + sys.getsizeof(encoded) + _FRAME_OVERHEAD
 
 
-def shuffle_key(record_id: str, *, seed: int, occurrence_id: str) -> bytes:
-    """K011: host/attempt/partition-count independent global random sort key."""
-    if not isinstance(record_id, str) or not record_id:
-        raise _err("INVALID_CONTRACT", "record_id must be a non-empty string")
-    if isinstance(seed, bool) or not isinstance(seed, int):
-        raise _err("INVALID_CONTRACT", "seed must be an integer")
-    return _shuffle_key_bytes(record_id, seed=seed, occurrence_id=occurrence_id)
 
 
-def _int_token(value: int) -> bytes:
-    negative = value < 0
-    magnitude = abs(value)
-    mag = magnitude.to_bytes((magnitude.bit_length() + 7) // 8 or 1, "big")
-    length = struct.pack(">Q", len(mag))
-    if negative:
-        return b"\x00" + bytes(b ^ 0xFF for b in length + mag)
-    return b"\x01" + length + mag
 
 
-def _float_token(value: float) -> bytes:
-    raw = struct.pack(">d", value)
-    if raw[0] & 0x80:
-        return bytes(b ^ 0xFF for b in raw)
-    return bytes([raw[0] ^ 0x80]) + raw[1:]
 
 
-def _value_token(value: Any) -> bytes:
-    if value is None:
-        return b"\x00"
-    if isinstance(value, bool):
-        return b"\x01" + (b"\x01" if value else b"\x00")
-    if isinstance(value, int):
-        return b"\x02" + _int_token(value)
-    if isinstance(value, float):
-        return b"\x03" + _float_token(value)
-    if isinstance(value, str):
-        return b"\x04" + value.encode("utf-8")
-    if isinstance(value, bytes):
-        return b"\x05" + value
-    if isinstance(value, (tuple, list)):
-        tag = b"\x06" if isinstance(value, tuple) else b"\x07"
-        parts = []
-        for item in value:
-            token = _value_token(item)
-            parts.append(struct.pack(">Q", len(token)) + token)
-        return tag + b"".join(parts)
-    if isinstance(value, Mapping):
-        items = sorted(value.items(), key=lambda kv: _value_token(kv[0]))
-        parts = []
-        for key, item in items:
-            kt = _value_token(key)
-            vt = _value_token(item)
-            parts.append(struct.pack(">Q", len(kt)) + kt + struct.pack(">Q", len(vt)) + vt)
-        return b"\x08" + b"".join(parts)
-    raise _err("INVALID_CONTRACT", "unsupported sort value type", type=type(value).__name__)
 
 
-def _field_token(value: Any, descending: bool) -> tuple[int, bytes]:
-    if value is None:
-        return (1, b"")
-    token = _value_token(value)
-    if descending:
-        token = bytes(b ^ 0xFF for b in token)
-    return (0, token)
+
+
+
+
+
+
 
 
 def _provenance(record: Record) -> tuple[bytes, int, str]:
@@ -191,135 +134,20 @@ def _record_sort_key(
     raise _err("INVALID_CONTRACT", "kind is not an ordering kernel", kind=kind)
 
 
-def _frame_bytes(key: tuple, prov: tuple, rec_bytes: bytes, *, frame_limit=None, admit=None) -> bytes:
-    limit = len(rec_bytes) * 4 + 1024 if frame_limit is None else frame_limit
-    if admit is not None:
-        from demiflow.execution.contracts.record_codec import _typed_shape
-        ks, _, kt = _typed_shape({'value': key}, limit)
-        ps, _, pt = _typed_shape({'value': prov}, limit)
-        # Existing key/provenance/record bytes are retained by the merge.
-        # Admit the tagged trees, JSON/string bytes and final joined frame
-        # before encoding. These three phases do not coexist with each other.
-        admit(max(kt + 2 * ks, ks + pt + 2 * ps,
-                  2 * (ks + ps) + len(rec_bytes) + 12) + 512)
-    key_bytes = _encode_payload({"value": key}, max_bytes=limit)
-    prov_bytes = _encode_payload({"value": prov}, max_bytes=limit)
-    if frame_limit is not None and len(key_bytes)+len(prov_bytes)+len(rec_bytes)+12+_FRAME_OVERHEAD > frame_limit:
-        raise _err('BUDGET_EXCEEDED', 'single sort frame exceeds the resident budget')
-    return b''.join((struct.pack(">I", len(key_bytes)), key_bytes,
-        struct.pack(">I", len(prov_bytes)), prov_bytes,
-        struct.pack(">I", len(rec_bytes)), rec_bytes))
+
 
 
 def _encode_frame(key: tuple, prov: tuple, record: Record, *, max_bytes: int, frame_limit=None) -> bytes:
     raw = _encode_record_document(record, max_bytes=max_bytes)
     encoded = _encode_payload({"record_id": record.record_id, "sequence": record.sequence,
                                "document": raw}, max_bytes=max_bytes * 4 + 1024)
-    return _frame_bytes(key, prov, encoded, frame_limit=frame_limit)
+    return _frame_bytes(key, prov, encoded, frame_limit=frame_limit, encode_payload=_encode_payload, typed_shape=_typed_shape)
 
 
-class _MergeReadBudget:
-    """Actual held frames/buffers inside one already admitted merge window."""
-    def __init__(self, window, count):
-        self.limit = window.merge_reader_bytes
-        self.total_limit = window.merge_resident_bytes or window.resident_bytes
-        self.frames = [0] * count
-        self.buffers = [0] * count
-        self.working = [0] * count
-
-    def check(self, extra=0, *, total=False):
-        # Fixed readers/heap/slot tables are small and bounded by fan-in.
-        used = 4096 + sum(self.frames) + sum(self.buffers) + sum(self.working) + extra
-        if used > (self.total_limit if total else self.limit):
-            raise _err('BUDGET_EXCEEDED', 'sort merge frames exceed their measured resident subwindow')
-
-    def external(self, extra):
-        self.check(extra, total=True)
-
-    def finish(self, slot, size):
-        # The old heap frame and the newly decoded frame coexist until next()
-        # returns. Check both before replacing the slot's retained charge.
-        self.check(size)
-        self.frames[slot] = size
-        self.working[slot] = 0
-
-    def close(self, slot):
-        self.frames[slot] = self.buffers[slot] = self.working[slot] = 0
 
 
-class _FrameReader:
-    """Streaming length-prefixed frame reader over bounded store chunks."""
 
-    def __init__(self, chunks: Iterator[bytes], *, max_frame_bytes: int,
-                 budget=None, slot=0, chunk_bytes=0) -> None:
-        self._max_frame_bytes = max_frame_bytes
-        self._chunks = iter(chunks)
-        self._buffer = bytearray()
-        self._eof = False
-        self._budget, self._slot, self._chunk_bytes = budget, slot, chunk_bytes
-        if budget is not None:
-            budget.buffers[slot] = sys.getsizeof(self._buffer)
-            budget.check()
 
-    def _fill(self, needed: int) -> None:
-        while len(self._buffer) < needed and not self._eof:
-            if self._budget is not None:
-                # read()'s next chunk, bytearray growth, and an old chunk can
-                # overlap. The configured read chunk is a hard upper bound.
-                self._budget.check(sys.getsizeof(self._buffer) + 3 * self._chunk_bytes + 256)
-            try:
-                chunk = next(self._chunks)
-            except StopIteration:
-                self._eof = True
-                break
-            self._buffer.extend(chunk)
-            if self._budget is not None:
-                self._budget.buffers[self._slot] = sys.getsizeof(self._buffer)
-
-    def _read_exact(self, count: int) -> bytes:
-        self._fill(count)
-        if len(self._buffer) < count:
-            raise _err("CORRUPT_ARTIFACT", "truncated sort run frame")
-        if self._budget is not None:
-            self._budget.check(2 * count + 256)
-        data = bytes(self._buffer[:count])
-        del self._buffer[:count]
-        if self._budget is not None:
-            self._budget.buffers[self._slot] = sys.getsizeof(self._buffer)
-        return data
-
-    def _decode(self, size):
-        raw = self._read_exact(size)
-        if self._budget is not None:
-            from demiflow.execution.contracts.record_codec import raw_workspace
-            self._budget.check(raw_workspace(raw))
-        return _decode_payload(raw, max_bytes=self._max_frame_bytes)['value']
-
-    def next_frame(self) -> tuple | None:
-        self._fill(4)
-        if not self._buffer:
-            if self._budget is not None:
-                self._budget.finish(self._slot, 0)
-            return None
-        (key_len,) = struct.unpack(">I", self._read_exact(4))
-        if key_len > self._max_frame_bytes:
-            raise _err("BUDGET_EXCEEDED", "sort key frame exceeds the resident budget")
-        key = self._decode(key_len)
-        if self._budget is not None:
-            self._budget.working[self._slot] = _retained_frame_bytes(key, (), b'')
-        (prov_len,) = struct.unpack(">I", self._read_exact(4))
-        if key_len + prov_len + 12 > self._max_frame_bytes:
-            raise _err("BUDGET_EXCEEDED", "sort provenance frame exceeds the resident budget")
-        prov = self._decode(prov_len)
-        if self._budget is not None:
-            self._budget.working[self._slot] = _retained_frame_bytes(key, prov, b'')
-        (rec_len,) = struct.unpack(">I", self._read_exact(4))
-        if key_len + prov_len + rec_len + 12 > self._max_frame_bytes:
-            raise _err("BUDGET_EXCEEDED", "sort record frame exceeds the resident budget")
-        rec_bytes = self._read_exact(rec_len)
-        if self._budget is not None:
-            self._budget.finish(self._slot, _retained_frame_bytes(key, prov, rec_bytes))
-        return (key, prov, rec_bytes)
 
 
 def _run_frames(ref: ArtifactRef, services: RuntimeServices, window=None, *, budget=None, slot=0) -> Iterator[tuple]:
@@ -327,7 +155,7 @@ def _run_frames(ref: ArtifactRef, services: RuntimeServices, window=None, *, bud
     chunks = services.store.read(ref, max_bytes=ref.size_bytes, **kwargs)
     reader = _FrameReader(chunks, max_frame_bytes=(services.bounds.max_resident_bytes
                           if window is None else window.frame_bytes), budget=budget, slot=slot,
-                          chunk_bytes=0 if window is None else window.read_chunk_bytes)
+                          chunk_bytes=0 if window is None else window.read_chunk_bytes, decode_payload=_decode_payload)
     try:
         while True:
             frame = reader.next_frame()
@@ -466,7 +294,7 @@ def sort_with_body_references(records, *, spec, services, rows, window, retain, 
             encoded = _encode_payload(saved, max_bytes=window.frame_bytes)
             packed = _frame_bytes(key, provenance, encoded, frame_limit=window.frame_bytes,
                 admit=lambda size: admit_workspace(size, codec.bounds, resident_bytes=stage_resident_bytes(getattr(codec, 'assignment', None)),
-                                                   retained=retained + native + len(encoded)))
+                                                   retained=retained + native + len(encoded)), encode_payload=_encode_payload, typed_shape=_typed_shape)
             largest = max(largest, _retained_frame_bytes(key, provenance, packed))
             return packed
 
@@ -675,7 +503,7 @@ def merge_sort_runs(
                         for key, prov, rec_bytes in source_frames:
                             yield _frame_bytes(key, prov, rec_bytes,
                                 frame_limit=None if window is None else window.frame_bytes,
-                                admit=None if budget is None else budget.external)
+                                admit=None if budget is None else budget.external, encode_payload=_encode_payload, typed_shape=_typed_shape)
 
                 with closing(frames()) as output_frames:
                     ref = services.store.put(output_frames, max_bytes=remaining, media_type=RECORD_MEDIA_TYPE)

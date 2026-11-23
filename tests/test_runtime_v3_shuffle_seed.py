@@ -437,7 +437,7 @@ def test_typed_codec_values_and_mapping_order_contract(tmp_path):
 
 
 def test_legacy_formula_and_old_sealed_configuration_remain_unchanged(tmp_path, monkeypatch):
-    from demiflow.execution.kernels.ordering import shuffle_key
+    from demiflow.operators.ordering import shuffle_key
     from demiflow.execution.action_driver import dataflow as execution_module
     from demiflow.planning import dataflow_compile
     from test_runtime_v3_real_seams import prepared
