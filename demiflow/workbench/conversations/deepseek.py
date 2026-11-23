@@ -99,6 +99,8 @@ class DeepSeek:
             py_path = Path(config['_project_python'])
             env['PATH'] = str(py_path.parent) + ':' + env['PATH']
             env['DEMIFLOW_PROJECT_PYTHON'] = str(py_path)
+        if config.get('_shim_bin'):
+            env['PATH'] = str(config['_shim_bin']) + ':' + env['PATH']
         if config.get('_cell_bin'):
             env['PATH'] = config['_cell_bin'] + ':' + env['PATH']
         env.update(proxy_environment(config))
@@ -116,7 +118,7 @@ class DeepSeek:
     def __init__(self,transport,config,project,saved_session=None):
         self.transport,self.config,self.project=transport,config,project
         self.thread,self.turn=saved_session,None
-        self.prompt='';self.prompt_key=None;self.items={};self.acknowledged=False
+        self.prompt='';self.prompt_key=None;self.prompt_sent=False;self.items={};self.acknowledged=False
         self.message_scope=None;self.message_block=0;self.message_kind=None
         self.stream_attempt=None;self.stream_blocks={};self.stream_count=0;self.stream_messages=set()
         self.metrics_sequence=-1
@@ -136,7 +138,9 @@ class DeepSeek:
         return dict(profile='private_fixed_acp',filesystem='host_permissions',input_requests='unsupported',history_replay='unsupported')
 
     def open(self,prompt):
-        self.prompt=prompt
+        # Inject Skill only on a fresh session; resumed sessions already carry it.
+        self.prompt = '' if self.thread else prompt
+        self.prompt_sent = bool(self.thread)
         params=dict(cwd=self.project['root'],mcpServers=self.mcp_servers)
         if self.thread:params['sessionId']=self.thread
         return self.transport.request('session/resume' if self.thread else 'session/new',params)
@@ -150,10 +154,15 @@ class DeepSeek:
         return self.thread
 
     def start(self,message,submission):
-        # Context and requirement share one immutable prompt frame. A lost send
-        # cannot be retried automatically; no separate model title request exists.
+        # Context and requirement share one immutable prompt frame on the first turn;
+        # subsequent turns in the same session send only the user's message.
         scope=hashlib.sha256(wire([self.thread, text(submission, 512)])).hexdigest()[:32]
-        self.prompt_key=self.transport.request('session/prompt',dict(sessionId=self.thread,prompt=[dict(type='text',text=self.prompt+'\n\n当前请求：\n'+message)]))
+        if self.prompt and not self.prompt_sent:
+            body = self.prompt + '\n\n' + message
+            self.prompt_sent = True
+        else:
+            body = message
+        self.prompt_key=self.transport.request('session/prompt',dict(sessionId=self.thread,prompt=[dict(type='text',text=body)]))
         self.turn='acp-interval:'+self.prompt_key
         # ACP request IDs restart in each process. They are not persisted message
         # identities: one conversation can contain many "client-3" intervals.

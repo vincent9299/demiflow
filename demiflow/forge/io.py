@@ -18,9 +18,29 @@ def directory_handle(path, *, create=False):
     if '..' in path.parts:
         raise ForgeError('Non-normalized directory', code='invalid_request')
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-    fd = os.open(path.anchor, flags)
     try:
-        for component in path.parts[1:]:
+        fd = os.open(path.anchor, flags)
+        remaining = path.parts[1:]
+    except PermissionError:
+        # Under Landlock confinement, ancestor directories outside the project root
+        # are intentionally unreadable; verify no_symlinks via lstat and anchor at
+        # the deepest readable directory instead.
+        no_symlinks(path)
+        anchor = path
+        tail = []
+        fd = None
+        while True:
+            try:
+                fd = os.open(anchor, flags)
+                break
+            except FileNotFoundError:
+                if not create or anchor == anchor.parent:
+                    raise
+                tail.append(anchor.name)
+                anchor = anchor.parent
+        remaining = tuple(reversed(tail))
+    try:
+        for component in remaining:
             try:
                 child = os.open(component, flags, dir_fd=fd)
             except FileNotFoundError:

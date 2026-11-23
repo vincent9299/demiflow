@@ -446,20 +446,13 @@
         };
         forgeStrip.append(pill);
       }
-      if (typeof onRequestReview === 'function' && latestChecks.review !== 'running') {
-        const revBtn = node('button', 'dev-forge-trigger', '发起评审');
-        revBtn.type = 'button';
-        revBtn.title = '手动发起一次独立只读 Forge 评审';
-        revBtn.onclick = () => onRequestReview();
-        forgeStrip.append(revBtn);
-      }
       const selected = items.find(i => i.key === activeCheckKey);
       forgeDetail.replaceChildren();
       if (selected) {
         const head = node('div', 'dev-forge-detail-head');
         head.append(node('strong', null, selected.label + ' · ' + selected.text));
         const headBtns = node('div', 'dev-forge-detail-actions');
-        if (typeof onRework === 'function' && selected.tone !== 'ok' && selected.lines.length) {
+        if (typeof onRework === 'function' && selected.tone === 'bad' && selected.lines.length) {
           const reworkBtn = node('button', 'dev-forge-rework', '带问题打回修改');
           reworkBtn.type = 'button';
           reworkBtn.onclick = () => {

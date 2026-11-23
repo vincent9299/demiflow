@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 from hashlib import sha256
 from pathlib import Path
 
@@ -129,6 +130,39 @@ def _project_sources(root, requested, excluded, coverage, diagnostics):
     return rows
 
 
+def _runtime_environment(root):
+    setting = os.environ.get('DEMIFLOW_FORGE_RUNTIME_CONFIG')
+    if not setting:
+        return None
+    path = Path(setting)
+    if not path.is_absolute() or '..' in path.parts or path.is_relative_to(root):
+        return None
+    try:
+        raw = read_bounded(no_symlinks(path), 65536)
+        data = json.loads(raw)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if data.get('root') and Path(data['root']).resolve() != root.resolve():
+        return None
+    env = {}
+    if isinstance(data.get('execution_mode'), str):
+        env['execution_mode'] = data['execution_mode']
+    py = data.get('python')
+    env['python'] = py if isinstance(py, str) and py else None
+    writes = data.get('writes')
+    if isinstance(writes, list):
+        env['writes'] = [str(item) for item in writes[:64]]
+        if len(writes) > 64:
+            env['writes_total'] = len(writes)
+    if isinstance(data.get('shared_sources'), list):
+        env['shared_sources'] = [str(item) for item in data['shared_sources'][:32]]
+    if isinstance(data.get('input_access'), bool):
+        env['input_access'] = data['input_access']
+    return env
+
+
 def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference=None, exclude=()):
     from .project import discover_project_sources
 
@@ -188,6 +222,12 @@ def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference
         if control is not None:
             project = dict(state='initialized', name=control['name'], id=control.get('id'),
                            platform_digest=control.get('platform', {}).get('digest'))
+            if isinstance(control.get('locations'), dict) and control['locations']:
+                project['locations'] = {
+                    str(k): (dict(root=str(v.get('root', '')), writable=bool(v.get('writable', False)))
+                             if isinstance(v, dict) else str(v))
+                    for k, v in sorted(control['locations'].items())[:32]
+                }
             raw = read_bounded(root / 'workspace.json', 1024**2)
             if json.loads(raw) != control:
                 raise ForgeError('Project declaration changed during discovery', code='conflict')
@@ -205,6 +245,9 @@ def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference
     requested = tuple(dict.fromkeys([*sources, *(name for name in paths
                                                    if name != 'workspace.json' and (root / name).is_file())]))
     result['sources'].extend(_project_sources(root, requested, excluded, coverage, diagnostics))
+    env_cfg = _runtime_environment(root)
+    if env_cfg is not None:
+        result['environment'] = env_cfg
     if diagnostics:
         result['status'] = 'incomplete'
     if len(canonical(result)) > CONTEXT_BYTES:
@@ -220,6 +263,28 @@ def render_context(result):
     rows.extend(['\n' + api_markdown(sdk['apis']),
                  f"SDK 版本依据 {sdk['sdk_revision']} · API 目录 {sdk['catalog_id']}", '\n## 当前项目',
                  f"{result['project']['name']} · {result['root']} · {result['project']['state']}"])
+    locations = result['project'].get('locations')
+    if locations:
+        loc_parts = [
+            f"{k}={v['root']}({'可写' if v.get('writable') else '只读'})" if isinstance(v, dict) else f'{k}={v}'
+            for k, v in locations.items()
+        ]
+        rows.append('项目自定义目录（locations）：' + '、'.join(loc_parts))
+    env_cfg = result.get('environment')
+    if isinstance(env_cfg, dict):
+        rows.append('\n## 项目运行与沙箱配置')
+        if env_cfg.get('execution_mode'):
+            rows.append('执行模式：' + ('受限开发沙箱（读写限于本项目目录及 $TMPDIR）'
+                                     if env_cfg['execution_mode'] == 'restricted' else env_cfg['execution_mode']))
+        if env_cfg.get('python'):
+            rows.append('业务 Python 环境（只读）：' + env_cfg['python'] + '（已加入 PATH，可直接运行 python / pytest，已自动接通只读 demiflow SDK 与 pytest 沙箱参数）')
+        else:
+            rows.append('业务 Python 环境：未配置（工作台不默认继承平台环境；请勿在宿主机搜索 Python/pytest，如需运行测试请提示用户在项目设置中配置业务 Python）')
+        if env_cfg.get('writes'):
+            extra = f"（共 {env_cfg['writes_total']} 项）" if env_cfg.get('writes_total') else ''
+            rows.append('授权可写范围' + extra + '：' + '、'.join(env_cfg['writes'][:20]))
+        if env_cfg.get('shared_sources'):
+            rows.append('已声明只读共享模块根包：' + '、'.join(env_cfg['shared_sources']))
     flows = result['registered_flows']
     rows.append(f"登记入口（共 {flows['total'] if flows['total'] is not None else '未知'} 个）")
     for flow in flows['items']:
