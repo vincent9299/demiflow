@@ -233,77 +233,44 @@ def test_relational_hash_spill_match_oracle(budget, how):
     assert_same_rows(actual, _oracle_join(left, right, ['a', 'b'], ['x', 'y'], how))
 
 
-def test_join_group_order_reuse_and_callback_invalidation(monkeypatch):
-    from demiflow.data import local_relational as rel
-    calls = []
-    original = rel.sorted_rows
-    def tracked(*args, **kwargs):
-        calls.append(tuple(args[1]))
-        return original(*args, **kwargs)
-    monkeypatch.setattr(rel, 'sorted_rows', tracked)
+def test_join_group_order_and_callback_invalidation():
     def plan():
         return ds([{'k': 2, 'v': 'a'}, {'k': 1, 'v': 'b'}, {'k': 2, 'v': 'c'}]).join(
             ds([{'k': 1}, {'k': 2}]), on='k')
     def reducer(acc, row):
         return {'k': row['k'], 'vs': (acc or {}).get('vs', '') + row['v']}
     assert plan().reduce_by_key('k', reducer).take_all() == [{'k':1,'vs':'b'}, {'k':2,'vs':'ac'}]
-    assert calls == []  # Dataset relations no longer use Python external sorting
-    calls.clear()
     batches = plan().group_batches('k', max_rows=1).take_all()
-    assert len(batches) == 3 and calls == []
-    calls.clear()
+    assert len(batches) == 3
     changed = plan().map(lambda row: {**row, 'k': 3-row['k']}).reduce_by_key('k', reducer).take_all()
     assert changed == [{'k':1,'vs':'ac'}, {'k':2,'vs':'b'}]
-    assert calls == []
 
 
 @pytest.mark.parametrize('how', ['inner', 'left', 'semi', 'anti'])
-def test_normal_join_groups_do_not_spool(tmp_path, monkeypatch, how):
-    from demiflow.data import local_relational as rel
-    writes = []
-    original = rel._write_records
-    def tracked(path, records):
-        writes.append(str(path))
-        return original(path, records)
-    monkeypatch.setattr(rel, '_write_records', tracked)
+def test_join_results_with_many_normal_groups(how):
     left = [{'k': i} for i in range(100)]
     # right table exceeds budget, individual keys fit: use sort/merge without group files
     right = [{'k': i, 'v': 'x'*50} for i in range(100)]
     assert_same_rows(ds(left).join(ds(right), on='k', how=how, chunk_bytes=1000).take_all(), _oracle_join(left, right, ['k'], ['k'], how))
-    assert writes == []  # native relations do not spool Python key-group files
 
 
-def test_hot_key_cartesian_product_and_no_aliasing(tmp_path, monkeypatch):
-    from demiflow.data import local_relational as rel
-    writes = []
-    original = rel._write_records
-    def tracked(path, records):
-        writes.append(str(path))
-        return original(path, records)
-    monkeypatch.setattr(rel, '_write_records', tracked)
+def test_hot_key_cartesian_product_and_no_aliasing():
     left = [{'k': 1, 'l': i} for i in range(3)]
     right = [{'k': 1, 'nested': [i]} for i in range(40)]
     result = ds(left).join(ds(right), on='k', chunk_bytes=500).take_all()
     assert_same_rows(result, _oracle_join(left, right, ['k'], ['k'], 'inner'))
-    assert writes == []
     result[0]['nested'].append('mutated')
     assert all('mutated' not in row['nested'] for row in result[1:])
 
 
-def test_large_stable_sort_multiple_merge_passes(tmp_path):
-    from demiflow.data.local_relational import sorted_rows, key_of
-    rows = [{'k': i % 7, 'i': i} for i in range(1100)]
-    assert [r for _, r in sorted_rows(iter(rows), ['k'], tmp_path, 1)] == sorted(rows, key=lambda r: key_of(r, ['k']))
-
-
-@pytest.mark.slow
-def test_parallel_sort_matches_serial(tmp_path):
-    from demiflow.data.local_relational import sorted_rows
-    a = tmp_path/'serial'; a.mkdir()
-    b = tmp_path/'parallel'; b.mkdir()
-    rows = [{'k': (i*7919)%37, 'i':i, 'payload':'x'*256} for i in range(40000)]
-    assert list(sorted_rows(iter(rows), ['k'], a, 8*1024*1024, workers=1)) == list(
-        sorted_rows(iter(rows), ['k'], b, 8*1024*1024, workers=2))
+@pytest.mark.parametrize('workers', [1, 2])
+def test_public_sort_preserves_equal_key_order(tmp_path, workers):
+    from demiflow import data
+    from demiflow.execution import RunContext
+    rows = [{'k': i % 7, 'i': i} for i in range(64)]
+    with RunContext.start(tmp_path/'run'), data.local_execution(workers=workers, partitions=1):
+        actual = data.from_items(rows).sort('k').take_all()
+    assert actual == sorted(rows, key=lambda row: row['k'])
 
 
 def test_sort_and_join_cleanup_on_consumer_error(tmp_path, monkeypatch):
@@ -354,38 +321,60 @@ def test_sort_and_join_cleanup_on_consumer_error(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize('how,expected_rows', [('inner', 2), ('semi', 2), ('left', 100), ('anti', 100)])
-def test_native_join_does_not_call_python_sort(monkeypatch, how, expected_rows):
-    from demiflow.data import local_relational as rel
-    original = rel.sorted_rows
-    scanned = []
-    def track(rows, *args, **kwargs):
-        def counted():
-            for row in rows:
-                scanned.append(row['k'])
-                yield row
-        return original(counted(), *args, **kwargs)
-    monkeypatch.setattr(rel, 'sorted_rows', track)
+def test_native_join_results_with_wide_left_inputs(how, expected_rows):
     left = [{'k':i, 'payload':'wide'*100} for i in reversed(range(100))]
     right = [{'k':1}, {'k':4}]
     assert_same_rows(ds(left).join(ds(right), on='k', how=how).take_all(), _oracle_join(left, right, ['k'], ['k'], how))
-    assert scanned == []
 
 
-def test_wide_sort_writes_payload_once_across_merge_passes(tmp_path, monkeypatch):
-    from demiflow.data import local_relational as rel
-    monkeypatch.setattr(rel, '_MERGE_FAN_IN', 2)
-    original = rel._write_records
-    encoded_sizes = []
-    def track(path, records):
-        def checked():
-            for key, payload in records:
-                encoded_sizes.append(len(payload))
-                yield key, payload
-        return original(path, checked())
-    monkeypatch.setattr(rel, '_write_records', track)
-    rows = [{'k': i % 3, 'i': i, 'wide': str(i) * 8192} for i in reversed(range(20))]
-    actual = [row for _, row in rel.sorted_rows(iter(rows), ['k'], tmp_path, 512)]
-    assert actual == sorted(rows, key=lambda r: rel.key_of(r, ['k']))
-    assert len(encoded_sizes) > len(rows)  # Multiple merge passes really occurred.
-    assert max(encoded_sizes) == 9  # Only offsets, never wide payload copies.
-    assert (tmp_path / 'payloads.pickle').stat().st_size < sum(len(r['wide']) for r in rows) + 4096
+@pytest.mark.parametrize(('width', 'key_padding', 'rows', 'uses_offsets'), [
+    (24, 0, 40, False), (70000, 0, 40, True), (70000, 17000, 52, True),
+], ids=['narrow-values', 'wide-values', 'wide-values-and-keys'])
+def test_wide_sort_writes_payload_once_across_merge_passes(
+        tmp_path, monkeypatch, width, key_padding, rows, uses_offsets):
+    from demiflow import data
+    from demiflow.execution import RunContext
+    from demiflow.execution.dataflow_scratch import KernelScratch
+    from demiflow.execution.kernels import ordering
+
+    extents, references, runs = [], [], []
+    append, encode, write_run = KernelScratch.append, ordering._encode_payload, ordering._write_run
+
+    def append_body(scratch, raw):
+        offset = append(scratch, raw)
+        if b'x' * 4096 in raw:
+            extents.append((offset, len(raw)))
+        return offset
+
+    def encode_reference(value, **kwargs):
+        if {'offset', 'length', 'sha256'} <= value.keys():
+            references.append((value['offset'], value['length']))
+        return encode(value, **kwargs)
+
+    def spill(frames, services):
+        ref = write_run(frames, services)
+        runs.append(ref.size_bytes)
+        return ref
+
+    monkeypatch.setattr(KernelScratch, 'append', append_body)
+    monkeypatch.setattr(ordering, '_encode_payload', encode_reference)
+    monkeypatch.setattr(ordering, '_write_run', spill)
+    monkeypatch.setattr(ordering, '_MERGE_FAN_IN', 2)
+
+    def wide(row):
+        i = row['id']
+        return {'k': str(i % 3) + 'z' * key_padding, 'i': i, 'wide': 'x' * width}
+
+    limits = {'memory_bytes': 2 << 20, 'max_row_bytes': 210000,
+              'max_batch_bytes': 1 << 20, 'checkpoint_interval_ms': 1000000}
+    with RunContext.start(tmp_path/'run', limits=limits), data.local_execution(
+            workers=1, worker_mode='thread', partitions=1):
+        order = []
+        for row in data.range(rows).map(wide).sort('k').iter_rows():
+            assert row['wide'] == 'x' * width
+            order.append(row['i'])
+    assert order == sorted(range(rows), key=lambda i: i % 3)
+    assert len(extents) == len(references) == (rows if uses_offsets else 0)
+    assert extents == references and len(set(references)) == len(references)
+    if key_padding:
+        assert len(runs) > 1

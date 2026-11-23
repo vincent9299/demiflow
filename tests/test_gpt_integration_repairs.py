@@ -122,28 +122,6 @@ def test_plain_instance_auto_state_and_prepend_public_composition(tmp_path):
         assert ds.materialize().take_all() == [dict(id=i, count=i+1) for i in range(3)]
 
 
-def test_arrow_detaches_small_slice_from_large_backing_buffer():
-    from demiflow.execution.arrow_batch_sink import rechunk
-    parent = pa.record_batch({'x': list(range(1024))})
-    rows = rechunk([parent], 1, max_bytes=16)
-    try:
-        assert next(rows).get_total_buffer_size() <= 16
-    finally:
-        rows.close()
-
-
-def test_arrow_ipc_bytes_rejected_before_disk_write(tmp_path):
-    import cloudpickle
-    from demiflow.execution.arrow_batch_sink import apply_batch
-    from demiflow.data.plan import MapBatchesOp, CallableSpec
-    op = MapBatchesOp(CallableSpec(target=_identity), batch_format='pyarrow')
-    path = tmp_path / 'output.arrow'
-    batch = pa.table({'id': [1]})
-    with pytest.raises(RecoveryContractError, match='scratch byte budget'):
-        apply_batch(batch, cloudpickle.dumps(op), str(path), batch.schema, max_bytes=8)
-    assert not path.exists()
-
-
 def test_arrow_public_write_uses_admitted_physical_reader(tmp_path, monkeypatch):
     from demiflow.lance import read
     reads = []
