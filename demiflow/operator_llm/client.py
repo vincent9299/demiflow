@@ -274,8 +274,8 @@ class AsyncOperatorLLMClient:
         if verification is not True and verification is not False and verification != 'listed':
             raise ValueError('verify_model must be true, false, or listed')
         self.request_options=request_options(self.options)
-        from demiflow.execution.contracts.dataflow import PrivatePromptJournalPort
-        private_remote = PrivatePromptJournalPort in type(native_journal).__mro__
+        from demiflow.execution.contracts.dataflow import PrivatePromptJournalPort, inherits_bound_port
+        private_remote = inherits_bound_port(native_journal, PrivatePromptJournalPort)
         if private_remote:
             if (self.options.get('sqlite_journal') != native_journal.declaration
                     or self.options.get('journal_dir')):
@@ -293,8 +293,8 @@ class AsyncOperatorLLMClient:
             # Capability-verified remote native journal is assembled before the
             # http_error_retry guard. A private write journal must not silently
             # dual-write with native recovery; it stays as read-only history.
-            from demiflow.execution.contracts.dataflow import PromptJournalPort
-            if PromptJournalPort not in type(native_journal).__mro__:
+            from demiflow.execution.contracts.dataflow import PromptJournalPort, inherits_bound_port
+            if not inherits_bound_port(native_journal, PromptJournalPort):
                 raise ValueError('native_journal must be a capability-verified RemotePromptJournal')
             if self.journal is not None:
                 raise ValueError('Native remote journal cannot coexist with a private prompt journal; '
@@ -307,8 +307,8 @@ class AsyncOperatorLLMClient:
             journal = self.journal
             verified = isinstance(journal, SQLitePromptJournal)
             if not verified and journal is not None:
-                from demiflow.execution.contracts.dataflow import PromptJournalPort
-                verified = PromptJournalPort in type(journal).__mro__
+                from demiflow.execution.contracts.dataflow import PromptJournalPort, inherits_bound_port
+                verified = inherits_bound_port(journal, PromptJournalPort)
             if (not verified or journal.read_only
                     or type(journal.limit) is not int or journal.limit < 0):
                 raise ValueError('HTTP error retry requires a writable SQLite journal with finite nonnegative max_requests')

@@ -2140,6 +2140,12 @@ def shared_binding(configuration, occurrence):
     return {'owner': value['owner'], 'members': list(value['members']), 'state_owner': value['state_owner']}
 
 
+def inherits_bound_port(value, port):
+    """Require a real base, bypassing virtual registration and metaclass hooks."""
+    bases = type.__dict__['__mro__'].__get__(type(value))
+    return any(base is port for base in bases)
+
+
 class PromptJournalPort(ABC):
     """Bound model journal operations; driver still verifies occurrence and lease.
 

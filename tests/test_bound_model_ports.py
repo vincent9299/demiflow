@@ -7,9 +7,32 @@ from demiflow.execution.contracts.dataflow import (
 from demiflow.operator_llm.model import PromptModel
 
 
+def masquerading_type(cls, port, kind):
+    if kind == 'virtual':
+        port.register(cls)
+        return cls
+    if kind == 'class_attribute':
+        return type('Disguised', (cls,), {'__class__': property(lambda self: port)})
+    if kind == 'metaclass_attribute':
+        class Pretend(type):
+            def __getattribute__(self, name):
+                return (port, object) if name == '__mro__' else super().__getattribute__(name)
+    elif kind == 'metaclass_property':
+        class Pretend(type):
+            @property
+            def __mro__(self):
+                return (port, object)
+    else:
+        class Pretend(type):
+            def __eq__(self, other):
+                return True
+            __hash__ = type.__hash__
+    return Pretend('Disguised', (cls,), {})
+
+
 @pytest.mark.parametrize('port', [PromptJournalPort, PrivatePromptJournalPort])
 @pytest.mark.parametrize('target', ['http', 'codex', 'offline'])
-@pytest.mark.parametrize('masquerade', ['virtual', 'class_attribute'])
+@pytest.mark.parametrize('masquerade', ['virtual', 'class_attribute', 'metaclass_attribute', 'metaclass_property', 'metaclass_equality'])
 def test_model_clients_refuse_non_inheriting_journal(port, target, masquerade):
     from demiflow.operator_llm.client import AsyncOperatorLLMClient
     from demiflow.operator_llm.codex_exec import CodexExecPromptClient
@@ -21,13 +44,8 @@ def test_model_clients_refuse_non_inheriting_journal(port, target, masquerade):
         declaration = None
         route = None
 
-    if masquerade == 'virtual':
-        port.register(Unbound)
-    else:
-        Unbound = type('Disguised', (Unbound,), {'__class__': property(lambda self: port)})
-    value = Unbound()
-    assert isinstance(value, port)  # The ordinary ABC check is insufficient.
-    assert port not in type(value).__mro__
+    value = masquerading_type(Unbound, port, masquerade)()
+    assert not any(base is port for base in type.__dict__['__mro__'].__get__(type(value)))
     model = PromptModel('fixture', 'openai_compatible', base_url='http://127.0.0.1:1')
     with pytest.raises(ValueError, match='journal|port'):
         if target == 'http':
@@ -38,7 +56,7 @@ def test_model_clients_refuse_non_inheriting_journal(port, target, masquerade):
             RemoteOfflinePromptClient(model, {'offline_dir': '/unused'}, value)
 
 
-@pytest.mark.parametrize('masquerade', ['virtual', 'class_attribute'])
+@pytest.mark.parametrize('masquerade', ['virtual', 'class_attribute', 'metaclass_attribute', 'metaclass_property', 'metaclass_equality'])
 def test_image_algorithm_refuses_non_inheriting_writer(masquerade):
     from demiflow.operator_llm.media import store_image
     called = []
@@ -47,12 +65,7 @@ def test_image_algorithm_refuses_non_inheriting_writer(masquerade):
         def store_image(self, raw, options):
             called.append(raw)
 
-    if masquerade == 'virtual':
-        BoundImageWriter.register(Unbound)
-    else:
-        Unbound = type('Disguised', (Unbound,), {'__class__': property(lambda self: BoundImageWriter)})
-    value = Unbound()
-    assert isinstance(value, BoundImageWriter)
+    value = masquerading_type(Unbound, BoundImageWriter, masquerade)()
     with pytest.raises(TypeError, match='bound image writer'):
         store_image(b'not executed', {}, store=value)
     assert called == []

@@ -95,8 +95,8 @@ class OfflinePromptClient:
 
 class RemoteOfflinePromptClient:
     def __init__(self, model, options, journal):
-        from demiflow.execution.contracts.dataflow import PromptJournalPort
-        if PromptJournalPort not in type(journal).__mro__:
+        from demiflow.execution.contracts.dataflow import PromptJournalPort, inherits_bound_port
+        if not inherits_bound_port(journal, PromptJournalPort):
             raise ValueError('Offline input requires the verified native worker port')
         if set(options) not in ({'offline_dir'}, {'offline_store'}):
             raise ValueError('Offline input accepts exactly one declared store')

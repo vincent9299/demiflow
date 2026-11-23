@@ -376,9 +376,9 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
                     # Take the recovery journal first and pass it to the factory
                     # so the constructor's http_error_retry guard sees a verified
                     # writable journal; bind_client then installs the scopes.
-                    from demiflow.execution.contracts.dataflow import PromptJournalPort
+                    from demiflow.execution.contracts.dataflow import PromptJournalPort, inherits_bound_port
                     journal = getattr(recovery, 'journal', None)
-                    if PromptJournalPort in type(journal).__mro__:
+                    if inherits_bound_port(journal, PromptJournalPort):
                         native_journal = journal
                 # Standalone transports retain their original factory call
                 # shape; only an actual native journal requires this binding.
