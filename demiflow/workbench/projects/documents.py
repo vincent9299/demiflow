@@ -17,7 +17,7 @@ DIFF_LIMIT = 200
 MARKDOWN = {'.md', '.markdown'}
 TEXT = MARKDOWN | {'.py', '.js', '.ts', '.css', '.html', '.sh', '.json', '.yaml', '.yml', '.toml', '.txt', '.csv'}
 SKIP = {'node_modules', '__pycache__', 'venv', 'env'}
-CHANGE_SKIP = SKIP | {'runs', 'data', 'datasets', 'outputs', 'results'}
+CHANGE_SKIP = SKIP | {'runs', 'data', 'datasets', 'outputs', 'results', 'logs'}
 
 
 def _path(root, value, *, directory=False):

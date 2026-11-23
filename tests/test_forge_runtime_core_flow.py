@@ -92,7 +92,7 @@ def test_http_registration_permissions_cas_and_no_execution(unregistered, tmp_pa
         assert request(app, prefix+'flow-register', body)[1]['status'] == 'unchanged'
         (unregistered/'flows/total.py').write_text('from demiflow import data\ndef run():\n    return data.range(2).count()\n')
         status, registered = request(app, prefix+'flow-register', {'entry': 'flows/total.py:run'})
-        assert status == 200 and registered['params'] == 'parameters/total.json', registered
+        assert status == 200 and registered['params'] == 'configs/total.json', registered
         assert registered['params'] in ws.load_workspace_control(unregistered)[1]['entries']['flows/total.py:run']
         assert request(app, prefix+'context')[1]['run_permissions'] == dict(run_submit=True, run_control=True, attach=False)
         assert not list((unregistered/'.forge/runs').glob('*'))

@@ -308,3 +308,36 @@ def test_reviewer_strips_deleted_author_runtime_paths(tmp_path, monkeypatch):
     assert out == {'status': 'passed'}
     assert str(existing) in captured['spec'].runtime_paths
     assert str(stale) not in captured['spec'].runtime_paths
+
+
+def test_forge_unifies_configs_role_and_keeps_legacy_parameters_compatible(tmp_path):
+    from demiflow.forge import pipeline_check, project
+    from demiflow.forge.project_rules import ROLE_DIRS
+    from demiflow.workbench.runs import manager as run_manager
+    assert ROLE_DIRS == ('flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks')
+    proj = tmp_path / 'proj'
+    project.initialize_project(proj, name='Demo')
+    (proj / 'flows').mkdir()
+    (proj / 'flows/demo.py').write_text('from demiflow import data\ndef run():\n    return data.range(2).count()\n')
+    reg = project.register_flow(proj, 'flows/demo.py:run')
+    assert reg['params'] == 'configs/demo.json'
+    assert (proj / 'configs/demo.json').is_file()
+    (proj / 'notebooks').mkdir()
+    (proj / 'notebooks/explore.ipynb').write_text('{"cells":[],"metadata":{},"nbformat":4,"nbformat_minor":5}\n')
+    # Discovery surfaces configs/ JSON and notebooks/ ipynb files
+    disc = project.discover_project_sources(proj, include_roles=True)
+    assert 'configs/demo.json' in disc['roles']['configs']
+    assert 'notebooks/explore.ipynb' in disc['roles']['notebooks']
+    # Standalone configs JSON and notebooks ipynb validate cleanly
+    (proj / 'configs/extra.json').write_text('{"items": [1, 2]}\n')
+    chk = pipeline_check.check_project(proj, paths=('configs/extra.json', 'notebooks/explore.ipynb'))
+    assert chk['status'] == 'passed', chk
+    # Visible logs/<run_id>/attempt-1 path
+    run_dir = run_manager.directory(proj, 'r' + 'a' * 24)
+    assert run_manager.attempt_directory(run_dir, 'logs', 1) == proj / 'logs' / ('r' + 'a' * 24) / 'attempt-1'
+    # Legacy parameters/ binding remains accepted
+    (proj / 'flows/legacy.py').write_text('from demiflow import data\ndef run():\n    return data.range(1).count()\n')
+    (proj / 'parameters').mkdir()
+    (proj / 'parameters/legacy.json').write_text('{"format":"demiflow_forge_flow_parameters_v2","arguments":{}}\n')
+    reg_legacy = project.register_flow(proj, 'flows/legacy.py:run', params='parameters/legacy.json')
+    assert reg_legacy['params'] == 'parameters/legacy.json'

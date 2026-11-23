@@ -33,7 +33,7 @@ demiflow forge add flow --root ./experiment --register --entry flows/counts.py:r
 demiflow forge check --root ./experiment
 ```
 
-有业务参数时，在定向检查和登记命令上指定相同的 `--params REL.json`。已登记的配置在同一路径编辑。检查受影响的入口和定义可用 `--path REL`，可重复给出。实际业务行为由用户项目的测试验证。例如标量 count 可在项目的 SDK 测试中直接断言返回值。工作台托管执行要求受支持的本地写出终点，运行结果依照实际回执。
+有业务参数时，将 Flow 参数与业务配置文件统一放在 `configs/`（未传 `--params` 时默认创建并绑定 `configs/<flow>.json`；存量项目已登记的 `parameters/` 继续兼容），标准角色目录为 `flows/`、`operators/`、`prompts/`、`configs/`、`data_tools/`、`notebooks/`；数据表与运行产物统一平铺到 `data/`，可读运行日志落到 `logs/`，并在定向检查和登记命令上指定相同的 `--params configs/REL.json`。已登记的配置在同一路径编辑。检查受影响的入口和定义可用 `--path REL`，可重复给出。实际业务行为由用户项目的测试验证。例如标量 count 可在项目的 SDK 测试中直接断言返回值。工作台托管执行要求受支持的本地写出终点，运行结果依照实际回执。
 
 在终端运行独立评审前，将 `DEMIFLOW_FORGE_REVIEW_CONFIG` 指向本机的 DeepSeek provider JSON 配置文件，也可以指定含 `providers.deepseek` 的开发部署文件。配置项 `executable` 与 `node` 是已安装的 dsh 和 Node 的绝对路径，`version` 为已验收的 dsh 版本（首版为 `0.2.1-rc.2`），`model` 选择模型。`deepseek-official` 使用 `credential_env` 命名的 API key 环境变量；`deepseek-account` 使用配置中的本机认证文件引用。账户材料由本机管理。
 

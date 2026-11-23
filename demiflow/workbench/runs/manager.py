@@ -66,10 +66,17 @@ def journal(root, run_id):
     return RunJournal(directory(root, run_id))
 
 
+def _visible_logs_root(target):
+    path = Path(target)
+    if path.parent.name == 'runs' and path.parent.parent.name == '.forge':
+        return path.parents[2] / 'logs' / path.name
+    return path / 'logs'
+
+
 def attempt_directory(target, kind, attempt=None):
     if kind not in {'work', 'logs', 'diagnostics'} or attempt is not None and (type(attempt) is not int or not 1 <= attempt <= 32):
         raise ForgeError('Invalid attempt directory')
-    parent = Path(target) / kind
+    parent = _visible_logs_root(target) if kind == 'logs' else Path(target) / kind
     return parent / ('attempt-' + str(attempt)) if attempt is not None else parent
 
 
@@ -373,9 +380,15 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                 if not isinstance(item, str) or not item or item != item.strip() or len(item) > 128:
                     raise ForgeError('Output metadata requires normalized text of at most 128 characters')
             mode, expected_version = value.get('mode', 'create'), value.get('expected_version')
-            if new_outputs and mode in {'create', 'checkpoint'}:
-                value['relative_uri'] = f'runs/{run_id}/{name}.lance'
             base = ws.location_root(root, workspace['locations'][value['location_id']])
+            if new_outputs and mode in {'create', 'checkpoint'}:
+                prefix = '' if base.name == 'data' else 'data/'
+                candidate = f'{prefix}{name}.lance'
+                suffix = 2
+                while ws.relative_path(base, candidate).exists():
+                    candidate = f'{prefix}{name}-{suffix}.lance'
+                    suffix += 1
+                value['relative_uri'] = candidate
             uri = ws.relative_path(base, value['relative_uri'])
             if mode in {'create', 'checkpoint'} and uri.exists():
                 raise ForgeError('Create target already exists: ' + str(uri))
@@ -1356,8 +1369,8 @@ def source(root, run_id, path):
 
 def retain_logs(target, attempt, budget):
     """Evict only stopped prior-attempt logs before reserving the next tail."""
-    parent=target/'logs'
-    parent.mkdir(exist_ok=True)
+    parent = attempt_directory(target, 'logs')
+    parent.mkdir(parents=True, exist_ok=True)
     retained=[]
     with os.scandir(parent) as entries:
         for count,entry in enumerate(entries):
@@ -1385,7 +1398,12 @@ def logs(root, run_id, *, offset=0, limit=65536, attempt=None):
     target, value = _load(root, run_id, attempt=attempt,detail='identity')
     if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 65536:
         raise ForgeError('Invalid log range')
-    parent = attempt_directory(target, 'logs', value['state'].get('attempt'))
+    attempt_num = value['state'].get('attempt')
+    parent = attempt_directory(target, 'logs', attempt_num)
+    if not parent.exists():
+        legacy = Path(target) / 'logs' / ('attempt-' + str(attempt_num)) if attempt_num is not None else Path(target) / 'logs'
+        if legacy.exists():
+            parent = legacy
     ws.no_symlinks(parent)
     if not parent.exists():
         return dict(text='', next_offset=offset, truncated=False)

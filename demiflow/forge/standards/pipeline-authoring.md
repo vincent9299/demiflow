@@ -8,7 +8,7 @@
 
 ### DF-02
 
-每条 Flow 在 `flows/` 定义一个明确入口。共享代码算子放在 `operators/`，版本化的 Prompt 或 Agent 定义放在 `prompts/`。源码目录中的文件和项目声明中已登记的入口分别计数。准备交付的入口显式绑定实际使用的参数。
+项目标准角色目录为 `flows/`、`operators/`、`prompts/`、`configs/`、`data_tools/`、`notebooks/`。每条 Flow 在 `flows/` 定义一个明确入口；共享代码算子放在 `operators/`；版本化的 Prompt 或 Agent 定义放在 `prompts/`；Flow 运行参数与业务配置文件统一放在 `configs/`（不再新建 `parameters/`，存量项目已登记的 `parameters/` 保持兼容）；数据探索与分析 Notebook 放在 `notebooks/`。业务数据表与运行产物统一放在 `data/`（直接平铺如 `data/<name>.lance`，不再按 `run_id` 建 `runs/` 子目录，存量 `runs/` 兼容）；可读运行日志放在 `logs/`；平台内部锁、数据库与缓存由 `.forge/` 管理。源码目录中的文件和项目声明中已登记的入口分别计数。准备交付的入口显式绑定实际使用的参数。
 
 在模块顶层用 `__demiflow_operators__ = ["normalize"]` 声明可复用的算子函数或可调用的 Actor。尚未接入 Flow 的算子也可声明。用 docstring 说明用途、输入和返回值。
 
