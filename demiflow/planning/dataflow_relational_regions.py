@@ -119,6 +119,102 @@ def place_join_probe(graph, snapshots, splits, stages, *, policy, bounds, hosts)
         kernel_refs=tuple(dict.fromkeys(ref for s in stages for ref in s.kernel_refs))),)
 
 
+def _column_lineage(kernel, origins):
+    """Map declared output names to their Lance inputs after a structural operation."""
+    from collections.abc import Mapping
+
+    if kernel.kind == 'SelectColumnsOp':
+        names = kernel.configuration['columns']
+        if len(set(names)) == len(names) and all(k in origins for k in names):
+            return {k: origins[k] for k in names}
+    elif kernel.kind == 'DropColumnsOp':
+        names = kernel.configuration['columns']
+        if all(k in origins for k in names):
+            return {k: origin for k, origin in origins.items() if k not in names}
+    elif kernel.kind == 'RenameColumnsOp':
+        names = kernel.configuration['names']
+        targets = [names.get(k, k) for k in origins] if isinstance(names, Mapping) else names
+        if len(targets) == len(origins) and len(set(targets)) == len(targets):
+            return dict(zip(targets, origins.values()))
+    elif kernel.kind == 'LimitOp':
+        return origins
+    return None
+
+
+def _build_read_columns(source, names, nodes, outgoing, build_path):
+    structural = {'SelectColumnsOp', 'DropColumnsOp', 'RenameColumnsOp', 'LimitOp'}
+    if len(set(names)) != len(names):
+        return {}
+    required, projections = set(), []
+    pending = [(source, dict(zip(names, names)))]
+    while pending:
+        current, origins = pending.pop()
+        for edge in outgoing.get(current, ()):
+            node = nodes[edge.consumer]
+            if node.kernel.kind == 'exclude_keys' and edge.input_port == 'right':
+                keys = node.kernel.configuration['on']
+                if any(k not in origins for k in keys):
+                    return {}
+                required.update(origins[k] for k in keys)
+            elif node.occurrence_id in build_path and node.kernel.kind in structural:
+                outputs = _column_lineage(node.kernel, origins)
+                if outputs is None:  # Keep the original missing-column/rename failure.
+                    return {}
+                projections.append((node, origins, outputs))
+                pending.append((node.occurrence_id, outputs))
+            else:
+                # An unknown callback or unrelated consumer sees its full input.
+                required.update(origins.values())
+    if not required or len(required) == len(names):
+        return {}
+    bindings = {source: {'read_columns': [name for name in names if name in required]}}
+    for node, inputs, outputs in projections:
+        kind, config = node.kernel.kind, node.kernel.configuration
+        if kind == 'LimitOp':
+            continue
+        if kind == 'DropColumnsOp':
+            # Presence was checked using the original fixed schema. A pruned
+            # column need not be fetched solely to test its name in every row.
+            columns = [k for k in config['columns'] if inputs[k] in required]
+        else:
+            columns = [name for name, origin in outputs.items() if origin in required]
+        if kind == 'RenameColumnsOp':
+            # Positional renames retain the relative order of surviving slots.
+            # A mapping also becomes this already resolved list of output names.
+            bindings[node.occurrence_id] = {'column_binding': columns}
+        elif columns != list(config['columns']):
+            bindings[node.occurrence_id] = {'column_binding': columns}
+    return bindings
+
+
+def exclusion_read_bindings(graph, scan_columns):
+    """Plan finite build-side column reads without evaluating a source or callable."""
+    if graph.jobs or not any(n.kernel.kind == 'exclude_keys' for n in graph.nodes):
+        return {}
+    nodes = {n.occurrence_id: n for n in graph.nodes}
+    incoming, outgoing = {}, {}
+    build_path = set()
+    for edge in graph.edges:
+        incoming.setdefault(edge.consumer, []).append(edge.producer)
+        outgoing.setdefault(edge.producer, []).append(edge)
+        if nodes[edge.consumer].kernel.kind == 'exclude_keys' and edge.input_port == 'right':
+            build_path.add(edge.producer)
+    # Follow only ordinary unary links; joins, jobs and forks into unrelated
+    # consumers never acquire an implicit right-key-only interpretation.
+    pending = list(build_path)
+    while pending:
+        current = pending.pop()
+        parents = incoming.get(current, ())
+        if nodes[current].kind == 'transform' and len(parents) == 1 and parents[0] not in build_path:
+            build_path.add(parents[0])
+            pending.append(parents[0])
+    bindings = {}
+    for source, names in scan_columns:
+        if source in build_path:
+            bindings.update(_build_read_columns(source, names, nodes, outgoing, build_path))
+    return bindings
+
+
 def place_key_exclusion(graph, snapshots, splits, stages, *, policy, bounds, hosts):
     """Admit the SQL process inside the stage that already owns a pinned left scan's anti join."""
     from ..execution.contracts.relational_region import KEY_SQL_SUFFIX, SQL_CHILD_RSS, SQL_PARENT_WINDOW

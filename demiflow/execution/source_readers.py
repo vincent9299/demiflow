@@ -809,6 +809,20 @@ class LanceReader(_BaseReader):
             yield from key_rows(self)
             return
         exact = replace(self._plan.query, version=self._version)
+        binding = self._services.constants.get('constants', {}).get(self._snapshot.source_id, {})
+        columns = binding.get('read_columns')
+        dataset = None
+        if columns:
+            if exact.projection:
+                dataset = open_lance_dataset(exact.uri, self._version, exact.storage_options)
+                fields = set(dataset.schema.names)
+                # A computed projection may fail on real data. Lance must still
+                # evaluate it even when the anti join never needs its value.
+                projection = tuple((name, expr) for name, expr in exact.projection
+                                   if name in columns or not (expr.isidentifier() and expr in fields))
+                exact = replace(exact, projection=projection)
+            else:
+                exact = replace(exact, columns=columns)
         if hasattr(exact, 'batch_readahead'):
             # One native prefetch plus the current batch fits the same source
             # grant; do not inherit Lance's larger implicit prefetch window.
@@ -822,6 +836,8 @@ class LanceReader(_BaseReader):
         def rows(batch, fragment_id, start):
             if batch.nbytes > self._services.bounds.max_batch_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'Lance decoded batch exceeds max_batch_bytes')
+            if columns and exact.projection:
+                batch = batch.select(columns)
             self._schema_ref = self._schemas.put(batch.schema)
             from .arrow_payload import publish_batch, ArrowPayload, fallback_row
             carrier = (publish_batch(batch, reader=self, fragment_id=fragment_id, start=start)
@@ -838,7 +854,7 @@ class LanceReader(_BaseReader):
                     raise DataflowError('BUDGET_EXCEEDED', 'Lance row exceeds max_row_bytes')
                 yield fallback_row(batch, index)
         def scan_batches(fragments=None):
-            batches = _iter_scan(exact, batch_size=batch_rows, fragments=fragments)
+            batches = _iter_scan(exact, batch_size=batch_rows, fragments=fragments, dataset=dataset)
             if self.batch_carrier == 'mapped_arrow.v1':
                 # A scanner may admit just one worst-case row per fetch. Group
                 # its *actual* small buffers before creating an IPC artifact.
@@ -863,7 +879,8 @@ class LanceReader(_BaseReader):
                     yield 0, row_offset, row
                     row_offset += 1
             return
-        dataset = open_lance_dataset(exact.uri, self._version, exact.storage_options)
+        if dataset is None:
+            dataset = open_lance_dataset(exact.uri, self._version, exact.storage_options)
         by_id = {int(fragment.fragment_id): fragment for fragment in dataset.get_fragments()}
         for fragment_id in self._fragment_ids:
             fragment = by_id.get(fragment_id)

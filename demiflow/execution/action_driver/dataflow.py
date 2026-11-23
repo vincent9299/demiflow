@@ -526,8 +526,17 @@ class DataflowExecution:
                     native['batch_rows'] = min(context.limits['batch_rows'],
                                                native.get('batch_rows', context.limits['batch_rows']))
                     self._policy = replace(self._policy, native_limits=native)
-            constants_ref = resolve_execution_constants(graph, action=self._action, store=self._store,
-                                                        policy=self._policy)
+            from ...planning.dataflow_relational_regions import exclusion_read_bindings
+            from ..dataflow_schema import KEY, decode
+            scan_columns = (
+                (source.source_id, decode(source.immutable_identity[KEY], bounds=self._bounds).names)
+                for source in snapshots
+                if source.kind == 'lance' and KEY in source.immutable_identity
+                and source.immutable_identity['query']['kind'] == 'scan'
+            )
+            constants_ref = resolve_execution_constants(
+                graph, action=self._action, store=self._store, policy=self._policy,
+                column_bindings=exclusion_read_bindings(graph, scan_columns))
             physical = compile_physical_dataflow(
                 graph, tuple(snapshots), tuple(splits), policy=self._policy, hosts=self._services.hosts,
                 bounds=self._bounds, constants_ref=constants_ref)
