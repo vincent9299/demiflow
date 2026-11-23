@@ -591,3 +591,72 @@ def test_source_opaque_constant_no_recursive_alias_and_static_ifexp(tmp_path):
     report = check_project(proj, entry='flows/ifexp.py:run', params='configs/ifexp.json')
     assert report['status'] == 'passed', report
     assert report['entries'][0]['status'] == 'checked', report
+
+
+def test_flow_check_project_confined_static_config_read_and_security_boundary(tmp_path):
+    from demiflow.forge.pipeline_check import check_project
+    from demiflow.forge.project import initialize_project
+
+    proj = tmp_path / 'cfg_proj'
+    initialize_project(proj)
+    for d in ('flows', 'configs', 'prompts', 'data'):
+        (proj / d).mkdir(exist_ok=True)
+    (proj / 'deployment.json').write_text('{"demo": {"count": 4}}\n')
+    (proj / 'prompts' / 'p.yaml').write_text('version: 1\n')
+    (proj / 'data' / 'secret.json').write_text('{"count": 9}\n')
+    outside = tmp_path / 'outside.json'
+    outside.write_text('{"count": 9}\n')
+
+    (proj / 'flows' / 'good.py').write_text(
+        'from copy import deepcopy\n'
+        'import hashlib, json, yaml\n'
+        'from pathlib import Path\n'
+        'from demiflow import data\n'
+        'ROOT = Path(__file__).resolve().parents[1]\n'
+        'def run():\n'
+        '    cfg = deepcopy(json.loads((ROOT / "deployment.json").read_bytes()))\n'
+        '    base, extra = cfg["demo"], {"bias": 1}\n'
+        '    merged = {**base, **extra}\n'
+        '    p = (ROOT / "prompts" / "p.yaml").resolve()\n'
+        '    if not p.is_relative_to(ROOT / "prompts") or not p.is_file():\n'
+        '        raise ValueError("missing prompt")\n'
+        '    raw = p.read_bytes()\n'
+        '    _ = hashlib.sha256(raw).hexdigest()\n'
+        '    meta = yaml.safe_load(raw)\n'
+        '    return data.range(merged["count"] + merged["bias"] + meta["version"]).count()\n'
+    )
+    (proj / 'configs' / 'good.json').write_text('{"format": "demiflow_forge_flow_parameters_v2", "arguments": {}}\n')
+    good = check_project(proj, entry='flows/good.py:run', params='configs/good.json')
+    assert good['status'] == 'passed', good
+    assert good['entries'][0]['status'] == 'checked', good
+    assert 'deployment.json' in good['basis']['sources']
+    assert 'prompts/p.yaml' in good['basis']['sources']
+
+    # Security boundary 1: reading from protected data/ dir must NOT pass
+    (proj / 'flows' / 'bad_data.py').write_text(
+        'import json\n'
+        'from pathlib import Path\n'
+        'from demiflow import data\n'
+        'ROOT = Path(__file__).resolve().parents[1]\n'
+        'def run():\n'
+        '    cfg = json.loads((ROOT / "data" / "secret.json").read_bytes())\n'
+        '    return data.range(cfg["count"]).count()\n'
+    )
+    (proj / 'configs' / 'bad_data.json').write_text('{"format": "demiflow_forge_flow_parameters_v2", "arguments": {}}\n')
+    bad_data = check_project(proj, entry='flows/bad_data.py:run', params='configs/bad_data.json')
+    assert bad_data['status'] != 'passed', bad_data
+
+    # Security boundary 2: reading outside project root must NOT pass
+    (proj / 'flows' / 'bad_out.py').write_text(
+        'import json\n'
+        'from pathlib import Path\n'
+        'from demiflow import data\n'
+        'def run(target=""):\n'
+        '    cfg = json.loads(Path(target).read_bytes())\n'
+        '    return data.range(cfg["count"]).count()\n'
+    )
+    (proj / 'configs' / 'bad_out.json').write_text(
+        f'{{"format": "demiflow_forge_flow_parameters_v2", "arguments": {{"target": "{outside.as_posix()}"}}}}\n'
+    )
+    bad_out = check_project(proj, entry='flows/bad_out.py:run', params='configs/bad_out.json')
+    assert bad_out['status'] != 'passed', bad_out

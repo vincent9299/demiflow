@@ -19,8 +19,10 @@ from ..data.flow_contract import (
     field,
     literal_type,
 )
+from .io import no_symlinks
 from .operator_check import OperatorChecker
 from .platform import bounded_json, content_digest, native_handlers
+from .platform_environment import read_bounded
 from .schema import ForgeError
 from .source import (
     Definition,
@@ -316,6 +318,17 @@ class FlowChecker:
                     node.targets if isinstance(node, ast.Assign) else [node.target]
                 )
                 for target in targets:
+                    if isinstance(target, (ast.Tuple, ast.List)) and target.elts and all(isinstance(e, ast.Name) for e in target.elts):
+                        if not isinstance(value, (tuple, list)) or len(value) != len(target.elts):
+                            self.fail("FL-07", "Unpack target count mismatch", node, module)
+                        val_origin = self._parameter_origin(node.value)
+                        mod_ns = self.tree.load(module)
+                        for idx, elem in enumerate(target.elts):
+                            if elem.id in mod_ns:
+                                self.fail("FL-02", "Flow variable shadows an imported/defined symbol", node, module)
+                            env[elem.id] = value[idx]
+                            self.parameter_scopes[-1][elem.id] = self._origin_index(val_origin, idx)
+                        continue
                     if not isinstance(target, ast.Name):
                         self.fail("FL-07", "Flow mutation is not wiring", node, module)
                     if target.id in self.tree.load(module):
@@ -439,6 +452,26 @@ class FlowChecker:
                 return ('__bound_pure_method__', getattr(parent, node.attr))
             if type(parent) is str and node.attr in {'strip', 'lstrip', 'rstrip', 'startswith', 'endswith', 'lower', 'upper', 'replace', 'split', 'join'}:
                 return ('__bound_pure_method__', getattr(parent, node.attr))
+            if isinstance(parent, Path):
+                if node.attr in {'name', 'stem', 'suffix'}:
+                    return getattr(parent, node.attr)
+                if node.attr == 'parent':
+                    candidate = parent.parent
+                    if candidate == self.tree.root or self.tree.root in candidate.parents:
+                        return candidate
+                    self.fail("FL-07", "Static wiring path may not escape project root", node, module, incomplete=True)
+                if node.attr in {'as_posix', 'is_relative_to'}:
+                    return ('__bound_pure_method__', getattr(parent, node.attr))
+                if node.attr == 'resolve':
+                    return ('__bound_pure_method__', lambda: self._resolve_project_path(parent, node, module))
+                if node.attr == 'is_file':
+                    return ('__bound_pure_method__', lambda: self._project_static_is_file(parent, node, module))
+                if node.attr == 'read_bytes':
+                    return ('__bound_pure_method__', lambda: self._read_project_static_file(parent, node, module))
+                if node.attr == 'read_text':
+                    return ('__bound_pure_method__', lambda encoding='utf-8': self._read_project_static_file(parent, node, module).decode(encoding))
+            if hasattr(parent, 'hexdigest') and type(parent).__name__ == 'HASH' and node.attr == 'hexdigest':
+                return ('__bound_pure_method__', parent.hexdigest)
             self.fail(
                 "FL-02",
                 "Attribute does not resolve to a public platform API",
@@ -506,18 +539,29 @@ class FlowChecker:
             items = [visit(n) for n in node.elts]
             return items if isinstance(node, ast.List) else tuple(items)
         if isinstance(node, ast.Dict):
-            if any(k is None for k in node.keys):
-                self.fail(
-                    "FL-03",
-                    "Dynamic mapping expansion is unsupported",
-                    node,
-                    module,
-                    incomplete=True,
-                )
-            keys = [visit(k) for k in node.keys]
-            if any(type(k) is not str for k in keys) or len(set(keys)) != len(keys):
-                self.fail("FL-03", "Mapping keys must be unique strings", node, module)
-            return dict(zip(keys, [visit(v) for v in node.values]))
+            merged = {}
+            explicit_keys = set()
+            for k_node, v_node in zip(node.keys, node.values):
+                if k_node is None:
+                    mapping = visit(v_node)
+                    if type(mapping) is not dict or any(type(mk) is not str for mk in mapping):
+                        self.fail(
+                            "FL-03",
+                            "Dynamic mapping expansion requires a static string-keyed dict",
+                            node,
+                            module,
+                            incomplete=True,
+                        )
+                    merged.update(mapping)
+                else:
+                    k = visit(k_node)
+                    if type(k) is not str or k in explicit_keys:
+                        self.fail("FL-03", "Mapping keys must be unique strings", node, module)
+                    explicit_keys.add(k)
+                    merged[k] = visit(v_node)
+                if len(merged) > 1024:
+                    self.fail("FL-10", "Mapping exceeds budget", node, module, incomplete=True)
+            return merged
         if isinstance(node, ast.UnaryOp) and isinstance(
             node.op, (ast.Not, ast.USub, ast.UAdd)
         ):
@@ -621,6 +665,19 @@ class FlowChecker:
                     if len(r) > 4096:
                         raise ValueError("Static range exceeds 4096 elements")
                     return list(r)
+                def _yaml_safe_load(raw):
+                    import yaml
+                    return yaml.safe_load(raw)
+
+                def _yaml_safe_dump(obj, **kw):
+                    import yaml
+                    return yaml.safe_dump(obj, **kw)
+
+                def _hashlib_sha256(raw=b''):
+                    if not isinstance(raw, (bytes, bytearray)):
+                        raise TypeError('sha256 requires bytes')
+                    return hashlib.sha256(raw)
+
                 pure_builtins = {
                     'builtins.type': type,
                     'builtins.isinstance': isinstance,
@@ -644,6 +701,12 @@ class FlowChecker:
                     'builtins.zip': lambda *its: list(zip(*its)),
                     'pathlib.Path': Path,
                     'pathlib.PurePosixPath': Path,
+                    'json.loads': json.loads,
+                    'json.dumps': json.dumps,
+                    'copy.deepcopy': copy.deepcopy,
+                    'hashlib.sha256': _hashlib_sha256,
+                    'yaml.safe_load': _yaml_safe_load,
+                    'yaml.safe_dump': _yaml_safe_dump,
                 }
                 fn = pure_builtins.get(target.name)
                 if fn is not None and not any(isinstance(a, (RuntimeValue, DatasetPort, Action)) for a in (*args, *kwargs.values())):
@@ -760,6 +823,53 @@ class FlowChecker:
         if isinstance(node, ast.SetComp):
             return set(results)
         return results
+
+    _STATIC_PROTECTED_ROOTS = frozenset({'data', 'datasets', 'runs', 'results', 'outputs', 'logs', 'notebooks'})
+
+    def _resolve_project_path(self, path, node, module):
+        candidate = path if path.is_absolute() else (self.tree.root / path)
+        try:
+            resolved = no_symlinks(candidate.absolute())
+            resolved = resolved.resolve()
+        except (ForgeError, OSError):
+            self.fail("FL-07", "Static wiring path must stay within project without symlinks", node, module, incomplete=True)
+        root = self.tree.root.resolve()
+        if resolved != root and root not in resolved.parents:
+            self.fail("FL-07", "Static wiring path may not escape project root", node, module, incomplete=True)
+        return resolved
+
+    def _project_static_relative(self, path, node, module):
+        resolved = self._resolve_project_path(path, node, module)
+        root = self.tree.root.resolve()
+        if resolved == root:
+            self.fail("FL-07", "Static wiring file must be a file inside the project", node, module, incomplete=True)
+        rel = resolved.relative_to(root)
+        if any(p.startswith('.') for p in rel.parts) or rel.parts[0] in self._STATIC_PROTECTED_ROOTS:
+            self.fail("FL-07", "Static wiring may only access project-owned static config/prompt files", node, module, incomplete=True)
+        rel_str = rel.as_posix()
+        self.tree.require_visible(rel_str)
+        return resolved, rel_str
+
+    def _project_static_is_file(self, path, node, module):
+        resolved, _ = self._project_static_relative(path, node, module)
+        return resolved.is_file()
+
+    def _read_project_static_file(self, path, node, module):
+        resolved, rel_str = self._project_static_relative(path, node, module)
+        if not resolved.is_file():
+            self.fail("FL-07", f"Static project file not found: {rel_str}", node, module)
+        if rel_str not in self.tree.files and len(self.tree.files) >= self.tree.limits["files"]:
+            self.fail("FL-10", "Source file budget exceeded", node, module, incomplete=True)
+        try:
+            raw = read_bounded(resolved, self.tree.limits["file_bytes"])
+        except (OSError, ValueError, ForgeError) as exc:
+            self.fail("FL-07", str(exc), node, module, incomplete=True)
+        if rel_str not in self.tree.files:
+            self.tree.bytes += len(raw)
+            if self.tree.bytes > self.tree.limits["total_bytes"]:
+                self.fail("FL-10", "Source byte budget exceeded", node, module, incomplete=True)
+            self.tree.files[rel_str] = hashlib.sha256(raw).hexdigest()
+        return raw
 
     def _native(self, api, args, kwargs, node, module):
         record = api.record
