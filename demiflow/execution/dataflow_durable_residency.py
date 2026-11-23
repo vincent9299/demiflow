@@ -139,9 +139,18 @@ class DurableResidency:
                     target.send_business({'kind': 'edge_eoi', 'edge_id': edge_id, 'producer_partition': producer})
         active_sources = any(set(s.occurrences) & self._sources
                              for s in self._physical.stages if s.stage_id in self.groups[self.active_index])
-        if not active_sources:
+        if not active_sources and not self.can_drain_in_place():
             for endpoint in endpoints.values():
                 endpoint.send_business({'kind': 'park'})
+
+    def can_drain_in_place(self):
+        """All other cohorts have finished and no parked channel requires handoff."""
+        active = set(self.partition_groups[self.active_index])
+        if self.all_partitions - active - self.completed:
+            return False
+        return not any(edge.mode == 'durable_incremental' and (
+            active.intersection(edge.producer_partitions) or active.intersection(edge.consumer_partitions))
+            for edge in self._physical.exchanges)
 
     def final(self, phase_done):
         return phase_done and self.all_partitions <= (

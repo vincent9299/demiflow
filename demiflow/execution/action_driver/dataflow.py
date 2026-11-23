@@ -1489,6 +1489,11 @@ class DataflowExecution:
                     endpoint.send_business({'kind': 'pause'})
             elif self._stopping:
                 self._set_result(image)
+            elif not all_workers <= self._done and durable.can_drain_in_place():
+                # The same admitted owners can finish against their sealed
+                # inputs. ACK the real cut and keep their live output iterators.
+                durable.committed(image, False)
+                self._continue_after_cut()
             else:
                 self._retire_phase(image)
         elif all_workers <= self._done and self._phase_index < len(self._phases) - 1:
@@ -1506,12 +1511,15 @@ class DataflowExecution:
         elif self._stopping or all_workers <= self._done:
             self._set_result(image)
         else:
-            self._cut = None
-            self._contributions.clear()
-            self._idle.clear()
-            self._checkpoint_requested = False
-            self._checkpoint_deferred.clear()
-            self._resume_workers()
+            self._continue_after_cut()
+
+    def _continue_after_cut(self):
+        self._cut = None
+        self._contributions.clear()
+        self._idle.clear()
+        self._checkpoint_requested = False
+        self._checkpoint_deferred.clear()
+        self._resume_workers()
 
     def _resume_workers(self, *, publishing=False):
         # Shares sum to the original run ceilings, never one full allowance per
