@@ -7,7 +7,8 @@ old fail-open max() per RESPONSE.md #6 / Q43 and CRITICAL-REVISION.md §6.
 """
 import pytest
 
-from demiflow.execution.reservation import LEGACY_PREFETCH, ReservationError, derive_prefetch
+from demiflow.planning.dataflow_graph_adapter import LEGACY_PREFETCH, derive_prefetch
+from demiflow.execution.contracts.errors import ReservationError
 
 
 def test_none_default_path_is_legacy_exact():

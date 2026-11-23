@@ -654,19 +654,19 @@ def test_y024(executor, source, plan):
 
 
 def test_y026(executor, source, plan, monkeypatch):
-    import demiflow.execution.graph as graph_module
+    from demiflow.execution.executors import graph as graph_module
     observed = []
     result = {'target_rows': {'reader': 1}}
-    def graph_entry(spec, **kwargs):
-        observed.append((spec, kwargs))
+    def graph_entry(caller, spec, **kwargs):
+        observed.append((spec, caller))
         return result
-    monkeypatch.setattr(graph_module, 'run_ray_graph', graph_entry)
+    monkeypatch.setattr(graph_module, 'materialize_graph', graph_entry)
     graph_spec = {'source': source, 'source_id': 's0',
         'ancestor': {'plan': plan},
         'targets': [{'reader_id': 'reader', 'plan': plan}],
         'routing': 'hash', 'key_fields': ['id'], 'exchange_mode': 'durable_incremental'}
     assert executor.materialize_graph(graph_spec) is result
-    assert observed == [(graph_spec, {'_executor': executor})]
+    assert observed == [(graph_spec, executor)]
     # Actual program execution, channels and recovery are checked by the real
     # graph adapter tests under both Local and Ray Core, not this unit seam.
 

@@ -18,21 +18,12 @@ import os
 from pathlib import Path
 import time
 
-from .recovery_contract import RecoveryContractError, document, identifier
+from .contracts.errors import ReservationError
+from .recovery_contract import document, identifier
 
 MAX_ACTIVE_RECORDS = 1024
 _RECORD_BYTES = 8192
 _DIMENSIONS = ("input_bytes", "inflight_slots", "output_bytes", "effect_units")
-
-
-class ReservationError(RecoveryContractError):
-    """A call cannot be admitted or released under the recorded reservation."""
-
-    def __init__(self, code, message, *, call_id=None, retriable=False):
-        super().__init__(message)
-        self.code = code
-        self.call_id = call_id
-        self.retriable = retriable
 
 
 @dataclass(frozen=True)
@@ -243,76 +234,3 @@ class ReserveGate:
                     "active": [self._view(record) for record in active]}
         finally:
             os.close(fd)
-
-
-# Legacy prefetch constants (U3). None budget keeps them exactly; an admitted
-# inflight-slot budget tightens each bound to what the admission can hold.
-LEGACY_PREFETCH = {"append_slots": 64, "source_batch_size": 256, "queue_depth": 4096, "max_pending": 1024}
-
-
-def derive_prefetch(inflight_slots=None, *, max_pending_floor=1):
-    """Derive prefetch bounds from the admitted inflight budget.
-
-    ``None`` (default/unified-seam-off path) returns the exact legacy constants,
-    so the old default path is behavior-identical. A positive admitted slot
-    budget caps every bound at that budget (never above the legacy ceiling).
-    ``max_pending_floor`` is the InputGate protocol minimum: the alignment buffer
-    must hold a full credit grant of envelopes (worst case one row each = credit
-    rows). When the floor exceeds the admitted ceiling the layout is infeasible
-    and rejected here (fail-closed); the floor never expands the admitted budget.
-    The caller must jointly solve credit first (resolve_prefetch_credit), which
-    tightens default credit to the grant or rejects an unsatisfiable explicit one."""
-    if inflight_slots is None:
-        return dict(LEGACY_PREFETCH)
-    if type(inflight_slots) is not int or inflight_slots <= 0:
-        raise ReservationError("INVALID_SPEC", "admitted inflight slots must be a positive integer")
-    if type(max_pending_floor) is not int or max_pending_floor < 1:
-        raise ReservationError("INVALID_SPEC", "max_pending floor must be a positive integer")
-    bounds = {name: min(legacy, inflight_slots) for name, legacy in LEGACY_PREFETCH.items()}
-    if max_pending_floor > bounds["max_pending"]:
-        raise ReservationError("INVALID_SPEC",
-                               "max_pending floor exceeds the admitted prefetch ceiling; jointly solve credit before seal")
-    return bounds
-
-
-def resolve_prefetch_credit(inflight_slots, *, inflight_bytes, credit_budget, credit_explicit):
-    """Jointly solve channel credit against the admitted slot/byte grant before seal.
-
-    Pure and deterministic: recovery re-invokes with the original sealed inputs and
-    compares the result against the sealed credit; it never re-solves a different
-    layout or dynamically changes credit. The slot grant (``inflight_slots``) and
-    byte grant (``inflight_bytes``) are checked together against the actual channel
-    ``credit_budget`` ({rows, bytes}); credit is not an extra grant. Default credit
-    may tighten to one consistent smaller grant shared by seal/router/InputGate;
-    explicit credit the grant cannot honor is rejected before any source read. The
-    credit floor never expands the admitted budget and no second grant is requested.
-    ``inflight_slots=None`` is the original unbound path: legacy prefetch, credit
-    unchanged."""
-    if type(credit_budget) is not dict or set(credit_budget) != {"rows", "bytes"}:
-        raise ReservationError("INVALID_SPEC", "credit_budget must name exactly rows and bytes")
-    rows, byte_credit = credit_budget["rows"], credit_budget["bytes"]
-    if type(rows) is not int or rows < 1 or type(byte_credit) is not int or byte_credit < 1:
-        raise ReservationError("INVALID_SPEC", "credit rows and bytes must be positive integers")
-    if type(credit_explicit) is not bool:
-        raise ReservationError("INVALID_SPEC", "credit_explicit must be a bool")
-    if inflight_slots is None:
-        return {"prefetch": derive_prefetch(None), "credit_budget": {"rows": rows, "bytes": byte_credit}}
-    if type(inflight_slots) is not int or inflight_slots <= 0:
-        raise ReservationError("INVALID_SPEC", "admitted inflight slots must be a positive integer")
-    if type(inflight_bytes) is not int or inflight_bytes <= 0:
-        raise ReservationError("INVALID_SPEC", "admitted inflight bytes must be a positive integer")
-    ceiling = min(inflight_slots, LEGACY_PREFETCH["max_pending"])
-    if credit_explicit:
-        if rows > ceiling:
-            raise ReservationError("BUDGET_EXCEEDED",
-                                   "explicit credit rows exceed the admitted prefetch ceiling; cannot expand grant",
-                                   retriable=False)
-        if byte_credit > inflight_bytes:
-            raise ReservationError("BUDGET_EXCEEDED",
-                                   "explicit credit bytes exceed the admitted inflight byte grant",
-                                   retriable=False)
-        solved_rows, solved_bytes = rows, byte_credit
-    else:
-        solved_rows, solved_bytes = min(rows, ceiling), min(byte_credit, inflight_bytes)
-    prefetch = derive_prefetch(inflight_slots, max_pending_floor=solved_rows)
-    return {"prefetch": prefetch, "credit_budget": {"rows": solved_rows, "bytes": solved_bytes}}

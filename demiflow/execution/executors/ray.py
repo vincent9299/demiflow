@@ -78,9 +78,10 @@ class RayDatasetExecutor(DatasetExecutor):
             options['terminal_parallelism_cap'] = terminal_parallelism_cap
         return explain_dataset(source, plan, provider=self.PROVIDER, options=options)
 
-    def materialize_graph(self, graph_spec):
-        from ..graph import run_ray_graph
-        return run_ray_graph(graph_spec, _executor=self)
+    def materialize_graph(self, graph_spec, *, host_id='local', resource_root=None, control_timeout_s=120):
+        from .graph import materialize_graph
+        return materialize_graph(self, graph_spec, host_id=host_id, resource_root=resource_root,
+                                 control_timeout_s=control_timeout_s)
 
     def schema(self, source: SourcePlan, plan: LogicalPlan, *, fetch_if_missing: bool = True) -> Any:
         if not fetch_if_missing:

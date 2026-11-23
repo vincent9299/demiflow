@@ -157,8 +157,14 @@ def test_only_audited_original_routing_functions_accept_the_earlier_sealed_diges
         assert not _matches_original_program('callable', CallableSpec.create(fn, fn_kwargs={'reader': 'changed'}), old)
         clone = FunctionType(fn.__code__, fn.__globals__, fn.__name__)
         assert not _matches_original_program('callable', CallableSpec.create(clone), old)
+        other_scope = FunctionType(fn.__code__, dict(fn.__globals__), fn.__name__)
+        assert not _matches_original_program('callable', CallableSpec.create(other_scope), old)
+        source = _source(fn) + b'\n'
+        changed_sha = sha256(source).hexdigest()
+        code = identity(code_record(fn.__code__))
+        assert function_pin(fn, source, changed_sha, code) == (changed_sha, code)
         target['code'] = 'f' * 64
         assert not _matches_original_program('callable', spec, old)
-    assert describe(routing.validate_graph_replay)['source_hash'] == sha256(_source(routing.validate_graph_replay)).hexdigest()
+    assert describe(routing.graph_credit)['source_hash'] == sha256(_source(routing.graph_credit)).hexdigest()
     class_pin = describe(routing._ClassTarget)
     assert class_pin['methods']['__call__'] == identity(code_record(routing._ClassTarget.__call__.__code__))

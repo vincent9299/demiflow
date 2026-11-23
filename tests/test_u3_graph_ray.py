@@ -234,7 +234,7 @@ def test_ray_graph_producer_death_recovers_acked_prefix_exactly_once(tmp_path, r
     from runtime_v3_owned_crash import assert_worker_loss
     driver_pid = os.getpid()
     from collections import Counter
-    from demiflow.execution.graph import run_ray_graph
+    from demiflow.execution.executors.ray import RayDatasetExecutor
     crash_marker = tmp_path / "ancestor-crashed-once"
     trace = tmp_path / "ancestor-trace"
 
@@ -254,7 +254,7 @@ def test_ray_graph_producer_death_recovers_acked_prefix_exactly_once(tmp_path, r
         with RunContext.start(tmp_path / "run", limits=limits) as run:
             reference = run.ref
             with run.action({"kind": "materialize", "source": {"fixture": "u3-ray-producer-fault"}}):
-                run_ray_graph(spec)
+                RayDatasetExecutor().materialize_graph(spec)
     assert_worker_loss(failure.value)
     _assert_actor_exited(crash_marker, run)
     original_acks = capture_acks(run, 'action-1')
@@ -291,7 +291,7 @@ def test_ray_graph_consumer_death_recovers_whole_graph_exactly_once(tmp_path, ra
     from runtime_v3_graph_history import capture_acks, assert_acks_retained
     from runtime_v3_owned_crash import assert_worker_loss
     driver_pid = os.getpid()
-    from demiflow.execution.graph import run_ray_graph
+    from demiflow.execution.executors.ray import RayDatasetExecutor
     crash_marker = tmp_path / "target-crashed-once"
 
     def crashing_target(row):
@@ -311,7 +311,7 @@ def test_ray_graph_consumer_death_recovers_whole_graph_exactly_once(tmp_path, ra
         with RunContext.start(tmp_path / "run", limits=limits) as run:
             reference = run.ref
             with run.action({"kind": "materialize", "source": {"fixture": "u3-ray-consumer-fault"}}):
-                run_ray_graph(spec)
+                RayDatasetExecutor().materialize_graph(spec)
     assert_worker_loss(failure.value)
     _assert_actor_exited(crash_marker, run)
     original_acks = capture_acks(run, 'action-1')
@@ -337,7 +337,7 @@ def test_ray_graph_consumer_death_recovers_whole_graph_exactly_once(tmp_path, ra
 # ---------------- Ray fault matrix: sealed storage insufficiency fails early ----------------
 
 def test_ray_graph_sealed_storage_exhaustion_fails_early_without_publication(tmp_path, ray_cluster):
-    from demiflow.execution.graph import run_ray_graph
+    from demiflow.execution.executors.ray import RayDatasetExecutor
     from runtime_v3_graph_history import assert_rejected_before_workers
     business_marker = tmp_path / 'business-started'
     def double(row):
@@ -354,7 +354,7 @@ def test_ray_graph_sealed_storage_exhaustion_fails_early_without_publication(tmp
     with pytest.raises(DataflowError, match='^BUDGET_EXCEEDED: graph storage budget cannot admit every declared channel$') as failure:
         with RunContext.start(tmp_path / "run", limits=limits) as run:
             with run.action({"kind": "materialize", "source": {"fixture": "u3-ray-sealed-exhaust"}}):
-                run_ray_graph(spec, control_timeout_s=10)
+                RayDatasetExecutor().materialize_graph(spec, control_timeout_s=10)
     assert time.monotonic() - start < 40, "sealed exhaustion deadlocked instead of failing early"
     assert failure.value.code == 'BUDGET_EXCEEDED'
     assert_rejected_before_workers(run, 'action-1', business_marker)

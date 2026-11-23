@@ -391,22 +391,10 @@
      "reason": "11-10 那一代图执行的驱动侧；没有产品调用方。和批次 4 一起评审。",
      "users": []
     },
-    "_graph_action_request": {
-     "status": "live",
-     "reason": "图入口走 v3 动作的实现。"
-    },
-    "_run_graph": {
-     "status": "live",
-     "reason": "图入口走 v3 动作的实现。"
-    },
     "_sealed_operators": {
      "status": "old",
      "reason": "11-10 那一代图执行的驱动侧；没有产品调用方。和批次 4 一起评审。",
      "users": []
-    },
-    "_validate_graph_location": {
-     "status": "live",
-     "reason": "图入口走 v3 动作的实现。"
     },
     "_worker_assignment_channels": {
      "status": "old",
@@ -417,16 +405,6 @@
      "status": "old",
      "reason": "11-10 那一代图执行的驱动侧；没有产品调用方。和批次 4 一起评审。",
      "users": []
-    },
-    "run_local_graph": {
-     "status": "compat_entry",
-     "reason": "MIGRATION「替换与退出」：graph 公开兼容入口保留。executors/local.py、executors/ray.py 调用；函数内交给 _run_graph，由它走 v3 动作。",
-     "translates_through": "_run_graph"
-    },
-    "run_ray_graph": {
-     "status": "compat_entry",
-     "reason": "MIGRATION「替换与退出」：graph 公开兼容入口保留。executors/local.py、executors/ray.py 调用；函数内交给 _run_graph，由它走 v3 动作。",
-     "translates_through": "_run_graph"
     }
    },
    "measured": {

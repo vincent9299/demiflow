@@ -8,9 +8,8 @@ second grant is requested; recovery re-solve is identical to the original seal.
 """
 import pytest
 
-from demiflow.execution.reservation import (
-    LEGACY_PREFETCH, ReservationError, derive_prefetch, resolve_prefetch_credit,
-)
+from demiflow.planning.dataflow_graph_adapter import LEGACY_PREFETCH, derive_prefetch, resolve_prefetch_credit
+from demiflow.execution.contracts.errors import ReservationError
 
 MB = 1024 ** 2
 

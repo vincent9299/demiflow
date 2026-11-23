@@ -789,3 +789,20 @@ def verify_action_programs(action, graph, physical, sealed, *, store, bounds):
         verify_dataflow_program(node.program_ref, expected_pin=expected, store=store,
                                 bounds=bounds, live_binding=live_binding)
     return pending
+
+
+def validate_graph_replay(action, declaration, credit):
+    """Verify original routing and admitted credit before creating any graph workers."""
+    if action.context.journal.source_binding(action.action_id + _SEAL_KEY) is None:
+        return
+    from ..sealed_plans import load_sealed_plan
+    bundle = load_sealed_plan(action.context.directory, action.action_id)
+    graph, physical = bundle['graph'], bundle['physical']
+    originals = [node.kernel.configuration['arguments'].get('graph') for node in graph.nodes if node.occurrence_id in graph.terminals]
+    if [_thaw_json(value) for value in originals] != [declaration]:
+        raise DataflowError('INCOMPATIBLE_HISTORY', 'graph declaration differs from the sealed routing')
+    router = next(node.occurrence_id for node in graph.nodes if 'graph_route' in node.kernel.configuration)
+    selected = {edge.edge_id for edge in graph.edges if edge.producer == router or edge.consumer == router}
+    for exchange in physical.exchanges:
+        if exchange.edge_id in selected and (exchange.credit_rows > credit['rows'] or exchange.credit_bytes > credit['bytes']):
+            raise DataflowError('BUDGET_EXCEEDED', 'sealed graph credit exceeds the current admitted grant')

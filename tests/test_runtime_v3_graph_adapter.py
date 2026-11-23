@@ -37,18 +37,14 @@ def _spec(directory):
 
 
 def test_graph_legacy_location_cannot_override_executor_domain(graph_environment, monkeypatch):
-    from demiflow.execution import graph
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     executor = LocalDatasetExecutor(resource_root=graph_environment)
-    called = []
-    monkeypatch.setattr(graph, '_run_graph', lambda spec, caller, **kwargs: called.append(caller))
     with pytest.raises(DataflowError, match='host placement'):
-        graph.run_local_graph({}, host_id='other-host', _executor=executor)
+        executor.materialize_graph({}, host_id='other-host')
     with pytest.raises(DataflowError, match='resource_root differs'):
-        graph.run_local_graph({}, resource_root=graph_environment / 'other-domain', _executor=executor)
-    assert not called
-    graph.run_local_graph({}, resource_root=graph_environment, _executor=executor)
-    assert called == [executor]
+        executor.materialize_graph({}, resource_root=graph_environment / 'other-domain')
+    with pytest.raises(RuntimeError, match='native action context'):
+        executor.materialize_graph({}, resource_root=graph_environment)
 
 
 class _Counter:

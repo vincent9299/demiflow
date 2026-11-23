@@ -77,6 +77,59 @@ def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bou
         raise
 
 
+def run_graph_action(request, *, control_timeout_s):
+    from dataclasses import replace
+    from ..dataflow_api import resolve_action_runtime, record_execution_metadata
+    from ...planning.dataflow_graph_adapter import graph_credit
+    from ..seal.plan import validate_graph_replay
+    policy, bounds = resolve_action_runtime(request)
+    declaration = request.source.declaration
+    if 'queue_depth' in declaration:
+        depth = declaration['queue_depth']
+        if type(depth) is not int or depth < 1:
+            raise ValueError('graph queue_depth must be a positive integer')
+        bounds = replace(bounds, max_pending_events=min(bounds.max_pending_events, depth))
+    if 'cut_rows' in declaration:
+        rows = declaration['cut_rows']
+        if type(rows) is not int or rows < 1:
+            raise ValueError('graph cut_rows must be a positive integer')
+        policy = replace(policy, checkpoint_rows=min(policy.checkpoint_rows, rows))
+    if type(control_timeout_s) not in (int, float) or control_timeout_s <= 0:
+        raise ValueError('graph control timeout must be positive')
+    policy = replace(policy, control_timeout_ms=min(policy.control_timeout_ms, int(control_timeout_s * 1000)))
+    # Credit rejection precedes source snapshot/read, program construction and
+    # worker provisioning. The same solver seals the actual exchange windows.
+    credit = graph_credit(declaration, bounds=bounds)
+    validate_graph_replay(request.action, declaration, credit)
+    handle = execute_action(request, policy=policy, bounds=bounds)
+    primary_failure = None
+    try:
+        result = handle.result()
+        return handle._execution.graph_result(result)
+    except BaseException as exc:
+        primary_failure = exc
+        raise
+    finally:
+        # Close drains final observations. A failure while projecting them
+        # must not replace the business failure or prevent remaining cleanup.
+        failure = primary_failure
+        for label, cleanup in (
+                ('Graph cleanup also failed: ', handle.close),
+                ('Execution metadata also failed: ', lambda: record_execution_metadata(request, handle._execution))):
+            try:
+                cleanup()
+            except BaseException as exc:
+                if failure is None:
+                    failure = exc
+                elif exc is not failure:
+                    try:
+                        failure.add_note(label + str(exc))
+                    except BaseException:
+                        pass
+        if primary_failure is None and failure is not None:
+            raise failure
+
+
 class DataflowExecution:
     def __init__(self, request: ActionRequest, *, services: DriverServices) -> None:
         if not isinstance(request, ActionRequest):
@@ -158,6 +211,7 @@ class DataflowExecution:
         self._source_done = set()
         self._source_credit_needs_rotation = False
         self._node_metrics = {}
+        self._graph_finished = {}
         self._observed_workers = {}
         self._current_worker_observations = {}
         self._observed_worker_count = 0
@@ -1071,8 +1125,8 @@ class DataflowExecution:
             observe_models(self, event, payload)
             from ..dataflow_operator_observations import observe_operator
             observe_operator(self, event, payload)
-            from ...planning.dataflow_graph_adapter import observe_graph_progress
-            observe_graph_progress(self, event, payload)
+            from ..journal.run_telemetry import observe_graph_progress
+            observe_graph_progress(self._graph_finished, self._graph, self._bounds, payload)
             key = self._report_keys.get(occ)
             if key is not None:
                 self._checked.progress(key, **{k: metrics[k] - old[k] for k in metrics})
@@ -1575,6 +1629,17 @@ class DataflowExecution:
         self._state = "succeeded"
 
     # -- E006 finish ------------------------------------------------------
+    def graph_result(self, result):
+        from ..journal.run_telemetry import committed_graph_metrics
+        from ..outputs.terminals import graph_result
+
+        committed = committed_graph_metrics(self._graph, self._physical, self._restore_image,
+            self._store, max_state_bytes=self._bounds.max_state_bytes)
+        action = self.request.action
+        return graph_result(self._graph, self._physical, committed, self._graph_finished,
+            action.context.journal.execution_commits(action.action_id), result.result_ref,
+            workers=self._observed_worker_count)
+
     def finish(self):
         if self._failure is not None:
             raise self._failure

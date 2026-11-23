@@ -9,6 +9,8 @@ change to any of them is a visible, deliberate edit rather than drift.
 Nothing here changes behaviour, and no table is duplicated: the inventory is
 derived from the engine's own source every time.
 """
+import ast
+
 import compile_contract_inventory as inventory
 
 TABLES = inventory.tables()
@@ -126,11 +128,15 @@ def test_sdk_native_entries_only_preflight_their_declaration():
 
 def test_compilation_reads_nothing_from_its_surroundings():
     functions = sorted({item.split(': ', 1)[0] for item in inventory.implicit_inputs()})
-    assert functions == [
-        # Not on the compile call chain: result summary and sealed-replay validation.
-        'planning/dataflow_graph_adapter.py::graph_result',
-        'planning/dataflow_graph_adapter.py::validate_graph_replay',
-    ]
+    assert functions == []
+    # A new planning module must not gain run-state reads outside the inventoried stages.
+    planning = inventory.PACKAGE / 'planning'
+    forbidden = {'journal', 'execution_commits', 'source_binding'}
+    violations = [(path.name, node.lineno, node.attr)
+                  for path in sorted(planning.rglob('*.py'))
+                  for node in ast.walk(ast.parse(path.read_text(encoding='utf-8')))
+                  if isinstance(node, ast.Attribute) and node.attr in forbidden]
+    assert violations == []
 
 
 def test_one_function_resolves_the_compiler_inputs():

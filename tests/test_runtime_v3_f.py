@@ -537,40 +537,27 @@ def _graph_spec():
     }
 
 
-def test_f015(fake_action, monkeypatch):
+@pytest.mark.parametrize('provider', ['local', 'ray'])
+def test_graph_request_uses_its_configured_executor_once(fake_action, monkeypatch, provider):
     _binding_assertion()
-    import demiflow.execution.graph as graph
-    executor = _FakeExecutor("local")
-    declaration = _graph_spec()
-    seen = []
-    def forwarded(spec, caller, *, control_timeout_s):
-        seen.append((spec, caller, control_timeout_s))
-        return {"native_graph_result": True}
-    monkeypatch.setattr(graph, "_run_graph", forwarded)
-    assert graph.run_local_graph(declaration, _executor=executor) == {"native_graph_result": True}
-    assert seen == [(declaration, executor, 120)]
-    assert seen[0][0] is declaration
+    from demiflow.execution.action_driver import dataflow
+    from demiflow.execution.executors import graph
 
-
-def test_f016(fake_action, monkeypatch):
-    _binding_assertion()
-    import demiflow.execution.graph as graph
-    # Unit boundary only: real Ray graph routing/recovery has separate tests.
-    if not _real_module_available("demiflow.execution.executors.ray"):
-        fake_ray = types.ModuleType("demiflow.execution.executors.ray")
-        fake_ray.RayDatasetExecutor = lambda: _FakeExecutor("ray")
-        monkeypatch.setitem(sys.modules, "demiflow.execution.executors.ray", fake_ray)
-        TEST_DOUBLES.append("demiflow.execution.executors.ray")
-    executor = _FakeExecutor("ray")
+    executor = _FakeExecutor(provider)
     declaration = _graph_spec()
-    seen = []
-    def forwarded(spec, caller, *, control_timeout_s):
-        seen.append((spec, caller, control_timeout_s))
-        return {"native_graph_result": True}
-    monkeypatch.setattr(graph, "_run_graph", forwarded)
-    assert graph.run_ray_graph(declaration, _executor=executor) == {"native_graph_result": True}
-    assert seen == [(declaration, executor, 120)]
-    assert seen[0][0] is declaration
+    requests = []
+    result = {'native_graph_result': True}
+
+    def execute(request, *, control_timeout_s):
+        requests.append((request, control_timeout_s))
+        return result
+
+    monkeypatch.setattr(dataflow, 'run_graph_action', execute)
+    assert graph.materialize_graph(executor, declaration) is result
+    assert len(requests) == 1
+    request, timeout = requests[0]
+    assert request.provider == {'local': 'local', 'ray': 'ray_core'}[provider] and timeout == 120
+    assert request.source.declaration['routing'] == 'broadcast'
 
 
 def test_f017(fake_action):

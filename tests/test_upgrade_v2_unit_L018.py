@@ -13,7 +13,8 @@ import pytest
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.sealed_plans import load_sealed_plan
-from demiflow.planning.dataflow_graph_adapter import graph_credit, validate_graph_replay
+from demiflow.planning.dataflow_graph_adapter import graph_credit
+from demiflow.execution.seal.plan import validate_graph_replay
 from test_runtime_v3_graph_adapter import _spec
 
 
@@ -26,7 +27,7 @@ def ray_credit_case():
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.dataflow_terminals import materialized_handle
     from demiflow.execution.dataflow_api import resolve_action_runtime
-    from demiflow.execution.graph import _graph_action_request
+    from demiflow.execution.executors.graph import graph_action_request
     from runtime_v3_residency_scenarios import _provider
     from runtime_v3_support import RuntimeV3Fixture, make_scope, DEFAULT_BOUNDS, _RayDataBlocker
     owned = not ray.is_initialized()
@@ -61,7 +62,7 @@ def ray_credit_case():
                         'timeout_s':120}) as run:
                     reference = run.ref
                     with run.action(declaration) as action:
-                        request = _graph_action_request(spec, _current_executor.get())
+                        request = graph_action_request(spec, _current_executor.get())
                         _, bounds = resolve_action_runtime(request)
                         summary = _current_executor.get().materialize_graph(spec)
                         action.complete({'kind':'graph-materialized'})
@@ -101,13 +102,14 @@ def test_ray_prefetch_wiring_identical_to_local(ray_credit_case):
 
 def test_ray_recovery_guard_identical_to_local(ray_credit_case):
     from demiflow.data.api import _current_executor
-    from demiflow.execution.graph import _graph_action_request
+    from demiflow.execution.executors.graph import graph_action_request
     case=ray_credit_case
     with pytest.raises(DataflowError,match='sealed graph credit') as error:
         with RunContext.resume(case.reference) as run:
             with run.action(case.declaration):
-                request=_graph_action_request(case.spec,_current_executor.get())
-                validate_graph_replay(request,bounds=replace(case.bounds,max_batch_bytes=8192))
+                request=graph_action_request(case.spec,_current_executor.get())
+                validate_graph_replay(request.action, request.source.declaration,
+                    graph_credit(request.source.declaration, bounds=replace(case.bounds,max_batch_bytes=8192)))
     assert error.value.code=='BUDGET_EXCEEDED'
     assert run.journal.execution_commits('action-1')==case.commits
     assert load_sealed_plan(run.directory,'action-1',version='v3')['physical']==case.bundle['physical']

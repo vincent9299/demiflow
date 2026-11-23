@@ -616,19 +616,21 @@ def test_l024(ex, engine):
 # L026 materialize_graph — delegate to thin translator, no independent driver.
 # --------------------------------------------------------------------------- #
 def test_l026(ex, engine, monkeypatch):
-    import demiflow.execution.graph as graph_mod
+    from demiflow.execution.executors import graph as graph_mod
+    from demiflow.execution.action_driver import dataflow as graph_driver
     import demiflow.execution.run_context as run_context_mod
 
     seen = {}
 
-    def fake_run_local_graph(graph_spec, **kwargs):
+    def graph_request(graph_spec, executor):
         seen['graph_spec'] = graph_spec
         # F015 thin translator forwards to the same unified execute_action entry.
         request = engine.make_action_request(ex, _source(), _plan(),
                                              kind='materialize', arguments={})
-        return engine.run_dataset_action(request)
+        return request
 
-    monkeypatch.setattr(graph_mod, 'run_local_graph', fake_run_local_graph)
+    monkeypatch.setattr(graph_mod, 'graph_action_request', graph_request)
+    monkeypatch.setattr(graph_driver, 'run_graph_action', lambda request, **kwargs: engine.run_dataset_action(request))
     monkeypatch.setattr(run_context_mod, 'current_action', lambda: None)
     graph_spec = object()
     with pytest.raises(RuntimeError, match='native action context'):

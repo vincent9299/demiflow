@@ -40,7 +40,7 @@ import pytest
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.graph import run_local_graph
+from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.run_context import RunAction, RunContext
@@ -180,7 +180,7 @@ def test_graph_end_to_end_by_reference_udf_succeeds(tmp_path, monkeypatch):
             with run.action({"kind": "materialize",
                              "source": {"fixture": "graph-codepin-clean"}}) as execution:
                 action_id = execution.action_id
-                result = run_local_graph(spec, control_timeout_s=15)
+                result = LocalDatasetExecutor().materialize_graph(spec, control_timeout_s=15)
                 execution.complete(dict(kind="graph-materialized"))
             facts = run.journal.execution_commits(action_id)
             for rid in readers:

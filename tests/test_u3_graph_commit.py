@@ -185,7 +185,7 @@ def test_durable_graph_reclaims_channel_segments(tmp_path, monkeypatch):
 def test_private_tag_colocation_keeps_reader_and_resource_boundaries(tmp_path, variant):
     from dataclasses import replace
     from _native_graph_fixtures import HISTORICAL_MEMORY, HISTORICAL_WORKERS
-    from demiflow.execution.graph import _graph_action_request
+    from demiflow.execution.executors.graph import graph_action_request
     from demiflow.execution.dataflow_api import resolve_action_runtime
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_place import partition_stages
@@ -209,7 +209,7 @@ def test_private_tag_colocation_keeps_reader_and_resource_boundaries(tmp_path, v
     executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS)
     with RunContext.start(tmp_path/'compile', limits={'memory_bytes': HISTORICAL_MEMORY}) as run:
         with run.action({'kind': 'materialize', 'fixture': variant}) as execution:
-            request = _graph_action_request(spec, executor)
+            request = graph_action_request(spec, executor)
             policy, bounds = resolve_action_runtime(request)
             graph = lower_action(request, bounds=bounds).graph
             stages = partition_stages(graph, policy=policy, bounds=bounds)

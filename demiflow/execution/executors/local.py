@@ -564,15 +564,10 @@ class LocalDatasetExecutor(DatasetExecutor):
                         raise
             yield rows
 
-    def materialize_graph(self, graph_spec):
-        # graph_spec is translated to a standard v3 request by run_local_graph
-        # (F015), which forwards to the same execute_action entry; there is no
-        # independent graph driver here.
-        from ..graph import run_local_graph
-        from ..run_context import current_action
-        if current_action() is None:
-            raise RuntimeError("Graph materialization requires the native action context")
-        return run_local_graph(graph_spec, _executor=self)
+    def materialize_graph(self, graph_spec, *, host_id='local', resource_root=None, control_timeout_s=120):
+        from .graph import materialize_graph
+        return materialize_graph(self, graph_spec, host_id=host_id, resource_root=resource_root,
+                                 control_timeout_s=control_timeout_s)
 
     def _materialize_blocks(self, source, execute) -> _LocalMaterializedHandle:
         """通用块缓存；失败时清理本次溢写，不返回部分结果或删除其他缓存。"""

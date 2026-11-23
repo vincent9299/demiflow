@@ -29,7 +29,7 @@ _REVISIONS = {
         '474ffe83ef57fcf0dd18d84dc2e03bf4a52d382d83090ae54a85e8543d17de7b',
         'e67e3703f03ea14f8bcefb803bafc3251072e78bc17a5c1f2df60fad2ca2f83f'),
     'demiflow.planning.dataflow_graph_adapter': (
-        '219b7b61382f2c0a5a71a160a762047b088f03107a0bd1f1096bf3b48e11c5d5',
+        '4ee25f483669b6ec82ed6275c04d3077721d8e718c710bf09b66c86335f79ef2',
         '0ab9e3db6f4dffe74c2f614ac887ce0a69749910b083db63eaa95c819652cbcf'),
     'demiflow.data.result_cache': (
         '2ac2ab41bb6a1b4eda601b8c06f78e7c0bc74caf638d9c54afe6360190a4912b',

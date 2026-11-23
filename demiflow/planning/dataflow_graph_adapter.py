@@ -6,11 +6,11 @@ compiler hooks specialize a normal captured UnionSource before its only seal.
 from dataclasses import dataclass, replace
 import inspect
 import re
-import time
 
 from ..data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from ..data.sources import PlanInput, UnionSource
 from ..execution.contracts.dataflow_errors import DataflowError
+from ..execution.contracts.errors import ReservationError
 
 
 @dataclass(frozen=True)
@@ -370,8 +370,80 @@ def _colocate_private_tags(graph, stages, *, policy, bounds):
     return tuple(merged.get(stage.stage_id, stage) for stage in stages if stage.stage_id not in removed)
 
 
+# Legacy prefetch constants (U3). None budget keeps them exactly; an admitted
+# inflight-slot budget tightens each bound to what the admission can hold.
+LEGACY_PREFETCH = {"append_slots": 64, "source_batch_size": 256, "queue_depth": 4096, "max_pending": 1024}
+
+
+def derive_prefetch(inflight_slots=None, *, max_pending_floor=1):
+    """Derive prefetch bounds from the admitted inflight budget.
+
+    ``None`` (default/unified-seam-off path) returns the exact legacy constants,
+    so the old default path is behavior-identical. A positive admitted slot
+    budget caps every bound at that budget (never above the legacy ceiling).
+    ``max_pending_floor`` is the InputGate protocol minimum: the alignment buffer
+    must hold a full credit grant of envelopes (worst case one row each = credit
+    rows). When the floor exceeds the admitted ceiling the layout is infeasible
+    and rejected here (fail-closed); the floor never expands the admitted budget.
+    The caller must jointly solve credit first (resolve_prefetch_credit), which
+    tightens default credit to the grant or rejects an unsatisfiable explicit one."""
+    if inflight_slots is None:
+        return dict(LEGACY_PREFETCH)
+    if type(inflight_slots) is not int or inflight_slots <= 0:
+        raise ReservationError("INVALID_SPEC", "admitted inflight slots must be a positive integer")
+    if type(max_pending_floor) is not int or max_pending_floor < 1:
+        raise ReservationError("INVALID_SPEC", "max_pending floor must be a positive integer")
+    bounds = {name: min(legacy, inflight_slots) for name, legacy in LEGACY_PREFETCH.items()}
+    if max_pending_floor > bounds["max_pending"]:
+        raise ReservationError("INVALID_SPEC",
+                               "max_pending floor exceeds the admitted prefetch ceiling; jointly solve credit before seal")
+    return bounds
+
+
+def resolve_prefetch_credit(inflight_slots, *, inflight_bytes, credit_budget, credit_explicit):
+    """Jointly solve channel credit against the admitted slot/byte grant before seal.
+
+    Pure and deterministic: recovery re-invokes with the original sealed inputs and
+    compares the result against the sealed credit; it never re-solves a different
+    layout or dynamically changes credit. The slot grant (``inflight_slots``) and
+    byte grant (``inflight_bytes``) are checked together against the actual channel
+    ``credit_budget`` ({rows, bytes}); credit is not an extra grant. Default credit
+    may tighten to one consistent smaller grant shared by seal/router/InputGate;
+    explicit credit the grant cannot honor is rejected before any source read. The
+    credit floor never expands the admitted budget and no second grant is requested.
+    ``inflight_slots=None`` is the original unbound path: legacy prefetch, credit
+    unchanged."""
+    if type(credit_budget) is not dict or set(credit_budget) != {"rows", "bytes"}:
+        raise ReservationError("INVALID_SPEC", "credit_budget must name exactly rows and bytes")
+    rows, byte_credit = credit_budget["rows"], credit_budget["bytes"]
+    if type(rows) is not int or rows < 1 or type(byte_credit) is not int or byte_credit < 1:
+        raise ReservationError("INVALID_SPEC", "credit rows and bytes must be positive integers")
+    if type(credit_explicit) is not bool:
+        raise ReservationError("INVALID_SPEC", "credit_explicit must be a bool")
+    if inflight_slots is None:
+        return {"prefetch": derive_prefetch(None), "credit_budget": {"rows": rows, "bytes": byte_credit}}
+    if type(inflight_slots) is not int or inflight_slots <= 0:
+        raise ReservationError("INVALID_SPEC", "admitted inflight slots must be a positive integer")
+    if type(inflight_bytes) is not int or inflight_bytes <= 0:
+        raise ReservationError("INVALID_SPEC", "admitted inflight bytes must be a positive integer")
+    ceiling = min(inflight_slots, LEGACY_PREFETCH["max_pending"])
+    if credit_explicit:
+        if rows > ceiling:
+            raise ReservationError("BUDGET_EXCEEDED",
+                                   "explicit credit rows exceed the admitted prefetch ceiling; cannot expand grant",
+                                   retriable=False)
+        if byte_credit > inflight_bytes:
+            raise ReservationError("BUDGET_EXCEEDED",
+                                   "explicit credit bytes exceed the admitted inflight byte grant",
+                                   retriable=False)
+        solved_rows, solved_bytes = rows, byte_credit
+    else:
+        solved_rows, solved_bytes = min(rows, ceiling), min(byte_credit, inflight_bytes)
+    prefetch = derive_prefetch(inflight_slots, max_pending_floor=solved_rows)
+    return {"prefetch": prefetch, "credit_budget": {"rows": solved_rows, "bytes": solved_bytes}}
+
+
 def graph_credit(declaration, *, bounds):
-    from ..execution.reservation import resolve_prefetch_credit
     credit = dict(declaration.get('credit_budget', {'rows': 64, 'bytes': 8 * 1024**2}))
     slots = declaration.get('prefetch_slots')
     solved = resolve_prefetch_credit(slots,
@@ -444,104 +516,6 @@ def constrain_graph_storage(graph, exchanges):
             raise DataflowError('BUDGET_EXCEEDED', 'graph storage budget cannot admit every declared channel')
         result.append(replace(exchange, storage_bytes=storage))
     return tuple(result)
-
-
-def observe_graph_progress(execution, event, payload):
-    """Read-only first completion evidence after original worker authentication."""
-    if payload.get('node_finished') is not True:
-        return
-    occurrence, partition = payload['occurrence_id'], payload['partition_id']
-    node = next(node for node in execution._graph.nodes if node.occurrence_id == occurrence)
-    if not node.kernel.configuration.get('graph_observe'):
-        return
-    observations = getattr(execution, '_graph_finished', None)
-    if observations is None:
-        observations = execution._graph_finished = {}
-    # Missing historical or budget-truncated times remain unavailable.
-    if len(observations) < execution._bounds.max_control_bytes // 512:
-        observations.setdefault((occurrence, partition), time.monotonic())
-
-
-def graph_result(execution):
-    """Project native counters, first EOI observations and original commit facts."""
-    configuration = next(node.kernel.configuration['graph_result'] for node in execution._graph.nodes
-                         if 'graph_result' in node.kernel.configuration)
-    committed = committed_graph_metrics(execution)
-    def rows(occurrence, partition=None):
-        values = [value['rows_output'] for (occ, part), value in committed.items()
-                  if occ == occurrence and (partition is None or part == partition)]
-        return sum(values) if values else None
-    def finished(occurrence, partition=None):
-        owners = [stage for stage in execution._physical.stages if occurrence in stage.occurrences]
-        members = (partition,) if partition is not None else owners[0].partitions
-        observations = getattr(execution, '_graph_finished', {})
-        values = [observations.get((occurrence, member)) for member in members]
-        return max(values) if values and all(value is not None for value in values) else None
-    targets = configuration['targets']
-    journal = execution.request.action.context.journal
-    facts = journal.execution_commits(execution.request.action.action_id)
-    return {'workers': execution._observed_worker_count,
-            'egress_rows': rows(configuration['ancestor']),
-            'target_rows': {reader: rows(binding['occurrence_id'], binding['partition_id']) for reader, binding in targets.items()},
-            'final_arrival': {'ancestor': finished(configuration['ancestor']),
-                **{reader: finished(binding['occurrence_id'], binding['partition_id']) for reader, binding in targets.items()}},
-            'checkpoints': {fact['commit_id']: {'commit': fact} for fact in facts if fact['status'] == 'acked'},
-            'result_ref': execution._terminal_result.result_ref,
-            'target_bindings': {reader: dict(binding) for reader, binding in targets.items()},
-            'dag_id': execution._graph.dag_id, 'plan_id': execution._physical.plan_id}
-
-
-def validate_graph_replay(request, *, bounds):
-    """Validate the original graph declaration and credit without rewriting it."""
-    action = request.action
-    if action.context.journal.source_binding(action.action_id + '-dataflow-sealed') is None:
-        return
-    from ..execution.sealed_plans import load_sealed_plan
-    from .dataflow_compile import _plain
-    bundle = load_sealed_plan(action.context.directory, action.action_id)
-    graph, physical = bundle['graph'], bundle['physical']
-    declaration = request.source.declaration
-    originals = [node.kernel.configuration['arguments'].get('graph') for node in graph.nodes if node.occurrence_id in graph.terminals]
-    if [_plain(value) for value in originals] != [declaration]:
-        raise DataflowError('INCOMPATIBLE_HISTORY', 'graph declaration differs from the sealed routing')
-    credit = graph_credit(declaration, bounds=bounds)
-    router = next(node.occurrence_id for node in graph.nodes if 'graph_route' in node.kernel.configuration)
-    selected = {edge.edge_id for edge in graph.edges if edge.producer == router or edge.consumer == router}
-    for exchange in physical.exchanges:
-        if exchange.edge_id in selected and (exchange.credit_rows > credit['rows'] or exchange.credit_bytes > credit['bytes']):
-            raise DataflowError('BUDGET_EXCEEDED', 'sealed graph credit exceeds the current admitted grant')
-
-
-def committed_graph_metrics(execution):
-    """Read counters from authenticated final contributions, including resume."""
-    import json
-    from ..execution.recovery_contract import identity
-    from ..execution.contracts.dataflow_codec import compute_participant_id
-    image = execution._restore_image
-    if image is None or not image.cut.final:
-        raise DataflowError('INVALID_CONTRACT', 'graph result has no original final cut')
-    owners = {compute_participant_id(stage.stage_id, partition): (stage, partition)
-              for stage in execution._physical.stages for partition in stage.partitions}
-    wanted = {node.occurrence_id for node in execution._graph.nodes if node.kernel.configuration.get('graph_observe')}
-    result = {}
-    for contribution in image.contributions:
-        stage, partition = owners[contribution.participant_id]
-        if not wanted.intersection(stage.occurrences):
-            continue
-        ref = contribution.operator_states.get(identity(['worker-frontier', partition]))
-        if ref is None:
-            raise DataflowError('CORRUPT_ARTIFACT', 'graph contribution lacks its worker frontier')
-        frontier = json.loads(b''.join(execution._store.read(ref, max_bytes=execution._bounds.max_state_bytes)))
-        if frontier.get('schema') != 'demiflow.worker-frontier.v3':
-            raise DataflowError('CORRUPT_ARTIFACT', 'graph contribution has an unknown frontier')
-        for occurrence in wanted.intersection(stage.occurrences):
-            values = frontier.get('metrics', {}).get(occurrence)
-            if (type(values) is not dict or set(values) != {'rows_input', 'rows_output'}
-                    or any(type(value) is not int or value < 0 for value in values.values())
-                    or occurrence not in frontier['nodes']):
-                raise DataflowError('CORRUPT_ARTIFACT', 'graph node has no committed completion counters')
-            result[(occurrence, partition)] = values
-    return result
 
 
 def tighten_graph_credits(graph, exchanges, *, bounds):

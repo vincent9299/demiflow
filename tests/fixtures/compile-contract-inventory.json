@@ -157,12 +157,12 @@
     "planning/dataflow_shared.py"
    ],
    "ancestor": [
-    "planning/dataflow_graph_adapter.py"
+    "execution/outputs/terminals.py"
    ],
    "arguments": [
     "execution/dataflow_native_limits.py",
-    "execution/worker/dataflow_graph_runner.py",
-    "planning/dataflow_graph_adapter.py"
+    "execution/seal/plan.py",
+    "execution/worker/dataflow_graph_runner.py"
    ],
    "batch_size": [
     "execution/dataflow_batch_membership.py",
@@ -218,8 +218,8 @@
     "planning/dataflow_graph_adapter.py"
    ],
    "graph_observe": [
-    "execution/worker/dataflow_graph_runner.py",
-    "planning/dataflow_graph_adapter.py"
+    "execution/journal/run_telemetry.py",
+    "execution/worker/dataflow_graph_runner.py"
    ],
    "graph_private_tag": [
     "planning/dataflow_graph_adapter.py"
@@ -229,9 +229,10 @@
    ],
    "graph_result": [
     "execution/action_driver/dataflow.py",
-    "planning/dataflow_graph_adapter.py"
+    "execution/outputs/terminals.py"
    ],
    "graph_route": [
+    "execution/seal/plan.py",
     "planning/dataflow_graph_adapter.py",
     "planning/dataflow_single_worker.py",
     "planning/dataflow_thread_fusion.py"
@@ -457,7 +458,7 @@
     "execution/kernels/block_partition.py"
    ],
    "targets": [
-    "planning/dataflow_graph_adapter.py"
+    "execution/outputs/terminals.py"
    ],
    "task_batch_rows": [
     "execution/kernels/operator.py",
@@ -741,11 +742,7 @@
   ],
   "preflight_result_used": []
  },
- "implicit_inputs": [
-  "planning/dataflow_graph_adapter.py::graph_result: journal = execution.request.action.context.journal",
-  "planning/dataflow_graph_adapter.py::validate_graph_replay: bundle = load_sealed_plan(action.context.directory, action.action_id)",
-  "planning/dataflow_graph_adapter.py::validate_graph_replay: if action.context.journal.source_binding(action.action_id + '-dataflow-sealed') is None:"
- ],
+ "implicit_inputs": [],
  "input_resolver": [
   "execution/dataflow_compile_inputs.py::compile_inputs: context = current()",
   "execution/dataflow_compile_inputs.py::compile_inputs: return CompileInputs(defaults=executor_defaults(getattr(request.action, '_dataflow_executor', None)),",
