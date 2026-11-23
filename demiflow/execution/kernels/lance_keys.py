@@ -12,46 +12,51 @@ from .ordering import build_sort_runs, merge_sort_runs
 
 def _sql_survivors(left, right, keys, services):
     from ...operators.relational import EXCLUDE_OFFSETS_SQL
-    from ..contracts.relational_region import KEY_SQL_SUFFIX, SQL_CHILD_RSS, SQL_PARENT_WINDOW
+    from ..contracts.relational_region import KEY_SQL_SUFFIX, SQL_CHILD_RSS, selection_wire_bytes
     from .dataflow import _group_key
 
     if not any(s.stage_id.endswith(KEY_SQL_SUFFIX) for s in services.assignment.stages):
         return None
     if services.query_region_offsets is None:
         raise DataflowError('UNSUPPORTED_CAPABILITY', 'sealed key exclusion requires its SQL host')
-    # The two inputs are closed finite ports. Only their key bytes and ordered
-    # offsets enter the child. A speculative read never consumes the worker
-    # iterator used by the hash strategy; user callbacks have already finished.
-    sources = []
-    retained = 0
+    # Both finite inputs are closed and replayable. Send only canonical keys
+    # to SQL, then read the original left port in order for survivor provenance.
+    # No source, callback or payload lookup is repeated by this second scan.
+    import pyarrow as pa
+
+    window = selection_wire_bytes(SQL_CHILD_RSS)
     tables = {}
+    retained = 4096  # request header and query
     for name, port in (('lkeys', left), ('rkeys', right)):
-        scan = port.within_offset_budget(SQL_PARENT_WINDOW // 2048)
+        scan = port.within_offset_budget(window // 8)
         if scan is None:
             return None
-        table = []
+        chunks, pending = [], []
         try:
-            for ordinal, record in enumerate(scan):
+            for record in scan:
                 services.check_stop()
                 row = _materialize_row(record, services)
-                value = _group_key(row, keys).encode('utf-8')
-                key = None if any(row[f] is None for f in keys) else value
-                # Includes child input's simultaneous serialization, left
-                # provenance and the Python object tree of the bounded narrow row.
-                retained += 2048 + len(value) * 8
-                if name == 'lkeys':
-                    retained += record.encoded_bytes * 40
-                if retained > SQL_PARENT_WINDOW // 4:
+                key = None if any(row[f] is None for f in keys) else _group_key(row, keys).encode('utf-8')
+                retained += 5 + (len(key) if key is not None else 0)
+                if not pending:
+                    retained += 512  # per-buffer and serialization overhead
+                if retained > window:
                     return None
-                table.append((key, ordinal))
-                if name == 'lkeys':
-                    sources.append(record)
+                pending.append(key)
+                if len(pending) == 8192:
+                    chunks.append(pa.array(pending, type=pa.binary()))
+                    pending.clear()
+            if pending:
+                chunks.append(pa.array(pending, type=pa.binary()))
         finally:
             scan.close()
-        tables[name] = table
-    pairs = services.query_region_offsets(EXCLUDE_OFFSETS_SQL, tables=tables, max_pairs=len(sources),
-        rss_bytes=SQL_CHILD_RSS, check_stop=services.check_stop)
-    return (sources[i] for i, in pairs)
+        tables[name] = pa.chunked_array(chunks, type=pa.binary())
+    rows = len(tables['lkeys'])
+    selection = services.query_region_offsets(EXCLUDE_OFFSETS_SQL, tables=tables, max_pairs=rows,
+        rss_bytes=SQL_CHILD_RSS, check_stop=services.check_stop, selection=True)
+    if not any(selection):
+        return iter(())
+    return (record for i, record in enumerate(left) if selection[i // 8] & (1 << (i % 8)))
 
 
 def _hydration_rows(schema, services, requested):

@@ -198,11 +198,12 @@ def _worker_environment(threads):
     return env
 
 
-def query_region_offsets(sql, *, tables, max_pairs, rss_bytes, check_stop):
+def query_region_offsets(sql, *, tables, max_pairs, rss_bytes, check_stop, selection=False):
     """Use one already-granted CPU and RSS window for a complete finite relation.
 
     Each input is an ordered sequence of (canonical binary key or null, spool
-    offset). The relation kernel owns SQL, join semantics, and offset hydration.
+    offset), or a compact binary-key column for a left-row selection. The
+    relation kernel owns SQL, join semantics, and offset hydration.
     Anonymous IPC consumes part of the same grant; no storage or result commits.
     """
     import pickle
@@ -215,6 +216,12 @@ def query_region_offsets(sql, *, tables, max_pairs, rss_bytes, check_stop):
     # Keep both anonymous files plus the child's interpreter and Arrow pool
     # inside the declared total. Callers separately own their input/output lists.
     wire_limit = rss_bytes // 16
+    if selection:
+        import pyarrow as pa
+        from .contracts.relational_region import selection_wire_bytes
+        wire_limit = selection_wire_bytes(rss_bytes)
+        if (max_pairs + 7) // 8 > wire_limit:
+            raise DataflowError('BUDGET_EXCEEDED', 'native row selection exceeds its window')
     if type(sql) is not str or not sql.strip() or type(tables) is not dict or not tables:
         raise DataflowError('INVALID_CONTRACT', 'invalid native relation query or bindings')
     if len(sql) >= wire_limit or len(sql.encode()) >= wire_limit:
@@ -223,6 +230,13 @@ def query_region_offsets(sql, *, tables, max_pairs, rss_bytes, check_stop):
     for name, rows in tables.items():
         if type(name) is not str or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name):
             raise DataflowError('INVALID_CONTRACT', 'invalid native relation input name')
+        if selection:
+            if not isinstance(rows, pa.ChunkedArray) or rows.type != pa.binary():
+                raise DataflowError('INVALID_CONTRACT', 'native selection requires a binary key column')
+            input_bytes += rows.get_total_buffer_size() + 512 * rows.num_chunks
+            if input_bytes + 4096 > wire_limit or len(rows) > wire_limit // 8:
+                raise DataflowError('BUDGET_EXCEEDED', 'native key selection exceeds its window')
+            continue
         if not isinstance(rows, (list, tuple)):
             raise DataflowError('INVALID_CONTRACT', 'native relation input must be a finite key table')
         for index, (key, offset) in enumerate(rows):
@@ -236,7 +250,7 @@ def query_region_offsets(sql, *, tables, max_pairs, rss_bytes, check_stop):
                 raise DataflowError('BUDGET_EXCEEDED', 'native relation input exceeds its memory window')
     with (tempfile.TemporaryFile(dir='/dev/shm') as request,
           tempfile.TemporaryFile(dir='/dev/shm') as result):
-        spec = dict(region_offsets=True, tables=tables, sql=sql, max_pairs=max_pairs, parent_pid=os.getpid(),
+        spec = dict(region_offsets=True, selection=selection, tables=tables, sql=sql, max_pairs=max_pairs, parent_pid=os.getpid(),
                     result_fd=result.fileno(), options={'threads': 1}, slot=0, rss_bytes=rss_bytes,
                     wire_limit=wire_limit)
         try:
@@ -271,6 +285,8 @@ def query_region_offsets(sql, *, tables, max_pairs, rss_bytes, check_stop):
             result.seek(0)
             status, value = pickle.load(result)
             if status == 'complete':
+                if selection and (type(value) is not bytearray or len(value) != (max_pairs + 7) // 8):
+                    raise DataflowError('INTERNAL_PROTOCOL', 'invalid native row selection')
                 return value
             if status == 'budget':
                 raise DataflowError('BUDGET_EXCEEDED', value)

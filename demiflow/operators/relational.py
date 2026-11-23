@@ -93,7 +93,7 @@ def merge_join_rows(
 # Tables contain the same canonical binary keys used by hash matching. A SQL
 # NULL on either side never matches. Left duplicates have distinct offsets.
 EXCLUDE_OFFSETS_SQL = """
-    SELECT l.off FROM lkeys l LEFT ANTI JOIN rkeys r ON l.k = r.k ORDER BY l.ord
+    SELECT l.off FROM lkeys l LEFT ANTI JOIN rkeys r ON l.k = r.k
 """
 
 

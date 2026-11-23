@@ -1499,7 +1499,7 @@ class RuntimeServices:
 
     # Installed by the worker host. SQL and all relational semantics belong
     # to the operator; this one port supervises the process under the grant.
-    query_region_offsets: Callable[..., list[tuple[int | None, ...]] | None] | None = None
+    query_region_offsets: Callable[..., list[tuple[int | None, ...]] | bytearray] | None = None
 
     def __post_init__(self):
         if not isinstance(self.bounds, Bounds):

@@ -59,7 +59,8 @@ def test_public_key_exclusion_uses_only_key_sql_and_bulk_hydrates_survivors(tmp_
     take = lance.LanceDataset._take_rows
     def key_only(sql, **kwargs):
         assert 'LEFT ANTI JOIN' in sql
-        assert all(k is None or type(k) is bytes for rows in kwargs['tables'].values() for k, i in rows)
+        assert kwargs['selection']
+        assert all(rows.type == pa.binary() for rows in kwargs['tables'].values())
         probes.append(tuple(map(len, kwargs['tables'].values())))
         return query(sql, **kwargs)
     def selected_rows(dataset, ids, *, columns, **kwargs):

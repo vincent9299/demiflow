@@ -15,6 +15,11 @@ MAX_JOIN_DEPTH = 2
 REDUCER_MEMORY_FIELD = 'reducer_memory_v1'
 
 
+def selection_wire_bytes(child_rss):
+    """Anonymous IPC allowance for a compact key binding or its selection bitmap."""
+    return min(child_rss // 8, SQL_PARENT_WINDOW // 2)
+
+
 def needs_native_offsets(stage):
     return stage.stage_id.startswith(SQL_PREFIX) or stage.stage_id.endswith(KEY_SQL_SUFFIX)
 

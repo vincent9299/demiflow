@@ -39,7 +39,16 @@ def _region_offsets(request):
         pa.set_io_thread_count(1)
         config = SessionConfig().with_target_partitions(1).with_batch_size(min(1024, maximum + 1))
         context = SessionContext(config, RuntimeEnvBuilder().with_greedy_memory_pool(limit).with_disk_manager_disabled())
+        selection = request.get('selection', False)
         for name, rows in request.pop('tables').items():
+            if selection:
+                batches, start = [], 0
+                for keys in rows.chunks or [pa.array([], type=pa.binary())]:
+                    offsets = pa.array(range(start, start + len(keys)), type=pa.int64())
+                    batches.append(pa.record_batch([keys, offsets], names=['k', 'off']))
+                    start += len(keys)
+                context.register_record_batches(name, [batches])
+                continue
             table = pa.record_batch([pa.array((key for key, _ in rows), type=pa.binary()),
                                      pa.array((offset for _, offset in rows), type=pa.int64()),
                                      pa.array(range(len(rows)), type=pa.int64())], names=['k', 'off', 'ord'])
@@ -49,10 +58,21 @@ def _region_offsets(request):
         schema = frame.schema()
         if not len(schema) or any(field.type != pa.int64() for field in schema):
             raise TypeError('native relation must return int64 offset columns')
-        rows = []
+        rows = bytearray((maximum + 7) // 8) if selection else []
+        if selection and len(schema) != 1:
+            raise ValueError('native selection requires one offset column')
         status, value = 'complete', rows
         for wrapped in frame.execute_stream():
             batch = wrapped.to_pyarrow()
+            if selection:
+                for offset in batch.column(0).to_pylist():
+                    if type(offset) is not int or not 0 <= offset < maximum:
+                        raise ValueError('native selection returned an invalid offset')
+                    index, bit = divmod(offset, 8)
+                    if rows[index] & (1 << bit):
+                        raise ValueError('native selection returned a duplicate offset')
+                    rows[index] |= 1 << bit
+                continue
             if len(rows) + batch.num_rows > maximum:
                 status, value = 'budget', 'native relation produced more offset pairs than admitted'
                 break
