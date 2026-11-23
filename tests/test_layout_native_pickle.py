@@ -170,3 +170,16 @@ def test_modified_current_algorithm_is_not_certified_as_historical(original_call
     with pytest.raises(DataflowError,match='owner differs'):
         load_payload([(original_callbacks/(name+'.pickle')).read_bytes()])
     assert snapshot(fn)==before
+
+
+def test_moduleless_business_callable_keeps_original_public_execution(tmp_path,monkeypatch):
+    import cloudpickle
+    from demiflow import data
+    from demiflow.execution.run_context import RunContext
+    fn=eval('lambda row: {"id": row["id"] + 1}', {})
+    assert fn.__module__ is None
+    restored=load_payload([cloudpickle.dumps(fn)])
+    assert restored.__module__ is None and restored({'id':3})=={'id':4}
+    monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT',str(tmp_path/'resources'))
+    with RunContext.start(tmp_path/'run'),data.local_execution(workers=1,worker_mode='process'):
+        assert data.from_items([{'id':3}]).map(fn).take_all()==[{'id':4}]

@@ -84,7 +84,8 @@ class ProgramUnpickler(pickle.Unpickler):
         if value not in self._native_states:
             from types import FunctionType
             from demiflow.execution.contracts.recovery_sdk_v3 import LAYOUT_RELOCATIONS
-            if type(value) is FunctionType:
+            if (type(value) is FunctionType and type(value.__module__) is str
+                    and type(value.__qualname__) is str):
                 entry = LAYOUT_RELOCATIONS.get(value.__module__ + '.' + value.__qualname__, {})
                 if entry.get('by_value'):
                     import sys
