@@ -61,6 +61,14 @@ def test_driver_stop_does_not_authorize_forged_or_stale_source_eoi(tmp_path, mon
             with pytest.raises(DataflowError, match='pruned input differs'):
                 original(execution, replace(event, payload=payload))
             authorization = execution._terminal_stop_sources
+            satisfied = execution._satisfied_consumers
+            # A real downstream Limit may independently finish the input.
+            # Remove both kinds of evidence to test that stopping alone grants
+            # no authority; leave the actual event untouched for processing.
+            assert satisfied
+            assert all(execution._source_demand_satisfied(split.source_id)
+                       for split in execution._endpoints[event.allocation_id]._assignment.source_splits)
+            execution._satisfied_consumers = {}
             execution._terminal_stop_sources = {}
             try:
                 # _stopping by itself grants no authority over a source split.
@@ -75,6 +83,7 @@ def test_driver_stop_does_not_authorize_forged_or_stale_source_eoi(tmp_path, mon
                     original(execution, event)
             finally:
                 authorization[event.allocation_id] = old
+                execution._satisfied_consumers = satisfied
             assert not execution._checkpoint.inputs_complete()
             checked.append(event)
         return original(execution, event)
