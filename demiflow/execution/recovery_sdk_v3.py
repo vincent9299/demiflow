@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 from types import CodeType, FunctionType
 
-from demiflow.execution.contracts.recovery_sdk_v3 import code_record
+from demiflow.execution.contracts.recovery_sdk_v3 import code_record, LAYOUT_RELOCATIONS
 from .recovery_contract import identity
 
 
@@ -534,27 +534,93 @@ _LAYOUT_SOURCE_TYPES = {'demiflow.execution.pipeline.package_loader.pipeline_bun
                                                                           'get_nowait': ['a34929c61ee5e66df278413202ab479035d962d86a2edcbae66e127c430cc438',
                                                                                          '77a333d49524d51dbca48bd3cabe16888a3f14302718cc5ff73ff0a5d6fa4495']}}}
 
+_LAYOUT_SOURCE_TYPES.update(LAYOUT_RELOCATIONS)
+
+def _contextmanager_original(value, module):
+    """Authenticate stdlib wrapping without executing the supplied function."""
+    import contextlib
+    wrapped = vars(value).get('__wrapped__')
+    if (value.__globals__ is not vars(contextlib)
+            or type(wrapped) is not FunctionType or wrapped.__globals__ is not vars(module)
+            or value.__code__.co_freevars != ('func',)
+            or not value.__closure__ or len(value.__closure__) != 1
+            or value.__closure__[0].cell_contents is not wrapped):
+        return None
+    template = contextlib.contextmanager(wrapped)
+    if (identity(code_record(value.__code__)) != identity(code_record(template.__code__))
+            or value.__defaults__ != template.__defaults__ or value.__kwdefaults__ != template.__kwdefaults__):
+        return None
+    return wrapped
+
+
+def _layout_dependencies_match(entry):
+    """Authenticate helpers used by an explicitly reviewed paired conversion.
+
+    This does not decide whether arbitrary edits are equivalent. The finite
+    recorded pairs are the inlined input helper and passive budget projection;
+    altered helper code, defaults or import bindings invalidate those pairs.
+    """
+    from hashlib import sha256
+    from importlib import import_module
+    for item in entry.get('dependencies', ()):
+        module = import_module(item['module'])
+        fn = vars(module).get(item['name'])
+        if type(fn) is not FunctionType or fn.__globals__ is not vars(module) or fn.__closure__:
+            return False
+        source = Path(module.__file__).read_bytes()
+        if sha256(source).hexdigest() != item['source']:
+            return False
+        code = identity(code_record(fn.__code__))
+        declared = _declared_codes(source).get(item['name'])
+        if (code not in item['codes'] or declared is None
+                or code != identity(code_record(declared))
+                or fn.__defaults__ != item['defaults'] or fn.__kwdefaults__ != item['kwdefaults']):
+            return False
+        for owner, name in item['bindings']:
+            if vars(import_module(owner)).get(name) is not fn:
+                return False
+    return True
+
+
 def _layout_source_type(value):
     module_name = getattr(value, '__module__', None)
     qualname = getattr(value, '__qualname__', '')
     if type(module_name) is not str or type(qualname) is not str:
         return None
     class_name = qualname.split('.', 1)[0]
-    entry = _LAYOUT_SOURCE_TYPES.get(module_name + '.' + class_name)
+    entry = (_LAYOUT_SOURCE_TYPES.get(module_name + '.' + qualname)
+             or _LAYOUT_SOURCE_TYPES.get(module_name + '.' + class_name))
     module = sys.modules.get(module_name)
     if entry is None or module is None:
         return None
+    if not _layout_dependencies_match(entry):
+        return None
+    if 'optimization_variants' in entry:
+        # Inlining a helper can remove a wrapper docstring: the current body
+        # is identical in normal/-OO mode while the original wrapper was not.
+        variants = entry['optimization_variants'].get(str(sys.flags.optimize))
+        if variants is None:
+            return None
+        entry = {**entry, 'variants': variants}
     if entry.get('kind') == 'function':
-        if type(value) is not FunctionType or value is not vars(module).get(qualname):
+        if type(value) is not FunctionType:
             return None
         source = Path(module.__file__).read_bytes()
         from hashlib import sha256
-        if sha256(source).hexdigest() != entry['source'] or value.__globals__ is not vars(module):
+        if sha256(source).hexdigest() != entry['source']:
             return None
-        code = identity(code_record(value.__code__))
+        original = value
+        if value.__globals__ is not vars(module):
+            original = _contextmanager_original(value, module)
+            if original is None or value not in _owners(module, qualname):
+                return None
+        code = identity(code_record(original.__code__))
         declared = _declared_codes(source).get(qualname)
-        if declared is None or code != identity(code_record(declared)):
+        if declared is None or not _matches_definition(original, module, declared, qualname, code, source):
             return None
+        if 'variants' in entry:
+            published = entry['variants'].get(code)
+            return {**entry, 'code': (code, published)} if published is not None else None
         default = identity(code_record(_declared_codes(source, 0)[qualname]))
         if default != entry['code'][0]:
             return None
@@ -572,7 +638,12 @@ def _layout_source_type(value):
     compiled = _declared_codes(source)
     default_codes = _declared_codes(source, 0)
     methods = {}
-    declarations = set()
+    from collections import Counter
+    declarations = Counter()
+    class_code = compiled.get(class_name)
+    if class_code is None:
+        return None
+    declared_members = tuple(item for item in class_code.co_consts if isinstance(item, CodeType))
     for name, member in vars(cls).items():
         functions = ((member.fget, member.fset, member.fdel) if isinstance(member, property)
                      else (member.__func__,) if isinstance(member, (classmethod, staticmethod)) else (member,))
@@ -580,23 +651,35 @@ def _layout_source_type(value):
             if type(method) is not FunctionType:
                 continue
             code = identity(code_record(method.__code__))
-            declared = compiled.get(method.__qualname__)
-            if declared is not None:
-                declarations.add(method.__qualname__)
-                if (method.__globals__ is not vars(module)
-                        or code != identity(code_record(declared))):
+            candidates = tuple(item for item in declared_members if item.co_qualname == method.__qualname__)
+            if candidates:
+                declarations[method.__qualname__] += 1
+                original = method
+                if method.__globals__ is not vars(module):
+                    original = _contextmanager_original(method, module)
+                    if original is None:
+                        return None
+                original_live_code = identity(code_record(original.__code__))
+                if not any(original_live_code == identity(code_record(item)) for item in candidates):
                     return None
-                if method.__closure__:
-                    if method.__code__.co_freevars != ('__class__',):
+                if original.__closure__:
+                    if original.__code__.co_freevars != ('__class__',):
                         return None
                     try:
-                        if method.__closure__[0].cell_contents is not cls:
+                        if original.__closure__[0].cell_contents is not cls:
                             return None
                     except ValueError:
                         return None
-                # Python -OO removes docstrings. Authenticate against the
-                # same compilation mode, while preserving that mode's old pin.
-                original_code = identity(code_record(default_codes[method.__qualname__]))
+                if original is not method:
+                    original_code = code
+                else:
+                    originals = tuple(item for item in default_codes[class_name].co_consts
+                                      if isinstance(item, CodeType) and item.co_qualname == method.__qualname__)
+                    # Getter and setter share a qualname. Pair their position
+                    # in the class definition rather than discarding one.
+                    position = next(i for i,item in enumerate(candidates)
+                                    if original_live_code == identity(code_record(item)))
+                    original_code = identity(code_record(originals[position]))
             else:
                 if isinstance(member, property):
                     return None
@@ -616,9 +699,14 @@ def _layout_source_type(value):
                 pins = entry['methods'].get(name)
                 if pins is None or original_code != pins[0]:
                     return None
-                methods[name] = (code, code if pins[0] == pins[1] else pins[1])
-    expected = {name for name in compiled if name.startswith(class_name + '.')
-                and name.count('.') == 1}
+                if 'variants' in entry:
+                    published = entry['variants'].get(name, {}).get(code)
+                    if published is None:
+                        return None
+                else:
+                    published = code if pins[0] == pins[1] else pins[1]
+                methods[name] = (code, published)
+    expected = Counter(item.co_qualname for item in declared_members)
     if declarations != expected or set(methods) != set(entry['methods']):
         return None
     return {**entry, 'methods': methods}
@@ -633,17 +721,24 @@ def persistent_source_module(value):
 def source_pickle_global(module, name):
     """Resolve only recorded historical GLOBAL names, never arbitrary paths."""
     for key, entry in _LAYOUT_SOURCE_TYPES.items():
-        current_module, class_name = key.rsplit('.', 1)
-        if module != entry['old_module']:
+        current_module = entry.get('module', key.rsplit('.', 1)[0])
+        current_name = entry.get('name', key.rsplit('.', 1)[1])
+        old_name = entry.get('old_name', current_name)
+        # Current names remain normal imports, including after a future source
+        # change. Only an actual relocated historical GLOBAL needs this table.
+        if module != entry['old_module'] or module == current_module:
             continue
-        if name == class_name:
-            return current_module, class_name
-        if name.startswith(class_name + '.') and name[len(class_name) + 1:] in entry.get('methods', {}):
-            return current_module, name
+        if name == old_name:
+            return current_module, current_name
+        if name.startswith(old_name + '.') and name[len(old_name) + 1:] in entry.get('methods', {}):
+            return current_module, current_name + name[len(old_name):]
     return None
 
 
 def authentic_source_global(value, original_module):
     """A successful measured relocation, without the ordinary identity fallback."""
+    from types import MethodType
+    if type(value) is MethodType:
+        value = value.__func__
     entry = _layout_source_type(value)
     return entry is not None and entry['old_module'] == original_module

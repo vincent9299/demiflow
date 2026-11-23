@@ -22,9 +22,18 @@ CARRIERS = {
     'dataflow_inputs': ['InputMaterializedHandle'],
     'dataflow_acquisition_call': ['QueueSourceDeclaration', 'AcquisitionCall'],
     'literal_source': ['LiteralSourceReference'],
-    'contracts.pipeline': ['PipelineBundleRef', 'PipelineExecutionEnvironment'],
+    'contracts.pipeline': ['PipelineBundleRef', 'PipelineExecutionEnvironment', 'PipelineRunRequest'],
+    'executors.base': ['DatasetExecutor'],
+    'source_readers': ['LanceReader'],
     'requirements': ['FrozenRequirements', 'ResolvedWheel', 'PythonEnvironmentResolution'],
     'request_limits': ['ObservedQueue'],
+    'dataset_commit': ['DatasetCommit', 'UncertainDatasetCommit'],
+    'target': ['PipelineExecutionTarget'],
+    'package_loader': ['BundlePackages'],
+    'run_context': ['RunContext'],
+    'checked': ['CheckedExecution'],
+    'managed_native': ['NativeExecution'],
+    'run_journal': ['RunJournal'],
 }
 
 
@@ -59,6 +68,12 @@ from demiflow.data.guards import require
 from demiflow.data.result_cache import selected
 for fn in [data.from_items, data.read_legacy_queue_records, require, selected]:
     result['public.' + fn.__name__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
+from demiflow.operator_llm import required_environment, parse_prompt_pack
+from demiflow.execution.executors.base import DatasetExecutor
+from demiflow.execution.run_reader import read_run
+from demiflow.execution.dataflow_capacity import local_capacity_domain
+for fn in [data.local_execution, required_environment, parse_prompt_pack, read_run, local_capacity_domain, DatasetExecutor.prepare_input]:
+    result['public.' + fn.__name__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
 from demiflow import Dataset
 result['public.Dataset'] = [base64.b64encode(pickle.dumps(Dataset, protocol=5)).decode(), describe(Dataset)]
 from demiflow import PipelineBundleRef
@@ -89,7 +104,7 @@ def test_published_source_carrier_decodes_with_same_identity(original_carriers, 
     loaded = load_private_payload(OriginalStore(raw), ref) if private else load_payload([raw[:5], raw[5:]])
     assert describe(loaded) == expected
     # Loading old bytes never installs an old public module alias.
-    if expected['module'] not in {'demiflow.execution.contracts.pipeline', 'demiflow.execution.requirements'}:
+    if loaded.__module__ != expected['module'] and expected['module'] not in {'demiflow.execution.contracts.pipeline', 'demiflow.execution.requirements'}:
         assert expected['module'] not in sys.modules
 
 
@@ -161,10 +176,39 @@ def test_original_source_bound_method_global(original_carriers, name):
     assert method.__self__.path == '/fixed/archive.sqlite'
 
 
-@pytest.mark.parametrize('name', ['from_items', 'read_legacy_queue_records', 'require'])
+@pytest.mark.parametrize('name', ['from_items', 'read_legacy_queue_records', 'require',
+    'local_execution', 'required_environment', 'parse_prompt_pack', 'read_run', 'local_capacity_domain', 'prepare_input'])
 def test_public_function_import_changes_keep_published_pin(original_carriers, name):
     raw, original = original_carriers['public.' + name]
     assert describe(load_payload([base64.b64decode(raw)])) == original
+
+
+@pytest.mark.parametrize('module,name,carrier', [
+    ('demiflow.execution.executors.base', 'prepare_public_items', 'DatasetExecutor'),
+    ('demiflow.execution.sources.materialized_input', 'build_input_handle', 'DatasetExecutor'),
+    ('demiflow.execution.contracts.record_codec', '_window', 'LanceReader'),
+    ('demiflow.execution.contracts.record_codec', '_resident_budget', 'LanceReader'),
+])
+def test_paired_boundary_requires_actual_helper(original_carriers, monkeypatch, module, name, carrier):
+    import importlib
+    owner = importlib.import_module(module)
+    original = getattr(owner, name)
+    # The public class has not changed: a change to its implementation helper
+    # must still invalidate the explicitly reviewed old representation.
+    monkeypatch.setattr(original, '__code__', original.__code__.replace(co_consts=(*original.__code__.co_consts, 'changed')))
+    raw, expected = original_carriers[carrier]
+    if carrier == 'LanceReader':
+        with pytest.raises(DataflowError, match='audited definition'):
+            load_payload([base64.b64decode(raw)])
+    else:
+        assert describe(load_payload([base64.b64decode(raw)])) != expected
+
+
+def test_paired_input_requires_import_binding(original_carriers, monkeypatch):
+    from demiflow.execution.executors import base
+    monkeypatch.setattr(base, 'build_input_handle', lambda *args, **kwargs: None)
+    raw, expected = original_carriers['DatasetExecutor']
+    assert describe(load_payload([base64.b64decode(raw)])) != expected
 
 
 def test_original_public_bound_bundle_loader_executes(original_carriers, tmp_path):
@@ -224,3 +268,19 @@ def test_published_unchanged_cache_callback_keeps_measured_identity(original_car
     assert describe(selected) == expected
     assert selected(lambda row: row['id'] > 0, {'id': 1}) is True
     assert selected(lambda row: row['id'] > 0, {'id': -1}) is False
+
+
+def test_relocated_context_wrapper_authenticates_original_closure(original_carriers, monkeypatch):
+    from demiflow.execution.journal.run_reader import read_run
+    monkeypatch.setattr(read_run, '__wrapped__', lambda *a, **k: None)
+    raw = base64.b64decode(original_carriers['public.read_run'][0])
+    with pytest.raises(DataflowError, match='audited definition'):
+        load_payload([raw])
+
+
+def test_relocated_commit_class_rejects_changed_body(original_carriers, monkeypatch):
+    from demiflow.execution.checkpoint.dataset_commit import DatasetCommit
+    method = DatasetCommit.confirm
+    monkeypatch.setattr(method, '__code__', method.__code__.replace(co_consts=(*method.__code__.co_consts, 'changed')))
+    with pytest.raises(DataflowError, match='audited definition'):
+        load_payload([base64.b64decode(original_carriers['DatasetCommit'][0])])

@@ -35,12 +35,13 @@ def test_unchanged_helpers_retain_their_v3_file_identities():
     assert frozen['code'] == identity(code_record(frozen_options.__code__))
 
 
-def test_changed_local_execution_keeps_its_actual_source_and_code():
+def test_local_execution_keeps_post_retirement_source_and_code():
     # Retiring the old execution selectors changed this public context's
     # signature and body. It must not impersonate the pre-retirement helper.
     original = data.local_execution.__wrapped__
     binding = describe(data.local_execution)['closure'][0]
-    assert binding['source_hash'] == sha256(_source(original)).hexdigest()
+    # ④ changed import coordinates around the unchanged post-③ definition.
+    assert binding['source_hash'] == 'cdb771da09e31f50a03e32459fc643b60b333e97cf1c0fbbf09d2e4ff6e70792'
     assert binding['source_hash'] != 'e67e3703f03ea14f8bcefb803bafc3251072e78bc17a5c1f2df60fad2ca2f83f'
     assert binding['code'] == identity(code_record(original.__code__))
 
