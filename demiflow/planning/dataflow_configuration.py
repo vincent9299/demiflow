@@ -166,6 +166,7 @@ COMPILER_KEYS: Mapping[str, ConfigurationKey] = {key.name: key for key in (
     _key('terminal_memory', 'budget', _terminal_memory, 'terminal index and payload windows, or one bounded workspace; bytes'),
     _key('publication_workspace', 'budget', _publication, 'resident window of a native publication; bytes'),
     _key('input_carrier', 'budget', _text, 'the terminal consumes stored row references from its producer'),
+    _key('wide_body_refs', 'capture', _true, 'sort may retain wide record bodies once across merge passes'),
     _key('small_right_index', 'capture', _true, 'finite join may probe a complete bounded right index'),
     _key('output_carrier', 'budget', _text, 'the join publishes stored row references to its terminal'),
     _key('reducer_memory_v1', 'budget', _mapping, 'declared memory contract of a reducer'),
@@ -291,6 +292,8 @@ def _admitted(node) -> frozenset | None:
         keys |= VARIANT_KEYS
     if kind == 'MapBatchesOp':
         keys |= {'default_batch_size', *PREDICTION_KEYS}
+    if kind == 'SortOp':
+        keys |= {'wide_body_refs'}
     if kind == 'RandomShuffleOp':
         keys |= {'shuffle_order_version'}
     if kind in TASK_KINDS:

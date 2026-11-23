@@ -318,6 +318,8 @@ def compile_kernel_spec(
         for field in fields(operation)
         if field.name not in _NON_SEMANTIC_FIELDS | {"callable", "native_options", "stream_options"}
     }
+    if kind == 'SortOp':
+        configuration['wide_body_refs'] = True
     if kind == 'RandomShuffleOp':
         # New plans opt in. A sealed graph without this field keeps the exact
         # original occurrence/record-id shuffle formula when loaded or resumed.

@@ -16,7 +16,7 @@ import hashlib
 import heapq
 import struct
 import sys
-from contextlib import closing
+from contextlib import closing, ExitStack
 from dataclasses import dataclass, replace
 from collections.abc import Iterator, Mapping
 from typing import Any
@@ -419,7 +419,67 @@ def build_sort_runs(
     return _build_sort_runs(records, spec=spec, services=services, window=window)
 
 
-def _build_sort_runs(records, *, spec, services, window=None, key_for_record=None):
+def sort_with_body_references(records, *, spec, services, rows):
+    """Store a wide inline body once. Merge runs carry its authenticated position.
+
+    Only this invocation reads the temporary extent. Recovery reconstructs it
+    from the original closed input port. An already published payload ref is
+    small and follows the ordinary encoding without writing a second body.
+    """
+    from ..dataflow_record_frames import resident_limit
+    from ..storage.objects import RunArtifactStore
+
+    bounds, store = services.bounds, services.store
+    grant = resident_limit(bounds, services)
+    threshold = max(1024, min(65536, grant // 16))
+    room = True
+    if isinstance(store, RunArtifactStore):
+        # Keep space for a two-way merge with its output as well as the extent.
+        room = store.available_file_slots(maximum=bounds.max_open_files) >= (
+            store.SCRATCH_FILES + store.PUT_FILES + 2 * store.READ_FILES)
+    extent = None
+    with ExitStack() as scope:
+        def frame(key, provenance, record, used):
+            nonlocal extent
+            size = _input_row_bytes(record)
+            if (not room or record.inline is None or size < threshold
+                    or size * rows <= grant):
+                return _encode_frame(key, provenance, record, max_bytes=bounds.max_row_bytes)
+            raw = _encode_record_document(record, max_bytes=bounds.max_row_bytes)
+            if (extent.size if extent is not None else 0) + len(raw) + used > bounds.max_spill_bytes:
+                raise _err('BUDGET_EXCEEDED', 'wide sort bodies and runs exceed max_spill_bytes')
+            if extent is None:
+                extent = scope.enter_context(store.scratch(max_bytes=bounds.max_spill_bytes,
+                    max_io_bytes=bounds.max_row_bytes + bounds.max_control_bytes))
+            offset = extent.append(raw)
+            encoded = _encode_payload({'record_id': record.record_id, 'sequence': record.sequence,
+                'offset': offset, 'length': len(raw), 'sha256': hashlib.sha256(raw).digest()},
+                max_bytes=bounds.max_row_bytes * 4 + 1024)
+            return _frame_bytes(key, provenance, encoded)
+
+        def load(saved):
+            if 'document' in saved:
+                return saved['document']
+            if extent is None or not 0 <= saved['length'] <= bounds.max_row_bytes + bounds.max_control_bytes:
+                raise _err('CORRUPT_ARTIFACT', 'sort reference has no matching body extent')
+            raw = extent.read_at(saved['offset'], saved['length'])
+            if hashlib.sha256(raw).digest() != saved['sha256']:
+                raise _err('CORRUPT_ARTIFACT', 'sort body differs from its authenticated reference')
+            return raw
+
+        def body_bytes():
+            return 0 if extent is None else extent.size
+        runs = _build_sort_runs(records, spec=spec, services=services,
+            frame_for_record=frame, body_bytes=body_bytes)
+        try:
+            yield from merge_sort_runs(runs, spec=spec, services=services,
+                load_body=load, body_bytes=body_bytes())
+        finally:
+            _release_runs(runs, services)
+
+
+def _build_sort_runs(records, *, spec, services, window=None, key_for_record=None,
+                     frame_for_record=None, body_bytes=None):
     """Private key hook; public sort/shuffle signatures and legacy keys stay fixed."""
     bounds = services.bounds
     if window is not None:
@@ -440,7 +500,7 @@ def _build_sort_runs(records, *, spec, services, window=None, key_for_record=Non
             raise _err('BUDGET_EXCEEDED', 'sort run references exceed the metadata window')
         frames.sort(key=lambda item: (item[0], item[1]))
         total = used if window is None else sum(len(frame[2]) for frame in frames)
-        if spill_total + total > bounds.max_spill_bytes:
+        if spill_total + total + (body_bytes() if body_bytes is not None else 0) > bounds.max_spill_bytes:
             raise _err("BUDGET_EXCEEDED", "sort spill exceeds max_spill_bytes", bytes=spill_total + total)
         refs.append(_write_run(frames, services))
         spill_total += total
@@ -469,8 +529,11 @@ def _build_sort_runs(records, *, spec, services, window=None, key_for_record=Non
                 # encoded in the comparator frame and need not be stored twice.
                 saved_record = replace(record, payload_ref=None, inline={},
                     encoded_bytes=len(_encode_payload({}, max_bytes=bounds.max_row_bytes)), schema_ref=None)
-            encoded = _encode_frame(key, prov, saved_record, max_bytes=bounds.max_row_bytes,
-                                    frame_limit=None if window is None else window.frame_bytes)
+            if frame_for_record is None:
+                encoded = _encode_frame(key, prov, saved_record, max_bytes=bounds.max_row_bytes,
+                                        frame_limit=None if window is None else window.frame_bytes)
+            else:
+                encoded = frame_for_record(key, prov, saved_record, spill_total + used)
             frame_bytes = len(encoded) + _FRAME_OVERHEAD
             if frame_bytes > (run_budget if window is None else window.frame_bytes):
                 raise _err("BUDGET_EXCEEDED", "single sort frame exceeds the resident budget")
@@ -530,7 +593,7 @@ def _merge_into(
 
 def merge_sort_runs(
     runs: tuple[ArtifactRef, ...], *, spec: KernelSpec, services: RuntimeServices,
-    window: SortWindow | None = None,
+    window: SortWindow | None = None, load_body=None, body_bytes=0,
 ) -> Iterator[Record]:
     """K010: finite fan-in multi-pass merge; releases only owned intermediates."""
     if window is not None:
@@ -552,7 +615,7 @@ def merge_sort_runs(
         final_fan_in = fan_in = min(fan_in, window.merge_fan_in)
     if final_fan_in < 1 or (len(runs)>1 and final_fan_in<2) or (len(runs)>final_fan_in and fan_in<2):
         raise _err("BUDGET_EXCEEDED", "sort merge requires at least two input file slots plus owned leases/output")
-    max_spill = services.bounds.max_spill_bytes
+    max_spill = services.bounds.max_spill_bytes - body_bytes
     owned: list[ArtifactRef] = []
     current = tuple(runs)
     spill_total = 0
@@ -598,7 +661,8 @@ def merge_sort_runs(
                 if window is not None and window.codec_bytes is not None:
                     if raw_workspace(saved['document']) + 2 * len(rec_bytes) > codec_window:
                         raise _err('BUDGET_EXCEEDED', 'sort document decode exceeds its codec subwindow')
-                yield _decode_record_document(saved["document"], record_id=saved["record_id"],
+                document = saved["document"] if load_body is None else load_body(saved)
+                yield _decode_record_document(document, record_id=saved["record_id"],
                     sequence=saved["sequence"], max_bytes=services.bounds.max_row_bytes)
     finally:
         _release_runs(owned, services)

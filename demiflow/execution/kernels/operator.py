@@ -1186,8 +1186,12 @@ class OperatorKernel:
                     sort_spec = replace(sort_spec, configuration={**dict(sort_spec.configuration),
                         'keys': list(sort_spec.configuration.get('keys') or ()),
                         'num_blocks': block_count(sort_spec, rows=port._count, bounds=self._services.bounds)})
-                runs = build_sort_runs(records, spec=sort_spec, services=services)
-                records = merge_sort_runs(runs, spec=sort_spec, services=services)
+                if kind == 'SortOp' and sort_spec.configuration.get('wide_body_refs'):
+                    from .ordering import sort_with_body_references
+                    records = sort_with_body_references(records, spec=sort_spec, services=services, rows=port._count)
+                else:
+                    runs = build_sort_runs(records, spec=sort_spec, services=services)
+                    records = merge_sort_runs(runs, spec=sort_spec, services=services)
             if kind in ('RepartitionOp', 'RandomShuffleOp'):
                 records = partition_records(records, spec=self._spec, rows=port._count, services=services)
             elif layout is not None:
