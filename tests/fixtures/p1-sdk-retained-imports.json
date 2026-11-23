@@ -17,27 +17,27 @@
     ],
     [
       "Dataset.batch_map",
-      "demiflow.execution.capabilities",
+      "demiflow.execution.compiler_support.capabilities",
       "require_action"
     ],
     [
       "Dataset.checkpoint",
-      "demiflow.execution.capabilities",
+      "demiflow.execution.compiler_support.capabilities",
       "require_action"
     ],
     [
       "Dataset.checkpoint_async",
-      "demiflow.execution.capabilities",
+      "demiflow.execution.compiler_support.capabilities",
       "require_action"
     ],
     [
       "Dataset.checkpoint_lance",
-      "demiflow.execution.capabilities",
+      "demiflow.execution.compiler_support.capabilities",
       "require_action"
     ],
     [
       "Dataset.checkpoint_lance_async",
-      "demiflow.execution.capabilities",
+      "demiflow.execution.compiler_support.capabilities",
       "require_action"
     ],
     [
@@ -72,7 +72,7 @@
     ],
     [
       "Dataset.map_async",
-      "demiflow.execution.capabilities",
+      "demiflow.execution.compiler_support.capabilities",
       "require_action"
     ],
     [
@@ -87,7 +87,7 @@
     ],
     [
       "Dataset.run_stream",
-      "demiflow.execution.capabilities",
+      "demiflow.planning.dataflow_compile",
       "validate_stream_plan"
     ],
     [

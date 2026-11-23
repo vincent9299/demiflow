@@ -61,7 +61,7 @@ def test_every_key_the_corpus_produces_has_one_writer(graphs):
 
 
 def test_names_owned_by_other_modules_are_mirrored_exactly():
-    from demiflow.execution import dataflow_schema
+    from demiflow.execution.contracts import record_schema
     from demiflow.execution.contracts.dataflow_kinds import MANAGED_HTTP_DEVICES_FIELD
     from demiflow.execution.scheduler import dataflow_publication_budget
     from demiflow.execution.contracts.dataflow_kinds import SHUFFLE_ORDER_FIELD
@@ -71,7 +71,7 @@ def test_names_owned_by_other_modules_are_mirrored_exactly():
     assert {dataflow_publication_budget.SCHEMA, dataflow_publication_budget.PHASE_SCHEMA} == schema.PUBLICATION_SCHEMAS
     assert REDUCER_MEMORY_FIELD == 'reducer_memory_v1' in schema.COMPILER_KEYS
     assert SHUFFLE_ORDER_FIELD == 'shuffle_order_version' in schema.COMPILER_KEYS
-    assert dataflow_schema.KEY == schema.SCHEMA_KEY
+    assert record_schema.KEY == schema.SCHEMA_KEY
     assert MANAGED_HTTP_DEVICES_FIELD == 'managed_http_devices' in schema.MODEL_KEYS['prompt']
     assert TASK_KINDS == schema.TASK_KINDS
     assert dataflow_compile._NON_SEMANTIC_FIELDS | {'callable', 'native_options', 'stream_options'} == schema.NOT_COPIED
