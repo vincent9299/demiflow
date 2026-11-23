@@ -83,6 +83,9 @@ from demiflow.inference import request_admission_config
 for fn in [Dataset.map_embeddings, request_admission_config]:
     result['public.' + fn.__name__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
 result['public.Dataset'] = [base64.b64encode(pickle.dumps(Dataset, protocol=5)).decode(), describe(Dataset)]
+from demiflow.data.result_cache import CachedMap, CachedSyncMap
+for fn in [CachedMap.__call__, CachedMap._io, CachedSyncMap.__call__, CachedSyncMap.__init__]:
+    result['public.' + fn.__qualname__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
 from demiflow import PipelineBundleRef
 buffer = io.BytesIO(); ProgramPickler(buffer, protocol=5).dump(PipelineBundleRef.load)
 result['bundle_loader'] = base64.b64encode(buffer.getvalue()).decode()
@@ -334,7 +337,8 @@ def test_original_protocol_rejects_forged_typing_methods(original_carriers, monk
         load_payload([base64.b64decode(original_carriers['TerminalSubscription'][0])])
 
 
-@pytest.mark.parametrize('name', ['map_embeddings', 'request_admission_config'])
+@pytest.mark.parametrize('name', ['map_embeddings', 'request_admission_config',
+    'CachedMap.__call__', 'CachedMap._io', 'CachedSyncMap.__call__', 'CachedSyncMap.__init__'])
 @pytest.mark.parametrize('private', [False, True])
 def test_original_public_function_keeps_effective_sdk_pin(original_carriers, name, private):
     encoded, expected = original_carriers['public.' + name]
