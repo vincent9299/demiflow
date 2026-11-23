@@ -30,9 +30,12 @@ def resolve_local_uri(value):
     path = Path(value).expanduser().absolute()
     for root in path.parents:
         manifest = root / '_demiflow' / 'lance_locations.json'
-        if not manifest.is_file():
+        try:
+            if not manifest.is_file():
+                continue
+            stat = manifest.stat()
+        except PermissionError:
             continue
-        stat = manifest.stat()
         from ..execution.location_index import recent_digest
         mapping = _location_mapping(str(manifest), stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns,
                                     stat.st_ctime_ns, recent_digest(str(manifest), stat))

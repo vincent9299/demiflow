@@ -34,6 +34,14 @@ from .source import (
 )
 
 
+class _LoopContinue(Exception):
+    pass
+
+
+class _LoopBreak(Exception):
+    pass
+
+
 @dataclass
 class DatasetPort:
     node: str
@@ -379,6 +387,7 @@ class FlowChecker:
                         incomplete=True,
                     )
                 iterable_origin = self._parameter_origin(node.iter)
+                broke = False
                 for index, value in enumerate(values):
                     env[node.target.id] = value
                     origin = iterable_origin
@@ -386,13 +395,23 @@ class FlowChecker:
                     self.stack.append(f"loop:{node.lineno}:{index}")
                     try:
                         returned, result = self._body(node.body, env, module)
+                    except _LoopContinue:
+                        returned, result = False, None
+                    except _LoopBreak:
+                        broke = True
+                        break
                     finally:
                         self.stack.pop()
                     if returned:
                         return True, result
-                returned, result = self._body(node.orelse, env, module)
-                if returned:
-                    return True, result
+                if not broke:
+                    returned, result = self._body(node.orelse, env, module)
+                    if returned:
+                        return True, result
+            elif isinstance(node, ast.Continue):
+                raise _LoopContinue()
+            elif isinstance(node, ast.Break):
+                raise _LoopBreak()
             elif isinstance(node, ast.Pass):
                 pass
             else:

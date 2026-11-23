@@ -124,7 +124,9 @@ def capture(argv, request, limits, *, response_formats=None, input_limit=16384, 
                 if process.returncode:
                     # Imported modules are trusted; do not return arbitrary
                     # module stdout/stderr as a successful protocol response.
-                    raise ForgeError(f"Platform inspection process failed ({process.returncode})")
+                    tail = ' '.join(outputs["stderr"].decode("utf-8", "replace").split())[-240:]
+                    detail = f": {tail}" if tail else ""
+                    raise ForgeError(f"Platform inspection process failed ({process.returncode}){detail}")
             finally:
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
