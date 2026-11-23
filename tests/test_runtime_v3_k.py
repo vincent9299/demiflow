@@ -8,6 +8,7 @@ objects are given this tree-resident test file as their __file__ so the IL012
 in-process tree-binding assertion still holds for every loaded demiflow module.
 """
 from __future__ import annotations
+from demiflow.execution.outputs import terminal_scalar as terminal_output
 
 import hashlib
 import math
@@ -708,11 +709,11 @@ def test_k014():
     p2 = ka.accumulate_partial(iter(data[3:]), spec=s, services=svc)
     merged = ka.merge_partials(iter([p2, p1]), spec=s, services=svc)  # deterministic reorder
     assert merged.count == 6
-    with ka.bind_finalize(svc):
-        result = ka.finalize_aggregate(merged, spec=s)
+    with terminal_output.bind_finalize(svc):
+        result = terminal_output.finalize_aggregate(merged, spec=s)
     direct = ka.accumulate_partial(iter(data), spec=s, services=svc)
-    with ka.bind_finalize(svc):
-        direct_result = ka.finalize_aggregate(direct, spec=s)
+    with terminal_output.bind_finalize(svc):
+        direct_result = terminal_output.finalize_aggregate(direct, spec=s)
     assert result.scalar["mean(v)"] == pytest.approx(direct_result.scalar["mean(v)"])
     assert result.scalar["std(v)"] == pytest.approx(direct_result.scalar["std(v)"], rel=1e-9)
 
@@ -734,21 +735,21 @@ def test_k015():
 
     s = spec("aggregate", {"aggregates": [{"builtin": "sum", "on": "v"}, {"builtin": "mean", "on": "v"}]})
     empty = ka.accumulate_partial(iter([]), spec=s, services=svc)
-    with ka.bind_finalize(svc):
-        result = ka.finalize_aggregate(empty, spec=s)
+    with terminal_output.bind_finalize(svc):
+        result = terminal_output.finalize_aggregate(empty, spec=s)
     assert result.scalar is None and result.rows == 0  # empty -> None, not fabricated zero
 
     allnull = ka.accumulate_partial(iter([rec({"v": None}), rec({"v": None})]), spec=s, services=svc)
-    with ka.bind_finalize(svc):
-        result = ka.finalize_aggregate(allnull, spec=s)
+    with terminal_output.bind_finalize(svc):
+        result = terminal_output.finalize_aggregate(allnull, spec=s)
     assert result.scalar["sum(v)"] is None  # all-null not faked to zero
     assert result.scalar["mean(v)"] is None
 
     s = spec("aggregate", {"aggregates": [{"builtin": "sum", "on": "v"}, {"builtin": "min", "on": "v"},
                                           {"builtin": "max", "on": "v"}, {"builtin": "std", "on": "v"}]})
     state = ka.accumulate_partial(iter([rec({"v": v}) for v in [2, 4, 6]]), spec=s, services=svc)
-    with ka.bind_finalize(svc):
-        result = ka.finalize_aggregate(state, spec=s)
+    with terminal_output.bind_finalize(svc):
+        result = terminal_output.finalize_aggregate(state, spec=s)
     assert result.scalar["sum(v)"] == 12
     assert result.scalar["min(v)"] == 2
     assert result.scalar["max(v)"] == 6

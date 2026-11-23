@@ -24,8 +24,8 @@
    }
   },
   "demiflow.execution.checkpoint.dataset_commit": {
-   "status": "live",
-   "reason": "④按13归位既有DatasetCommit对账；现行队列真实使用原提交验证，不是旧执行循环。",
+   "status": "history",
+   "reason": "④按13归位既有公开DatasetCommit人工append intent/receipt对账和历史恢复；当前平台无调用者，不是现行队列提交权威。公开语义见docs/platform-upgrade.md追加提交与空运行重置。",
    "measured": {
     "at": "74d2f99",
     "test_files_that_load_it": {
@@ -635,7 +635,7 @@
   },
   {
    "module": "demiflow.execution.dataset_commit",
-   "reason": "④按13归位既有DatasetCommit对账；现行队列真实使用原提交验证，不是旧执行循环。"
+   "reason": "④原公开DatasetCommit人工append intent/receipt对账和历史恢复归位13 checkpoint.dataset_commit；当前平台无调用者，不恢复第二条执行或提交路径。"
   },
   {
    "module": "demiflow.execution.environment",

@@ -3,15 +3,25 @@
 No source or transform is evaluated again. The durable spool is also the
 recovery prefix, so metadata and aggregation see exactly the committed rows.
 """
-from demiflow.execution.contracts.dataflow import stage_resident_bytes
-import base64
-import json
-from collections.abc import Mapping
 
-from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.contracts.record_codec import decode_frame, decode_document, line_limit
-from demiflow.execution.kernels.dataflow import _materialize_row
+import base64
+import pickle
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 from demiflow.execution.contracts import state_codec
+from demiflow.execution.contracts.dataflow import (
+    AggregateState, KernelSpec, RuntimeServices, TerminalResult, stage_resident_bytes,
+)
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.record_codec import (
+    canonical_record_json, decode_document, decode_frame, line_limit,
+)
+from demiflow.execution.kernels.dataflow import _materialize_row
+
+_FINALIZE_SERVICES = ContextVar("demiflow_kernel_finalize_services", default=None)
+AGGREGATE_RESULT_MEDIA_TYPE = "application/x-demiflow-aggregate-result-v3"
 
 
 def terminal_scalar(stream, *, spec, services, schema_ref=None):
@@ -63,3 +73,44 @@ def terminal_scalar(stream, *, spec, services, schema_ref=None):
 def aggregate_scalar(values, *, max_bytes):
     """Deliver the original typed manifest scalar after the kernel finishes."""
     return {'typed_result': base64.b64encode(state_codec.dumps(values, max_bytes=max_bytes)).decode()}
+
+
+@contextmanager
+def bind_finalize(services: RuntimeServices) -> Iterator[None]:
+    token = _FINALIZE_SERVICES.set(services)
+    try:
+        yield
+    finally:
+        _FINALIZE_SERVICES.reset(token)
+
+def _finalize_services() -> RuntimeServices:
+    services = _FINALIZE_SERVICES.get()
+    if services is None:
+        raise DataflowError("INVALID_CONTRACT", "finalize_aggregate requires bound runtime services")
+    return services
+
+def finalize_aggregate(state: AggregateState, *, spec: KernelSpec) -> TerminalResult:
+    """K015: restore aggregate names and sum/min/max/mean/std return semantics."""
+    services = _finalize_services()
+    from demiflow.operators.aggregate import resolve_aggregates, finalize_aggregate_values
+    aggregates = resolve_aggregates(spec.configuration, services.programs)
+    result = finalize_aggregate_values(state, aggregates, store=services.store,
+                                      max_state=services.bounds.max_state_bytes)
+    if state.count == 0:
+        return TerminalResult(
+            kind="aggregate", rows=0, scalar=None, result_ref=None,
+            write_result=None, complete=True, completion="source_exhausted",
+        )
+    raw = pickle.dumps(result, protocol=pickle.HIGHEST_PROTOCOL)
+    result_ref = services.store.put(
+        iter([raw]), max_bytes=len(raw), media_type=AGGREGATE_RESULT_MEDIA_TYPE
+    )
+    try:
+        canonical_record_json(result)
+        scalar = result
+    except (ValueError, TypeError):
+        scalar = None
+    return TerminalResult(
+        kind="aggregate", rows=state.count, scalar=scalar, result_ref=result_ref,
+        write_result=None, complete=True, completion="source_exhausted",
+    )
