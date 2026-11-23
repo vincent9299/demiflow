@@ -467,11 +467,13 @@
       if(model.selected){const card=model.nodes.find(n=>n.key===model.selected);if(card)selectGraphNode(card.selection,{quiet:true}).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});}
     }
     async function fetchGraph(ticket,{preserveSelection=false,refresh=false}={}){
-      clearPlanPreview(true);
+      const previousDigest=data().graph?.binding?.basis_digest||null;
+      if(!refresh)clearPlanPreview(true);
       const selected=data(),query=selected.run?{basis_kind:'run',run_id:selected.run,attempt:selected.attempt}:selected.report?{basis_kind:'report',report_digest:selected.report}:{basis_kind:'source',entry:selected.entry,...(selected.params?{params:selected.params}:{})};
       const sequence=++graphSequence,requestedStatus=run?.status;if(scopeNode)query.node_id=scopeNode;if(nodeOffset)query.node_offset=nodeOffset;
       const value=await request('graph',query);if(!current(ticket)||sequence!==graphSequence)return;
       if(refresh&&Object.keys(getDraft().values).length){message('项目内容已变化；配置草稿保留，请核对后再保存。');return;}
+      if(refresh&&value.binding?.basis_digest!==previousDigest)clearPlanPreview(true);
       const previous=preserveSelection?data().node:null,keepWhole=preserveSelection&&inspectorWhole;
       if(!state.acceptGraph(ticket,value))return;
       if(selected.run){lastRunGraphAt=Date.now();graphStatus=requestedStatus;}
