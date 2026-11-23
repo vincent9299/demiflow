@@ -1082,7 +1082,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 saved = store.turn(tid)
                 if saved['baseline'] and watched:
                     before = json.loads(saved['baseline']); after = capture(project['root'], watched, exclude=excluded)
-                    changes = list(differences(before, after, project['writes']))
+                    changes = list(differences(before, after, project['writes'], root=project['root']))
                     if changes:
                         source_hash = lambda values: digest({name: (fact or {}).get('sha256') for name, fact in values.items()})
                         revision = dict(before=source_hash(before), after=source_hash(after))

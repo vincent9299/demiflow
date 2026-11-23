@@ -193,7 +193,10 @@ def main() -> None:
                 _fail(f'无效的允许写入路径: {rel}')
             candidate.mkdir(parents=True, exist_ok=True)
             write_paths.append(str(candidate))
-        _apply_landlock(read_paths=read_paths, exec_paths=exec_paths, write_paths=write_paths)
+        if platform.system() == 'Linux':
+            _apply_landlock(read_paths=read_paths, exec_paths=exec_paths, write_paths=write_paths)
+        elif platform.system() != 'Darwin':
+            _fail('当前操作系统不支持原生 Notebook 只读内核沙箱（请使用 Linux、macOS 或 WSL2/容器环境）。')
 
     env = dict(os.environ)
     existing_py_path = env.get('PYTHONPATH', '')
@@ -214,7 +217,26 @@ def main() -> None:
     env['PATH'] = f'{py_bin}:{env.get("PATH", "/usr/bin:/bin")}'
 
     os.chdir(root)
-    os.execve(target_python, [target_python, '-m', 'ipykernel_launcher', '-f', connection_file], env)
+    kernel_cmd = [target_python, '-m', 'ipykernel_launcher', '-f', connection_file]
+    if sandbox_mode == 'readonly' and platform.system() == 'Darwin':
+        if not Path('/usr/bin/sandbox-exec').is_file():
+            _fail('macOS Notebook 只读沙箱需要 /usr/bin/sandbox-exec。')
+        sys.path.insert(0, code_root)
+        from demiflow.workbench.conversations.sandbox import SandboxSpec
+        from demiflow.workbench.conversations.sandbox_backends.macos_seatbelt import build_seatbelt_profile
+
+        spec = SandboxSpec(
+            read_paths=tuple(p for p in read_paths if p != '/' and Path(p).exists()),
+            write_paths=tuple(p for p in write_paths if p not in {'/dev/null', '/dev/zero', '/dev/urandom', '/dev/random', '/dev/shm'} and Path(p).exists()),
+            runtime_paths=tuple(p for p in exec_paths if Path(p).exists()),
+            protected_paths=(),
+            denied_paths=(),
+            private_home=str(tmp_dir),
+            direct_network=False,
+        )
+        profile = build_seatbelt_profile(spec)
+        os.execve('/usr/bin/sandbox-exec', ['/usr/bin/sandbox-exec', '-p', profile, *kernel_cmd], env)
+    os.execve(target_python, kernel_cmd, env)
 
 
 if __name__ == '__main__':

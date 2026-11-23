@@ -553,9 +553,12 @@
       pathText.textContent = activePath;
       pathText.title = activePath;
 
+      const ch = changeFor(activePath);
+      const st = entry.status && entry.status !== 'clean' ? entry.status : ch?.status;
       const hasGitDiff = entry.isGit && entry.changed && typeof entry.original === 'string';
-      const hasObsDiff = !hasGitDiff && typeof entry.unifiedDiff === 'string' && entry.unifiedDiff.trim().length > 0;
-      const canDiff = hasGitDiff || hasObsDiff;
+      const hasAddedDiff = !hasGitDiff && st === 'A' && typeof entry.modified === 'string';
+      const hasObsDiff = !hasGitDiff && !hasAddedDiff && typeof entry.unifiedDiff === 'string' && entry.unifiedDiff.trim().length > 0;
+      const canDiff = hasGitDiff || hasAddedDiff || hasObsDiff;
       if (viewMode === 'diff' && !canDiff) viewMode = 'source';
 
       diffModeBtn.disabled = !canDiff;
@@ -564,10 +567,8 @@
       diffModeBtn.classList.toggle('is-active', viewMode === 'diff');
       sourceModeBtn.classList.toggle('is-active', viewMode === 'source');
 
-      const ch = changeFor(activePath);
-      const st = entry.status && entry.status !== 'clean' ? entry.status : ch?.status;
       if (st && st !== 'clean') {
-        const added = entry.changed ? entry.added : ch?.added;
+        const added = entry.changed ? entry.added : (ch?.added || (st === 'A' && entry.modified ? entry.modified.split('\n').length : null));
         const removed = entry.changed ? entry.removed : ch?.removed;
         const parts = [{M:'已修改', A:'新增', D:'已删除'}[st] || st];
         if (Number.isFinite(added) && added > 0) parts.push('+' + added);
@@ -591,7 +592,7 @@
           path: activePath,
           mode: viewMode,
           text: entry.modified ?? '',
-          original: hasGitDiff ? entry.original : null,
+          original: hasGitDiff ? entry.original : (hasAddedDiff ? '' : null),
           unifiedDiff: hasObsDiff ? entry.unifiedDiff : null,
         });
       } else {
@@ -637,7 +638,11 @@
           unifiedDiff: obs?.diff || null,
         };
         fileCache.set(clean, entry);
-        const hasDiff = (entry.isGit && entry.changed && typeof entry.original === 'string') || Boolean(entry.unifiedDiff);
+        const chNow = changeFor(clean);
+        const stNow = entry.status && entry.status !== 'clean' ? entry.status : chNow?.status;
+        const hasDiff = (entry.isGit && entry.changed && typeof entry.original === 'string')
+          || (stNow === 'A' && typeof entry.modified === 'string')
+          || Boolean(entry.unifiedDiff);
         if (preferredMode === 'diff' || preferredMode === 'source') {
           viewMode = preferredMode === 'diff' && hasDiff ? 'diff' : 'source';
         } else if (!silent) {
