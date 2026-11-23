@@ -402,10 +402,13 @@ def plan_exchanges(
                          if nodes[occ].kernel.configuration.get('task_batch_rows')]
             edge_credit_rows = min([credit_rows, *task_rows])
             config = consumer_node.kernel.configuration
-            if config.get('streaming_map') or consumer_node.kernel.kind in ('AsyncMapOp', 'BatchMapOp'):
+            if (config.get('streaming_map') or 'concurrency' in config
+                    or consumer_node.kernel.kind in ('AsyncMapOp', 'BatchMapOp')):
                 # The receiving worker owns its active calls separately. The
                 # cross-worker window is the declared input queue, not a second
                 # generic 256-row prefetch allowance ahead of that queue.
+                # Native consumers declare the same concurrency contract;
+                # their admitted external work must also drain on early close.
                 depth = config.get('queue_depth') or config.get('concurrency', 1)
                 edge_credit_rows = min(edge_credit_rows, depth)
         routing, keys = _routing(consumer_node, edge.input_port)

@@ -107,3 +107,37 @@ def test_closed_subscription_acknowledges_late_real_output(tmp_path, monkeypatch
         assert 0 < execution._terminal_result.rows < 1000
         assert execution._terminal_result.completion == 'terminal_satisfied'
         assert not execution._endpoints and not execution._active_worker_allocations
+
+
+@pytest.mark.parametrize('concurrency', [None, 1, 3])
+@pytest.mark.parametrize('durability', ['ephemeral', 'durable'])
+def test_native_input_prefetch_respects_concurrency_without_changing_durable_windows(concurrency, durability):
+    from demiflow.execution.contracts.dataflow import ActionRequest
+    from demiflow.execution.dataflow_api import _CompileContext
+    from demiflow.execution.run_context import RunAction
+    from demiflow.operator_llm.parser import parse_prompt_pack
+    from demiflow.planning.dataflow_compile import lower_action
+    from demiflow.planning.dataflow_place import partition_stages, plan_exchanges
+    from demiflow.planning.dataflow_policy import resolve_runtime_policy
+    from test_map_prompt_async import PACK
+
+    source = data.from_items([{'item': 'text'}])
+    operation = source.map_prompt if concurrency is None else source.map_prompt_async
+    options = {} if concurrency is None else {'concurrency': concurrency}
+    dataset = operation('enrich', config=parse_prompt_pack(PACK),
+        inputs={'payload': 'item'}, output='answer', max_requests=3, **options)
+    request = ActionRequest(kind='iter_rows', source=dataset._source, plan=dataset._plan,
+        arguments={}, sink=None, programs=(), provider='local',
+        action=RunAction(_CompileContext(), 'native-prefetch', {}))
+    policy, bounds = resolve_runtime_policy({'max_active_workers': 4, 'durability': durability}, {}, provider='local')
+    graph = lower_action(request, bounds=bounds).graph
+    stages = partition_stages(graph, policy=policy, bounds=bounds)
+    exchanges = plan_exchanges(graph, stages, policy=policy, bounds=bounds)
+    prompt, = [node for node in graph.nodes if node.kernel.kind == 'prompt']
+    incoming = {edge.edge_id for edge in graph.edges if edge.consumer == prompt.occurrence_id}
+    windows = [edge.credit_rows for edge in exchanges if edge.edge_id in incoming]
+    assert windows
+    if durability == 'ephemeral':
+        assert windows == [concurrency or 1]
+    else:
+        assert all(rows > (concurrency or 1) for rows in windows)
