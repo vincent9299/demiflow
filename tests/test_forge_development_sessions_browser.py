@@ -356,7 +356,12 @@ def test_turn_rail_history_and_project_files_share_the_conversation(tmp_path):
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                 page.get_by_role('button',name='关闭代码面板').click()
                 expect(page.get_by_label('开发要求')).to_have_value('草稿')
-            assert page.locator('.development-more,.development-trajectory,[role=tablist]').count()==0
+            assert page.locator('.development-more,.development-trajectory').count() == 0
+            assert page.locator('.development-conversation [role=tablist]').count() == 0
+            # The operator catalog now shares this page; its categories do not
+            # introduce a second conversation/history navigation surface.
+            assert page.locator('[role=tablist]').count() == 1
+            assert page.locator('.dev-op-sidebar [role=tablist][aria-label="算子分类"]').count() == 1
 
 
 def test_append_messages_while_busy_survives_reload_and_drains_in_order(tmp_path):

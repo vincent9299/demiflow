@@ -33,8 +33,16 @@ def test_unchanged_helpers_retain_their_v3_file_identities():
     frozen = describe(frozen_options)
     assert frozen['source_hash'] == '3033f1f14141c9759d29679ee5275492bfbc83bcd41b51c7bf9962afd115387f'
     assert frozen['code'] == identity(code_record(frozen_options.__code__))
+
+
+def test_changed_local_execution_keeps_its_actual_source_and_code():
+    # Retiring the old execution selectors changed this public context's
+    # signature and body. It must not impersonate the pre-retirement helper.
+    original = data.local_execution.__wrapped__
     binding = describe(data.local_execution)['closure'][0]
-    assert binding['source_hash'] == 'e67e3703f03ea14f8bcefb803bafc3251072e78bc17a5c1f2df60fad2ca2f83f'
+    assert binding['source_hash'] == sha256(_source(original)).hexdigest()
+    assert binding['source_hash'] != 'e67e3703f03ea14f8bcefb803bafc3251072e78bc17a5c1f2df60fad2ca2f83f'
+    assert binding['code'] == identity(code_record(original.__code__))
 
 
 def test_unrecognised_source_or_function_keeps_actual_evidence():
