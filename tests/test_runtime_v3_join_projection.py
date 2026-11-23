@@ -159,7 +159,7 @@ def test_duplicate_declared_keys_keep_original_row_admission(tmp_path):
 def test_projected_scratch_preserves_original_schema_provenance_and_document_bytes(tmp_path):
     import pyarrow as pa
     from demiflow.execution.storage.record_schema import RecordSchemas
-    from demiflow.execution.kernels.join_spool import project_join_document, _Spool
+    from demiflow.execution.kernels.join_spool import project_join_document, bind_spool
     from demiflow.execution.contracts.record_codec import _encode_record_document
     with store_fixture(tmp_path) as (_, store, _):
         svc, _ = fixture(store)
@@ -171,7 +171,7 @@ def test_projected_scratch_preserves_original_schema_provenance_and_document_byt
             max_bytes=svc.bounds.max_row_bytes,fields=('k',),row_window=svc.bounds.max_resident_bytes//4)
         assert type(projected) is _EncodedJoinInput
         with store.scratch(max_bytes=svc.bounds.max_spill_bytes,max_io_bytes=svc.bounds.max_resident_bytes//4) as file:
-            spool = _Spool(file,svc)
+            spool = bind_spool(file,svc)
             offset,_ = spool.append(projected,('k',))
             recovered = spool.record(offset,spool.header(offset))
             assert recovered == source

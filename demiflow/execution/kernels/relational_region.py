@@ -4,99 +4,13 @@ Leaf documents are written once. Intermediate frames contain only offsets,
 original occurrence and encoded-size evidence; they never persist another copy
 of a wide row. Public Record/transport and original ACK formats are unchanged.
 """
-from dataclasses import dataclass
-import struct
 
-from ...operators.relational import hash_join_pairs, merge_join_rows
-from ...operators.relational_sql import offset_join_query
-from .join_spool import _Spool, _Chain, _HEADER, _ID_BYTES, _NONE, _FANOUT
+from .join_spool import bind_spool
+from demiflow.operators.join_spool import JoinChain, PARTITIONS
+from demiflow.operators.relational_region import RegionSpool, RowReference, offset_query, matching_references
 from demiflow.execution.kernels.dataflow import _check_stop, _err, _output_record, RECORD_DOMAIN, _OutputBudget
-from demiflow.execution.contracts.record_codec import row_bytes as _row_bytes
 from demiflow.execution.contracts.record_codec import record_identity as _hash_id
 from demiflow.execution.storage.streams import materialize_row as materialize_row
-
-_REF = struct.Struct('!qqIQ')
-
-
-@dataclass(frozen=True)
-class _RowReference:
-    offset: int
-    header: tuple
-
-
-class _RegionSpool(_Spool):
-    def __init__(self, file, services, specs, counters):
-        super().__init__(file, services)
-        self.specs, self.counters = specs, counters
-        # No second independently sized hash cache. Only one hash join probe is
-        # live; this bounded index shares the explicitly admitted region grant.
-        self.index_limit = max(1, services.bounds.max_row_bytes // 4)
-
-    def append(self, record, fields, **filters):
-        entry = super().append(record, fields, **filters)
-        self.counters['leaf_key_rows'] += 1
-        if entry is not None:
-            self.counters['leaf_payload_bytes'] += self.header(entry[0])[3]
-        return entry
-
-    def record(self, offset, header):
-        return _RowReference(offset, header)
-
-    def hydrate(self, ref):
-        return self.hydrate_with_schema(ref)[0]
-
-    def hydrate_with_schema(self, ref, depth=0):
-        if depth > 2:
-            raise _err('CORRUPT_ARTIFACT', 'region reference exceeds sealed join depth')
-        start = ref.offset + _HEADER.size + _ID_BYTES + ref.header[2]
-        tag = self.file.read_at(start, 1)
-        if tag != b'@':
-            record = super().record(ref.offset, ref.header)
-            return materialize_row(record, store=self.services.store, bounds=self.services.bounds, assignment=getattr(self.services, 'assignment', None)), record.schema_ref
-        if ref.header[3] != 1 + _REF.size:
-            raise _err('CORRUPT_ARTIFACT', 'invalid region reference frame')
-        left, right, index, size = _REF.unpack(self.file.read_at(start + 1, _REF.size))
-        if not 0 <= left < ref.offset or right != _NONE and not 0 <= right < ref.offset or index >= len(self.specs):
-            raise _err('CORRUPT_ARTIFACT', 'invalid region reference ancestry')
-        lrow, schema = self.hydrate_with_schema(_RowReference(left, self.header(left)), depth + 1)
-        spec = self.specs[index]
-        if right == _NONE:
-            return lrow, schema if spec.configuration.get('how', 'inner') in ('semi', 'anti') else None
-        rrow, _ = self.hydrate_with_schema(_RowReference(right, self.header(right)), depth + 1)
-        return merge_join_rows(lrow, rrow, tuple(spec.configuration['on']),
-                          tuple(spec.configuration.get('right_on') or spec.configuration['on']),
-                          spec.configuration.get('suffix', '_right')), None
-
-    def append_reference(self, left, right, *, index, sequence, budget):
-        spec = self.specs[index]
-        # Preserve validation at the original logical output boundary. This
-        # bounded transient size encoding is counted separately; no encoded
-        # intermediate payload is retained or sent through another finite port.
-        lrow = self.hydrate(left)
-        if right is None:
-            row = lrow
-        else:
-            rrow = self.hydrate(right)
-            row = merge_join_rows(lrow, rrow, tuple(spec.configuration['on']),
-                             tuple(spec.configuration.get('right_on') or spec.configuration['on']),
-                             spec.configuration.get('suffix', '_right'))
-        size = _row_bytes(row, max_bytes=self.services.bounds.max_row_bytes)
-        del row, lrow
-        if right is not None:
-            del rrow
-        class Sized:
-            encoded_bytes = size
-        budget.charge(Sized())
-        self.counters['intermediate_validation_bytes'] += size
-        key = self.key(left.offset, left.header)
-        hashed = left.header[1]  # Inherit the exact original key partition.
-        doc = b'@' + _REF.pack(left.offset, right.offset if right is not None else _NONE, index, size)
-        record_id = _hash_id([RECORD_DOMAIN, spec.configuration['occurrence_id'], 'join', sequence])
-        fields = (_NONE, hashed, len(key), len(doc), sequence)
-        raw = _HEADER.pack(*fields) + record_id.encode('ascii') + key + doc
-        offset = self.file.append(raw)
-        self.counters['intermediate_reference_bytes'] += len(raw)
-        return _RowReference(offset, fields)
 
 
 class RelationalRegionRuntime:
@@ -138,67 +52,6 @@ class RelationalRegionRuntime:
     def snapshot(self):
         return {'region_id': self.plan.region_id, 'counters': dict(self.counters)}
 
-    def _offset_query(self, arena, relations, specs):
-        """Read only retained keys/offsets. Never run an unbounded join or sort."""
-        from ..contracts.relational_region import SQL_CHILD_RSS, SQL_PARENT_WINDOW
-        first, second = self.plan.occurrences
-        a, b, c = relations[(first, 'left')], relations[(first, 'right')], relations[(second, 'right')]
-        kinds = tuple(spec.configuration.get('how', 'inner') for spec in specs)
-        # Same digest bucket is necessary for a match. This conservative bound
-        # covers the complete un-limited joins *and* ordering, including nulls
-        # and left preservation. A single hot key also stays bounded.
-        upper = 0
-        for ai, bi, ci in zip(a, b, c):
-            middle = ai.count * max(bi.count, int(kinds[0] == 'left'))
-            upper += middle + middle * max(ci.count, int(kinds[1] == 'left'))
-        if not 0 < upper <= SQL_PARENT_WINDOW // 2048:
-            return None
-        tables, leaf_refs, retained = {}, {}, 0
-        for name, chains in (('akeys', a), ('bkeys', b), ('ckeys', c)):
-            table = []
-            for chain in chains:
-                index_bytes = 0
-                for offset, header in arena.entries(chain):
-                    size = header[2]
-                    # Same-partition traversal order as the bounded hash path.
-                    # A hash partition that would split must keep its own order.
-                    if size and name != 'akeys':
-                        index_bytes += 512 + size
-                        if index_bytes > arena.index_limit:
-                            return None
-                    # Bound retained header/reference, hash-table entry, encoded
-                    # key and the host's simultaneous serialization copy.
-                    retained += 768 + 4 * size
-                    if retained > SQL_PARENT_WINDOW // 8:
-                        return None
-                    table.append((arena.key(offset, header) if size else None, offset))
-                    leaf_refs[offset] = _RowReference(offset, header)
-            tables[name] = table
-        if self.services.query_region_offsets is None:
-            raise _err('UNSUPPORTED_CAPABILITY', 'sealed native offset query needs its worker host')
-        pairs = self.services.query_region_offsets(offset_join_query(*kinds, upper), tables=tables,
-            max_pairs=upper, rss_bytes=SQL_CHILD_RSS, check_stop=self.services.check_stop)
-        self.counters['offset_sql_queries'] += 1
-        self.counters['offset_sql_inputs'] += sum(len(table) for table in tables.values())
-        self.counters['offset_sql_pairs'] += len(pairs)
-        return pairs, leaf_refs
-
-    def _matches(self, arena, left, right, spec, native, intermediates, index):
-        if native is None:
-            for lpart, rpart in zip(left, right):
-                yield from hash_join_pairs(arena, lpart, rpart, how=spec.configuration.get('how', 'inner'))
-            return
-        # Both SQL joins share one process and one bounded response. First
-        # validate *every* logical intermediate under its original node's row
-        # and output constraints, even when the final join discards that row.
-        pairs, leaf_refs = native
-        for phase, ao, bo, co in pairs:
-            if phase != index:
-                continue
-            if index == 0:
-                yield leaf_refs[ao], None if bo is None else leaf_refs[bo]
-            else:
-                yield intermediates[(ao, bo)], None if co is None else leaf_refs[co]
 
     def records(self):
         bounds = self.services.bounds
@@ -214,7 +67,14 @@ class RelationalRegionRuntime:
         specs = [self.kernels[o].spec for o in self.plan.occurrences]
         with store.scratch(max_bytes=bounds.max_spill_bytes,
                            max_io_bytes=max(1, bounds.max_row_bytes * 2)) as file:
-            arena = _RegionSpool(file, self.services, specs, self.counters)
+            def hydrate_record(record):
+                return materialize_row(record, store=store, bounds=bounds,
+                    assignment=getattr(self.services, 'assignment', None)), record.schema_ref
+            configurations = [spec.configuration for spec in specs]
+            arena = bind_spool(file, self.services, spool_type=RegionSpool,
+                configurations=configurations, counters=self.counters, hydrate_record=hydrate_record,
+                reference_id=lambda index, sequence: _hash_id([
+                    RECORD_DOMAIN, specs[index].configuration['occurrence_id'], 'join', sequence]))
             relations = {}
             leaf_sizes = {}
             entries = {(entry.consumer, entry.port): entry for entry in self.plan.inputs}
@@ -249,7 +109,8 @@ class RelationalRegionRuntime:
                         membership.finish()
                         read_leaf(left, probe_filter=membership)
                         del membership
-                native = self._offset_query(arena, relations, specs) if self.plan.sql_offsets else None
+                native = offset_query(arena, relations, configurations, occurrences=self.plan.occurrences,
+                    query=self.services.query_region_offsets, check_stop=self.services.check_stop, counters=self.counters) if self.plan.sql_offsets else None
                 intermediates = {}
                 for index, occurrence in enumerate(self.plan.occurrences):
                     spec = specs[index]
@@ -260,13 +121,17 @@ class RelationalRegionRuntime:
                         yield from self._ordered_groups(arena, source, spec)
                         break
                     left, right = relations[(occurrence, 'left')], relations[(occurrence, 'right')]
-                    outputs = [_Chain() for _ in range(_FANOUT)]
+                    outputs = [JoinChain() for _ in range(PARTITIONS)]
                     budget = _OutputBudget(spec, self.services, streaming=True)
+                    def admit_size(size):
+                        class Sized:
+                            encoded_bytes = size
+                        budget.charge(Sized())
                     sequence = 0
-                    for lref, rref in self._matches(arena, left, right, spec, native, intermediates, index):
+                    for lref, rref in matching_references(arena, left, right, spec.configuration, native, intermediates, index):
                         _check_stop(self.services)
-                        ref = arena.append_reference(lref, rref, index=index, sequence=sequence, budget=budget)
-                        outputs[ref.header[1] & (_FANOUT - 1)].link(arena, ref.offset)
+                        ref = arena.append_reference(lref, rref, index=index, sequence=sequence, admit_size=admit_size)
+                        outputs[ref.header[1] & (PARTITIONS - 1)].link(arena, ref.offset)
                         if native is not None and index == 0:
                             intermediates[(lref.offset, rref.offset if rref else None)] = ref
                         sequence += 1
@@ -281,7 +146,7 @@ class RelationalRegionRuntime:
                     else:
                         for chain in outputs:
                             for offset, header in arena.entries(chain):
-                                ref = _RowReference(offset, header)
+                                ref = RowReference(offset, header)
                                 row, schema = arena.hydrate_with_schema(ref)
                                 rid = _hash_id([RECORD_DOMAIN, occurrence, 'join', header[4]])
                                 yield _output_record(rid, {'join_index': header[4]}, row, header[4], self.services,
@@ -309,7 +174,7 @@ class RelationalRegionRuntime:
                     else:
                         # SQL null never matches. A null-containing composite
                         # key has no join token; its other fields still sort.
-                        row = arena.hydrate(_RowReference(offset, header))
+                        row = arena.hydrate(RowReference(offset, header))
                         keyrow = {key: row[key] for key in keys}
                         del row
                     rid = _hash_id(['region-sort-v1', self.plan.region_id, offset])
@@ -326,7 +191,7 @@ class RelationalRegionRuntime:
                 offset = record.sequence
                 header = arena.header(offset)
                 token = arena.key(offset, header)
-                row = arena.hydrate(_RowReference(offset, header))
+                row = arena.hydrate(RowReference(offset, header))
                 # A preserved nonnull key is already the exact equality token,
                 # including scalar types. Group output still needs its row.
                 group = token.decode('utf-8') if token else null_key or group_key(row, keys)

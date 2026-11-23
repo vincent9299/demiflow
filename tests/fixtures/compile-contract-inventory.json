@@ -269,6 +269,7 @@
     "execution/contracts/relational_region.py",
     "execution/kernels/relational.py",
     "execution/kernels/relational_region.py",
+    "operators/relational_region.py",
     "planning/dataflow_place.py"
    ],
    "initial": [
@@ -385,6 +386,7 @@
     "execution/kernels/relational_region.py",
     "execution/worker/dataflow_graph_runner.py",
     "execution/worker/key_exclusion.py",
+    "operators/relational_region.py",
     "planning/dataflow_place.py",
     "planning/dataflow_relational_regions.py"
    ],
@@ -449,7 +451,7 @@
    "right_on": [
     "execution/kernels/operator.py",
     "execution/kernels/relational.py",
-    "execution/kernels/relational_region.py"
+    "operators/relational_region.py"
    ],
    "routes": [
     "execution/dataflow_model_observations.py",
@@ -515,7 +517,7 @@
     "planning/dataflow_thread_fusion.py"
    ],
    "suffix": [
-    "execution/kernels/relational_region.py"
+    "operators/relational_region.py"
    ],
    "target_num_rows_per_block": [
     "execution/kernels/block_partition.py"

@@ -290,7 +290,7 @@ def test_fixed_three_way_join_selects_sql_only_under_its_actual_stage_grant(tmp_
         return result
     monkeypatch.setattr(host, '_start_sql_worker', start)
     monkeypatch.setattr(host, 'query_region_offsets', query)
-    from demiflow.execution.kernels.relational_region import _RegionSpool
+    from demiflow.operators.relational_region import RegionSpool as _RegionSpool
     from collections import Counter
     reads, observed = Counter(), []
     raw_key, raw_header = _RegionSpool.key, _RegionSpool.header
@@ -369,7 +369,7 @@ def test_public_join_propagates_overflow_after_sql_started(tmp_path, monkeypatch
     import pyarrow as pa
     import pytest
     from demiflow.execution.hosts import datafusion
-    from demiflow.execution.kernels import relational_region
+    from demiflow.operators import relational_region
 
     for name in ('a', 'b', 'c'):
         lance.write_dataset(pa.table({'k': [3, 6, 9], name: [1, 2, 3]}), str(tmp_path / name))
