@@ -88,7 +88,7 @@
     window.addEventListener('resize',positionMore);window.addEventListener('scroll',positionMore,true);
     root.addEventListener('click',event=>{if(!more.contains(event.target))more.open=false;});
     root.addEventListener('keydown',event=>{if(event.key==='Escape'&&more.open){more.open=false;more.querySelector('summary').focus();}});
-    const checkButton=button('静态检查',()=>{more.open=false;return check();},moreBody),runButton=button('运行',()=>confirmSubmit(),actions,{cls:'primary'});
+    const runButton=button('运行',()=>confirmSubmit(),actions,{cls:'primary'});
     button('接入与权限',()=>{more.open=false;settings.hidden=!settings.hidden;paintSettings();},moreBody,{cls:'quiet'});
     const advancedDialog=$('dialog',undefined,'wb-advanced-dialog');advancedDialog.setAttribute('aria-label','高级诊断');
     const advancedDialogHead=$('div',undefined,'wb-dialog-head');advancedDialogHead.append($('h3','高级诊断'));
@@ -179,12 +179,6 @@
     const tools=$('div',undefined,'wb-canvas-tools');
     const pipelineCode=$('section',undefined,'wb-pipeline-code');pipelineCode.hidden=true;
     pipelineCode.setAttribute('aria-label','Pipeline 源码');
-    const checksTab=button('检查',()=>{
-      argumentEditor.hide();pipelineCodeOpen=false;pipelineSequence++;pipelineReadKey=null;
-      disposeReaders(pipelineCode);pipelineCode.replaceChildren();
-      return changeMode('checks');
-    },flowTabs);
-    const checksBadge=$('span',undefined,'wb-tab-badge');checksBadge.hidden=true;checksTab.append(checksBadge);
     const closeChecks=button('收起检查',()=>changeMode('config'),checks);checks.prepend(closeChecks);
     const previewButton=button('解析执行计划',()=>compilePlanPreview(),actions);previewButton.title='只解析当前入口与已保存入参，不启动数据处理';
     actions.append(runsContextButton,currentContextButton,previewButton,runButton,refreshRunButton,more);
@@ -308,7 +302,6 @@
       flowGraphTab.setAttribute('aria-pressed',String(graphTabActive));
       argumentsButton.setAttribute('aria-pressed',String(argsShown));
       argumentsButton.disabled=!working?.entry;
-      checksTab.setAttribute('aria-pressed',String(checksActive));
       planContext.hidden=monitoring||operatorsActive||argsShown||checksActive;
       toolbar.hidden=operatorsActive||(monitoring&&!hasRun&&!comparison);
       body.hidden=resultsActive||definitionActive||operatorsActive||argsShown||checksActive||(monitoring&&!hasRun);
@@ -344,9 +337,8 @@
       runBar.hidden=!run||!!comparison||activePage!=='monitor';
       if(!checksActive)documents.open=false;
       const dirty=argumentEditor.dirty()||working&&Object.keys(getDraft().values).length>0;
-      checkButton.hidden=monitoring||!!run;
-      checkButton.disabled=busy||previewBusy||!!run||!registered()||dirty;
-      if(scopedCheckButton?.isConnected)scopedCheckButton.disabled=checkButton.disabled;
+      const checkDisabled=busy||previewBusy||!!run||!registered()||dirty;
+      if(scopedCheckButton?.isConnected)scopedCheckButton.disabled=checkDisabled;
       runButton.disabled=busy||previewBusy||!!run||!registered()||!can('run_submit')||dirty||!data().graph?.parameters.available||data().graph?.freshness.current===false;
       runButton.title=run?'返回当前配置后提交新运行':dirty?'先保存当前配置草稿':!can('run_submit')?'项目或服务尚未开放提交权限':!registered()?'先登记原生流程与参数文件':!data().graph?'正在读取图与配置':data().graph.freshness.current===false?'检查依据已变化，请先读取当前配置或重新检查':!data().graph.parameters.available?'登记配置暂不可用':'提交新运行；检查、封存并启动';
       const needsConfiguration=!(working?.params||'')&&requiredPreviewArguments().length>0;
@@ -357,10 +349,6 @@
       previewButton.textContent=previewBusy?'正在解析…':'解析执行计划';
       previewButton.title=dirty?'先保存业务参数，解析使用已保存值':previewHelp;
       previewButton.hidden=monitoring||!!run;runButton.hidden=monitoring||!!run;
-      const diagnostics=data().graph?.diagnostics||[];
-      checksBadge.hidden=!diagnostics.length;
-      checksBadge.textContent=String(diagnostics.length);
-      checksTab.title=diagnostics.length?'查看当前图依据中的 '+diagnostics.length+' 项诊断；不代表执行状态':'查看静态检查状态与覆盖';
       accessState.hidden=operatorsActive||monitoring||!!run||(!invalidEntry&&registered()&&can('run_submit'));
       accessState.textContent=invalidEntry?working.entry+' · '+previewHelp:!working?.entry?'请在“更多 → 接入与权限”登记入口和业务参数。':!registered()?'已发现原项目入口，尚未绑定可执行的原生流程与参数；可解析已保存配置的执行计划，接入不会自动授予运行权限。':'原生流程已登记；当前可阅读与检查，项目或服务尚未开放提交权限。';
       const previewNode=!run&&planPreview?.dag.nodes.find(n=>n.occurrence_id===previewSelection?.occurrenceId);
@@ -681,7 +669,7 @@
       if(g?.diagnostics.length)renderDiagnostics(g.diagnostics,checkIssues,async id=>{await chooseNode(id);});
       if(g?.diagnostics_truncated)checkIssues.append($('p','当前展示部分问题，完整报告共 '+g.diagnostic_count+' 项。','wb-caption'));
       const actions=$('div',undefined,'wb-inline-actions');checkIssues.append(actions);
-      scopedCheckButton=button(checked?'重新检查当前配置':'检查当前配置',()=>check(),actions,{disabled:checkButton.disabled});button('返回配置与图',()=>wholeConfiguration(),actions);
+      scopedCheckButton=button(checked?'重新检查当前配置':'检查当前配置',()=>check(),actions,{disabled:busy||previewBusy||!!run||!registered()||draftDirty});button('返回配置与图',()=>wholeConfiguration(),actions);
       const facts=$('dl',undefined,'details');checkCoverage.append(facts);
       for(const[label,value]of [['范围','所选入口与配置'],['流程',g?.binding.entry||working?.entry||'尚未选择'],['配置',g?.binding.params||'未绑定参数文件'],['依据',checked?'固定检查报告':'源码观察，尚未检查'],['状态',checked?g.status:'尚未检查']])facts.append($('dt',label),$('dd',value));
       if(g)raw('规则、覆盖与原始依据',{binding:g.binding,coverage:g.coverage,freshness:g.freshness,completeness:g.completeness,status:g.status},checkCoverage);
