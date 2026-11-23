@@ -616,7 +616,7 @@ SOFTWARE.
         const request=++state.navigationEpoch;
         earlier.disabled=true;
         try{
-          const older=await api('dev-replay',{session_id:sid,before_sequence:state.windowStart+1,max_turns:8,limit:200});
+          const older=await api('dev-replay',{session_id:sid,before_sequence:state.windowStart+1,max_turns:8,limit:100});
           if(state.disposed||state.navigationEpoch!==request)return;
           const prevHeight=timeline.scrollHeight,prevTop=timeline.scrollTop;
           const existing=state.renderedEvents||[];
