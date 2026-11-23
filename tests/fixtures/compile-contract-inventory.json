@@ -372,6 +372,7 @@
    "on": [
     "execution/contracts/relational_region.py",
     "execution/kernels/lance_keys.py",
+    "execution/kernels/operator.py",
     "execution/kernels/relational_region.py",
     "execution/worker/dataflow_graph_runner.py",
     "execution/worker/key_exclusion.py",
