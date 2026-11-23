@@ -18,6 +18,40 @@ from .schema import ForgeError, canonical
 CONTEXT_BYTES = 64 * 1024
 SOURCE_LIMIT = 32
 FILE_BYTES = 256 * 1024
+SECTION_TOPICS = ('sdk', 'rules', 'files')
+CONTEXT_TOPICS = (*SECTION_TOPICS, *TOPICS)
+
+
+def _first_doc_line(doc, limit=120):
+    if not isinstance(doc, str):
+        return ''
+    for line in doc.splitlines():
+        clean = line.strip()
+        if clean:
+            return clean[:limit]
+    return ''
+
+
+def _flow_summary(root, entry, excluded):
+    rel, _, symbol = entry.partition(':')
+    if not rel or _hidden(rel, excluded):
+        return {}
+    try:
+        raw = read_bounded(relative_path(root, rel), FILE_BYTES)
+        tree = ast.parse(raw.decode('utf-8'), filename=rel)
+    except (OSError, ValueError, SyntaxError, UnicodeError):
+        return {}
+    mod_doc = _first_doc_line(ast.get_docstring(tree))
+    fn = next((node for node in tree.body
+               if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == symbol), None)
+    fn_doc = _first_doc_line(ast.get_docstring(fn)) if fn is not None else ''
+    title = (fn_doc or mod_doc).rstrip('。.')
+    info = {}
+    if title:
+        info['title'] = title
+    if mod_doc and mod_doc.rstrip('。.') != title:
+        info['summary'] = mod_doc
+    return info
 
 
 def _sample(items, budget):
@@ -181,14 +215,20 @@ def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference
         if _hidden(name, excluded):
             raise ForgeError('Selected project path is protected', code='operation_rejected')
         relative_path(root, name)
-    chosen = {topic} if topic is not None else set()
+    if topic is not None and topic not in CONTEXT_TOPICS:
+        raise ForgeError(
+            f'Unknown context topic: {topic}. Choose one of: {", ".join(CONTEXT_TOPICS)}',
+            code='invalid_request',
+        )
+    chosen = {topic} if topic in TOPICS else set()
     roles = dict(zip(ROLE_DIRS, TOPICS))
     chosen.update(roles[name.split('/')[0]] for name in paths if name.split('/')[0] in roles)
     rules, notes = guidance(topics=chosen)
     coverage = dict(checked=[], unverified=[])
     diagnostics = []
     result = dict(status='ready', root=str(root), diagnostics=diagnostics, coverage=coverage,
-                  rules=rules, rules_id=RULES_ID, guidance=notes, topics=list(TOPICS),
+                  rules=rules, rules_id=RULES_ID, guidance=notes, topics=list(CONTEXT_TOPICS),
+                  view=dict(topic=topic, api=api, has_paths=bool(paths), has_sources=bool(sources)),
                   sdk=dict(sdk_revision=None, catalog_id=None, apis=[]))
     try:
         if reference is None:
@@ -237,8 +277,9 @@ def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference
         entries = {key: [p for p in configs if not _hidden(p, excluded)]
                    for key, configs in sorted(view['entries'].items()) if not _hidden(key.split(':')[0], excluded)}
         result.update(project=project,
-                      registered_flows=_sample([dict(entry=key, parameters=values[:4], parameter_count=len(values))
-                                                for key, values in entries.items()], 6 * 1024),
+                      registered_flows=_sample([dict(entry=key, parameters=values[:4], parameter_count=len(values),
+                                                     **_flow_summary(root, key, excluded))
+                                                for key, values in entries.items()], 8 * 1024),
                       role_files={role: _sample([p for p in files if not _hidden(p, excluded)], 2 * 1024)
                                   for role, files in view['roles'].items()},
                       targets=_targets(root, entries, paths, coverage, diagnostics))
@@ -256,22 +297,43 @@ def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference
 
 
 def render_context(result):
-    rows = ['## Forge 开发规范', *(f"- {r['id']} · {r['text']}（{r['source']}）" for r in result['rules'])]
-    rows.extend(f"\n{n['text']}（{n['source']}）" for n in result['guidance'])
-    rows.append('强制条款版本 ' + result['rules_id'])
+    view = result.get('view') or {}
+    topic = view.get('topic')
+    api = view.get('api')
+    has_paths = bool(view.get('has_paths') or result.get('targets', {}).get('paths'))
+    has_sources = bool(view.get('has_sources'))
+    overview_only = topic is None and api is None and not has_paths and not has_sources
     sdk = result['sdk']
-    rows.extend(['\n' + api_markdown(sdk['apis']),
-                 f"SDK 版本依据 {sdk['sdk_revision']} · API 目录 {sdk['catalog_id']}", '\n## 当前项目',
-                 f"{result['project']['name']} · {result['root']} · {result['project']['state']}"])
-    locations = result['project'].get('locations')
-    if locations:
-        loc_parts = [
-            f"{k}={v['root']}({'可写' if v.get('writable') else '只读'})" if isinstance(v, dict) else f'{k}={v}'
-            for k, v in locations.items()
-        ]
-        rows.append('项目自定义目录（locations）：' + '、'.join(loc_parts))
-    env_cfg = result.get('environment')
-    if isinstance(env_cfg, dict):
+    rows = []
+
+    def append_project_header():
+        rows.append('## 当前项目')
+        rows.append(f"{result['project']['name']} · {result['root']} · {result['project']['state']}")
+        locations = result['project'].get('locations')
+        if locations:
+            loc_parts = [
+                f"{k}={v['root']}({'可写' if v.get('writable') else '只读'})" if isinstance(v, dict) else f'{k}={v}'
+                for k, v in locations.items()
+            ]
+            rows.append('项目自定义目录（locations）：' + '、'.join(loc_parts))
+
+    def append_registered_flows():
+        flows = result['registered_flows']
+        rows.append(f"\n### 已登记管道（共 {flows['total'] if flows['total'] is not None else '未知'} 个）")
+        if not flows['items']:
+            rows.append('- （暂无已登记入口）')
+            return
+        for flow in flows['items']:
+            title = f"{flow['title']} | " if flow.get('title') else ''
+            params_str = ', '.join(flow['parameters']) if flow['parameters'] else '无绑定参数'
+            rows.append(f"- {title}{flow['entry']} | 参数：{params_str}（共 {flow['parameter_count']} 个）")
+            if flow.get('summary'):
+                rows.append(f"  摘要：{flow['summary']}")
+
+    def append_environment():
+        env_cfg = result.get('environment')
+        if not isinstance(env_cfg, dict):
+            return
         rows.append('\n## 项目运行与沙箱配置')
         if env_cfg.get('execution_mode'):
             rows.append('执行模式：' + ('受限开发沙箱（读写限于本项目目录及 $TMPDIR）'
@@ -285,22 +347,80 @@ def render_context(result):
             rows.append('授权可写范围' + extra + '：' + '、'.join(env_cfg['writes'][:20]))
         if env_cfg.get('shared_sources'):
             rows.append('已声明只读共享模块根包：' + '、'.join(env_cfg['shared_sources']))
-    flows = result['registered_flows']
-    rows.append(f"登记入口（共 {flows['total'] if flows['total'] is not None else '未知'} 个）")
-    for flow in flows['items']:
-        rows.append(f"- {flow['entry']} · {', '.join(flow['parameters'])}（参数文件 {flow['parameter_count']} 个）")
-    for role, files in result['role_files'].items():
-        rows.append(f"- {role} 文件（共 {files['total'] if files['total'] is not None else '未知'} 个） " +
-                    '、'.join(files['items']))
-    if result['targets']['paths']:
-        rows.append('本次目标与已知直接引用：' + canonical(result['targets']).decode())
-    for source in result['sources']:
-        rows.append(f"来源 {source['origin']} · {source['path']} · sha256 {source['sha256']}")
-        if source.get('excerpt'):
-            rows.append(f"\n### {source['path']}［字节 {source['range'][0]}–{source['range'][1]}］\n{source['excerpt']}")
+
+    def append_role_counts():
+        parts = [f"{role}={files['total'] if files['total'] is not None else '未知'}"
+                 for role, files in result['role_files'].items()]
+        rows.append('\n## 角色目录统计')
+        rows.append('、'.join(parts) + '（完整文件列表可用 `--topic files` 展开）')
+
+    def append_role_files(only_role=None):
+        rows.append('\n## 项目角色文件')
+        for role, files in result['role_files'].items():
+            if only_role is not None and role != only_role:
+                continue
+            rows.append(f"- {role} 文件（共 {files['total'] if files['total'] is not None else '未知'} 个） " +
+                        '、'.join(files['items']))
+
+    def append_rules(include_notes=True):
+        rows.append('\n## Forge 开发规范')
+        rows.extend(f"- {r['id']} · {r['text']}（{r['source']}）" for r in result['rules'])
+        if include_notes:
+            rows.extend(f"\n{n['text']}（{n['source']}）" for n in result['guidance'])
+        rows.append('强制条款版本 ' + result['rules_id'])
+
+    def append_sdk(full=False):
+        if full:
+            rows.append('\n' + api_markdown(sdk['apis']))
+        else:
+            names = [item['id'] for item in sdk.get('apis') or ()]
+            rows.append('\n## SDK 索引（完整签名请用 `--topic sdk` 或 `--api <SYMBOL>`）')
+            if names:
+                rows.append('、'.join(names))
+        rows.append(f"SDK 版本依据 {sdk['sdk_revision']} · API 目录 {sdk['catalog_id']}")
+
+    if overview_only:
+        append_project_header()
+        append_registered_flows()
+        append_environment()
+        append_role_counts()
+        append_sdk(full=False)
+        rows.append('强制条款版本 ' + result['rules_id'])
+    elif topic == 'sdk':
+        append_project_header()
+        append_sdk(full=True)
+    elif topic == 'rules':
+        append_rules(include_notes=True)
+    elif topic == 'files':
+        append_project_header()
+        append_registered_flows()
+        append_role_files()
+    elif topic in TOPICS:
+        role_dir = dict(zip(TOPICS, ROLE_DIRS)).get(topic)
+        append_rules(include_notes=True)
+        append_role_files(only_role=role_dir)
+    else:
+        # Focused query: --api and/or --path and/or --source
+        append_project_header()
+        append_registered_flows()
+        if api is not None:
+            append_sdk(full=True)
+        else:
+            append_sdk(full=False)
+        if has_paths:
+            append_rules(include_notes=True)
+        else:
+            rows.append('强制条款版本 ' + result['rules_id'])
+        if result['targets']['paths']:
+            rows.append('本次目标与已知直接引用：' + canonical(result['targets']).decode())
+        for source in result['sources']:
+            if source.get('excerpt'):
+                rows.append(f"来源 {source['origin']} · {source['path']} · sha256 {source['sha256']}")
+                rows.append(f"\n### {source['path']}［字节 {source['range'][0]}–{source['range'][1]}］\n{source['excerpt']}")
+
     rows.extend('待核对：' + item for item in result['coverage']['unverified'])
     rows.extend(d['detail'] for d in result['diagnostics'])
-    rows.append('可按主题查阅：' + '、'.join(result['topics']))
+    rows.append('\n渐进展开：`demiflow forge context --root . --topic <' + '|'.join(result['topics']) + '>`，或 `--api <SYMBOL>`、`--path <REL>`')
     text = '\n'.join(rows)
     if len(text.encode()) > CONTEXT_BYTES:
         raise ForgeError('Rendered context exceeds budget', code='resource_limit')

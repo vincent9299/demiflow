@@ -39,8 +39,10 @@ def test_all_navigation_resize_ellipsis_and_retained_width(project,tmp_path,brow
             page.get_by_role('button',name=name,exact=True).click()
             expect(separator).to_be_visible();assert abs(sidebar.bounding_box()['width']-expected)<2
             if kind=='development':
-                sidebar.locator('.dev-sidebar-tabs').get_by_role('button',name='算子',exact=True).click()
-                page.get_by_role('tab',name='Prompt 算子',exact=True).click()
+                sidebar.locator('.dev-sidebar-tabs').get_by_role('button',name='大纲',exact=True).click()
+                expect(sidebar.locator('.dev-outline-explorer')).to_be_visible()
+                expect(sidebar.get_by_role('separator',name='调整管道与代码算子高度',exact=True)).to_be_visible()
+                expect(sidebar.get_by_role('separator',name='调整代码算子与 Prompt 算子高度',exact=True)).to_be_visible()
                 summary=sidebar.locator('.op-tree-file>summary').filter(has_text=long_name)
                 facts=summary.locator('span').evaluate('(n)=>({scroll:n.scrollWidth,width:n.clientWidth,wrap:getComputedStyle(n).whiteSpace,align:getComputedStyle(n).textAlign,height:n.getBoundingClientRect().height})')
                 assert facts['scroll']>facts['width'] and facts['wrap']=='nowrap' and facts['align']=='left' and facts['height']<30

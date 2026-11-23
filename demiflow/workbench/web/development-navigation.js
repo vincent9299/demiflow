@@ -809,83 +809,199 @@
       paintOperatorTree();
     }
 
-    // === OPERATORS SIDEBAR + TYPE-AWARE RIGHT PANEL ===
-    let opIndex = null, opSelected = null, opRevision = 'current', opDetail = null, opKind = 'code', opSeq = 0, opLoading = null;
+    // === OUTLINE SIDEBAR (Flows + Code Ops + Prompt Ops, collapsible & vertically resizable) + TYPE-AWARE RIGHT PANEL ===
+    let opIndex = null, opFlows = [], opSelected = null, opSelectedFlow = null, opRevision = 'current', opDetail = null, opSeq = 0, opLoading = null;
     const opStorageKey = project ? 'demiflow.operator-selection.' + project : '';
     try { if (opStorageKey) opSelected = sessionStorage.getItem(opStorageKey); } catch {}
     const opCodeType = item => ({class: '可调用类', async_function: '异步函数', function: '函数'})[item.definition_type] || 'Python 定义';
     const opVisible = item => item.kind === 'prompt' || item.export_status === 'declared' || (item.export_status === 'legacy' && item.flow_references?.length) || item.id === opSelected;
 
-    let opTabs = null, opList = null;
-    if (operatorsHost) {
-      const opWrap = node('div', 'dev-op-sidebar');
-      opTabs = globalThis.ForgeNavigation?.categoryTabs
-        ? ForgeNavigation.categoryTabs('算子分类', [['code', '代码算子'], ['prompt', 'Prompt 算子']], kind => {
-            opKind = kind;
-            paintOperatorTree();
-          })
-        : null;
-      opList = node('div', 'op-tree-items dev-op-list');
-      opList.setAttribute('role', 'tabpanel');
-      opList.setAttribute('aria-label', '代码算子');
-      if (opTabs) opWrap.append(opTabs.element);
-      opWrap.append(opList);
-      operatorsHost.replaceChildren(opWrap);
+    let outlineExplorer = null;
+    const outlineSections = {}; // key -> {section, toggle, count, list, open}
+    const outlineHandles = [];
+    let outlineWeights = [0.28, 0.42, 0.30];
+    try {
+      const saved = JSON.parse(localStorage.getItem('forge-dev-outline-splits') || 'null');
+      if (Array.isArray(saved) && saved.length === 3 && saved.every(n => Number.isFinite(n) && n >= 0.1)) outlineWeights = saved;
+    } catch {}
+
+    function applyOutlineSplits() {
+      if (!outlineExplorer) return;
+      const keys = ['flows', 'code', 'prompt'];
+      const openKeys = keys.filter(k => outlineSections[k]?.open);
+      const totalWeight = openKeys.reduce((sum, k) => sum + outlineWeights[keys.indexOf(k)], 0) || 1;
+      for (const k of keys) {
+        const s = outlineSections[k];
+        if (!s) continue;
+        s.list.hidden = !s.open;
+        s.toggle.setAttribute('aria-expanded', String(s.open));
+        s.section.classList.toggle('is-collapsed', !s.open);
+        if (s.open) {
+          const pct = (outlineWeights[keys.indexOf(k)] / totalWeight) * 100;
+          s.section.style.flex = `1 1 ${pct.toFixed(2)}%`;
+        } else {
+          s.section.style.flex = '0 0 auto';
+        }
+      }
+      // Show a drag handle only when both the section above it and at least one section below it are open.
+      if (outlineHandles[0]) outlineHandles[0].hidden = !(outlineSections.flows?.open && (outlineSections.code?.open || outlineSections.prompt?.open));
+      if (outlineHandles[1]) outlineHandles[1].hidden = !(outlineSections.code?.open && outlineSections.prompt?.open);
     }
 
-    function paintOperatorTree() {
-      if (!opList) return;
-      opTabs?.select(opKind);
-      opList.setAttribute('aria-label', opKind === 'code' ? '代码算子' : 'Prompt 算子');
-      opList.replaceChildren();
+    function wireOutlineDrag(handle, upperIdx, lowerIdx) {
+      handle.onpointerdown = e => {
+        if (e.button !== 0 || !outlineExplorer) return;
+        e.preventDefault();
+        handle.setPointerCapture(e.pointerId);
+        handle.classList.add('is-dragging');
+        const keys = ['flows', 'code', 'prompt'];
+        const actualLower = outlineSections[keys[lowerIdx]]?.open ? lowerIdx : (lowerIdx === 1 && outlineSections.prompt?.open ? 2 : -1);
+        if (actualLower < 0) return;
+        const startY = e.clientY;
+        const totalH = Math.max(120, outlineExplorer.getBoundingClientRect().height);
+        const startUpper = outlineWeights[upperIdx], startLower = outlineWeights[actualLower];
+        const sumPair = startUpper + startLower;
+        const openSum = keys.reduce((acc, k, idx) => acc + (outlineSections[k]?.open ? outlineWeights[idx] : 0), 0) || 1;
+        const move = ev => {
+          const delta = ((ev.clientY - startY) / totalH) * openSum;
+          const nextUpper = Math.max(0.12, Math.min(sumPair - 0.12, startUpper + delta));
+          outlineWeights[upperIdx] = nextUpper;
+          outlineWeights[actualLower] = sumPair - nextUpper;
+          applyOutlineSplits();
+        };
+        const end = () => {
+          handle.classList.remove('is-dragging');
+          handle.removeEventListener('pointermove', move);
+          handle.removeEventListener('pointerup', end);
+          handle.removeEventListener('pointercancel', end);
+          try { localStorage.setItem('forge-dev-outline-splits', JSON.stringify(outlineWeights)); } catch {}
+        };
+        handle.addEventListener('pointermove', move);
+        handle.addEventListener('pointerup', end);
+        handle.addEventListener('pointercancel', end);
+      };
+    }
+
+    if (operatorsHost) {
+      outlineExplorer = node('div', 'dev-outline-explorer');
+      const specs = [
+        ['flows', '管道', '调整管道与代码算子高度'],
+        ['code', '代码算子', '调整代码算子与 Prompt 算子高度'],
+        ['prompt', 'Prompt 算子', null],
+      ];
+      specs.forEach(([key, label, handleLabel], idx) => {
+        const section = node('div', 'dev-outline-section');
+        const header = node('div', 'dev-section-header');
+        const toggleBtn = node('button', 'dev-section-toggle');
+        toggleBtn.type = 'button';
+        toggleBtn.setAttribute('aria-expanded', 'true');
+        const count = node('span', 'dev-section-count', '0');
+        toggleBtn.append(chevronIcon(), node('span', 'dev-section-title', label), count);
+        header.append(toggleBtn);
+        if (idx === 0) {
+          const refBtnOutline = iconButton('刷新大纲', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
+          refBtnOutline.onclick = () => ensureOperatorsLoaded({force: true});
+          header.append(refBtnOutline);
+        }
+        const list = node('div', 'op-tree-items dev-outline-list');
+        section.append(header, list);
+        outlineExplorer.append(section);
+        outlineSections[key] = {section, toggle: toggleBtn, count, list, open: true};
+        toggleBtn.onclick = () => {
+          outlineSections[key].open = !outlineSections[key].open;
+          applyOutlineSplits();
+        };
+        if (handleLabel) {
+          const handle = node('div', 'dev-split-resizer');
+          handle.setAttribute('role', 'separator');
+          handle.setAttribute('aria-orientation', 'horizontal');
+          handle.setAttribute('aria-label', handleLabel);
+          outlineExplorer.append(handle);
+          outlineHandles.push(handle);
+          wireOutlineDrag(handle, idx, idx + 1);
+        }
+      });
+      operatorsHost.replaceChildren(outlineExplorer);
+      applyOutlineSplits();
+    }
+
+    function paintOperatorGroup(listEl, countEl, kind) {
+      if (!listEl) return;
+      listEl.replaceChildren();
       if (!opIndex) {
-        opList.append(node('p', 'op-muted dev-op-pad', '正在读取项目算子…'));
+        countEl.textContent = '0';
+        listEl.append(node('p', 'op-muted dev-op-pad', '正在读取…'));
         return;
       }
       const term = filterTerm.trim().toLocaleLowerCase();
-      const matches = (opIndex.definitions || []).filter(item => opVisible(item) && item.kind === opKind &&
+      const matches = (opIndex.definitions || []).filter(item => opVisible(item) && item.kind === kind &&
         [item.symbol, item.path, item.description].join(' ').toLocaleLowerCase().includes(term));
-      const declared = matches.filter(item => item.kind === 'prompt' || item.export_status === 'declared');
-      const legacy = matches.filter(item => item.kind === 'code' && item.export_status !== 'declared');
-      for (const rows of [declared, legacy]) {
-        if (!rows.length) continue;
-        const group = node(rows === legacy ? 'details' : 'div', 'op-tree-group');
-        if (rows === legacy) {
-          group.open = !declared.length || !!term || rows.some(item => item.id === opSelected);
-          group.append(node('summary', 'op-legacy-heading', '流程已引用 · 未声明'));
-        }
-        const paths = new Map();
-        for (const row of rows) {
-          if (!paths.has(row.path)) paths.set(row.path, []);
-          paths.get(row.path).push(row);
-        }
-        for (const [path, items] of paths) {
-          const folder = node('details', 'op-tree-file');
-          folder.open = !!term || items.some(i => i.id === opSelected) || paths.size < 4;
-          const summary = node('summary');
-          summary.append(node('span', null, path));
-          summary.title = path;
-          folder.append(summary);
-          for (const item of items) {
-            const b = node('button', 'op-tree-leaf');
-            b.type = 'button';
-            b.dataset.definition = item.id;
-            b.setAttribute('aria-pressed', String(opSelected === item.id));
-            b.title = (opKind === 'code' ? (item.export_status === 'declared' ? '已声明算子' : '流程引用 · 未声明') + ' · ' + opCodeType(item) + ' · ' : '') + item.path + ' · ' + item.symbol;
-            b.append(node('span', 'op-glyph', opKind === 'code' ? (item.definition_type === 'class' ? 'C' : 'ƒ') : 'P'), node('span', null, item.symbol));
-            b.onclick = () => openOperator(item.id);
-            folder.append(b);
-          }
-          group.append(folder);
-        }
-        opList.append(group);
+      countEl.textContent = String(matches.length);
+      const paths = new Map();
+      for (const row of matches) {
+        if (!paths.has(row.path)) paths.set(row.path, []);
+        paths.get(row.path).push(row);
       }
-      if (!opList.childNodes.length) {
-        opList.append(node('p', 'op-muted dev-op-pad', term ? '没有匹配的算子' : opKind === 'code' ? '项目尚未声明代码算子。' : '项目尚未声明 Prompt 算子。'));
+      for (const [path, items] of paths) {
+        const folder = node('details', 'op-tree-file');
+        folder.open = !!term || items.some(i => i.id === opSelected) || paths.size <= 3;
+        const summary = node('summary');
+        summary.append(node('span', null, path));
+        summary.title = path;
+        folder.append(summary);
+        for (const item of items) {
+          const b = node('button', 'op-tree-leaf');
+          b.type = 'button';
+          b.dataset.definition = item.id;
+          b.setAttribute('aria-pressed', String(paneMode === 'operator' && opSelected === item.id));
+          b.title = (kind === 'code' ? (item.export_status === 'declared' ? '已声明算子' : '流程引用 · 未声明') + ' · ' + opCodeType(item) + ' · ' : '') + item.path + ' · ' + item.symbol;
+          const glyphCls = 'op-glyph ' + (kind === 'code' ? 'is-code' : 'is-prompt');
+          b.append(node('span', glyphCls, kind === 'code' ? (item.definition_type === 'class' ? 'C' : 'ƒ') : 'P'), node('span', null, item.symbol));
+          b.onclick = () => openOperator(item.id);
+          folder.append(b);
+        }
+        listEl.append(folder);
       }
-      for (const issue of opIndex.diagnostics || []) {
-        opList.append(node('p', 'op-error dev-op-pad', issue.path + '：' + issue.detail));
+      if (!matches.length) {
+        listEl.append(node('p', 'op-muted dev-op-pad', term ? '无匹配项' : kind === 'code' ? '暂无代码算子' : '暂无 Prompt 算子'));
       }
+    }
+
+    function paintFlowsOutline() {
+      const sec = outlineSections.flows;
+      if (!sec) return;
+      sec.list.replaceChildren();
+      const term = filterTerm.trim().toLocaleLowerCase();
+      const matches = opFlows.filter(f => [f.title, f.entry].join(' ').toLocaleLowerCase().includes(term));
+      sec.count.textContent = String(matches.length);
+      for (const f of matches) {
+        const filePath = f.entry.split(':')[0];
+        const b = node('button', 'op-tree-leaf dev-outline-flow');
+        b.type = 'button';
+        b.dataset.entry = f.entry;
+        b.title = f.entry;
+        b.setAttribute('aria-pressed', String(paneMode === 'file' && opSelectedFlow === f.entry && activePath === filePath));
+        const textWrap = node('span', 'dev-outline-flow-text');
+        textWrap.append(node('span', 'dev-outline-flow-name', f.title));
+        if (f.title !== f.entry) textWrap.append(node('span', 'dev-outline-flow-entry', f.entry));
+        b.append(node('span', 'op-glyph is-flow', 'F'), textWrap);
+        b.onclick = () => {
+          opSelectedFlow = f.entry;
+          openFile(filePath, 'source');
+          paintOperatorTree();
+        };
+        sec.list.append(b);
+      }
+      if (!matches.length) {
+        sec.list.append(node('p', 'op-muted dev-op-pad', term ? '无匹配管道' : '暂无已登记管道'));
+      }
+    }
+
+    function paintOperatorTree() {
+      if (!outlineExplorer) return;
+      paintFlowsOutline();
+      paintOperatorGroup(outlineSections.code?.list, outlineSections.code?.count, 'code');
+      paintOperatorGroup(outlineSections.prompt?.list, outlineSections.prompt?.count, 'prompt');
     }
 
     function paintOperatorCard(parent, title, contentFn) {
@@ -1078,12 +1194,10 @@
       if (!id || disposed) return;
       opSelected = id;
       opRevision = version;
-      const meta = opIndex?.definitions?.find(item => item.id === id);
-      if (meta?.kind) opKind = meta.kind;
       const ticket = ++opSeq;
+      setPaneMode('operator');
       paintOperatorTree();
       try { if (opStorageKey) sessionStorage.setItem(opStorageKey, id); } catch {}
-      setPaneMode('operator');
       if (pane.hidden) setOpen(true, {skipFocus: true});
       operatorPane.replaceChildren(node('p', 'op-muted dev-op-pad', '正在读取算子定义…'));
       try {
@@ -1104,16 +1218,25 @@
       if (opLoading && !force) return opLoading;
       opLoading = (async () => {
         try {
-          const data = await api('project-operators');
+          const [data, ctx] = await Promise.all([
+            api('project-operators'),
+            api('context').catch(() => null),
+          ]);
           if (disposed) return;
           opIndex = data;
+          const seen = new Map();
+          for (const e of ctx?.project?.entries || []) seen.set(e.entry, {entry: e.entry, title: e.entry});
+          for (const f of ctx?.flows || []) seen.set(f.entry, {entry: f.entry, title: f.title || f.name || f.description?.split('\n')[0] || f.entry});
+          opFlows = [...seen.values()];
           if (!opSelected || !opIndex.definitions?.some(d => d.id === opSelected)) {
-            const first = opIndex.definitions?.find(d => d.kind === opKind && opVisible(d)) || opIndex.definitions?.find(opVisible);
+            const first = opIndex.definitions?.find(opVisible);
             if (first) opSelected = first.id;
           }
           paintOperatorTree();
         } catch (err) {
-          if (!disposed && opList) opList.replaceChildren(node('p', 'op-error dev-op-pad', err.message));
+          if (!disposed && outlineSections.code?.list) {
+            outlineSections.code.list.replaceChildren(node('p', 'op-error dev-op-pad', err.message));
+          }
         } finally {
           opLoading = null;
         }
