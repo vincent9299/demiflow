@@ -122,10 +122,9 @@
    }
   },
   "demiflow.execution.local_tasks": {
-   "status": "undecided",
-   "reason": "它自己的函数只被历史测试执行；arrow_batch_sink 继承它的 Block 并使用 TaskOutput、TaskScheduler，dataset_native 使用 _apply、_fold。",
+   "status": "history",
+   "reason": "已封存的 native worker 函数 dataset_native.finish_typed_batch 按原路径调用 _apply，_select 只供该函数求值投影。现行分派、池和旧执行循环已退役。",
    "importers": [
-    "demiflow.execution.arrow_batch_sink",
     "demiflow.execution.dataset_native"
    ],
    "measured": {
