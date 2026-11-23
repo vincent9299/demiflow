@@ -494,6 +494,19 @@ class DataflowExecution:
                         target_partitions=self._policy.default_partitions, bounds=self._bounds)
                 snapshots.append(snapshot)
                 splits.extend(source_splits)
+            pinned_batch = (len(splits) == 1 and self._policy.fusion and any(
+                node.kind == 'terminal' and node.kernel.configuration.get('input_carrier') == 'fixed_scan_batches.v1'
+                for node in graph.nodes))
+            if pinned_batch:
+                from dataclasses import replace
+                context = self._action.context
+                if 'checkpoint_rows' not in context.explicit_limits:
+                    self._policy = replace(self._policy, checkpoint_rows=context.limits['checkpoint_unconfirmed_rows'])
+                if 'batch_rows' in context.explicit_limits:
+                    native = dict(self._policy.native_limits or {})
+                    native['batch_rows'] = min(context.limits['batch_rows'],
+                                               native.get('batch_rows', context.limits['batch_rows']))
+                    self._policy = replace(self._policy, native_limits=native)
             constants_ref = resolve_execution_constants(graph, action=self._action, store=self._store,
                                                         policy=self._policy)
             physical = compile_physical_dataflow(

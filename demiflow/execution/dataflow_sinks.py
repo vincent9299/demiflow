@@ -10,6 +10,7 @@ the native finalize fact and never issues a second ACK (C08/C16).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 
@@ -383,8 +384,10 @@ def ack_source_claims(image: RecoveryImage, *, action: RunAction) -> None:
         raise DataflowError("SOURCE_CHANGED", "Confirmed source frontier differs from the committed position")
 
 def publication_blocks(manifest, *, store, bounds, batch_rows, publication_workspace,
-                       publication_metadata, declared_schema=None):
+                       publication_metadata, declared_schema=None, fixed_scan_batches=False):
     """Read an ACKed or pending row publication inside its admitted memory envelope."""
+    import contextlib
+    import itertools
     import pyarrow as pa
     from .exchange.dataflow_bridge import _decode_payload
     from .dataflow_record_frames import (decode_frame, decode_document, line_limit, frame_stream,
@@ -464,7 +467,39 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
     try:
         for partition in manifest['partitions']:
             ref = _artifact_from_json(partition['data_ref'])
-            from .dataflow_segments import block_chunks
+            from .dataflow_segments import ARROW_STREAM_MEDIA, block_chunks, range_segments
+            if fixed_scan_batches and partition['rows']:
+                from .arrow_payload import _uncompressed_ipc
+                leaves = range_segments(store, ref, bounds, start=0, end=partition['rows'],
+                    frame_call=index_call if publication_workspace else None, on_retained=retain_index)
+                with contextlib.closing(leaves):
+                    first = next(leaves, None)
+                    if first and first[0].media_type == ARROW_STREAM_MEDIA:
+                        rows = total = 0
+                        for leaf, offset, count in itertools.chain((first,), leaves):
+                            if (offset != rows or leaf.media_type != ARROW_STREAM_MEDIA
+                                    or not 0 < leaf.size_bytes <= bounds.max_batch_bytes):
+                                raise DataflowError('INVALID_CONTRACT', 'invalid native terminal segment')
+                            call(admit_workspace, 4 * leaf.size_bytes + 65536, bounds)
+                            raw = b''.join(store.read(leaf, max_bytes=leaf.size_bytes))
+                            buffer = pa.py_buffer(raw)
+                            _uncompressed_ipc(buffer, bounds)
+                            with pa.ipc.open_stream(buffer) as scanner:
+                                value = scanner.read_next_batch()
+                            value.validate(full=True)
+                            if value.num_rows != count:
+                                raise DataflowError('INVALID_CONTRACT', 'native terminal segment row count changed')
+                            for start in range(0, count, batch_rows):
+                                output = pa.Table.from_batches([value.slice(start, batch_rows)])
+                                yield output
+                                last_output_bytes = output.get_total_buffer_size()
+                                del output
+                            rows += count
+                            total += leaf.size_bytes
+                            del raw, buffer, value
+                        if rows != partition['rows'] or total != partition['bytes']:
+                            raise DataflowError('INVALID_CONTRACT', 'native terminal segment totals changed')
+                        continue
             stream = frame_stream(block_chunks(store, ref, bounds,
                 chunk_bytes=read_chunk_bytes(bounds),
                 frame_call=index_call if publication_workspace else None,
@@ -615,18 +650,38 @@ class NativeTerminalSink(_DataflowArtifactSink):
         with self._native_scope():
             if manifest.get('final', True) and self._admit_publication is not None:
                 self._admit_publication()
-            result['native'] = (self.native.prepare(publication_blocks(manifest, store=self._store,
-                                    bounds=self._bounds, batch_rows=self._batch_rows,
-                                    publication_workspace=self._publication_workspace,
-                                    publication_metadata=self._publication_metadata,
-                                    declared_schema=getattr(getattr(self.native, "spec", None), "schema", None)), context)
-                                if manifest.get('final', True) else None)
+            result['native'] = None
+            if manifest.get('final', True):
+                blocks = self._batches(manifest)
+                if (self._configuration.get('input_carrier') == 'fixed_scan_batches.v1'
+                        and self.native.spec.schema is None):
+                    result['native'] = self.native.prepare_publication(blocks, context, result['ref'])
+                else:
+                    result['native'] = self.native.prepare(blocks, context)
         return result
+
+    def _batches(self, manifest):
+        return publication_blocks(manifest, store=self._store, bounds=self._bounds,
+            batch_rows=self._batch_rows, publication_workspace=self._publication_workspace,
+            publication_metadata=self._publication_metadata,
+            fixed_scan_batches=self._configuration.get('input_carrier') == 'fixed_scan_batches.v1',
+            declared_schema=getattr(getattr(self.native, "spec", None), "schema", None))
 
     def inspect(self, prepared, context):
         artifact = super().inspect(prepared, context)
         if prepared['native'] is None:
             return artifact
+        if 'publication' in prepared['native']:
+            from .dataflow_segments import tree_refs
+            if (prepared['native']['publication'] != prepared['ref']
+                    or prepared['native']['rows'] != prepared['manifest']['total_rows']
+                    or hashlib.sha256(self._publication_bytes(prepared['manifest'], context)).hexdigest()
+                        != prepared['ref']['digest']):
+                raise DataflowError('CORRUPT_ARTIFACT', 'Native merge input differs from the sealed publication')
+            for part in prepared['manifest']['partitions']:
+                for ref in tree_refs(self._store, _artifact_from_json(part['data_ref']), self._bounds):
+                    if not self._store.inspect(ref):
+                        raise DataflowError('CORRUPT_ARTIFACT', 'Native merge input segment disappeared')
         native = self.native.inspect(prepared['native'], context)
         if native is None and artifact is not None:
             # The exact original rows receipt is written only after native
@@ -643,7 +698,11 @@ class NativeTerminalSink(_DataflowArtifactSink):
         native = self.native.inspect(prepared['native'], context)
         if native is None:
             with self._native_scope():
-                native = self.native.commit(prepared['native'], context)
+                if 'publication' in prepared['native']:
+                    native = self.native.commit(prepared['native'], context,
+                        blocks=self._batches(prepared['manifest']), batch_rows=self._batch_rows)
+                else:
+                    native = self.native.commit(prepared['native'], context)
         artifact = super().commit(prepared, context)
         return {**artifact, 'data': {**artifact['data'], 'native_receipt': native}}
 
@@ -730,6 +789,11 @@ def make_native_terminal_sink(spec, *, request, services, publication_reserved_b
         raise DataflowError('INVALID_CONTRACT', 'unknown native terminal adapter')
     batch_rows = min(256, (services.policy.native_limits or {}).get("batch_rows", 256),
                      services.action.context.limits['batch_rows'])
+    if spec.configuration.get('input_carrier') == 'fixed_scan_batches.v1':
+        requested = request.source.query.batch_size or batch_rows
+        batch_rows = min(requested, (services.policy.native_limits or {}).get('batch_rows', requested))
+        if 'batch_rows' in services.action.context.explicit_limits:
+            batch_rows = min(batch_rows, services.action.context.limits['batch_rows'])
     return NativeTerminalSink(native=native, batch_rows=batch_rows, native_limits=services.policy.native_limits,
         admit_publication=admit_publication,
         sink_id=request.kind, store=services.store,

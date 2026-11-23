@@ -686,6 +686,87 @@ class LanceReader(_BaseReader):
         if prefix is not None:
             self._rows = itertools.chain(prefix, self._rows)
 
+    def supports_native_batches(self):
+        """Only an exact pinned table with ordinary Arrow values may skip the row codec."""
+        import pyarrow as pa
+        from ..lance.storage import open_lance_dataset
+        from ..lance.model import LanceScanSpec
+        query = self._plan.query
+        if (type(query) is not LanceScanSpec or self._global or self._replay_pending
+                or self._offset.get('arrow_batch') is not None
+                or query.version != self._version or self._version != self._snapshot.immutable_identity['version']):
+            return False
+        dataset = open_lance_dataset(query.uri, self._version, query.storage_options)
+        fields = [dataset.schema.field(name) for name in query.columns] if query.columns else dataset.schema
+        return all(pa.types.is_integer(f.type) or pa.types.is_boolean(f.type)
+                   or pa.types.is_string(f.type) or pa.types.is_binary(f.type) for f in fields)
+
+    def _native_batches(self):
+        from dataclasses import replace
+        from ..lance.read import _iter_scan
+        from ..lance.storage import open_lance_dataset
+        from .dataflow_native_limits import limit_value
+        from .arrow_payload import _window
+        query = self._plan.query
+        workspace = _window(self._services.bounds, self._services)
+        if workspace <= 0:
+            raise DataflowError('BUDGET_EXCEEDED', 'native scan requires an admitted byte window')
+        count = limit_value(self._services, 'batch_rows', query.batch_size or 256)
+        query = replace(query, version=self._version, batch_size=count, batch_readahead=1, fragment_readahead=1)
+        dataset = open_lance_dataset(query.uri, query.version, query.storage_options)
+        by_id = {int(f.fragment_id): f for f in dataset.get_fragments()}
+        first = self._fragment_ids.index(self._fragment_id) if self._next_sequence else 0
+        for index, frag_id in enumerate(self._fragment_ids[first:]):
+            offset = self._row_offset if index == 0 else 0
+            if frag_id not in by_id:
+                raise DataflowError('SOURCE_CHANGED', 'pinned source fragment disappeared')
+            for batch in _iter_scan(query, batch_size=count, batch_bytes=workspace,
+                                    fragments=[by_id[frag_id]], offset=offset):
+                if batch.num_rows:
+                    yield frag_id, offset, batch
+                    offset += batch.num_rows
+
+    def next_arrow_batch(self, max_rows, max_bytes):
+        """Advance to the next unread source row only for the returned contiguous slice."""
+        from .arrow_payload import _value_upper, row_upper
+        self._check_open()
+        if self._eoi:
+            return None
+        if not hasattr(self, '_batch_scan'):
+            self._batch_scan = self._native_batches()
+            self._batch_remainder = None
+        if self._batch_remainder is None:
+            self._batch_remainder = next(self._batch_scan, None)
+        if self._batch_remainder is None:
+            self._eoi = True
+            return None
+        fragment, offset, batch = self._batch_remainder
+        bounds = self._services.bounds
+        if batch.get_total_buffer_size() > bounds.max_batch_bytes:
+            raise DataflowError('BUDGET_EXCEEDED', 'decoded scan batch exceeds retained buffer allowance')
+        size = min(max_rows, batch.num_rows, 65536)
+        piece = batch.slice(0, size)
+        while size > 1 and piece.nbytes > max_bytes:
+            size = max(1, size // 2)
+            piece = batch.slice(0, size)
+        if piece.nbytes > max_bytes:
+            raise DataflowError('BUDGET_EXCEEDED', 'source row exceeds unconfirmed byte allowance')
+        # A whole-column upper bound cheaply proves that every row fits.
+        # An ambiguous upper bound falls back to the original individual check.
+        aggregate = 32 + sum(len(json.dumps(f.name).encode()) + 8 + _value_upper(col)
+                             for f, col in zip(piece.schema, piece.columns))
+        if aggregate > bounds.max_row_bytes:
+            from .arrow_payload import fallback_row
+            for index in range(size):
+                if row_upper(piece, index) > bounds.max_row_bytes:
+                    _encoded_size(fallback_row(piece, index), max_bytes=bounds.max_row_bytes)
+        self._batch_remainder = ((fragment, offset + size, batch.slice(size))
+                                 if size < batch.num_rows else None)
+        self._fragment_id, self._row_offset = fragment, offset + size
+        self._offset = {'version': self._version, 'fragment_id': fragment, 'row_offset': offset + size}
+        self._next_sequence += size
+        return piece
+
     def _iter_rows(self) -> Iterator[tuple[int, int, Any]]:
         from dataclasses import replace
 
@@ -772,6 +853,9 @@ class LanceReader(_BaseReader):
         return row, position
 
     def _teardown(self):
+        if hasattr(self, '_batch_scan'):
+            self._batch_scan.close()
+            self._batch_remainder = None
         rows, self._rows = self._rows, iter(())
         close = getattr(rows, 'close', None)
         if close is not None:

@@ -222,6 +222,31 @@ class TerminalBlocks:
             raise DataflowError('INVALID_CONTRACT', 'logical block count changed within an action')
         return key
 
+    def append_arrow_batch(self, batch):
+        """Retain one native batch in the same checked forest as the checkpoint."""
+        import pyarrow as pa
+        from ..dataflow_segments import ARROW_STREAM_MEDIA
+        rows = batch.num_rows
+        size = pa.ipc.get_record_batch_size(batch) + len(batch.schema.serialize()) + 8
+        if (size > self.bounds.max_batch_bytes or self.rows + rows > self.bounds.max_output_rows
+                or self.bytes + size > self.bounds.max_spill_bytes):
+            raise DataflowError('BUDGET_EXCEEDED', 'terminal Arrow batch exceeds output allowance')
+        self._admit_metadata(roots=1)
+        self._check_workspace(batch.get_total_buffer_size() + size * 2 + 65536)
+        # Exact-size buffer avoids an unbudgeted geometric growth during IPC write.
+        encoded = pa.allocate_buffer(size)
+        with pa.FixedSizeBufferWriter(encoded) as stream:
+            with pa.ipc.new_stream(stream, batch.schema) as writer:
+                writer.write_batch(batch)
+            size = stream.tell()
+        chunks = (encoded.slice(start, min(65536, size - start)).to_pybytes()
+                  for start in range(0, size, 65536))
+        ref = self.services.store.put(chunks, max_bytes=size, media_type=ARROW_STREAM_MEDIA)
+        key = self._block(None)
+        self.blocks[key][1].append(ref, rows=rows)
+        self.rows += rows
+        self.bytes += size
+
     def append(self, record, raw):
         self.append_parts(record, iter((raw,)), size=len(raw))
 

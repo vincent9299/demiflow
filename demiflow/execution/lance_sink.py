@@ -132,6 +132,36 @@ class LanceSink(Datasink):
         return dict(path=str(path.relative_to(self.run.directory)), bytes=path.stat().st_size,
                     sha256=digest.hexdigest(), rows=rows, schema_hash=schema_hash(schema), base_version=base)
 
+    def prepare_publication(self, blocks, context, publication):
+        """A pinned merge already owns durable, authenticated terminal segments."""
+        if self.spec.mode != 'merge' or self.spec.schema is not None:
+            raise RecoveryContractError('Only an uncast merge can consume its upstream publication')
+        target = inspect_lance(self.spec.uri, None, self.spec.storage_options)
+        if self.spec.expected_version is not None and target.resolved_version != self.spec.expected_version:
+            raise LanceWriteConflict('Lance CAS baseline changed')
+        rows = size = 0
+        schema = None
+        for block in blocks:
+            self.run.check_stop()
+            rows += block.num_rows
+            size += block.nbytes
+            if rows > self.run.limits['max_output_rows'] or size > self.run.limits['max_output_bytes']:
+                raise ExecutionBudgetExceeded('max_output_bytes', 'Merge publication exceeds run limits')
+            if schema is not None and schema != block.schema:
+                raise RecoveryContractError('Merge publication schema changed')
+            schema = block.schema
+        self.run.reserve('output_rows', rows, ceiling=self.run.limits['max_output_rows'],
+            reservation_id=identity({'commit': context.commit_id, 'sink': self.sink_id,
+                                     'component': 'output_rows'}))
+        self.run.reserve_output('row_bytes', size,
+            reservation_id=identity({'commit': context.commit_id, 'sink': self.sink_id,
+                                     'component': 'row_bytes'}))
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.run.allocate_artifact(self._marker(context), commit_id=context.commit_id)
+        return dict(publication=publication, rows=rows, bytes=size,
+                    schema_hash=schema_hash(schema if schema is not None else target.schema),
+                    base_version=target.resolved_version)
+
     def _path(self, prepared):
         relative = Path(prepared["path"])
         path = self.run.directory / relative
@@ -158,7 +188,8 @@ class LanceSink(Datasink):
 
     def inspect(self, prepared, context):
         import json
-        self._path(prepared)
+        if 'publication' not in prepared:
+            self._path(prepared)
         marker = self._marker(context)
         if marker.exists():
             if marker.is_symlink() or marker.stat().st_size > 65536:
@@ -204,10 +235,12 @@ class LanceSink(Datasink):
             schema_hash=prepared["schema_hash"], status="committed")
         return self._receipt(native, context)
 
-    def commit(self, prepared, context):
+    def commit(self, prepared, context, *, blocks=None, batch_rows=None):
         import pyarrow as pa
         from ..lance.write import write_lance
-        path = self._path(prepared)
+        if ('publication' in prepared) != (blocks is not None):
+            raise RecoveryContractError('Prepared input differs from the native merge publication')
+        path = self._path(prepared) if blocks is None else None
         effective = self.spec
         if self.spec.mode in {"append", "overwrite"}:
             effective = replace(self.spec, mode="create" if prepared["base_version"] is None else self.spec.mode,
@@ -219,6 +252,10 @@ class LanceSink(Datasink):
                 merged = self.native_merge(effective)
         if merged is not None:
             receipt = merged
+        elif blocks is not None:
+            limits = dict(self.run.limits, batch_rows=batch_rows)
+            receipt = write_lance(effective, blocks, limits=limits, check_stop=self.run.check_stop,
+                                  _source_row_count=prepared['rows'])
         elif (self.spec.mode == 'append' and self.spec.expected_version is None
                 and prepared['base_version'] is not None and prepared['rows'] == 0):
             # Preserve default empty-append semantics using a native empty CAS
@@ -252,7 +289,7 @@ class LanceSink(Datasink):
         return result
 
     def abort(self, prepared, context):
-        if self.inspect(prepared, context) is None:
+        if self.inspect(prepared, context) is None and 'publication' not in prepared:
             self._path(prepared).unlink(missing_ok=True)
 
 
