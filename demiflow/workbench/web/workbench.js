@@ -846,8 +846,7 @@
         basis:(value.source_basis==='compiled_snapshot'?'计划绑定版本':value.source_basis==='sealed'?'运行封存版本':'')+(definitionDigest?' · '+definitionDigest.slice(0,8):''),
         truncated:value.truncated},{mountText});
     }
-    const BEHAVIOR_ARGS=new Set(['when','catch','route','routes','isolate_route_failures','cache_when','schema_retries']);
-    const RUNTIME_ARGS=new Set(['config','model','options','concurrency','queue_depth','max_requests','request_concurrency','token_budget','service','request_gate','request_policy','batch_size','batch_readahead','fragment_readahead','max_batch','max_rows','max_row_bytes','wait_timeout_s','prepare_workers','reuse_workers','reuse_worker_max_tasks','index_cache_mb','max_entries','max_key_bytes']);
+    const RUNTIME_ARGS=new Set(['config','model','options','concurrency','queue_depth','max_requests','request_concurrency','token_budget','when','catch','route','routes','isolate_route_failures','cache_when','schema_retries','service','request_gate','request_policy','batch_size','batch_readahead','fragment_readahead','max_batch','max_rows','max_row_bytes','wait_timeout_s','prepare_workers','reuse_workers','reuse_worker_max_tasks','index_cache_mb','max_entries','max_key_bytes']);
     const OUTPUT_SIDE_ARGS=new Set(['call_output','error_output','output_ref']);
     function formatArgValue(p){
       if(p.value?.type==='Dataset')return 'Dataset · 上游数据流';
@@ -857,62 +856,59 @@
       return typeof p.value==='string'?p.value:json(p.value);
     }
     function renderArgTable(target,items){
-      materialTable(target,['参数','绑定来源','生效值'],items.map(p=>[p.name,
-        p.expression||(p.origin==='default'?'API 默认值':'字典展开或传入'),formatArgValue(p)]));
+      materialTable(target,['配置项','来源','当前值'],items.map(p=>[p.name,
+        p.expression||(p.origin==='default'?'API 默认值':'传入值'),formatArgValue(p)]));
     }
     function renderWiring(node,values,dag=planPreview?.dag){
       const byKind=Object.fromEntries(values.map(v=>[v.kind,v])),call=byKind.callsite,config=byKind.configuration,schema=byKind.schema;
       const allArgs=(config?.metadata?.arguments||[]).filter(p=>p.name!=='self'&&p.value?.type!=='Dataset');
       const provided=allArgs.filter(p=>p.origin!=='default'),defaults=allArgs.filter(p=>p.origin==='default');
-      const behaviorArgs=provided.filter(p=>BEHAVIOR_ARGS.has(p.name));
       const runtimeArgs=provided.filter(p=>RUNTIME_ARGS.has(p.name));
       const sideOutputs=provided.filter(p=>OUTPUT_SIDE_ARGS.has(p.name));
-      const interfaceArgs=provided.filter(p=>!BEHAVIOR_ARGS.has(p.name)&&!RUNTIME_ARGS.has(p.name)&&!OUTPUT_SIDE_ARGS.has(p.name));
+      const dataArgs=provided.filter(p=>!RUNTIME_ARGS.has(p.name)&&!OUTPUT_SIDE_ARGS.has(p.name));
       const bindings=schema?.metadata?.bindings||{};
 
-      const ioSection=$('section',undefined,'wb-wiring-section');
-      ioSection.append($('h4','1. 接口接线'));
-      if(bindings.inputs&&typeof bindings.inputs==='object')materialTable(ioSection,['上游字段','算子输入'],Object.entries(bindings.inputs).map(([k,v])=>[String(v),k]));
-      if(bindings.output)ioSection.append($('p','主输出：算子返回值 → 当前行的 '+bindings.output+' 字段','wb-wiring-binding'));
-      if(bindings.outputs)materialTable(ioSection,['算子输出','Dataset 字段'],Object.entries(bindings.outputs).map(([k,v])=>[k,String(v)]));
-      if(sideOutputs.length)materialTable(ioSection,['伴随输出','写回字段'],sideOutputs.map(p=>[p.name,formatArgValue(p)]));
-      if(interfaceArgs.length)renderArgTable(ioSection,interfaceArgs);
+      const dataSection=$('section',undefined,'wb-wiring-section');
+      dataSection.append($('h4','数据接线'));
+      if(bindings.inputs&&typeof bindings.inputs==='object')materialTable(dataSection,['上游字段','算子输入'],Object.entries(bindings.inputs).map(([k,v])=>[String(v),k]));
+      if(bindings.output)dataSection.append($('p','主输出：算子返回值 → 当前行的 '+bindings.output+' 字段','wb-wiring-binding'));
+      if(bindings.outputs)materialTable(dataSection,['算子输出','Dataset 字段'],Object.entries(bindings.outputs).map(([k,v])=>[k,String(v)]));
+      if(sideOutputs.length)materialTable(dataSection,['伴随输出','写回字段'],sideOutputs.map(p=>[p.name,formatArgValue(p)]));
+      if(dataArgs.length)renderArgTable(dataSection,dataArgs);
       const advanced=details('本次 API 调用与高级信息',sourceBody);advanced.classList.add('wb-input-advanced');
-      const schemaFold=details('查看输入 / 输出 Schema',ioSection);schemaFold.classList.add('wb-wiring-fold');
+      const schemaFold=details('查看输入 / 输出 Schema',dataSection);schemaFold.classList.add('wb-wiring-fold');
       if(schema?.metadata){
         schemaMaterial(schemaFold,schema.metadata,{input:true,advanced});
         schemaMaterial(schemaFold,schema.metadata,{advanced});
       }else schemaFold.append($('p','尚无已确认的上下游 Dataset Schema。','wb-caption'));
       const next=(dag?.edges||[]).filter(e=>e.from.occurrence_id===node.occurrence_id);
       const targets=[...new Set(next.map(e=>e.to.occurrence_id))];
-      const downstream=$('div',undefined,'wb-downstream');downstream.append($('span',targets.length?'下游：':'当前动作的数据流终点。','wb-caption'));ioSection.append(downstream);
+      const downstream=$('div',undefined,'wb-downstream');downstream.append($('span',targets.length?'下游：':'当前动作的数据流终点。','wb-caption'));dataSection.append(downstream);
       for(const id of targets){const target=dag.nodes.find(n=>n.occurrence_id===id);button(target?.label||target?.op_kind||'下游节点',()=>{const card=graphModel?.nodes.find(c=>c.selection.occurrenceId===id);if(card)return selectGraphNode(card.selection);},downstream);}
-      sourceBody.append(ioSection);
-
-      if(behaviorArgs.length){
-        const behaviorSection=$('section',undefined,'wb-wiring-section');
-        behaviorSection.append($('h4','2. 行为接线（门控与容错）'));
-        renderArgTable(behaviorSection,behaviorArgs);
-        if(behaviorArgs.some(p=>p.name==='when')&&sourceAvailable(node,'implementation')){
-          const jump=$('div',undefined,'wb-downstream');
-          button('查看门控代码源码 (when)',async()=>{sourceKind='implementation';sourceOpen=true;await loadSource();},jump);
-          behaviorSection.append(jump);
-        }
-        sourceBody.append(behaviorSection);
-      }
+      sourceBody.append(dataSection);
 
       const engineCfg=config?.metadata?.engine_configuration;
-      const engineModel=engineCfg?.model?.name||engineCfg?.model||null;
-      if(runtimeArgs.length||engineModel){
+      const modelObj=engineCfg?.model&&typeof engineCfg.model==='object'?engineCfg.model:null;
+      const modelName=modelObj?.name||modelObj?.model||(typeof engineCfg?.model==='string'?engineCfg.model:null);
+      const modelTransport=modelObj?.transport||null;
+      const modelLabel=[modelName,modelTransport].filter(Boolean).join(' · ');
+      if(runtimeArgs.length||modelLabel){
         const runtimeSection=$('section',undefined,'wb-wiring-section');
-        runtimeSection.append($('h4',(behaviorArgs.length?'3. ':'2. ')+'运行接线（模型 · 并发 · 预算）'));
+        runtimeSection.append($('h4','运行配置'));
         const summaryChips=$('div',undefined,'wb-runtime-chips');
-        if(engineModel)summaryChips.append($('span','生效模型 '+engineModel,'definition-model'));
+        if(modelLabel)summaryChips.append($('span','模型 '+modelLabel,'definition-model'));
+        const chipLabels={concurrency:'并发',queue_depth:'队列',max_requests:'请求上限'};
         for(const p of runtimeArgs){
-          if(['concurrency','queue_depth','max_requests'].includes(p.name))summaryChips.append($('span',p.name+'='+formatArgValue(p),'definition-chip'));
+          if(chipLabels[p.name])summaryChips.append($('span',chipLabels[p.name]+' '+formatArgValue(p),'definition-chip'));
+          else if(p.name==='token_budget'&&p.value?.max_input!=null)summaryChips.append($('span','输入上限 '+p.value.max_input,'definition-chip'));
         }
         if(summaryChips.children.length)runtimeSection.append(summaryChips);
         if(runtimeArgs.length)renderArgTable(runtimeSection,runtimeArgs);
+        if(runtimeArgs.some(p=>p.name==='when')&&sourceAvailable(node,'implementation')){
+          const jump=$('div',undefined,'wb-downstream');
+          button('查看触发条件源码 (when)',async()=>{sourceKind='implementation';sourceOpen=true;await loadSource();},jump);
+          runtimeSection.append(jump);
+        }
         sourceBody.append(runtimeSection);
       }
 
@@ -967,7 +963,7 @@
           if(value.path){definitionSource={path:value.path,line:value.start_line,sha256:value.sha256};definitionButton.textContent='查看当前定义';}
           const isGuard=sourceReferenced(node,'prompt');
           const implDef=meta.definition||{kind:'code'};
-          readDefinition(sourceBody,isGuard?{...implDef,role_badge:'门控代码 · when 条件'}:implDef,value);
+          readDefinition(sourceBody,isGuard?{...implDef,role_badge:'触发条件 · when 函数'}:implDef,value);
         }else if(kind==='prompt'){
           if(meta.name&&meta.template_sha256){definitionSource={name:meta.name,version:meta.version,template_sha256:meta.template_sha256};definitionButton.textContent='查看当前定义';}
           for(const item of meta.routes||[meta]){
