@@ -93,7 +93,7 @@ def test_empty_run_reset_and_activity_guard(tmp_path):
 
 def test_empty_reset_excludes_writer(tmp_path):
     from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.artifacts import run_lock
+    from demiflow.execution.storage.artifacts import run_lock
     journal = RunJournal(tmp_path)
     journal.initialize({'code': 'x'})
     with run_lock(tmp_path), pytest.raises(RuntimeError, match='Another writer'):

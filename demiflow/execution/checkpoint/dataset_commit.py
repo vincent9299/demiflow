@@ -9,7 +9,7 @@ from pathlib import Path
 import time
 import uuid
 from demiflow.execution.contracts.artifact import digest
-from demiflow.execution.artifacts import immutable, read, run_lock
+from demiflow.execution.storage.artifacts import immutable, read, run_lock
 
 
 class UncertainDatasetCommit(RuntimeError):

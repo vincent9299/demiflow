@@ -12,7 +12,7 @@ import json
 import re
 import shutil
 
-from ..execution.artifacts import immutable, read
+from demiflow.execution.storage.artifacts import immutable, read
 from .registry import Catalog, ReleaseRegistry
 from .storage import resolve_local_uri
 from .legacy import read_legacy_record

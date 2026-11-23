@@ -12,7 +12,7 @@ import os
 import threading
 from contextlib import contextmanager, ExitStack
 
-from demiflow.execution.artifacts import run_lock
+from demiflow.execution.storage.artifacts import run_lock
 from demiflow.execution.contracts.artifact import encoded
 from ..errors import ExecutionConflict
 from .recovery_contract import RecoveryContractError

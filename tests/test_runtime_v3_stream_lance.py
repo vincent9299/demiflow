@@ -188,7 +188,7 @@ def test_changed_record_membership_cannot_reuse_confirmed_invocation(tmp_path,mo
 
 def test_cancel_preserves_only_acknowledged_microbatches_and_releases_writer_lock(tmp_path):
     from demiflow.execution.recovery_contract import RecoveryContractError
-    from demiflow.execution.artifacts import run_lock
+    from demiflow.execution.storage.artifacts import run_lock
     target=tmp_path/'cancel.lance';ready=tmp_path/'visible'
     def source():
         yield {'id':'a','value':1}

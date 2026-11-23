@@ -142,7 +142,7 @@ def open_object(uri):
         raise ValueError('Object URI requires an explicit scheme')
     scheme = urlsplit(uri).scheme
     if scheme == 'file':
-        from .execution.artifacts import resolve_local_artifact
+        from demiflow.execution.storage.artifacts import resolve_local_artifact
         with resolve_local_artifact(_local_path(uri)).open('rb') as stream:
             yield stream
     elif scheme in {'http', 'https'}:
@@ -221,7 +221,7 @@ class LocalObjectStore:
         # the original spelling for that check without changing legacy put/read
         # location and artifact-alias behavior.
         self._domain_read_directory = self.directory
-        from .execution.artifacts import resolve_local_artifact
+        from demiflow.execution.storage.artifacts import resolve_local_artifact
         self.directory = resolve_local_artifact(self.directory)
 
     def recovery_identity(self):

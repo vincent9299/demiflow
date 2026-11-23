@@ -33,6 +33,8 @@ CARRIERS = {
     'opaque_payloads': ['hydrate_payloads'],
     'lance_predicate': ['scalar_equal'],
     'stream_checkpoint': ['StreamCheckpoint'],
+    'file_ref': ['JsonArtifactRef', 'save_json_artifact'],
+    'artifacts': ['read', 'immutable', 'run_lock', 'run_is_active', 'snapshot'],
     'dataflow_acquisition_call': ['QueueSourceDeclaration', 'AcquisitionCall'],
     'literal_source': ['LiteralSourceReference'],
     'contracts.pipeline': ['PipelineBundleRef', 'PipelineExecutionEnvironment', 'PipelineRunRequest'],

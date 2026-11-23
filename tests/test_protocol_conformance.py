@@ -8,7 +8,7 @@ protection evidence, not by this file.
 import threading
 
 import pytest
-from demiflow.execution.file_ref import save_manifest
+from demiflow.execution.storage.artifacts import save_manifest
 
 from demiflow.data import plan as ops
 from demiflow.data.plan import CallableSpec, LogicalPlan

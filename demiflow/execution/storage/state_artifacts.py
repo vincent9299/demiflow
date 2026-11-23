@@ -51,8 +51,8 @@ class StateArtifacts:
         name = sha + ".json"
         self.context.allocate_artifact(self.root / name, size=len(raw))
         with self.context.journal.publication_guard(self.context.fence):
-            from demiflow.execution.outputs.block_sink import storage_usage
-            total = storage_usage(self.context)
+
+            total = self.context.journal.storage_usage()
             target = self.root / name
             if not target.exists():
                 atomic_bytes(target, raw)

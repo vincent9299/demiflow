@@ -96,3 +96,48 @@ def read_sink_json(store, ref: ArtifactRef, *, max_bytes: int, media_type: str):
         return json.loads(raw)
     except ValueError as exc:
         raise DataflowError("CORRUPT_ARTIFACT", "Sink artifact is not valid JSON") from exc
+
+
+def read_f1_carrier(directory, ref, maximum):
+    """F1's existing permissive reference shape, with a pinned bounded read."""
+    import os
+    import stat
+    import json
+    import hashlib
+    from pathlib import Path
+    if (type(ref) is not dict or set(ref) != {'sha256', 'path', 'bytes'}
+            or type(ref['sha256']) is not str or len(ref['sha256']) != 64
+            or type(ref['bytes']) is not int or not 0 <= ref['bytes'] <= 4 * 1024**2):
+        raise PlanContractError('invalid_contract', 'Invalid F1 carrier reference')
+    name = ref['path']
+    if (type(name) is not str or not name or Path(name).is_absolute()
+            or any(p in ('', '.', '..') for p in name.split('/')) or '\\' in name):
+        raise PlanContractError('unsafe_artifact', 'Carrier path is not run relative')
+    path = Path(directory) / name
+    try:
+        if any(p.is_symlink() for p in (path, *path.parents)):
+            raise PlanContractError('unsafe_artifact', 'Carrier path contains a symlink')
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode):
+                raise PlanContractError('unsafe_artifact', 'Carrier is not regular')
+            if before.st_size > maximum or ref['bytes'] > maximum:
+                raise PlanContractError('artifact_too_large', 'Carrier exceeds read budget')
+            with os.fdopen(fd, 'rb', closefd=False) as stream:
+                raw = stream.read(maximum + 1)
+            after = os.fstat(fd); linked = path.stat(follow_symlinks=False)
+            if (before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns,before.st_ctime_ns) != (after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns) or (linked.st_dev,linked.st_ino) != (after.st_dev,after.st_ino):
+                raise PlanContractError('corrupt_artifact', 'Carrier changed while reading')
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise PlanContractError('unsafe_artifact', 'Carrier is unsafe or unreadable') from exc
+    if len(raw) > maximum:
+        raise PlanContractError('artifact_too_large', 'Carrier exceeds read budget')
+    if len(raw) != ref['bytes'] or hashlib.sha256(raw).hexdigest() != ref['sha256']:
+        raise PlanContractError('corrupt_artifact', 'Carrier digest or size differs')
+    try:
+        return json.loads(raw)
+    except ValueError as exc:
+        raise PlanContractError('corrupt_artifact', 'Carrier is not valid JSON') from exc

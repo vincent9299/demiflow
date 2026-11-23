@@ -18,7 +18,7 @@ import sys
 import time
 import uuid
 from .http import ManagedHTTPService
-from ..execution.artifacts import read, run_lock
+from demiflow.execution.storage.artifacts import read, run_lock
 from contextlib import suppress
 
 

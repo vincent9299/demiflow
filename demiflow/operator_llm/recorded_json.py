@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 import httpx
 from demiflow.execution.contracts.artifact import digest
-from demiflow.execution.artifacts import immutable, read
+from demiflow.execution.storage.artifacts import immutable, read
 
 class CallBudgetExceeded(RuntimeError):pass
 class UncertainPreviousCall(RuntimeError):pass

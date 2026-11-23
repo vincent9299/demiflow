@@ -61,7 +61,7 @@ PRE_V3_MODULES = {
         'demiflow.execution.worker.graph_execution', 'demiflow.execution.worker.queue_transform'},
     'demiflow.execution.seal.plan_interpreter': {
         'demiflow.execution.seal.plan',
-        'demiflow.execution.sealed_plan_facts', 'demiflow.execution.seal.sealed_plans',
+        'demiflow.execution.journal.sealed_plan_facts', 'demiflow.execution.seal.sealed_plans',
         'demiflow.workbench.runs.facts'},
     'demiflow.execution.hosts.local': {'demiflow.execution'},
     'demiflow.execution.hosts.ray': {'demiflow.execution'},

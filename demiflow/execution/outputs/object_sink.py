@@ -12,7 +12,7 @@ import threading
 
 from demiflow.data.datasink import Datasink
 from demiflow.objects import LocalObjectStore
-from demiflow.execution.outputs.block_sink import BlockSink, storage_usage
+from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identifier, identity
 from demiflow.execution.storage.state_artifacts import atomic_bytes
 from demiflow.execution.storage.object_resources import object_name, stage_object, verify_object
@@ -64,7 +64,7 @@ class ObjectSink(Datasink, BoundImageWriter):
             reservation_id='images-'+identity(node_id),ceiling=self.run.limits['max_output_bytes'])
         self.run.reserve('image_scratch_admission_bytes',maximum*(3*byte_limit+65536)+1024,
             reservation_id='images-'+identity(node_id),ceiling=self.run.limits['max_scratch_bytes'])
-        storage_usage(self.run)
+        self.run.journal.storage_usage()
 
     def store_image(self, raw, options):
         from demiflow.operator_llm.media import media_limits, image_decode_policy

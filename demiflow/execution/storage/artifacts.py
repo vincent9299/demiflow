@@ -130,4 +130,15 @@ def snapshot(path):
     return {'path':str(path),'exists':True,'size':s.st_size,'mtime_ns':s.st_mtime_ns,'inode':s.st_ino}
 
 
-import types
+
+
+def save_manifest(directory, value):
+    """Persist a validated run-input manifest as immutable JSON."""
+    from demiflow.execution.contracts.artifact import validate_manifest
+    validate_manifest(value)
+    directory = Path(directory)
+    sha = digest(value)
+    path = directory / (sha + '.json')
+    immutable(path, value)
+    return {"manifest_id": value["manifest_id"], "path": str(path),
+            "bytes": path.stat().st_size, "sha256": sha}

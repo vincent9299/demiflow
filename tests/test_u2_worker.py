@@ -16,9 +16,9 @@ from types import SimpleNamespace
 import pytest
 
 from demiflow.errors import ExecutionConflict
-from demiflow.execution.artifacts import read
+from demiflow.execution.storage.artifacts import read
 from demiflow.execution.contracts import artifact
-from demiflow.execution.file_ref import save_manifest
+from demiflow.execution.storage.artifacts import save_manifest
 from demiflow.execution.contracts.envelope import WORKER_PROTOCOL_VERSION
 from demiflow.execution.contracts.worker import validate_message
 from demiflow.execution.contracts.errors import ProtocolError

@@ -117,9 +117,9 @@ def bind_namespace(context, logical_root):
             if pending.is_symlink():
                 raise UnresolvedCommit('Object owner staging contains a symlink')
             pending.unlink(missing_ok=True)
-        from demiflow.execution.outputs.block_sink import storage_usage
+
         raw=owner_bytes(record)
-        if storage_usage(context)+len(raw)>context.limits['max_scratch_bytes']:
+        if context.journal.storage_usage()+len(raw)>context.limits['max_scratch_bytes']:
             raise RecoveryContractError('Object ownership metadata exceeds shared scratch budget')
         atomic_bytes(marker,raw)
         sync_directories(record,namespace)

@@ -18,7 +18,7 @@ from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..artifacts import read as _read_artifact
+from demiflow.execution.storage.artifacts import read as _read_artifact
 from ..contracts.dataflow_errors import DataflowError
 from ..contracts.envelope import WORKER_PROTOCOL_VERSION
 from ..contracts.errors import ProtocolError

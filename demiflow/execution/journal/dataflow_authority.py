@@ -11,7 +11,7 @@ from __future__ import annotations
 from demiflow.execution.contracts.dataflow_codec import image_request_budget
 from demiflow.execution.recovery_contract import UnresolvedCommit
 
-from demiflow.execution.artifacts import resolve_local_artifact
+from demiflow.execution.storage.artifacts import resolve_local_artifact
 from demiflow.execution.storage.private_journals import inspect_private_journal as _existing_size, inspect_private_lease_history as _lease_history
 
 from demiflow.execution.contracts.dataflow_kinds import NATIVE_BATCH_SCHEMA as SCHEMA, NATIVE_BATCH_KINDS as KINDS

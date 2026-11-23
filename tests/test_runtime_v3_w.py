@@ -703,7 +703,7 @@ def test_w009(tmp_path):
 
 def test_w010():
     # The historical-layout summary is produced by the engine reader since P4.
-    from demiflow.execution import sealed_plan_facts as facts
+    from demiflow.execution.journal import sealed_plan_facts as facts
     graph, occs = make_graph("a0")
     physical = make_physical(graph, limitations=("limit",))
     view = hist.build_plan_view(graph, make_sealed(), physical, observations=())
@@ -745,7 +745,7 @@ def test_w011():
     # v1/v2 entry keeps the historical shape.
     # The engine reader hands the workbench the summarised physical plan in plan_view
     # (P4); the workbench passes it through without re-deriving it.
-    from demiflow.execution import sealed_plan_facts
+    from demiflow.execution.journal import sealed_plan_facts
     physical_plan = {"plan_id": "p", "plan_revision": 1, "recovery": {},
                      "worker_groups": [], "stages": [], "channels": []}
     summary = sealed_plan_facts._physical_summary(physical_plan)

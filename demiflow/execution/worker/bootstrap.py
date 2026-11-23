@@ -19,7 +19,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from ..artifacts import read
+from demiflow.execution.storage.artifacts import read
 from ..contracts.errors import ProtocolError
 from ..recovery_contract import RecoveryContractError, document
 from .runtime import validate_worker_launch

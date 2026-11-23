@@ -2,7 +2,7 @@ import lance
 import pyarrow as pa
 import pytest
 from demiflow.lance.maintenance import retire_tables
-from demiflow.execution.artifacts import read
+from demiflow.execution.storage.artifacts import read
 from demiflow.lance.refs import DatasetRef
 from demiflow.lance.registry import Catalog, ReleaseRegistry
 from demiflow.lance.storage import schema_hash

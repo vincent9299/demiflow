@@ -177,7 +177,7 @@ def finish_journal_audit(execution, stats):
     if not embeddings and not prompts:
         return
     from itertools import chain
-    from demiflow.execution.artifacts import resolve_local_artifact
+    from demiflow.execution.storage.artifacts import resolve_local_artifact
     from demiflow.operator_llm.call_ref import journal_totals
     labels = getattr(execution, '_observation_labels', {})
     seen = set()

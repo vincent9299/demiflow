@@ -16,9 +16,7 @@ BLOCK_BYTES = 4 * 1024**2
 _CANON_MAX_DEPTH = 64
 
 
-def storage_usage(context):
-    """Indexed reserved/settled bytes; no history or directory scan on writes."""
-    return context.journal.storage_usage()
+
 
 
 def _canonical_row(value):

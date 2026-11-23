@@ -5,7 +5,7 @@ import os
 import pytest
 
 from demiflow.execution.storage import location_index as locations
-from demiflow.execution import artifacts
+from demiflow.execution.storage import artifacts
 
 
 @pytest.fixture

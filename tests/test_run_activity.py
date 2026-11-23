@@ -2,7 +2,7 @@
 import subprocess
 import sys
 
-from demiflow.execution.artifacts import run_is_active, run_lock
+from demiflow.execution.storage.artifacts import run_is_active, run_lock
 
 
 def test_activity_without_side_effects_and_same_process_holder(tmp_path):
@@ -17,7 +17,7 @@ def test_activity_without_side_effects_and_same_process_holder(tmp_path):
 
 def test_observe_external_writer_and_release(tmp_path):
     script = '''import sys
-from demiflow.execution.artifacts import run_lock
+from demiflow.execution.storage.artifacts import run_lock
 with run_lock(sys.argv[1]):
     print('locked', flush=True)
     sys.stdin.readline()

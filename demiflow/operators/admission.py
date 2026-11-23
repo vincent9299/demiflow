@@ -146,7 +146,7 @@ class StreamAdmission:
         return key_digest(values, self.max_key_bytes)
 
     def start(self):
-        from demiflow.execution.artifacts import run_lock
+        from demiflow.execution.storage.artifacts import run_lock
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = run_lock(self.path.with_suffix(self.path.suffix + '.owner'))
         self.lock.__enter__()

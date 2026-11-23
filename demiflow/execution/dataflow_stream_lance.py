@@ -173,7 +173,7 @@ class _NativeWriter(StreamLanceWriter):
         except LanceResourceNotFound: return None
 
     def start(self, node, *, latest=None, policy=None):
-        from .artifacts import run_lock
+        from demiflow.execution.storage.artifacts import run_lock
         self._target_lock = run_lock(Path(self.uri).with_suffix('.stream-writer'))
         self._target_lock.__enter__()
         run = self.action.context

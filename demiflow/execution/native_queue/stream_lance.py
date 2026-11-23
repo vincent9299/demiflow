@@ -289,7 +289,7 @@ class StreamLanceSink(StreamLanceWriter):
         self._lock = None
 
     async def astart(self):
-        from demiflow.execution.artifacts import run_lock
+        from demiflow.execution.storage.artifacts import run_lock
         self.version = None
         self._lock = run_lock(Path(self.uri).with_suffix('.stream-writer'))
         self._lock.__enter__()

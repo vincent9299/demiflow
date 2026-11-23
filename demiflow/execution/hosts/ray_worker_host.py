@@ -12,7 +12,7 @@ from pathlib import Path
 import ray
 from ray.exceptions import GetTimeoutError, RayActorError
 
-from ..artifacts import read as _read_artifact
+from demiflow.execution.storage.artifacts import read as _read_artifact
 from ..contracts.errors import ProtocolError
 from ..worker.runtime import WorkerRuntime, validate_worker_launch
 

@@ -200,7 +200,7 @@ class _SQLiteJournalShard:
         if read_only and legacy_source:
             raise ValueError('A read-only journal cannot import legacy records')
         self.read_only = read_only
-        from ..execution.artifacts import resolve_local_artifact
+        from demiflow.execution.storage.artifacts import resolve_local_artifact
         self.path = resolve_local_artifact(path)
         self.limit = max_requests
         self.timeout_s = timeout_s
@@ -1083,7 +1083,7 @@ class SQLitePromptJournal:
             raise ValueError('read_only must be a boolean')
         if read_only and legacy_source:
             raise ValueError('A read-only journal cannot import legacy records')
-        from ..execution.artifacts import resolve_local_artifact
+        from demiflow.execution.storage.artifacts import resolve_local_artifact
         self.path = resolve_local_artifact(path)
         self.limit = max_requests
         self.timeout_s = timeout_s
