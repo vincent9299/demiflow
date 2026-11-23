@@ -894,11 +894,45 @@
       if(current)item.setAttribute('aria-current','true');else item.removeAttribute('aria-current');
     }
   }
+  let projectDefaultPython='';
   function settingsDialog() {
     const project=projectList.find(p=>p.workspace_id===workspaceId);if(!project)return;
     const dialog=$('dialog');dialog.setAttribute('aria-label','项目设置');
     const path=$('p',project.root,'muted small');path.style.overflowWrap='anywhere';
     dialog.append($('h2','项目设置'),$('p',project.name),path);
+    if(projectManageEnabled){
+      const pySection=$('section',undefined,'project-python-settings');
+      pySection.append($('strong','开发测试 Python 环境（沙箱只读）'));
+      const modeSelect=$('select',undefined,'project-python-select');modeSelect.setAttribute('aria-label','Python 环境模式');
+      modeSelect.append(new Option('继承工作台默认环境','default'),new Option('自定义项目虚拟环境 (venv / conda)','custom'),new Option('不挂载 Python 环境','disabled'));
+      const currentPy=project.python;
+      modeSelect.value=currentPy===undefined||currentPy===null?'default':currentPy===''?'disabled':'custom';
+      const pyInput=$('input',undefined,'project-python-input');pyInput.type='text';pyInput.setAttribute('aria-label','自定义 Python 解释器路径');
+      pyInput.placeholder='/path/to/venv/bin/python';pyInput.value=typeof currentPy==='string'&&currentPy?currentPy:'';
+      const pyHint=$('p','','muted small project-python-hint');
+      const pyMsg=$('p','','small project-python-msg');pyMsg.hidden=true;
+      const syncPyUi=()=>{
+        const m=modeSelect.value;
+        pyInput.hidden=m!=='custom';
+        pyHint.textContent=m==='default'?('当前默认：'+(projectDefaultPython||'工作台宿主 Python')+'（仅开放只读执行与 pytest，不可写入环境目录）'):m==='disabled'?'沙箱内仅保留系统 /usr/bin，不挂载项目 Python 环境。':'填写该项目的 venv 或 conda Python 绝对路径，工作台将以只读方式加入开发沙箱 PATH。';
+      };
+      modeSelect.onchange=syncPyUi;syncPyUi();
+      const savePy=button('保存 Python 环境',async()=>{
+        const m=modeSelect.value;
+        const payloadPy=m==='default'?null:m==='disabled'?'':pyInput.value.trim();
+        if(m==='custom'&&!payloadPy){pyMsg.textContent='请填写 Python 解释器的绝对路径。';pyMsg.dataset.tone='error';pyMsg.hidden=false;return;}
+        savePy.disabled=true;pyMsg.hidden=true;
+        try{
+          await api('project-python',{},{workspace_id:project.workspace_id,expected:projectDigest,python:payloadPy});
+          await refreshProjects();
+          pyMsg.textContent='已保存，新发起的开发回合将使用此只读 Python 环境。';pyMsg.dataset.tone='ok';pyMsg.hidden=false;
+        }catch(err){
+          pyMsg.textContent=err?.message||'保存失败';pyMsg.dataset.tone='error';pyMsg.hidden=false;
+        }finally{savePy.disabled=false;}
+      },pySection);
+      pySection.insertBefore(modeSelect,savePy);pySection.insertBefore(pyInput,savePy);pySection.insertBefore(pyHint,savePy);pySection.append(pyMsg);
+      dialog.append(pySection);
+    }
     if(projectRemovalEnabled)button('移除项目 '+project.name,()=>{dialog.close();removeProjectDialog(project);},dialog);
     else dialog.append($('p','此服务未授予项目管理权限。','notice'));
     button('关闭',()=>dialog.close(),dialog);document.body.append(dialog);
@@ -923,6 +957,7 @@
   }
   async function refreshProjects(){
     const inventory=await api('projects'),rows=inventory.projects;projectDigest=inventory.digest;
+    if(typeof inventory.default_python==='string')projectDefaultPython=inventory.default_python;
     if(json(rows)!==json(projectList)||!projectNav.childElementCount){
       projectList=rows;
       const existing=new Map([...projectNav.querySelectorAll('[data-workspace]')].map(item=>[item.dataset.workspace,item]));

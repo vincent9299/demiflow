@@ -336,12 +336,12 @@ class Service:
         return self.store.list(workspace, offset, limit, identity=root_identity(root),
                                policy_hash=self.current_hash(workspace,root), providers=self.binding(workspace,root)[0].providers)
 
-    def start_project(self, workspace, root, session_id, submission_id, expected_revision, text, operation='message'):
+    def start_project(self, workspace, root, session_id, submission_id, expected_revision, text, operation='message', auto_review=False, rework_depth=0):
         self._require_writable(workspace,root,session_id)
         cell_capability = {'notebook_cell':'notebook_cells', 'notebook_cell_cli':'notebook_cli'}.get(operation)
         if cell_capability and not self.capabilities(workspace,root).get(cell_capability):
             reject('当前开发服务未提供只读的 Notebook 单元格生成。')
-        return self.start(workspace,root,session_id,submission_id,expected_revision,text,operation=operation)
+        return self.start(workspace,root,session_id,submission_id,expected_revision,text,operation=operation,auto_review=auto_review,rework_depth=rework_depth)
 
     def steer(self, workspace, root, session_id, turn_id, submission_id, text, from_queue=False):
         with self.lock:
@@ -386,7 +386,9 @@ class Service:
                             return
                         if session['turn']['cleanup'] == 'complete':
                             head = queue[0]
-                            self.start_project(workspace, root, sid, head['submission'], session['revision'], head['text'])
+                            is_rework = head['submission'].startswith('forge-rework-')
+                            self.start_project(workspace, root, sid, head['submission'], session['revision'], head['text'],
+                                               auto_review=is_rework, rework_depth=1 if is_rework else 0)
                     except (OSError, ValueError) as exc:
                         self.queue_readers.discard(sid)
                         self.store.hold_queue(sid, str(exc))
@@ -409,7 +411,18 @@ class Service:
             reject('No provider conversation is available to compact', 'conflict')
         return self.start(workspace,root,session_id,submission_id,expected_revision,'压缩上下文',operation='compact')
 
-    def start(self, workspace, root, session_id, submission_id, expected_revision, text, *, operation="message"):
+    def _maybe_drain_queue(self, workspace, root_path, sid):
+        if self.closed or not workspace or not root_path or not sid:
+            return
+        try:
+            session = self.store.show(workspace, sid)
+            queue = session.get('queued_messages') or []
+            if queue and not queue[0].get('error'):
+                self._watch_queue(workspace, root_path, sid)
+        except (OSError, ValueError):
+            pass
+
+    def start(self, workspace, root, session_id, submission_id, expected_revision, text, *, operation="message", auto_review=False, rework_depth=0):
         self.project(workspace, root)
         _, current_hash, _ = self.binding(workspace, root, seal=True)
         caps = self.capabilities(workspace, root)
@@ -442,6 +455,13 @@ class Service:
             value, fresh = self.store.submit(workspace, session_id, submission_id, expected_revision, text, root_identity(root), current_hash,
                                              operation=operation, provider=target_provider)
             if not fresh: return self.store.public_turn(value)
+            if auto_review or rework_depth:
+                turn_dir = self.root / session_id / value['id']
+                turn_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+                opts_path = turn_dir / 'forge_options.json'
+                fd = os.open(opts_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+                with os.fdopen(fd, 'wb') as stream:
+                    stream.write(wire(dict(auto_review=bool(auto_review), rework_depth=int(rework_depth))))
             session = self.store.show(workspace, session_id)
             return self._launch_provider(value, session)
 
@@ -584,6 +604,8 @@ class Service:
                             if self.closed:
                                 self.warm_workers.pop(warm.session_id, None)
                                 self._retire_warm(warm, wait_s=0.0)
+                            else:
+                                self._maybe_drain_queue(warm.workspace, warm.root_path, warm.session_id)
                         self.notify()
         finally:
             warm.dead = True
@@ -599,6 +621,7 @@ class Service:
                     try: sock.close()
                     except OSError: pass
                 self._cleanup_reserved(warm)
+                self._maybe_drain_queue(warm.workspace, warm.root_path, warm.session_id)
             self.notify()
 
     def _launch_provider(self, value, session):
@@ -735,10 +758,16 @@ class Service:
             if process.poll() is not None:
                 self._close_turn_life(tid, life)
                 del self.workers[tid]
-                self.worker_targets.pop(tid, None)
+                target = self.worker_targets.pop(tid, None)
                 if self.store.turn(tid)['cleanup'] != 'complete':
                     if not self._finish_unstarted(self.store.turn(tid)):
                         self.store.update(tid, state='interrupted', cleanup='unknown')
+                if target and not self.closed:
+                    try:
+                        root_path = json.loads(target[3])['path']
+                        self._maybe_drain_queue(target[0], root_path, target[1])
+                    except (ValueError, KeyError, IndexError):
+                        pass
         warm_map = getattr(self, 'warm_workers', None)
         if warm_map:
             for sid, warm in list(warm_map.items()):

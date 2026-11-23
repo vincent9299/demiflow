@@ -198,3 +198,27 @@ def test_browser_restores_terminal_review_from_parent_receipt():
                        result=dict(pipeline_review='invalid')),turn='truncated')])
         expect(page.locator('.dfc-answers .dfc-summary').last).to_have_text('需要修改')
         assert not errors
+
+
+def test_forge_auto_review_and_rework_helpers():
+    from demiflow.workbench.conversations.worker import _has_code_changes, _build_rework_prompt
+    assert _has_code_changes([{'path': 'flows/main.py'}]) is True
+    assert _has_code_changes([{'path': 'deployment.json'}]) is True
+    assert _has_code_changes([{'path': 'parameters/default.json'}]) is True
+    assert _has_code_changes([{'path': 'README.md'}]) is False
+    assert _has_code_changes([{'path': 'docs/notes.md'}]) is False
+    # Passed checks & suggestion-only review produce no automatic rework.
+    assert _build_rework_prompt(
+        {'native_flow': {'status': 'passed'}, 'project_layout': {'status': 'passed'}},
+        {'status': 'passed', 'findings': [{'severity': 'suggestion', 'path': 'flows/a.py', 'line': 1, 'impact': 'style'}]},
+    ) is None
+    # Hard static failure or blocking review finding produces structured rework prompt.
+    prompt = _build_rework_prompt(
+        {'native_flow': {'status': 'failed', 'diagnostics': [{'rule': 'FL-03', 'path': 'flows/a.py', 'line': 12, 'detail': 'bad arg'}]}},
+        {'status': 'invalid', 'findings': [{'severity': 'blocking', 'path': 'operators/b.py', 'line': 8,
+                                            'trigger': 'empty input', 'impact': 'crashes', 'suggestion': 'guard None'}]},
+    )
+    assert prompt is not None
+    assert '[Forge 自动返工 1/1]' in prompt
+    assert 'FL-03' in prompt and 'flows/a.py:12' in prompt
+    assert 'operators/b.py:8' in prompt and 'guard None' in prompt

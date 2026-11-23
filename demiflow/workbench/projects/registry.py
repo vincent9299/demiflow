@@ -23,6 +23,20 @@ def identity(value):
     return value
 
 
+def validate_python(value):
+    """Validate optional per-project read-only Python interpreter path."""
+    if value is None or value == '':
+        return value
+    if type(value) is not str or len(value.encode('utf-8')) > 2048 or any(ord(c) < 32 for c in value):
+        raise ForgeError('Python 路径格式不正确。', code='invalid_request')
+    p = Path(value)
+    if not p.is_absolute() or str(p) != value or '..' in p.parts:
+        raise ForgeError('Python 路径必须是规范的绝对路径。', code='invalid_request')
+    if not p.is_file() or not os.access(p, os.X_OK):
+        raise ForgeError('指定的 Python 解释器不存在或不可执行：' + value, code='invalid_request')
+    return value
+
+
 def load_registry(path):
     path = ws.no_symlinks(Path(path).absolute())
     value = ws.read_control(path, 256*1024)
@@ -34,8 +48,12 @@ def load_registry(path):
     for key, item in value['projects'].items():
         identity(key)
         fields = {'root','name','allow_runs'} if value['format']==FORMAT else {'root','name','permissions'}
-        if type(item) is not dict or set(item)!=fields:
+        if type(item) is not dict or set(item) - {'python'} != fields:
             raise ForgeError('Invalid console project')
+        if 'python' in item:
+            py = item['python']
+            if py != '' and (type(py) is not str or not Path(py).is_absolute() or str(Path(py)) != py or '..' in Path(py).parts):
+                raise ForgeError('Invalid project python configuration')
         if value['format']==FORMAT:
             if type(item['allow_runs']) is not bool:
                 raise ForgeError('Invalid run permission')
@@ -146,6 +164,7 @@ def projects(value):
         row = dict(workspace_id=key, **item, **({'allow_runs':permissions(item)['run_submit']} if 'allow_runs' not in item else {}))
         row['permissions']=permissions(item)
         row['capabilities']=capabilities(item)
+        row['python'] = item.get('python')
         try:
             resolve_workspace(value, key)
             row['status'] = 'available'
@@ -243,6 +262,24 @@ def set_permissions(path, workspace_id, *, expected, run_submit, run_control, at
         value['projects'][workspace_id]['permissions'].update(requested)
         ws.write_control(path,value,expected=expected)
     return dict(status='updated',workspace_id=workspace_id,permissions=requested,digest=content_digest(value))
+
+
+def set_python(path, workspace_id, *, expected, python):
+    """Configure optional per-project read-only Python interpreter for dev sandbox testing."""
+    identity(workspace_id)
+    cleaned = validate_python(python)
+    with _locked(path) as path:
+        value = load_registry(path)
+        if content_digest(value) != expected:
+            raise ForgeError('Registry changed before python environment update', code='conflict')
+        if workspace_id not in value['projects']:
+            raise ForgeError('Workspace is not registered', code='not_found')
+        if cleaned is None:
+            value['projects'][workspace_id].pop('python', None)
+        else:
+            value['projects'][workspace_id]['python'] = cleaned
+        ws.write_control(path, value, expected=expected)
+    return dict(status='updated', workspace_id=workspace_id, python=cleaned, digest=content_digest(value))
 
 
 def register(forge):
