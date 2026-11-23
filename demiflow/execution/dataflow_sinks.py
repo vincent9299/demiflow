@@ -10,6 +10,7 @@ the native finalize fact and never issues a second ACK (C08/C16).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 
@@ -649,19 +650,38 @@ class NativeTerminalSink(_DataflowArtifactSink):
         with self._native_scope():
             if manifest.get('final', True) and self._admit_publication is not None:
                 self._admit_publication()
-            result['native'] = (self.native.prepare(publication_blocks(manifest, store=self._store,
-                                    bounds=self._bounds, batch_rows=self._batch_rows,
-                                    publication_workspace=self._publication_workspace,
-                                    publication_metadata=self._publication_metadata,
-                                    fixed_scan_batches=self._configuration.get('input_carrier') == 'fixed_scan_batches.v1',
-                                    declared_schema=getattr(getattr(self.native, "spec", None), "schema", None)), context)
-                                if manifest.get('final', True) else None)
+            result['native'] = None
+            if manifest.get('final', True):
+                blocks = self._batches(manifest)
+                if (self._configuration.get('input_carrier') == 'fixed_scan_batches.v1'
+                        and self.native.spec.schema is None):
+                    result['native'] = self.native.prepare_publication(blocks, context, result['ref'])
+                else:
+                    result['native'] = self.native.prepare(blocks, context)
         return result
+
+    def _batches(self, manifest):
+        return publication_blocks(manifest, store=self._store, bounds=self._bounds,
+            batch_rows=self._batch_rows, publication_workspace=self._publication_workspace,
+            publication_metadata=self._publication_metadata,
+            fixed_scan_batches=self._configuration.get('input_carrier') == 'fixed_scan_batches.v1',
+            declared_schema=getattr(getattr(self.native, "spec", None), "schema", None))
 
     def inspect(self, prepared, context):
         artifact = super().inspect(prepared, context)
         if prepared['native'] is None:
             return artifact
+        if 'publication' in prepared['native']:
+            from .dataflow_segments import tree_refs
+            if (prepared['native']['publication'] != prepared['ref']
+                    or prepared['native']['rows'] != prepared['manifest']['total_rows']
+                    or hashlib.sha256(self._publication_bytes(prepared['manifest'], context)).hexdigest()
+                        != prepared['ref']['digest']):
+                raise DataflowError('CORRUPT_ARTIFACT', 'Native merge input differs from the sealed publication')
+            for part in prepared['manifest']['partitions']:
+                for ref in tree_refs(self._store, _artifact_from_json(part['data_ref']), self._bounds):
+                    if not self._store.inspect(ref):
+                        raise DataflowError('CORRUPT_ARTIFACT', 'Native merge input segment disappeared')
         native = self.native.inspect(prepared['native'], context)
         if native is None and artifact is not None:
             # The exact original rows receipt is written only after native
@@ -678,7 +698,11 @@ class NativeTerminalSink(_DataflowArtifactSink):
         native = self.native.inspect(prepared['native'], context)
         if native is None:
             with self._native_scope():
-                native = self.native.commit(prepared['native'], context)
+                if 'publication' in prepared['native']:
+                    native = self.native.commit(prepared['native'], context,
+                        blocks=self._batches(prepared['manifest']), batch_rows=self._batch_rows)
+                else:
+                    native = self.native.commit(prepared['native'], context)
         artifact = super().commit(prepared, context)
         return {**artifact, 'data': {**artifact['data'], 'native_receipt': native}}
 
