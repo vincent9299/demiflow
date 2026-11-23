@@ -80,6 +80,8 @@ STATIC_ASSETS = {
     "/reading.js": ("reading.js", "text/javascript; charset=utf-8"),
     "/data-tools.js": ("data-tools.js", "text/javascript; charset=utf-8"),
     "/python-syntax.js": ("python-syntax.js", "text/javascript; charset=utf-8"),
+    "/codemirror-viewer.js": ("codemirror-viewer.js", "text/javascript; charset=utf-8"),
+    "/codemirror-viewer-LICENSE.txt": ("codemirror-viewer-LICENSE.txt", "text/plain; charset=utf-8"),
     "/markdown-worker.js": ("markdown-worker.js", "text/javascript; charset=utf-8"),
     "/markdown-it.min.js": ("markdown-it.min.js", "text/javascript; charset=utf-8"),
     "/markdown-it.LICENSE.txt": ("markdown-it.LICENSE.txt", "text/plain; charset=utf-8"),
@@ -92,6 +94,8 @@ RESPONSE_BYTES = 9 * 1024**2
 # Required and optional wire fields; these describe transport, never Flow operators.
 GET_FIELDS = {
     'project-file-text': ({'path'}, set()),
+    'project-file-diff': ({'path'}, set()),
+    'project-changes': (set(), set()),
     'project-files': (set(), {'path', 'offset', 'limit'}),
     'project-documents': (set(), {'path', 'offset', 'limit'}),
     'project-markdown': ({'path'}, set()),
@@ -654,7 +658,7 @@ class Handler(BaseHTTPRequestHandler):
                 if self.server.api_only:
                     raise ForgeError('Web assets are disabled', code='not_found')
                 filename, mime = STATIC_ASSETS[url.path]
-                self._send(read_bounded(ASSETS / filename, 512 * 1024), mime=mime)
+                self._send(read_bounded(ASSETS / filename, 1024 * 1024), mime=mime)
                 return
             self._authorize()
             if url.path == '/api/development-settings':
@@ -711,7 +715,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:self._send(value)
                 return
             with self._work(control=url.path in {'/api/run-snapshot','/api/run-events'},
-                            project=name in {'project-data-tools','data-tool-definition','project-operators','operator-definition','operator-history','flow-arguments','project-file-text','project-files','project-documents','project-markdown'}):
+                            project=name in {'project-data-tools','data-tool-definition','project-operators','operator-definition','operator-history','flow-arguments','project-file-text','project-file-diff','project-changes','project-files','project-documents','project-markdown'}):
                 if url.path == "/api/context":
                     value = api.workspace_context(root)
                     value['runs_enabled'] = permissions['run_submit']
@@ -779,6 +783,12 @@ class Handler(BaseHTTPRequestHandler):
                 elif url.path == '/api/project-file-text':
                     from demiflow.workbench.projects import documents
                     value = documents.read(root, query['path'], project_text=True)
+                elif url.path == '/api/project-file-diff':
+                    from demiflow.workbench.projects import documents
+                    value = documents.file_diff(root, query['path'])
+                elif url.path == '/api/project-changes':
+                    from demiflow.workbench.projects import documents
+                    value = documents.git_changes(root)
                 elif url.path in {'/api/project-files', '/api/project-documents', '/api/project-markdown'}:
                     from demiflow.workbench.projects import documents
                     value = (documents.read(root, query['path']) if url.path == '/api/project-markdown' else
@@ -1065,12 +1075,12 @@ def export_report(root, digest, path):
             continue
         if tag not in html:
             continue  # Worker-only assets are not executed by an offline report.
-        content = read_bounded(ASSETS / name, 512 * 1024).decode()
+        content = read_bounded(ASSETS / name, 1024 * 1024).decode()
         content = re.sub(closing[:-1], lambda match: "<\\/" + match[0][2:], content, flags=re.IGNORECASE)
         prefix = "<script>window.FORGE_EXPORT=" + payload + ";</script>" if name == "app.js" else ""
         html = html.replace(tag, prefix + opening + content + closing)
     notices = "\n\n".join(read_bounded(ASSETS / name, 512 * 1024).decode()
-                            for name in ("markdown-it.LICENSE.txt", "markdown-it.NOTICES.txt"))
+                            for name in ("markdown-it.LICENSE.txt", "markdown-it.NOTICES.txt", "codemirror-viewer-LICENSE.txt"))
     html = html.replace("</body>", '<details class="export-notices"><summary>第三方许可证与通知</summary><pre>'
                         + html_markup.escape(notices) + "</pre></details></body>")
     raw = html.encode("utf-8")
