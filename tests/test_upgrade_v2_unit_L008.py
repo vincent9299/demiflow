@@ -8,7 +8,7 @@ import shutil
 
 import pytest
 
-from demiflow.execution.native_plan import load_native_execution
+from demiflow.execution.seal.plan import load_native_execution
 from demiflow.execution.plan_interpreter import ExecutionPlacement, PlanContractError
 from demiflow.execution.run_context import RunContext
 from test_execution_layout import chain_fixture
@@ -35,6 +35,14 @@ def test_load_native_execution_locates_placement(workdir, legacy_seal_writer):
     assert placement.backend == "datafusion"
     assert placement.recovery == "final_commit"
     assert list(placement.stage_ids) == n.op_stages
+    assert placement.stage_limits == {stage["stage_id"]: stage["budgets"]
+                                      for stage in n.pp["stages"] if stage["stage_id"] in n.op_stages}
+    assert layout.checkpoint.checkpoint_rows == n.doc["checkpoint_rows"]
+    recovery = n.pp["recovery"]
+    assert (layout.checkpoint.interval_ms, layout.checkpoint.unconfirmed_rows,
+            layout.checkpoint.unconfirmed_bytes) == (
+        recovery["checkpoint_interval_ms"], recovery["unconfirmed_rows"], recovery["unconfirmed_bytes"])
+    assert tuple(op["stage_id"] for op in placement.programs[0]["operator_bindings"]) == tuple(n.op_stages)
 
 
 def test_unknown_execution_id_rejected(workdir, legacy_seal_writer):

@@ -1,4 +1,5 @@
 """Installed symlink libraries remain environment-owned; business code stays pinned."""
+from dataclasses import asdict
 import importlib
 import importlib.util
 import json
@@ -13,7 +14,8 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.seal import business_sources
-from demiflow.execution.chain import stage_plan_artifact
+from demiflow.execution.contracts.dataflow import ArtifactRef
+from runtime_v3_program_probe import program_store, stage_callable
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunContext, RunAction
 
@@ -111,30 +113,48 @@ def test_actual_pin_archive_and_fresh_worker_helper_drift(tmp_path, monkeypatch,
         declaration = {'kind': 'chain-materialize', 'source': {'source_id': 'fixture'}}
         run.journal.bind_execution_action(run.fence, 'main-action', declaration)
         action = RunAction(run, 'main-action', declaration)
-        ref = stage_plan_artifact(action, plan)
-        assert {Path(item['source']) for item in ref['code_sources']} == {helper, rule}
-        ref_file = tmp_path/'plan-ref.json'; ref_file.write_text(json.dumps(ref))
-        script = '''import cloudpickle,json,pathlib,sys
-from demiflow.execution.chain import verify_loaded_plan
-from demiflow.execution.seal.business_sources import plan_code_pin
-ref=json.loads(pathlib.Path(sys.argv[2]).read_text())
-plan=cloudpickle.loads((pathlib.Path(sys.argv[1])/ref['path']).read_bytes())
-verify_loaded_plan(plan,ref,None)
-print(json.dumps(plan_code_pin(plan),sort_keys=True))
-'''
-        env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(tmp_path), str(Path.cwd()), str(Path.cwd()/'tests')]),
-                   PYTHONDONTWRITEBYTECODE='1')
-        def worker():
-            return subprocess.run([sys.executable, '-B', '-c', script, str(run.directory), str(ref_file)],
-                                  capture_output=True, text=True, env=env, timeout=30)
-        unchanged = worker()
-        assert unchanged.returncode == 0, unchanged.stderr
-        assert json.loads(unchanged.stdout) == pin
-        archived = {item['path']: (run.directory/item['path']).read_bytes() for item in ref['code_sources']}
-        helper.write_text('def delta():\n    return 9999\n')
-        changed = worker()
-        assert changed.returncode != 0 and 'code-pin differs' in changed.stderr
-        assert all((run.directory/path).read_bytes() == raw for path, raw in archived.items())
+        with program_store(action) as (store, bounds):
+            ref, manifest = stage_callable(plan.operations[0].callable, store=store, bounds=bounds)
+            sources = {name: ArtifactRef(**item) for name, item in manifest['business_sources'].items()}
+            assert set(sources) == {helper_name, rule_name}
+
+            def archived():
+                return {name: b''.join(store.read(item, max_bytes=item.size_bytes)) for name, item in sources.items()}
+
+            original = archived()
+            assert original == {helper_name: helper.read_bytes(), rule_name: rule.read_bytes()}
+            params = {'root': str(run.directory / '.dataflow-store'), 'ref': asdict(ref),
+                      'bounds': asdict(bounds), 'code_identity': manifest['code_identity']}
+            script = """
+import json, pathlib, sys
+from demiflow.execution.contracts.dataflow import ArtifactRef, Bounds
+from demiflow.execution.seal.plan import verify_dataflow_program
+from demiflow.execution.storage.objects import RunArtifactStore
+params = json.load(sys.stdin)
+ref = ArtifactRef(**params['ref'])
+bounds = Bounds(**params['bounds'])
+store = RunArtifactStore(root=pathlib.Path(params['root']), store_id=ref.store_id,
+                         journal=None, readonly=True, bounds=bounds)
+try:
+    program = verify_dataflow_program(ref, expected_pin=params['code_identity'], store=store, bounds=bounds)
+    print(json.dumps(program.value.target({'x': 2})))
+finally:
+    store.close()
+"""
+            env = dict(os.environ, PYTHONPATH=os.pathsep.join((str(tmp_path), str(Path.cwd()))),
+                       PYTHONDONTWRITEBYTECODE='1')
+
+            def worker():
+                return subprocess.run([sys.executable, '-B', '-c', script], input=json.dumps(params),
+                                      capture_output=True, text=True, env=env, timeout=30)
+
+            unchanged = worker()
+            assert unchanged.returncode == 0, unchanged.stderr
+            assert json.loads(unchanged.stdout) == {'x': 3}
+            helper.write_text('def delta():\n    return 9999\n')
+            changed = worker()
+            assert changed.returncode != 0 and 'Loaded program code differs' in changed.stderr
+            assert archived() == original
         run.journal.complete_execution_action(run.fence, 'main-action', {'kind': 'test-complete'})
 
 

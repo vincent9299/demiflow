@@ -39,7 +39,7 @@ from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunContext, RunAction
 
 from test_stage2_unified_plan import (
-    LIMITS, _crash_hook, _load_modules, _map_plan, _topology,
+    LIMITS, _crash_hook, _load_modules, _map_plan,
 )
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
@@ -55,7 +55,9 @@ def sealed(tmp_path):
         run.journal.bind_execution_action(run.fence, "main-action", declaration)
         action = RunAction(run, "main-action", declaration)
         try:
-            yield SimpleNamespace(run=run, action=action)
+            from runtime_v3_program_probe import program_store
+            with program_store(action) as (store, bounds):
+                yield SimpleNamespace(run=run, action=action, store=store, bounds=bounds)
         finally:
             record = run.journal.execution_action("main-action")
             if record is not None and record["result"] is None:
@@ -216,19 +218,19 @@ def test_g1_closure_helper_edit_same_run_resume_refuses(tmp_path, monkeypatch, f
 
 @pytest.mark.parametrize("form", FORMS)
 def test_g3_closure_helper_edit_worker_load_gate_refuses(sealed, tmp_path, monkeypatch, form):
-    from demiflow.execution.chain import stage_plan_artifact, verify_loaded_plan
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_program_probe import worker_loader
     from demiflow.execution.seal.business_sources import _business_dependency_manifest
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7bg3_" + form)
     transform = FACTORIES[form](helper_mod)
     plan = _map_plan(transform)
     assert helper in _business_dependency_manifest(plan), "captured helper must be pinned"
-    plan_ref = stage_plan_artifact(sealed.action, plan)
-    topology, _, _ = _topology(sealed, plan, plan_ref)
-    verify_loaded_plan(plan, plan_ref, topology["operators"])      # unedited passes
+    load = worker_loader(sealed, plan.operations[0].callable)
+    load()      # unedited passes
     paths[helper].write_text("def delta():\n    return 9999\n")
     importlib.reload(sys.modules[helper])
-    with pytest.raises(RecoveryContractError, match="code-pin differs"):
-        verify_loaded_plan(_map_plan(transform), plan_ref, topology["operators"])
+    with pytest.raises(DataflowError, match="Loaded program code differs"):
+        load()
 
 
 # --- G2: unedited manifest stable + captured helper pinned (three forms) ---
@@ -247,7 +249,7 @@ def test_g2_closure_unedited_manifest_stable(tmp_path, monkeypatch, form):
 # --- G2 control: a by-value closure with NO capture pins nothing (no regression) ---
 
 def test_g2_no_capture_by_value_dependencies_empty(sealed):
-    from demiflow.execution.chain import stage_plan_artifact, verify_loaded_plan
+    from runtime_v3_program_probe import worker_loader
     from demiflow.execution.seal.business_sources import _business_dependency_manifest
 
     def v1(row):
@@ -255,9 +257,8 @@ def test_g2_no_capture_by_value_dependencies_empty(sealed):
 
     plan = _map_plan(v1)
     assert _business_dependency_manifest(plan) == {}
-    plan_ref = stage_plan_artifact(sealed.action, plan)
-    topology, _, _ = _topology(sealed, plan, plan_ref)
-    verify_loaded_plan(plan, plan_ref, topology["operators"])
+    load = worker_loader(sealed, plan.operations[0].callable)
+    load()
 
 
 # --- G2: a clean full run with a capturing closure succeeds (no false refuse) ---
@@ -280,7 +281,8 @@ def test_g2_closure_clean_run_succeeds(tmp_path, monkeypatch, form):
 
 @pytest.mark.parametrize("container", ["list", "dict"])
 def test_g2_container_capture_pinned_and_edit_refuses(sealed, tmp_path, monkeypatch, container):
-    from demiflow.execution.chain import stage_plan_artifact, verify_loaded_plan
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_program_probe import worker_loader
     from demiflow.execution.seal.business_sources import _business_dependency_manifest
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7bcont_" + container)
     if container == "list":
@@ -295,13 +297,12 @@ def test_g2_container_capture_pinned_and_edit_refuses(sealed, tmp_path, monkeypa
             return {"input": row["x"], "value": row["x"] + captured["m"].delta()}
     plan = _map_plan(transform)
     assert helper in _business_dependency_manifest(plan)
-    plan_ref = stage_plan_artifact(sealed.action, plan)
-    topology, _, _ = _topology(sealed, plan, plan_ref)
-    verify_loaded_plan(plan, plan_ref, topology["operators"])
+    load = worker_loader(sealed, plan.operations[0].callable)
+    load()
     paths[helper].write_text("def delta():\n    return 9999\n")
     importlib.reload(sys.modules[helper])
-    with pytest.raises(RecoveryContractError, match="code-pin differs"):
-        verify_loaded_plan(_map_plan(transform), plan_ref, topology["operators"])
+    with pytest.raises(DataflowError, match="Loaded program code differs"):
+        load()
 
 
 # --- R2 by-reference business class instance: type module AND __dict__ module pinned ---
@@ -446,19 +447,20 @@ def _assert_sealed_helper(run, helper, source):
 # --- G4 queue: edit the captured helper -> the shared resume seam refuses ---
 
 def test_g4_queue_seam_edit_refuses(sealed, tmp_path, monkeypatch):
-    from demiflow.execution.chain import stage_plan_artifact
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_program_probe import worker_loader
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7bg4n")
 
     def label_fn(row):
         helper_mod.delta()
         return {**row, 'label': 'downloaded' if row['status'] == 'ok' else 'failed'}
 
-    stage_plan_artifact(sealed.action, _map_plan(label_fn))
+    load = worker_loader(sealed, _map_plan(label_fn).operations[0].callable)
+    load()
     paths[helper].write_text("def delta():\n    return 9999\n")
     importlib.reload(sys.modules[helper])
-    with pytest.raises(RecoveryContractError,
-                       match="Business code changed since the plan was sealed"):
-        stage_plan_artifact(sealed.action, _map_plan(label_fn))
+    with pytest.raises(DataflowError, match="Loaded program code differs"):
+        load()
 
 
 
