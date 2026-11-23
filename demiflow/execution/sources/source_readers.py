@@ -138,7 +138,7 @@ class _BaseReader:
         row, position = result
         sequence = self._next_sequence
         record_id = identity([self._snapshot.source_id, self._split.split_id, position])
-        from demiflow.execution.arrow_payload import ArrowPayload
+        from demiflow.execution.contracts.record_codec import ArrowPayload
         if isinstance(row, ArrowPayload):
             record = Record(record_id, position, row.ref, None, row.encoded_bytes, sequence, self._schema_ref)
         else:
@@ -667,7 +667,8 @@ class LanceReader(_BaseReader):
         self._rows = self._iter_rows()
         prefix = None
         if saved is not None:
-            from demiflow.execution.arrow_payload import ArrowBatchCache, ArrowPayload
+            from demiflow.execution.kernels.arrow_payload import ArrowBatchCache
+            from demiflow.execution.contracts.record_codec import ArrowPayload
             ref = ArtifactRef(**saved)
             cache = ArrowBatchCache(self._services.store, self._services.bounds, services=self._services)
             from demiflow.execution.contracts.record_codec import ARROW_BATCH_MEDIA
@@ -722,9 +723,9 @@ class LanceReader(_BaseReader):
         from dataclasses import replace
         from demiflow.lance.read import _iter_scan
         from demiflow.execution.scheduler.native_limits import limit_value
-        from demiflow.execution.arrow_payload import _window
+        from demiflow.execution.contracts.record_codec import _window
         query = self._plan.query
-        workspace = _window(self._services.bounds, self._services)
+        workspace = _window(self._services.bounds, getattr(self._services, 'assignment', None))
         if workspace <= 0:
             raise DataflowError('BUDGET_EXCEEDED', 'native scan requires an admitted byte window')
         count = min(65536, workspace, self._services.bounds.max_output_rows,
@@ -747,7 +748,7 @@ class LanceReader(_BaseReader):
 
     def next_arrow_batch(self, max_rows, max_bytes):
         """Advance to the next unread source row only for the returned contiguous slice."""
-        from demiflow.execution.arrow_payload import _value_upper, row_upper
+        from demiflow.execution.contracts.record_codec import _value_upper, row_upper
         self._check_open()
         if self._eoi:
             return None
@@ -830,7 +831,9 @@ class LanceReader(_BaseReader):
             if columns and exact.projection:
                 batch = batch.select(columns)
             self._schema_ref = self._schemas.put(batch.schema)
-            from demiflow.execution.arrow_payload import publish_batch, ArrowPayload, fallback_row
+            from demiflow.execution.arrow_payload import publish_batch
+            from demiflow.execution.contracts.record_codec import ArrowPayload
+            from demiflow.execution.arrow_payload import fallback_row
             if self._snapshot.immutable_identity.get('record_carrier_v1') == 'mapped_arrow':
                 from demiflow.execution.arrow_payload import publish_source_rows
                 yield from publish_source_rows(batch, reader=self,
@@ -856,7 +859,7 @@ class LanceReader(_BaseReader):
             if self.batch_carrier == 'mapped_arrow.v1':
                 # A scanner may admit just one worst-case row per fetch. Group
                 # its *actual* small buffers before creating an IPC artifact.
-                from demiflow.execution.arrow_payload import _MAX_ROWS as ARROW_MAX_ROWS
+                from demiflow.execution.contracts.record_codec import _MAX_ROWS as ARROW_MAX_ROWS
                 from demiflow.execution.arrow_payload import compact_scan_batches
                 target = limit_value(self._services, 'batch_rows', self._plan.query.batch_size or ARROW_MAX_ROWS)
                 yield from compact_scan_batches(batches, services=self._services, target_rows=target)
@@ -904,7 +907,7 @@ class LanceReader(_BaseReader):
         self._row_offset = row_offset + 1
         self._offset = {"version": self._version, "fragment_id": fragment_id,
                         "row_offset": row_offset + 1}
-        from demiflow.execution.arrow_payload import ArrowPayload
+        from demiflow.execution.contracts.record_codec import ArrowPayload
         from demiflow.execution.contracts.record_codec import ARROW_BATCH_MEDIA
         if isinstance(row, ArrowPayload) and row.ref.media_type == ARROW_BATCH_MEDIA:
             from dataclasses import asdict

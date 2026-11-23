@@ -297,7 +297,7 @@ def codec_window(kernel, operation, bounds):
     if kernel.kind in {'join', 'exclude_keys', 'reduce'}:
         return None  # These kernels own explicit copy/reducer working sets.
     if kernel.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
-        from ..execution.dataflow_models import _model_profile
+
         concurrency = kernel.configuration.get('concurrency', 1)
         expected = _model_profile(kernel.resource_role, bounds, concurrency,
                                   kernel.state, operation=operation)
@@ -468,3 +468,20 @@ def allocate_workspace_slack(graph, floor_graph, stages, residency, *, hosts, bo
         selected.append(stage)
     publication = reservation.bytes + int(publication_share * publication_extra)
     return tuple(selected), reservation.base + publication
+
+
+def _model_profile(resource_role, bounds, concurrency, state, *, operation=None,
+                   codec_workspace=True):
+    # Native actors carry the same typed records as ordinary kernels. Their
+    # codec copies must fit the original stage grant too; input+output alone
+    # is not that peak. Keep one planner and every explicit worker constraint.
+
+    profile = default_profile(operation, bounds=bounds, state=state,
+        codec_workspace=codec_workspace, concurrency=concurrency)
+    requests = dict(profile.requests)
+    resources = getattr(getattr(operation, 'native_options', None), 'worker_resources', None) or {}
+    if 'cpu' not in resources:
+        requests['cpu_millis'] = 100
+    if resource_role == 'gpu' and 'accelerators' not in requests:
+        requests['accelerators'] = [{'type': 'gpu', 'count': 1}]
+    return ResourceProfile(requests=requests, limits=profile.limits, requirements=profile.requirements)

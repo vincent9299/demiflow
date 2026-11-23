@@ -1469,7 +1469,7 @@ class Dataset:
         """
         if 'journal_dir' in (options or {}):
             raise ValueError('map_prompt_async recovery is execution-owned; remove journal options')
-        from ..execution.dataflow_prompt_journal import private_prompt_declaration
+        from demiflow.operator_llm.flow_contract import private_prompt_declaration
         private_prompt_declaration(options)
         from ..operator_llm.parser import resolve_prompt
         if isinstance(config, (str, Path)):

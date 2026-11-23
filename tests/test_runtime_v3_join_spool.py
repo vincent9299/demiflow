@@ -174,7 +174,7 @@ def test_public_lance_join_vector_probes_only_true_inner_and_semi_batches(tmp_pa
     import lance
     import pyarrow as pa
     import pyarrow.compute as pc
-    from demiflow.execution.arrow_payload import ArrowBatchCache
+    from demiflow.execution.kernels.arrow_payload import ArrowBatchCache
     from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
     uri = str(tmp_path / 'source.lance')

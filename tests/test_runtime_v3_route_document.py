@@ -9,7 +9,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.exchange import dataflow_bridge as bridge
 from demiflow.execution.exchange import dataflow_channels as channels
 from demiflow.execution.exchange.dataflow_state import RoutingCounters
-from demiflow.execution.record_schema import SCHEMA_MEDIA_TYPE
+from demiflow.execution.contracts.record_schema import SCHEMA_MEDIA_TYPE
 from demiflow.execution.contracts.dataflow import clone_record
 from demiflow.execution.recovery_contract import identity
 from test_runtime_v3_c import make,bounds

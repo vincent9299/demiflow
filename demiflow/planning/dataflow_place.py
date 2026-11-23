@@ -1079,3 +1079,42 @@ def compile_physical_dataflow(
         from .dataflow_training import validate_training_inputs
         validate_training_inputs(graph, physical, bounds=bounds)
     return physical
+
+
+def batch_carrier(graph, physical):
+    """Optimize only a sealed, sequential source-to-terminal slice.
+
+    Reordering, forks and mixed sources keep the original row codec. Otherwise
+    one-cache consumers could reread an entire batch once per interleaved row.
+    This selects a payload representation, never another execution route.
+    """
+    if len(physical.splits) != 1:
+        return None
+    if sum(node.kind == 'source' for node in graph.nodes) != 1:
+        return None
+    if sum(node.kind == 'terminal' for node in graph.nodes) != 1:
+        return None
+    terminal = next(node for node in graph.nodes if node.kind == 'terminal')
+    if terminal.kernel.kind not in ('write_lance', 'materialize', 'iter_rows', 'count'):
+        # size_bytes/summary and bounded collectors retain their original exact
+        # row accounting. The carrier estimate is a resource bound, not a new
+        # public measurement of a row's serialized size.
+        return None
+    mapped_arrow = terminal.kernel.configuration.get('input_carrier') == 'mapped_arrow.v1'
+    if any(node.kind not in ('source', 'terminal') and node.kernel.kind != 'LimitOp'
+           and not (mapped_arrow and node.kernel.kind == 'MapBatchesOp')
+           for node in graph.nodes):
+        return None
+    if len(graph.edges) != len(graph.nodes) - 1:
+        return None
+    producers = [edge.producer for edge in graph.edges]
+    consumers = [edge.consumer for edge in graph.edges]
+    if (len(set(producers)) != len(producers) or len(set(consumers)) != len(consumers)
+            or any(len(edge.producer_partitions) != 1 or len(edge.consumer_partitions) != 1
+                   for edge in physical.exchanges)):
+        return None
+    if mapped_arrow:
+        return 'mapped_arrow.v1'
+    # Existing seals did not request contiguous native batches. Keep their
+    # original scan boundaries and reference representation on recovery.
+    return 'original_scan_batches'

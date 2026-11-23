@@ -1,6 +1,10 @@
 """Streams implementation."""
 from __future__ import annotations
 
+from demiflow.execution.contracts.record_codec import row_upper, mapped_row_bytes, mapped_member, _window, _resident_budget, MAPPED_ARROW_MEDIA
+
+from demiflow.execution.contracts.record_codec import _MAGIC as _ARROW_MAGIC, _HEADER as _ARROW_HEADER
+
 import hashlib
 import json
 from demiflow.execution.contracts.state_codec import PACK_MEDIA, _MAGIC, _MAX_MEMBERS, _HEADER_BYTES, pack_limit
@@ -153,7 +157,7 @@ def read_document(ref, store, bounds, *, resident_bytes=None, retained=0, _maxim
         if close is not None: close()
 
 def frame_stream(chunks, bounds, *, resident_bytes=None, check_workspace=None):
-    
+
     return _ReplayLines(chunks, chunk_bytes=read_chunk_bytes(bounds, resident_bytes),
         check=(check_workspace if check_workspace is not None
                else lambda size: _admit(size, resident_limit(bounds, resident_bytes))))
@@ -170,7 +174,7 @@ def iter_kernel_images(store, ref, bounds):
     GC only mutates after its entire root trace; read_kernel_image retains just
     the requested member and exhausts all other members before returning.
     """
-    
+
     limit = pack_limit(bounds)
     if ref.media_type != PACK_MEDIA or ref.size_bytes > limit:
         raise DataflowError('BUDGET_EXCEEDED', 'kernel pack exceeds original recovery workspace')
@@ -207,3 +211,60 @@ def iter_kernel_images(store, ref, bounds):
         raise DataflowError('CORRUPT_ARTIFACT', str(error)) from error
     finally:
         stream.close()
+
+
+def put_arrow_batch(batch, raw_header, estimate, media_type, store):
+    """Stream one pre-admitted uncompressed IPC batch to the original artifact store."""
+    import pyarrow as pa
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, batch.schema) as writer:
+        writer.write_batch(batch)
+    buffer = sink.getvalue()
+    size = 12 + len(raw_header) + buffer.size
+    if size > estimate:
+        raise DataflowError('BUDGET_EXCEEDED', 'Arrow IPC exceeded its pre-admitted encoding window')
+    def chunks():
+        yield _ARROW_MAGIC + _ARROW_HEADER.pack(len(raw_header)) + raw_header
+        for offset in range(0, buffer.size, 65536):
+            yield buffer.slice(offset, min(65536, buffer.size - offset)).to_pybytes()
+    return store.put(chunks(), max_bytes=estimate, media_type=media_type)
+
+
+def store_mapped_arrow(batch, bindings, schema_ref, *, store, bounds, assignment=None, retained_bytes):
+    """Authenticate output occurrences sharing an IPC artifact; None selects typed rows."""
+    import json
+    import pyarrow as pa
+    from demiflow.execution.contracts.dataflow import ArtifactRef, Record
+    from demiflow.execution.contracts.dataflow_codec import _thaw_json as thaw_control_json
+    from demiflow.execution.contracts.record_codec import _encode_record_document as encode_record_document
+    window = _window(bounds, assignment)
+    sizes = []
+    for index in range(batch.num_rows):
+        size = row_upper(batch, index)
+        if size is None:
+            return None
+        exact = mapped_row_bytes(batch, index, bounds.max_row_bytes)
+        if exact > bounds.max_row_bytes:
+            return None
+        sizes.append(exact)
+    members = [mapped_member(key, source.source_position) for key, source in bindings]
+    header = json.dumps(dict(v=1, members=members, sizes=sizes, schema=schema_ref.digest,
+                             count=batch.num_rows), sort_keys=True, separators=(',', ':')).encode()
+    if len(header) > min(8192, bounds.max_control_bytes):
+        return None
+    estimate = pa.ipc.get_record_batch_size(batch) + schema_ref.size_bytes + len(header) + 256
+    if estimate > window or retained_bytes + 8 * estimate + window > _resident_budget(bounds, assignment):
+        return None
+    probe = ArtifactRef('0' * 64, estimate, schema_ref.store_id, '0' * 64, MAPPED_ARROW_MEDIA)
+    def records(ref):
+        return [Record(key, thaw_control_json(source.source_position), ref, None, size,
+                       source.sequence, schema_ref) for (key, source), size in zip(bindings, sizes)]
+    try:
+        for record in records(probe):
+            encode_record_document(record, max_bytes=bounds.max_row_bytes)
+    except DataflowError as exc:
+        if exc.code == 'BUDGET_EXCEEDED':
+            return None
+        raise
+    ref = put_arrow_batch(batch, header, estimate, MAPPED_ARROW_MEDIA, store)
+    return records(ref)

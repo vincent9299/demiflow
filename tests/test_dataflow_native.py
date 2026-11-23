@@ -160,7 +160,7 @@ def test_cache_state_is_asked_of_the_owner_of_the_bound_callable():
 def test_importing_the_module_initialises_no_native_service():
     script = (
         "import sys\n"
-        "import demiflow.execution.dataflow_native as native\n"
+        "import demiflow.execution.compiler_support.dataflow_native as native\n"
         "native.model_variant(None); native.native_variant(None, None)\n"
         "from demiflow.operator_llm.native_actor import is_native_prompt_actor\n"
         "assert not is_native_prompt_actor(lambda row: row)\n"
@@ -190,7 +190,7 @@ def test_every_registered_lowering_symbol_resolves_to_a_function_with_the_agreed
     from demiflow.planning import dataflow_compile
     from demiflow.planning.dataflow_compile import _GENERIC_LOWERING, _lowering, compile_kernel_spec
     compiler_symbols = {record.operator[0] for record in kind_records().values() if record.operator is not None}
-    assert compiler_symbols == {_GENERIC_LOWERING, 'demiflow.execution.dataflow_models:build_model_factory'}
+    assert compiler_symbols == {_GENERIC_LOWERING, 'demiflow.planning.dataflow_models:build_model_factory'}
     assert _lowering(_GENERIC_LOWERING) is compile_kernel_spec is dataflow_compile.compile_kernel_spec
     for symbol in compiler_symbols:                      # lower(operation, *, program_ref, bounds)
         parameters = inspect.signature(_lowering(symbol)).parameters

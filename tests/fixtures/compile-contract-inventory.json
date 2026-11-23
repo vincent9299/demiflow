@@ -2558,7 +2558,7 @@
     "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
    },
    "AgentMapOp": {
-    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "compiler_symbol": "demiflow.planning.dataflow_models:build_model_factory",
     "inputs": [
      "main"
     ],
@@ -2600,7 +2600,7 @@
     "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
    },
    "EmbeddingMapOp": {
-    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "compiler_symbol": "demiflow.planning.dataflow_models:build_model_factory",
     "inputs": [
      "main"
     ],
@@ -2642,7 +2642,7 @@
     "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
    },
    "OperatorLLMMapOp": {
-    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "compiler_symbol": "demiflow.planning.dataflow_models:build_model_factory",
     "inputs": [
      "main"
     ],
@@ -2762,7 +2762,7 @@
     "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
    },
    "agent": {
-    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "compiler_symbol": "demiflow.planning.dataflow_models:build_model_factory",
     "inputs": [
      "main"
     ],
@@ -2783,7 +2783,7 @@
     "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
    },
    "embedding": {
-    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "compiler_symbol": "demiflow.planning.dataflow_models:build_model_factory",
     "inputs": [
      "main"
     ],
@@ -2825,7 +2825,7 @@
     "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
    },
    "prompt": {
-    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "compiler_symbol": "demiflow.planning.dataflow_models:build_model_factory",
     "inputs": [
      "main"
     ],

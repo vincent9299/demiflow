@@ -391,7 +391,8 @@ def drain(reader):
 def load_inline(record, store):
     if record.inline is not None:
         return record.inline
-    from demiflow.execution.arrow_payload import is_arrow_record, batch_cache
+    from demiflow.execution.contracts.record_codec import is_arrow_record
+    from demiflow.execution.kernels.arrow_payload import batch_cache
     if is_arrow_record(record):
         return batch_cache(store, make_bounds()).row(record)
     return pickle.loads(b"".join(store.read(record.payload_ref, max_bytes=1 << 20)))

@@ -97,7 +97,7 @@ def test_actual_task_block_batch_sink_and_same_run_recovery(tmp_path):
 
 def test_native_cached_forwarding_keeps_provenance_but_clears_changed_row_schema():
     # Native forwarding component, not a simulated public execution result.
-    from demiflow.execution.dataflow_models import _CachedMapKernel
+    from demiflow.execution.kernels.model_state import _CachedMapKernel
     from demiflow.execution.contracts.dataflow import ArtifactRef
     original = record({'coordinates': [1, 2], 'dataflow_task': {'group': 'g', 'ordinal': 3}})
     block = BlockPartition(hashlib.sha256(b'block').hexdigest(), 0, 2)

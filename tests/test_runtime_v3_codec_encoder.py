@@ -10,7 +10,7 @@ import pytest
 from demiflow.execution.contracts.dataflow import ArtifactRef, BlockPartition, Record
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.exchange import dataflow_bridge as codec
-from demiflow.execution.record_schema import SCHEMA_MEDIA_TYPE
+from demiflow.execution.contracts.record_schema import SCHEMA_MEDIA_TYPE
 
 
 def original_json(value):

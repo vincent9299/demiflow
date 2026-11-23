@@ -2,6 +2,8 @@
 
 No file, environment, network, service or candidate callback is read here.
 """
+
+import math
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from enum import Enum
@@ -290,3 +292,23 @@ def agent_facts(actor, environment):
     result = prompt_facts(projection)
     return {**result, 'contract': 'demiflow.agent.node.v3',
             'environment': _value(environment.identity())}
+
+
+def private_prompt_declaration(options):
+    value = (options or {}).get('sqlite_journal')
+    if value is None:
+        return None
+    if (type(value) is not dict or set(value) - {'path', 'max_requests', 'read_only', 'timeout_s'}
+            or type(value.get('path')) is not str or not value['path']):
+        raise ValueError('Private Prompt cache requires an explicit bounded SQLite declaration')
+    limit = value.get('max_requests')
+    if limit is not None and (type(limit) is not int or not 0 <= limit <= 2**40):
+        raise ValueError('Invalid private Prompt request ceiling')
+    if type(value.get('read_only', False)) is not bool:
+        raise ValueError('Private Prompt read_only must be boolean')
+    timeout = value.get('timeout_s', 30)
+    if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 3600:
+        raise ValueError('Private Prompt lock deadline must be finite')
+    if any(key in options for key in ('journal_dir', 'offline_dir', 'offline_store', 'codex_exec', 'codex_agent')):
+        raise ValueError('Private Prompt cache requires a single explicit HTTP journal')
+    return dict(value)

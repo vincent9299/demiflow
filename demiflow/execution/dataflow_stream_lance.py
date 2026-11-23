@@ -115,7 +115,7 @@ def declaration(operation, actor):
     value = {name:getattr(actor,name) for name in ('uri','stage','output_ref','mode',
         'max_rows','max_row_bytes','max_key_bytes','max_index_bytes')}
     value['key'] = list(actor.key) if isinstance(actor.key,tuple) else [actor.key]
-    from .record_schema import encode_schema
+    from demiflow.execution.contracts.record_schema import encode_schema
     from .dataflow_api import _PREFLIGHT_BOUNDS
     value['schema'] = encode_schema(actor.schema,bounds=_PREFLIGHT_BOUNDS).hex()
     value['max_batch'] = operation.max_batch

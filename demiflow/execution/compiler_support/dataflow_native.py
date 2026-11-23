@@ -44,8 +44,8 @@ STREAM_WRITE_PREDICATE = 'stream_write_predicate'  # the same factory carrying a
 # A cache declaration has none: its operation is lowered generically and only its
 # state is tightened.
 DECLARATION_LOWERINGS: Mapping[str, str] = MappingProxyType({
-    ROUTED_PROMPT: 'demiflow.execution.dataflow_routed_prompt:compile_routed_prompt',
-    PROMPT: 'demiflow.execution.dataflow_models:lower_prompt_declaration',
+    ROUTED_PROMPT: 'demiflow.planning.dataflow_models:compile_routed_prompt',
+    PROMPT: 'demiflow.planning.dataflow_models:lower_prompt_declaration',
 })
 
 

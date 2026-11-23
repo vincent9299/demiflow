@@ -160,7 +160,7 @@ def _input_row_bytes(record: Record) -> int:
     if record.inline is not None:
         return record.encoded_bytes
     if record.payload_ref is not None:
-        from demiflow.execution.arrow_payload import is_arrow_record
+        from demiflow.execution.contracts.record_codec import is_arrow_record
         if is_arrow_record(record):
             return record.encoded_bytes
         return record.payload_ref.size_bytes
@@ -172,7 +172,8 @@ def _materialize_row(record: Record, services: RuntimeServices, *, measured=Fals
         raise _err("INVALID_CONTRACT", "record must carry exactly one of inline/payload_ref")
     if record.inline is not None:
         return thaw_record_value(record.inline)
-    from demiflow.execution.arrow_payload import is_arrow_record, materialize_arrow_row
+    from demiflow.execution.contracts.record_codec import is_arrow_record
+    from demiflow.execution.kernels.arrow_payload import materialize_arrow_row
     if is_arrow_record(record):
         return materialize_arrow_row(record, services)
     ref = record.payload_ref
@@ -350,7 +351,7 @@ def invoke_unary(
         return
     if kind in ('SelectColumnsOp', 'DropColumnsOp', 'RenameColumnsOp') and record.payload_ref is not None:
         from demiflow.execution.contracts.record_codec import ARROW_MEDIA_TYPES
-        from demiflow.execution.arrow_payload import batch_cache
+        from demiflow.execution.kernels.arrow_payload import batch_cache
         from demiflow.operators.relational import project_columns
         if record.payload_ref.media_type in ARROW_MEDIA_TYPES:
             cache = batch_cache(services.store, services.bounds, services=services)
@@ -589,11 +590,11 @@ def _batch_to_rows(result: Any, batch_format: str, *, on_schema=None) -> Iterato
 def _callback_table(records, services, *, zero_copy):
     """Reassemble the original business batch from validated, consecutive IPC slices."""
     import pyarrow as pa
-    from demiflow.execution.arrow_payload import _resident_budget
-    from demiflow.execution.arrow_payload import batch_cache
+    from demiflow.execution.contracts.record_codec import _resident_budget
+    from demiflow.execution.kernels.arrow_payload import batch_cache
     cache = batch_cache(services.store, services.bounds, services=services)
     limit = min(services.bounds.max_batch_bytes,
-                _resident_budget(services.bounds, services))
+                _resident_budget(services.bounds, getattr(services, 'assignment', None)))
     pieces = []
     retained = 0
     # Count each backing buffer once per contiguous artifact run. An
@@ -630,9 +631,9 @@ def _mapped_arrow_output(result, *, binding, schemas, services, budget, retained
     """Consume callback outputs once and leave each original occurrence with its ACK owner."""
     import pyarrow as pa
     from collections.abc import Iterator
-    from demiflow.execution.arrow_payload import _MAX_ROWS
-    from demiflow.execution.arrow_payload import _resident_budget
-    from demiflow.execution.arrow_payload import store_mapped_arrow
+    from demiflow.execution.contracts.record_codec import _MAX_ROWS
+    from demiflow.execution.contracts.record_codec import _resident_budget
+    from demiflow.execution.storage.streams import store_mapped_arrow
 
     outputs = result if isinstance(result, Iterator) else (result,)
     ordinal = 0
@@ -640,7 +641,7 @@ def _mapped_arrow_output(result, *, binding, schemas, services, budget, retained
         for output in outputs:
             if isinstance(output, (pa.RecordBatch, pa.Table)):
                 parent_bytes = output.get_total_buffer_size()
-                if retained_bytes + parent_bytes > _resident_budget(services.bounds, services):
+                if retained_bytes + parent_bytes > _resident_budget(services.bounds, getattr(services, 'assignment', None)):
                     raise _err('BUDGET_EXCEEDED', 'Arrow callback input and retained result exceed the worker grant')
                 # Each membership digest costs 67 bytes in the bounded IPC header.
                 max_rows = min(_MAX_ROWS, max(1, (min(8192, services.bounds.max_control_bytes) - 256) // 80))
@@ -653,7 +654,7 @@ def _mapped_arrow_output(result, *, binding, schemas, services, budget, retained
                             continue
                         schema_ref = schemas.put(chunk.schema)
                         members = [binding(ordinal + i) for i in range(chunk.num_rows)]
-                        carried = store_mapped_arrow(chunk, members, schema_ref, services,
+                        carried = store_mapped_arrow(chunk, members, schema_ref, store=services.store, bounds=services.bounds, assignment=getattr(services, "assignment", None),
                             retained_bytes=retained_bytes + parent_bytes)
                         if carried is None:
                             # Unsupported types retain their exact historical typed-row validation.
@@ -726,7 +727,7 @@ def invoke_batch(
 
     if (kind == 'MapBatchesOp' and cfg.get('batch_format') == 'pyarrow' and records
             and expected is None):
-        from demiflow.execution.arrow_payload import is_arrow_record
+        from demiflow.execution.contracts.record_codec import is_arrow_record
         if all(is_arrow_record(record) for record in records):
             table = _callback_table(records, services, zero_copy=cfg.get('zero_copy_batch', False))
             if table is not None:
@@ -893,7 +894,7 @@ def make_kernel(
     if kind not in KERNEL_KINDS:
         raise _err("INVALID_CONTRACT", "unknown kernel kind", kind=kind)
     if kind not in _AGGREGATE_KINDS and spec.configuration.get("cache_namespace") is not None:
-        from demiflow.execution.dataflow_models import bind_cached_map
+        from demiflow.execution.kernels.model_state import bind_cached_map
 
         return bind_cached_map(spec, services=services)
     from demiflow.execution.kernels.operator import OperatorKernel

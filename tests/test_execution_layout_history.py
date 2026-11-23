@@ -57,6 +57,9 @@ from demiflow import data
 from demiflow.data.guards import require
 for fn in [data.from_items, data.read_legacy_queue_records, require]:
     result['public.' + fn.__name__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
+from demiflow import PipelineBundleRef
+buffer = io.BytesIO(); ProgramPickler(buffer, protocol=5).dump(PipelineBundleRef.load)
+result['bundle_loader'] = base64.b64encode(buffer.getvalue()).decode()
 print(json.dumps(result))
 '''
     child = subprocess.run([sys.executable, '-P', '-B', '-c', script, str(original), json.dumps(CARRIERS)],
@@ -158,3 +161,14 @@ def test_original_source_bound_method_global(original_carriers, name):
 def test_public_function_import_changes_keep_published_pin(original_carriers, name):
     raw, original = original_carriers['public.' + name]
     assert describe(load_payload([base64.b64decode(raw)])) == original
+
+
+def test_original_public_bound_bundle_loader_executes(original_carriers, tmp_path):
+    package = tmp_path / 'pipeline'
+    package.mkdir()
+    (package / '__init__.py').write_text('')
+    (package / 'work.py').write_text("from demiurge.demiflow import PipelineProgram\nclass Example(PipelineProgram):\n    execution = {'mode': 'portable'}\n    def run(self, ctx):\n        pass\n")
+    loader = load_payload([base64.b64decode(original_carriers['bundle_loader'])])
+    ref = loader(tmp_path)
+    assert ref.verify() == tmp_path.resolve()
+    assert ref.module_key == 'p_' + ref.content_digest.removeprefix('sha256:')[:24]

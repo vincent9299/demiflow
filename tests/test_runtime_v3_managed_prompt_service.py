@@ -75,8 +75,8 @@ def test_zero_prompt_budget_starts_no_service(tmp_path, monkeypatch, request):
 def test_service_facts_keep_native_identity_and_private_environment_in_program(tmp_path, monkeypatch, request):
     from demiflow.operator_llm.flow_contract import prompt_facts
     from demiflow.execution.dataflow_model_factory import native_model_declaration
-    from demiflow.execution.dataflow_prompt_service import service_kernel
-    from demiflow.execution.dataflow_models import build_model_factory
+    from demiflow.planning.dataflow_models import service_kernel
+    from demiflow.planning.dataflow_models import build_model_factory
     from demiflow.execution.contracts.dataflow import thaw_record_value
     from demiflow.execution.dataflow_api import resolve_runtime_policy
     from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS

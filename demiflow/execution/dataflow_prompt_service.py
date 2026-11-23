@@ -6,8 +6,8 @@ by Embedding; a live owner or an undeclared mutation never becomes a factory.
 """
 from dataclasses import replace
 
-from .contracts.dataflow_errors import DataflowError
-from .dataflow_managed_http import freeze_managed_http, managed_http_digest
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.dataflow_managed_http import freeze_managed_http, managed_http_digest
 
 
 def prompt_service_declaration(actor):
@@ -23,29 +23,7 @@ def prompt_service_declaration(actor):
     return value
 
 
-def service_kernel(model, settings):
-    declaration = settings.get('service')
-    if declaration is None:
-        return model
-    if model.kind != 'prompt':
-        raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed HTTP service requires a native Prompt node')
-    from .dataflow_models import _json_config
-    import hashlib
-    from .recovery_contract import document
-    # Execution programs retain the passive declaration. Public plan facts do
-    # not duplicate service environment values or arbitrary command arguments.
-    digest = hashlib.sha256(document(declaration, 65536)).hexdigest()
-    configuration = dict(_json_config(model.configuration), managed_http_service_digest=digest)
-    parameters = declaration['parameters']
-    requests = dict(model.profile.requests)
-    role = model.resource_role
-    if parameters['gpus']:
-        configuration['managed_http_devices'] = {
-            'indices': parameters['gpus'], 'device_order': parameters['env'].get('CUDA_DEVICE_ORDER')}
-        requests['accelerators'] = [{'type': 'gpu', 'count': len(parameters['gpus'])}]
-        role = 'gpu'
-    return replace(model, configuration=configuration, resource_role=role,
-                   profile=replace(model.profile, requests=requests))
+
 
 
 def bind_prompt_service(actor, spec, *, services, node_id):
@@ -57,5 +35,5 @@ def bind_prompt_service(actor, spec, *, services, node_id):
         return
     if getattr(actor, '_sealed_service_declaration', None) != digest:
         raise DataflowError('INVALID_CONTRACT', 'Prompt worker service declaration does not match its program')
-    from .dataflow_managed_devices import bind_worker_service
+    from demiflow.execution.dataflow_managed_devices import bind_worker_service
     bind_worker_service(actor, spec, services=services, node_id=node_id, service=service)

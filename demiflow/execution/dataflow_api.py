@@ -18,7 +18,7 @@ from .contracts.dataflow import (
 )
 from .contracts.dataflow_errors import DataflowError
 from .action_driver.dataflow import execute_action
-from .dataflow_models import build_model_factory
+from demiflow.planning.dataflow_models import build_model_factory
 from .recovery_identity import (
     describe, operation_identity, plan_identity, source_identity,
 )

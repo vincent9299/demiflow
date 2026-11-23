@@ -10,81 +10,22 @@ output is allocated. Identity formulas (IDENTITY.md) live here exactly once:
 """
 from __future__ import annotations
 
+import math
+from dataclasses import fields, is_dataclass
+from typing import Mapping
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+
 import dataclasses
 import hashlib
 import json
-import math
+
 import re
-from types import MappingProxyType
-from typing import Mapping
+
 
 from demiflow.data.datasink import WriteResult
 from demiflow.resources.contracts import ResourceProfile
 
-from .dataflow import (
-    thaw_json as _thaw_json,
-    ActionProgram,
-    AggregateState,
-    ArtifactCommand,
-    ArtifactRef,
-    ArtifactReply,
-    Bounds,
-    CapabilityReport,
-    CompiledDataflow,
-    CompletedControl,
-    ControlReply,
-    CreditLease,
-    CutContribution,
-    CutRequest,
-    DataLocation,
-    DataflowGraph,
-    FitJobNode,
-    FitJobStage,
-    ValueEdge,
-    DomainProof,
-    EffectCommand,
-    EffectReply,
-    ExchangeSpec,
-    ExecutionStatus,
-    FiniteScope,
-    GraphEdge,
-    GraphNode,
-    HistoricalBinding,
-    HostDescriptor,
-    InputPort,
-    KernelSpec,
-    NativeJournalCommand,
-    NativeJournalReply,
-    NodeObservation,
-    OperatorDefinition,
-    PhysicalDataflow,
-    ProducerCompletion,
-    QueueBinding,
-    QueueCommand,
-    QueueReply,
-    ReadyWork,
-    Record,
-    BlockPartition,
-    RecoveryImage,
-    ResidencyPlan,
-    RoutedRecord,
-    RuntimePolicy,
-    ScheduleChoice,
-    SealedExecution,
-    SourceCursor,
-    SourceDefinition,
-    SourcePoll,
-    SourceSnapshot,
-    SourceSplit,
-    StageSpec,
-    TerminalDefinition,
-    TerminalResult,
-    WorkerAssignment,
-    WorkerEvent,
-    WorkerLease,
-    WorkerStep,
-    _artifact_key,
-)
+from .dataflow import thaw_json as _thaw_json, AggregateState, ArtifactCommand, ArtifactRef, ArtifactReply, Bounds, CapabilityReport, CompletedControl, ControlReply, CreditLease, CutContribution, CutRequest, DataLocation, DataflowGraph, FitJobNode, FitJobStage, ValueEdge, DomainProof, EffectCommand, EffectReply, ExchangeSpec, ExecutionStatus, FiniteScope, GraphEdge, GraphNode, HistoricalBinding, HostDescriptor, InputPort, KernelSpec, NativeJournalCommand, NativeJournalReply, NodeObservation, OperatorDefinition, PhysicalDataflow, ProducerCompletion, QueueBinding, QueueCommand, QueueReply, ReadyWork, Record, BlockPartition, RecoveryImage, ResidencyPlan, RoutedRecord, RuntimePolicy, ScheduleChoice, SealedExecution, SourceCursor, SourceDefinition, SourcePoll, SourceSnapshot, SourceSplit, StageSpec, TerminalDefinition, TerminalResult, WorkerAssignment, WorkerEvent, WorkerLease, WorkerStep, _artifact_key
 from .dataflow_errors import DATAFLOW_ERROR_CODES, DataflowError
 
 WIRE_SCHEMA = "demiflow.runtime_wire.v3"
@@ -1247,3 +1188,20 @@ def runtime_scope_id(plan_id: str, attempt: int) -> str:
     if type(attempt) is not int or attempt < 1:
         raise _err("runtime scope needs a positive attempt")
     return "df-" + plan_id + ("-a" + str(attempt) if attempt > 1 else "")
+
+
+def _json_config(value):
+    """Project a declaration to strict JSON, rejecting live code/locks/clients."""
+    if value is None or type(value) in (str, bool, int):
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise DataflowError('INVALID_CONTRACT', 'Model configuration has a nonfinite number')
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _json_config(item) for key, item in value.items()}
+    if type(value) in (list, tuple):
+        return [_json_config(item) for item in value]
+    if is_dataclass(value) and not isinstance(value, type):
+        return {field.name: _json_config(getattr(value, field.name)) for field in fields(value)}
+    raise DataflowError('INVALID_CONTRACT', 'Model configuration must be declarative code/config, not a live object')

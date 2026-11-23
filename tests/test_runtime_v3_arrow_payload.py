@@ -7,7 +7,8 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution.arrow_payload import ArrowBatchCache, is_arrow_record, row_upper
+from demiflow.execution.kernels.arrow_payload import ArrowBatchCache
+from demiflow.execution.contracts.record_codec import is_arrow_record, row_upper
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.run_context import RunContext
 from _arrow_payload_fixtures import install_arrow_probe
@@ -38,7 +39,7 @@ def test_row_upper_bounds_original_typed_encoding_without_row_materialization():
 
 
 def test_compressed_ipc_is_refused_before_decoded_array_allocation():
-    from demiflow.execution.arrow_payload import _uncompressed_ipc
+    from demiflow.execution.contracts.record_codec import _uncompressed_ipc
     from test_runtime_v3_s import make_bounds
     batch = source_table(8).to_batches()[0]
     sink = pa.BufferOutputStream()

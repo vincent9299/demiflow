@@ -77,7 +77,7 @@ def test_v3_public_arrow_batches_cross_fragments_without_row_conversions(tmp_pat
     from _arrow_payload_fixtures import install_arrow_probe
     from _worker_event_fixtures import events
     from demiflow.execution.kernels import dataflow as kernels
-    from demiflow.execution import arrow_payload as streams
+    from demiflow.execution.storage import streams
 
     source, target = str(tmp_path / 'source'), str(tmp_path / 'target')
     observed = install_arrow_probe(tmp_path, monkeypatch, forbid_rows=declared)
@@ -154,7 +154,7 @@ def test_mapped_arrow_refuses_oversized_output_without_lance_publication(tmp_pat
 
 
 def test_arrow_output_accounting_matches_typed_record_bytes():
-    from demiflow.execution.arrow_payload import mapped_row_bytes
+    from demiflow.execution.contracts.record_codec import mapped_row_bytes
     from demiflow.execution.contracts.record_codec import _encode_payload as encode_payload
 
     rows = [{'i': -728, 'binary': b'\x91' * 32, 'nested': [{'word': '汉"\t\x00', 'xs': [1.0, -0.0]}]},

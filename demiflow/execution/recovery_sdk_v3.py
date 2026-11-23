@@ -29,7 +29,7 @@ _REVISIONS = {
         '431b27e1065e3fdc02cfd708d60c20b924a1489c78ff2bd6afd36546cf56e134',
         '54bc1fa489826c74c7d67432fdeaba9fb9e54131d681936b5c2ea18180c117e9'),
     'demiflow.data.dataset': (
-        'b7df0ad60e5be07b2639ffa7a150562b555b746ef1645dc366d9ca21a9a92db7',
+        '1acb8a3356ee264257d9f419fb2374620f91421268cd886b4210564453c187fb',
         '1ba0e80f1ed0853948a97792dc65125fdaec17504bc3396b5f53ffb593da7e88'),
     'demiflow.data.sources': (
         '4c349450034860cbaaa81d7b88e39b5caeea6c9ea56849e031804007cd226e79',
@@ -76,6 +76,7 @@ _RELATIONAL_METHODS = ('join', 'reduce_by_key', 'group_batches', 'exclude_keys',
 # The explicit checkpoint operation and arguments already rejected before
 # these removed branches. Pin only measured still-present declarations.
 _DATASET_METHODS = {
+    'Dataset.map_prompt_async': ('ec04f2b257e2405b0d82150ef74b07924e8c4e1e7f25120c6588510b31a4653f', '995d11e4cb7a97cba1a936b67faeec7656cba225f274387927fd5846e3c40f9d'),
     # ④ import relocation only; live body/globals and this source revision
     # are authenticated before encoding the original v3 import identity.
     'Dataset.enqueue': (
@@ -259,7 +260,8 @@ def _method_pin(fn, code):
 def function_pin(fn, source, source_hash, code):
     relocated = _layout_source_type(fn)
     if relocated is not None and source_hash == relocated['source']:
-        pins = relocated['methods'].get(fn.__qualname__.rsplit('.', 1)[-1])
+        pins = (relocated['code'] if relocated.get('kind') == 'function'
+                else relocated['methods'].get(fn.__qualname__.rsplit('.', 1)[-1]))
         if pins is not None and code == pins[0]:
             return relocated['old_source'], pins[1]
     revision = _REVISIONS.get(fn.__module__) if type(fn.__module__) is str else None
@@ -347,7 +349,13 @@ def class_method_pins(cls, methods):
 # placement. These are the five actual types found in published program
 # artifacts. Both installed source and every method are measured; a changed
 # definition uses its real identity and is never certified as the old one.
-_LAYOUT_SOURCE_TYPES = {'demiflow.execution.sources.legacy_queue.LegacyQueueHistoryDatasource': {'old_module': 'demiflow.execution.legacy_queue',
+_LAYOUT_SOURCE_TYPES = {'demiflow.execution.pipeline.package_loader.pipeline_bundle_digest': {'kind': 'function',
+                                                                       'old_module': 'demiflow.execution.contracts.pipeline',
+                                                                       'old_source': '98b4717cfa7c3989411c3021a9254e69756b405ecb75ee134220aa0667d27f9a',
+                                                                       'source': '3958b7f612a3ee4e994cd599d6072967e9311696ec15d68bb42908795f924212',
+                                                                       'code': ['0a882b37d1543344a1ffe8736a25e9b1aee2bba4de166349940d38fb95231878',
+                                                                                '0a882b37d1543344a1ffe8736a25e9b1aee2bba4de166349940d38fb95231878']},
+ 'demiflow.execution.sources.legacy_queue.LegacyQueueHistoryDatasource': {'old_module': 'demiflow.execution.legacy_queue',
                                                                           'old_source': '5fe509ab9503850c6979648145056e3399a2d0ee823754e1d627b013edf52070',
                                                                           'source': '190ddde229ea531b91d3620cb6e6af803190ed5c49abcfc411b096f48fa56090',
                                                                           'methods': {'__init__': ['4ae277bea5c1e24191add012bffe7ffe2d2e05960f9dfcc0905021ab8870208c',
@@ -524,6 +532,21 @@ def _layout_source_type(value):
     module = sys.modules.get(module_name)
     if entry is None or module is None:
         return None
+    if entry.get('kind') == 'function':
+        if type(value) is not FunctionType or value is not vars(module).get(qualname):
+            return None
+        source = Path(module.__file__).read_bytes()
+        from hashlib import sha256
+        if sha256(source).hexdigest() != entry['source'] or value.__globals__ is not vars(module):
+            return None
+        code = identity(code_record(value.__code__))
+        declared = _declared_codes(source).get(qualname)
+        if declared is None or code != identity(code_record(declared)):
+            return None
+        default = identity(code_record(_declared_codes(source, 0)[qualname]))
+        if default != entry['code'][0]:
+            return None
+        return {**entry, 'code': (code, code if entry['code'][0] == entry['code'][1] else entry['code'][1])}
     cls = vars(module).get(class_name)
     if not isinstance(cls, type) or (value is not cls and value is not vars(cls).get(qualname.rsplit('.', 1)[-1])):
         return None
@@ -595,7 +618,7 @@ def source_pickle_global(module, name):
             continue
         if name == class_name:
             return current_module, class_name
-        if name.startswith(class_name + '.') and name[len(class_name) + 1:] in entry['methods']:
+        if name.startswith(class_name + '.') and name[len(class_name) + 1:] in entry.get('methods', {}):
             return current_module, name
     return None
 

@@ -329,7 +329,7 @@ class DataflowWorkerExecutor:
 
     # ---- B004 start ----
     def start(self) -> None:
-        from demiflow.execution.dataflow_models import restore_actor_state
+        from demiflow.execution.kernels.model_state import restore_actor_state
         from demiflow.execution.sources.snapshots import open_source_reader
         pass
         from demiflow.execution.exchange.dataflow_channels import open_channels

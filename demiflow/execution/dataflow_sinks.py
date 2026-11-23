@@ -407,7 +407,8 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
     from demiflow.execution.storage.streams import frame_stream, read_document
     from demiflow.execution.contracts.dataflow import thaw_record_value
     from demiflow.execution.record_schema import RecordSchemas
-    from demiflow.execution.arrow_payload import ArrowBatchCache, is_arrow_record
+    from demiflow.execution.kernels.arrow_payload import ArrowBatchCache
+    from demiflow.execution.contracts.record_codec import is_arrow_record
     from demiflow.data.runtime_contract import check_size
     schemas = RecordSchemas(store=store, bounds=bounds)
     arrow = ArrowBatchCache(store, bounds)
@@ -481,7 +482,7 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
             ref = _artifact_from_json(partition['data_ref'])
             from demiflow.execution.storage.segments import ARROW_STREAM_MEDIA, block_chunks, range_segments
             if fixed_scan_batches and partition['rows']:
-                from demiflow.execution.arrow_payload import _uncompressed_ipc
+                from demiflow.execution.contracts.record_codec import _uncompressed_ipc
                 leaves = range_segments(store, ref, bounds, start=0, end=partition['rows'],
                     frame_call=index_call if publication_workspace else None, on_retained=retain_index)
                 with contextlib.closing(leaves):

@@ -447,7 +447,7 @@ def sort_with_body_references(records, *, spec, services, rows, window, retain, 
     """Only this sort owns its body extent. Recovery reopens the closed input port."""
     from demiflow.execution.contracts.record_codec import _json_shape, _typed_shape, admit_workspace, decode_document, encode_document, raw_workspace, resident_limit
     from demiflow.execution.storage.streams import read_document
-    from demiflow.execution.arrow_payload import is_arrow_record
+    from demiflow.execution.contracts.record_codec import is_arrow_record
     from demiflow.execution.storage.objects import RunArtifactStore
 
     bounds, store = services.bounds, services.store

@@ -23,7 +23,7 @@ def pack_result(batch, positions, *, source_id, split_id, version, occurrence, s
 
 def validate_row_sizes(batch, maximum):
     """Prove existing typed-row limits in bulk. Ambiguous rows use the original exact codec."""
-    from ..arrow_payload import _value_upper
+    from demiflow.execution.contracts.record_codec import _value_upper
     from demiflow.execution.contracts.record_codec import _encode_payload
     names = sum(8 + len(json.dumps(name, ensure_ascii=False).encode()) for name in batch.schema.names)
     def check(start, count):
@@ -51,7 +51,7 @@ class PublishedArrowRows:
     """One authenticated result batch; Record consumers can reconstruct original provenance."""
     def __init__(self, ref, *, rows, first, schema_ref, schemas):
         import pyarrow as pa
-        from ..arrow_payload import _uncompressed_ipc
+        from demiflow.execution.contracts.record_codec import _uncompressed_ipc
         from demiflow.execution.storage.segments import ARROW_STREAM_MEDIA
         bounds = schemas.bounds
         if (ref.media_type != ARROW_STREAM_MEDIA or type(rows) is not int or not 0 < rows <= bounds.max_output_rows

@@ -82,7 +82,7 @@ class WorkerGraphRunner:
         self._consumed_deliveries = set()
         self._memory_frontiers = {}
         physical = executor._physical
-        from demiflow.execution.arrow_payload import batch_carrier
+        from demiflow.planning.dataflow_place import batch_carrier
         carrier = batch_carrier(executor._graph, physical)
         for reader in executor._readers.values():
             reader.batch_carrier = carrier
@@ -1345,7 +1345,8 @@ class WorkerGraphRunner:
                     # restored prefix; do not decode/encode/spool the probe.
                     # Cross-partition totals remain the driver's responsibility.
                     raise ValueError(f'Dataset contains more than the take_all limit of {maximum} rows')
-            from demiflow.execution.arrow_payload import is_arrow_record, batch_cache
+            from demiflow.execution.contracts.record_codec import is_arrow_record
+            from demiflow.execution.kernels.arrow_payload import batch_cache
             if is_arrow_record(record):
                 # Actual worker delivery uses the transfer codec directly.
                 # Authenticate and bind the shared payload before accepting its

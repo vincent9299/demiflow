@@ -61,7 +61,8 @@ def _record_row(record: "Record", handle: "ActionHandle") -> "Row":
         from .contracts.dataflow import thaw_record_value
         return thaw_record_value(record.inline)
     if record.payload_ref is not None:
-        from .arrow_payload import is_arrow_record, batch_cache
+        from demiflow.execution.contracts.record_codec import is_arrow_record
+        from demiflow.execution.kernels.arrow_payload import batch_cache
         if is_arrow_record(record):
             return batch_cache(handle.services.store, handle.bounds).row(record)
         ref = record.payload_ref

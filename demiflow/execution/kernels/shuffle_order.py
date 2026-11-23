@@ -80,7 +80,7 @@ class _TypedKeys:
             row = record.inline
         else:
             scoped = OrderingServices(services, window.codec_bytes)
-            from demiflow.execution.arrow_payload import is_arrow_record
+            from demiflow.execution.contracts.record_codec import is_arrow_record
             if is_arrow_record(record):
                 row = _materialize_row(record, scoped)
             else:

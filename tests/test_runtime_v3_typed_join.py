@@ -202,7 +202,8 @@ def test_csv_shared_batch_cursor_and_projection_keep_authenticated_occurrences(t
     from dataclasses import replace
     from demiflow.data.sources import FileSource
     from demiflow.execution.sources.source_readers import FileReader
-    from demiflow.execution.arrow_payload import ArrowBatchCache, is_arrow_record
+    from demiflow.execution.kernels.arrow_payload import ArrowBatchCache
+    from demiflow.execution.contracts.record_codec import is_arrow_record
     from demiflow.execution.record_schema import RecordSchemas
     from test_runtime_v3_s import FakeStore, make_bounds, make_snapshot, first_split, make_services, drain
     path = tmp_path/'rows.csv'

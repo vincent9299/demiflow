@@ -415,6 +415,8 @@ DataflowError = ERRORS.DataflowError
 
 # --- production symbols under test (imported AFTER doubles are installed) ----
 from demiflow.execution import dataflow_models as models
+from demiflow.planning import dataflow_models as model_plan
+from demiflow.execution.kernels import model_state
 from demiflow.execution.operator_bindings import dataflow_model_journal as journal
 from demiflow.execution.recovery_contract import identity, RecoveryContractError
 from demiflow.operator_llm.journal import RequestRecord, request_key, canonical
@@ -782,7 +784,7 @@ def test_m001():
     client_mod.AsyncOperatorLLMClient.__init__ = counting_client
     emb_mod.EmbeddingActor.__init__ = counting_emb
     try:
-        spec = models.build_model_factory(prompt_op, program_ref=program_ref, bounds=bounds)
+        spec = model_plan.build_model_factory(prompt_op, program_ref=program_ref, bounds=bounds)
     finally:
         client_mod.AsyncOperatorLLMClient.__init__ = original_client
         emb_mod.EmbeddingActor.__init__ = original_emb
@@ -797,25 +799,25 @@ def test_m001():
 
     emb_op = EmbeddingMapOp(callable=CallableSpec.create(lambda rows: rows),
                             inputs={'text': 'text'}, model_contract={'name': 'm'})
-    assert models.build_model_factory(emb_op, program_ref=None, bounds=bounds).kind == 'embedding'
+    assert model_plan.build_model_factory(emb_op, program_ref=None, bounds=bounds).kind == 'embedding'
     agent_op = AgentMapOp(callable=CallableSpec.create(lambda row: row),
                           environment=OperatorEnvironment(runtime='codex', operators=()))
-    agent_spec = models.build_model_factory(agent_op, program_ref=None, bounds=bounds)
+    agent_spec = model_plan.build_model_factory(agent_op, program_ref=None, bounds=bounds)
     assert agent_spec.kind == 'agent' and agent_spec.effect == 'unknown_replay_forbidden'
     assert agent_spec.state == 'nonrecoverable'
     search_op = SearchWebOp(callable=CallableSpec.create(lambda row: row), output='hits')
-    assert models.build_model_factory(search_op, program_ref=None, bounds=bounds).kind == 'fetch'
+    assert model_plan.build_model_factory(search_op, program_ref=None, bounds=bounds).kind == 'fetch'
     doc_op = ReadDocumentsOp(callable=CallableSpec.create(lambda row: row), request='docs', output='out')
-    assert models.build_model_factory(doc_op, program_ref=None, bounds=bounds).kind == 'document'
+    assert model_plan.build_model_factory(doc_op, program_ref=None, bounds=bounds).kind == 'document'
 
     with pytest.raises(DataflowError) as unsupported:
-        models.build_model_factory(MapOp(callable=CallableSpec.create(lambda row: row)),
+        model_plan.build_model_factory(MapOp(callable=CallableSpec.create(lambda row: row)),
                                    program_ref=None, bounds=bounds)
     assert unsupported.value.code == 'UNSUPPORTED_CAPABILITY'
     live_op = OperatorLLMMapOp(prompt_name='enrich', config=pack, inputs={'payload': 'item'},
                                output='answer', options={'live': object()})
     with pytest.raises(DataflowError) as invalid:
-        models.build_model_factory(live_op, program_ref=None, bounds=bounds)
+        model_plan.build_model_factory(live_op, program_ref=None, bounds=bounds)
     assert invalid.value.code == 'INVALID_CONTRACT'
 
 
@@ -898,22 +900,22 @@ def test_m004():
     actor = StatefulActor()
     actor.total = 7
     actor._task = 'astart-task-handle'
-    ref = models.snapshot_actor_state(actor, services=services)
+    ref = model_state.snapshot_actor_state(actor, services=services)
     fresh = StatefulActor()
     fresh._lock = threading.Lock()
-    models.restore_actor_state(fresh, ref=ref, services=services)
+    model_state.restore_actor_state(fresh, ref=ref, services=services)
     assert fresh.total == 7  # business accumulator restored
     assert hasattr(fresh._lock, 'acquire') and hasattr(fresh._lock, 'release')  # resource rebuilt, not erased
     # None ref is a no-op
     before = fresh.total
-    models.restore_actor_state(fresh, ref=None, services=services)
+    model_state.restore_actor_state(fresh, ref=None, services=services)
     assert fresh.total == before
     # half a hook pair is rejected
     class HalfHook:
         def snapshot_state(self):
             return {}
     with pytest.raises(DataflowError) as half:
-        models.restore_actor_state(HalfHook(), ref=ref, services=services)
+        model_state.restore_actor_state(HalfHook(), ref=ref, services=services)
     assert half.value.code == 'INVALID_CONTRACT'
     # auto_json fallback restores public business attrs; empty vars are not stateful
     class Plain:
@@ -921,14 +923,14 @@ def test_m004():
             self.count = 3
             self._private = 'resource'
     plain = Plain()
-    pref = models.snapshot_actor_state(plain, services=services)
+    pref = model_state.snapshot_actor_state(plain, services=services)
     restored = Plain()
     restored.count = 0
-    models.restore_actor_state(restored, ref=pref, services=services)
+    model_state.restore_actor_state(restored, ref=pref, services=services)
     assert restored.count == 3 and restored._private == 'resource'
     class Empty:
         pass
-    eref = models.snapshot_actor_state(Empty(), services=services)
+    eref = model_state.snapshot_actor_state(Empty(), services=services)
     assert json.loads(b''.join(store.read(eref, max_bytes=1024))) == {}
 
 
@@ -937,7 +939,7 @@ def test_m005():
     services, store, port = make_services()
     actor = StatefulActor()
     actor.total = 42
-    ref = models.snapshot_actor_state(actor, services=services)
+    ref = model_state.snapshot_actor_state(actor, services=services)
     assert isinstance(ref, ArtifactRef)
     assert json.loads(b''.join(store.read(ref, max_bytes=services.bounds.max_state_bytes))) == {'total': 42}
     # opaque public state cannot be honestly reported as stateless then upgraded
@@ -945,7 +947,7 @@ def test_m005():
         def __init__(self):
             self.handle = object()
     with pytest.raises(DataflowError) as opaque:
-        models.snapshot_actor_state(Opaque(), services=services)
+        model_state.snapshot_actor_state(Opaque(), services=services)
     assert opaque.value.code == 'INVALID_CONTRACT'
     # size is bounded up front
     small = make_services()
@@ -958,7 +960,7 @@ def test_m005():
     big = StatefulActor()
     big.total = 10**9
     with pytest.raises(DataflowError) as budget:
-        models.snapshot_actor_state(big, services=tight)
+        model_state.snapshot_actor_state(big, services=tight)
     assert budget.value.code == 'BUDGET_EXCEEDED'
 
 
@@ -979,7 +981,7 @@ def test_m006(tmp_path):
                       inputs=(), state='none', effect='pure', resource_role='cpu',
                       profile=ResourceProfile(requests={'cpu_millis': 1, 'memory_bytes': 1}),
                       output_bound_bytes=1024, mergeable=False)
-    kernel = models.bind_cached_map(spec, services=services)
+    kernel = model_state.bind_cached_map(spec, services=services)
     kernel.start()
     record = Record(record_id=identity(['record', 0]), source_position={}, payload_ref=None,
                     inline={'n': 1}, encoded_bytes=8, sequence=0)
@@ -1008,7 +1010,7 @@ def test_m006(tmp_path):
     assert result['answer'] == b'\x00\x01binary'
 
     with pytest.raises(DataflowError) as missing:
-        models.bind_cached_map(KernelSpec(kind='transform', implementation_ref=None,
+        model_state.bind_cached_map(KernelSpec(kind='transform', implementation_ref=None,
                                           configuration={'node_id': 'x'}, inputs=(), state='none',
                                           effect='pure', resource_role='cpu',
                                           profile=ResourceProfile(requests={'cpu_millis': 1, 'memory_bytes': 1}),

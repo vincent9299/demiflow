@@ -652,7 +652,8 @@ class StoredMaterializedHandle:
         from demiflow.execution.record_schema import RecordSchemas
         schemas = RecordSchemas(store=self._store, bounds=self._bounds) if with_schema else None
         count = 0
-        from demiflow.execution.arrow_payload import ArrowBatchCache, is_arrow_record
+        from demiflow.execution.kernels.arrow_payload import ArrowBatchCache
+        from demiflow.execution.contracts.record_codec import is_arrow_record
         arrow = ArrowBatchCache(self._store, self._bounds)
         from demiflow.execution.storage.segments import segment_refs
         from demiflow.execution.contracts.record_codec import decode_frame, decode_document, line_limit, read_chunk_bytes

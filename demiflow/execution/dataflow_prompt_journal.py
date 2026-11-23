@@ -4,38 +4,22 @@ HTTP identities/results remain exclusively in that cache. RunJournal owns
 finite execution admission and result commits. The two databases are not an atomic
 transaction: admission is retained across failures and crash resume is refused.
 """
+from demiflow.operator_llm.flow_contract import private_prompt_declaration
 from dataclasses import replace
 import math
 import re
 import threading
 
-from .contracts.dataflow import NativeJournalReply, thaw_record_value
-from .contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.dataflow import NativeJournalReply, thaw_record_value
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal, make_native_action_view, _rebuild_request_gate
-from .recovery_contract import RecoveryContractError, identity
+from demiflow.execution.recovery_contract import RecoveryContractError, identity
 
 _DELIVERY = frozenset({'take', 'take_all', 'take_batch', 'iter_rows', 'iter_batches', 'run_stream'})
 _OPERATIONS = frozenset({'lookup', 'reserve', 'reserve_http_retry', 'response', 'failed', 'references'})
 
 
-def private_prompt_declaration(options):
-    value = (options or {}).get('sqlite_journal')
-    if value is None:
-        return None
-    if (type(value) is not dict or set(value) - {'path', 'max_requests', 'read_only', 'timeout_s'}
-            or type(value.get('path')) is not str or not value['path']):
-        raise ValueError('Private Prompt cache requires an explicit bounded SQLite declaration')
-    limit = value.get('max_requests')
-    if limit is not None and (type(limit) is not int or not 0 <= limit <= 2**40):
-        raise ValueError('Invalid private Prompt request ceiling')
-    if type(value.get('read_only', False)) is not bool:
-        raise ValueError('Private Prompt read_only must be boolean')
-    timeout = value.get('timeout_s', 30)
-    if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 3600:
-        raise ValueError('Private Prompt lock deadline must be finite')
-    if any(key in options for key in ('journal_dir', 'offline_dir', 'offline_store', 'codex_exec', 'codex_agent')):
-        raise ValueError('Private Prompt cache requires a single explicit HTTP journal')
-    return dict(value)
+
 
 
 def bind_private_prompt_contracts(service, graph):
@@ -54,7 +38,7 @@ def bind_private_prompt_contracts(service, graph):
             nodes[(node.occurrence_id, None)] = config
     if not nodes:
         return
-    from .checked import current
+    from demiflow.execution.checked import current
     kind = service._action.declaration.get('kind')
     # Ordinary Prompt may finish its current attempt into the ORIGINAL result
     # manifest. A result commit does not make private HTTP intents resumable.
@@ -90,7 +74,7 @@ class RemotePrivatePromptJournal(RemotePromptJournal):
         self.timeout_s = min(self.timeout_s, declaration.get('timeout_s', 30))
 
     def _command(self, operation, request, *, value_ref=None, reservation=None, options=None):
-        from .row_scope import current_row_scope
+        from demiflow.execution.row_scope import current_row_scope
         scope = current_row_scope()
         if scope is None or not re.fullmatch('[0-9a-f]{64}', scope.occurrence):
             raise DataflowError('INVALID_CONTRACT', 'Private Prompt RPC lost its original row scope')
@@ -151,7 +135,7 @@ def is_private_prompt_request(service, command, request):
 
 
 def _journal(service, node_id, route):
-    from ..operator_llm.sqlite_journal import SQLitePromptJournal
+    from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
     from demiflow.execution.storage.private_journals import private_storage
     with service._private_prompt_lock:
         if service._closed:
@@ -170,7 +154,7 @@ def _journal(service, node_id, route):
 
 
 def private_prompt_request(service, command, request):
-    from .dataflow_authority import _NATIVE_HANDLERS
+    from demiflow.execution.dataflow_authority import _NATIVE_HANDLERS
     route, scope = command.options.get('prompt_route'), command.options.get('row_scope')
     if (command.operation not in _OPERATIONS or command.reservation is not None
             or type(scope) is not str or not re.fullmatch('[0-9a-f]{64}', scope)
@@ -187,7 +171,7 @@ def private_prompt_request(service, command, request):
         raise DataflowError('INVALID_CONTRACT', 'Private Prompt RPC contains undeclared fields')
     config = service._private_prompt_nodes[(command.node_id, route)]
     if command.operation == 'reserve_http_retry':
-        from ..operator_llm.http_retry import http_error_retry_policy
+        from demiflow.operator_llm.http_retry import http_error_retry_policy
         policy = http_error_retry_policy(config['options'].get('http_error_retry'))
         if (policy is None or type(options['expected_attempt']) is not int
                 or not 1 <= options['expected_attempt'] <= policy['max_retries']
@@ -219,8 +203,8 @@ def private_prompt_request(service, command, request):
         charges['requests-' + identity(command.node_id)] = (1, ceiling if maximum is None else maximum)
     retry = options.get('expected_attempt') if command.operation == 'reserve_http_retry' else 0
     reservation = identity(['private-prompt-admission', command.action_id, command.node_id, route, scope, command.request_key, retry])
-    from .run_journal import ExecutionBudgetExceeded
-    from ..operator_llm.errors import PromptBudgetExceededError
+    from demiflow.execution.run_journal import ExecutionBudgetExceeded
+    from demiflow.operator_llm.errors import PromptBudgetExceededError
     try:
         service._journal.reserve_budgets(service._fence, reservation, charges)
     except ExecutionBudgetExceeded as error:

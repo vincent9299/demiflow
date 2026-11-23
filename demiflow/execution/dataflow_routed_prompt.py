@@ -7,9 +7,9 @@ occurrence, while request identity and per-route quota have stable subnamespaces
 from dataclasses import replace
 from types import SimpleNamespace
 
-from ..data.plan import CallableSpec
-from .contracts.dataflow_errors import DataflowError
-from .recovery_contract import identity
+from demiflow.data.plan import CallableSpec
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.recovery_contract import identity
 from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal
 
 
@@ -38,9 +38,9 @@ class _RoutedPromptJournal(RemotePromptJournal):
 
 
 def routed_declaration(actor, target):
-    from ..operator_llm.routed import RoutedPromptActor
-    from ..operator_llm.native_actor import is_native_prompt_actor
-    from .dataflow_model_factory import native_model_declaration, RoutedPromptFactory
+    from demiflow.operator_llm.routed import RoutedPromptActor
+    from demiflow.operator_llm.native_actor import is_native_prompt_actor
+    from demiflow.execution.dataflow_model_factory import native_model_declaration, RoutedPromptFactory
     if (getattr(target, '__func__', None) is not RoutedPromptActor.__call__
             or type(actor.actors) is not dict or not 1 <= len(actor.actors) <= 32
             or type(actor.limits) is not dict or set(actor.actors) != set(actor.limits)
@@ -62,31 +62,7 @@ def routed_declaration(actor, target):
         children, dict(actor.limits), actor.route, actor.isolate_failures, actor.max_requests))
 
 
-def compile_routed_prompt(operation, declaration, *, program_ref, bounds):
-    from .dataflow_models import build_model_factory, _json_config, _model_profile
-    children, limits, route, isolate, max_requests = declaration.constructor_args
-    if any(child.constructor_args[1].get('service') is not None for child in children.values()):
-        raise DataflowError('UNSUPPORTED_CAPABILITY', 'Owned Prompt route services require independent service placement')
-    models = {name: build_model_factory(child.constructor_args[0], program_ref=None, bounds=bounds)
-              for name, child in children.items()}
-    first = next(iter(models.values()))
-    configuration = {'route': route, 'routes': {name: _json_config(model.configuration)
-        for name, model in models.items()}, 'route_limits': limits,
-        'isolate_route_failures': isolate, 'concurrency': operation.concurrency,
-        'max_requests': max_requests,
-        'catch': [c.__module__ + '.' + c.__qualname__ for c in operation.catch]}
-    configuration['node_id'] = identity(['routed-prompt', configuration])
-    from .kernels.task_scope import function_residency_kind
-    state = 'nonrecoverable' if any('private_journal' in model.configuration for model in models.values()) else 'none'
-    for child in children.values():
-        predicate = child.constructor_args[1].get('when')
-        if predicate is not None and function_residency_kind(predicate) != 'none':
-            # The native journal recovers HTTP effects, not arbitrary predicate
-            # state. Retain the runtime's existing attempt-only restriction.
-            state = 'nonrecoverable'
-    return replace(first, implementation_ref=program_ref, configuration=configuration, state=state,
-        profile=_model_profile(first.resource_role, bounds, operation.concurrency, state,
-                               operation=operation))
+
 
 
 def bind_routed_prompt(actor, *, services, node_id, configuration):
@@ -94,7 +70,7 @@ def bind_routed_prompt(actor, *, services, node_id, configuration):
     action = make_native_action_view(services, node_id=node_id)
     for name, child in actor.actors.items():
         if configuration['routes'][name].get('private_journal') is not None:
-            from .dataflow_prompt_journal import bind_private_prompt_adapter
+            from demiflow.execution.dataflow_prompt_journal import bind_private_prompt_adapter
             bind_private_prompt_adapter(child, services=services, node_id=node_id,
                                         configuration=configuration['routes'][name], route=name)
             continue

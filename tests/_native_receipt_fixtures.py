@@ -33,7 +33,8 @@ def committed_rows(run, action_id, fact, sink_id='materialize'):
         manifest = publication['manifest']
         assert manifest['total_rows'] == receipt['rows']
         result = []
-        from demiflow.execution.arrow_payload import ArrowBatchCache, is_arrow_record
+        from demiflow.execution.kernels.arrow_payload import ArrowBatchCache
+        from demiflow.execution.contracts.record_codec import is_arrow_record
         arrow = ArrowBatchCache(store, bounds)
         for partition in manifest['partitions']:
             for leaf in segment_refs(store, ArtifactRef(**partition['data_ref']), bounds):

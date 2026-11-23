@@ -441,9 +441,9 @@ def _exceeds_record_batch(records, services):
     maximum = services.bounds.max_batch_bytes
     if sum(record.encoded_bytes for record in records) <= maximum:
         return False
-    from demiflow.execution.arrow_payload import batch_cache
+    from demiflow.execution.kernels.arrow_payload import batch_cache
     from demiflow.execution.contracts.record_codec import ARROW_BATCH_MEDIA
-    from demiflow.execution.arrow_payload import mapped_row_bytes
+    from demiflow.execution.contracts.record_codec import mapped_row_bytes
     total = 0
     for record in records:
         if record.payload_ref is not None and record.payload_ref.media_type == ARROW_BATCH_MEDIA:

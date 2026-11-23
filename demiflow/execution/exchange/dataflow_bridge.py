@@ -1,23 +1,15 @@
 """Lossless v3 projections to the frozen K4/K5 exchange contracts."""
 from demiflow.execution.contracts.record_codec import PAYLOAD_SCHEMA, RECORD_ENCODING, _DATA_MEDIA_TYPES, _digest, _document, _encode_payload, _fail, _ident, _nonneg_int, _ref_document, _validate_artifact_ref, _validate_record
 import base64
-import hashlib
-import json
-import math
-import sys
-import re
-from collections.abc import Mapping
 
-from demiflow.execution.contracts.dataflow import (ArtifactRef, BlockPartition, CutRequest, ExchangeSpec, Record,
-                                                  _FrozenRowList, _FrozenRowSet, thaw_record_value)
-from demiflow.execution.contracts.dataflow_errors import DataflowError
+
+from demiflow.execution.contracts.dataflow import CutRequest, ExchangeSpec
+
 from demiflow.execution.contracts.exchange import (
     DATA_ENVELOPE_SCHEMA, build_data_ref, check_read_domain, validate_barrier,
     validate_data_envelope,
 )
-from demiflow.execution.recovery_contract import (
-    MAX_DOCUMENT_BYTES, RecoveryContractError, document, identifier,
-)
+from demiflow.execution.recovery_contract import MAX_DOCUMENT_BYTES, RecoveryContractError
 
 
 _MODES = frozenset({"memory_incremental", "durable_incremental", "finite_sealed"})
@@ -27,13 +19,6 @@ _PLAN_KEYS = frozenset({
     "producer_partitions", "consumer_partitions", "route_epoch",
     "credit_budget", "storage_bytes", "read_domain", "scope_id", "reason",
 })
-from demiflow.execution.contracts.record_codec import ARROW_MEDIA_TYPES
-
-
-
-
-
-
 
 
 # -- X012 ---------------------------------------------------------------------

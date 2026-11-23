@@ -13,7 +13,7 @@ from demiflow.execution.contracts import record_codec as frames
 from demiflow.execution.contracts.dataflow import ArtifactRef, Record, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.record_codec import _encode_payload, _encode_record_document
-from demiflow.execution.record_schema import SCHEMA_MEDIA_TYPE
+from demiflow.execution.contracts.record_schema import SCHEMA_MEDIA_TYPE
 from demiflow.execution.recovery_contract import document
 from test_runtime_v3_c import bounds
 

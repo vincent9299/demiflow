@@ -66,7 +66,7 @@ ROLES = FAMILIES + (
 )
 
 _COMPILE = "demiflow.planning.dataflow_compile:compile_kernel_spec"
-_MODEL_COMPILE = "demiflow.execution.dataflow_models:build_model_factory"
+_MODEL_COMPILE = "demiflow.planning.dataflow_models:build_model_factory"
 _UNARY = "demiflow.execution.kernels.dataflow:invoke_unary"
 _BATCH = "demiflow.execution.kernels.dataflow:invoke_batch"
 _ORDER = "demiflow.execution.kernels.ordering:build_sort_runs"

@@ -1,10 +1,13 @@
 """Record codec implementation."""
 from __future__ import annotations
 
+import struct
+from dataclasses import dataclass
+
 from dataclasses import asdict
 
 import base64
-import hashlib
+
 import json
 import math
 import sys
@@ -12,7 +15,7 @@ import re
 from collections.abc import Mapping
 from demiflow.execution.contracts.dataflow import ArtifactRef, BlockPartition, Record, _FrozenRowList, _FrozenRowSet, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import MAX_DOCUMENT_BYTES, RecoveryContractError, document, identifier
+from demiflow.execution.recovery_contract import RecoveryContractError, document, identifier
 
 
 ARROW_BATCH_MEDIA = 'application/vnd.demiflow.arrow-batch.v1'
@@ -344,7 +347,7 @@ def _validate_record(record):
     for parent in parents:
         _digest(parent, 'parent_record_id')
     if record.schema_ref is not None:
-        from demiflow.execution.record_schema import SCHEMA_MEDIA_TYPE
+        from demiflow.execution.contracts.record_schema import SCHEMA_MEDIA_TYPE
         _validate_artifact_ref(record.schema_ref, 'schema_ref')
         if record.schema_ref.media_type != SCHEMA_MEDIA_TYPE:
             _fail('INVALID_CONTRACT', 'schema_ref must use the Arrow schema encoding')
@@ -432,7 +435,7 @@ def _decode_record_document(raw, *, record_id, sequence, max_bytes,
             schema_ref = ArtifactRef(**doc["s"])
         except (TypeError, ValueError) as exc:
             raise DataflowError("CORRUPT_ARTIFACT", "record schema ref is malformed") from exc
-        from demiflow.execution.record_schema import SCHEMA_MEDIA_TYPE
+        from demiflow.execution.contracts.record_schema import SCHEMA_MEDIA_TYPE
         if schema_ref.media_type != SCHEMA_MEDIA_TYPE:
             _fail("CORRUPT_ARTIFACT", "record schema ref has the wrong encoding")
     if (doc["p"] is None) == (doc["r"] is None):
@@ -443,7 +446,7 @@ def _decode_record_document(raw, *, record_id, sequence, max_bytes,
     if payload_max_bytes is not None and doc['eb'] > payload_limit:
         _fail('BUDGET_EXCEEDED', 'encoded payload exceeds max_row_bytes bound')
     if metadata_max_bytes is not None:
-        
+
         _json_shape({**doc, 'p': None}, metadata_max_bytes)
     if doc["p"] is not None:
         row = _decode_value(doc["p"])
@@ -455,7 +458,7 @@ def _decode_record_document(raw, *, record_id, sequence, max_bytes,
             # Validate normalization without simultaneously retaining a second
             # complete tagged tree AND both its JSON text/byte copies. Those
             # are separate peaks inside the caller's original codec grant.
-            
+
             _typed_shape(row, payload_limit)
             expected = _encode_value(row)
             if not _same_codec_tree(expected, doc['p']):
@@ -720,7 +723,7 @@ def decode_metadata(raw, bounds, *, resident_bytes=None, retained=0):
     return json.loads(raw)
 
 def _record_metadata(record):
-    
+
     metadata = {'v':3, 'sp':record.source_position, 'eb':record.encoded_bytes, 'p':None,
                 'r':None if record.payload_ref is None else _ref_document(record.payload_ref)}
     if record.schema_ref is not None: metadata['s'] = _ref_document(record.schema_ref)
@@ -749,7 +752,7 @@ def admit_encoded_record(record, raw, bounds, *, resident_bytes=None, retained=0
     _admit(retained + native + metadata + len(raw) + 4096, resident_limit(bounds, resident_bytes))
 
 def encode_document(record, bounds, *, resident_bytes=None, payload_limit=None, retained=0):
-    
+
     maximum = bounds.max_row_bytes if payload_limit is None else min(bounds.max_row_bytes, payload_limit)
     if record.inline is not None:
         size, native, tree = _typed_shape(record.inline, maximum)
@@ -882,7 +885,7 @@ def admit_document(raw, bounds, *, resident_bytes=None, retained=0):
 
 def decode_document(raw, *, record_id, sequence, bounds, resident_bytes=None, retained=0,
                     check_workspace=None):
-    
+
     workspace = admit_document(raw, bounds, resident_bytes=resident_bytes, retained=retained)
     if check_workspace is not None:
         # The caller's collection/read-window check and our codec admission
@@ -1137,3 +1140,178 @@ def _decode_canonical_outer(line, bounds, *, resident_bytes, retained, finite):
         offset += 1
         cursor = index + 2
     return bytes(output), item
+
+
+_MAGIC = b'DFARROW1'
+
+_HEADER = struct.Struct('!I')
+
+_MAX_ROWS = 256
+
+def is_arrow_record(record):
+    return record.payload_ref is not None and record.payload_ref.media_type in ARROW_MEDIA_TYPES
+
+def _arrow_error(message):
+    raise DataflowError('CORRUPT_ARTIFACT', message)
+
+def _value_upper(array, *, depth=0):
+    """Typed-row JSON upper bound from Arrow types/buffers, never Python rows.
+
+    Unknown types and oversized structures use the original exact row codec.
+    Scalar conversions below are only list offsets / aggregate validity bits.
+    """
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    n, kind = len(array), array.type
+    if depth > 24 or n > 65536:
+        return None
+    if pa.types.is_null(kind):
+        return 16 * n
+    if pa.types.is_boolean(kind) or pa.types.is_integer(kind):
+        return 48 * n
+    if pa.types.is_floating(kind):
+        if n and pc.any(pc.invert(pc.is_finite(array))).as_py():
+            return None  # Preserve the original nonfinite validation.
+        return 64 * n
+    if pa.types.is_string(kind) or pa.types.is_large_string(kind):
+        return 32 * n + 6 * array.nbytes
+    if pa.types.is_binary(kind) or pa.types.is_large_binary(kind) or pa.types.is_fixed_size_binary(kind):
+        return 32 * n + 4 * ((array.nbytes + 2) // 3)
+    if pa.types.is_struct(kind):
+        total = 32 * n
+        for index, field in enumerate(kind):
+            value = _value_upper(array.field(index), depth=depth + 1)
+            if value is None:
+                return None
+            total += n * (len(json.dumps(field.name, ensure_ascii=False).encode()) + 8) + value
+        return total
+    if pa.types.is_list(kind) or pa.types.is_large_list(kind):
+        first = array.offsets[0].as_py()
+        last = array.offsets[-1].as_py()
+        value = _value_upper(array.values.slice(first, last - first), depth=depth + 1)
+        return None if value is None else 32 * n + value
+    if pa.types.is_fixed_size_list(kind):
+        child = array.values.slice(array.offset * kind.list_size, n * kind.list_size)
+        value = _value_upper(child, depth=depth + 1)
+        return None if value is None else 32 * n + value
+    return None
+
+def row_upper(batch, index):
+    total = 32
+    for field, column in zip(batch.schema, batch.columns):
+        value = _value_upper(column.slice(index, 1))
+        if value is None:
+            return None
+        total += len(json.dumps(field.name, ensure_ascii=False).encode()) + 8 + value
+    return total
+
+def _resident_budget(bounds, assignment=None):
+    resident = bounds.max_resident_bytes
+    if assignment is not None:
+        stages = getattr(assignment, 'stages', ())
+        for stage in stages:
+            resident = min(resident, stage.profile.requests['memory_bytes'])
+    return resident
+
+def _window(bounds, assignment=None):
+    resident = _resident_budget(bounds, assignment)
+    # Source input + IPC encoding + authenticated read + prior yielded batch,
+    # and downstream row conversion may coexist. Keep explicit finite headroom.
+    return max(0, min(bounds.max_batch_bytes // 8, resident // 32))
+
+@dataclass(frozen=True)
+class ArrowPayload:
+    ref: object
+    encoded_bytes: int
+
+_UTF8_STRING_ESCAPE = re.compile(rb'["\\\x00-\x1f]')
+
+def mapped_row_bytes(batch, index, maximum):
+    """Exact tagged-row size for Arrow outputs, without constructing a row or copying its binary values."""
+    import pyarrow as pa
+
+
+    count = 1
+    def value_size(value, depth):
+        nonlocal count
+        count += 1
+        if count > _MAX_NODES or depth > _MAX_DEPTH:
+            raise DataflowError('BUDGET_EXCEEDED', 'record structure exceeds depth/node budget')
+        if not value.is_valid:
+            return 12
+        dtype = value.type
+        if pa.types.is_binary(dtype) or pa.types.is_large_binary(dtype) or pa.types.is_fixed_size_binary(dtype):
+            return 20 + 4 * ((value.as_buffer().size + 2) // 3)
+        if pa.types.is_string(dtype) or pa.types.is_large_string(dtype):
+            # Count JSON escapes in UTF-8; regular expression scanning stays in C
+            # for unescaped long strings. json_string_size uses the same escapes.
+            buf = memoryview(value.as_buffer()).cast('B')
+            size = len(buf) + 2
+            for match in _UTF8_STRING_ESCAPE.finditer(buf):
+                char = buf[match.start()]
+                size += 1 if char in b'\"\\\b\f\n\r\t' else 5
+            return 16 + size
+        if pa.types.is_struct(dtype):
+            return mapping_size(((field.name, value[field.name]) for field in dtype), depth)
+        if pa.types.is_list(dtype) or pa.types.is_large_list(dtype) or pa.types.is_fixed_size_list(dtype):
+            values = value.values
+            return 19 + max(0, len(values) - 1) + sum(value_size(v, depth + 1) for v in values)
+        return _typed_shape(value.as_py(), maximum)[0]
+
+    def mapping_size(fields, depth=0):
+        size = 18
+        for ordinal, (name, value) in enumerate(fields):
+            size += int(ordinal > 0) + 3 + _string_size(name) + value_size(value, depth + 1)
+        return size
+
+    return mapping_size((field.name, column[index]) for field, column in zip(batch.schema, batch.columns))
+
+def mapped_member(record_id, position):
+    from demiflow.execution.contracts.dataflow_codec import _thaw_json as thaw_control_json
+    from demiflow.execution.recovery_contract import identity
+    return identity([record_id, thaw_control_json(position)])
+
+def _uncompressed_ipc(buffer, bounds):
+    """Inspect bounded IPC messages before Arrow can allocate decoded arrays.
+
+    Our writer emits schema + one uncompressed record batch, no dictionaries.
+    The FlatBuffer check reads only Message.header and RecordBatch.compression
+    slots; a compressed/custom carrier is not part of this MIME contract.
+    """
+    import pyarrow as pa
+    messages = pa.ipc.MessageReader.open_stream(buffer)
+    schema, record = messages.read_next_message(), messages.read_next_message()
+    if schema.type != 'schema' or record.type != 'record batch':
+        _arrow_error('Arrow carrier requires schema and one record batch')
+    try:
+        messages.read_next_message()
+    except StopIteration:
+        pass
+    else:
+        _arrow_error('Arrow carrier contains extra IPC messages')
+    for message in (schema, record):
+        if message.metadata.size > min(65536, bounds.max_control_bytes):
+            _arrow_error('Arrow IPC metadata exceeds decode bound')
+    metadata = memoryview(record.metadata)
+    def field(table, index):
+        if not 0 <= table <= len(metadata)-4:
+            _arrow_error('invalid Arrow IPC table')
+        vtable = table - struct.unpack_from('<i', metadata, table)[0]
+        if not 0 <= vtable <= len(metadata)-4:
+            _arrow_error('invalid Arrow IPC vtable')
+        size = struct.unpack_from('<H', metadata, vtable)[0]
+        slot = 4 + 2*index
+        if slot + 2 > size:
+            return None
+        offset = struct.unpack_from('<H', metadata, vtable+slot)[0]
+        return table+offset if offset else None
+    try:
+        root = struct.unpack_from('<I', metadata, 0)[0]
+        pointer = field(root, 2)  # org.apache.arrow.flatbuf.Message.header
+        if pointer is None:
+            _arrow_error('Arrow IPC message lacks record header')
+        table = pointer + struct.unpack_from('<I', metadata, pointer)[0]
+        if field(table, 3) is not None:  # RecordBatch.compression
+            _arrow_error('compressed Arrow IPC is not an admitted batch carrier')
+    except (struct.error, IndexError) as exc:
+        raise DataflowError('CORRUPT_ARTIFACT', 'invalid Arrow IPC record header') from exc
