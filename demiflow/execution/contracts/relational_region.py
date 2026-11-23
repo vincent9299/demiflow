@@ -37,7 +37,8 @@ def fixed_join_inputs(graph):
     if join is None:
         return None
     spec = join.kernel
-    if (spec.configuration.get('how') not in ('inner','semi') or not spec.configuration.get('small_right_index')
+    if (any(n.kernel.effect != 'pure' for n in graph.nodes)
+            or spec.configuration.get('how') not in ('inner','semi') or not spec.configuration.get('small_right_index')
             or len(spec.configuration['on']) != 1):
         return None
     incoming = {e.input_port:e.producer for e in graph.edges if e.consumer == join.occurrence_id}

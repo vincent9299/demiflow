@@ -250,7 +250,11 @@ class DataflowExecution:
         self._idle.clear()
         for allocation_id, endpoint in self._endpoints.items():
             endpoint.send_business({"kind": "pause"})
-            endpoint.send_business({"kind": "satisfy"})
+            # Reaching a declared terminal limit completes its demand. An
+            # iterator close or stream stop only asks to checkpoint a prefix:
+            # source EOI alone cannot prove every finite kernel emitted its rows.
+            if self._limit is not None and self._terminal_seen >= self._limit:
+                endpoint.send_business({"kind": "satisfy"})
             # This is permission to stop this live source owner, not proof that
             # its input was exhausted. A prefix cut must remain non-final.
             lease = self._scheduler.leases[allocation_id]

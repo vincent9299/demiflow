@@ -895,7 +895,7 @@ class OperatorKernel:
         rows = port.records().within_offset_budget(JOIN_PROBE_WINDOW // 192)
         if rows is None:
             return None
-        field, = self._spec.configuration['right_on']
+        field, = self._spec.configuration.get('right_on') or self._spec.configuration['on']
         values = set()
         try:
             for record in rows:
