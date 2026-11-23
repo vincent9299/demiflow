@@ -94,8 +94,8 @@ dialog pre{max-width:75vw;max-height:65vh;overflow:auto;white-space:pre-wrap;ove
   .development-layout.development-files-open{grid-template-columns:var(--side-navigation-width,240px) minmax(0,1fr) var(--side-detail-width,minmax(360px,46%))}
   .development-layout.development-files-open[data-sidebar=closed]{grid-template-columns:0 minmax(0,1fr) var(--side-detail-width,minmax(360px,46%))}
 }
-.dev-sidebar-tabs{display:grid;grid-template-columns:1fr 1fr;gap:3px;padding:3px;margin:0 0 10px;background:#efefef;border-radius:8px;flex:none}
-.dev-sidebar-tab{display:inline-flex;align-items:center;justify-content:center;gap:5px;border:0;border-radius:6px;background:transparent;color:#52525b;font:inherit;font-size:12.5px;font-weight:500;padding:4px 8px;cursor:pointer;line-height:20px;transition:background .12s,color .12s}
+.dev-sidebar-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;padding:3px;margin:0 0 10px;background:#efefef;border-radius:8px;flex:none}
+.dev-sidebar-tab{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:0;border:0;border-radius:6px;background:transparent;color:#52525b;font:inherit;font-size:12px;font-weight:500;padding:4px 4px;cursor:pointer;line-height:20px;white-space:nowrap;transition:background .12s,color .12s}
 .dev-sidebar-tab:hover{color:#09090b}
 .dev-sidebar-tab.is-active{background:#fff;color:#09090b;font-weight:600;box-shadow:0 1px 2px rgba(9,9,11,.06),0 0 0 1px rgba(9,9,11,.05)}
 .dev-change-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 5px;border-radius:999px;background:#18181b;color:#fff;font-size:10.5px;font-weight:600;line-height:1}
