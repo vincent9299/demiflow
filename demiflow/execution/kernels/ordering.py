@@ -459,7 +459,7 @@ def sort_windows(services):
 def sort_with_body_references(records, *, spec, services, rows, window, retain, metadata_bytes):
     """Only this sort owns its body extent. Recovery reopens the closed input port."""
     from ..dataflow_record_frames import (
-        _typed_shape, admit_workspace, decode_document, encode_document,
+        _json_shape, _typed_shape, admit_workspace, decode_document, encode_document,
         raw_workspace, read_document, resident_limit,
     )
     from ..arrow_payload import is_arrow_record
@@ -476,6 +476,7 @@ def sort_with_body_references(records, *, spec, services, rows, window, retain, 
 
     def keys(record):
         row = record.inline
+        retained = 0
         if row is None:
             if is_arrow_record(record):
                 row = _materialize_row(record, codec)
@@ -485,10 +486,12 @@ def sort_with_body_references(records, *, spec, services, rows, window, retain, 
                 admit_workspace(raw_workspace(raw), codec.bounds, services=codec)
                 row = _decode_payload(raw, max_bytes=bounds.max_row_bytes)
                 del raw
+            retained = _typed_shape(row, bounds.max_row_bytes)[1]
         # Thaw only the key fields. Lists, tuples and typed nested values retain
         # the existing comparator semantics; a large non-key column stays frozen.
         key_row = {}
-        memory = 0
+        position_bytes, position_native = _json_shape(record.source_position, bounds.max_control_bytes)
+        memory = retained + 3 * position_bytes + 2 * position_native
         for name in spec.configuration['keys']:
             if name not in row:
                 raise _err('INVALID_CONTRACT', 'sort key field missing', field=name)
@@ -592,8 +595,9 @@ def _build_sort_runs(records, *, spec, services, window=None, key_for_record=Non
         frames = []
         used = 0
 
+    ordinal = 0
     try:
-        for ordinal, record in enumerate(records):
+        for record in records:
             _check_stop(services)
             size = _input_row_bytes(record)
             if size > bounds.max_row_bytes:
@@ -603,6 +607,7 @@ def _build_sort_runs(records, *, spec, services, window=None, key_for_record=Non
             elif key_for_record is None:
                 row = _materialize_row(record, services)
                 key = _record_sort_key(record, row, spec, services, ordinal=ordinal)
+                del row
                 prov = _provenance(record)
             else:
                 key = key_for_record(record)
@@ -631,6 +636,10 @@ def _build_sort_runs(records, *, spec, services, window=None, key_for_record=Non
                 flush()
             frames.append((key, prov, encoded))
             used += resident
+            ordinal += 1
+            # The input reader charges a single decoded row. Drop this one
+            # before requesting the next row from the port.
+            del saved_record, record, key, prov, encoded
         flush()
     except BaseException:
         _release_runs(refs, services)
