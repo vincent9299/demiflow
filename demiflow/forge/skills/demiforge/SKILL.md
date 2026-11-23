@@ -1,14 +1,18 @@
 ---
 name: demiforge
-description: 用 DemiFlow 公开 SDK 解读、新建或修改 Pipeline 项目中的 Flow、共享算子和 Prompt。用于需要查询开发规范、创建标准文件、登记入口或检查源码的开发任务。
+description: 用 DemiFlow 公开 SDK 解读、新建或修改 Pipeline 项目中的 Flow、共享算子和 Prompt。用于查询项目个性化配置与开发规范、创建标准文件、检查源码与执行项目验证的开发任务。
 ---
 
 # DemiForge 项目开发
 
-1. 确认用户选定的项目根和业务目标。运行 `demiflow forge context --root DIR`，分别查看已登记入口与角色目录。已有目标可加 `--path REL`。需要范例时加 `--topic flow`、`--topic operator` 或 `--topic prompt`。需要精确签名时加 `--api demiflow.data:Dataset.filter`。根据出处阅读本次相关的源码、参数和测试。纯解读任务到此即可回答。
-2. 新项目用 `demiflow forge init --root DIR`。接纳已有源码要显式使用 `--existing`。新增文件用 `demiflow forge add flow NAME --root DIR` 或 `add operator NAME --root DIR`。新建 Prompt 时先查 Prompt 主题，按实际原生格式准备内容，再用 `add prompt NAME --root DIR --from FILE` 创建。已经存在的文件直接按需求修改。
-3. 运行 `demiflow forge check --root DIR --path REL`；对指定入口可用 `--entry REL.py:SYMBOL` 并按需加 `--params REL.json`。根据具体诊断修正并重查。用针对业务目的的小样本测试核对输出。分别报告已检查和仍未核实的行为。
-4. 交付新增或实质修改的 Flow、算子、Prompt、跨管道输入或输出前，运行 `demiflow forge review --root DIR --entry REL.py:SYMBOL --goal "本次业务目标"`。复用本次参数，可用 `--evidence REL` 附小样本测试和真实结果。审一组改动时用 `--base REF`，聚焦文件时可重复给出 `--path REL`。工作台开发会话使用宿主提供的 `request_pipeline_review`，结果回到本会话。评审依据随 Forge 分发的《Forge Pipeline 评审指南》。对影响交付的发现修正并复核，将报告中的证据缺口带入交付说明。纯解读或文字修订沿用轻量路径。
-5. 准备让工作台使用的新入口，运行 `demiflow forge add flow --root DIR --register --entry REL.py:SYMBOL`；显式参数绑定用同一 `--params`。交付实际登记的入口、源码改动、测试结果、评审结论和剩余限制。已有入口修改后使用原登记。
-
-工作台可在开发全程关闭。项目自己的业务约束从用户要求、实际输入输出、源码和测试获取。
+1. **先通过 CLI 获取本项目个性化配置与规范**：运行 `demiflow forge context --root .`，查看项目根目录、个性化目录（`locations`）、授权可写路径、业务 Python 运行环境状态、已登记入口与角色目录。已有目标可加 `--path REL`；查编写范例加 `--topic flow`、`--topic operator` 或 `--topic prompt`；查精确 SDK 签名加 `--api demiflow.data:Dataset.filter`。根据出处阅读本次相关源码、参数和测试。纯解读任务到此即可回答。
+2. **新建或修改标准文件**：新项目用 `demiflow forge init --root .`（接纳已有源码加 `--existing`）。新增文件用 `demiflow forge add flow NAME --root .` 或 `add operator NAME --root .`；新建 Prompt 先查 Prompt 主题，再通过 `add prompt NAME --root . --from FILE` 创建。已有文件按需求直接修改。
+3. **改后自查与业务测试**：每次代码修改后，运行 `demiflow forge check --root . --path REL`（指定入口可加 `--entry REL.py:SYMBOL` 及 `--params REL.json`），根据诊断立即修正并复查。
+   - **业务环境自闭环**：仅使用 `forge context` 报告的本项目业务 Python 环境在项目根目录运行 `python` / `pytest`（允许导入 `demiflow` SDK，不依赖平台宿主第三方包）。
+   - 若 `forge context` 显示本项目尚未配置业务 Python 环境，**切勿**在宿主机搜索 Python/venv/pytest；完成源码修改与 `forge check` 静态检查后，明确提示用户在项目设置中配置该项目独立的 Python 解释器。
+4. **严格遵守读写与沙箱边界**：读写仅限本项目根目录、授权可写目录及 `$TMPDIR`；严禁探测、列举或绕过父目录、兄弟项目、宿主机 `/tmp`、凭证文件或平台内部环境。读取项目外输入数据时，在工作台内使用 `read_input` 工具。
+5. **独立评审与交付**：交付新增或实质修改的 Flow、算子、Prompt、跨管道输入或输出语义前：
+   - 在终端/独立环境运行 `demiflow forge review --root . --entry REL.py:SYMBOL --goal "本次业务目标"`（复用参数，可附 `--evidence REL` / `--base REF` / `--path REL`）。
+   - 在工作台开发会话中，独立评审由工作台宿主自动执行或通过宿主工具 `request_pipeline_review` 触发，不要在受限沙箱内直接跑 `demiflow forge review`。
+   - 对影响交付的阻断项修正并复核；纯解读或文字调整可直接回答。
+6. **登记新入口**：需向工作台公开新入口时，按权限使用 `demiflow forge add flow --root . --register --entry REL.py:SYMBOL`（可配 `--params`）；已有入口修改沿用原登记。结束时分别报告实际修改、静态检查、测试结果与尚待解决的限制。

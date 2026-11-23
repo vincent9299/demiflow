@@ -902,30 +902,32 @@
     dialog.append($('h2','项目设置'),$('p',project.name),path);
     if(projectManageEnabled){
       const pySection=$('section',undefined,'project-python-settings');
-      pySection.append($('strong','开发测试 Python 环境（沙箱只读）'));
+      pySection.append($('strong','业务 Python 环境（开发沙箱只读）'));
       const modeSelect=$('select',undefined,'project-python-select');modeSelect.setAttribute('aria-label','Python 环境模式');
-      modeSelect.append(new Option('继承工作台默认环境','default'),new Option('自定义项目虚拟环境 (venv / conda)','custom'),new Option('不挂载 Python 环境','disabled'));
-      const currentPy=project.python;
-      modeSelect.value=currentPy===undefined||currentPy===null?'default':currentPy===''?'disabled':'custom';
-      const pyInput=$('input',undefined,'project-python-input');pyInput.type='text';pyInput.setAttribute('aria-label','自定义 Python 解释器路径');
-      pyInput.placeholder='/path/to/venv/bin/python';pyInput.value=typeof currentPy==='string'&&currentPy?currentPy:'';
+      modeSelect.append(new Option('未配置（不继承平台环境）','disabled'),new Option('指定项目业务 Python 环境 (venv / conda)','custom'));
+      const currentPy=typeof project.python==='string'?project.python.trim():'';
+      modeSelect.value=currentPy?'custom':'disabled';
+      const pyInput=$('input',undefined,'project-python-input');pyInput.type='text';pyInput.setAttribute('aria-label','项目 Python 解释器路径');
+      pyInput.placeholder='/path/to/project-venv/bin/python';pyInput.value=currentPy;
       const pyHint=$('p','','muted small project-python-hint');
       const pyMsg=$('p','','small project-python-msg');pyMsg.hidden=true;
       const syncPyUi=()=>{
         const m=modeSelect.value;
         pyInput.hidden=m!=='custom';
-        pyHint.textContent=m==='default'?('当前默认：'+(projectDefaultPython||'工作台宿主 Python')+'（仅开放只读执行与 pytest，不可写入环境目录）'):m==='disabled'?'沙箱内仅保留系统 /usr/bin，不挂载项目 Python 环境。':'填写该项目的 venv 或 conda Python 绝对路径，工作台将以只读方式加入开发沙箱 PATH。';
+        pyHint.textContent=m==='custom'
+          ?'填写该业务项目独立的 venv / conda Python 绝对路径。沙箱仅开放只读执行（自动支持导入纯 demiflow SDK），写权限仍限于本项目内。'
+          :'未配置时不挂载任何 Python（默认不继承 DemiFlow 平台环境，保证业务项目自闭环）。';
       };
       modeSelect.onchange=syncPyUi;syncPyUi();
       const savePy=button('保存 Python 环境',async()=>{
         const m=modeSelect.value;
-        const payloadPy=m==='default'?null:m==='disabled'?'':pyInput.value.trim();
+        const payloadPy=m==='custom'?pyInput.value.trim():null;
         if(m==='custom'&&!payloadPy){pyMsg.textContent='请填写 Python 解释器的绝对路径。';pyMsg.dataset.tone='error';pyMsg.hidden=false;return;}
         savePy.disabled=true;pyMsg.hidden=true;
         try{
           await api('project-python',{},{workspace_id:project.workspace_id,expected:projectDigest,python:payloadPy});
           await refreshProjects();
-          pyMsg.textContent='已保存，新发起的开发回合将使用此只读 Python 环境。';pyMsg.dataset.tone='ok';pyMsg.hidden=false;
+          pyMsg.textContent=payloadPy?'已保存，新发起的开发回合将使用此业务 Python 环境（只读）。':'已清除，开发回合将不挂载业务 Python 环境。';pyMsg.dataset.tone='ok';pyMsg.hidden=false;
         }catch(err){
           pyMsg.textContent=err?.message||'保存失败';pyMsg.dataset.tone='error';pyMsg.hidden=false;
         }finally{savePy.disabled=false;}
