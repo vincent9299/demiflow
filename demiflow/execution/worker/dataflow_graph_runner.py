@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from itertools import islice
 from dataclasses import asdict
 
-from ..contracts.dataflow import ArtifactRef, CutContribution, WorkerStep
+from ..contracts.dataflow import FIXED_SCAN_BATCHES, ArtifactRef, CutContribution, WorkerStep
 from ..contracts.dataflow_errors import DataflowError
 from ..exchange.dataflow_bridge import _encode_record_document, _decode_record_document
 from ..exchange.dataflow_channels import reserve_credit, _route_record_document, snapshot_channels
@@ -155,7 +155,7 @@ class WorkerGraphRunner:
             budget=self._terminal_spec.configuration.get('terminal_memory') if self._terminal_spec else None,
             frame_call=self._frame_call, coalesce_allowed=lambda: not self._finite)
         self._batch_source = None
-        if (self._terminal_spec and self._terminal_spec.configuration.get('input_carrier') == 'fixed_scan_batches.v1'
+        if (self._terminal_spec and self._terminal_spec.configuration.get('input_carrier') == FIXED_SCAN_BATCHES
                 and len(executor._node_specs) == len(executor._graph.nodes) == 2
                 and len(executor._readers) == 1):
             reader = next(iter(executor._readers.values()))

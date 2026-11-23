@@ -16,6 +16,7 @@ import json
 from typing import TYPE_CHECKING
 
 from ..contracts.dataflow import (
+    FIXED_SCAN_BATCHES,
     ActionHandle, ActionRequest, ArtifactRef, Bounds, ControlReply, CutContribution,
     CutRequest, DriverServices, ExecutionStatus, PhysicalDataflow, ReadyWork,
     RecoveryImage, RuntimePolicy, SealedExecution, TerminalResult, WorkerAssignment,
@@ -417,7 +418,7 @@ class DataflowExecution:
                 snapshots.append(snapshot)
                 splits.extend(source_splits)
             pinned_batch = (len(splits) == 1 and self._policy.fusion and any(
-                node.kind == 'terminal' and node.kernel.configuration.get('input_carrier') == 'fixed_scan_batches.v1'
+                node.kind == 'terminal' and node.kernel.configuration.get('input_carrier') == FIXED_SCAN_BATCHES
                 for node in graph.nodes))
             if pinned_batch:
                 from dataclasses import replace
