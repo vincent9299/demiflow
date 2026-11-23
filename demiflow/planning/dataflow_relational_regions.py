@@ -88,6 +88,37 @@ def fuse_relational_regions(graph, stages, *, policy, bounds, hosts, snapshots=(
                  for s in stages if s.stage_id in replacements or not any(o in used for o in s.occurrences))
 
 
+def place_join_probe(graph, snapshots, splits, stages, *, policy, bounds, hosts):
+    from ..execution.contracts.relational_region import JOIN_PROBE_SUFFIX, JOIN_PROBE_WINDOW, fixed_join_inputs
+    shape = fixed_join_inputs(graph)
+    if not policy.fusion or not shape or len(splits) != 2 or {s.source_id for s in splits} != set(shape[:2]):
+        return stages
+    source = {snap.source_id:snap for snap in snapshots}
+    left, right, _ = shape
+    build = source[right].immutable_identity
+    count = build.get('row_count', build.get('count'))
+    scan = source[left].immutable_identity
+    if (type(scan.get('version')) is not int or type(count) is not int or count > JOIN_PROBE_WINDOW // 192
+            or any(s.locator.get('global_query') for s in splits)
+            or any(len(s.partitions) != 1 or s.replica_target != 1 or s.profile.limits or s.profile.requirements
+                   or set(s.profile.requests) - {'cpu_millis','memory_bytes'} for s in stages)):
+        return stages
+    resident = sum(s.resident_bytes for s in stages) + JOIN_PROBE_WINDOW
+    cpu = max(s.profile.requests['cpu_millis'] for s in stages)
+    control = min(bounds.max_control_bytes, bounds.max_resident_bytes // 8)
+    if resident + control > bounds.max_resident_bytes or not any(
+            h.logical_resources.get('memory_bytes', 0) >= resident and
+            h.logical_resources.get('cpu_millis', h.logical_resources.get('cpu', 0)*1000) >= cpu for h in hosts):
+        return stages
+    marker = stages[0].stage_id + JOIN_PROBE_SUFFIX
+    return (replace(stages[0], stage_id=marker, partitions=(marker + '-p0',),
+        occurrences=tuple(n.occurrence_id for n in graph.nodes),
+        profile=ResourceProfile(requests={'cpu_millis':cpu, 'memory_bytes':resident}),
+        replica_min=1, replica_target=1, replica_max=1, resident_bytes=resident,
+        output_bytes=sum(s.output_bytes for s in stages), state_bytes=sum(s.state_bytes for s in stages),
+        kernel_refs=tuple(dict.fromkeys(ref for s in stages for ref in s.kernel_refs))),)
+
+
 def place_key_exclusion(graph, snapshots, splits, stages, *, policy, bounds, hosts):
     """Admit the SQL process inside the stage that already owns a pinned left scan's anti join."""
     from ..execution.contracts.relational_region import KEY_SQL_SUFFIX, SQL_CHILD_RSS, SQL_PARENT_WINDOW

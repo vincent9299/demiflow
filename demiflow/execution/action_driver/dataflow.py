@@ -527,9 +527,9 @@ class DataflowExecution:
             physical = compile_physical_dataflow(
                 graph, tuple(snapshots), tuple(splits), policy=self._policy, hosts=self._services.hosts,
                 bounds=self._bounds, constants_ref=constants_ref)
-            from ..contracts.relational_region import KEY_BATCH_SUFFIXES
+            from ..contracts.relational_region import JOIN_PROBE_SUFFIX, KEY_BATCH_SUFFIXES
             context = self._action.context
-            if (any(s.stage_id.endswith(KEY_BATCH_SUFFIXES) for s in physical.stages)
+            if (any(s.stage_id.endswith((*KEY_BATCH_SUFFIXES, JOIN_PROBE_SUFFIX)) for s in physical.stages)
                     and 'checkpoint_rows' not in context.explicit_limits
                     and self._policy.checkpoint_rows == context.limits['checkpoint_rows']
                     and self._policy.checkpoint_rows < context.limits['checkpoint_unconfirmed_rows']):

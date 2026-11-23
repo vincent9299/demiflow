@@ -161,15 +161,7 @@ class _BaseReader:
             encoded_bytes = getattr(self, '_decoded_row_bytes', None)
             self._decoded_row_bytes = None
             if encoded_bytes is None:
-                if self._measure_row_copies:
-                    from .dataflow_record_frames import admit_row_copies
-                    bounds = self._services.bounds
-                    shared = getattr(self, '_shared_frame_call', None)
-                    if shared is not None:
-                        shared(admit_row_copies, row, bounds)
-                    else:
-                        admit_row_copies(row, bounds, services=self._services)
-                encoded_bytes = _encoded_size(row, max_bytes=self._services.bounds.max_row_bytes)
+                encoded_bytes = self.measured_row_size(row)
             else:
                 # The decoded immutable row and the source Record's frozen
                 # containers/array copy briefly coexist before publication.
@@ -189,6 +181,18 @@ class _BaseReader:
         if self._at_known_end():
             self._eoi = True
         return SourcePoll("record", record, 0)
+
+    def measured_row_size(self, row):
+        """Apply the same row copy and byte budgets for each emitted source record."""
+        if self._measure_row_copies:
+            from .dataflow_record_frames import admit_row_copies
+            bounds = self._services.bounds
+            shared = getattr(self, '_shared_frame_call', None)
+            if shared is not None:
+                shared(admit_row_copies, row, bounds)
+            else:
+                admit_row_copies(row, bounds, services=self._services)
+        return _encoded_size(row, max_bytes=self._services.bounds.max_row_bytes)
 
     def acknowledge_output(self) -> None:
         """A quiescent cut has captured every already-published record downstream.

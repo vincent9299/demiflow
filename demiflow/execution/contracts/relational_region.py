@@ -24,6 +24,34 @@ def selection_wire_bytes(child_rss):
     return min(child_rss // 8, SQL_PARENT_WINDOW // 2)
 
 
+JOIN_PROBE_SUFFIX = '-join-probe1'
+JOIN_PROBE_WINDOW = 1 << 20
+
+
+def fixed_join_inputs(graph):
+    """A pinned left probe and a complete right input feed exactly one inner/semi join."""
+    if len(graph.sources) != 2 or len(graph.terminals) != 1 or graph.jobs:
+        return None
+    nodes = {n.occurrence_id:n for n in graph.nodes}
+    join = next((n for n in graph.nodes if n.kernel.kind == 'join'), None)
+    if join is None:
+        return None
+    spec = join.kernel
+    if (spec.configuration.get('how') not in ('inner','semi') or not spec.configuration.get('small_right_index')
+            or len(spec.configuration['on']) != 1):
+        return None
+    incoming = {e.input_port:e.producer for e in graph.edges if e.consumer == join.occurrence_id}
+    if set(incoming) != {'left','right'}:
+        return None
+    left, right = incoming['left'], incoming['right']
+    if (set(graph.sources) != {left,right} or nodes[left].kernel.kind != 'lance'
+            or nodes[right].kernel.kind not in ('items','range','materialized')
+            or len(nodes) != 4 or len(graph.edges) != 3
+            or not any(e.producer == join.occurrence_id and e.consumer == graph.terminals[0] for e in graph.edges)):
+        return None
+    return left, right, join.occurrence_id
+
+
 def fixed_key_inputs(graph):
     """Exact two-scan anti join with an unmodified stream of surviving left rows."""
     if len(graph.sources) != 2 or len(graph.terminals) != 1 or graph.jobs:
