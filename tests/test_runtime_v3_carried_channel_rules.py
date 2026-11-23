@@ -11,7 +11,7 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from demiflow.execution.worker import mailbox
+from demiflow.execution.worker import mailbox as mailbox_module
 from demiflow.execution.contracts.dataflow import ExchangeSpec
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.recovery_contract import identity
@@ -45,7 +45,7 @@ def test_memory_delivery_from_another_route_epoch_is_fenced(command_epoch):
 
 
 def test_control_request_without_a_reply_stays_unknown_and_is_sent_once():
-    mailbox = mailbox.ControlMailbox(bounds=BIG, check_stop=lambda: None)
+    mailbox = mailbox_module.ControlMailbox(bounds=BIG, check_stop=lambda: None)
     event = mk_event('contribution')
     with pytest.raises(DataflowError) as failure:
         mailbox.request(event, deadline_ms=50)
