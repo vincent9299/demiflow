@@ -79,6 +79,9 @@ from demiflow.execution.dataflow_capacity import local_capacity_domain
 for fn in [data.local_execution, required_environment, parse_prompt_pack, read_run, local_capacity_domain, DatasetExecutor.prepare_input]:
     result['public.' + fn.__name__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
 from demiflow import Dataset
+from demiflow.inference import request_admission_config
+for fn in [Dataset.map_embeddings, request_admission_config]:
+    result['public.' + fn.__name__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
 result['public.Dataset'] = [base64.b64encode(pickle.dumps(Dataset, protocol=5)).decode(), describe(Dataset)]
 from demiflow import PipelineBundleRef
 buffer = io.BytesIO(); ProgramPickler(buffer, protocol=5).dump(PipelineBundleRef.load)
@@ -329,3 +332,20 @@ def test_original_protocol_rejects_forged_typing_methods(original_carriers, monk
         monkeypatch.setattr(TerminalSubscription, '__subclasshook__', forged)
     with pytest.raises(DataflowError, match='audited definition'):
         load_payload([base64.b64decode(original_carriers['TerminalSubscription'][0])])
+
+
+@pytest.mark.parametrize('name', ['map_embeddings', 'request_admission_config'])
+@pytest.mark.parametrize('private', [False, True])
+def test_original_public_function_keeps_effective_sdk_pin(original_carriers, name, private):
+    encoded, expected = original_carriers['public.' + name]
+    raw = base64.b64decode(encoded)
+    ref = SimpleNamespace(size_bytes=len(raw), digest=hashlib.sha256(raw).hexdigest())
+    loaded = load_private_payload(OriginalStore(raw), ref) if private else load_payload([raw])
+    assert describe(loaded) == expected
+
+
+def test_changed_request_policy_cannot_keep_original_pin(original_carriers, monkeypatch):
+    from demiflow.inference import request_admission_config
+    original = request_admission_config.__code__
+    monkeypatch.setattr(request_admission_config, '__code__', original.replace(co_consts=(*original.co_consts, 'changed')))
+    assert describe(request_admission_config) != original_carriers['public.request_admission_config'][1]
