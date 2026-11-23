@@ -1,8 +1,10 @@
 """The retired private method only invalidates resumes which captured the entire Dataset class."""
 from collections import Counter
+import json
 import os
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -96,15 +98,38 @@ def test_old_cut_and_sink_effects(published, tmp_path, capture, operation, rejec
 
     interrupted, before = invoke(published, 'generate')
     assert interrupted.returncode == 75, interrupted.stderr
-    assert before['start'] == 1 and 0 < before['row'] < 48
+    from demiflow.execution.run_reader import _ReadonlyJournal
+    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.sealed_plans import load_sealed_plan
+    directory = tmp_path / 'run'
+    stopped = json.loads((tmp_path / 'interruption.json').read_text())
+    journal = _ReadonlyJournal(directory)
+    fact = next(f for f in journal.execution_commits(stopped['action'])
+                if f['commit_id'] == stopped['commit'])
+    bounds = load_sealed_plan(directory, stopped['action'], version='v3')['physical'].bounds
+    cut = StateArtifacts(SimpleNamespace(directory=directory,
+        limits={'max_state_bytes': bounds.max_state_bytes})).read(fact['prepared']['state']['dataflow-cut-v3'])
+    cursors = [c for contribution in cut['contributions'] for c in contribution['sources']]
+    cursor, = cursors
+    committed = cursor['offset']['next']
+    assert not cut['cut']['final'] and 0 < committed < 48
+    # Workers can run ahead of the committed cut before the driver is killed.
+    # Only checkpointed calls are protected from replay; the durable sink must
+    # still publish every input exactly once.
+    assert before['start'] == 1 and committed <= before['row'] <= 48
     resumed, after = invoke(REPO, operation)
     if rejection:
         assert resumed.returncode != 0 and rejection in resumed.stderr, resumed.stderr
         assert not after
     else:
         assert resumed.returncode == 0, resumed.stderr
-        assert before['row'] + after['row'] == 48
+        assert committed + after['row'] == 48
         assert after == {'row': after['row'], 'start': 1, 'prepare': 1, 'commit': 1, 'complete': 1}
+        from _native_receipt_fixtures import committed_rows
+        final = journal.execution_commits(stopped['action'])[-1]
+        assert final['receipts']['write_datasink']['data']['native_receipt']['data']['written_rows'] == 48
+        assert committed_rows(SimpleNamespace(directory=directory), stopped['action'], final,
+                              sink_id='write_datasink') == [{'id': n} for n in range(48)]
 
 
 def test_whole_class_capture_published_results_still_readable(published, tmp_path):

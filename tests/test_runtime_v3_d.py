@@ -597,7 +597,21 @@ class FakeStore:
             assert stream.readinto(destination) == ref.size_bytes
 
     def inspect(self, ref):
-        return self._path(ref.key).is_file()
+        path = self._path(ref.key)
+        if not path.is_file():
+            return False
+        raw = path.read_bytes()
+        if len(raw) != ref.size_bytes or hashlib.sha256(raw).hexdigest() != ref.digest:
+            raise DataflowError("INVALID_CONTRACT", "artifact bytes do not match its reference")
+        return True
+
+    def object_signature(self, ref):
+        # This crash-test store has no reusable checksum proofs. Publication
+        # must authenticate its leaves through inspect on every attempt.
+        return None
+
+    def reusable_signature(self, ref, *, witness):
+        return None
 
     def _owners_path(self, key):
         return self.root / (key + ".owners.json")

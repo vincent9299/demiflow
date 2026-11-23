@@ -337,7 +337,9 @@ class FakeServices:
         self.programs = dict(programs or {})
         self.constants = dict(constants or {"random_seed": 12345})
         self.journal = object()
-        self.assignment = object()
+        # These unit kernels have no compiler-selected SQL stage. The live
+        # runtime supplies this same stages interface through WorkerAssignment.
+        self.assignment = types.SimpleNamespace(stages=())
         self._clock = [0]
         self.stopped = False
 
