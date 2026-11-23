@@ -420,6 +420,7 @@ class DataflowExecution:
             return False
         self._check_stop()
         self._terminal = TerminalSubscription(self._bounds, self._exchange, ())
+        self._action.complete({"kind": "count", "scalar": rows, "source": self._request.source.handle.recovery_reference})
         self._started = True
         self._confirmed_rows = rows
         self._terminal_result = TerminalResult(kind="count", rows=rows, scalar=rows, result_ref=None,

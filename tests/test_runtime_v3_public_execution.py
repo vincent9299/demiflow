@@ -29,6 +29,45 @@ def test_public_filter_count(tmp_path):
         assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
 
 
+def test_materialized_count_uses_authenticated_rows_and_records_action(tmp_path):
+    with RunContext.start(tmp_path / 'run') as run, data.local_execution():
+        stored = data.from_items(_rows()).map(lambda row: row).materialize()
+        assert stored.count() == 6
+        assert stored.execution_metadata().diagnostics['observed_worker_count'] == 0
+        receipt = run.journal.execution_action('action-2')['result']
+        assert receipt == {'kind': 'count', 'scalar': 6, 'source': stored._source.handle.recovery_reference}
+        assert stored.filter(lambda row: row['n'] > 3).count() == 2
+        assert stored.execution_metadata().diagnostics['observed_worker_count'] > 0
+        stored.release()
+        with pytest.raises(RuntimeError, match='release'):
+            stored.count()
+
+
+@pytest.mark.parametrize('damage', ['missing', 'same-size', 'manifest'])
+def test_materialized_count_rejects_damaged_input(tmp_path, damage):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.dataflow_segments import segment_refs
+    with RunContext.start(tmp_path / 'run'), data.local_execution():
+        stored = data.from_items(_rows()).map(lambda row: row).materialize()
+        handle = stored._source.handle
+        ref = handle._manifest_ref if damage == 'manifest' else next(
+            ref for block in handle._blocks for ref in segment_refs(handle._store, block, handle._bounds)
+            if ref.size_bytes)
+        path = handle._store._object_path(ref)
+        original = path.read_bytes()
+        try:
+            if damage == 'missing':
+                path.unlink()
+            else:
+                with path.open('r+b') as payload:
+                    payload.write(bytes([original[0] ^ 1]))
+            with pytest.raises(DataflowError):
+                stored.count()
+        finally:
+            path.write_bytes(original)
+            stored.release()
+
+
 def test_public_union_take_all(tmp_path):
     with RunContext.start(tmp_path / 'run'), data.local_execution():
         left = data.from_items([{'n': 1}, {'n': 2}])

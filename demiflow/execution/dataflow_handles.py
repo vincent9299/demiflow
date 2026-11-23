@@ -572,8 +572,13 @@ class StoredMaterializedHandle:
                 raise _error("CORRUPT_ARTIFACT", "materialized row count differs from manifest")
             if self._declared_schema_ref is not None and not self._store.inspect(self._declared_schema_ref):
                 raise _error("CORRUPT_ARTIFACT", "materialized schema is absent")
-            if any(self._store.object_signature(ref) != stamp for ref, stamp in self._count_proof.items()):
-                return None
+            for ref, stamp in self._count_proof.items():
+                if self._store.object_signature(ref) != stamp:
+                    # Replacements may be byte-identical. Authorize reads and authenticate
+                    # again before the ordinary source reader takes over.
+                    if not self._store.inspect(ref):
+                        raise _error("UNKNOWN_EFFECT", "materialized block is absent")
+                    return None
             return self._rows
 
     def _read_manifest(self) -> dict:
