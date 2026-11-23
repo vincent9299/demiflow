@@ -44,7 +44,7 @@ def cpu(pid):
 def instrument_client(metrics):
     from demiflow.operator_llm import messages, runtime, client
     from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
-    from demiflow.execution.blocking_io import BlockingIOPool
+    from demiflow.services.blocking_io import BlockingIOPool
     metrics.wrap(messages,'render_input','client.render')
     metrics.wrap(runtime,'validate_instance','client.schema')
     for name in ['prepare','decode']:
