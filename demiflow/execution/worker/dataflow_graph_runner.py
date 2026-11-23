@@ -793,6 +793,65 @@ class WorkerGraphRunner:
             self._paused = True
             self._flush_metrics()
 
+    def _accept_arrow_result(self, terminal_occurrence, batch, *, positions):
+        """Seal each ordered output batch once and advertise that same leaf under ACK credit."""
+        import pyarrow as pa
+        from ..dataflow_native_limits import sealed_execution_ceilings
+        from ..dataflow_record_frames import admit_workspace
+        from ..outputs.arrow_rows import pack_result, validate_row_sizes
+        from ..record_schema import RecordSchemas
+        operator = next(node for node in self.e._node_specs.values() if node.kernel.kind == 'exclude_keys')
+        source_id = operator.kernel.configuration['lance_key_source']
+        split, = [s for s in self.e._physical.splits if s.source_id == source_id]
+        snapshot = next(s for s in self.e._physical.sources if s.source_id == source_id)
+        caps = sealed_execution_ceilings(self.e._graph)
+        row_budget = min(self.bounds.max_row_bytes, operator.kernel.output_bound_bytes or self.bounds.max_row_bytes)
+        validate_row_sizes(batch, row_budget)
+        if not batch.num_rows:
+            return
+        if self._terminal_schema_ref is None:
+            self._terminal_schema_ref = RecordSchemas(self.services).put(batch.schema)
+            self._set_terminal_columns(batch.schema, schema=True)
+        size_limit = min(self.bounds.max_batch_bytes, caps.get('inflight_bytes', self.bounds.max_batch_bytes))
+        start = 0
+        while start < batch.num_rows:
+            count = min(batch.num_rows - start, caps.get('inflight_rows', batch.num_rows))
+            while True:
+                packed = pack_result(batch.slice(start, count), positions.slice(start, count), source_id=source_id,
+                    split_id=split.split_id, version=snapshot.immutable_identity['version'],
+                    occurrence=operator.occurrence_id, sequence=self._terminal_rows, bounds=self.bounds)
+                size = pa.ipc.get_record_batch_size(packed) + len(packed.schema.serialize()) + 8
+                if size <= size_limit:
+                    break
+                if count == 1:
+                    raise DataflowError('BUDGET_EXCEEDED', 'terminal Arrow row exceeds admitted transfer bytes')
+                count //= 2
+            # Only one leased IPC leaf may await acknowledgement. Cursor movement
+            # and cuts outside this call observe the complete processed source prefix.
+            deadline = time.monotonic() + self.bounds.timeout_ms / 1000
+            with self._condition:
+                while self._credits:
+                    if self.e._cancel_event.is_set():
+                        raise DataflowError('CANCELLED', 'business execution cancelled')
+                    if time.monotonic() >= deadline:
+                        raise DataflowError('DEADLINE_EXCEEDED', 'terminal Arrow delivery credit deadline')
+                    self._condition.wait(.01)
+            self.services.check_stop()
+            self._frame_call(admit_workspace, packed.get_total_buffer_size() + 2 * size + 65536, self.bounds)
+            first = self._terminal_rows
+            ref = self._terminal_blocks.append_arrow_batch(packed)
+            self._terminal_rows, self._terminal_bytes = self._terminal_blocks.rows, self._terminal_blocks.bytes
+            delivery = self.e._next_operation_id('terminal')
+            with self._condition:
+                self._credits[delivery] = (None, None)
+            self._send('terminal', {'delivery_id': delivery, 'producer_partition': self.partition,
+                'result_batch': _artifact_json(ref), 'rows': count, 'sequence': first,
+                'schema_ref': _artifact_json(self._terminal_schema_ref)})
+            self._metrics[terminal_occurrence]['rows_input'] += count
+            self._metrics[terminal_occurrence]['rows_output'] += count
+            self._dirty_metrics.add(terminal_occurrence)
+            start += count
+
     def step(self, *, max_records, deadline_ms):
         if max_records <= 0 or deadline_ms <= 0:
             raise DataflowError('INVALID_CONTRACT', 'step budgets must be positive')
