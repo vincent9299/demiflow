@@ -718,7 +718,7 @@ class LanceReader(_BaseReader):
     def _native_batches(self):
         from dataclasses import replace
         from demiflow.lance.read import _iter_scan
-        from demiflow.execution.dataflow_native_limits import limit_value
+        from demiflow.execution.scheduler.native_limits import limit_value
         from demiflow.execution.arrow_payload import _window
         query = self._plan.query
         workspace = _window(self._services.bounds, self._services)
@@ -816,7 +816,7 @@ class LanceReader(_BaseReader):
             # grant; do not inherit Lance's larger implicit prefetch window.
             exact = replace(exact, batch_readahead=1, fragment_readahead=1)
         batch_rows = max(1, min(256, self._services.bounds.max_batch_bytes // self._services.bounds.max_row_bytes))
-        from demiflow.execution.dataflow_native_limits import limit_value
+        from demiflow.execution.scheduler.native_limits import limit_value
         batch_rows = limit_value(self._services, 'batch_rows', batch_rows)
         if getattr(exact, 'batch_size', None) is not None:
             exact = replace(exact, batch_size=min(exact.batch_size, batch_rows))

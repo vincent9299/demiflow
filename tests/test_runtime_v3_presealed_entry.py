@@ -15,7 +15,7 @@ def _plain(row):return {**row,'out':row['i']*2}
 def _prepared(tmp_path,*,thread=False,wrong_program_pin=False):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.dataflow_api import make_action_request
-    from demiflow.execution.dataflow_services import make_driver_services
+    from demiflow.execution.action_driver.services import make_driver_services
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     shared=[]
     def live(row):
@@ -110,7 +110,7 @@ def test_first_sealed_plan_bad_code_pin_carrier_is_rejected_before_execution(tmp
 def test_first_sealed_plan_for_another_action_is_rejected(tmp_path):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.dataflow_api import make_action_request
-    from demiflow.execution.dataflow_services import make_driver_services
+    from demiflow.execution.action_driver.services import make_driver_services
     with _prepared(tmp_path) as (run,ds,first,unused,_):
         request=make_action_request(ds._executor,ds._source,ds._plan,kind='take_all',arguments={'limit':None})
         assert request.action.action_id!='action-1'

@@ -219,7 +219,8 @@ def resolve_action_runtime(request: ActionRequest):
     run = request.action.context
     limits = dict(run.limits)
     explicit = set(run.explicit_limits)
-    from .dataflow_native_limits import EXECUTION_LIMITS, execution_ceilings, intersect_native_limits
+    from demiflow.execution.contracts.dataflow import EXECUTION_LIMITS, execution_ceilings
+    from demiflow.execution.scheduler.native_limits import intersect_native_limits
     ceilings = execution_ceilings(request.arguments.get(EXECUTION_LIMITS))
     if ceilings:
         if 'scratch_bytes' in ceilings:
@@ -245,7 +246,7 @@ def resolve_action_runtime(request: ActionRequest):
     native = ({'batch_rows': min(ceilings['inflight_rows'], limits['batch_rows'])}
               if 'inflight_rows' in ceilings else None)
     if declared is not None:
-        from .dataflow_native_limits import effective_native_limits
+        from demiflow.execution.scheduler.native_limits import effective_native_limits
         native = intersect_native_limits(native, effective_native_limits(declared, limits))
     if request.kind == 'aggregate' and not request.action.replaying:
         block_rows = min(getattr(executor, '_block_size', limits['batch_rows']),
@@ -335,7 +336,7 @@ def _run_dataset_action(request: ActionRequest, *, after_prepare=None) -> object
         finally:
             record_execution_metadata(request, handle._execution)
     # Streaming adapters retain the action handle until exhaustion or close.
-    from .dataflow_native_limits import DELIVERY_LIMIT
+    from demiflow.execution.contracts.dataflow import DELIVERY_LIMIT
     native_delivery = request.kind == "take" and DELIVERY_LIMIT in arguments
     if request.kind == "iter_rows" or (native_delivery and arguments.get('batch_format') != 'pyarrow'):
         return observed(iterate_rows(handle))

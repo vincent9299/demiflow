@@ -62,7 +62,7 @@ class PinnedKeyScan:
         import pyarrow as pa
         from ..lance.model import LanceScanSpec
         from ..lance.storage import open_lance_dataset
-        from .dataflow_native_limits import limit_value
+        from demiflow.execution.scheduler.native_limits import limit_value
         q = reader._plan.query
         if (type(q) is not LanceScanSpec or reader._global or q.filter or q.limit or q.projection
                 or reader._replay_pending or reader._offset.get('arrow_batch')
@@ -256,7 +256,7 @@ class PinnedKeyPayload:
         return self.fragment_order.get(pos['fragment_id'], 0), pos['row_offset']
 
     def hydration_rows(self, *, bulk):
-        from .dataflow_native_limits import limit_value
+        from demiflow.execution.scheduler.native_limits import limit_value
         bounds = self.services.bounds
         rows = _hydration_rows(self.schema, self.services, self.requested) if bulk else (
             max(1, min(256, bounds.max_batch_bytes // bounds.max_row_bytes)))

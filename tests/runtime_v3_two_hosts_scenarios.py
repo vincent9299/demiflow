@@ -30,7 +30,7 @@ def _different_bytes(fx, nodes):
     import pytest
     from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
     from demiflow import data
-    from demiflow.execution import dataflow_services
+    from demiflow.execution.hosts import configuration as dataflow_services
     from demiflow.execution.run_context import RunContext
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     local = ray.get_runtime_context().get_node_id()
@@ -108,7 +108,7 @@ def two_hosts(fx, fault=None):
         raise NotRunError('two_hosts', detail)
     import test_runtime_v3_physical_hosts as original_cases
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution import dataflow_services
+    from demiflow.execution.hosts import configuration as dataflow_services
     original_domain = dataflow_services.verify_host_domain
     domain_proofs, caches, cases = [], [], {}
 

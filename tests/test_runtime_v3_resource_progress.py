@@ -11,7 +11,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 def test_runs_share_one_capacity_domain(tmp_path, monkeypatch):
     from demiflow.execution.hosts.capacity import local_capacity
-    from demiflow.execution.dataflow_services import _driver_resources
+    from demiflow.execution.hosts.configuration import driver_resources as _driver_resources
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     from demiflow.resources.capacity import LocalCapacityPool
     from demiflow.resources.contracts import ResourceError

@@ -7,6 +7,12 @@ effects: K1 recheck, read-only state restore, granted-fence authority attach at
 Activate, the business-input gate, and drain/cancel. Sealed dataflow workers
 run the v3 assignment. Standalone K3 workers only hold their granted authority.
 """
+
+from demiflow.execution.contracts.dataflow import RuntimeServices, WorkerAssignment
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.storage.objects import RunArtifactStore
+from demiflow.execution.dataflow_authority import WorkerJournalClient
+from demiflow.execution.seal.plan import load_worker_programs, read_execution_constants
 import tempfile
 import time
 import uuid
@@ -73,7 +79,6 @@ def _decode_v3_assignment(config):
 
 def _build_v3_executor(config, *, control):
     """Assemble the unified v3 executor from a sealed launch payload (H027/B001/B002)."""
-    from ..dataflow_services import make_runtime_services
     from .dataflow_execution import DataflowWorkerExecutor
     assignment = _decode_v3_assignment(config)
     transport = config.get("transport")
@@ -341,3 +346,65 @@ class WorkerRuntime:
         if self.authority is not None:
             self.authority.__exit__(None, None, None)
             self.authority = None
+
+
+def _bind_prediction_program(program, binding, configuration):
+    """Apply the assignment to both the verified declaration and private tasks."""
+    from dataclasses import replace
+    from demiflow.execution.contracts.dataflow import thaw_record_value
+
+    def bind(declaration):
+        return replace(declaration, constructor_kwargs={
+            'model': thaw_record_value(binding),
+            'inputs': thaw_record_value(configuration['predict_inputs']),
+            'parameters': thaw_record_value(configuration['predict_parameters'])})
+
+    def load_private():
+        return bind(program.load_private())
+
+    return replace(program, value=bind(program.value),
+                   load_private=load_private if program.load_private is not None else None)
+
+def make_runtime_services(assignment: WorkerAssignment, *, transport: "ControlTransport",
+                          cache: Path) -> RuntimeServices:
+    if not isinstance(assignment, WorkerAssignment):
+        raise DataflowError("INVALID_CONTRACT", "assignment must be a WorkerAssignment")
+    bounds = assignment.bounds
+    cache = Path(cache) / assignment.lease.allocation_id
+    journal = WorkerJournalClient(transport=transport, lease=assignment.lease, bounds=bounds)
+    journal.check_grant()
+    shared_store = transport.store
+    if shared_store is None:
+        raise DataflowError("INVALID_CONTRACT", "transport exposes no authenticated shared store")
+    store_id = assignment.sealed.code_pin_ref.store_id
+    if store_id != shared_store.store_id:
+        raise DataflowError("INVALID_CONTRACT", "assignment artifacts belong to another store domain")
+    store = RunArtifactStore(root=shared_store.root, store_id=store_id, journal=journal, bounds=bounds)
+    try:
+        programs = load_worker_programs(assignment, store=store, bounds=bounds, cache=cache)
+        for occurrence, (binding, configuration) in programs.prediction_bindings.items():
+            programs[occurrence] = _bind_prediction_program(programs[occurrence], binding, configuration)
+        constants = read_execution_constants(assignment.sealed.constants_ref, store=store, bounds=bounds)
+        from demiflow.execution.hosts.configuration import NativeBudgetGuard
+        from demiflow.execution.scheduler.native_limits import intersect_native_limits
+        limits = intersect_native_limits(getattr(programs, "native_limits", None), assignment.native_limits)
+        if limits is not None:
+            constants['native_limits'] = limits
+        guard = NativeBudgetGuard(limits)
+        def check_stop():
+            guard.check()
+            transport.check_stop()
+            journal.check_lease()
+        from demiflow.execution.contracts.relational_region import needs_native_offsets
+        query_region_offsets = None
+        if any(needs_native_offsets(stage) for stage in assignment.stages):
+            from demiflow.execution.hosts.datafusion import query_region_offsets
+        return RuntimeServices(store=store, journal=journal, bounds=bounds, assignment=assignment,
+                               clock_ms=lambda: int(time.time() * 1000), check_stop=check_stop,
+                               constants=constants, programs=programs, query_region_offsets=query_region_offsets)
+    except BaseException as failure:
+        try:
+            store.close()
+        except BaseException as cleanup:
+            failure.add_note('Worker store cleanup failed: ' + str(cleanup))
+        raise

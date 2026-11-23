@@ -2070,3 +2070,31 @@ class DriverAuthority(Protocol):
     def poll_replies(self, *, max_replies: int) -> tuple[CompletedControl, ...]: ...
     def close(self, *, deadline_ms: int) -> None: ...
     def bind_queue(self, service: object) -> None: ...
+
+
+EXECUTION_LIMITS = 'native_execution_limits'
+DELIVERY_LIMIT = 'native_delivery_limit'
+
+def execution_ceilings(value):
+    """Small declaration borrowed from an old placement, never a new grant."""
+    names = {'cpu_millis', 'memory_bytes', 'scratch_bytes', 'inflight_rows',
+             'inflight_bytes', 'output_bytes'}
+    if value is None:
+        return {}
+    if not isinstance(value, _RuntimeMapping) or set(value) - names:
+        raise DataflowError('INVALID_CONTRACT', 'invalid native execution ceilings')
+    result = {key: amount for key, amount in value.items() if amount is not None}
+    if any(type(amount) is not int or not 0 < amount < 2**63 for amount in result.values()):
+        raise DataflowError('INVALID_CONTRACT', 'native execution ceilings must be bounded positive integers')
+    if result.get('cpu_millis', 1000) < 1000:
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'native execution requires one whole CPU worker')
+    return result
+
+def sealed_execution_ceilings(graph):
+    values = [execution_ceilings(node.kernel.configuration.get('arguments', {}).get(EXECUTION_LIMITS))
+              for node in graph.nodes if node.kind == 'terminal']
+    return {key: min(value[key] for value in values if key in value)
+            for key in set().union(*(value.keys() for value in values))}
+
+def validate_native_limits(value):
+    _native_limits(value)

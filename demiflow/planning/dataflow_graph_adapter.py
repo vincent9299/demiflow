@@ -548,7 +548,7 @@ def pack_graph_residency(graph, stages, exchanges, residency, *, requested, host
     if not any('graph_route' in node.kernel.configuration for node in graph.nodes):
         return exchanges, residency
     from .dataflow_place import solve_residency
-    from ..execution.dataflow_native_limits import sealed_execution_ceilings
+    from demiflow.execution.contracts.dataflow import sealed_execution_ceilings
     originals = {edge.edge_id: edge for edge in requested}
     selected = exchanges
     attempts = 0

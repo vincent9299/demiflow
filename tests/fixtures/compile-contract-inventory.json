@@ -164,8 +164,8 @@
     "execution/outputs/terminals.py"
    ],
    "arguments": [
+    "execution/contracts/dataflow.py",
     "execution/contracts/relational_region.py",
-    "execution/dataflow_native_limits.py",
     "execution/seal/plan.py",
     "execution/worker/dataflow_graph_runner.py",
     "planning/dataflow_place.py"
@@ -407,13 +407,12 @@
     "planning/dataflow_training.py"
    ],
    "predict_inputs": [
-    "execution/dataflow_services.py"
+    "execution/worker/runtime.py"
    ],
    "predict_parameters": [
-    "execution/dataflow_services.py"
+    "execution/worker/runtime.py"
    ],
    "predict_step": [
-    "execution/dataflow_services.py",
     "execution/seal/plan.py",
     "planning/dataflow_place.py",
     "planning/dataflow_training.py"

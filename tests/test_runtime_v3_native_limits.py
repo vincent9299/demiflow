@@ -9,9 +9,8 @@ from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire, compute_physical_digest
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.dataflow_native_limits import (
-    NativeBudgetGuard, admission_timeout_ms, intersect_native_limits,
-)
+from demiflow.execution.hosts.configuration import NativeBudgetGuard
+from demiflow.execution.scheduler.native_limits import admission_timeout_ms, intersect_native_limits
 from demiflow.execution.run_context import RunContext
 
 

@@ -365,7 +365,7 @@ def plan_exchanges(
     owner = _stage_of_occurrence(stages)
     credit_rows = max(1, min(256, bounds.max_pending_events))
     credit_bytes = max(1, min(bounds.max_resident_bytes, bounds.max_batch_bytes * 4))
-    from ..execution.dataflow_native_limits import sealed_execution_ceilings
+    from demiflow.execution.contracts.dataflow import sealed_execution_ceilings
     ceilings = sealed_execution_ceilings(graph)
     credit_rows = min(credit_rows, ceilings.get('inflight_rows', credit_rows))
     credit_bytes = min(credit_bytes, ceilings.get('inflight_bytes', credit_bytes))
@@ -834,7 +834,7 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
     If it cannot fit, checkpointable boundaries may park a bounded durable
     window. The fixed-plan solver remains strict about memory co-residency.
     """
-    from ..execution.dataflow_native_limits import sealed_execution_ceilings
+    from demiflow.execution.contracts.dataflow import sealed_execution_ceilings
     ceilings = sealed_execution_ceilings(graph)
     cpu_ceiling = ceilings.get('cpu_millis')
     from demiflow.execution.scheduler.dataflow_publication_budget import graph_workspace_bytes
@@ -968,7 +968,7 @@ def compile_physical_dataflow(
     # Optional co-location must fit the same caller ceiling as the original
     # allocation scope. Project capacity only for planning; real providers keep
     # their original descriptors and admission authority.
-    from ..execution.dataflow_native_limits import sealed_execution_ceilings
+    from demiflow.execution.contracts.dataflow import sealed_execution_ceilings
     cpu_ceiling = sealed_execution_ceilings(graph).get('cpu_millis')
     if cpu_ceiling is not None:
         hosts = tuple(replace(host, logical_resources={**host.logical_resources,

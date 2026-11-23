@@ -21,7 +21,7 @@ from demiflow.execution.contracts.dataflow_codec import runtime_scope_id
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.dataflow_hosts import ControlMailbox
 from demiflow.execution.operator_bindings.dataflow_model_journal import make_native_action_view
-from demiflow.execution.dataflow_services import make_runtime_services
+from demiflow.execution.worker.runtime import make_runtime_services
 from demiflow.execution.recovery_contract import document, RecoveryContractError
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor

@@ -23,7 +23,7 @@ from demiflow.execution.dataflow_api import make_action_request
 from demiflow.execution.sources.materialized_input import build_input_handle
 from demiflow.execution.seal.plan import load_dataflow
 from demiflow.execution.seal.plan import verify_dataflow_program
-from demiflow.execution.dataflow_services import make_driver_services
+from demiflow.execution.action_driver.services import make_driver_services
 from demiflow.execution.sources.snapshots import spool_record
 from demiflow.execution.sources.snapshots import open_source_reader
 from demiflow.execution.recovery_identity import source_identity
@@ -183,7 +183,7 @@ def test_assignment_only_contains_sources_owned_by_its_stage(tmp_path):
 
 def test_worker_reads_original_sealed_refs_without_opening_journal(tmp_path, monkeypatch):
     from demiflow.execution.seal.plan import load_sealed_dataflow
-    from demiflow.execution.dataflow_services import _load_programs
+    from demiflow.execution.seal.plan import load_worker_programs as _load_programs
     from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
     from demiflow.execution.dataflow_hosts import ControlMailbox
     with prepared(tmp_path, data.from_items([{"x": 1}]).map(lambda r: r)) as (ex, services):

@@ -10,7 +10,7 @@ from demiflow.resources.contracts import RESOURCE_PROTOCOL_VERSION, ResourceProf
 from demiflow.execution.contracts.dataflow_codec import encode_wire
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.training import FitRequest, FitResult, JobLookup, JobRef, TrainingSnapshotRef
-from demiflow.execution.dataflow_native_limits import admission_timeout_ms
+from demiflow.execution.scheduler.native_limits import admission_timeout_ms
 from demiflow.execution.recovery_contract import document, identifier, identity
 from demiflow.execution.scheduler.job import JobAllocation
 from demiflow.execution.storage.state_artifacts import atomic_bytes
@@ -30,7 +30,7 @@ class ManagedFitHost:
 
     @classmethod
     def recover(cls, action, occurrence, binding, *, deadline):
-        from demiflow.execution.dataflow_services import original_job_resources
+        from demiflow.execution.hosts.configuration import original_job_resources
         run = action.context
         return cls(action=action, occurrence=occurrence, binding=binding,
                    job_resources=lambda scope: original_job_resources(run, scope), deadline=deadline,

@@ -34,7 +34,7 @@ class RayDatasetExecutor(DatasetExecutor):
     ) -> None:
         if workers is not None and (type(workers) is not int or workers < 1):
             raise ValueError('workers must be a positive integer or None')
-        from ..native_resources import parse_native_resources
+        from demiflow.planning.dataflow_policy import parse_native_resources
         self._workers = workers
         self._native_resources = parse_native_resources(native_resources)
         self.resource_root = Path(resource_root or ".").resolve()

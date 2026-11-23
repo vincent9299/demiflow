@@ -246,7 +246,7 @@ def _receipt(status='committed'):
 
 
 def test_lance_binding_consumed_before_nested_callback_and_limits_retained(boundary):
-    from demiflow.execution.dataflow_native_limits import EXECUTION_LIMITS
+    from demiflow.execution.contracts.dataflow import EXECUTION_LIMITS
     state = boundary
     state.result = _receipt()
     callbacks = []

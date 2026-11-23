@@ -362,7 +362,7 @@ def _write_lance(executor: actions.ExecutionPort, request_spec: actions.WriteLan
     from .lance_action import _lance_action_binding, _consume_lance_action_binding
     binding = _lance_action_binding()
     if binding is not None:
-        from .dataflow_native_limits import EXECUTION_LIMITS
+        from demiflow.execution.contracts.dataflow import EXECUTION_LIMITS
         arguments[EXECUTION_LIMITS] = {'inflight_rows': binding[1]}
     with action('write_table', request_spec.source, request_spec.plan, spec) as checked, observe_action(
         'write_lance', request_spec.source, request_spec.plan, executor,

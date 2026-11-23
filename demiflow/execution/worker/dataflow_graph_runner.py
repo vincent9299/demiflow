@@ -93,7 +93,7 @@ class WorkerGraphRunner:
         # resident group is absent. Expansion inside one invocation is separately
         # rejected if it cannot fit the actual channel credit window.
         self._credit_limit = min(self.bounds.max_pending_events, 64)
-        from ..dataflow_native_limits import sealed_execution_ceilings
+        from demiflow.execution.contracts.dataflow import sealed_execution_ceilings
         self._credit_limit = min(self._credit_limit,
             sealed_execution_ceilings(executor._graph).get('inflight_rows', self._credit_limit))
         self._terminals = {}
@@ -870,7 +870,7 @@ class WorkerGraphRunner:
                              source_split, version):
         """Seal each ordered output batch once and advertise that same leaf under ACK credit."""
         import pyarrow as pa
-        from ..dataflow_native_limits import sealed_execution_ceilings
+        from demiflow.execution.contracts.dataflow import sealed_execution_ceilings
         from ..dataflow_record_frames import admit_workspace
         from ..outputs.arrow_rows import pack_result, validate_row_sizes
         from ..record_schema import RecordSchemas

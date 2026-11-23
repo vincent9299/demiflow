@@ -24,7 +24,7 @@ from ..contracts.dataflow import (
 )
 from ..contracts.dataflow_errors import DataflowError
 from ..scheduler.placement import DataflowScheduler
-from ..dataflow_services import make_driver_services
+from demiflow.execution.action_driver.services import make_driver_services
 from ..dataflow_terminals import open_terminal, TerminalSubscription
 from ..checkpoint.coordinator import DataflowCheckpointCoordinator
 from ..seal.plan import (
@@ -146,7 +146,7 @@ class DataflowExecution:
         self._policy = services.policy
         self._active_worker_limit = self._policy.max_active_workers
         self._bounds = services.bounds
-        from ..dataflow_native_limits import NativeBudgetGuard
+        from demiflow.execution.hosts.configuration import NativeBudgetGuard
         self._native_limits = self._policy.native_limits
         self._native_guard = NativeBudgetGuard(self._native_limits)
         self._began_at = time.monotonic()
@@ -483,7 +483,7 @@ class DataflowExecution:
             validate_shared_actor_binding(self._request, graph, bounds=physical.bounds)
             from ..dataflow_schema import validate_literal_schema_replay
             validate_literal_schema_replay(self._request, graph, bounds=self._bounds)
-            from ..dataflow_native_limits import validate_execution_binding
+            from demiflow.execution.seal.plan import validate_execution_binding
             validate_execution_binding(self._request, graph)
             completed_live_nodes = verify_action_programs(
                 self._action, graph, physical, sealed, store=self._store, bounds=self._bounds)
@@ -571,7 +571,8 @@ class DataflowExecution:
         # Preserve the sealed plan; current execution budgets only intersect
         # its original ceilings. The same store/journal/allocator retain ownership.
         from dataclasses import replace
-        from ..dataflow_native_limits import NativeBudgetGuard, intersect_bounds, intersect_native_limits
+        from demiflow.execution.hosts.configuration import NativeBudgetGuard
+        from demiflow.execution.scheduler.native_limits import intersect_bounds, intersect_native_limits
         self._bounds = intersect_bounds(physical.bounds, self._bounds)
         self._native_limits = intersect_native_limits(physical.policy.native_limits, self._native_limits)
         self._native_guard = NativeBudgetGuard(self._native_limits)
@@ -704,7 +705,7 @@ class DataflowExecution:
                                              for h in self._services.hosts))),
                   "memory_bytes": self._bounds.max_resident_bytes,
                   "max_workers": self._active_worker_limit or self._bounds.max_partitions}
-        from ..dataflow_native_limits import sealed_execution_ceilings
+        from demiflow.execution.contracts.dataflow import sealed_execution_ceilings
         ceilings = sealed_execution_ceilings(self._graph)
         if 'cpu_millis' in ceilings:
             budget['cpu_millis'] = min(budget['cpu_millis'], ceilings['cpu_millis'])
@@ -716,7 +717,7 @@ class DataflowExecution:
             budget['accelerator_gpu'] = gpu_budget
         if self._fit:
             self._scheduler.bind_job_capacity(budget, self._services.job_gpu)
-        from ..dataflow_services import resource_scope_binding
+        from demiflow.execution.hosts.configuration import resource_scope_binding
         self._services.resources.state.operation_scope = self._scheduler.scope_id
         self._services.resources.state.open_scope(self._fence(), ResourceScope(
             self._scheduler.scope_id, self._run_id(), resource_scope_binding(self._services.resources, self._policy),
@@ -898,7 +899,7 @@ class DataflowExecution:
                    for stage in stages for partition in stage.partitions if partition in members]
         hosts = self._scheduler.place_hosts(pending)
         ready = []
-        from ..dataflow_native_limits import admission_timeout_ms
+        from demiflow.execution.scheduler.native_limits import admission_timeout_ms
         deadline = time.monotonic() + admission_timeout_ms(self._policy) / 1000
         while pending:
             deferred = []

@@ -12,6 +12,12 @@ The historical code-pin (``chain.plan_code_pin``) and identity-bridge
 """
 from __future__ import annotations
 
+from demiflow.execution.contracts.dataflow import EXECUTION_LIMITS, DELIVERY_LIMIT
+
+import json
+from demiflow.execution.contracts.dataflow import WorkerAssignment
+from demiflow.execution.storage.objects import RunArtifactStore
+
 import hashlib
 import secrets
 from dataclasses import replace
@@ -817,3 +823,75 @@ def load_native_execution(run, action_id, *, execution_id):
     if len(matches) != 1:
         raise PlanContractError("invalid_contract", "execution_id is absent or ambiguous in the sealed layout")
     return layout, matches[0]
+
+
+def read_execution_constants(ref: "ArtifactRef", *, store: RunArtifactStore, bounds: Bounds) -> dict:
+    raw = b"".join(store.read(ref, max_bytes=bounds.max_control_bytes))
+    value = json.loads(raw)
+    if type(value) is not dict:
+        raise DataflowError("INVALID_CONTRACT", "runtime constants must be a JSON object")
+    return value
+
+class _VerifiedPrograms(dict):
+    """Programs and policy returned from the same authenticated sealed plan."""
+    native_limits = None
+
+def load_worker_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bounds: Bounds, cache=None) -> dict[str, LoadedProgram]:
+    graph, physical, pin = load_sealed_dataflow(assignment.sealed,
+        action_id=assignment.action_id, store=store, bounds=bounds)
+    if physical.plan_id != assignment.plan_id:
+        raise DataflowError("CODE_MISMATCH", "loaded plan_id differs from the assignment")
+    if physical.plan_revision != assignment.plan_revision:
+        raise DataflowError("FENCED", "loaded plan_revision differs from the assignment")
+    if physical.policy.worker_mode == "thread":
+        cache = None  # Never mutate sys.path/module namespaces in the hosting process.
+    programs = _VerifiedPrograms()
+    programs.prediction_bindings = {}
+    programs.native_limits = physical.policy.native_limits
+    shared_cache = {}
+    owned = {occurrence for stage in assignment.stages for occurrence in stage.occurrences}
+    for node in graph.nodes:
+        if node.occurrence_id not in owned or node.program_ref is None:
+            continue
+        programs[node.occurrence_id] = verify_dataflow_program(
+            node.program_ref, expected_pin=pin["programs"][node.occurrence_id],
+            store=store, bounds=bounds, cache=cache, shared_cache=shared_cache,
+            live_binding={"run_id": assignment.run_id, "action_id": assignment.action_id,
+                          "attempt": assignment.attempt, "fence": assignment.fence})
+    if graph.jobs:
+        from demiflow.execution.contracts.dataflow import thaw_record_value
+        from demiflow.data.plan import CallableSpec
+        predictors = {n.occurrence_id: n.kernel.configuration for n in graph.nodes
+                      if n.occurrence_id in owned and 'predict_step' in n.kernel.configuration}
+        bindings = assignment.model_bindings
+        if bindings is None or bindings.keys() != predictors.keys():
+            raise DataflowError('INVALID_CONTRACT', 'Prediction assignment model membership differs from seal')
+        for occurrence, config in predictors.items():
+            model = thaw_record_value(bindings[occurrence])
+            program = programs[occurrence]
+            if (model['step'] != config['predict_step'] or model['snapshot']['step'] != model['step']
+                    or model['predictor_digest'] != program.digest
+                    or model['snapshot']['model_format'] != config['predict_model_format']
+                    or not isinstance(program.value, CallableSpec) or not program.value.is_class):
+                raise DataflowError('CODE_MISMATCH', 'Prediction assignment differs from sealed actor or selector')
+            programs.prediction_bindings[occurrence] = (bindings[occurrence], config)
+    return programs
+
+
+def validate_execution_binding(request, graph):
+    """An existing action may borrow its original sealed native adapter only.
+
+    Older callers declared the source/plan before choosing a native placement.
+    Their added ceilings/schema belong to this same graph seal, not a nested
+    action or a mutable side ledger. Refuse drift before loading/starting work.
+    """
+    from demiflow.execution.dataflow_schema import KEY
+    keys = (EXECUTION_LIMITS, KEY, DELIVERY_LIMIT)
+    expected = {key: request.arguments.get(key) for key in keys}
+    for node in graph.nodes:
+        if node.kind != 'terminal':
+            continue
+        actual = {key: node.kernel.configuration.get('arguments', {}).get(key) for key in keys}
+        if actual != expected:
+            raise DataflowError('INCOMPATIBLE_HISTORY',
+                                'native execution limits or schema differ from the sealed binding')

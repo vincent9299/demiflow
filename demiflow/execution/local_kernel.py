@@ -39,7 +39,7 @@ class LocalKernelOptions:
             raise ValueError("local_execution supports at most 256 shuffle partitions")
         if self.memory_bytes < self.workers * 64 * 1024:
             raise ValueError("memory_bytes must provide at least 64 KiB per worker")
-        from .native_resources import parse_native_resources
+        from demiflow.planning.dataflow_policy import parse_native_resources
         object.__setattr__(self, 'native_resources', parse_native_resources(self.native_resources))
 
 
