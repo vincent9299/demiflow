@@ -283,10 +283,10 @@ def borrowed_join_records(services, entry, proof, *, fields, row_window):
     if len(set(fields)) != len(fields):
         yield from _borrowed_records(services, entry)
         return
-    from .kernels.join_spool import _project_join_document
+    from .kernels.join_spool import project_join_document
     selected = tuple(dict.fromkeys((*fields, *spec.keys)))
     def project(raw, **kwargs):
-        return _project_join_document(raw, fields=selected, row_window=row_window, **kwargs)
+        return project_join_document(raw, fields=selected, row_window=row_window, **kwargs)
     yield from _borrowed_records(services, entry, project=project)
 
 

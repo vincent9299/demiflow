@@ -161,7 +161,8 @@ def partition_stages(
                 or memory.get('schema') == TERMINAL_WORKSPACE):
             resident = kernel.profile.requests['memory_bytes']
         if kernel.kind == 'reduce':
-            from ..execution.kernels.reducer_memory import contract, resident_bytes
+            from demiflow.execution.contracts.relational_region import reducer_resident_bytes as resident_bytes
+            from demiflow.execution.contracts.relational_region import reducer_contract as contract
             reducer_memory = contract(kernel)
             if reducer_memory is not None:
                 resident = resident_bytes(reducer_memory,bounds)
@@ -847,6 +848,7 @@ def compile_physical_dataflow(
     hosts: tuple[HostDescriptor, ...],
     bounds: Bounds,
     constants_ref: ArtifactRef,
+    _allow_offset_sql: bool = True,
 ) -> PhysicalDataflow:
     _check_bounds(bounds)
     snapshot_ids = {snapshot.source_id for snapshot in snapshots}
@@ -882,7 +884,8 @@ def compile_physical_dataflow(
         from .dataflow_thread_fusion import fuse_thread_suffix
         stages = fuse_thread_suffix(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
         from .dataflow_relational_regions import fuse_relational_regions
-        stages = fuse_relational_regions(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
+        stages = fuse_relational_regions(graph, stages, policy=policy, bounds=bounds, hosts=hosts,
+                                        snapshots=snapshots if _allow_offset_sql else ())
         from .dataflow_finite_fusion import fuse_finite_suffix
         stages = fuse_finite_suffix(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
     stages = select_fusion_groups(graph, stages, policy=policy)
@@ -894,8 +897,17 @@ def compile_physical_dataflow(
     exchanges = specialize_graph_exchanges(graph, stages, exchanges, bounds=bounds)
     exchanges = _share_exchange_storage(exchanges, bounds)
     graph_requested_exchanges = exchanges
-    exchanges, residency = _select_budgeted_residency(
-        graph, snapshots, stages, exchanges, hosts=hosts, bounds=bounds, policy=policy)
+    try:
+        exchanges, residency = _select_budgeted_residency(
+            graph, snapshots, stages, exchanges, hosts=hosts, bounds=bounds, policy=policy)
+    except DataflowError as exc:
+        from ..execution.contracts.relational_region import SQL_PREFIX
+        if exc.code != 'RESOURCE_INFEASIBLE' or not any(s.stage_id.startswith(SQL_PREFIX) for s in stages):
+            raise
+        # A larger optional stage may not coexist with other mandatory
+        # reservations. Retry only this fresh physical choice, before sealing.
+        return compile_physical_dataflow(graph, snapshots, splits, policy=policy, hosts=hosts, bounds=bounds,
+                                         constants_ref=constants_ref, _allow_offset_sql=False)
     from .dataflow_graph_adapter import pack_graph_residency
     exchanges, residency = pack_graph_residency(graph, stages, exchanges, residency,
         requested=graph_requested_exchanges, hosts=hosts, bounds=bounds, policy=policy)

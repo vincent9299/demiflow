@@ -80,6 +80,7 @@ PLANNING_MAY_IMPORT = {
     'demiflow.execution.contracts.dataflow_errors',
     'demiflow.execution.contracts.dataflow_kinds',
     'demiflow.execution.contracts.errors',
+    'demiflow.execution.contracts.relational_region',  # sealed data and pure grant arithmetic
     'demiflow.execution.dataflow_compile_inputs',
     'demiflow.execution.dataflow_managed_devices',
     'demiflow.execution.dataflow_model_factory',

@@ -12,7 +12,8 @@ import types
 
 from ..contracts.dataflow_errors import DataflowError
 
-FIELD = 'reducer_memory_v1'
+from ..contracts.relational_region import (REDUCER_MEMORY_FIELD as FIELD,
+                                           reducer_contract, reducer_resident_bytes)
 
 
 def _error(code, message):
@@ -169,31 +170,6 @@ def declare(initial, bounds):
             'inspection_nodes': nodes}
 
 
-def contract(spec):
-    value = spec.configuration.get(FIELD)
-    if value is None:
-        return None
-    expected = {'version', 'initial_bytes', 'initial_copy_bytes', 'copy_workspace_bytes',
-                'state_resident_bytes', 'inspection_bytes', 'inspection_nodes'}
-    if (set(value) != expected or value['version'] != 1
-            or any(type(v) is not int or v < 0 for v in value.values())
-            or min(value['state_resident_bytes'],value['inspection_bytes'],value['inspection_nodes']) < 1):
-        raise _error('INCOMPATIBLE_HISTORY', 'Invalid sealed reducer resident contract')
-    return value
-
-
-def resident_bytes(value, bounds, *, join_depth=None):
-    """Maximum of disjoint build/hydrate/fold/copy/output phases, not their sum."""
-    row, batch = bounds.max_row_bytes, bounds.max_batch_bytes
-    initial, state = value['initial_bytes'], value['state_resident_bytes']
-    hydrate = batch + ((join_depth + 1) if join_depth is not None else 2) * row
-    build = 8 * row + hydrate
-    fold = max(hydrate + row + state,            # next row + saved group key/state
-               3 * row + 2 * state,             # row/two group keys + old/new state
-               3 * row + state + max(state, bounds.max_state_bytes),
-               3 * row + value['initial_copy_bytes'] + value['copy_workspace_bytes'],
-               batch + 4 * row + state)         # next group row + final output/codec
-    return initial + value['inspection_bytes'] + max(build, 7 * row + fold)
 
 
 def sort_window(bounds, *, key_only):
@@ -234,7 +210,7 @@ def check_state(state, value, *, serialized_limit):
 
 
 def check_grant(value, bounds, assignment, *, join_depth=None):
-    required = resident_bytes(value,bounds,join_depth=join_depth)
+    required = reducer_resident_bytes(value,bounds,join_depth=join_depth)
     stages = getattr(assignment,'stages',())
     available = sum(min(stage.resident_bytes,stage.profile.requests['memory_bytes']) for stage in stages)
     if stages and (available < required or required > bounds.max_resident_bytes):

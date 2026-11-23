@@ -22,9 +22,74 @@ def _write_error(path, error, managed):
         cloudpickle.dump(error, LimitedWriter(stream, 256*1024))
 
 
+def _region_offsets(request):
+    """Execute a read-only region against bounded binary-key tables in this process."""
+    import pickle
+    import datafusion
+    import pyarrow as pa
+    from datafusion import RuntimeEnvBuilder, SessionConfig, SessionContext
+    from datafusion.context import SQLOptions
+    from .native_diagnostics import LimitedWriter
+    limit = request['wire_limit']
+    maximum = request['max_pairs']
+    try:
+        if datafusion.__version__ != '54.0.0':
+            raise RuntimeError('native relation requires datafusion==54.0.0')
+        pa.set_cpu_count(1)
+        pa.set_io_thread_count(1)
+        config = SessionConfig().with_target_partitions(1).with_batch_size(min(1024, maximum + 1))
+        context = SessionContext(config, RuntimeEnvBuilder().with_greedy_memory_pool(limit).with_disk_manager_disabled())
+        for name, rows in request.pop('tables').items():
+            table = pa.record_batch([pa.array((key for key, _ in rows), type=pa.binary()),
+                                     pa.array((offset for _, offset in rows), type=pa.int64()),
+                                     pa.array(range(len(rows)), type=pa.int64())], names=['k', 'off', 'ord'])
+            context.register_record_batches(name, [[table]])
+        read_only = SQLOptions().with_allow_ddl(False).with_allow_dml(False).with_allow_statements(False)
+        frame = context.sql(request['sql'], options=read_only)
+        schema = frame.schema()
+        if not len(schema) or any(field.type != pa.int64() for field in schema):
+            raise TypeError('native relation must return int64 offset columns')
+        rows = []
+        status, value = 'complete', rows
+        for wrapped in frame.execute_stream():
+            batch = wrapped.to_pyarrow()
+            if len(rows) + batch.num_rows > maximum:
+                status, value = 'overflow', None
+                break
+            if (len(rows) + batch.num_rows) * (128 + 48 * len(schema)) > limit:
+                status, value = 'budget', 'native relation output tuples exceed their memory window'
+                break
+            rows.extend(zip(*(column.to_pylist() for column in batch.columns)))
+    except Exception as exc:
+        # DataFusion 54 exposes its ResourcesExhausted variant through Python
+        # as a plain Exception with this stable category prefix.
+        value = str(exc)[:512]
+        exhausted = isinstance(exc, MemoryError) or value.startswith('DataFusion error: Resources exhausted:')
+        status = 'budget' if exhausted else 'failed'
+    with os.fdopen(request['result_fd'], 'wb', closefd=False) as result:
+        try:
+            pickle.dump((status, value), LimitedWriter(result, limit), protocol=5)
+        except ValueError:
+            result.seek(0)
+            result.truncate()
+            pickle.dump(('budget', 'native relation result exceeds its memory window'), result)
+        # The query can finish between parent samples; also check the native
+        # process high-water mark before acknowledging its result.
+        # VmHWM belongs to this exec'd address space. getrusage(ru_maxrss)
+        # can still include the much larger worker parent's pre-exec image.
+        with open('/proc/self/status') as status_file:
+            peak = next(int(line.split()[1]) * 1024 for line in status_file if line.startswith('VmHWM:'))
+        if peak + os.stat(sys.argv[1]).st_size + limit > request['rss_bytes']:
+            result.seek(0)
+            result.truncate()
+            pickle.dump(('budget', 'native relation child exceeded its granted peak RSS'), result)
+    return 0
+
+
 def main():
     import cloudpickle
-    request = cloudpickle.loads(Path(sys.argv[1]).read_bytes())
+    with open(sys.argv[1], 'rb') as stream:
+        request = cloudpickle.load(stream)
     # A parent crash must not leave a native query holding admission forever.
     libc = ctypes.CDLL(None, use_errno=True)
     if libc.prctl(1, signal.SIGKILL, 0, 0, 0) != 0:
@@ -36,6 +101,8 @@ def main():
     end = len(allowed) - request['slot'] * options['threads']
     os.sched_setaffinity(0, allowed[end-options['threads']:end])
     faulthandler.enable()
+    if request.get('region_offsets'):
+        return _region_offsets(request)
     # Periodic traceback dumping reproducibly crashed this runtime during Python
     # transforms. Keep fatal-error diagnostics; the parent enforces deadlines
     # and reports progress/RSS without asynchronously walking Python frames.

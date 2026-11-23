@@ -40,7 +40,8 @@ def test_region_planner_preserves_legacy_disable_isolation_and_budget():
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_place import partition_stages
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
-    from demiflow.planning.dataflow_relational_regions import fuse_relational_regions, interpret_region
+    from demiflow.planning.dataflow_relational_regions import fuse_relational_regions
+    from demiflow.execution.contracts.relational_region import interpret_region
     from demiflow.resources.contracts import ResourceProfile
     from test_runtime_v3_finite_fusion import HOSTS
     ds = build_chain()
@@ -244,3 +245,119 @@ def test_sort_subwindow_uses_original_store_and_closes_readers(tmp_path,monkeypa
         next(closed)
         closed.close()
         assert activity['active']==0
+
+
+def test_group_after_left_join_keeps_composite_null_groups_and_typed_keys(tmp_path):
+    from demiflow.execution.kernels.dataflow import _group_key as group_key, group_key_values
+
+    complex_key = {'x': [b'v', None], 'y': (-0.0, True, 1)}
+    encoded = group_key({'a': complex_key, 'b': 'y'}, ('a', 'b')).encode()
+    assert group_key_values(encoded) == (complex_key, 'y')
+    assert group_key(dict(zip(('a', 'b'), group_key_values(encoded))), ('a','b')).encode() == encoded
+    rows = [{'a':None, 'b':1, 'v':'first'}, {'a':None, 'b':2,'v':'second'},
+            {'a':'s', 'b':1, 'v':'third'}]
+    with RunContext.start(tmp_path/'run'), data.local_execution(workers=2):
+        result = data.from_items(rows).join(data.from_items([{'a':'s','b':1,'r':12}]),
+            on=['a','b'], how='left').group_batches(['a','b'], max_rows=2).take_all()
+    assert [(r['a'],r['b'],r['items'][0]['v']) for r in result] == [
+        ('s',1,'third'), (None,1,'first'), (None,2,'second')]
+
+
+def test_fixed_three_way_join_selects_sql_only_under_its_actual_stage_grant(tmp_path, monkeypatch, record_property):
+    import lance
+    import pyarrow as pa
+    from demiflow.execution import datafusion as host
+    from demiflow.execution.contracts.relational_region import SQL_CHILD_RSS, SQL_PARENT_WINDOW, interpret_region
+    from _native_relational_fixtures import native_region_evidence
+
+    # Duplicates on both joins, a null, and an unmatched nullable right side.
+    for name, rows in (
+        ('a', [{'k':i, 'seq':i, 'drop_me':'z'*4096} for i in range(48)] +
+              [{'k':None, 'seq':48, 'drop_me':'none'}]),
+        ('b', [{'j':i,'v':i+100} for i in range(48)] + [{'j':7,'v':1070}]),
+        ('c', [{'j':i,'v':i+200} for i in range(47)] + [{'j':7,'v':2070}])):
+        lance.write_dataset(pa.Table.from_pylist(rows), str(tmp_path/name))
+    processes, queries, selections = [], [], []
+    old_start, obtain = host._start_sql_worker, host.query_region_offsets
+    def start(*args):
+        child = old_start(*args)
+        processes.append(child)
+        return child
+    def query(sql, **kw):
+        result = obtain(sql, **kw)
+        queries.append((sql, [len(t) for t in kw['tables'].values()], len(result), kw['rss_bytes']))
+        return result
+    monkeypatch.setattr(host, '_start_sql_worker', start)
+    monkeypatch.setattr(host, 'query_region_offsets', query)
+    from demiflow.execution.kernels.relational_region import _RegionSpool
+    from collections import Counter
+    reads, observed = Counter(), []
+    raw_key, raw_header = _RegionSpool.key, _RegionSpool.header
+    def count_key(self, offset, header):
+        reads['keys'] += 1
+        return raw_key(self, offset, header)
+    def count_header(self, offset):
+        reads['headers'] += 1
+        return raw_header(self, offset)
+    monkeypatch.setattr(_RegionSpool, 'key', count_key)
+    monkeypatch.setattr(_RegionSpool, 'header', count_header)
+    for grant in (128, 1024):
+        reads.clear()
+        limits = {'memory_bytes': grant << 20, 'max_row_bytes':65536, 'max_batch_bytes':1 << 20}
+        with RunContext.start(tmp_path/str(grant), limits=limits), data.local_execution(
+                workers=2, partitions=2, worker_mode='thread', memory_bytes=grant << 20) as local:
+            a = data.read_lance(str(tmp_path/'a'), version=1).select_columns(['k','seq'])
+            b = data.read_lance(str(tmp_path/'b'), version=1)
+            c = data.read_lance(str(tmp_path/'c'), version=1)
+            rows = a.join(b, on='k', right_on='j', how='left').join(c,on='k',right_on='j',how='left').take_all()
+            graph, physical, counters = native_region_evidence(local)
+        stage = next(s for s in physical.stages if s.stage_id.startswith('relational-v1-'))
+        selected = interpret_region(graph, stage)
+        assert selected.sql_offsets == (grant == 1024)
+        if selected.sql_offsets:
+            assert stage.resident_bytes >= SQL_CHILD_RSS + SQL_PARENT_WINDOW
+            assert counters[0]['offset_sql_queries'] == 1
+            assert counters[0]['offset_sql_pairs'] == 50 + len(rows)
+        observed.append(reads.copy())
+        selections.append(rows)
+        assert len(queries) == len(processes) == int(selected.sql_offsets)
+    for index, strategy in enumerate(('bounded_hash', 'offset_sql')):
+        for kind, count in observed[index].items():
+            record_property(strategy + '_' + kind, count)
+    assert observed[1]['keys'] < observed[0]['keys']
+    assert observed[1]['headers'] < observed[0]['headers']
+    assert selections[0] == selections[1]
+    assert len(selections[0]) == 52
+    assert len(queries) == 1 and queries[0][1:] == ([49,49,48],102,SQL_CHILD_RSS)
+    assert queries[0][0].count('JOIN') == 2 and processes[0].returncode == 0
+
+
+def test_skewed_bucket_refuses_unbounded_native_sort_before_spawning(tmp_path, monkeypatch):
+    import hashlib
+    import lance
+    import pyarrow as pa
+    from demiflow.execution.kernels.dataflow import _group_key as group_key
+    from demiflow.execution import datafusion as host
+    from _native_relational_fixtures import native_region_evidence
+
+    # Distinct keys in one hash bucket. A conservative multiplicity bound
+    # rejects 34^3 possible candidates before any native query or full sort.
+    keys = []
+    for i in range(1000):
+        token = group_key({'k':i}, ('k',)).encode()
+        if int.from_bytes(hashlib.sha256(token).digest()[:8], 'big') % 16 == 0:
+            keys.append(i)
+        if len(keys) == 3:
+            break
+    for n, k in zip('abc', keys):
+        lance.write_dataset(pa.table({'k':[k]*34, n:list(range(34))}), str(tmp_path/n))
+    def unexpected(*args, **kwargs):
+        raise AssertionError('skewed inputs must use the original bounded comparison')
+    monkeypatch.setattr(host, '_start_sql_worker', unexpected)
+    with RunContext.start(tmp_path/'run', limits={'memory_bytes':1<<30,'max_row_bytes':65536,'max_batch_bytes':1<<20}), \
+            data.local_execution(workers=2, worker_mode='thread', memory_bytes=1<<30) as local:
+        a,b,c = [data.read_lance(str(tmp_path/n),version=1) for n in 'abc']
+        assert a.join(b,on='k',how='left').join(c,on='k',how='left').take_all() == [
+            {'k':keys[0],'a':i} for i in range(34)]
+        _, _, counters = native_region_evidence(local)
+        assert counters[0]['offset_sql_queries'] == 0

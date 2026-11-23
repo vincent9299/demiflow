@@ -118,6 +118,29 @@ def _group_key(row: Mapping[str, Any], fields: tuple[str, ...]) -> str:
     return _canonical([_key_token(row[field]) for field in fields])
 
 
+def group_key_values(raw):
+    """Recover the typed sort columns from a canonical finite join key."""
+    def value(token):
+        kind = token[0]
+        if kind == 'n':
+            return None
+        payload = token[1]
+        if kind in ('s', 'i', 'b'):
+            return payload
+        if kind == 'f':
+            return float(payload)
+        if kind == 'y':
+            return bytes.fromhex(payload)
+        if kind == 'l':
+            return [value(item) for item in payload]
+        if kind == 't':
+            return tuple(value(item) for item in payload)
+        if kind == 'd':
+            return {value(k): value(v) for k, v in payload}
+        raise DataflowError('CORRUPT_ARTIFACT', 'unknown tag in a finite join key')
+    return tuple(value(token) for token in json.loads(raw))
+
+
 def _dumps_row(row: object, *, max_bytes: int) -> bytes:
     from ..exchange.dataflow_bridge import _encode_payload
     return _encode_payload(row, max_bytes=max_bytes)

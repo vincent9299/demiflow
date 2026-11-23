@@ -765,6 +765,15 @@ class OperatorKernel:
             except BaseException:
                 pass
 
+    def checkpoint_region_state(self):
+        return (self._image or {}).get('relational_region')
+
+    def complete_region_member(self, emitted):
+        self._emitted = emitted
+
+    def finite_join_records(self, port, fields):
+        return self._ports[port].records().for_join(fields)
+
     def accepts_finite_reference(self, port):
         return (self._spec.kind != 'StreamPrependOp' and port in self._ports
                 and any(p.name == port and p.requirement == 'finite_complete' for p in self._spec.inputs))
@@ -1086,7 +1095,7 @@ class OperatorKernel:
         """
         return self._reducer_retained_bytes + self._shuffle_retained_bytes
 
-    def _retain_reducer_peers(self, size: int) -> None:
+    def retain_reducer_peers(self, size: int) -> None:
         self._reducer_retained_bytes = size
 
     def _retain_shuffle_peers(self, size: int) -> None:
@@ -1110,12 +1119,12 @@ class OperatorKernel:
             left = self._ports[self._port_order[0]].records()
             right = self._ports[self._port_order[1]].records()
             yield from self._emit(preserve_block(join_partitions(left, right, spec=self._spec,
-                services=services, retain=self._retain_reducer_peers), None))
+                services=services, retain=self.retain_reducer_peers), None))
         elif kind == "reduce":
             from .relational import reduce_partition
 
             yield from self._emit(reduce_partition(self._ports[self._port_order[0]].records(), spec=self._spec,
-                services=services,retain=self._retain_reducer_peers))
+                services=services,retain=self.retain_reducer_peers))
         elif kind == "groups":
             from .relational import emit_groups
 

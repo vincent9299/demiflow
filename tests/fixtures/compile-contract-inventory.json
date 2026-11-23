@@ -137,13 +137,15 @@
    "FIELD": [
     "execution/dataflow_publication_budget.py",
     "execution/kernels/operator.py",
-    "execution/kernels/reducer_memory.py",
     "execution/kernels/shuffle_order.py",
     "planning/dataflow_budget.py",
     "planning/dataflow_compile.py"
    ],
    "KEY": [
     "execution/dataflow_schema.py"
+   ],
+   "REDUCER_MEMORY_FIELD": [
+    "execution/contracts/relational_region.py"
    ],
    "_KEY": [
     "execution/dataflow_managed_devices.py"
@@ -241,6 +243,7 @@
     "execution/kernels/operator.py"
    ],
    "how": [
+    "execution/contracts/relational_region.py",
     "execution/kernels/relational_region.py"
    ],
    "initial": [
@@ -300,6 +303,7 @@
     "execution/kernels/operator.py"
    ],
    "max_rows": [
+    "execution/contracts/relational_region.py",
     "execution/kernels/operator.py"
    ],
    "monitor_schemas": [
@@ -336,6 +340,7 @@
     "planning/dataflow_configuration.py"
    ],
    "on": [
+    "execution/contracts/relational_region.py",
     "execution/kernels/lance_keys.py",
     "execution/kernels/relational_region.py",
     "planning/dataflow_relational_regions.py"
@@ -428,6 +433,9 @@
     "execution/dataflow_sinks.py",
     "execution/worker/dataflow_graph_runner.py",
     "planning/dataflow_training.py"
+   ],
+   "small_right_index": [
+    "execution/kernels/relational.py"
    ],
    "sort": [
     "execution/kernels/block_partition.py",
@@ -554,6 +562,9 @@
    ],
    "sink_id": [
     "planning/dataflow_training.py"
+   ],
+   "small_right_index": [
+    "planning/dataflow_compile.py"
    ],
    "streaming_map": [
     "planning/dataflow_compile.py"

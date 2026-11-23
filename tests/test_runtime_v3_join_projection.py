@@ -112,7 +112,7 @@ def test_projection_falls_back_when_same_row_window_cannot_hold_copies(tmp_path)
 
 @pytest.mark.parametrize('how', ['inner', 'left', 'semi', 'anti'])
 def test_join_key_codec_matches_original_for_null_binary_tuple_negative_zero_and_skew(tmp_path, how):
-    from demiflow.execution.kernels.join_spool import _project_join_document
+    from demiflow.execution.kernels.join_spool import project_join_document
     from demiflow.execution.exchange.dataflow_bridge import _encode_record_document
     with store_fixture(tmp_path) as (_, store, _):
         svc, _ = fixture(store)
@@ -125,7 +125,7 @@ def test_join_key_codec_matches_original_for_null_binary_tuple_negative_zero_and
                 iter(lrows),iter(rrows),left_keys=('lk',),right_keys=('rk',),how=how,services=svc)]
         expected = execute(left,right)
         def project(rows,field):
-            return [_project_join_document(_encode_record_document(row,max_bytes=svc.bounds.max_row_bytes),
+            return [project_join_document(_encode_record_document(row,max_bytes=svc.bounds.max_row_bytes),
                 record_id=row.record_id,sequence=row.sequence,max_bytes=svc.bounds.max_row_bytes,
                 fields=(field,),row_window=svc.bounds.max_resident_bytes//4) for row in rows]
         actual = execute(project(left,'lk'),project(right,'rk'))
@@ -159,7 +159,7 @@ def test_duplicate_declared_keys_keep_original_row_admission(tmp_path):
 def test_projected_scratch_preserves_original_schema_provenance_and_document_bytes(tmp_path):
     import pyarrow as pa
     from demiflow.execution.record_schema import RecordSchemas
-    from demiflow.execution.kernels.join_spool import _project_join_document, _Spool
+    from demiflow.execution.kernels.join_spool import project_join_document, _Spool
     from demiflow.execution.exchange.dataflow_bridge import _encode_record_document
     with store_fixture(tmp_path) as (_, store, _):
         svc, _ = fixture(store)
@@ -167,7 +167,7 @@ def test_projected_scratch_preserves_original_schema_provenance_and_document_byt
         schema = pa.schema([('k',pa.int64()),('payload',pa.binary())],metadata={b'origin':b'original'})
         source = replace(record({'k':7,'payload':b'wide'*1024},31), schema_ref=schemas.put(schema))
         raw = _encode_record_document(source,max_bytes=svc.bounds.max_row_bytes)
-        projected = _project_join_document(raw,record_id=source.record_id,sequence=source.sequence,
+        projected = project_join_document(raw,record_id=source.record_id,sequence=source.sequence,
             max_bytes=svc.bounds.max_row_bytes,fields=('k',),row_window=svc.bounds.max_resident_bytes//4)
         assert type(projected) is _EncodedJoinInput
         with store.scratch(max_bytes=svc.bounds.max_spill_bytes,max_io_bytes=svc.bounds.max_resident_bytes//4) as file:

@@ -4,6 +4,7 @@
 预算时落盘。排序载荷只编码一次，按块读写。join 的键序可供紧邻的分组
 复用，任意 Python 变换之后不假设键或顺序不变。reducer 自行控制状态大小。
 """
+from demiflow.operators.relational import merge_join_rows
 import asyncio
 import fcntl
 import hashlib
@@ -216,17 +217,6 @@ def _ordered_rows(dataset, fields, directory, chunk_bytes):
                        workers=getattr(dataset._executor, '_sort_workers', 1))
 
 
-def _merge_row(left, right, lk, rk, suffix):
-    out = dict(left)
-    for key, value in right.items():
-        if key in lk and key in rk and key in out and out[key] == value:
-            continue
-        dest = key if key not in out else key + suffix
-        if dest in out:
-            raise ValueError(f'join column collision: {dest}')
-        out[dest] = value
-    return out
-
 
 def _right_index(rows, fields, chunk_bytes):
     """试建有界右表；超限时把已读取的原记录接回流中，不重读上游。"""
@@ -313,7 +303,7 @@ def join(left, right, on, right_on=None, how='inner', suffix='_right', chunk_byt
                             yield dict(row)
                     elif matches:
                         for payload in matches:
-                            yield _merge_row(row, pickle.loads(payload), lk, rk, suffix)
+                            yield merge_join_rows(row, pickle.loads(payload), lk, rk, suffix)
                     elif how == 'left':
                         yield dict(row)
                 return
@@ -339,7 +329,7 @@ def join(left, right, on, right_on=None, how='inner', suffix='_right', chunk_byt
                             yield dict(row)
                     elif matched:
                         for other in matches():
-                            yield _merge_row(row, other, lk, rk, suffix)
+                            yield merge_join_rows(row, other, lk, rk, suffix)
                     elif how == 'left':
                         yield dict(row)
                 if matched:

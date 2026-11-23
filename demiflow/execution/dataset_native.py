@@ -16,7 +16,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from ..data import plan as ops
-from ..data.local_relational import key_of, _merge_row
+from ..data.local_relational import key_of
+from demiflow.operators.relational import merge_join_rows
 from ..data.sources import (
     FileSource, IterableSource, KeyedSource, LanceSource, PlanInput, UnionSource,
 )
@@ -449,7 +450,7 @@ class Engine:
         if row[right.keys[tuple(source.right_on)][1]] is None:
             return a
         b = self.decode(right, row)
-        return _merge_row(a, b, source.on, source.right_on, source.suffix)
+        return merge_join_rows(a, b, source.on, source.right_on, source.suffix)
 
     def record(self, result, purpose):
         self.stats['stages'].append({'name': 'datafusion', 'purpose': purpose, 'rows_output': result.row_count,
