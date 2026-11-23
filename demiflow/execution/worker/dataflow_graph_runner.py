@@ -154,6 +154,13 @@ class WorkerGraphRunner:
             declaration=declaration, partitioned=not scalar,
             budget=self._terminal_spec.configuration.get('terminal_memory') if self._terminal_spec else None,
             frame_call=self._frame_call, coalesce_allowed=lambda: not self._finite)
+        self._batch_source = None
+        if (self._terminal_spec and self._terminal_spec.configuration.get('input_carrier') == 'fixed_scan_batches.v1'
+                and len(executor._node_specs) == len(executor._graph.nodes) == 2
+                and len(executor._readers) == 1):
+            reader = next(iter(executor._readers.values()))
+            if reader.supports_native_batches():
+                self._batch_source = reader
         args = self._terminal_spec.configuration.get('arguments', {}) if self._terminal_spec else {}
         self._limit = (args.get('limit') if self._terminal_spec and self._terminal_spec.kind == 'take'
                        else args.get('batch_size', 20) if self._terminal_spec and self._terminal_spec.kind == 'take_batch'
@@ -732,6 +739,37 @@ class WorkerGraphRunner:
             frames.close()
         return processed
 
+    def _advance_batch(self, source, split_id, credit):
+        """Transfer a co-located source batch within the same cut and credit window."""
+        rows, size = self.bounds.max_output_rows, self.bounds.max_batch_bytes
+        if credit is not None:
+            rows = min(rows, credit['rows'] - self._unconfirmed_rows)
+            size = min(size, credit['bytes'] - self._unconfirmed_bytes)
+        if not self._publication_overlap:
+            rows = min(rows, self._source_quantum - self._source_rows_since_cut)
+        batch = self._batch_source.next_arrow_batch(rows, size)
+        if batch is None:
+            self._finish_source_split(split_id, source)
+            return
+        if self._terminal_schema_ref is None:
+            from ..record_schema import RecordSchemas
+            self._terminal_schema_ref = RecordSchemas(self.services).put(batch.schema)
+            self._set_terminal_columns(batch.schema, schema=True)
+        self._terminal_blocks.append_arrow_batch(batch)
+        self._terminal_rows, self._terminal_bytes = self._terminal_blocks.rows, self._terminal_blocks.bytes
+        count = batch.num_rows
+        terminal = self.e._graph.terminals[0]
+        self._metrics[source]['rows_output'] += count
+        self._metrics[terminal]['rows_input'] += count
+        self._metrics[terminal]['rows_output'] += count
+        self._dirty_metrics.update((source, terminal))
+        self._source_rows_since_cut += count
+        self._unconfirmed_rows += count
+        self._unconfirmed_bytes += batch.nbytes
+        if not self._publication_overlap and self._source_rows_since_cut >= self._source_quantum:
+            self._paused = True
+            self._flush_metrics()
+
     def step(self, *, max_records, deadline_ms):
         if max_records <= 0 or deadline_ms <= 0:
             raise DataflowError('INVALID_CONTRACT', 'step budgets must be positive')
@@ -811,6 +849,10 @@ class WorkerGraphRunner:
                     break
                 from ..dataflow_source_context import source_run_scope
                 with source_run_scope(self.e._source_run):
+                    if reader is self._batch_source:
+                        self._advance_batch(source, split_id, credit)
+                        processed += 1
+                        break
                     poll = reader.next_record()
                 if poll.status == 'record':
                     if credit is not None and self._unconfirmed_bytes + poll.record.encoded_bytes > credit['bytes']:

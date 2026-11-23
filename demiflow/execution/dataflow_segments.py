@@ -12,6 +12,7 @@ from .contracts.dataflow import ArtifactRef
 from .contracts.dataflow_errors import DataflowError
 
 RECORDS_MEDIA = 'application/x-demiflow-records-v3'
+ARROW_STREAM_MEDIA = 'application/vnd.apache.arrow.stream'
 FINITE_RECORDS_MEDIA = 'application/x-demiflow-finite-records-v3'
 SEGMENTS_MEDIA = 'application/x-demiflow-terminal-segments.v1'
 SCHEMA = 'demiflow.terminal-segments.v1'
@@ -75,7 +76,7 @@ def tree_refs(store, root, bounds, *, leaves_only=False, frame_call=None, on_ret
         if visited > ceiling or len(ancestors) > bounds.max_depth or key in ancestors:
             _fail('terminal tree exceeds node/depth budget or contains a cycle')
         if ref.media_type != SEGMENTS_MEDIA:
-            if expected is not None and ref.media_type not in (RECORDS_MEDIA, FINITE_RECORDS_MEDIA):
+            if expected is not None and ref.media_type not in (RECORDS_MEDIA, FINITE_RECORDS_MEDIA, ARROW_STREAM_MEDIA):
                 _fail('terminal tree leaf must be a record segment')
             if expected is not None and (expected['height'] != 0 or expected['bytes'] != ref.size_bytes):
                 _fail('terminal segment size/height disagrees with its parent')
