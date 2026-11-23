@@ -66,6 +66,8 @@
 .dfc-think .dfc-markdown{color:var(--dfc-muted);font-size:13px;line-height:24px}
 .dfc-tool-output{margin:0;border:0;border-radius:8px;background:#f6f6f7;color:#62656c;padding:10px 12px;max-height:300px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/17px ui-monospace,SFMono-Regular,Consolas,monospace}
 .dfc-incomplete{font-size:10px;line-height:18px;color:var(--dfc-muted);padding:0 5px;background:#f1f2f4;border-radius:4px;white-space:nowrap;flex:none}
+.dfc-open-code{margin-left:auto;border:1px solid #e4e4e7;background:#fff;color:#27272a;font:inherit;font-size:11px;font-weight:500;line-height:18px;padding:0 8px;border-radius:6px;cursor:pointer;flex:none}
+.dfc-open-code:hover{background:#f4f4f5;color:#09090b}
 .dfc-answers{min-width:0}
 .dfc-answer{min-width:0;margin:12px 0 0}
 .dfc-progress{margin:6px 0 12px;color:var(--dfc-secondary)}

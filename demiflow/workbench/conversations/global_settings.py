@@ -44,16 +44,14 @@ def automatic_project(root):
     grant = dict(root=str(root), kind='pipeline', phase='implementation', writes=[], watch=[], sources=[],
         non_goals=['修改项目外文件、运行结果、原始数据、Notebook输出和平台控制文件'],
         authorization='工作台全局 AI 开发：仅按当前会话真人要求修改本项目源代码。')
-    scopes = {'README.md', 'tests', 'docs'}
+    scopes = {'README.md', 'tests', 'docs', 'parameters', 'configs', 'src', 'lib'}
     from demiflow.forge.project_rules import ROLE_DIRS
     scopes.update(ROLE_DIRS)
-    if not (root / 'workspace.json').is_file():
-        scopes.update(('src', 'lib'))
-        with os.scandir(root) as entries:
-            for count, entry in enumerate(entries):
-                if count >= 4096: reject('项目目录条目过多。', 'resource_limit')
-                if not entry.name.startswith('.') and entry.is_file(follow_symlinks=False) and Path(entry.name).suffix in {'.py', '.js', '.ts', '.yaml', '.yml', '.json', '.md'}:
-                    scopes.add(entry.name)
+    with os.scandir(root) as entries:
+        for count, entry in enumerate(entries):
+            if count >= 4096: reject('项目目录条目过多。', 'resource_limit')
+            if not entry.name.startswith('.') and entry.is_file(follow_symlinks=False) and Path(entry.name).suffix in {'.py', '.js', '.ts', '.yaml', '.yml', '.json', '.toml', '.md'}:
+                scopes.add(entry.name)
     scopes.difference_update({'AGENTS.md', 'PIPELINE_SPEC.md', 'workspace.json', 'runs', 'datasets', 'data', 'notebooks', 'results', 'outputs'})
     grant['watch'] = sorted(scopes)
     # Landlock write grants are additive. Grant only existing subtrees with no

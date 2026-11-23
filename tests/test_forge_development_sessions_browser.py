@@ -306,22 +306,26 @@ def test_turn_rail_history_and_project_files_share_the_conversation(tmp_path):
             assert page.get_by_label('开发要求').bounding_box()['y']==fixed['y']
             assert page.evaluate('window.scrollY')==0
             page.get_by_label('开发要求').fill('草稿')
-            page.get_by_role('button',name='打开项目根目录').click()
-            pane = page.get_by_role('complementary',name='项目文件')
-            expect(pane).to_contain_text(str(root))
-            pane.get_by_role('button',name='nested',exact=True).click()
-            pane.get_by_role('button',name='step.py').click()
-            expect(page.get_by_role('dialog')).to_contain_text('print(1)')
-            page.get_by_role('button',name='关闭文件预览').click()
-            pane.get_by_role('button',name='notes.md').click()
-            expect(page.get_by_role('dialog')).to_contain_text('Project-only document')
-            page.get_by_role('button',name='关闭文件预览').click()
+            sidebar = page.locator('.development-session-sidebar')
+            sidebar.get_by_role('button',name='文件').click()
+            sidebar.get_by_role('button',name='nested',exact=True).click()
+            sidebar.get_by_role('button',name='step.py').click()
+            pane = page.get_by_role('complementary',name='代码面板')
+            expect(pane).to_be_visible()
+            expect(pane.locator('.cm-editor')).to_be_visible()
+            expect(pane).to_contain_text('print(1)')
+            assert page.get_by_role('dialog').count() == 0
+            pane.get_by_role('button',name='引用到对话',exact=True).click()
+            expect(page.get_by_label('开发要求')).to_have_value('草稿\n引用文件：nested/step.py')
+            page.get_by_label('开发要求').fill('草稿')
+            sidebar.get_by_role('button',name='notes.md').click()
+            expect(pane).to_contain_text('Project-only document')
             assert page.locator('.development-timeline').bounding_box()['x'] < pane.bounding_box()['x']
             assert page.get_by_label('开发要求').bounding_box()['x'] < pane.bounding_box()['x']
             page.screenshot(path=str(shot_dir/'project-files.png'))
-            page.get_by_role('button',name='刷新项目目录').click()
-            expect(pane.get_by_role('button',name='nested')).to_have_attribute('aria-expanded','false')
-            page.get_by_role('button',name='关闭项目目录').click()
+            sidebar.get_by_role('button',name='刷新项目目录').click()
+            expect(sidebar.get_by_role('button',name='nested')).to_have_attribute('aria-expanded','false')
+            page.get_by_role('button',name='关闭代码面板').click()
             for width in (390,320):
                 page.set_viewport_size({'width':width,'height':760})
                 picker=page.get_by_role('combobox',name='跳到会话轮次')
@@ -329,10 +333,10 @@ def test_turn_rail_history_and_project_files_share_the_conversation(tmp_path):
                 picker.select_option(index=0)
                 expect(page.locator('.dfc-user').first).to_contain_text('第 1 个问题')
                 page.get_by_role('button',name='回到最新记录').click()
-                page.get_by_role('button',name='打开项目根目录').click()
-                expect(pane.get_by_role('button',name='nested')).to_be_visible()
+                page.get_by_role('button',name='打开代码面板').click()
+                expect(pane).to_be_visible()
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-                page.get_by_role('button',name='关闭项目目录').click()
+                page.get_by_role('button',name='关闭代码面板').click()
                 expect(page.get_by_label('开发要求')).to_have_value('草稿')
             assert page.locator('.development-more,.development-trajectory,[role=tablist]').count()==0
 

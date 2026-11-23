@@ -143,6 +143,67 @@ def test_automatic_scope_preserves_nested_data_and_notebooks(tmp_path):
         str(src/'app.py'), str(src/'models')]
 
 
+def test_automatic_scope_allows_business_configs_and_blocks_control_and_data(tmp_path):
+    root = tmp_path / 'pipeline_proj'
+    root.mkdir()
+    (root / 'workspace.json').write_text('{"name":"demo"}')
+    (root / 'AGENTS.md').write_text('rules')
+    (root / 'PIPELINE_SPEC.md').write_text('spec')
+    (root / 'deployment.json').write_text('{"mode":"http"}')
+    (root / 'execute.py').write_text('print("ok")\n')
+    (root / 'review.ipynb').write_text('{}')
+    for d in ('flows', 'operators', 'prompts', 'parameters', 'configs', 'tests', 'docs', 'runs', 'notebooks', 'data'):
+        (root / d).mkdir()
+    (root / 'parameters/default.yaml').write_text('limit: 5\n')
+    (root / 'configs/model.yaml').write_text('model: demo\n')
+    (root / 'flows/main.py').write_text('def run(): return 1\n')
+    grant = automatic_project(root)
+    writes = set(grant['writes'])
+    assert {'deployment.json', 'execute.py', 'parameters', 'configs', 'flows', 'operators', 'prompts', 'tests', 'docs'} <= writes
+    for forbidden in ('workspace.json', 'AGENTS.md', 'PIPELINE_SPEC.md', 'runs', 'notebooks', 'data', 'review.ipynb'):
+        assert forbidden not in writes
+        assert not any(w.startswith(forbidden + '/') for w in writes)
+    # Bytecode caches created during runs/tests must not pollute change observation.
+    from demiflow.workbench.conversations.changes import capture
+    cache = root / 'flows/__pycache__'
+    cache.mkdir()
+    (cache / 'main.cpython-310.pyc').write_bytes(b'pyc')
+    snap = capture(root, ['flows'])
+    assert 'flows/main.py' in snap
+    assert not any('__pycache__' in p or p.endswith('.pyc') for p in snap)
+
+
+def test_project_git_changes_and_file_diff(tmp_path):
+    import subprocess
+    from demiflow.workbench.projects import documents
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    subprocess.run(['git', '-C', str(repo), 'init', '-q'], check=True)
+    subprocess.run(['git', '-C', str(repo), 'config', 'user.email', 'test@example.com'], check=True)
+    subprocess.run(['git', '-C', str(repo), 'config', 'user.name', 'Test'], check=True)
+    (repo / 'flows').mkdir()
+    (repo / 'flows/a.py').write_text('x = 1\ny = 2\n')
+    subprocess.run(['git', '-C', str(repo), 'add', 'flows/a.py'], check=True)
+    subprocess.run(['git', '-C', str(repo), 'commit', '-q', '-m', 'init'], check=True)
+    (repo / 'flows/a.py').write_text('x = 1\ny = 3\nz = 4\n')
+    (repo / 'flows/b.py').write_text('print("new")\n')
+    summary = documents.git_changes(repo)
+    assert summary['is_git'] is True
+    by_path = {row['path']: row for row in summary['changes']}
+    assert by_path['flows/a.py']['status'] == 'M'
+    assert by_path['flows/a.py']['added'] == 2 and by_path['flows/a.py']['removed'] == 1
+    assert by_path['flows/b.py']['status'] == 'A'
+    diff = documents.file_diff(repo, 'flows/a.py')
+    assert diff['changed'] is True and diff['status'] == 'M'
+    assert diff['original'] == 'x = 1\ny = 2\n'
+    assert diff['modified'] == 'x = 1\ny = 3\nz = 4\n'
+    # Untracked subdirectory project inside a parent git repo must not report parent repo untracked noise.
+    sub = repo / 'untracked_sub'
+    sub.mkdir()
+    (sub / 'note.py').write_text('a = 1\n')
+    assert documents.git_changes(sub)['is_git'] is False
+
+
 def call(server,body=None,token=None):
     request=urllib.request.Request(server.origin+'/api/development-settings',
         data=json.dumps(body).encode() if body is not None else None,

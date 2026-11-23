@@ -42,10 +42,11 @@
     if(mode==='contract'){contract(root,value);return root;}
     if(mode==='full'){
       if(value.kind==='api'){if(value.description){const help=el('details',null,'definition-contract');help.append(el('summary','接口说明'),el('p',value.description,'definition-doc'));root.append(help);}contract(root,value);return root;}
-      const fold=el('details',null,'definition-contract');fold.append(el('summary','输入与输出'));contract(fold,value);root.append(fold);
+      const fold=el('details',null,'definition-contract');fold.append(el('summary','契约（输入 / 输出 · 配置项）'));contract(fold,value);root.append(fold);
     }
     const source=value.kind==='prompt'?(value.template??(value.messages?json(value.messages):value.source)):value.source;
     if(typeof source==='string'){
+      if(mode==='full')root.append(el('div',value.kind==='prompt'?'行为（Prompt 模板）':'行为（源码）','definition-behavior-title'));
       const body=el('div',null,'definition-source');root.append(body);mountText(body,source,{sourceOnly:true,compactSource:true,continuousSource:true,
         pythonLine:['code','data_tool'].includes(value.kind)?(value.line||1):undefined});
       const status=body.querySelector('.reading-status');if(status?.textContent==='源码完整显示。')status.hidden=true;
