@@ -16,7 +16,7 @@ import time
 import pytest
 
 from demiflow import data
-from demiflow.execution import dataflow_finite_input as finite
+from demiflow.execution.worker import finite_input as finite
 from demiflow.execution.contracts.dataflow import WorkerLease
 from demiflow.execution.contracts.dataflow_codec import runtime_scope_id
 from demiflow.execution.contracts.dataflow_errors import DataflowError
@@ -253,8 +253,8 @@ def test_finite_credit_retry_checks_cancel_but_native_port_keeps_original_guard(
         def measure(bounds, *, resident_bytes, retained):
             requests.append(retained)
             if not sizes:
-                sizes.append(resident_limit(bounds, stage_resident_bytes(getattr(services, 'assignment', None))) - retained + 2048)
-            return admit_workspace(sizes[0], bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained)
+                sizes.append(resident_limit(bounds, resident_bytes) - retained + 2048)
+            return admit_workspace(sizes[0], bounds, resident_bytes=resident_bytes, retained=retained)
         original_wait = runner._condition.wait
         def cancel_at_original_credit_wait(timeout):
             item.worker.cancel('cancel finite peer-credit wait', deadline_ms=100)

@@ -330,7 +330,7 @@ def _reset_engine(monkeypatch):
     """Unit-test the Ray adapter against explicit facade seams, never sys.modules."""
     import demiflow.execution.dataflow_api as api
     import demiflow.execution.sources.materialized_input as inputs
-    import demiflow.execution.input_runtime as input_runtime
+    import demiflow.execution.executors.base as input_runtime
     import demiflow.planning.dataflow_policy as policy
     monkeypatch.setattr(api, "make_action_request", ENGINE.make_action_request)
     monkeypatch.setattr(api, "run_dataset_action", ENGINE.run_dataset_action)

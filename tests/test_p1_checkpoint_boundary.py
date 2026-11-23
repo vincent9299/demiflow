@@ -29,10 +29,10 @@ class _Port:
         self.inputs = []
 
     def prepare_input(self, request):
-        from demiflow.execution.input_runtime import prepare_input
+        from demiflow.execution.executors.base import DatasetExecutor
         self.events.append('input')
         self.inputs.append(request)
-        return prepare_input(self, request)
+        return DatasetExecutor.prepare_input(self, request)
 
 
 class _Lock:

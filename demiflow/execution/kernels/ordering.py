@@ -14,7 +14,6 @@ from __future__ import annotations
 from demiflow.execution.contracts.dataflow import stage_resident_bytes
 
 import hashlib
-import heapq
 import sys
 from contextlib import closing, ExitStack
 from dataclasses import replace
@@ -61,27 +60,6 @@ class OrderingServices:
 
     def __getattr__(self, name):
         return getattr(self._original, name)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def _provenance(record: Record) -> tuple[bytes, int, str]:
@@ -134,20 +112,11 @@ def _record_sort_key(
     raise _err("INVALID_CONTRACT", "kind is not an ordering kernel", kind=kind)
 
 
-
-
-
 def _encode_frame(key: tuple, prov: tuple, record: Record, *, max_bytes: int, frame_limit=None) -> bytes:
     raw = _encode_record_document(record, max_bytes=max_bytes)
     encoded = _encode_payload({"record_id": record.record_id, "sequence": record.sequence,
                                "document": raw}, max_bytes=max_bytes * 4 + 1024)
     return _frame_bytes(key, prov, encoded, frame_limit=frame_limit, encode_payload=_encode_payload, typed_shape=_typed_shape)
-
-
-
-
-
-
 
 
 def _run_frames(ref: ArtifactRef, services: RuntimeServices, window=None, *, budget=None, slot=0) -> Iterator[tuple]:
@@ -193,14 +162,6 @@ def _release_runs(refs, services):
             active.add_note('Sort run cleanup also failed: ' + str(failure))
         else:
             raise failure
-
-
-def build_sort_runs(
-    records: Iterator[Record], *, spec: KernelSpec, services: RuntimeServices,
-    window: SortWindow | None = None,
-) -> tuple[ArtifactRef, ...]:
-    """K009: bounded stable runs, disk reserved before write, single-row rejection."""
-    return _build_sort_runs(records, spec=spec, services=services, window=window)
 
 
 def sort_windows(services):
@@ -316,7 +277,7 @@ def sort_with_body_references(records, *, spec, services, rows, window, retain, 
         def body_bytes():
             return 0 if extent is None else extent.size
 
-        runs = _build_sort_runs(records, spec=spec, services=services, window=window,
+        runs = build_sort_runs(records, spec=spec, services=services, window=window,
             sort_keys=keys, frame_for_record=frame, body_bytes=body_bytes)
         scope.callback(_release_runs, runs, services)
         if close is not None:
@@ -332,85 +293,42 @@ def sort_with_body_references(records, *, spec, services, rows, window, retain, 
                                    restore_record=restore, body_bytes=body_bytes())
 
 
-def _build_sort_runs(records, *, spec, services, window=None, key_for_record=None,
-                     sort_keys=None, frame_for_record=None, body_bytes=None):
-    """Private key hook; public sort/shuffle signatures and legacy keys stay fixed."""
+def build_sort_runs(records, *, spec, services, window=None, key_for_record=None,
+                    sort_keys=None, frame_for_record=None, body_bytes=None):
+    """Bind partition values/codecs/storage to the original run-sort algorithm."""
     bounds = services.bounds
-    if window is not None:
-        window.validate(bounds)
-    run_budget = bounds.max_resident_bytes if window is None else window.run_bytes
-    if run_budget < 1:
-        raise _err("RESOURCE_INFEASIBLE", "max_resident_bytes must be positive")
-    refs: list[ArtifactRef] = []
-    frames: list[tuple] = []
-    used = 0
-    spill_total = 0
+    def prepare_frame(record, ordinal, published):
+        if sort_keys is not None:
+            key, prov = sort_keys(record)
+        elif key_for_record is None:
+            row = _materialize_row(record, services)
+            key = _record_sort_key(record, row, spec, services, ordinal=ordinal)
+            del row
+            prov = _provenance(record)
+        else:
+            key = key_for_record(record)
+            # New shuffle keys already include their complete typed tie
+            # break. Record identity is carried unchanged inside the frame.
+            prov = ()
+        saved_record = record
+        if window is not None and window.key_only:
+            # Only the region's key/offset carrier opts in. Offset,
+            # provenance and record identity survive; the key is already
+            # encoded in the comparator frame and need not be stored twice.
+            saved_record = replace(record, payload_ref=None, inline={},
+                encoded_bytes=len(_encode_payload({}, max_bytes=bounds.max_row_bytes)), schema_ref=None)
+        if frame_for_record is None:
+            encoded = _encode_frame(key, prov, saved_record, max_bytes=bounds.max_row_bytes,
+                                    frame_limit=None if window is None else window.frame_bytes)
+        else:
+            encoded = frame_for_record(key, prov, saved_record, published)
+        return key,prov,encoded,saved_record
 
-    def flush() -> None:
-        nonlocal frames, used, spill_total
-        if not frames:
-            return
-        if window is not None and window.max_runs is not None and len(refs) >= window.max_runs:
-            raise _err('BUDGET_EXCEEDED', 'sort run references exceed the metadata window')
-        frames.sort(key=lambda item: (item[0], item[1]))
-        total = sum(len(frame[2]) for frame in frames)
-        if spill_total + total + (body_bytes() if body_bytes is not None else 0) > bounds.max_spill_bytes:
-            raise _err("BUDGET_EXCEEDED", "sort spill exceeds max_spill_bytes", bytes=spill_total + total)
-        refs.append(_write_run(frames, services))
-        spill_total += total
-        frames = []
-        used = 0
-
-    ordinal = 0
-    try:
-        for record in records:
-            _check_stop(services)
-            size = _input_row_bytes(record)
-            if size > bounds.max_row_bytes:
-                raise _err("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", size=size)
-            if sort_keys is not None:
-                key, prov = sort_keys(record)
-            elif key_for_record is None:
-                row = _materialize_row(record, services)
-                key = _record_sort_key(record, row, spec, services, ordinal=ordinal)
-                del row
-                prov = _provenance(record)
-            else:
-                key = key_for_record(record)
-                # New shuffle keys already include their complete typed tie
-                # break. Record identity is carried unchanged inside the frame.
-                prov = ()
-            saved_record = record
-            if window is not None and window.key_only:
-                # Only the region's key/offset carrier opts in. Offset,
-                # provenance and record identity survive; the key is already
-                # encoded in the comparator frame and need not be stored twice.
-                saved_record = replace(record, payload_ref=None, inline={},
-                    encoded_bytes=len(_encode_payload({}, max_bytes=bounds.max_row_bytes)), schema_ref=None)
-            if frame_for_record is None:
-                encoded = _encode_frame(key, prov, saved_record, max_bytes=bounds.max_row_bytes,
-                                        frame_limit=None if window is None else window.frame_bytes)
-            else:
-                encoded = frame_for_record(key, prov, saved_record, spill_total)
-            frame_bytes = len(encoded) + _FRAME_OVERHEAD
-            if frame_bytes > (run_budget if window is None else window.frame_bytes):
-                raise _err("BUDGET_EXCEEDED", "single sort frame exceeds the resident budget")
-            resident = frame_bytes if window is None else _retained_frame_bytes(key, prov, encoded)
-            if resident > run_budget:
-                raise _err('BUDGET_EXCEEDED', 'single retained sort frame exceeds the resident budget')
-            if frames and used + resident > run_budget:
-                flush()
-            frames.append((key, prov, encoded))
-            used += resident
-            ordinal += 1
-            # The input reader charges a single decoded row. Drop this one
-            # before requesting the next row from the port.
-            del saved_record, record, key, prov, encoded
-        flush()
-    except BaseException:
-        _release_runs(refs, services)
-        raise
-    return tuple(refs)
+    from demiflow.operators.ordering import build_sort_runs as sort_runs
+    return sort_runs(records,bounds=bounds,window=window,input_size=_input_row_bytes,
+        prepare_frame=prepare_frame,check_stop=services.check_stop,
+        write_run=lambda frames:_write_run(frames,services),
+        release_runs=lambda refs:_release_runs(refs,services),body_bytes=body_bytes)
 
 
 def _merge_into(
@@ -420,37 +338,8 @@ def _merge_into(
         budget = _MergeReadBudget(window, len(sources))
     readers = [_run_frames(ref, services, window, budget=budget, slot=index)
                for index, ref in enumerate(sources)]
-    try:
-        if budget is None:
-            for frame in heapq.merge(*readers, key=lambda item: (item[0], item[1])):
-                _check_stop(services)
-                yield frame
-        else:
-            # heapq.merge's final-reader shortcut keeps its first value and
-            # exhausted heap entry alive while yielding the remaining reader.
-            # These are no longer the frames charged to the reader slots.
-            # Advance explicitly so every retained frame has one live slot.
-            heap = []
-            for index, reader in enumerate(readers):
-                frame = next(reader, None)
-                if frame is not None:
-                    heap.append((frame[0], frame[1], index, frame))
-                del frame
-            heapq.heapify(heap)
-            while heap:
-                entry = heapq.heappop(heap)
-                index, frame = entry[2], entry[3]
-                del entry
-                _check_stop(services)
-                yield frame
-                del frame
-                frame = next(readers[index], None)
-                if frame is not None:
-                    heapq.heappush(heap, (frame[0], frame[1], index, frame))
-                del frame
-    finally:
-        for reader in readers:
-            reader.close()
+    from demiflow.operators.ordering import merge_sorted_frames
+    yield from merge_sorted_frames(readers,check_stop=services.check_stop,budget=budget)
 
 
 def merge_sort_runs(

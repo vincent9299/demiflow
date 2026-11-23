@@ -53,7 +53,8 @@ from demiflow.execution import dataflow_authority as AUTH
 from demiflow.execution import dataflow_artifacts as ART
 from demiflow.execution.hosts import dataflow_control as CTRL
 from demiflow.execution import dataflow_hosts as HOSTS
-from demiflow.execution import dataflow_services as SVC
+from demiflow.execution.action_driver import services as DRIVER_SERVICES
+from demiflow.execution.worker import runtime as WORKER_SERVICES
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.objects import ARTIFACT_STAGING_BUDGET, RunArtifactStore
 from demiflow.execution.run_context import RunAction, RunContext
@@ -747,7 +748,7 @@ def test_h021(monkeypatch):
         ep = doubled_endpoint(HOSTS.RayHostEndpoint, services)
         # This is the K3 staging-order unit, with no artifact store/real program.
         # Credential selection is exercised through real Ray native API cases.
-        import demiflow.execution.dataflow_environment as envs
+        import demiflow.execution.hosts.environment as envs
         services.store = object()
         selected = []
         monkeypatch.setattr(envs, 'allocation_environment',
@@ -874,7 +875,7 @@ def test_h026():
     tmp = newtmp()
     with RunContext.start(directory=tmp / 'a', limits={'checkpoint_rows': 2, 'max_requests': 10}) as ctx1:
         a1 = RunAction(ctx1, 'action-a', {'kind': 'literal_empty', 'tag': 'a'})
-        s1 = SVC.make_driver_services(a1, policy=POLICY, bounds=BIG)
+        s1 = DRIVER_SERVICES.make_driver_services(a1, policy=POLICY, bounds=BIG)
         assert isinstance(s1.journal_service, AUTH.DriverJournalService)
         assert s1.store.store_id == 'store-1' and s1.hosts[0].host_id == 'local'
         assert isinstance(s1.resources, ResourceManager)
@@ -885,7 +886,7 @@ def test_h026():
     tmp2 = newtmp()
     with RunContext.start(directory=tmp2 / 'b', limits={'checkpoint_rows': 2, 'max_requests': 10}) as ctx2:
         a2 = RunAction(ctx2, 'action-b', {'kind': 'literal_empty', 'tag': 'b'})
-        s2 = SVC.make_driver_services(a2, policy=POLICY, bounds=BIG)
+        s2 = DRIVER_SERVICES.make_driver_services(a2, policy=POLICY, bounds=BIG)
         assert s2.journal_service is not js1
         assert s2.journal_service._journal.directory != root1
         assert s2.journal_service._journal is ctx2.journal
@@ -898,7 +899,7 @@ def test_h027(monkeypatch):
     tmp = newtmp()
     with RunContext.start(directory=tmp / 'run', limits={'checkpoint_rows': 2, 'max_requests': 10}) as ctx:
         action = RunAction(ctx, 'action-a', {'kind': 'literal_empty'})
-        s1 = SVC.make_driver_services(action, policy=POLICY, bounds=BIG)
+        s1 = DRIVER_SERVICES.make_driver_services(action, policy=POLICY, bounds=BIG)
         prog_raw = json.dumps({'name': 'mod'}).encode()
         program_ref = s1.store.put(iter([prog_raw]), max_bytes=1 << 20, media_type='application/json')
         constants_ref = s1.store.put(iter([json.dumps({'k': 1}).encode()]), max_bytes=1 << 20, media_type='application/json')
@@ -944,9 +945,12 @@ def test_h027(monkeypatch):
         transport = FakeTransport(s1.store)
         def load_programs(given, *, store, bounds, cache):
             assert given is assignment and store.store_id == 'store-1'
-            return {oid('occ'): df.LoadedProgram('callable', {'digest': program_ref.digest}, program_ref.digest)}
-        monkeypatch.setattr(SVC, '_load_programs', load_programs)
-        rs = SVC.make_runtime_services(assignment, transport=transport, cache=cache)
+            from demiflow.execution.seal.plan import _VerifiedPrograms
+            values = _VerifiedPrograms({oid('occ'): df.LoadedProgram('callable', {'digest': program_ref.digest}, program_ref.digest)})
+            values.prediction_bindings = {}
+            return values
+        monkeypatch.setattr(WORKER_SERVICES, 'load_worker_programs', load_programs)
+        rs = WORKER_SERVICES.make_runtime_services(assignment, transport=transport, cache=cache)
         assert rs.store.store_id == 'store-1' and rs.constants == {'k': 1}
         occ = hashlib.sha256(b'occ').hexdigest()
         assert occ in rs.programs and rs.programs[occ].digest == program_ref.digest

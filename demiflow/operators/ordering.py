@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
+from demiflow.execution.contracts.dataflow import ArtifactRef
 import struct
 import sys
 from collections.abc import Iterator, Mapping
@@ -291,3 +293,100 @@ class SortFrameReader:
         if self._budget is not None:
             self._budget.finish(self._slot, retained_frame_bytes(key, prov, rec_bytes))
         return (key, prov, rec_bytes)
+
+
+def build_sort_runs(records, *, bounds, window=None, input_size, prepare_frame,
+                    check_stop, write_run, release_runs, body_bytes=None):
+    """Original bounded run-sort over prepared frames and bound storage calls.
+
+    The opaque retained input returned by prepare_frame stays alive until the
+    original end-of-iteration release. No Record or runtime service is inspected.
+    body_bytes observes the current shared extent after frame preparation.
+    """
+    if window is not None:
+        window.validate(bounds)
+    run_budget = bounds.max_resident_bytes if window is None else window.run_bytes
+    if run_budget < 1:
+        raise _ordering_error("RESOURCE_INFEASIBLE", "max_resident_bytes must be positive")
+    refs: list[ArtifactRef] = []
+    frames: list[tuple] = []
+    used = 0
+    spill_total = 0
+
+    def flush() -> None:
+        nonlocal frames, used, spill_total
+        if not frames:
+            return
+        if window is not None and window.max_runs is not None and len(refs) >= window.max_runs:
+            raise _ordering_error('BUDGET_EXCEEDED', 'sort run references exceed the metadata window')
+        frames.sort(key=lambda item: (item[0], item[1]))
+        total = sum(len(frame[2]) for frame in frames)
+        if spill_total + total + (body_bytes() if body_bytes is not None else 0) > bounds.max_spill_bytes:
+            raise _ordering_error("BUDGET_EXCEEDED", "sort spill exceeds max_spill_bytes", bytes=spill_total + total)
+        refs.append(write_run(frames))
+        spill_total += total
+        frames = []
+        used = 0
+
+    ordinal = 0
+    try:
+        for record in records:
+            check_stop()
+            size = input_size(record)
+            if size > bounds.max_row_bytes:
+                raise _ordering_error("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", size=size)
+            key, prov, encoded, saved_record = prepare_frame(record, ordinal, spill_total)
+            frame_bytes = len(encoded) + SORT_FRAME_OVERHEAD
+            if frame_bytes > (run_budget if window is None else window.frame_bytes):
+                raise _ordering_error("BUDGET_EXCEEDED", "single sort frame exceeds the resident budget")
+            resident = frame_bytes if window is None else retained_frame_bytes(key, prov, encoded)
+            if resident > run_budget:
+                raise _ordering_error('BUDGET_EXCEEDED', 'single retained sort frame exceeds the resident budget')
+            if frames and used + resident > run_budget:
+                flush()
+            frames.append((key, prov, encoded))
+            used += resident
+            ordinal += 1
+            # The input reader charges a single decoded row. Drop this one
+            # before requesting the next row from the port.
+            del saved_record, record, key, prov, encoded
+        flush()
+    except BaseException:
+        release_runs(refs)
+        raise
+    return tuple(refs)
+
+
+def merge_sorted_frames(readers, *, check_stop, budget=None):
+    """Original heap merge; bound readers keep their original lazy open/close."""
+    try:
+        if budget is None:
+            for frame in heapq.merge(*readers, key=lambda item: (item[0], item[1])):
+                check_stop()
+                yield frame
+        else:
+            # heapq.merge's final-reader shortcut keeps its first value and
+            # exhausted heap entry alive while yielding the remaining reader.
+            # These are no longer the frames charged to the reader slots.
+            # Advance explicitly so every retained frame has one live slot.
+            heap = []
+            for index, reader in enumerate(readers):
+                frame = next(reader, None)
+                if frame is not None:
+                    heap.append((frame[0], frame[1], index, frame))
+                del frame
+            heapq.heapify(heap)
+            while heap:
+                entry = heapq.heappop(heap)
+                index, frame = entry[2], entry[3]
+                del entry
+                check_stop()
+                yield frame
+                del frame
+                frame = next(readers[index], None)
+                if frame is not None:
+                    heapq.heappush(heap, (frame[0], frame[1], index, frame))
+                del frame
+    finally:
+        for reader in readers:
+            reader.close()

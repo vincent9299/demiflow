@@ -225,7 +225,7 @@ def test_measured_merge_drops_old_wide_frames_at_single_reader_tail(tmp_path, mo
             for count in run_lengths:
                 records = (_record({'v': i, 'payload': 'x' * 16384}, i, max_bytes=32768)
                     for i in range(start, start + count))
-                built = ordering._build_sort_runs(records, spec=_spec(), services=services,
+                built = ordering.build_sort_runs(records, spec=_spec(), services=services,
                     window=window, key_for_record=_TypedKeys(services, window))
                 refs.extend(built)
                 assert len(built) == 1
@@ -256,7 +256,7 @@ def test_two_shuffle_passes_share_the_original_spill_ceiling(tmp_path, monkeypat
         services = _services(store, port)
         services = replace(services, bounds=replace(services.bounds, max_spill_bytes=256 << 10))
         builds, written, released = [], [], []
-        original_build, original_put, original_release = shuffle_order._build_sort_runs, store.put, store.release
+        original_build, original_put, original_release = shuffle_order.build_sort_runs, store.put, store.release
         def build(*args, **kwargs):
             builds.append(True)
             return original_build(*args, **kwargs)
@@ -267,7 +267,7 @@ def test_two_shuffle_passes_share_the_original_spill_ceiling(tmp_path, monkeypat
         def release(ref, **kwargs):
             released.append(ref)
             return original_release(ref, **kwargs)
-        monkeypatch.setattr(shuffle_order, '_build_sort_runs', build)
+        monkeypatch.setattr(shuffle_order, 'build_sort_runs', build)
         monkeypatch.setattr(store, 'put', put)
         monkeypatch.setattr(store, 'release', release)
         records = (_record({'v': i, 'payload': b'x' * 256}, i) for i in range(100))
@@ -386,7 +386,7 @@ def test_real_store_failure_and_close_release_only_owned_shuffle_runs(tmp_path, 
         monkeypatch.setattr(store, 'release', release)
         monkeypatch.setattr(store, 'read', read)
         if boundary == 'second_build':
-            original = shuffle_order._build_sort_runs
+            original = shuffle_order.build_sort_runs
             builds = [0]
             def build(records, **kwargs):
                 builds[0] += 1
@@ -398,7 +398,7 @@ def test_real_store_failure_and_close_release_only_owned_shuffle_runs(tmp_path, 
                             yield record
                     return original(interrupt(), **kwargs)
                 return original(records, **kwargs)
-            monkeypatch.setattr(shuffle_order, '_build_sort_runs', build)
+            monkeypatch.setattr(shuffle_order, 'build_sort_runs', build)
         emitted = shuffle_order.seeded_shuffle((_record(row, i) for i, row in enumerate(source)),
             spec=_spec(), services=services)
         if boundary == 'output_close':

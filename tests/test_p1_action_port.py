@@ -10,7 +10,8 @@ from demiflow.data.dataset import Dataset, MaterializedDataset
 from demiflow.data.datasink import WriteResult
 from demiflow.data.plan import LogicalPlan
 from demiflow.data.sources import ItemsSource
-from demiflow.execution import checked, dataflow_api, dataset_runtime, lance_action
+from demiflow.execution import checked, dataflow_api
+from demiflow.execution.executors import dataset_runtime
 
 
 @pytest.fixture
@@ -254,10 +255,10 @@ def test_lance_binding_consumed_before_nested_callback_and_limits_retained(bound
     def before(action, spec):
         callbacks.append(spec)
         assert state.requests == []
-        assert lance_action._lance_action_binding() is None
+        assert dataset_runtime._lance_action_binding() is None
         state.dataset.write_lance('/tmp/p1-nested-unused.lance')
 
-    with lance_action.bind_lance_action(before, max_rows_per_batch=7):
+    with dataset_runtime.bind_lance_action(before, max_rows_per_batch=7):
         result = state.dataset.write_lance('/tmp/p1-outer-unused.lance', return_receipt=True)
     assert result is state.result
     assert len(callbacks) == 1
@@ -265,7 +266,7 @@ def test_lance_binding_consumed_before_nested_callback_and_limits_retained(bound
     assert EXECUTION_LIMITS not in state.requests[0].arguments
     assert state.requests[1].arguments[EXECUTION_LIMITS] == {'inflight_rows': 7}
     assert all(item[0] == 'write_table' and item[4] is None for item in state.checks)
-    assert lance_action._lance_action_binding() is None
+    assert dataset_runtime._lance_action_binding() is None
 
 
 def test_lance_callback_error_never_constructs_request_and_binding_resets(boundary):
@@ -273,10 +274,10 @@ def test_lance_callback_error_never_constructs_request_and_binding_resets(bounda
         raise RuntimeError('registration rejected')
 
     with pytest.raises(RuntimeError, match='registration rejected'):
-        with lance_action.bind_lance_action(before, max_rows_per_batch=7):
+        with dataset_runtime.bind_lance_action(before, max_rows_per_batch=7):
             boundary.dataset.write_lance('/tmp/p1-error-unused.lance')
     assert boundary.requests == []
-    assert lance_action._lance_action_binding() is None
+    assert dataset_runtime._lance_action_binding() is None
 
 
 @pytest.mark.parametrize('managed', [False, True])
@@ -304,11 +305,11 @@ def test_lance_capture_skips_callback_and_propagates_baseexception(boundary, mon
 
     monkeypatch.setattr(dataflow_api, 'run_dataset_action', capture)
     with pytest.raises(plan_capture._Captured):
-        with lance_action.bind_lance_action(lambda *args: callbacks.append(args), max_rows_per_batch=3):
+        with dataset_runtime.bind_lance_action(lambda *args: callbacks.append(args), max_rows_per_batch=3):
             state.dataset.write_lance('/tmp/p1-capture-unused.lance')
     assert callbacks == []
     assert not any(kind == 'receipt' for kind, _ in state.events)
-    assert lance_action._lance_action_binding() is None
+    assert dataset_runtime._lance_action_binding() is None
 
 
 def test_guard_has_no_host_and_only_registers_success(boundary):

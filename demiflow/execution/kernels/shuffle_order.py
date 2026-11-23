@@ -12,7 +12,7 @@ import hashlib
 import sys
 
 from demiflow.execution.kernels.dataflow import _err, _seed, _materialize_row, _input_row_bytes
-from demiflow.execution.kernels.ordering import OrderingServices, _build_sort_runs, merge_sort_runs, _release_runs, _provenance
+from demiflow.execution.kernels.ordering import OrderingServices, build_sort_runs, merge_sort_runs, _release_runs, _provenance
 from demiflow.operators.ordering import SortWindow
 from demiflow.execution.contracts.record_codec import resident_limit, raw_workspace, _typed_shape, _json_shape, _record_metadata
 from demiflow.execution.storage.streams import read_document
@@ -133,14 +133,14 @@ def seeded_shuffle(records, *, spec, services, windows=None, retain=None):
     first = second = ()
     canonical = ordered = None
     try:
-        first = _build_sort_runs(records, spec=spec, services=services, window=window,
+        first = build_sort_runs(records, spec=spec, services=services, window=window,
             key_for_record=_TypedKeys(services, window))
         close = getattr(records, 'close', None)
         if close is not None:
             close()
         canonical = merge_sort_runs(first, spec=spec, services=services, window=window)
         keys = _TypedKeys(services, window, seed=_seed(spec, services))
-        second = _build_sort_runs(canonical, spec=spec, services=services, window=window,
+        second = build_sort_runs(canonical, spec=spec, services=services, window=window,
             key_for_record=keys)
         canonical.close()
         canonical = None

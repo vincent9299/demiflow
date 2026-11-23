@@ -26,7 +26,7 @@ def port_for(svc, seal, spec):
 @pytest.mark.parametrize('routing', ['forward', 'rebalance', 'broadcast', 'hash', 'target'])
 @pytest.mark.parametrize('restore', [False, True])
 def test_join_projection_keeps_original_routes_and_revalidates_after_restore(tmp_path, monkeypatch, routing, restore):
-    from demiflow.execution import dataflow_finite_input as finite
+    from demiflow.execution.worker import finite_input as finite
     with store_fixture(tmp_path) as (run, store, _):
         svc, spec = fixture(store, routing=routing)
         seal, _, expected = make_seal(svc, spec)
