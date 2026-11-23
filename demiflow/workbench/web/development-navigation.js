@@ -148,7 +148,8 @@
     let viewMode = 'source'; // 'diff' | 'source'
     let viewerHandle = null;
     let loadEpoch = 0;
-    let latestChecks = {native_flow: null, project_layout: null, review: null};
+    let latestChecks = {native_flow: null, project_layout: null, review: null, reviewDetails: []};
+    let activeCheckKey = null;
 
     // === LEFT SIDEBAR: Changed files + Project tree (collapsible + resizable split) ===
     const explorer = node('div', 'dev-file-explorer');
@@ -277,6 +278,8 @@
 
     const forgeStrip = node('div', 'dev-forge-strip');
     forgeStrip.hidden = true;
+    const forgeDetail = node('div', 'dev-forge-detail');
+    forgeDetail.hidden = true;
 
     const toolbar = node('div', 'dev-code-toolbar');
     toolbar.hidden = true;
@@ -303,7 +306,7 @@
     toolbar.append(pathMeta, toolActions);
 
     const viewport = node('div', 'dev-code-viewport');
-    pane.append(tabBar, forgeStrip, toolbar, viewport);
+    pane.append(tabBar, forgeStrip, forgeDetail, toolbar, viewport);
     layout.append(pane);
     toggle.setAttribute('aria-expanded', 'false');
 
@@ -383,28 +386,58 @@
       const checkTone = status => ({passed:'ok', failed:'bad', incomplete:'warn', not_applicable:'muted'})[status] || 'muted';
       if (latestChecks.native_flow && latestChecks.native_flow.status !== 'not_applicable') {
         const c = latestChecks.native_flow;
-        items.push({label: '原生数据流检查', text: checkLabel(c.status), tone: checkTone(c.status),
-          detail: (c.diagnostics || []).map(d => [d.rule, d.path, d.detail].filter(Boolean).join(' · ')).join('\n')});
+        const lines = (c.diagnostics || []).map(d => [d.rule, d.path + (d.line ? ':' + d.line : ''), d.detail].filter(Boolean).join(' · '));
+        const omitted = (c.diagnostic_count || 0) - lines.length;
+        if (omitted > 0) lines.push('另有 ' + omitted + ' 项诊断');
+        items.push({key: 'native_flow', label: '原生数据流检查', text: checkLabel(c.status), tone: checkTone(c.status),
+          lines: lines.length ? lines : ['静态数据流与 SDK 契约检查通过。']});
       }
       if (latestChecks.project_layout && latestChecks.project_layout.status !== 'not_applicable') {
         const c = latestChecks.project_layout;
-        items.push({label: '项目目录检查', text: checkLabel(c.status), tone: checkTone(c.status),
-          detail: (c.diagnostics || []).map(d => [d.rule, d.path, d.detail].filter(Boolean).join(' · ')).join('\n')});
+        const lines = (c.diagnostics || []).map(d => [d.rule, d.path + (d.line ? ':' + d.line : ''), d.detail].filter(Boolean).join(' · '));
+        items.push({key: 'project_layout', label: '项目目录检查', text: checkLabel(c.status), tone: checkTone(c.status),
+          lines: lines.length ? lines : ['业务目录与角色规范检查通过。']});
       }
       if (latestChecks.review) {
         const r = latestChecks.review;
         const rText = ({passed:'已通过', invalid:'需修改', incomplete:'未完成', running:'评审中'})[r] || r;
         const rTone = ({passed:'ok', invalid:'bad', incomplete:'warn', running:'muted'})[r] || 'muted';
-        items.push({label: '独立评审', text: rText, tone: rTone, detail: ''});
+        const lines = latestChecks.reviewDetails.length
+          ? latestChecks.reviewDetails
+          : [r === 'passed' ? '独立只读评审通过。' : '点击聊天流中的「独立评审」查看完整记录。'];
+        items.push({key: 'review', label: '独立评审', text: rText, tone: rTone, lines});
       }
       forgeStrip.replaceChildren();
       forgeStrip.hidden = items.length === 0;
-      if (!items.length) return;
+      if (!items.length) { forgeDetail.hidden = true; return; }
+      if (activeCheckKey && !items.some(i => i.key === activeCheckKey)) activeCheckKey = null;
       forgeStrip.append(node('span', 'dev-forge-strip-label', 'Forge 校验'));
       for (const item of items) {
-        const pill = node('span', 'dev-forge-pill dev-forge-' + item.tone, item.label + ' · ' + item.text);
-        if (item.detail) pill.title = item.detail;
+        const pill = node('button', 'dev-forge-pill dev-forge-' + item.tone + (activeCheckKey === item.key ? ' is-open' : ''), item.label + ' · ' + item.text);
+        pill.type = 'button';
+        pill.setAttribute('aria-expanded', String(activeCheckKey === item.key));
+        pill.title = '点击查看「' + item.label + '」详情';
+        pill.onclick = () => {
+          activeCheckKey = activeCheckKey === item.key ? null : item.key;
+          renderForgeStrip();
+        };
         forgeStrip.append(pill);
+      }
+      const selected = items.find(i => i.key === activeCheckKey);
+      forgeDetail.replaceChildren();
+      if (selected) {
+        const head = node('div', 'dev-forge-detail-head');
+        head.append(node('strong', null, selected.label + ' · ' + selected.text));
+        const closeDetail = node('button', 'dev-forge-detail-close', '收起');
+        closeDetail.type = 'button';
+        closeDetail.onclick = () => { activeCheckKey = null; renderForgeStrip(); };
+        head.append(closeDetail);
+        const list = node('ul', 'dev-forge-detail-list');
+        for (const line of selected.lines) list.append(node('li', null, line));
+        forgeDetail.append(head, list);
+        forgeDetail.hidden = false;
+      } else {
+        forgeDetail.hidden = true;
       }
     }
 
@@ -704,12 +737,18 @@
       if (checks.native_flow) latestChecks.native_flow = checks.native_flow;
       if (checks.project_layout) latestChecks.project_layout = checks.project_layout;
       if (checks.review) latestChecks.review = checks.review;
+      if (checks.reviewReset) latestChecks.reviewDetails = [];
+      if (checks.reviewDetail) {
+        latestChecks.reviewDetails.push(checks.reviewDetail);
+        if (latestChecks.reviewDetails.length > 20) latestChecks.reviewDetails.shift();
+      }
       renderForgeStrip();
     }
 
     function clearSessionChanges() {
       observedChanges.clear();
-      latestChecks = {native_flow: null, project_layout: null, review: null};
+      latestChecks = {native_flow: null, project_layout: null, review: null, reviewDetails: []};
+      activeCheckKey = null;
       renderForgeStrip();
       renderChangedList();
     }
