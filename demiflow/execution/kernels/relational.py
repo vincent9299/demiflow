@@ -49,7 +49,7 @@ def typed_join_pairs(left, right, *, spec, services, retained_key):
     from demiflow.execution.contracts.relational_region import TYPED_JOIN_SUFFIX, SQL_CHILD_RSS, SQL_PARENT_WINDOW
     from demiflow.execution.contracts.record_codec import ARROW_MEDIA_TYPES
     from demiflow.execution.storage.arrow_payload import batch_cache
-    from demiflow.operators.relational_sql import typed_join_query, json_key_type
+    from demiflow.operators.relational_sql import query_typed_join, json_key_type
     if not any(s.stage_id.endswith(TYPED_JOIN_SUFFIX) for s in services.assignment.stages):
         return None
     if services.query_region_offsets is None:
@@ -123,23 +123,11 @@ def typed_join_pairs(left, right, *, spec, services, retained_key):
         arrays = [pa.chunked_array(parts, type=dtype) for parts, dtype in zip(chunks, types)]
         arrays.append(pa.chunked_array([pa.array(range(len(records)), type=pa.int64())]))
         tables[name] = pa.table(arrays, names=[*('k' + str(i) for i in range(len(fields))), 'off'])
-    how = spec.configuration.get('how', 'inner')
-    # Prove a complete result bound before starting SQL. Once started, errors
-    # and cancellation propagate; there is no retry through another algorithm.
-    upper = len(inputs[0]) if how in ('semi', 'anti') else len(inputs[0]) * max(1, len(inputs[1]))
-    if upper * 256 + retained > SQL_PARENT_WINDOW or upper * 224 > SQL_CHILD_RSS // 16:
+    pairs = query_typed_join(tables, types, how=spec.configuration.get('how', 'inner'),
+        left_count=len(inputs[0]), right_count=len(inputs[1]), retained=retained,
+        query=services.query_region_offsets, check_stop=services.check_stop)
+    if pairs is None:
         return None
-    sql, functions = typed_join_query(types, how)
-    pairs = services.query_region_offsets(sql, tables=tables, max_pairs=upper, rss_bytes=SQL_CHILD_RSS,
-                                         check_stop=services.check_stop, key_functions=functions)
-    for li, ri in pairs:
-        if type(li) is not int or not 0 <= li < len(inputs[0]) or (
-                ri is not None and (type(ri) is not int or not 0 <= ri < len(inputs[1]))):
-            raise _err('INTERNAL_PROTOCOL', 'typed join returned invalid input offsets')
-    # Recovery replays an emitted prefix. Order only these pre-admitted offset
-    # pairs, never the business keys or full input rows. The 256 bytes/pair
-    # above include tuple/int/list storage, sort keys and Timsort scratch.
-    pairs.sort(key=lambda pair: (pair[0], -1 if pair[1] is None else pair[1]))
     services.check_stop()
     retained_key(retained + len(pairs) * 256)
     def output():

@@ -366,8 +366,8 @@
     "execution/dataflow_models.py"
    ],
    "num_blocks": [
-    "execution/kernels/block_partition.py",
     "execution/worker/terminal_blocks.py",
+    "operators/block_partition.py",
     "operators/ordering.py",
     "planning/dataflow_compile.py"
    ],
@@ -520,7 +520,8 @@
     "operators/relational_region.py"
    ],
    "target_num_rows_per_block": [
-    "execution/kernels/block_partition.py"
+    "execution/kernels/block_partition.py",
+    "operators/block_partition.py"
    ],
    "targets": [
     "execution/outputs/terminals.py"

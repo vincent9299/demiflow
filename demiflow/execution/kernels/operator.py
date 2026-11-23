@@ -1264,7 +1264,8 @@ class OperatorKernel:
             yield from self._emit(preserve_block(union_inputs(inputs, spec=self._spec, services=services), None))
         elif kind in _ORDERING_KINDS:
             from demiflow.execution.kernels.ordering import build_sort_runs, merge_sort_runs
-            from demiflow.execution.kernels.block_partition import partition_records, block_count
+            from demiflow.execution.kernels.block_partition import partition_records
+            from demiflow.operators.block_partition import block_count
             from dataclasses import replace
             port = self._ports[self._port_order[0]]
             records = port.records()
@@ -1287,7 +1288,7 @@ class OperatorKernel:
                 if kind == 'RepartitionOp':
                     sort_spec = replace(sort_spec, configuration={**dict(sort_spec.configuration),
                         'keys': list(sort_spec.configuration.get('keys') or ()),
-                        'num_blocks': block_count(sort_spec, rows=port.count, bounds=self._services.bounds)})
+                        'num_blocks': block_count(sort_spec.configuration, rows=port.count, max_partitions=self._services.bounds.max_partitions)})
                 if kind == 'SortOp' and sort_spec.configuration.get('wide_body_refs'):
                     from demiflow.execution.kernels.ordering import sort_windows, sort_with_body_references
                     records.close()
