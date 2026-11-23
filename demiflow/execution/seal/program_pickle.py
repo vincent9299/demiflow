@@ -6,6 +6,7 @@ whitelist. Only the already serialized exception class state is augmented;
 failure messages remain data-only and never select an import or a constructor.
 """
 from tempfile import TemporaryFile
+import pickle
 
 import cloudpickle
 
@@ -22,6 +23,46 @@ class ProgramPickler(cloudpickle.CloudPickler):
             state = ({**state[0], '__qualname__': value.__qualname__}, state[1])
             reduced = (*reduced[:2], state, *reduced[3:])
         return reduced
+
+
+class _ProgramBuffer:
+    """Read a verified buffer without making a second whole-program copy."""
+    def __init__(self, buffer):
+        self.buffer = buffer
+        self.position = 0
+
+    def read(self, size=-1):
+        end = len(self.buffer) if size < 0 else min(len(self.buffer), self.position + size)
+        value = bytes(memoryview(self.buffer)[self.position:end])
+        self.position = end
+        return value
+
+    def readinto(self, target):
+        size = min(len(target), len(self.buffer) - self.position)
+        target[:size] = memoryview(self.buffer)[self.position:self.position + size]
+        self.position += size
+        return size
+
+    def readline(self):
+        end = self.buffer.find(b'\n', self.position)
+        return self.read(len(self.buffer) - self.position if end < 0 else end + 1 - self.position)
+
+
+class ProgramUnpickler(pickle.Unpickler):
+    """Decode authenticated original source carriers at their current owner.
+
+    Only the bounded recorded GLOBAL names are relocated. Old files and
+    pickle bytes remain intact; there are no import hooks or global aliases.
+    """
+    def find_class(self, module, name):
+        from demiflow.execution.recovery_sdk_v3 import source_pickle_global, persistent_source_module
+        target = source_pickle_global(module, name)
+        if target is None:
+            return super().find_class(module, name)
+        value = super().find_class(*target)
+        if persistent_source_module(value) != module:
+            raise pickle.UnpicklingError('Relocated source declaration differs from its audited definition')
+        return value
 
 
 def stage_payload(value, *, store, media_type, allow_live=False,
@@ -50,7 +91,7 @@ def load_payload(chunks):
         stream.writelines(chunks)
         stream.seek(0)
         try:
-            return cloudpickle.load(stream)
+            return ProgramUnpickler(stream).load()
         except Exception as exc:
             raise DataflowError("CORRUPT_ARTIFACT", "Program payload failed to load: " + str(exc)) from exc
 
@@ -68,6 +109,6 @@ def load_private_payload(store, ref):
     if hashlib.sha256(buffer).hexdigest() != ref.digest:
         raise DataflowError('CORRUPT_ARTIFACT', 'Private task program digest differs')
     try:
-        return cloudpickle.loads(buffer)
+        return ProgramUnpickler(_ProgramBuffer(buffer)).load()
     except Exception as exc:
         raise DataflowError('CORRUPT_ARTIFACT', 'Program payload failed to load: ' + str(exc)) from exc

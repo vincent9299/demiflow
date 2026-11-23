@@ -43,7 +43,7 @@ _REVISIONS = {
         '5fac23cf24cf8e2b27e79b36f9faf28ab2a0104517a13d1c02a249a94a74cb24',
         'e67e3703f03ea14f8bcefb803bafc3251072e78bc17a5c1f2df60fad2ca2f83f'),
     'demiflow.planning.dataflow_graph_adapter': (
-        '4ee25f483669b6ec82ed6275c04d3077721d8e718c710bf09b66c86335f79ef2',
+        '1c38779585642c638837951296a61ac58cf3f47298fcab83ed1153f69e14e1d0',
         '0ab9e3db6f4dffe74c2f614ac887ce0a69749910b083db63eaa95c819652cbcf'),
     'demiflow.data.result_cache': (
         '2ac2ab41bb6a1b4eda601b8c06f78e7c0bc74caf638d9c54afe6360190a4912b',
@@ -235,6 +235,11 @@ def _method_pin(fn, code):
 
 
 def function_pin(fn, source, source_hash, code):
+    relocated = _layout_source_type(fn)
+    if relocated is not None and source_hash == relocated['source']:
+        pins = relocated['methods'].get(fn.__qualname__.rsplit('.', 1)[-1])
+        if pins is not None and code == pins[0]:
+            return relocated['old_source'], pins[1]
     revision = _REVISIONS.get(fn.__module__) if type(fn.__module__) is str else None
     if revision is None or source_hash != revision[0]:
         return source_hash, code
@@ -294,6 +299,9 @@ def _queue_method(fn, module):
 
 
 def class_method_pins(cls, methods):
+    relocated = _layout_source_type(cls)
+    if relocated is not None:
+        return {name: relocated['methods'][name][1] for name in methods}
     # Class v3 identities contain method hashes but no file hash.
     queue_module = sys.modules.get('demiflow.execution.request_limits')
     if queue_module is not None and cls is vars(queue_module).get('ObservedQueue'):
@@ -311,3 +319,130 @@ def class_method_pins(cls, methods):
         if type(fn) is FunctionType and fn.__globals__ is vars(module):
             methods[name] = _method_pin(fn, methods[name])
     return methods
+
+
+# Original v3 source-carrier names are persistent data, independent of file
+# placement. These are the five actual types found in published program
+# artifacts. Both installed source and every method are measured; a changed
+# definition uses its real identity and is never certified as the old one.
+_LAYOUT_SOURCE_TYPES = {'demiflow.execution.sources.legacy_queue.LegacyQueueHistoryDatasource': {'old_module': 'demiflow.execution.legacy_queue',
+                                                                          'old_source': '5fe509ab9503850c6979648145056e3399a2d0ee823754e1d627b013edf52070',
+                                                                          'source': '190ddde229ea531b91d3620cb6e6af803190ed5c49abcfc411b096f48fa56090',
+                                                                          'methods': {'__init__': ['4ae277bea5c1e24191add012bffe7ffe2d2e05960f9dfcc0905021ab8870208c',
+                                                                                                   '4ae277bea5c1e24191add012bffe7ffe2d2e05960f9dfcc0905021ab8870208c'],
+                                                                                      'snapshot_identity': ['c04d235814cd2f9ad1678b90055882cb4dbf86ba637e9eb4945502b63d6be577',
+                                                                                                            'c04d235814cd2f9ad1678b90055882cb4dbf86ba637e9eb4945502b63d6be577'],
+                                                                                      'recovery_identity': ['bdacb53a986cbf300b60e08a755087655ede304db5c394a79b6d582b5cde6365',
+                                                                                                            'bdacb53a986cbf300b60e08a755087655ede304db5c394a79b6d582b5cde6365'],
+                                                                                      'get_read_tasks': ['d587bf7375e6a9606e0e8b6dc7f6d3c01a757361e3e8a8332f30d5dfca00bc28',
+                                                                                                         'd587bf7375e6a9606e0e8b6dc7f6d3c01a757361e3e8a8332f30d5dfca00bc28'],
+                                                                                      'rows': ['9f5267c20896f2b469525e57b47bdbcab7f66b495fc0ec3d48046f0daa8effda',
+                                                                                               'f8ed4c30d25799a24ec9322fe62ac5a724e88d886ba8198fc4b58906c8de2a3c']}},
+ 'demiflow.execution.sources.materialized_input.InputMaterializedHandle': {'old_module': 'demiflow.execution.dataflow_inputs',
+                                                                           'old_source': '23505a1d134a3312a8568aa497ab3d5f8375eb0bfd1bfd0b59942c17383e8456',
+                                                                           'source': 'b2169858de6ddfea9d90bfcc887b628e9e819342b94b635573bd870050b5b653',
+                                                                           'methods': {'__init__': ['b85b85852c1db8125162fcdf6c26a65c5a20c587813dd325935af2f134d63109',
+                                                                                                    'b85b85852c1db8125162fcdf6c26a65c5a20c587813dd325935af2f134d63109'],
+                                                                                       'check_open': ['158b5ef55654f20db50327de2fdbad18c1de3730db97d379e004483892a9b59b',
+                                                                                                      '158b5ef55654f20db50327de2fdbad18c1de3730db97d379e004483892a9b59b'],
+                                                                                       'rows': ['38c8e778ac98101357234fb093f164b2f1b37f824a64f630aaae7827f6627f25',
+                                                                                                '38c8e778ac98101357234fb093f164b2f1b37f824a64f630aaae7827f6627f25'],
+                                                                                       'typed_rows': ['7097d7209054104273ca70f9209fb23e5b665aa2ed8563927be16eb2f684fe70',
+                                                                                                      '7097d7209054104273ca70f9209fb23e5b665aa2ed8563927be16eb2f684fe70'],
+                                                                                       'num_blocks': ['6687d269076d2184a8bfa1bbd2ec411ed18ceb60b2f11e0b4526f9e07c982c2c',
+                                                                                                      '6687d269076d2184a8bfa1bbd2ec411ed18ceb60b2f11e0b4526f9e07c982c2c'],
+                                                                                       'release': ['fc9b6aacc5bcba65b477ee5fd678ecb81dde9ba7c7cbd632c10fbdc8f6ae974d',
+                                                                                                   'fc9b6aacc5bcba65b477ee5fd678ecb81dde9ba7c7cbd632c10fbdc8f6ae974d'],
+                                                                                       '_check_open': ['0f9d15bb10ce332a23bcfa5b2b72319bd8c70789d41e54e721060aa7d1fad0d5',
+                                                                                                       '0f9d15bb10ce332a23bcfa5b2b72319bd8c70789d41e54e721060aa7d1fad0d5'],
+                                                                                       '_iter_rows': ['5b3db5429597954b884f7638f667564e387bc7144d2c04812dd03cf4c2ed14fb',
+                                                                                                      '5b3db5429597954b884f7638f667564e387bc7144d2c04812dd03cf4c2ed14fb']}},
+ 'demiflow.execution.native_queue.dataflow_acquisition_call.QueueSourceDeclaration': {'old_module': 'demiflow.execution.dataflow_acquisition_call',
+                                                                                      'old_source': '597a8f30caa94c77fcb6b25b68e6793d45d2f3608ffd5b8e7a8ec4dd39bda40a',
+                                                                                      'source': 'b0fe18a726ade3a186635333a30bbf3fbb98ac04ac019ae1cb79d74ebf5acc41',
+                                                                                      'methods': {'snapshot_identity': ['69bfa6567d9c3e07eb4254ae209103c4bb2e78dc98982b4ccfb16f12b70fe4f7',
+                                                                                                                        '69bfa6567d9c3e07eb4254ae209103c4bb2e78dc98982b4ccfb16f12b70fe4f7'],
+                                                                                                  'recovery_identity': ['69bfa6567d9c3e07eb4254ae209103c4bb2e78dc98982b4ccfb16f12b70fe4f7',
+                                                                                                                        '69bfa6567d9c3e07eb4254ae209103c4bb2e78dc98982b4ccfb16f12b70fe4f7'],
+                                                                                                  '__init__': ['7c8b6b3fa0d38825de9d0588467274613a48ed729c22c56d86a458eb88db10a1',
+                                                                                                               '7c8b6b3fa0d38825de9d0588467274613a48ed729c22c56d86a458eb88db10a1'],
+                                                                                                  '__repr__': ['67deaf69a2f6a014e3d72d57980f0891fb4525004ae6aee457d30e6039a467fc',
+                                                                                                               '67deaf69a2f6a014e3d72d57980f0891fb4525004ae6aee457d30e6039a467fc'],
+                                                                                                  '__eq__': ['391fbc67de36ab6f3e2f328343a5ed49dd951968f1ad1d94992edf49cb2b6062',
+                                                                                                             '391fbc67de36ab6f3e2f328343a5ed49dd951968f1ad1d94992edf49cb2b6062'],
+                                                                                                  '__setattr__': ['0137c190ba161472435ed96a6e37d567f8dc97f9bbfca214206d83e2a4932184',
+                                                                                                                  '0137c190ba161472435ed96a6e37d567f8dc97f9bbfca214206d83e2a4932184'],
+                                                                                                  '__delattr__': ['f7ccb7b231364c4d509be3a1172e696edbc0401ce3c665aa2df006834b1d0e05',
+                                                                                                                  'f7ccb7b231364c4d509be3a1172e696edbc0401ce3c665aa2df006834b1d0e05'],
+                                                                                                  '__hash__': ['8a3d4fecaa32782bdeb9d03af0ff10207692c481e2973776c104406fbbb2a00e',
+                                                                                                               '8a3d4fecaa32782bdeb9d03af0ff10207692c481e2973776c104406fbbb2a00e']}},
+ 'demiflow.execution.native_queue.dataflow_acquisition_call.AcquisitionCall': {'old_module': 'demiflow.execution.dataflow_acquisition_call',
+                                                                               'old_source': '597a8f30caa94c77fcb6b25b68e6793d45d2f3608ffd5b8e7a8ec4dd39bda40a',
+                                                                               'source': 'b0fe18a726ade3a186635333a30bbf3fbb98ac04ac019ae1cb79d74ebf5acc41',
+                                                                               'methods': {'__init__': ['6ed653d87436ea1a16c4fdd5d83027371db16c1e2e86e0f09eabd3659fe20583',
+                                                                                                        '6ed653d87436ea1a16c4fdd5d83027371db16c1e2e86e0f09eabd3659fe20583'],
+                                                                                           'bind': ['1047150a7ea9a0a43c69c427276a1ae0700d5c00d00ee439c54147b62fa6a5dc',
+                                                                                                    '1047150a7ea9a0a43c69c427276a1ae0700d5c00d00ee439c54147b62fa6a5dc'],
+                                                                                           'snapshot_state': ['281996a89183592ec2a76c431bd515496a5a1c0ce517247932aceaaf97df407b',
+                                                                                                              '281996a89183592ec2a76c431bd515496a5a1c0ce517247932aceaaf97df407b'],
+                                                                                           'restore_state': ['b6541d1c19222fea934c06c713227ffb2b34e9b455ac55da9c5c4fbaae8016ec',
+                                                                                                             'b6541d1c19222fea934c06c713227ffb2b34e9b455ac55da9c5c4fbaae8016ec'],
+                                                                                           '__call__': ['02292d155e58ccde35f0e75eed45eae60fce79de267ba402bd1d56a23a0a3aa6',
+                                                                                                        '15864c89112752aeb587ddb71aedf94e871c79cfdc49d23ba56d55a7e10060e2']}},
+ 'demiflow.execution.sources.literal_source.LiteralSourceReference': {'old_module': 'demiflow.execution.literal_source',
+                                                                      'old_source': '8348d18a5138ba595f97c105efdd67c8a8c34f64c2336ea1edb56efb4c1f9ee3',
+                                                                      'source': 'af904e8eeb7e9609d17188c1feb978bce2a58b2f4dc72361f29d58e0f08246db',
+                                                                      'methods': {'__init__': ['15d22ac1354664b437c9f6bcd1491af3f8a745abb1b561d9eaf10bf3aa3afb82',
+                                                                                               '15d22ac1354664b437c9f6bcd1491af3f8a745abb1b561d9eaf10bf3aa3afb82'],
+                                                                                  '__repr__': ['67deaf69a2f6a014e3d72d57980f0891fb4525004ae6aee457d30e6039a467fc',
+                                                                                               '67deaf69a2f6a014e3d72d57980f0891fb4525004ae6aee457d30e6039a467fc'],
+                                                                                  '__eq__': ['e85bcbefb6644f0266cc463d5986622fc303fce6d67beed2f0340e2410c6fe82',
+                                                                                             'e85bcbefb6644f0266cc463d5986622fc303fce6d67beed2f0340e2410c6fe82'],
+                                                                                  '__setattr__': ['9825bf8c29053108b8283c775dda062f6d284636155117372d087fba07e40d6a',
+                                                                                                  '9825bf8c29053108b8283c775dda062f6d284636155117372d087fba07e40d6a'],
+                                                                                  '__delattr__': ['35a7690238d62bdabf270d743dbbdbcfd815bbe8a685dca4e78cddfe870f6bdb',
+                                                                                                  '35a7690238d62bdabf270d743dbbdbcfd815bbe8a685dca4e78cddfe870f6bdb'],
+                                                                                  '__hash__': ['634bb8370d1a15ed62178d2c0275a60966a64a945d5dccd2592da68e09990be1',
+                                                                                               '634bb8370d1a15ed62178d2c0275a60966a64a945d5dccd2592da68e09990be1']}}}
+
+
+def _layout_source_type(value):
+    module_name = getattr(value, '__module__', None)
+    qualname = getattr(value, '__qualname__', '')
+    if type(module_name) is not str or type(qualname) is not str:
+        return None
+    class_name = qualname.split('.', 1)[0]
+    entry = _LAYOUT_SOURCE_TYPES.get(module_name + '.' + class_name)
+    module = sys.modules.get(module_name)
+    if entry is None or module is None:
+        return None
+    cls = vars(module).get(class_name)
+    if not isinstance(cls, type) or (value is not cls and value is not vars(cls).get(qualname.rsplit('.', 1)[-1])):
+        return None
+    try:
+        from hashlib import sha256
+        source = Path(module.__file__).read_bytes()
+    except (OSError, AttributeError, TypeError):
+        return None
+    if sha256(source).hexdigest() != entry['source']:
+        return None
+    methods = {name: identity(code_record(method.__code__)) for name, method in vars(cls).items()
+               if type(method) is FunctionType}
+    if methods != {name: pins[0] for name, pins in entry['methods'].items()}:
+        return None
+    return entry
+
+
+def persistent_source_module(value):
+    """The authenticated original v3 name; no imports or process aliases."""
+    entry = _layout_source_type(value)
+    return entry['old_module'] if entry is not None else value.__module__
+
+
+def source_pickle_global(module, name):
+    """Resolve only recorded historical GLOBAL names, never arbitrary paths."""
+    for key, entry in _LAYOUT_SOURCE_TYPES.items():
+        current_module, class_name = key.rsplit('.', 1)
+        if module == entry['old_module'] and name == class_name:
+            return current_module, class_name
+    return None
