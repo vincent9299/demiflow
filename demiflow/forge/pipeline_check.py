@@ -391,7 +391,13 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
             layout_paths.update(inspected)
             layout.extend({**d, 'entry': candidate, 'params': param} for d in issues)
             report['binding']['parameter_path'] = param
-            row = dict(entry=candidate, params=param, status=report['status'])
+            kept_entry_diags = [d for d in report['diagnostics'] if _keep_diagnostic(d)]
+            entry_status = (
+                'invalid' if any(d.get('status') == 'invalid' for d in kept_entry_diags)
+                else 'incomplete' if kept_entry_diags
+                else ('checked' if report['status'] in ('checked', 'incomplete') else report['status'])
+            )
+            row = dict(entry=candidate, params=param, status=entry_status)
             if publish is not None:
                 publish(report)
             rows.append(row)

@@ -660,3 +660,64 @@ def test_flow_check_project_confined_static_config_read_and_security_boundary(tm
     )
     bad_out = check_project(proj, entry='flows/bad_out.py:run', params='configs/bad_out.json')
     assert bad_out['status'] != 'passed', bad_out
+
+
+def test_deepseek_stdio_exdev_rename_is_atomic(tmp_path):
+    import subprocess
+    from pathlib import Path
+    shim = Path(__file__).resolve().parents[1] / 'demiflow/workbench/conversations/deepseek_stdio.cjs'
+    src = tmp_path / 'src.txt'
+    dst = tmp_path / 'dst.txt'
+    src.write_text('new-content')
+    dst.write_text('old-content')
+    script = (
+        f"const fs = require('fs');\n"
+        f"const origSync = fs.renameSync;\n"
+        f"let first = true;\n"
+        f"fs.renameSync = function(a, b) {{ if (first) {{ first = false; const e = new Error('EXDEV'); e.code = 'EXDEV'; throw e; }} return origSync.call(this, a, b); }};\n"
+        f"require({str(shim)!r});\n"
+        f"fs.renameSync({str(src)!r}, {str(dst)!r});\n"
+    )
+    res = subprocess.run(['node', '-e', script], capture_output=True, text=True)
+    assert res.returncode == 0, res.stderr
+    assert dst.read_text() == 'new-content'
+    assert not src.exists()
+
+
+def test_manage_project_layout_bind_table_and_pow_encode(tmp_path):
+    import lance
+    import pyarrow as pa
+    from demiflow.forge.pipeline_check import check_project
+    from demiflow.forge.project import initialize_project
+    from demiflow.workbench.conversations.context import _run_project_layout
+
+    ext = tmp_path / 'external_inputs'
+    ext.mkdir()
+    tbl = ext / 'items.lance'
+    lance.write_dataset(pa.table({'x': [1, 2, 3]}), str(tbl))
+
+    proj = tmp_path / 'tbl_proj'
+    initialize_project(proj)
+    for d in ('flows', 'configs'):
+        (proj / d).mkdir(exist_ok=True)
+    bound = _run_project_layout(proj, {'action': 'bind_table', 'alias': 'items_in', 'path': str(tbl), 'version': 1})
+    assert bound['status'] == 'bound'
+    assert bound['param_ref'] == {'kind': 'table', 'alias': 'items_in'}
+    assert (proj / 'tables' / 'items_in.json').is_file()
+
+    (proj / 'flows' / 'read_demo.py').write_text(
+        'import hashlib\n'
+        'from demiflow import data\n'
+        'def run(source=None):\n'
+        '    limit = 2 ** 3\n'
+        '    tag = hashlib.sha256("ok".encode()).hexdigest()\n'
+        '    if limit != 8 or len(tag) != 64:\n'
+        '        raise ValueError("bad")\n'
+        '    return data.read_lance(uri=source["uri"], version=source["version"]).count()\n'
+    )
+    (proj / 'configs' / 'read_demo.json').write_text(
+        '{"format": "demiflow_forge_flow_parameters_v2", "arguments": {"source": {"kind": "table", "alias": "items_in"}}}\n'
+    )
+    report = check_project(proj, entry='flows/read_demo.py:run', params='configs/read_demo.json')
+    assert report['status'] == 'passed', report
+    assert report['entries'][0]['status'] == 'checked', report

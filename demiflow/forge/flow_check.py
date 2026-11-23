@@ -450,8 +450,10 @@ class FlowChecker:
                 return API(self.methods[node.attr], parent)
             if type(parent) is dict and node.attr in {'get', 'keys', 'values', 'items'}:
                 return ('__bound_pure_method__', getattr(parent, node.attr))
-            if type(parent) is str and node.attr in {'strip', 'lstrip', 'rstrip', 'startswith', 'endswith', 'lower', 'upper', 'replace', 'split', 'join'}:
+            if type(parent) is str and node.attr in {'strip', 'lstrip', 'rstrip', 'startswith', 'endswith', 'lower', 'upper', 'replace', 'split', 'join', 'encode'}:
                 return ('__bound_pure_method__', getattr(parent, node.attr))
+            if type(parent) is bytes and node.attr == 'decode':
+                return ('__bound_pure_method__', parent.decode)
             if isinstance(parent, Path):
                 if node.attr in {'name', 'stem', 'suffix'}:
                     return getattr(parent, node.attr)
@@ -489,7 +491,7 @@ class FlowChecker:
                     module,
                 )
             return parent[key]
-        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod)):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)):
             left, right = visit(node.left), visit(node.right)
             if isinstance(left, RuntimeValue) or isinstance(right, RuntimeValue):
                 if not isinstance(node.op, (ast.Add, ast.Sub)):
@@ -512,10 +514,15 @@ class FlowChecker:
                     self.fail('FL-07', 'Unsupported configured arithmetic', node, module)
                 if isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)) and right == 0:
                     self.fail('FL-07', 'Division by zero in configured arithmetic', node, module)
-                result = (left * right if isinstance(node.op, ast.Mult) else
-                          left / right if isinstance(node.op, ast.Div) else
-                          left // right if isinstance(node.op, ast.FloorDiv) else
-                          left % right)
+                if isinstance(node.op, ast.Pow):
+                    if abs(left) > 10**6 or abs(right) > 64:
+                        self.fail('FL-07', 'Exponentiation exceeds static bounds', node, module)
+                    result = left ** right
+                else:
+                    result = (left * right if isinstance(node.op, ast.Mult) else
+                              left / right if isinstance(node.op, ast.Div) else
+                              left // right if isinstance(node.op, ast.FloorDiv) else
+                              left % right)
             bounded_json(result, 1024 * 1024)
             return result
         if isinstance(node, ast.BoolOp) and isinstance(node.op, (ast.And, ast.Or)):
