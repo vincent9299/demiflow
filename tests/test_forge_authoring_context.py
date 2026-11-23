@@ -69,7 +69,8 @@ def test_context_and_workbench_read_same_project_and_protect_paths(tmp_path, ref
     grant = dict(root=str(tmp_path), kind='pipeline', phase='implementation', writes=[], watch=[], sources=[],
                  non_goals=[], authorization='test', protected=protected)
     evidence, prompt = assemble(grant, 'read', Limits(), coding=reference)
-    assert render_context(result) in prompt and 'retired rules' not in prompt
+    skill = files('demiflow.forge').joinpath('skills', 'demiforge', 'SKILL.md').read_text()
+    assert skill in prompt and 'retired rules' not in prompt
     assert 'secret.py' not in prompt and 'HIDDEN README' not in prompt
     assert evidence['coding_guidance']['rules_id'] == result['rules_id']
     with pytest.raises(ForgeError, match='protected'):

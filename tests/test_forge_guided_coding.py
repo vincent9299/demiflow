@@ -26,11 +26,15 @@ def test_guidance_crosses_start_and_resume_without_a_parent_task(tmp_path, acp):
             assert manifest['coding_guidance']['catalog_id']
             assert 'task_id' not in manifest
             received = (service.root / session / 'received-context.txt').read_text()
-            assert 'Dataset.map_prompt_async' in received and 'DF-02' in received
-            assert 'demiflow.data:range' in received and 'Dataset.count' in received
+            assert '# DemiForge 项目开发' in received and 'demiflow forge context' in received
+            assert 'demiflow forge check' in received
             assert manifest['requirement'] == user
             if acp:
-                assert received.count(user) == 1
+                if revision == 0:
+                    assert received.count(user) == 1
+                else:
+                    # Resumed ACP turns send only the user's message with zero extra context.
+                    assert (service.root / session / 'received-request.txt').read_text() == user
             else:
                 assert user not in received
                 assert (service.root / session / 'received-request.txt').read_text() == user

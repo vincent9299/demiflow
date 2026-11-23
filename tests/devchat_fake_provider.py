@@ -24,7 +24,7 @@ for line in sys.stdin:
     elif method in {'thread/start','thread/resume'}:
         project_root = Path(params['cwd'])
         instructions = params.get('developerInstructions', '')
-        if '## 当前版本 DemiFlow 原生 API' in instructions:
+        if '## 当前版本 DemiFlow 原生 API' in instructions or '# DemiForge 项目开发' in instructions:
             (Path.home() / 'received-context.txt').write_text(params['developerInstructions'])
         result={'cwd':params['cwd'],'model':params['model'],'approvalPolicy':'on-request','sandbox':{'type':'dangerFullAccess'},'thread':{'id':thread}}
     elif method=='thread/compact/start':
@@ -45,7 +45,7 @@ for line in sys.stdin:
         send({'id':value['id'],'result':{'turn':{'id':turn}}})
         event('turn/started',{'threadId':thread,'turn':{'id':turn}})
         message=params['input'][0]['text']
-        if '## 当前版本 DemiFlow 原生 API' in instructions:
+        if '## 当前版本 DemiFlow 原生 API' in instructions or '# DemiForge 项目开发' in instructions:
             (Path.home() / 'received-request.txt').write_text(message)
         if message == 'generate notebook widget fixture':
             assert 'ipywidgets' in instructions and '当前 Notebook' in instructions
@@ -61,7 +61,8 @@ for line in sys.stdin:
             event('turn/completed',{'threadId':thread,'turn':{'id':turn,'status':'completed'}})
             continue
         if message.startswith('guided fixture edit'):
-            assert 'Dataset.map_prompt_async' in instructions and 'DF-02' in instructions
+            assert ('Dataset.map_prompt_async' in instructions and 'DF-02' in instructions) or (
+                '# DemiForge 项目开发' in instructions and 'demiflow forge check' in instructions)
             flow = project_root / 'flows' / 'guided.py'
             if message.endswith('native'):
                 flow.write_text("from demiflow.data import from_items\ndef run():\n    return from_items([{'id': 1}]).materialize()\n")
