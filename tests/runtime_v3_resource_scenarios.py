@@ -119,11 +119,11 @@ def lance_cast_preallocation(directory, *, provider='local', case='conversion_ne
     from demiflow import data
     from demiflow.execution.outputs.lance_sink import LanceSink
     from demiflow.execution.run_context import RunContext
-    from demiflow.execution import arrow_batch_sink
+    from demiflow.execution.contracts import record_codec
     directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
     observed, casts = [], []
     prepare = LanceSink.prepare
-    original_cast_bound = arrow_batch_sink._cast_allocation
+    original_cast_bound = record_codec.cast_allocation
     def cast_bound(table, schema):
         allocation = original_cast_bound(table, schema)
         casts.append({'retained_input_bytes': table.get_total_buffer_size(),
@@ -147,7 +147,7 @@ def lance_cast_preallocation(directory, *, provider='local', case='conversion_ne
     error = None
     with MonkeyPatch.context() as patch:
         patch.setattr(LanceSink, 'prepare', measured)
-        patch.setattr(arrow_batch_sink, '_cast_allocation', cast_bound)
+        patch.setattr(record_codec, 'cast_allocation', cast_bound)
         try:
             with RunContext.start(directory / 'run', limits=limits), _executor(provider,
                     workers=4, memory_bytes=limits['memory_bytes']):

@@ -1,6 +1,8 @@
 """Arrow batches implementation."""
 from __future__ import annotations
 
+from demiflow.data import plan as ops
+
 from collections.abc import Iterator, Mapping
 from typing import Any
 from demiflow.execution.contracts.dataflow_errors import DataflowError
@@ -102,3 +104,52 @@ def batch_to_rows(result: Any, batch_format: str, *, on_schema=None) -> Iterator
             close = getattr(iterator, 'close', None)
             if close is not None:
                 close()
+
+
+def _select(rows, columns):
+    for row in rows:
+        yield {k: row[k] for k in columns}
+
+def _apply(rows, operations):
+    """Apply the narrow operations embedded in a sealed native worker batch."""
+    for op in operations:
+        if isinstance(op, ops.MapOp):
+            rows = map(ops.StandardCallable(op.callable), rows)
+        elif isinstance(op, ops.BoundMapOp):
+            rows = map(ops.BoundCallable(op), rows)
+        elif isinstance(op, ops.FilterOp):
+            rows = filter(ops.StandardCallable(op.callable), rows)
+        elif isinstance(op, ops.SelectColumnsOp):
+            rows = _select(rows, op.columns)
+        elif isinstance(op, ops.DropColumnsOp):
+            def drop(source=rows, columns=op.columns):
+                for row in source:
+                    missing = set(columns) - row.keys()
+                    if missing:
+                        raise KeyError(f"columns not found: {sorted(missing)}")
+                    yield {k: v for k, v in row.items() if k not in columns}
+            rows = drop()
+        elif isinstance(op, ops.RenameColumnsOp):
+            def rename(source=rows, names=op.names):
+                for row in source:
+                    if isinstance(names, Mapping):
+                        targets = [names.get(k, k) for k in row]
+                    else:
+                        targets = names
+                        if len(targets) != len(row):
+                            raise ValueError("rename_columns list length must match schema")
+                    if len(set(targets)) != len(targets):
+                        raise ValueError("rename_columns produces duplicate column names")
+                    yield dict(zip(targets, row.values()))
+            rows = rename()
+        else:
+            raise NotImplementedError(f"partition kernel cannot execute {type(op).__name__}")
+    yield from rows
+
+def finish_typed_batch(batch, *, columns, encoded_operations, schema):
+    """Partition-local callbacks, one instance per configured input task batch."""
+    import pyarrow as pa
+    import cloudpickle
+    operations = cloudpickle.loads(encoded_operations)
+    rows = ({c.name: row[c.value] for c in columns if row[c.present]} for row in batch.to_pylist())
+    return pa.RecordBatch.from_pylist(list(_apply(rows, operations)), schema=schema)

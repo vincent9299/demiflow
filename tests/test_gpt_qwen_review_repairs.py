@@ -37,7 +37,7 @@ def test_prompt_long_enum_preserves_historical_native_bytes(size):
 def _cast_in_grant(table, schema, memory, monkeypatch):
     import base64
     from demiflow.resources import capacity
-    from demiflow.execution.dataset_native import _cast_sink_batch
+    from demiflow.execution.outputs.batch_conversion import _cast_sink_batch
 
     monkeypatch.setattr(capacity, 'inherited_envelope', lambda: {'memory_bytes': memory})
     schema_bytes = base64.b64encode(schema.serialize()).decode('ascii')

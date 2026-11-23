@@ -34,11 +34,6 @@ _REVISIONS = {
     'demiflow.data.sources': (
         '4c349450034860cbaaa81d7b88e39b5caeea6c9ea56849e031804007cd226e79',
         '3033f1f14141c9759d29679ee5275492bfbc83bcd41b51c7bf9962afd115387f'),
-    # Both published worker functions retain their module, code and defaults.
-    # Only the surrounding, retired DataFusion controller was removed.
-    'demiflow.execution.dataset_native': (
-        '0190242cdf4add543d4ea5ec4156025ee91ae0b01b7ff926af085cd55d0ac530',
-        'd9d085506558d444770c6e3cdf16c9aba487c10d2bae66ffc5a91151b13b5b94'),
     'demiflow.execution.local_kernel': (
         '5fac23cf24cf8e2b27e79b36f9faf28ab2a0104517a13d1c02a249a94a74cb24',
         'e67e3703f03ea14f8bcefb803bafc3251072e78bc17a5c1f2df60fad2ca2f83f'),
@@ -267,7 +262,7 @@ def _method_pin(fn, code):
 
 def function_pin(fn, source, source_hash, code):
     relocated = _layout_source_type(fn)
-    if relocated is not None and source_hash == relocated['source']:
+    if relocated is not None and relocated.get('preserve_identity', True) and source_hash == relocated['source']:
         pins = (relocated['code'] if relocated.get('kind') == 'function'
                 else relocated['methods'].get(fn.__qualname__.rsplit('.', 1)[-1]))
         if pins is not None and code == pins[0]:
@@ -277,9 +272,6 @@ def function_pin(fn, source, source_hash, code):
         return source_hash, code
     module = sys.modules.get(fn.__module__)
     root_name = fn.__qualname__.partition('.<locals>.')[0]
-    if fn.__module__ == 'demiflow.execution.dataset_native' and fn.__qualname__ not in (
-            '_cast_sink_batch', 'finish_typed_batch'):
-        return source_hash, code
     if fn.__module__ == _ROUTING_MODULE and root_name not in _ROUTING_FUNCTIONS:
         # Only the three unchanged row-routing functions were sealed as programs.
         return source_hash, code
@@ -333,7 +325,7 @@ def _queue_method(fn, module):
 
 def class_method_pins(cls, methods):
     relocated = _layout_source_type(cls)
-    if relocated is not None:
+    if relocated is not None and relocated.get('preserve_identity', True):
         return {name: relocated['methods'][name][1] for name in methods}
     # Class v3 identities contain method hashes but no file hash.
     queue_module = sys.modules.get('demiflow.execution.request_limits')
@@ -723,7 +715,7 @@ def _layout_source_type(value):
 def persistent_source_module(value):
     """The authenticated original v3 name; no imports or process aliases."""
     entry = _layout_source_type(value)
-    return entry['old_module'] if entry is not None else value.__module__
+    return entry['old_module'] if entry is not None and entry.get('preserve_identity', True) else value.__module__
 
 
 def source_pickle_global(module, name):
@@ -750,3 +742,54 @@ def authentic_source_global(value, original_module):
         value = value.__func__
     entry = _layout_source_type(value)
     return entry is not None and entry['old_module'] == original_module
+
+
+def native_pickle_function(code, globals, name, argdefs, closure):
+    """Authenticate the two recorded by-value SDK callback constructors.
+
+    This recognizes measured complete code, not arbitrary source transformations.
+    The caller must separately verify the recorded cloudpickle state before its
+    load returns. No business function or closure is rewritten.
+    """
+    import pickle
+    from importlib import import_module
+    from .recovery_contract import document, RecoveryContractError
+
+    if type(code) is not CodeType or type(globals) is not dict:
+        return None
+    digest = identity(code_record(code))
+    for key, entry in LAYOUT_RELOCATIONS.items():
+        variants = entry.get('by_value')
+        if variants is None:
+            continue
+        original_name = entry['old_name']
+        if (digest not in variants and not (
+                globals.get('__name__') == entry['old_module']
+                and original_name in (code.co_name, code.co_qualname, name))):
+            continue
+        recorded = variants.get(digest)
+        if (recorded is None or code.co_name != original_name or code.co_qualname != original_name
+                or code.co_freevars or closure is not None or argdefs is not None or name is not None
+                or not _same_module_file(globals.get('__file__'), code.co_filename)):
+            raise pickle.UnpicklingError('Native callback differs from its recorded definition')
+        initial = {k: v for k, v in globals.items() if k != '__file__'}
+        # cloudpickle can share base globals between callbacks in one payload;
+        # its ordinary factory may already have installed the builtin table.
+        if '__builtins__' in initial:
+            import builtins
+            if initial.pop('__builtins__') is not vars(builtins):
+                raise pickle.UnpicklingError('Native callback has modified builtins')
+        try:
+            same_globals = document(initial) == document(recorded['factory']['globals'])
+        except RecoveryContractError as exc:
+            raise pickle.UnpicklingError('Native callback has non-passive globals') from exc
+        if not same_globals:
+            raise pickle.UnpicklingError('Native callback has changed module globals')
+        module = import_module(entry['module'])
+        current = vars(module).get(entry['name'])
+        if (type(current) is not FunctionType or not authentic_source_global(current, entry['old_module'])
+                or current.__defaults__ is not None or current.__kwdefaults__ is not None
+                or current.__closure__ is not None or vars(current) or current.__annotations__):
+            raise pickle.UnpicklingError('Native callback owner differs from its audited definition')
+        return current, recorded['state']
+    return None

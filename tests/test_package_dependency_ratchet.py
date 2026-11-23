@@ -65,8 +65,6 @@ PRE_V3_MODULES = {
         'demiflow.execution.sealed_plan_facts', 'demiflow.execution.seal.sealed_plans',
         'demiflow.planning.dataset_dag',
         'demiflow.workbench.runs.facts'},
-    'demiflow.execution.local_tasks': {
-        'demiflow.execution.dataset_native'},
     'demiflow.execution.hosts.local': {'demiflow.execution'},
     'demiflow.execution.hosts.ray': {'demiflow.execution'},
 }

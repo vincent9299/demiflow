@@ -5,7 +5,7 @@ import pyarrow as pa
 import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataset_native import _cast_sink_batch
+from demiflow.execution.outputs.batch_conversion import _cast_sink_batch
 
 MiB = 2**20
 
@@ -19,7 +19,7 @@ def source(tmp_path, values=range(8)):
 
 def test_cast_admits_input_and_new_output_together_before_allocation(monkeypatch):
     from demiflow.resources.capacity import allocation_envelope
-    from demiflow.execution.arrow_batch_sink import _cast_allocation
+    from demiflow.execution.contracts.record_codec import cast_allocation as _cast_allocation
     from demiflow.execution.dataflow_schema import encode
     from demiflow.execution.dataflow_api import _PREFLIGHT_BOUNDS
     table = pa.table({'id': pa.array(range(64), type=pa.int64())})
@@ -87,7 +87,9 @@ with RunContext.start(root / 'run'), data.local_execution(
                         'DEMIFLOW_RESOURCE_HOME': str(tmp_path / 'resource-home')}, check=True)
 
     names = set()
-    class WorkerRequestReader(pickle.Unpickler):
+    from demiflow.execution.seal.program_pickle import ProgramUnpickler
+
+    class WorkerRequestReader(ProgramUnpickler):
         def find_class(self, module, name):
             if module.startswith('demiflow.'):
                 names.add((module, name))
@@ -135,8 +137,9 @@ print(json.dumps(describe(dataset_native._cast_sink_batch)))
     assert describe(_cast_sink_batch) == json.loads(archived_identity)
     substitute = FunctionType(_cast_sink_batch.__code__, dict(_cast_sink_batch.__globals__))
     assert describe(substitute) != json.loads(archived_identity)
-    old_cast = cloudpickle.loads(payload.read_bytes())
-    assert old_cast is not _cast_sink_batch
+    from demiflow.execution.seal.program_pickle import load_payload
+    old_cast = load_payload([payload.read_bytes()])
+    assert old_cast is _cast_sink_batch
     table = pa.table({'id': [1, 2]})
     schema = pa.schema([('id', pa.int32())])
     encoded = base64.b64encode(schema.serialize().to_pybytes()).decode()

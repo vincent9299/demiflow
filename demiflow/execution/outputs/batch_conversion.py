@@ -38,3 +38,20 @@ def native_writer_workspace(schema, bounds):
     return (io.DEFAULT_BUFFER_SIZE + 2048 + _writer_metadata(schema.metadata)
         + sum(4*len(field.name) + _writer_metadata(field.metadata)
               + _writer_type(field.type, bounds) for field in schema))
+
+
+def _cast_sink_batch(batch, *, schema_bytes, max_bytes):
+    """An ordinary native worker operator; retain both arrays before casting."""
+    import base64
+    import pyarrow as pa
+    from demiflow.execution.contracts.record_codec import cast_allocation as _cast_allocation
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.resources.capacity import inherited_envelope
+    schema = pa.ipc.read_schema(pa.BufferReader(base64.b64decode(schema_bytes, validate=True)))
+    envelope = inherited_envelope()
+    if envelope is None:
+        raise DataflowError('INVALID_CONTRACT', 'native schema conversion requires an admitted worker')
+    maximum = min(max_bytes, envelope['memory_bytes'])
+    if batch.get_total_buffer_size() + _cast_allocation(batch, schema) > maximum:
+        raise DataflowError('BUDGET_EXCEEDED', 'native schema input and cast output exceed the byte ceiling')
+    return batch.cast(schema, safe=True)

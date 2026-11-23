@@ -51,10 +51,67 @@ class _ProgramBuffer:
 class ProgramUnpickler(pickle.Unpickler):
     """Decode authenticated original source carriers at their current owner.
 
-    Only the bounded recorded GLOBAL names are relocated. Old files and
-    pickle bytes remain intact; there are no import hooks or global aliases.
+    Only recorded GLOBAL names and two measured by-value SDK callbacks are
+    relocated. Original pickle bytes remain intact; there are no import hooks
+    or global aliases. Ordinary business functions use cloudpickle unchanged.
     """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._native_states = {}
+
+    def load(self):
+        try:
+            result = super().load()
+            if any(self._native_states.values()):
+                raise pickle.UnpicklingError('Native callback state was not verified')
+            return result
+        finally:
+            self._native_states.clear()
+
+    def _make_function(self, code, globals, name, argdefs, closure):
+        from demiflow.execution.recovery_sdk_v3 import native_pickle_function
+        from cloudpickle.cloudpickle import _make_function
+        native = native_pickle_function(code, globals, name, argdefs, closure)
+        if native is None:
+            return _make_function(code, globals, name, argdefs, closure)
+        value, expected = native
+        self._native_states.setdefault(value, []).append(expected)
+        return value
+
+    def _function_setstate(self, value, state):
+        from cloudpickle.cloudpickle import _function_setstate
+        from demiflow.execution.recovery_contract import document, RecoveryContractError
+        if value not in self._native_states:
+            from types import FunctionType
+            from demiflow.execution.contracts.recovery_sdk_v3 import LAYOUT_RELOCATIONS
+            if type(value) is FunctionType:
+                entry = LAYOUT_RELOCATIONS.get(value.__module__ + '.' + value.__qualname__, {})
+                if entry.get('by_value'):
+                    import sys
+                    module = sys.modules.get(value.__module__)
+                    if module is not None and vars(module).get(entry['name']) is value:
+                        raise pickle.UnpicklingError('Canonical native callback has no pending state')
+            return _function_setstate(value, state)
+        pending = self._native_states[value]
+        if (type(state) is not tuple or len(state) != 2
+                or type(state[0]) is not dict or type(state[1]) is not dict):
+            raise pickle.UnpicklingError('Invalid native callback state')
+        try:
+            actual = document(state)
+        except RecoveryContractError as exc:
+            raise pickle.UnpicklingError('Native callback state has non-passive values') from exc
+        for index, expected in enumerate(pending):
+            if actual == document(expected):
+                pending.pop(index)
+                return None  # Never write old state into the canonical function.
+        raise pickle.UnpicklingError('Native callback state differs from its recorded definition')
+
     def find_class(self, module, name):
+        if module == 'cloudpickle.cloudpickle':
+            if name == '_make_function':
+                return self._make_function
+            if name == '_function_setstate':
+                return self._function_setstate
         from demiflow.execution.recovery_sdk_v3 import source_pickle_global, authentic_source_global
         target = source_pickle_global(module, name)
         if target is None:
