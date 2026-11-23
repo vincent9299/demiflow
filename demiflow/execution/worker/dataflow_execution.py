@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from demiflow.execution.recovery_contract import RecoveryContractError, RunRef
-from demiflow.execution.run_context import _ACTION, _CURRENT
+from demiflow.execution.run_context import source_run_scope
 
 import hashlib
 import json
@@ -624,14 +624,3 @@ def source_run_view(services, *, limits=None):
         assignment.fence, MappingProxyType(limits),
         services.check_stop,
     )
-
-
-@contextmanager
-def source_run_scope(view):
-    current_token = _CURRENT.set(view)
-    action_token = _ACTION.set(None)
-    try:
-        yield view
-    finally:
-        _ACTION.reset(action_token)
-        _CURRENT.reset(current_token)

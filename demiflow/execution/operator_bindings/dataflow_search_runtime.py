@@ -8,7 +8,7 @@ from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.raw_budget import budget_delta, record_admission
 from demiflow.execution.recovery_contract import RecoveryContractError, SourcePosition, UnresolvedCommit, identity
 from demiflow.execution.row_scope import RowScope, current_row_scope, set_row_scope
-from demiflow.execution.run_context import RunAction, _ACTION
+from demiflow.execution.run_context import RunAction, action_scope
 
 
 # Shared WebSessions capture one HTTP admission callback. Each request task
@@ -179,8 +179,7 @@ class SearchRuntime:
         return await asyncio.shield(result)
 
     async def _serve(self):
-        token = _ACTION.set(self.action)
-        try:
+        with action_scope(self.action):
             while True:
                 actor, command, row, reply = await self.queue.get()
                 if actor is None:
@@ -208,8 +207,6 @@ class SearchRuntime:
                     reply.set_exception(exc)
                 finally:
                     set_row_scope(None)
-        finally:
-            _ACTION.reset(token)
 
     async def close(self):
         if self.task is None:

@@ -18,7 +18,7 @@ from pathlib import Path
 
 from ...errors import ExecutionConflict
 from ..contracts.envelope import validate_grant
-from ..run_context import _CURRENT, _ACTION, _PERSISTING_EFFECT
+from ..run_context import current_run, run_scope, action_scope, persisting_effect_scope, is_persisting_effect
 from ..run_journal import RunJournal
 from ..recovery_contract import RunRef, RecoveryContractError, identity
 from demiflow.execution.run_context import active_limits
@@ -49,16 +49,16 @@ class WorkerAuthority:
         self.active = False
         self.position = 0
         self._connections = None
-        self._token = None
+        self._run_scope = None
 
     def _verify_owner(self):
-        with self.journal._connection() as db:
-            row = db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()
+        from demiflow.execution.journal.run_reader import read_runtime_owner
+        row = read_runtime_owner(self.journal)
         if row is None or tuple(row) != (self.attempt, self.fence):
             raise ExecutionConflict("Worker grant is not the current execution owner")
 
     def __enter__(self):
-        if _CURRENT.get() is not None:
+        if current_run() is not None:
             raise RecoveryContractError("A worker cannot nest an independent run context")
         configuration = self.journal.recovery_identity()
         if configuration is None:
@@ -74,7 +74,8 @@ class WorkerAuthority:
         self._connections = self.journal.connection_scope()
         self._connections.__enter__()
         self.active = True
-        self._token = _CURRENT.set(self)
+        self._run_scope = run_scope(self)
+        self._run_scope.__enter__()
         return self
 
     def __exit__(self, exc_type, exc, tb):
@@ -88,8 +89,8 @@ class WorkerAuthority:
                 if self._connections is not None:
                     self._connections.__exit__(exc_type, exc, tb)
             finally:
-                if self._token is not None:
-                    _CURRENT.reset(self._token)
+                if self._run_scope is not None:
+                    self._run_scope.__exit__(exc_type, exc, tb)
         return False
 
     @property
@@ -112,7 +113,7 @@ class WorkerAuthority:
             raise RecoveryContractError("Worker grant expired")
         if time.time() > self.deadline or time.monotonic() - self.started > self._limits["timeout_s"]:
             raise RecoveryContractError("Execution time budget exhausted")
-        if _PERSISTING_EFFECT.get() is self:
+        if is_persisting_effect(self):
             return
         if self._draining:
             raise RecoveryContractError("Execution is draining an isolated native writer")
@@ -125,11 +126,8 @@ class WorkerAuthority:
 
     @contextmanager
     def persist_admitted_effect(self):
-        token = _PERSISTING_EFFECT.set(self)
-        try:
+        with persisting_effect_scope(self):
             yield
-        finally:
-            _PERSISTING_EFFECT.reset(token)
 
     @contextmanager
     def action_scope(self, action_id):
@@ -139,11 +137,8 @@ class WorkerAuthority:
             raise RecoveryContractError("Worker action was not bound by the driver")
         action = WorkerAction(self, action_id, record["declaration"])
         action.replaying = record["result"] is not None
-        token = _ACTION.set(action)
-        try:
+        with action_scope(action):
             yield action
-        finally:
-            _ACTION.reset(token)
 
     def quarantine_worker(self, worker):
         if worker not in self._quarantined_workers:

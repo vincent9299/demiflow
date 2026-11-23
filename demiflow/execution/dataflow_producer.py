@@ -13,7 +13,7 @@ from .dataflow_queue import NativeAcquisitionService
 from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
 from .recovery_contract import identity
 from demiflow.execution.row_scope import RowScope, set_row_scope
-from .run_context import _ACTION
+from .run_context import action_scope
 
 
 class ProducerCall(AcquisitionCall):
@@ -164,13 +164,12 @@ class NativeProducerService(NativeAcquisitionService):
             raise DataflowError('FENCED', 'Publication does not belong to the active source unit')
         row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
         async def publish():
-            token = _ACTION.set(self._action)
-            set_row_scope(RowScope(command.record_id))
-            try:
-                return await actor(row)
-            finally:
-                set_row_scope(None)
-                _ACTION.reset(token)
+            with action_scope(self._action):
+                set_row_scope(RowScope(command.record_id))
+                try:
+                    return await actor(row)
+                finally:
+                    set_row_scope(None)
         self._admit_io()
         try:
             result = self._run_io(publish(), timeout_s=self._services.bounds.timeout_ms / 1000)

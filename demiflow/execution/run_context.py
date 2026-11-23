@@ -698,42 +698,6 @@ def bind_iteration(rows):
     return _ContextIterator(rows)
 
 
-def native_rows(method):
-    from functools import wraps
-    @wraps(method)
-    def consume(executor, *args, **kwargs):
-        def rows():
-            with execution_scope() as context:
-                executor._run_ref = context.ref
-                iterator = iter(method(executor, *args, **kwargs))
-                try:
-                    for row in iterator:
-                        context.check_stop()
-                        yield row
-                finally:
-                    close = getattr(iterator, 'close', None)
-                    if close is not None:
-                        close()
-        return bind_iteration(rows())
-    return consume
-
-
-def native_file_action(method):
-    from functools import wraps
-    @wraps(method)
-    def execute(executor, source, plan, format_name, path, options):
-        from .recovery_identity import plan_identity
-        with execution_scope() as context:
-            executor._run_ref = context.ref
-            declaration = plan_identity('write_file', source, plan,
-                arguments={'format': format_name, 'path': path, 'options': options})
-            with context.action(declaration) as action:
-                result = method(executor, source, plan, format_name, path, options)
-                action.complete({'kind': 'write_file', 'delivery': 'completed'})
-                return result
-    return execute
-
-
 def admit_stream(plan, *, source_batch_size=1):
     """Native resource admission applies equally with or without a checker."""
     from .plan_facts import operation_facts
@@ -793,3 +757,44 @@ def payload_scope(run, plan, *, owner_limits=None, arguments=None, source=None, 
         yield limits
     finally:
         _ACTIVE.reset(token)
+
+
+@contextmanager
+def source_run_scope(view):
+    current_token = _CURRENT.set(view)
+    action_token = _ACTION.set(None)
+    try:
+        yield view
+    finally:
+        _ACTION.reset(action_token)
+        _CURRENT.reset(current_token)
+
+@contextmanager
+def run_scope(view):
+    """Temporarily bind an existing run view; grants remain the caller's job."""
+    token = _CURRENT.set(view)
+    try:
+        yield view
+    finally:
+        _CURRENT.reset(token)
+
+@contextmanager
+def action_scope(action):
+    """Bind an already admitted action without making another ledger entry."""
+    token = _ACTION.set(action)
+    try:
+        yield action
+    finally:
+        _ACTION.reset(token)
+
+@contextmanager
+def persisting_effect_scope(run):
+    """Bind the existing received-effect scope without authorizing dispatch."""
+    token = _PERSISTING_EFFECT.set(run)
+    try:
+        yield
+    finally:
+        _PERSISTING_EFFECT.reset(token)
+
+def is_persisting_effect(run):
+    return _PERSISTING_EFFECT.get() is run

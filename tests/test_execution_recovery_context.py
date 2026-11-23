@@ -6,7 +6,7 @@ import pytest
 from demiflow.data.api import DataAPI
 from demiflow.data.runtime_contract import RuntimeContractError
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.run_context import RunContext, current_run, native_rows
+from demiflow.execution.run_context import RunContext, current_run, execution_scope, bind_iteration
 from demiflow.execution.run_journal import RunJournal
 
 
@@ -24,15 +24,17 @@ class Reader:
     def __init__(self):
         self.closed_under = None
 
-    @native_rows
     def rows(self, fail=False):
-        try:
-            yield current_run().ref
-            if fail:
-                raise RuntimeError('source-stopped')
-            yield current_run().ref
-        finally:
-            self.closed_under = current_run().ref
+        def consume():
+            with execution_scope():
+                try:
+                    yield current_run().ref
+                    if fail:
+                        raise RuntimeError('source-stopped')
+                    yield current_run().ref
+                finally:
+                    self.closed_under = current_run().ref
+        return bind_iteration(consume())
 
 
 def test_existing_run_is_retained_through_native_pull_and_close(tmp_path):
@@ -135,3 +137,19 @@ def test_wide_native_row_rejects_without_commit_and_accepts_explicit_budget(tmp_
         assert physical.bounds.max_batch_bytes == 32 * 1024**2
     finally:
         executor.close()
+
+
+def test_source_scope_shadows_outer_run_and_restores_action_on_error():
+    from demiflow.execution.run_context import (run_scope, action_scope, source_run_scope,
+        current_action, persisting_effect_scope, is_persisting_effect)
+    outer, source, action = object(), object(), object()
+    with run_scope(outer), action_scope(action):
+        with pytest.raises(ValueError, match='source failed'):
+            with source_run_scope(source):
+                assert current_run() is source and current_action() is None
+                with persisting_effect_scope(source):
+                    assert is_persisting_effect(source) and not is_persisting_effect(outer)
+                assert not is_persisting_effect(source)
+                raise ValueError('source failed')
+        assert current_run() is outer and current_action() is action
+    assert current_run() is None and current_action() is None

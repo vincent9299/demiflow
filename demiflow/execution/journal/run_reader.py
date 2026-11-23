@@ -1296,3 +1296,9 @@ def read_maintenance_owner(journal, fence):
     """Return the existing fence owner fact, without claiming an owner."""
     with journal._connection() as db:
         return db.execute('SELECT 1 FROM runtime_owner WHERE fence=?', (fence,)).fetchone()
+
+
+def read_runtime_owner(journal):
+    """Read the current attempt/fence fact; no claim, maintenance or GC."""
+    with journal._connection() as db:
+        return db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()

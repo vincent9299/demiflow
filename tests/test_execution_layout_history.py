@@ -38,6 +38,8 @@ CARRIERS = {
     'checked': ['CheckedExecution'],
     'managed_native': ['NativeExecution'],
     'run_journal': ['RunJournal'],
+    'worker.authority': ['WorkerAuthority'],
+    'dataflow_source_context': ['source_run_scope'],
     'plan_interpreter': ['PlanContractError'],
     'adaptive_requests': ['AdaptiveRequestGate'],
     'blocking_io': ['BlockingIOPool'],
@@ -516,3 +518,15 @@ def test_old_prompt_binding_requires_bound_response_projection(original_carriers
     monkeypatch.setattr(dataflow_model_journal, 'native_response', lambda response, **kw: response)
     with pytest.raises(DataflowError, match='audited definition'):
         load_payload([base64.b64decode(original_carriers['public.NativePromptRecovery.bind_client'][0])])
+
+
+@pytest.mark.parametrize('name', ['run_scope', 'action_scope', 'persisting_effect_scope', 'is_persisting_effect'])
+def test_original_worker_authority_requires_actual_context_owner(original_carriers, monkeypatch, name):
+    from demiflow.execution import run_context
+    from demiflow.execution.worker.authority import WorkerAuthority
+    from demiflow.execution.recovery_sdk_v3 import authentic_source_global
+    fn = getattr(run_context, name)
+    body = getattr(fn, '__wrapped__', fn)
+    monkeypatch.setattr(body, '__code__', body.__code__.replace(co_consts=(*body.__code__.co_consts, 'changed')))
+    assert not authentic_source_global(WorkerAuthority, 'demiflow.execution.worker.authority')
+    assert describe(WorkerAuthority) != original_carriers['WorkerAuthority'][1]

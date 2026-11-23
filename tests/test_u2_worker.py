@@ -23,7 +23,7 @@ from demiflow.execution.contracts.envelope import WORKER_PROTOCOL_VERSION
 from demiflow.execution.contracts.worker import validate_message
 from demiflow.execution.contracts.errors import ProtocolError
 from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext, _CURRENT, current_run
+from demiflow.execution.run_context import RunContext, run_scope, current_run
 from demiflow.execution.storage.state_artifacts import StateArtifacts
 from demiflow.execution.worker.authority import WorkerAuthority
 from demiflow.execution.worker.bootstrap import recv_message, send_message, spawn_local_worker
@@ -125,11 +125,8 @@ def _activate(env, rt, **over):
 def as_worker():
     """Simulate the worker process context: no driver ContextVar bound while the
     driver keeps live ownership of the run (runtime_owner stays (attempt, fence))."""
-    token = _CURRENT.set(None)
-    try:
+    with run_scope(None):
         yield
-    finally:
-        _CURRENT.reset(token)
 
 
 # ---------------- LIF: lifecycle command executor ----------------

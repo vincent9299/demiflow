@@ -41,7 +41,7 @@ from .queue_source import QueueDatasource
 from .raw_fetch import RawFetch
 from .recovery_contract import RecoveryContractError, identity
 from demiflow.execution.row_scope import RowScope, set_row_scope
-from .run_context import RunAction, _ACTION
+from .run_context import RunAction, action_scope
 
 Json = Union[None, bool, int, float, str, list, dict]
 
@@ -303,8 +303,7 @@ class NativeAcquisitionService(NativeSearchOperations):
             self._state = 'started'
 
     async def _astart(self):
-        token = _ACTION.set(self._action)
-        try:
+        with action_scope(self._action):
             if self._source is not None:
                 await self._source.astart()
             if self._fetch is not None:
@@ -314,8 +313,6 @@ class NativeAcquisitionService(NativeSearchOperations):
             runtime = getattr(self, '_search_runtime', None)
             if runtime is not None:
                 await runtime.start()
-        finally:
-            _ACTION.reset(token)
 
     def _pump_rows(self) -> None:
         try:
@@ -438,13 +435,12 @@ class NativeAcquisitionService(NativeSearchOperations):
                           row_ref, fact_ref, 0)
 
     async def _acquire_io(self, row, delivery, occurrence, *, fetch=None):
-        action_token = _ACTION.set(self._action)
-        scope_token = set_row_scope(RowScope(occurrence, delivery))
-        try:
-            return await (fetch or self._fetch)(row)
-        finally:
-            set_row_scope(None)
-            _ACTION.reset(action_token)
+        with action_scope(self._action):
+            scope_token = set_row_scope(RowScope(occurrence, delivery))
+            try:
+                return await (fetch or self._fetch)(row)
+            finally:
+                set_row_scope(None)
 
     # -- Q006 finalize --------------------------------------------------
     def finalize(self, command: QueueCommand, *, lease: WorkerLease) -> QueueReply:
@@ -500,11 +496,8 @@ class NativeAcquisitionService(NativeSearchOperations):
                           command.row_ref, fact_ref, 0)
 
     async def _finalize_io(self, delivery, row):
-        token = _ACTION.set(self._action)
-        try:
+        with action_scope(self._action):
             return await self._source.io.run(finalize_task, self._source, delivery, row)
-        finally:
-            _ACTION.reset(token)
 
     # -- Q007 finish ----------------------------------------------------
     def finish(self) -> Mapping[str, Json]:
