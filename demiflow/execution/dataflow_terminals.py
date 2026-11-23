@@ -130,10 +130,16 @@ def iterate_rows(handle: "ActionHandle") -> "Iterator[Row]":
     """Hold the action context until iteration completes or closes; read DataRefs on
     demand. An explicit close cancels the necessary producers without waiting for GC."""
     def gen():
-        records = handle.rows()
+        if isinstance(handle, RuntimeActionHandle):
+            records = handle.values()
+        else:
+            records = handle.rows()
         try:
-            for record in records:
-                yield _record_row(record, handle)
+            if isinstance(handle, RuntimeActionHandle):
+                yield from records
+            else:
+                for record in records:
+                    yield _record_row(record, handle)
         except GeneratorExit:
             # records.close() commits the bounded delivered prefix. Do not
             # cancel the execution before that native drain can run.
@@ -325,11 +331,13 @@ def inspect_result(handle: "ActionHandle", *, kind: str) -> object:
 class TerminalSubscription:
     """One action's ordered result window and replay cursor, sharing transport credit."""
 
-    def __init__(self, bounds, exchange, endpoints):
+    def __init__(self, bounds, exchange, endpoints, *, store=None):
         from collections import deque
         self._bounds = bounds
         self._exchange = exchange
         self._endpoints = endpoints
+        self._store = store
+        self._live_arrow = None
         self._queue = deque()
         self._replay = None
         self.closed = False
@@ -355,9 +363,11 @@ class TerminalSubscription:
     def buffered_bytes(self):
         replay = self._replay
         retained = replay.buffered_bytes if replay is not None else 0
+        if self._live_arrow is not None:
+            retained += self._live_arrow.bytes
         return max(retained, getattr(self, '_working_bytes', 0))
 
-    def read_admitted(self, *, max_records, deadline_ms, admit=None, admit_workspace=None):
+    def read_admitted(self, *, max_records, deadline_ms, admit=None, admit_workspace=None, batch_values=False):
         from .exchange.dataflow_transport import read_peer_many, MAX_PEER_BATCH, peer_batch_limit
         from .dataflow_record_frames import decode_document, document_limit
         from .dataflow_replay import record_encoded_bytes
@@ -382,6 +392,10 @@ class TerminalSubscription:
         try:
             while not self.closed and self._replay is not None and len(records) < max_records:
                 try:
+                    if batch_values:
+                        self._replay.peek_unit(check_workspace=workspace)
+                        if not records and (arrow := self._replay.pop_batch()) is not None:
+                            return (arrow,)
                     raw, record_id, sequence, size = self._replay.peek(check_workspace=workspace)
                 except StopIteration:
                     self._replay.close()
@@ -405,8 +419,38 @@ class TerminalSubscription:
             from itertools import islice
             # A historical prefix stays before all newly produced records.
             while not self.closed and self._replay is None and self._queue and len(records) < max_records:
+                if 'result_batch' in self._queue[0]:
+                    if records:
+                        break
+                    from .outputs.arrow_rows import PublishedArrowRows
+                    from .record_schema import RecordSchemas
+                    from .contracts.dataflow import ArtifactRef
+                    header = self._queue[0]
+                    if self._live_arrow is None:
+                        self._live_arrow = PublishedArrowRows(ArtifactRef(**header['result_batch']),
+                            rows=header['rows'], first=header['sequence'], schema_ref=ArtifactRef(**header['schema_ref']),
+                            schemas=RecordSchemas(store=self._store, bounds=self._bounds))
+                    arrow = self._live_arrow
+                    if batch_values:
+                        records.append(arrow)
+                    else:
+                        while arrow.index < arrow.batch.num_rows and len(records) < max_records:
+                            record = arrow.record()
+                            if records and payload_bytes + record.encoded_bytes > byte_window:
+                                break
+                            payload_bytes += record.encoded_bytes
+                            workspace(arrow.bytes)
+                            records.append(record)
+                            arrow.index += 1
+                    if batch_values or arrow.index == arrow.batch.num_rows:
+                        self._live_arrow = None
+                        self._queue.popleft()
+                        self._exchange.acknowledge(header['delivery_id'], None)
+                    break
                 batch, size, endpoint, limit = [], 0, None, MAX_PEER_BATCH
                 for payload in islice(self._queue, min(MAX_PEER_BATCH, max_records - len(records))):
+                    if 'result_batch' in payload:
+                        break
                     peer = payload['peer']
                     limit = min(limit, peer_batch_limit(peer))
                     if len(batch) >= limit:
@@ -456,6 +500,7 @@ class TerminalSubscription:
         if self.closed:
             return
         self.closed = True
+        self._live_arrow = None
         replay, self._replay = self._replay, None
         if replay is not None:
             replay.close()
