@@ -82,6 +82,10 @@ class CellCommands(BridgeServer):
             return {'done': False}
         fields = {'context.show': set(), 'catalog.list': {'group', 'offset'}, 'catalog.show': {'group', 'id', 'offset'},
                   'cell.show': set(), 'cell.edit': {'source'}, 'cell.run': set()}
+        if method == 'context.show' and type(params) is dict and 'topic' in params:
+            if params['topic'] not in ('cell', 'before', 'output', 'env', 'catalog'):
+                reject('Unknown context topic')
+            fields[method].add('topic')
         if method == 'catalog.list' and type(params) is dict and 'query' in params:
             text(params['query'], 256)
             fields[method].add('query')

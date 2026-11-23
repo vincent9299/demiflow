@@ -99,3 +99,45 @@ def test_context_mismatched_sdk_cache_fails_closed(tmp_path, reference):
     result = build_context(tmp_path, reference={**reference, 'catalog_id':'stale'})
     assert result['status']=='incomplete' and not result['sdk']['apis']
     assert result['diagnostics'][0]['code'] == 'conflict'
+
+
+def test_progressive_disclosure_topics_and_flow_titles(tmp_path, reference):
+    (tmp_path / 'flows').mkdir()
+    (tmp_path / 'flows/delivery.py').write_text(
+        '"""评测题与参考图联合交付：出题、复用、定稿。"""\n'
+        'from demiflow.data import from_items\n'
+        'def run():\n'
+        '    """评测题与参考图联合交付。"""\n'
+        '    return from_items([{"id": 1}]).count()\n',
+        encoding='utf-8',
+    )
+    (tmp_path / 'parameters').mkdir()
+    (tmp_path / 'parameters/delivery.json').write_text(json.dumps({
+        'format': 'demiflow_forge_flow_parameters_v2', 'arguments': {},
+    }))
+    (tmp_path / 'workspace.json').write_text(json.dumps(dict(
+        format='demiflow_forge_workspace_v3', name='demo', id='w' + 'c' * 32,
+        entries={'flows/delivery.py:run': ['parameters/delivery.json']},
+        platform={'path': '.forge/platform/' + 'd' * 64 + '.json', 'digest': 'd' * 64},
+        locations={}, audit={'reports': [], 'change_scope': None},
+    )))
+    overview = build_context(tmp_path, reference=reference)
+    flow_item, = overview['registered_flows']['items']
+    assert flow_item['title'] == '评测题与参考图联合交付'
+    assert '出题、复用、定稿' in flow_item['summary']
+    overview_text = render_context(overview)
+    assert '评测题与参考图联合交付 | flows/delivery.py:run' in overview_text
+    assert '## 当前版本 DemiFlow 原生 API' not in overview_text
+    assert '--topic <sdk|rules|files|flow|operator|prompt>' in overview_text
+
+    sdk_text = render_context(build_context(tmp_path, topic='sdk', reference=reference))
+    assert '## 当前版本 DemiFlow 原生 API' in sdk_text
+
+    rules_text = render_context(build_context(tmp_path, topic='rules', reference=reference))
+    assert '## Forge 开发规范' in rules_text and 'DF-05' in rules_text
+
+    files_text = render_context(build_context(tmp_path, topic='files', reference=reference))
+    assert 'flows/delivery.py' in files_text and '## 项目角色文件' in files_text
+
+    with pytest.raises(ForgeError, match='Unknown context topic'):
+        build_context(tmp_path, topic='unknown_topic', reference=reference)
