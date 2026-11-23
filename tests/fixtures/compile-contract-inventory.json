@@ -196,7 +196,8 @@
     "planning/dataflow_thread_fusion.py"
    ],
    "columns": [
-    "execution/contracts/relational_region.py"
+    "execution/contracts/relational_region.py",
+    "planning/dataflow_relational_regions.py"
    ],
    "concurrency": [
     "execution/dataflow_model_observations.py",
@@ -338,6 +339,9 @@
    ],
    "monitor_schemas": [
     "planning/dataflow_training.py"
+   ],
+   "names": [
+    "planning/dataflow_relational_regions.py"
    ],
    "native_key": [
     "execution/dataflow_fetch.py",

@@ -240,17 +240,29 @@ class DataflowWorkerExecutor:
                                   context={"resident_bytes": resident})
 
     def _prepare_factories(self, assignment, graph, physical):
+        from dataclasses import replace
+        from ..contracts.dataflow import thaw_record_value
+
         if bool(graph.jobs) != (assignment.model_bindings is not None):
             raise _dataflow_error("INVALID_CONTRACT", "worker assignment version differs from sealed graph")
         assigned = {occ: stage for stage in assignment.stages for occ in stage.occurrences}
         node_specs = {}
+        constants = self._services.constants.get('constants', {})
         for node in graph.nodes:
             if node.occurrence_id in assigned:
                 windows = assigned[node.occurrence_id].kernel_memory_bytes or {}
                 memory = windows.get(node.occurrence_id)
                 if memory is not None:
-                    from dataclasses import replace
                     node = replace(node, kernel=node.kernel.with_memory_bytes(memory, sealed_bounds=physical.bounds))
+                binding = constants.get(node.occurrence_id, {})
+                if 'column_binding' in binding:
+                    spec = node.kernel
+                    if spec.kind not in ('SelectColumnsOp', 'DropColumnsOp', 'RenameColumnsOp'):
+                        raise _dataflow_error('INCOMPATIBLE_HISTORY', 'sealed column binding on an incompatible node')
+                    field = 'names' if spec.kind == 'RenameColumnsOp' else 'columns'
+                    config = thaw_record_value(spec.configuration)
+                    config[field] = list(binding['column_binding'])
+                    node = replace(node, kernel=replace(spec, configuration=config))
                 node_specs[node.occurrence_id] = node
         if not node_specs:
             raise _dataflow_error("INVALID_CONTRACT", "no assigned occurrences found in graph")
