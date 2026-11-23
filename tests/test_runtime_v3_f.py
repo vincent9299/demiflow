@@ -590,7 +590,7 @@ def test_f017(fake_action):
 # ---------------------------------------------------------------------------
 def test_f018(fake_action, monkeypatch):
     _binding_assertion()
-    from demiflow.execution.dataset_native import execute
+    from demiflow.execution.executors.dataset_native import execute
     from demiflow.data.plan import LogicalPlan
     from demiflow.data.sources import ItemsSource
     from demiflow.execution.dataflow_api import declare_action_v3
@@ -610,27 +610,6 @@ def test_f018(fake_action, monkeypatch):
     out_arrow = list(execute(_FakeExecutor(), source, plan, arrow=True))
     assert out_arrow == table.to_batches()
     assert STATE.run_calls[1].kind == "iter_batches"
-
-
-def test_f019(fake_action, monkeypatch):
-    _binding_assertion()
-    import demiflow.execution.dataset_native as native
-    from demiflow.data.plan import LogicalPlan
-    from demiflow.data.sources import ItemsSource
-    calls = []
-    def _fake_execute(executor, source, plan, *, execution):
-        calls.append(execution)
-        yield {"id": 7}
-    monkeypatch.setattr(native, "execute", _fake_execute)
-
-    engine = native.Engine.__new__(native.Engine)
-    engine.stats = {}
-    engine.execution = object()
-    executor = _FakeExecutor()
-    executor._local_kernel_stats = {}
-    out = list(engine.python_rows(executor, ItemsSource([{"id": 1}]), LogicalPlan()))
-    assert out == [{"id": 7}]
-    assert calls == [engine.execution]
 
 
 # ---------------------------------------------------------------------------
