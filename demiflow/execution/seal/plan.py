@@ -791,7 +791,7 @@ def validate_graph_replay(action, declaration, credit):
     bundle = load_sealed_plan(action.context.directory, action.action_id)
     graph, physical = bundle['graph'], bundle['physical']
     originals = [node.kernel.configuration['arguments'].get('graph') for node in graph.nodes if node.occurrence_id in graph.terminals]
-    if [_thaw_json(value) for value in originals] != [declaration]:
+    if [thaw_json(value) for value in originals] != [declaration]:
         raise DataflowError('INCOMPATIBLE_HISTORY', 'graph declaration differs from the sealed routing')
     router = next(node.occurrence_id for node in graph.nodes if 'graph_route' in node.kernel.configuration)
     selected = {edge.edge_id for edge in graph.edges if edge.producer == router or edge.consumer == router}
