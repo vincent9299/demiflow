@@ -105,23 +105,6 @@
     "never_ran": 2
    }
   },
-  "demiflow.execution.lance_merge": {
-   "status": "undecided",
-   "reason": "产品代码没有导入方，有一个测试文件。暂不处理。",
-   "importers": [],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 1
-    },
-    "functions": 1,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 1
-   }
-  },
   "demiflow.execution.local": {
    "status": "separate_entry",
    "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
