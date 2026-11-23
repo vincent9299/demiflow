@@ -373,6 +373,7 @@
     "execution/contracts/relational_region.py",
     "execution/kernels/lance_keys.py",
     "execution/kernels/relational_region.py",
+    "execution/worker/dataflow_graph_runner.py",
     "execution/worker/key_exclusion.py",
     "planning/dataflow_place.py",
     "planning/dataflow_relational_regions.py"
@@ -437,6 +438,7 @@
     "execution/dataflow_models.py"
    ],
    "right_on": [
+    "execution/kernels/operator.py",
     "execution/kernels/relational_region.py"
    ],
    "routes": [
@@ -477,6 +479,7 @@
     "planning/dataflow_training.py"
    ],
    "small_right_index": [
+    "execution/contracts/relational_region.py",
     "execution/kernels/relational.py"
    ],
    "sort": [
