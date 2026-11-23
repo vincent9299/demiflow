@@ -25,7 +25,7 @@ from demiflow.execution.exchange.dataflow_transport import PeerBuffers, read_pee
 from demiflow.execution.dataflow_sinks import _artifact_json, _encode_record, _manifest_non_mapping_values, RECORDS_MEDIA, MANIFEST_MEDIA
 from demiflow.execution.recovery_contract import document
 from demiflow.execution.contracts.record_codec import encode_document, decode_document, document_limit, frame_parts, decode_frame, line_limit, read_chunk_bytes
-from demiflow.execution.exchange.dataflow_transport import admit_receive
+from demiflow.execution.contracts.record_codec import admit_receive
 from demiflow.execution.storage.streams import frame_stream, read_document
 
 
@@ -1155,8 +1155,9 @@ class WorkerGraphRunner:
             routed_input = record
             if spec.routing in ('hash', 'target') and record.inline is None:
                 from demiflow.execution.contracts.dataflow import clone_record
-                from demiflow.execution.kernels.dataflow import _materialize_row, _row_bytes
-                row = _materialize_row(record, self.services)
+                from demiflow.execution.storage.streams import materialize_row as _materialize_row
+                from demiflow.execution.contracts.record_codec import row_bytes as _row_bytes
+                row = _materialize_row(record, store=self.services.store, bounds=self.services.bounds, assignment=getattr(self.services, 'assignment', None))
                 routed_input = clone_record(record, inline=row, payload_ref=None,
                     encoded_bytes=_row_bytes(row, max_bytes=self.bounds.max_row_bytes))
             route_sequence = self.e._channels.routing.values().get(spec.channel_id, 0)
@@ -1351,7 +1352,7 @@ class WorkerGraphRunner:
                 # Actual worker delivery uses the transfer codec directly.
                 # Authenticate and bind the shared payload before accepting its
                 # row bytes/schema into terminal state, even for co-location.
-                batch_cache(self.services.store, self.bounds, services=self.services).locate(record)
+                batch_cache(self.services.store, self.bounds, assignment=getattr(self.services, 'assignment', None)).locate(record)
             elif record.inline is None and self._terminal_spec.configuration.get('input_carrier') == 'stored_typed_row.v1':
                 # Only the sealed pure-join carrier may defer hydration to the
                 # native driver. Authenticate the complete original payload
@@ -1371,8 +1372,9 @@ class WorkerGraphRunner:
                 del chunk
             elif record.inline is None:
                 from demiflow.execution.contracts.dataflow import clone_record
-                from demiflow.execution.kernels.dataflow import _materialize_row, _row_bytes
-                row = _materialize_row(record, self.services)
+                from demiflow.execution.storage.streams import materialize_row as _materialize_row
+                from demiflow.execution.contracts.record_codec import row_bytes as _row_bytes
+                row = _materialize_row(record, store=self.services.store, bounds=self.services.bounds, assignment=getattr(self.services, 'assignment', None))
                 record = clone_record(record, inline=row, payload_ref=None,
                     encoded_bytes=_row_bytes(row, max_bytes=self.bounds.max_row_bytes))
             if self._terminal_spec.kind == 'write_datasink':
@@ -1383,7 +1385,7 @@ class WorkerGraphRunner:
                     from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
                     from demiflow.execution.row_scope import RowScope, set_row_scope
                     from demiflow.execution.contracts.dataflow import clone_record
-                    from demiflow.execution.kernels.dataflow import _row_bytes
+                    from demiflow.execution.contracts.record_codec import row_bytes as _row_bytes
                     if self._queue_finalizer is None:
                         self._queue_finalizer = AcquisitionCall('finalize')
                         self._queue_finalizer.bind(self.services, occ)

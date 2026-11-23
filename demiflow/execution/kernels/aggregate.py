@@ -1,7 +1,7 @@
 """Partition binding for the original aggregation algorithms."""
 from demiflow.execution.contracts.dataflow import stage_resident_bytes
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.kernels.dataflow import _materialize_row
+from demiflow.execution.storage.streams import materialize_row as _materialize_row
 from demiflow.operators.aggregate import resolve_aggregates
 
 
@@ -10,7 +10,7 @@ def accumulate_partial(records, *, spec, services):
     aggregates = resolve_aggregates(spec.configuration, services.programs)
     return accumulate(records, aggregates=aggregates, bounds=services.bounds,
         store=services.store, check_stop=services.check_stop,
-        read_row=lambda record: _materialize_row(record, services))
+        read_row=lambda record: _materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None)))
 
 
 def merge_partials(partials, *, spec, services):

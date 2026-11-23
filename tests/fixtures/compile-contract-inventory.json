@@ -79,9 +79,6 @@
  },
  "configuration_access": {
   "accessor": {
-   "aggregates": [
-    "execution/kernels/aggregate.py"
-   ],
    "buffer_bytes": [
     "execution/kernels/operator.py"
    ],
@@ -161,6 +158,9 @@
    ],
    "actor_recovery_rows": [
     "planning/dataflow_shared.py"
+   ],
+   "aggregates": [
+    "operators/aggregate.py"
    ],
    "ancestor": [
     "execution/outputs/terminals.py"

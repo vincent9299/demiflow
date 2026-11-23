@@ -7,6 +7,8 @@ This transport executes no business code and has no journal/commit authority.
 """
 from __future__ import annotations
 
+from demiflow.execution.contracts.record_codec import admit_receive, peer_chunk_bytes
+
 from demiflow.execution.contracts.record_codec import document_limit, _frame_budget_error, _admit, resident_limit
 
 import hashlib
@@ -258,15 +260,3 @@ def _read_peer_frame(sock, locator, *, chunk_bytes=65536):
     if hashlib.sha256(data).hexdigest() != locator['sha256']:
         raise DataflowError('CORRUPT_ARTIFACT', 'peer frame checksum differs from locator')
     return data
-
-
-def admit_receive(size, bounds, *, resident_bytes=None, retained=0):
-    if type(size) is not int or not 0 <= size <= document_limit(bounds):
-        _frame_budget_error('peer document exceeds frame byte bound')
-    # Bytearray, returned bytes and one bounded recv fragment. The caller
-    # separately retains prior decoded rows / outstanding producer buffers.
-    _admit(retained + 2 * size + min(size, peer_chunk_bytes(bounds)) + 256,
-           resident_limit(bounds, resident_bytes))
-
-def peer_chunk_bytes(bounds):
-    return max(1, min(65536, bounds.max_row_bytes // 4))

@@ -227,7 +227,7 @@ def test_csv_shared_batch_cursor_and_projection_keep_authenticated_occurrences(t
     restored.open(split, cursor)
     tail = drain(restored)
     restored.close()
-    cache = ArrowBatchCache(store, bounds, services=services)
+    cache = ArrowBatchCache(store, bounds, assignment=getattr(services, 'assignment', None))
     assert [cache.row(r) for r in tail] == [{'k':'b','v':'2'},{'k':'c','v':'3'},{'k':'d','v':'4'}]
     assert (tail[0].record_id, tail[0].sequence) == (first[-1].record_id, first[-1].sequence)
     schemas = RecordSchemas(services)

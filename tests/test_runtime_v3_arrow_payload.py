@@ -88,6 +88,19 @@ def test_actual_lance_reader_restores_inside_shared_batch_and_validates_binding(
     with pytest.raises(DataflowError, match='offset/bytes'):
         cache.row(clone_record(first[0], encoded_bytes=1))
 
+    # Rebinding an existing authenticated cache must tighten its grant. Omission
+    # retains that grant, whereas explicit None restores the bounds-only grant.
+    from types import SimpleNamespace
+    from demiflow.execution.storage.arrow_payload import batch_cache
+    narrowed = SimpleNamespace(stages=(SimpleNamespace(
+        profile=SimpleNamespace(requests={'memory_bytes': 32})),))
+    shared = batch_cache(store, bounds, assignment=None)
+    assert shared.row(first[0]) == table.to_pylist()[0]
+    for current in (batch_cache(store, bounds, assignment=narrowed), batch_cache(store, bounds)):
+        with pytest.raises(DataflowError, match='current grant'):
+            current.row(first[0])
+    assert batch_cache(store, bounds, assignment=None).row(first[0]) == table.to_pylist()[0]
+
 
 def test_tiny_legal_row_uses_original_inline_when_reference_frame_does_not_fit(tmp_path):
     from test_runtime_v3_s import FakeStore, make_bounds, make_snapshot, first_split, make_services

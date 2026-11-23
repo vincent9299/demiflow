@@ -10,9 +10,10 @@ import struct
 from ...operators.relational import hash_join_pairs, merge_join_rows
 from ...operators.relational_sql import offset_join_query
 from .join_spool import _Spool, _Chain, _HEADER, _ID_BYTES, _NONE, _FANOUT
-from demiflow.execution.kernels.dataflow import _check_stop, _err, _row_bytes, _output_record, RECORD_DOMAIN, _OutputBudget
+from demiflow.execution.kernels.dataflow import _check_stop, _err, _output_record, RECORD_DOMAIN, _OutputBudget
+from demiflow.execution.contracts.record_codec import row_bytes as _row_bytes
 from demiflow.execution.contracts.record_codec import record_identity as _hash_id
-from .dataflow import _materialize_row as materialize_row
+from demiflow.execution.storage.streams import materialize_row as materialize_row
 
 _REF = struct.Struct('!qqIQ')
 
@@ -51,7 +52,7 @@ class _RegionSpool(_Spool):
         tag = self.file.read_at(start, 1)
         if tag != b'@':
             record = super().record(ref.offset, ref.header)
-            return materialize_row(record, self.services), record.schema_ref
+            return materialize_row(record, store=self.services.store, bounds=self.services.bounds, assignment=getattr(self.services, 'assignment', None)), record.schema_ref
         if ref.header[3] != 1 + _REF.size:
             raise _err('CORRUPT_ARTIFACT', 'invalid region reference frame')
         left, right, index, size = _REF.unpack(self.file.read_at(start + 1, _REF.size))

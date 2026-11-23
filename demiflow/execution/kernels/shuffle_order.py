@@ -9,7 +9,9 @@ typed key is retained, never a table-sized counter dictionary.
 from demiflow.execution.contracts.dataflow import stage_resident_bytes
 import sys
 
-from demiflow.execution.kernels.dataflow import _err, _seed, _materialize_row, _input_row_bytes
+from demiflow.execution.kernels.dataflow import _err, _seed
+from demiflow.execution.storage.streams import materialize_row as _materialize_row
+from demiflow.execution.contracts.record_codec import input_row_bytes as _input_row_bytes
 from demiflow.execution.kernels.ordering import OrderingServices, build_sort_runs, merge_sort_runs, _release_runs, _provenance
 from demiflow.operators.ordering import SortWindow
 from demiflow.execution.contracts.record_codec import resident_limit, raw_workspace, _typed_shape, _json_shape, _record_metadata
@@ -43,7 +45,7 @@ class _TypedKeys:
             scoped = OrderingServices(services, window.codec_bytes)
             from demiflow.execution.contracts.record_codec import is_arrow_record
             if is_arrow_record(record):
-                row = _materialize_row(record, scoped)
+                row = _materialize_row(record, store=scoped.store, bounds=scoped.bounds, assignment=getattr(scoped, 'assignment', None))
             else:
                 payload = read_document(record.payload_ref, services.store, scoped.bounds,
                     resident_bytes=stage_resident_bytes(getattr(scoped, 'assignment', None)), _maximum=services.bounds.max_row_bytes)

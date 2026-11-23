@@ -7,7 +7,8 @@ from demiflow.execution.contracts.dataflow import clone_record
 import hashlib
 
 from ..contracts.dataflow import BlockPartition, Record
-from demiflow.execution.kernels.dataflow import _err, _occurrence, _materialize_row
+from demiflow.execution.kernels.dataflow import _err, _occurrence
+from demiflow.execution.storage.streams import materialize_row as _materialize_row
 from demiflow.operators.relational import group_key as _group_key
 
 
@@ -35,7 +36,7 @@ def partition_records(records, *, spec, rows, services):
     for ordinal, record in enumerate(records):
         services.check_stop()
         if keys:
-            key = _group_key(_materialize_row(record, services), keys)
+            key = _group_key(_materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None)), keys)
             index = int.from_bytes(hashlib.sha256(key.encode()).digest()[:8], 'big') % count
         elif target is not None:
             index = ordinal // target

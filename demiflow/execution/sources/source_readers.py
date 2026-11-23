@@ -670,7 +670,7 @@ class LanceReader(_BaseReader):
             from demiflow.execution.storage.arrow_payload import ArrowBatchCache
             from demiflow.execution.contracts.record_codec import ArrowPayload
             ref = ArtifactRef(**saved)
-            cache = ArrowBatchCache(self._services.store, self._services.bounds, services=self._services)
+            cache = ArrowBatchCache(self._services.store, self._services.bounds, assignment=getattr(self._services, 'assignment', None))
             from demiflow.execution.contracts.record_codec import ARROW_BATCH_MEDIA
             if ref.media_type != ARROW_BATCH_MEDIA:
                 raise DataflowError('INCOMPATIBLE_HISTORY', 'Lance cursor does not reference a source batch')

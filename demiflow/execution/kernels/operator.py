@@ -32,7 +32,8 @@ from demiflow.execution.contracts.dataflow import (
 )
 from demiflow.execution.contracts.dataflow_kinds import kinds_with
 
-from demiflow.execution.kernels.dataflow import KERNEL_KINDS, RECORD_MEDIA_TYPE, _AGGREGATE_KINDS, _cfg, _check_stop, _err, _input_row_bytes, _MODEL_KINDS, _occurrence, _ORDERING_KINDS, _RELATIONAL_KINDS, _STREAM_GROUP_KINDS, _UNARY_KINDS, invoke_batch, invoke_unary
+from demiflow.execution.kernels.dataflow import KERNEL_KINDS, RECORD_MEDIA_TYPE, _AGGREGATE_KINDS, _cfg, _check_stop, _err, _MODEL_KINDS, _occurrence, _ORDERING_KINDS, _RELATIONAL_KINDS, _STREAM_GROUP_KINDS, _UNARY_KINDS, invoke_batch, invoke_unary
+from demiflow.execution.contracts.record_codec import input_row_bytes as _input_row_bytes
 from demiflow.execution.contracts.record_codec import canonical_record_json as _canonical, record_identity as _hash_id
 
 IMAGE_VERSION = "demiflow-kernel-image-v3"
@@ -448,7 +449,7 @@ def _exceeds_record_batch(records, services):
     total = 0
     for record in records:
         if record.payload_ref is not None and record.payload_ref.media_type == ARROW_BATCH_MEDIA:
-            batch, index = batch_cache(services.store, services.bounds, services=services).locate(record)
+            batch, index = batch_cache(services.store, services.bounds, assignment=getattr(services, 'assignment', None)).locate(record)
             total += mapped_row_bytes(batch, index, services.bounds.max_row_bytes)
         else:
             total += record.encoded_bytes
@@ -883,14 +884,14 @@ class OperatorKernel:
         """Bind the closed build port to the operator's typed probe calculation."""
         from demiflow.execution.contracts.relational_region import JOIN_PROBE_WINDOW
         from demiflow.operators.relational import probe_values
-        from demiflow.execution.kernels.dataflow import _materialize_row
+        from demiflow.execution.storage.streams import materialize_row as _materialize_row
 
         rows = self._ports['right'].records().within_offset_budget(JOIN_PROBE_WINDOW // 192)
         if rows is None:
             return None
         field, = self._spec.configuration.get('right_on') or self._spec.configuration['on']
         return probe_values(rows, field, dtype,
-            read_row=lambda record: _materialize_row(record, self._finite_services),
+            read_row=lambda record: _materialize_row(record, store=self._finite_services.store, bounds=self._finite_services.bounds, assignment=getattr(self._finite_services, 'assignment', None)),
             check_stop=self._finite_services.check_stop)
 
     def accepts_finite_reference(self, port):
@@ -1085,10 +1086,10 @@ class OperatorKernel:
 
     def _push_stream_group(self, record: Record) -> Iterator[Record]:
         from demiflow.operators.relational import group_key as _group_key
-        from demiflow.execution.kernels.dataflow import _materialize_row
+        from demiflow.execution.storage.streams import materialize_row as _materialize_row
         on=tuple(_cfg(self._spec,'on'))
         max_batch=int(self._spec.configuration.get('max_batch',self._max_batch))
-        row=dict(_materialize_row(record,self._services))
+        row=dict(_materialize_row(record, store=self._services.store, bounds=self._services.bounds, assignment=getattr(self._services, 'assignment', None)))
         key=_group_key(row,on)
         size=self._group_row_bytes(row)
         chunk,buffer=self._group_limits()

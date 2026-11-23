@@ -11,8 +11,8 @@ from demiflow.execution.storage.streams import put_arrow_batch
 
 class ArrowBatchCache:
     """One authenticated batch per consumer, charged within its original grant."""
-    def __init__(self, store, bounds, *, services=None):
-        self.store, self.bounds, self.services = store, bounds, services
+    def __init__(self, store, bounds, *, assignment=None):
+        self.store, self.bounds, self.assignment = store, bounds, assignment
         self.ref = self.batch = self.header = None
         self._projection = None
         self._lock = threading.RLock()
@@ -25,15 +25,15 @@ class ArrowBatchCache:
         import pyarrow as pa
         with self._lock:
             if ref == self.ref:
-                if ref.size_bytes > _window(self.bounds, getattr(self.services, 'assignment', None)):
+                if ref.size_bytes > _window(self.bounds, self.assignment):
                     raise DataflowError('BUDGET_EXCEEDED', 'Arrow cached batch exceeds the current grant')
                 return self.batch, self.header
             self.close()  # Do not retain the old batch during the next read.
-            if ref.media_type not in ARROW_MEDIA_TYPES or ref.size_bytes > _window(self.bounds, getattr(self.services, 'assignment', None)):
+            if ref.media_type not in ARROW_MEDIA_TYPES or ref.size_bytes > _window(self.bounds, self.assignment):
                 raise DataflowError('BUDGET_EXCEEDED', 'Arrow batch ref exceeds the original retained-buffer window')
             # Consume the complete iterator: store validates SHA before any
             # Arrow value can escape. Bounded join transient is in _window.
-            raw = b''.join(self.store.read(ref, max_bytes=_window(self.bounds, getattr(self.services, 'assignment', None))))
+            raw = b''.join(self.store.read(ref, max_bytes=_window(self.bounds, self.assignment)))
             if raw[:8] != _MAGIC or len(raw) < 12:
                 _arrow_error('invalid Arrow batch framing')
             size = _HEADER.unpack(raw[8:12])[0]
@@ -79,7 +79,7 @@ class ArrowBatchCache:
                     pass
                 else:
                     _arrow_error('Arrow artifact must contain exactly one batch')
-                if batch.num_rows != header['count'] or batch.get_total_buffer_size() > _window(self.bounds, getattr(self.services, 'assignment', None)):
+                if batch.num_rows != header['count'] or batch.get_total_buffer_size() > _window(self.bounds, self.assignment):
                     _arrow_error('Arrow batch rows/buffers differ from admitted metadata')
                 if hashlib.sha256(batch.schema.serialize().to_pybytes()).hexdigest() != header['schema']:
                     _arrow_error('Arrow batch schema digest differs')
@@ -143,9 +143,9 @@ class ArrowBatchCache:
                 header = json.dumps({**self.header, 'schema': schema_ref.digest, 'sizes': sizes},
                                     sort_keys=True, separators=(',', ':')).encode()
                 estimate = pa.ipc.get_record_batch_size(projected) + schema_ref.size_bytes + len(header) + 256
-                window = _window(self.bounds, getattr(self.services, 'assignment', None))
+                window = _window(self.bounds, self.assignment)
                 if (estimate > window or batch.get_total_buffer_size() + 8 * estimate + window >
-                        _resident_budget(self.bounds, getattr(self.services, 'assignment', None))):
+                        _resident_budget(self.bounds, self.assignment)):
                     return None
                 ref = put_arrow_batch(projected, header, estimate, record.payload_ref.media_type, self.store)
                 self._projection = (key, ref, sizes, schema_ref)
@@ -156,14 +156,16 @@ class ArrowBatchCache:
             batch, index = self.locate(record)
             return batch.slice(index, 1).to_pylist()[0]
 
-def batch_cache(store, bounds, *, services=None):
+_UNBOUND_ASSIGNMENT = object()
+
+def batch_cache(store, bounds, *, assignment=_UNBOUND_ASSIGNMENT):
     cache = getattr(store, '_arrow_payload_cache', None)
     if cache is None:
-        cache = ArrowBatchCache(store, bounds, services=services)
+        cache = ArrowBatchCache(store, bounds, assignment=None if assignment is _UNBOUND_ASSIGNMENT else assignment)
         store._arrow_payload_cache = cache
-    if services is not None:
-        cache.services = services
+    if assignment is not _UNBOUND_ASSIGNMENT:
+        cache.assignment = assignment
     return cache
 
-def materialize_arrow_row(record, services):
-    return batch_cache(services.store, services.bounds, services=services).row(record)
+def materialize_arrow_row(record, *, store, bounds, assignment=None):
+    return batch_cache(store, bounds, assignment=assignment).row(record)

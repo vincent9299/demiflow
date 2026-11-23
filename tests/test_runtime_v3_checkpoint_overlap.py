@@ -135,7 +135,7 @@ def test_cancel_during_native_publication_drains_without_aborting_acked_cut(tmp_
 def test_publication_obeys_encoded_byte_window_before_next_read(tmp_path, monkeypatch):
     observed = tmp_path/'byte-rows'
     rows = [{'id': i, 'value': 'x'*900} for i in range(30)]
-    from demiflow.execution.kernels.dataflow import _row_bytes
+    from demiflow.execution.contracts.record_codec import row_bytes as _row_bytes
     sizes = [_row_bytes(row, max_bytes=4096) for row in rows]
     window = sum(sizes[:12])
     def record(row):

@@ -11,7 +11,7 @@ from demiflow.execution.contracts.dataflow import Record
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.record_codec import _encode_payload, _encode_record_document, _decode_record_document
 from demiflow.execution.kernels import ordering
-from demiflow.execution.kernels.dataflow import _materialize_row
+from demiflow.execution.storage.streams import materialize_row as _materialize_row
 from test_runtime_v3_real_seams import prepared,reader_services
 from test_runtime_v3_artifact_files import descriptors
 
@@ -49,10 +49,10 @@ def test_final_merge_immediately_publishes_each_typed_record_with_live_readers(t
                 ref=store.put(iter([raw]),max_bytes=len(raw),media_type='application/vnd.demiflow.record.v3')
                 saved=b''.join(store.read(ref,max_bytes=65536))
                 restored=_decode_record_document(saved,record_id=record.record_id,sequence=record.sequence,max_bytes=65536)
-                row=_materialize_row(restored,narrow)
+                row=_materialize_row(restored, store=narrow.store, bounds=narrow.bounds, assignment=getattr(narrow, 'assignment', None))
                 assert type(row['typed']) is tuple and row['typed'][1]==b'\xff'
                 assert math.copysign(1,row['typed'][0])==-1
-                assert row==_materialize_row(expected,narrow)
+                assert row==_materialize_row(expected, store=narrow.store, bounds=narrow.bounds, assignment=getattr(narrow, 'assignment', None))
                 seen.append(row['x'])
             assert seen==list(range(1,count+1))
         finally:
@@ -99,7 +99,7 @@ def test_final_sort_uses_effective_window_of_other_live_view(tmp_path):
                 assert ref.size_bytes==len(raw)
                 expected=records[-1-len(seen)]
                 assert record.record_id==expected.record_id and record.source_position==expected.source_position
-                assert _materialize_row(record,runtime)==_materialize_row(expected,runtime)
+                assert _materialize_row(record, store=runtime.store, bounds=runtime.bounds, assignment=getattr(runtime, 'assignment', None))==_materialize_row(expected, store=runtime.store, bounds=runtime.bounds, assignment=getattr(runtime, 'assignment', None))
                 seen.append(record)
             assert len(seen)==5
         finally:iterator.close();other.close()

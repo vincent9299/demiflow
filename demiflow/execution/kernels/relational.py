@@ -26,7 +26,9 @@ from demiflow.execution.contracts.dataflow import (
     RuntimeServices,
 )
 
-from demiflow.execution.kernels.dataflow import RECORD_DOMAIN, _check_stop, _cfg, _err, _loads_row, _dumps_row, _materialize_row, _occurrence, _output_record, _OutputBudget
+from demiflow.execution.kernels.dataflow import RECORD_DOMAIN, _check_stop, _cfg, _err, _occurrence, _output_record, _OutputBudget
+from demiflow.execution.contracts.record_codec import loads_row as _loads_row, dumps_row as _dumps_row
+from demiflow.execution.storage.streams import materialize_row as _materialize_row
 from demiflow.operators.relational import group_key as _group_key
 from demiflow.execution.contracts.record_codec import record_identity as _hash_id
 from demiflow.execution.kernels.ordering import build_sort_runs, merge_sort_runs
@@ -57,7 +59,7 @@ def typed_join_pairs(left, right, *, spec, services, retained_key):
     columns = (tuple(spec.configuration['on']), tuple(spec.configuration.get('right_on') or spec.configuration['on']))
     tables, inputs, types = {}, [], None
     retained = 4096
-    cache = batch_cache(services.store, services.bounds, services=services)
+    cache = batch_cache(services.store, services.bounds, assignment=getattr(services, 'assignment', None))
     from demiflow.execution.storage.record_schema import RecordSchemas
     schemas = RecordSchemas(services)
     for name, port, fields in zip(('lkeys', 'rkeys'), (left, right), columns):
@@ -102,7 +104,7 @@ def typed_join_pairs(left, right, *, spec, services, retained_key):
                         return None
                     flush()
                     previous, batch, run = None, None, 0
-                    row = _materialize_row(record, services)
+                    row = _materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None))
                     for parts, field, dtype in zip(chunks, fields, declared):
                         parts.append(pa.array([row[field]], type=dtype))
                     del row
@@ -191,9 +193,9 @@ def join_partitions(
     try:
         for sequence, (left_record, right_record) in enumerate(pairs):
             _check_stop(services)
-            left_row = _materialize_row(left_record, services)
+            left_row = _materialize_row(left_record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None))
             out_row = (left_row if right_record is None else merge_join_rows(left_row,
-                _materialize_row(right_record, services), lk, rk, suffix))
+                _materialize_row(right_record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None)), lk, rk, suffix))
             record_id = _hash_id([RECORD_DOMAIN, occurrence, "join", sequence])
             if stored:
                 from demiflow.execution.contracts.record_codec import _typed_shape, admit_workspace
@@ -242,14 +244,14 @@ def _ordered_group_rows(
     sort_spec = _group_sort_spec(spec, on)
     def keyed_records():
         for record in records:
-            _group_key(_materialize_row(record, services), on)
+            _group_key(_materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None)), on)
             yield record
     from demiflow.operators.ordering import reducer_sort_window as sort_window
     from demiflow.execution.contracts.relational_region import reducer_contract as contract
     window = sort_window(services.bounds,key_only=False) if memory is not None or contract(spec) is not None else None
     runs = build_sort_runs(keyed_records(), spec=sort_spec, services=services,window=window)
     for record in merge_sort_runs(runs, spec=sort_spec, services=services,window=window):
-        row = _materialize_row(record, services)
+        row = _materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None))
         yield _group_key(row, on), row, record
         del row, record
 

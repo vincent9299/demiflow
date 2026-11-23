@@ -637,10 +637,11 @@ def test_k011():
 # ---------------------------------------------------------------------------
 def test_k012():
     from demiflow.execution.exchange.dataflow_channels import repartition_records
-    from demiflow.execution.kernels.dataflow import _materialize_row, _input_row_bytes
+    from demiflow.execution.storage.streams import materialize_row as _materialize_row
+    from demiflow.execution.contracts.record_codec import input_row_bytes as _input_row_bytes
     svc = services()
     binding = dict(bounds=svc.bounds, check_stop=svc.check_stop,
-        input_size=_input_row_bytes, read_row=lambda record: _materialize_row(record, svc))
+        input_size=_input_row_bytes, read_row=lambda record: _materialize_row(record, store=svc.store, bounds=svc.bounds, assignment=getattr(svc, 'assignment', None)))
     records = [rec({"k": "a", "i": i}, record_id=rid(f"r{i}"), sequence=i) for i in range(6)]
 
     def exchange(routing, **kw):

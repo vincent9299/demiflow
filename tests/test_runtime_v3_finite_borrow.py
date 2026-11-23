@@ -206,7 +206,7 @@ def test_public_typed_sort_borrows_without_second_payload_copy(tmp_path):
 
 
 def test_external_row_and_empty_member_keep_original_payload_and_bounds(tmp_path):
-    from demiflow.execution.kernels.dataflow import _materialize_row
+    from demiflow.execution.storage.streams import materialize_row as _materialize_row
     with store_fixture(tmp_path) as (_,store,_):
         svc,spec=fixture(store)
         row={'value':'x'*4096}
@@ -224,7 +224,7 @@ def test_external_row_and_empty_member_keep_original_payload_and_bounds(tmp_path
         port=_SpoolPort('input',svc,4)
         for entry in entries:port.adopt(entry)
         port.finish()
-        assert [_materialize_row(r,svc) for r in port.records()]==[row]
+        assert [_materialize_row(r, store=svc.store, bounds=svc.bounds, assignment=getattr(svc, 'assignment', None)) for r in port.records()]==[row]
         assert [x['rows'] for x in entries]==[1,0]
         # The compact reference frame does not exempt a large external row.
         limited=SimpleNamespace(**{**vars(svc),'bounds':replace(svc.bounds,max_row_bytes=2048)})

@@ -4,7 +4,8 @@ from demiflow.execution.contracts.dataflow import clone_record
 
 from ..contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.record_schema import RecordSchemas
-from demiflow.execution.kernels.dataflow import _materialize_row, _output_record, _OutputBudget
+from demiflow.execution.storage.streams import materialize_row as _materialize_row
+from demiflow.execution.kernels.dataflow import _output_record, _OutputBudget
 from demiflow.execution.contracts.record_codec import record_identity as _hash_id
 from .ordering import build_sort_runs, merge_sort_runs
 
@@ -34,7 +35,7 @@ def _sql_survivors(left, right, keys, services):
         try:
             for record in scan:
                 services.check_stop()
-                row = _materialize_row(record, services)
+                row = _materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None))
                 key = None if any(row[f] is None for f in keys) else _group_key(row, keys)
                 retained += 5 + (len(key.encode('utf-8')) if key is not None else 0)
                 if not pending:

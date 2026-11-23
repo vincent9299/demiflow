@@ -15,7 +15,7 @@ from demiflow.operators.relational import JOIN_PARTITION_BITS, JoinKeyFilter, ha
 from demiflow.execution.contracts.record_codec import _decode_record_document as decode_record_document, _encode_record_document as encode_record_document
 from demiflow.execution.kernels.dataflow import _check_stop, _err
 from demiflow.operators.relational import group_key as group_key
-from demiflow.execution.kernels.dataflow import _materialize_row as materialize_row
+from demiflow.execution.storage.streams import materialize_row as materialize_row
 
 # next offset, key digest prefix, key bytes, document bytes, sequence.
 _HEADER = struct.Struct('!qQIIQ')
@@ -162,16 +162,16 @@ class _Spool:
             from demiflow.execution.contracts.record_codec import is_arrow_record
             from demiflow.execution.storage.arrow_payload import batch_cache
             if is_arrow_record(record):
-                cache = batch_cache(self.services.store, self.services.bounds, services=self.services)
+                cache = batch_cache(self.services.store, self.services.bounds, assignment=getattr(self.services, 'assignment', None))
                 batch, index = cache.locate(record)
                 if (probe_filter is not None and len(fields) == 1
                         and probe_filter.arrow_rejects(batch.column(fields[0]), index, record.payload_ref)):
                     return None
                 row = {field: batch.column(field)[index].as_py() for field in fields}
             else:
-                row = materialize_row(record, self.services)
+                row = materialize_row(record, store=self.services.store, bounds=self.services.bounds, assignment=getattr(self.services, 'assignment', None))
         else:
-            row = materialize_row(record, self.services)
+            row = materialize_row(record, store=self.services.store, bounds=self.services.bounds, assignment=getattr(self.services, 'assignment', None))
         # Validate every key component even when another component is null.
         token = group_key(row, fields).encode('utf-8')
         key = b'' if any(row[name] is None for name in fields) else token

@@ -1,6 +1,9 @@
 """Streams implementation."""
 from __future__ import annotations
 
+from demiflow.execution.contracts.dataflow import thaw_record_value, stage_resident_bytes
+from demiflow.execution.contracts.record_codec import loads_row
+
 from demiflow.execution.contracts.record_codec import row_upper, mapped_row_bytes, mapped_member, _window, _resident_budget, MAPPED_ARROW_MEDIA
 
 from demiflow.execution.contracts.record_codec import _MAGIC as _ARROW_MAGIC, _HEADER as _ARROW_HEADER
@@ -298,3 +301,28 @@ def read_kernel_image(store, ref, bounds, *, occurrence, partition, admit=None):
             or image.get('occurrence_id') != occurrence or image.get('partition_id') != partition):
         raise DataflowError('INCOMPATIBLE_HISTORY', 'kernel pack header differs from original image identity')
     return selected
+
+
+def materialize_row(record, *, store, bounds, assignment=None, measured=False, retained=0) -> object:
+    if (record.inline is None) == (record.payload_ref is None):
+        raise DataflowError("INVALID_CONTRACT", "record must carry exactly one of inline/payload_ref")
+    if record.inline is not None:
+        return thaw_record_value(record.inline)
+    from demiflow.execution.contracts.record_codec import is_arrow_record
+    from demiflow.execution.storage.arrow_payload import materialize_arrow_row
+    if is_arrow_record(record):
+        return materialize_arrow_row(record, store=store, bounds=bounds, assignment=assignment)
+    ref = record.payload_ref
+    limit = bounds.max_row_bytes
+    if ref.size_bytes > limit:
+        raise DataflowError("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", context={"size": ref.size_bytes})
+    if measured:
+        from demiflow.execution.contracts.record_codec import admit_receive
+        from demiflow.execution.contracts.record_codec import admit_workspace, raw_workspace
+        admit_receive(ref.size_bytes, bounds, resident_bytes=stage_resident_bytes(assignment), retained=retained)
+    data = b"".join(store.read(ref, max_bytes=limit))
+    if measured:
+        admit_workspace(raw_workspace(data), bounds, resident_bytes=stage_resident_bytes(assignment), retained=retained)
+    if len(data) > limit:
+        raise DataflowError("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", context={"size": len(data)})
+    return loads_row(data)

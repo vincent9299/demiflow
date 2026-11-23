@@ -149,7 +149,8 @@ def reader_services(ex, services):
 
 
 def test_real_reader_and_callable_kernel_receive_sealed_parameters(tmp_path):
-    from demiflow.execution.kernels.dataflow import make_kernel, _materialize_row
+    from demiflow.execution.kernels.dataflow import make_kernel
+    from demiflow.execution.storage.streams import materialize_row as _materialize_row
     dataset = data.from_iter(lambda: iter([{"x": 2}])).map(
         lambda row, delta: {"x": row["x"] + delta}, fn_kwargs={"delta": 3})
     with prepared(tmp_path, dataset) as (ex, services):
@@ -163,7 +164,7 @@ def test_real_reader_and_callable_kernel_receive_sealed_parameters(tmp_path):
             poll = reader.next_record()
             assert poll.status == "record"
             output = list(kernel.push("main", poll.record))
-            assert [_materialize_row(record, runtime) for record in output] == [{"x": 5}]
+            assert [_materialize_row(record, store=runtime.store, bounds=runtime.bounds, assignment=getattr(runtime, 'assignment', None)) for record in output] == [{"x": 5}]
             assert reader.next_record().status == "eoi"
         finally:
             kernel.close()
@@ -212,7 +213,8 @@ def test_worker_reads_original_sealed_refs_without_opening_journal(tmp_path, mon
 
 def test_real_source_kernel_exchange_codec_roundtrip(tmp_path):
     from demiflow.execution.exchange.dataflow_channels import encode_record, resolve_record
-    from demiflow.execution.kernels.dataflow import make_kernel, _materialize_row
+    from demiflow.execution.kernels.dataflow import make_kernel
+    from demiflow.execution.storage.streams import materialize_row as _materialize_row
     value = {"negative": [-0.0], "positive": [0.0], "tuple": (b"data", [None])}
     with prepared(tmp_path, data.from_items([value]).map(lambda r: r)) as (ex, services):
         runtime = reader_services(ex, services)
@@ -227,8 +229,7 @@ def test_real_source_kernel_exchange_codec_roundtrip(tmp_path):
             decoded = resolve_record(source_wire, store=services.store, bounds=services.bounds)
             output, = kernel.push("main", decoded)
             wire = encode_record(output, bounds=services.bounds)
-            actual = _materialize_row(resolve_record(wire, store=services.store,
-                                      bounds=services.bounds), runtime)
+            actual = _materialize_row(resolve_record(wire, store=services.store, bounds=services.bounds), store=runtime.store, bounds=runtime.bounds, assignment=getattr(runtime, 'assignment', None))
             assert actual == value
             assert type(actual["tuple"]) is tuple and type(actual["tuple"][1]) is list
             assert math.copysign(1, actual["negative"][0]) == -1
@@ -431,7 +432,7 @@ def test_real_workbench_and_history_read_original_v3_store(tmp_path):
 
 def test_real_sort_spill_preserves_typed_records_and_provenance(tmp_path):
     from demiflow.execution.kernels.ordering import build_sort_runs, merge_sort_runs
-    from demiflow.execution.kernels.dataflow import _materialize_row
+    from demiflow.execution.storage.streams import materialize_row as _materialize_row
     original = [{"x": 2, "typed": (-0.0, b"two")}, {"x": 1, "typed": [0.0, b"one"]}]
     with prepared(tmp_path, data.from_items(original).sort("x")) as (ex, services):
         runtime = reader_services(ex, services)
@@ -444,7 +445,7 @@ def test_real_sort_spill_preserves_typed_records_and_provenance(tmp_path):
             ordered = list(merge_sort_runs(runs, spec=spec, services=runtime))
             assert [r.record_id for r in ordered] == [records[1].record_id, records[0].record_id]
             assert [r.source_position for r in ordered] == [records[1].source_position, records[0].source_position]
-            rows = [_materialize_row(r, runtime) for r in ordered]
+            rows = [_materialize_row(r, store=runtime.store, bounds=runtime.bounds, assignment=getattr(runtime, 'assignment', None)) for r in ordered]
             assert rows == [original[1], original[0]]
             assert type(rows[0]["typed"]) is list
             assert type(rows[1]["typed"]) is tuple
@@ -485,7 +486,7 @@ def test_resume_validation_reads_wire_plan_and_checks_platform_pin(tmp_path):
 
 def test_real_join_kernel_uses_same_row_codec_on_write_and_read(tmp_path):
     from demiflow.execution.kernels.relational import join_partitions
-    from demiflow.execution.kernels.dataflow import _materialize_row
+    from demiflow.execution.storage.streams import materialize_row as _materialize_row
     left = data.from_items([{"key": 1, "left": (b"one", -0.0)}, {"key": None, "left": ()}])
     right = data.from_items([{"key": 1, "right": [b"a"]}, {"key": 1, "right": [b"b"]}])
     with prepared(tmp_path, left.join(right, on="key")) as (ex, services):
@@ -505,7 +506,7 @@ def test_real_join_kernel_uses_same_row_codec_on_write_and_read(tmp_path):
                     rows.append(poll.record)
                 sources.append(iter(rows))
             spec = next(n.kernel for n in ex._graph.nodes if n.kind == "relational")
-            rows = [_materialize_row(r, runtime) for r in join_partitions(
+            rows = [_materialize_row(r, store=runtime.store, bounds=runtime.bounds, assignment=getattr(runtime, 'assignment', None)) for r in join_partitions(
                 sources[0], sources[1], spec=spec, services=runtime)]
             assert len(rows) == 2
             assert {r["right"][0] for r in rows} == {b"a", b"b"}

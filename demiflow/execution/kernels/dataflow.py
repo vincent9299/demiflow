@@ -10,6 +10,9 @@ not process RSS; Arrow logical bytes and decoded Python objects are accounted
 separately where they coexist (see ``invoke_batch``).
 """
 from __future__ import annotations
+
+from demiflow.execution.contracts.record_codec import dumps_row as _dumps_row, loads_row as _loads_row, row_bytes as _row_bytes, input_row_bytes as _input_row_bytes
+from demiflow.execution.storage.streams import materialize_row as _materialize_row
 from demiflow.operators.arrow_batches import batch_to_rows as _batch_to_rows, batch_values as _batch_values, rows_to_batch as _rows_to_batch, single_row_batch as _single_row_batch
 from demiflow.operators.ordering import shuffle_key_bytes as _shuffle_key_bytes
 from demiflow.execution.contracts.record_codec import record_identity as _hash_id
@@ -73,62 +76,27 @@ def _seed(spec: KernelSpec, services: RuntimeServices) -> int:
     return value
 
 
-def _dumps_row(row: object, *, max_bytes: int) -> bytes:
-    from demiflow.execution.contracts.record_codec import _encode_payload
-    return _encode_payload(row, max_bytes=max_bytes)
 
 
-def _loads_row(data: bytes) -> object:
-    from demiflow.execution.contracts.record_codec import _decode_payload
-    return _decode_payload(data, max_bytes=max(1, len(data)))
 
 
-def _row_bytes(row: object, *, max_bytes: int) -> int:
-    return len(_dumps_row(row, max_bytes=max_bytes))
 
 
-def _input_row_bytes(record: Record) -> int:
-    if record.inline is not None:
-        return record.encoded_bytes
-    if record.payload_ref is not None:
-        from demiflow.execution.contracts.record_codec import is_arrow_record
-        if is_arrow_record(record):
-            return record.encoded_bytes
-        return record.payload_ref.size_bytes
-    raise _err("INVALID_CONTRACT", "record carries neither inline nor payload_ref")
 
 
-def _materialize_row(record: Record, services: RuntimeServices, *, measured=False, retained=0) -> object:
-    if (record.inline is None) == (record.payload_ref is None):
-        raise _err("INVALID_CONTRACT", "record must carry exactly one of inline/payload_ref")
-    if record.inline is not None:
-        return thaw_record_value(record.inline)
-    from demiflow.execution.contracts.record_codec import is_arrow_record
-    from demiflow.execution.storage.arrow_payload import materialize_arrow_row
-    if is_arrow_record(record):
-        return materialize_arrow_row(record, services)
-    ref = record.payload_ref
-    limit = services.bounds.max_row_bytes
-    if ref.size_bytes > limit:
-        raise _err("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", size=ref.size_bytes)
-    if measured:
-        from demiflow.execution.exchange.dataflow_transport import admit_receive
-        from demiflow.execution.contracts.record_codec import admit_workspace, raw_workspace
-        admit_receive(ref.size_bytes, services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained)
-    data = b"".join(services.store.read(ref, max_bytes=limit))
-    if measured:
-        admit_workspace(raw_workspace(data), services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained)
-    if len(data) > limit:
-        raise _err("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", size=len(data))
-    return _loads_row(data)
+
+
+
+
+
 
 
 def _measured_input(record, services, retained):
     from demiflow.execution.contracts.record_codec import admit_row_copies
     if record.inline is not None:
         size = admit_row_copies(record.inline, services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained)
-        return _materialize_row(record, services), retained + 2 * size
-    value = _materialize_row(record, services, measured=True, retained=retained)
+        return _materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None)), retained + 2 * size
+    value = _materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None), measured=True, retained=retained)
     size = admit_row_copies(value, services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained)
     return value, retained + size
 
@@ -260,7 +228,7 @@ def invoke_unary(
         from demiflow.execution.storage.arrow_payload import batch_cache
         from demiflow.operators.relational import project_columns
         if record.payload_ref.media_type in ARROW_MEDIA_TYPES:
-            cache = batch_cache(services.store, services.bounds, services=services)
+            cache = batch_cache(services.store, services.bounds, assignment=getattr(services, 'assignment', None))
             batch, _ = cache.locate(record)
             projection = project_columns(batch.schema.names, kind, cfg)
             if projection is not None:
@@ -281,7 +249,7 @@ def invoke_unary(
             current = state_bytes() if state_bytes else 0
             return _output_record(*args, **kwargs, retained=input_bytes + current)
     else:
-        row = _materialize_row(record, services)
+        row = _materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None))
     position = record.source_position
     sequence = record.sequence
     if schemas is None:
@@ -422,7 +390,7 @@ def _callback_table(records, services, *, zero_copy):
     import pyarrow as pa
     from demiflow.execution.contracts.record_codec import _resident_budget
     from demiflow.execution.storage.arrow_payload import batch_cache
-    cache = batch_cache(services.store, services.bounds, services=services)
+    cache = batch_cache(services.store, services.bounds, assignment=getattr(services, 'assignment', None))
     limit = min(services.bounds.max_batch_bytes,
                 _resident_budget(services.bounds, getattr(services, 'assignment', None)))
     pieces = []
@@ -571,7 +539,7 @@ def invoke_batch(
             value, retained = _measured_input(record, services, retained)
             rows.append(value)
     else:
-        rows = [_materialize_row(record, services) for record in records]
+        rows = [_materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None)) for record in records]
     if expected is not None:
         import pyarrow as pa
         from demiflow.data.training_schema import PREDICTION_ROW_ID, validate_columns

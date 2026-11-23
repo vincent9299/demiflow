@@ -9,7 +9,7 @@ from itertools import islice
 from ..contracts.dataflow import Record
 from ..contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.record_codec import record_identity as _hash_id
-from demiflow.execution.kernels.dataflow import _row_bytes
+from demiflow.execution.contracts.record_codec import row_bytes as _row_bytes
 
 
 def hook_owner(kernel):

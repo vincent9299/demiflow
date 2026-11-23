@@ -439,12 +439,12 @@ class TerminalBlocks:
         from demiflow.execution.contracts.record_codec import decode_frame, decode_document, line_limit, read_chunk_bytes
         from demiflow.execution.storage.streams import frame_stream
         from demiflow.execution.storage.streams import read_document
-        from demiflow.execution.kernels.dataflow import _materialize_row
+        from demiflow.execution.storage.streams import materialize_row as _materialize_row
         from demiflow.execution.storage.arrow_payload import ArrowBatchCache
         from demiflow.execution.contracts.record_codec import is_arrow_record
         index_bytes = 0
         stream = None
-        arrow = ArrowBatchCache(self.services.store, self.bounds, services=self.services)
+        arrow = ArrowBatchCache(self.services.store, self.bounds, assignment=getattr(self.services, 'assignment', None))
 
         def reader_bytes():
             return index_bytes + (0 if arrow.ref is None else
@@ -484,7 +484,7 @@ class TerminalBlocks:
                     if size > min(self.bounds.max_row_bytes, self.bounds.max_batch_bytes):
                         raise DataflowError('BUDGET_EXCEEDED', 'aggregate row exceeds its sealed payload budget')
                     if record.inline is not None:
-                        row = _materialize_row(record, self.services)
+                        row = _materialize_row(record, store=self.services.store, bounds=self.services.bounds, assignment=getattr(self.services, 'assignment', None))
                     elif is_arrow_record(record):
                         # IPC authentication, cached parent, and row conversion
                         # share the exact same grant as the aggregate block.

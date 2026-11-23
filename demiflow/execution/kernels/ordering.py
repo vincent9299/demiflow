@@ -30,7 +30,9 @@ from demiflow.execution.contracts.dataflow import (
 from demiflow.execution.contracts.record_codec import _typed_shape, _encode_payload, _decode_payload, _encode_record_document, _decode_record_document
 from demiflow.execution.contracts.dataflow import thaw_record_value
 
-from demiflow.execution.kernels.dataflow import RECORD_MEDIA_TYPE, _check_stop, _cfg, _err, _input_row_bytes, _materialize_row, _occurrence, _seed
+from demiflow.execution.kernels.dataflow import RECORD_MEDIA_TYPE, _check_stop, _cfg, _err, _occurrence, _seed
+from demiflow.execution.contracts.record_codec import input_row_bytes as _input_row_bytes
+from demiflow.execution.storage.streams import materialize_row as _materialize_row
 from demiflow.operators.ordering import shuffle_key_bytes as _shuffle_key_bytes
 
 from demiflow.operators.ordering import MAX_SORT_MERGE_FAN_IN as _MERGE_FAN_IN, SortWindow
@@ -172,7 +174,7 @@ def sort_with_body_references(records, *, spec, services, rows, window, retain, 
         retained = 0
         if row is None:
             if is_arrow_record(record):
-                row = _materialize_row(record, codec)
+                row = _materialize_row(record, store=codec.store, bounds=codec.bounds, assignment=getattr(codec, 'assignment', None))
             else:
                 raw = read_document(record.payload_ref, store, codec.bounds, resident_bytes=stage_resident_bytes(getattr(codec, 'assignment', None)),
                                     _maximum=bounds.max_row_bytes)
@@ -265,7 +267,7 @@ def build_sort_runs(records, *, spec, services, window=None, key_for_record=None
         if sort_keys is not None:
             key, prov = sort_keys(record)
         elif key_for_record is None:
-            row = _materialize_row(record, services)
+            row = _materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None))
             key = _record_sort_key(record, row, spec, services, ordinal=ordinal)
             del row
             prov = _provenance(record)

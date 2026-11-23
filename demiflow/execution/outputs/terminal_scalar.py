@@ -18,7 +18,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.record_codec import (
     canonical_record_json, decode_document, decode_frame, line_limit,
 )
-from demiflow.execution.kernels.dataflow import _materialize_row
+from demiflow.execution.storage.streams import materialize_row as _materialize_row
 
 _FINALIZE_SERVICES = ContextVar("demiflow_kernel_finalize_services", default=None)
 AGGREGATE_RESULT_MEDIA_TYPE = "application/x-demiflow-aggregate-result-v3"
@@ -50,7 +50,7 @@ def terminal_scalar(stream, *, spec, services, schema_ref=None):
             size += record.encoded_bytes
             if kind == 'size_bytes':
                 continue
-            row = _materialize_row(record, services)
+            row = _materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None))
             if not isinstance(row, Mapping):
                 raise DataflowError('INVALID_CONTRACT',
                     kind + ' requires mapping rows; this result contains non-mapping business values')

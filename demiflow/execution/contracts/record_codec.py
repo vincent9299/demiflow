@@ -1889,3 +1889,33 @@ def cast_allocation(table, schema):
         raise RecoveryContractError('Arrow cast schema fields differ')
     return sum(bound(chunk, field.type) for column, field in zip(table.columns, schema)
                for chunk in column.chunks)
+
+
+def dumps_row(row: object, *, max_bytes: int) -> bytes:
+    return _encode_payload(row, max_bytes=max_bytes)
+
+def loads_row(data: bytes) -> object:
+    return _decode_payload(data, max_bytes=max(1, len(data)))
+
+def row_bytes(row: object, *, max_bytes: int) -> int:
+    return len(dumps_row(row, max_bytes=max_bytes))
+
+def input_row_bytes(record: Record) -> int:
+    if record.inline is not None:
+        return record.encoded_bytes
+    if record.payload_ref is not None:
+        if is_arrow_record(record):
+            return record.encoded_bytes
+        return record.payload_ref.size_bytes
+    raise DataflowError("INVALID_CONTRACT", "record carries neither inline nor payload_ref")
+
+def admit_receive(size, bounds, *, resident_bytes=None, retained=0):
+    if type(size) is not int or not 0 <= size <= document_limit(bounds):
+        _frame_budget_error('peer document exceeds frame byte bound')
+    # Bytearray, returned bytes and one bounded recv fragment. The caller
+    # separately retains prior decoded rows / outstanding producer buffers.
+    _admit(retained + 2 * size + min(size, peer_chunk_bytes(bounds)) + 256,
+           resident_limit(bounds, resident_bytes))
+
+def peer_chunk_bytes(bounds):
+    return max(1, min(65536, bounds.max_row_bytes // 4))
