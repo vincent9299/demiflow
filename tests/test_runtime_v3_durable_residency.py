@@ -161,11 +161,42 @@ def test_parked_limit_propagates_real_input_satisfaction(tmp_path):
         assert states[-1]['residency']['satisfied_source_splits']
 
 
-def test_attempt_only_input_cannot_automatically_park(tmp_path):
+def test_attempt_only_input_cannot_automatically_park(tmp_path, monkeypatch):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    with pytest.raises(DataflowError, match='cannot safely park'):
-        with RunContext.start(tmp_path/'run', limits=LIMITS), data.local_execution():
-            data.from_iter(_many_rows).take_all()
+    from runtime_v3_resource_scenarios import observe_execution
+
+    from dataclasses import replace
+    from demiflow.execution import dataflow_api
+    resolve = dataflow_api.resolve_action_runtime
+
+    def unfused(request):
+        policy, bounds = resolve(request)
+        return replace(policy, fusion=False), bounds
+
+    # A genuinely separate source and terminal cannot park this iterator to
+    # share one active worker slot. Check the original safety decision.
+    monkeypatch.setattr(dataflow_api, 'resolve_action_runtime', unfused)
+    with observe_execution(workers=1, memory_bytes=LIMITS['memory_bytes']) as observed:
+        with pytest.raises(DataflowError, match='cannot safely park'):
+            with RunContext.start(tmp_path/'run', limits=LIMITS), data.local_execution(workers=1):
+                data.from_iter(_many_rows).take_all()
+    assert not observed['launches']
+
+
+def test_attempt_only_input_can_complete_in_one_fused_worker(tmp_path):
+    from runtime_v3_resource_scenarios import observe_execution
+
+    def rows():
+        yield from ({'n': n} for n in range(4))
+
+    with observe_execution(workers=1, memory_bytes=LIMITS['memory_bytes']) as observed:
+        with RunContext.start(tmp_path/'run', limits=LIMITS), data.local_execution(workers=1):
+            assert data.from_iter(rows).take_all() == [{'n': n} for n in range(4)]
+    physical = observed['plans'][0]['physical']
+    assert len(physical['stages']) == 1
+    assert [edge['mode'] for edge in physical['exchanges']] == ['memory_incremental']
+    assert len(physical['residency']['simultaneous_groups'][0]) == 1
+    assert observed['charged_peak']['memory_bytes'] + physical['residency']['control_reserved_bytes'] <= LIMITS['memory_bytes']
 
 
 def test_limit_recovery_preserves_actual_closed_input_proof(tmp_path, monkeypatch):

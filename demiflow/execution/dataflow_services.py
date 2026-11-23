@@ -204,6 +204,24 @@ class _VerifiedPrograms(dict):
     native_limits = None
 
 
+def _bind_prediction_program(program, binding, configuration):
+    """Apply the assignment to both the verified declaration and private tasks."""
+    from dataclasses import replace
+    from .contracts.dataflow import thaw_record_value
+
+    def bind(declaration):
+        return replace(declaration, constructor_kwargs={
+            'model': thaw_record_value(binding),
+            'inputs': thaw_record_value(configuration['predict_inputs']),
+            'parameters': thaw_record_value(configuration['predict_parameters'])})
+
+    def load_private():
+        return bind(program.load_private())
+
+    return replace(program, value=bind(program.value),
+                   load_private=load_private if program.load_private is not None else None)
+
+
 def _load_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bounds: Bounds, cache=None) -> dict[str, LoadedProgram]:
     graph, physical, pin = load_sealed_dataflow(assignment.sealed,
         action_id=assignment.action_id, store=store, bounds=bounds)
@@ -226,7 +244,6 @@ def _load_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bou
             live_binding={"run_id": assignment.run_id, "action_id": assignment.action_id,
                           "attempt": assignment.attempt, "fence": assignment.fence})
     if graph.jobs:
-        from dataclasses import replace
         from .contracts.dataflow import thaw_record_value
         from ..data.plan import CallableSpec
         predictors = {n.occurrence_id: n.kernel.configuration for n in graph.nodes
@@ -242,10 +259,7 @@ def _load_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bou
                     or model['snapshot']['model_format'] != config['predict_model_format']
                     or not isinstance(program.value, CallableSpec) or not program.value.is_class):
                 raise DataflowError('CODE_MISMATCH', 'Prediction assignment differs from sealed actor or selector')
-            declaration = replace(program.value, constructor_kwargs={'model': model,
-                'inputs': thaw_record_value(config['predict_inputs']),
-                'parameters': thaw_record_value(config['predict_parameters'])})
-            programs[occurrence] = replace(program, value=declaration)
+            programs[occurrence] = _bind_prediction_program(program, bindings[occurrence], config)
     return programs
 
 

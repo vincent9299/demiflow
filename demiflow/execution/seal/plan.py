@@ -24,10 +24,10 @@ from ...data.plan import CallableSpec, LogicalPlan, MapOp
 from .business_sources import stable_code_identity, plan_code_pin
 from ..contracts.dataflow import (
     ArtifactRef, Bounds, CompiledDataflow, DataflowGraph, LoadedProgram,
-    PhysicalDataflow, ProgramDeclaration, SealedExecution,
+    PhysicalDataflow, ProgramDeclaration, SealedExecution, thaw_json,
 )
 from ..contracts.dataflow_codec import (
-    compute_graph_digest, compute_physical_digest, decode_wire, encode_wire, _thaw_json,
+    compute_graph_digest, compute_physical_digest, decode_wire, encode_wire,
 )
 from ..contracts.dataflow_errors import DataflowError
 from ..identity_bridge import build_identity_bridge
@@ -121,6 +121,7 @@ def _artifact_chunks(store, ref: ArtifactRef, *, media_type: str, max_bytes=None
             raise DataflowError("CORRUPT_ARTIFACT", "Sealed artifact length differs")
         digest.update(chunk)
         yield chunk
+        del chunk
     if size != ref.size_bytes or digest.hexdigest() != ref.digest:
         raise DataflowError("CORRUPT_ARTIFACT", "Sealed artifact length or digest differs")
 
@@ -264,43 +265,6 @@ def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds
     return ref
 
 
-def _owned_factory_declaration(spec):
-    """A class blueprint is durable only when it borrows no mutable state.
-
-    Reuse the existing passive function-state policy for methods and constructor
-    arguments. A serializable external list is still shared caller state; pickle
-    success alone cannot justify replacing it with a disconnected copy.
-    """
-    import types
-    from ..kernels.task_scope import function_residency_kind
-    if spec is None or not spec.is_class:
-        return False
-    immutable = (str, bytes, int, float, bool, type(None))
-    classes = type.__getattribute__(spec.target, '__mro__')
-    if len(classes) > 32:
-        return False
-    visited = 0
-    for cls in classes:
-        if cls is object:
-            continue
-        fields = type.__getattribute__(cls, '__dict__')
-        visited += len(fields)
-        if visited > 1024:
-            return False
-        for name, value in fields.items():
-            if name in {'__dict__', '__weakref__', '__module__', '__doc__', '__qualname__'}:
-                continue
-            if type(value) in (classmethod, staticmethod):
-                value = value.__func__
-            if type(value) is types.FunctionType:
-                args, kwargs = (spec.constructor_args, spec.constructor_kwargs) if name in {'__new__', '__init__'} else (
-                    (spec.call_args, spec.call_kwargs) if name == '__call__' else ((), {}))
-                if function_residency_kind(value, call_args=args, call_kwargs=kwargs) != 'none':
-                    return False
-            elif type(value) not in immutable:
-                return False
-    return True
-
 # -- D015 -----------------------------------------------------------------
 def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
                             store, bounds: Bounds, worker_mode=None) -> DataflowGraph:
@@ -364,8 +328,9 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
         # Unserializable constructors still use the existing attempt-only path;
         # ordinary shared functions/instances must retain their live identity.
         thread_stream = bool(config.get('streaming_map') and config.get('execution') == 'thread')
+        from ..kernels.task_scope import owned_factory_declaration
         owned_factory = (worker_mode == 'thread' and thread_stream
-                         and _owned_factory_declaration(declaration.callable_spec))
+                         and owned_factory_declaration(declaration.callable_spec))
         force_live = bool(worker_mode == 'thread' and (live_iterator
                           or thread_stream and not owned_factory or shared_stream
                           and node.kernel.kind == 'AsyncMapOp' and not config.get('task_batch_rows')))
@@ -380,6 +345,11 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
             from ...planning.dataflow_compile import _plain
             node = replace(node, kernel=replace(node.kernel, state='nonrecoverable',
                 configuration={**_plain(config), 'thread_attempt': True}))
+        elif config.get('task_batch_rows') and not config.get('shared_actor'):
+            from ..kernels.task_scope import task_uses_function_slots
+            if not task_uses_function_slots(_program_value(declaration)):
+                node = replace(node, kernel=replace(node.kernel, configuration={
+                    **thaw_json(config), 'task_load_bytes': manifest['payload_ref']['size_bytes']}))
         nodes.append(replace(node, program_ref=ref))
     jobs = []
     for job in graph.jobs:
@@ -387,7 +357,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
         if declaration is None or declaration.callable_spec is None:
             raise DataflowError("INVALID_CONTRACT", "fit requires an original trainer declaration")
         ref = _stage_one_program(declaration, store=store, bounds=bounds)
-        jobs.append(replace(job, program_ref=ref, configuration=_thaw_json(job.configuration)))
+        jobs.append(replace(job, program_ref=ref, configuration=thaw_json(job.configuration)))
     staged = replace(graph, nodes=tuple(nodes), jobs=tuple(jobs))
     for node in (*staged.nodes, *staged.jobs):
         if node.program_ref is not None and not store.inspect(node.program_ref):
@@ -413,6 +383,7 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
             mount_sources(shared_sources['refs'], shared_sources['imports'], store=store, cache=cache)
         mount_sources(manifest.get('business_sources', {}), code_identity.get('imports', {}),
                       store=store, cache=cache)
+    load_private = None
     if 'thread_attempt' in manifest:
         if 'payload_ref' in manifest:
             raise DataflowError('CORRUPT_ARTIFACT', 'live program cannot also claim a pickle payload')
@@ -426,9 +397,30 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
         cached = shared_cache.get(binding['owner']) if binding and shared_cache is not None else None
         if cached is not None and (cached[0] != payload_ref or cached[1] != binding):
             raise DataflowError('CORRUPT_ARTIFACT', 'Shared actor program bundle differs between members')
-        from ..dataflow_program_pickle import load_payload
-        value = cached[2] if cached is not None else load_payload(
-            _artifact_chunks(store, payload_ref, media_type=PAYLOAD_MEDIA))
+        from ..contracts.dataflow_errors import MAX_MESSAGE_CHARS
+        from ..dataflow_program_pickle import load_payload, load_private_payload
+        occurrence = manifest['occurrence_id']
+
+        def load(*, private=False):
+            if private and payload_ref.size_bytes > bounds.max_resident_bytes:
+                raise DataflowError('RESOURCE_INFEASIBLE', 'Private task program exceeds resident memory',
+                                    context={'occurrence_id': occurrence, 'required_bytes': payload_ref.size_bytes,
+                                             'available_bytes': bounds.max_resident_bytes})
+            try:
+                if private:
+                    return load_private_payload(store, payload_ref)
+                return load_payload(_artifact_chunks(store, payload_ref, media_type=PAYLOAD_MEDIA))
+            except DataflowError as exc:
+                if exc.code not in {'CORRUPT_ARTIFACT', 'INVALID_CONTRACT', 'UNKNOWN_EFFECT'}:
+                    raise
+                detail = f'Program {payload_ref.digest} at {occurrence}: {exc}'
+                raise DataflowError(exc.code, detail[:MAX_MESSAGE_CHARS], retryable=exc.retryable,
+                                    context={'occurrence_id': occurrence, 'payload_digest': payload_ref.digest}) from exc
+
+        value = cached[2] if cached is not None else load()
+        if kind == 'callable' and not binding:
+            from functools import partial
+            load_private = partial(load, private=True)
         if binding:
             if type(value) is not tuple or len(value) != len(binding['members']):
                 raise DataflowError('CORRUPT_ARTIFACT', 'Invalid shared actor program membership')
@@ -438,7 +430,7 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
     if not _matches_original_program(kind, value, code_identity):
         raise DataflowError("INVALID_CONTRACT",
                             "Loaded program code differs from the sealed pin (edited code or wrong module)")
-    return LoadedProgram(kind=kind, value=value, digest=identity(code_identity))
+    return LoadedProgram(kind=kind, value=value, digest=identity(code_identity), load_private=load_private)
 
 
 def verify_completed_live_program(ref, *, expected_pin, declaration, store, bounds):

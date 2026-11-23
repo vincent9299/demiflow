@@ -22,7 +22,7 @@ def test_all_navigation_resize_ellipsis_and_retained_width(project,tmp_path,brow
     index=tmp_path/'registry.json';registry.add(index,project)
     with service(None,registry=index) as app,opened(browser,app) as (page,requests):
         page.set_viewport_size(dict(width=1440,height=900))
-        for kind,rail,label in [('development','.development-session-sidebar','会话目录'),('operators','.op-tree','算子目录'),('flows','.wb-flow-navigation','管道目录'),('monitor','.wb-history','运行目录'),('tables','.data-dictionary','数据字典目录'),('overview','.document-directory','文档目录')]:
+        for kind,rail,label in [('development','.development-session-sidebar','会话目录'),('operators','.op-tree','算子目录'),('flows','.wb-flow-navigation','管道目录'),('tables','.data-dictionary','数据字典目录'),('overview','.document-directory','文档目录')]:
             page.locator(f'.function-nav [data-page={kind}]').click()
             page.wait_for_function('(kind)=>{const v=JSON.parse(new URLSearchParams(location.hash.slice(1)).get("view")||"{}");return (v.panel||v.kind)===kind;}',arg=kind)
             sidebar=page.locator(rail);expect(sidebar).to_be_visible()
@@ -54,10 +54,10 @@ def test_all_navigation_resize_ellipsis_and_retained_width(project,tmp_path,brow
                 page.set_viewport_size(dict(width=width,height=900))
                 page.evaluate('() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
                 if kind=='development' and not sidebar.is_visible():page.get_by_role('button',name='会话列表',exact=True).click()
-                if kind=='monitor' and width==390:
+                if kind=='flows' and width==390:
                     expect(sidebar).to_be_hidden()
                     expect(separator).to_be_hidden()
-                    reopen=page.get_by_role('button',name='运行目录',exact=True)
+                    reopen=page.get_by_role('button',name='管道目录',exact=True)
                     expect(reopen).to_have_attribute('aria-expanded','false')
                     reopen.click()
                     expect(reopen).to_have_attribute('aria-expanded','true')

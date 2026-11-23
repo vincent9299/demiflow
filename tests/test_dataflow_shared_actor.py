@@ -74,8 +74,8 @@ def capture_images(monkeypatch):
     return traces
 
 
-def build(actor, *, second=None, api=data):
-    return api.from_items([{'id': i} for i in range(12)]).map_async(actor, concurrency=3).map_async(
+def build(actor, *, second=None, api=data, concurrency=3):
+    return api.from_items([{'id': i} for i in range(12)]).map_async(actor, concurrency=concurrency).map_async(
         identity, concurrency=2).map_async(actor if second is None else second, concurrency=2)
 
 
@@ -125,6 +125,20 @@ def test_shared_actor_default_public_entry_fits_original_budget(tmp_path):
     events = [json.loads(v) for v in Path(actor.log).read_text().splitlines()]
     assert [v['event'] for v in events].count('start') == 1
     assert events[-1] == {'event': 'close', 'count': 24}
+
+
+def test_shared_actor_limited_collection_stops_its_live_upstream(tmp_path):
+    class Observed(Counter):
+        async def __call__(self, row):
+            self.record('call', row=row['id'])
+            return await super().__call__(row)
+    actor = Observed(tmp_path/'events')
+    with pytest.raises(ValueError, match='more than the take_all limit'):
+        with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 4}):
+            build(actor).take_all(limit=1)
+    events = [json.loads(v) for v in Path(actor.log).read_text().splitlines()]
+    seen = {event['row'] for event in events if event['event'] == 'call'}
+    assert 0 < len(seen) < 12
 
 
 @pytest.mark.parametrize('worker_mode', ['thread', 'process'])
@@ -177,7 +191,7 @@ def test_shared_explicit_infeasible_grant_rejects_before_start(tmp_path):
     with pytest.raises(DataflowError, match='Shared actor closure') as error:
         with RunContext.start(tmp_path/'run', limits={'max_row_bytes': 16*1024**2,
                 'max_batch_bytes': 16*1024**2}), data.local_execution(worker_mode='thread', workers=3, partitions=1):
-            build(actor).materialize()
+            build(actor, concurrency=4).materialize()
     assert error.value.code == 'BUDGET_EXCEEDED'
     assert not Path(actor.log).exists()
 

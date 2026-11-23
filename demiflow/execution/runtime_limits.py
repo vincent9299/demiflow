@@ -15,6 +15,20 @@ RECOVERY_LIMITS = dict(max_state_bytes=16 * 1024**2, max_control_bytes=64 * 1024
                        checkpoint_unconfirmed_rows=4096, checkpoint_unconfirmed_bytes=64 * 1024**2)
 
 
+def declared_limit_keys(values, explicit):
+    """A full admitted envelope may carry a smaller set of caller declarations."""
+    from .recovery_contract import RecoveryContractError
+    if values is not None and type(values) is not dict:
+        raise RecoveryContractError('Unknown execution budget')
+    keys = frozenset(values or ())
+    if explicit is None:
+        return keys
+    declared = frozenset(explicit)
+    if not declared <= keys:
+        raise RecoveryContractError("Explicit execution budgets must have admitted values")
+    return declared
+
+
 def execution_limits(values=None):
     from .recovery_contract import RecoveryContractError
     result = {**DEFAULT_LIMITS, **RECOVERY_LIMITS}

@@ -76,6 +76,7 @@ def test_native_multiple_runs_select_graph_logs_outputs_and_discard_late_deliver
         pipeline(page)
         submit_run(page)
         first=run_finished(page)
+        assert runs.journal(isolated,first).recovery_identity()['limits_explicit'] == sorted(ws.read_control(isolated/'workspace.json').get('budgets', {}))
         assert runs.show(isolated,first)['outputs'][0]['result']['ref']['row_count']==2
         expect(page.locator('.wb-basis')).to_contain_text('封存运行图')
         assert page.locator('.wb-node[data-state=success]').count()>0
@@ -257,6 +258,7 @@ def run(*, source, target):
         page.get_by_label('本次运行秒数上限').fill('77')
         submit_run(page)
         run_id=run_finished(page)
+        assert 'timeout_s' in runs.journal(isolated,run_id).recovery_identity()['limits_explicit']
         performance=page.get_by_role('button',name='性能趋势 · 整次运行')
         expect(page.locator('.wb-run-seal')).to_be_hidden()
         performance.click()

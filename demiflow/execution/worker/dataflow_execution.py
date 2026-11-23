@@ -36,16 +36,18 @@ _EVENT_SCHEMA = "demiflow.dataflow_event.v3"
 _MAX_LOCAL_EVENTS = 4096
 
 
-class _FiniteServices:
-    """Borrow the original ports/data; override only pure computation's stop.
+class _KernelServices:
+    """Borrow the original ports/data with a kernel's stop check and physical grant.
 
     Do not rebuild RuntimeServices: its validation copies constants/program
     mappings, whereas this invocation-local view adds only two references.
     """
-    __slots__ = ('_original', 'check_stop')
+    __slots__ = ('_original', 'check_stop', 'bounds', 'measured_workspace')
 
-    def __init__(self, original, check_stop):
+    def __init__(self, original, check_stop, bounds=None):
         self._original, self.check_stop = original, check_stop
+        self.bounds = original.bounds if bounds is None else bounds
+        self.measured_workspace = bounds is not None
 
     def __getattr__(self, name):
         return getattr(self._original, name)
@@ -198,6 +200,9 @@ class DataflowWorkerExecutor:
                     raise _dataflow_error("CODE_MISMATCH", "loaded plan_id differs from assignment")
                 if physical.plan_revision != assignment.plan_revision:
                     raise _dataflow_error("FENCED", "loaded plan_revision differs from assignment")
+                sealed_stages = {s.stage_id: s for s in physical.stages}
+                if any(sealed_stages.get(stage.stage_id) != stage for stage in assignment.stages):
+                    raise _dataflow_error("CODE_MISMATCH", "worker stage differs from its sealed physical plan")
                 programs = self._services.programs
                 owned = {occurrence for stage in assignment.stages for occurrence in stage.occurrences}
                 if set(programs) != set(pin["programs"]).intersection(owned):
@@ -237,12 +242,15 @@ class DataflowWorkerExecutor:
     def _prepare_factories(self, assignment, graph, physical):
         if bool(graph.jobs) != (assignment.model_bindings is not None):
             raise _dataflow_error("INVALID_CONTRACT", "worker assignment version differs from sealed graph")
-        assigned = set()
-        for stage in assignment.stages:
-            assigned.update(stage.occurrences)
+        assigned = {occ: stage for stage in assignment.stages for occ in stage.occurrences}
         node_specs = {}
         for node in graph.nodes:
             if node.occurrence_id in assigned:
+                windows = assigned[node.occurrence_id].kernel_memory_bytes or {}
+                memory = windows.get(node.occurrence_id)
+                if memory is not None:
+                    from dataclasses import replace
+                    node = replace(node, kernel=node.kernel.with_memory_bytes(memory, sealed_bounds=physical.bounds))
                 node_specs[node.occurrence_id] = node
         if not node_specs:
             raise _dataflow_error("INVALID_CONTRACT", "no assigned occurrences found in graph")
@@ -252,6 +260,13 @@ class DataflowWorkerExecutor:
         for split in assignment.source_splits:
             self._split_by_source.setdefault(split.source_id, []).append(split)
         self._snapshot_by_source = {snap.source_id: snap for snap in physical.sources}
+
+    @staticmethod
+    def _measured_services(spec, services):
+        from dataclasses import replace
+        working = spec.profile.requests['memory_bytes'] - spec.configuration.get('task_load_bytes', 0)
+        bounded = replace(services.bounds, max_resident_bytes=min(working, services.bounds.max_resident_bytes))
+        return _KernelServices(services, services.check_stop, bounded)
 
     def _cleanup_cache(self):
         if self._cache is not None and self._cache.exists():
@@ -313,7 +328,7 @@ class DataflowWorkerExecutor:
             # Pure finite scans observe executor cancellation. Callable/native
             # persistence keeps its original service and admitted-effect drain.
             # This view shares the same authenticated ports/grant/assignment.
-            self._finite_services = _FiniteServices(self._services, self._check_finite_stop)
+            self._finite_services = _KernelServices(self._services, self._check_finite_stop)
             self._source_run = source_run_view(self._services, limits=facts['limits'])
             with source_run_scope(self._source_run):
                 assignment = self.assignment
@@ -326,9 +341,13 @@ class DataflowWorkerExecutor:
                 for occ, spec in self._kernel_specs.items():
                     if self._node_specs[occ].kind in ("source", "terminal"):
                         continue
+                    services, finite = self._services, self._finite_services
+                    if spec.uses_measured_workspace(self._physical.bounds):
+                        services = self._measured_services(spec, services)
+                        finite = self._measured_services(spec, finite)
                     for partition in assignment.lease.partition_ids:
-                        kernel = make_kernel(spec, services=self._services, partition_id=partition,
-                                             finite_services=self._finite_services)
+                        kernel = make_kernel(spec, services=services, partition_id=partition,
+                                             finite_services=finite)
                         if occ in shared:
                             kernel._shared_actor = shared[occ]
                         self._kernels[(occ, partition)] = kernel
@@ -365,11 +384,14 @@ class DataflowWorkerExecutor:
                     if snapshot is None:
                         raise _dataflow_error("SOURCE_CHANGED", "no snapshot for assigned source",
                                               context={"source_id": source_id})
+                    spec = self._kernel_specs[source_id]
+                    services = self._services
+                    if spec.uses_measured_workspace(self._physical.bounds):
+                        services = self._measured_services(spec, services)
                     for split in splits:
                         cursor = self._restored_cursors.get(split.split_id)
                         with source_run_scope(self._source_run):
-                            reader = open_source_reader(snapshot, split, cursor=cursor,
-                                                        services=self._services)
+                            reader = open_source_reader(snapshot, split, cursor=cursor, services=services)
                         self._readers[split.split_id] = reader
                 if self._channels is None:
                     self._channels = open_channels(self._input_specs + self._output_specs,

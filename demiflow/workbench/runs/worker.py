@@ -129,16 +129,13 @@ def _execute(root, run_id, run, attempt=None):
             operators=report['operators'], source_root=source, resource_root=target, work_root=work, limits=limits,
             record=record, check_stop=check_stop, observe=run.observe_nodes,
             targets=report['binding']['targets'], report_digest=manifest['report_digest'])
-        native = dict(memory_bytes=limits['memory_bytes'], max_rss_bytes=limits['max_rss_bytes'] // 2,
-            max_scratch_bytes=limits['max_scratch_bytes'], max_row_bytes=limits['max_row_bytes'],
-            batch_rows=limits['batch_rows'], threads=2, partitions=1,
-            timeout_s=min(3600, limits['timeout_s']), admission_timeout_s=limits['admission_timeout_s'])
+        from demiflow.workbench.pipeline_policy import native_limits
         # Use the unified bounded host default; the manifest still owns all resource ceilings.
         with RunContext.attach(run, entry_identity=manifest.get('source_digest'), training_project_root=root,
-                limits=manifest['limits'], check_stop=check_stop), local_execution(
+                limits=manifest['limits'], explicit_limits=manifest.get('limits_explicit'), check_stop=check_stop), local_execution(
                 worker_mode=(manifest.get('native_execution') or {}).get('worker_mode', 'thread'), partitions=1,
                 batch_rows=limits['batch_rows'], memory_bytes=limits['memory_bytes'],
-                temp_directory=str(work), native_resources=native, resource_root=source,
+                temp_directory=str(work), inherited_native_resources=native_limits(limits), resource_root=source,
                 diagnostics_root=target / 'diagnostics', block_size=limits['batch_rows']):
             with context.bind_context():
                 entry(**report['binding']['arguments'])

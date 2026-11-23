@@ -76,9 +76,9 @@ def test_tabs_restore_exact_run_version_and_project_despite_late_response(owned_
     other=console.create(fx.registry,fx.tmp_path/'other-project',name='Tab isolation project')['workspace_id']
     run_id=fx.run_facts['run_id'];vf=fx.version_facts
     with tab_page(fx,browser) as (page,requests):
-        # The current run module owns sealed-run navigation. Current pipeline
-        # configuration no longer doubles as the historical monitoring page.
-        tab(page,'运行')
+        # The unified pipeline tab owns both current definition and sealed runs.
+        tab(page,'管道')
+        page.locator('.wb-context-switch').get_by_role('button',name='运行记录',exact=True).click()
         page.get_by_label('运行记录',exact=True).select_option(run_id)
         page.locator('.wb-node').first.click()
         run_ref=reference(page)
@@ -95,7 +95,7 @@ def test_tabs_restore_exact_run_version_and_project_despite_late_response(owned_
         expect_reference(page,fixed_ref)
 
         # Return to this exact run and attempt, rather than a current source graph.
-        tab(page,'运行')
+        tab(page,'管道')
         expect_reference(page,run_ref)
         expect(page.locator('.wb-node.selected')).to_have_count(1)
         tab(page,'数据');expect_reference(page,fixed_ref)
@@ -117,12 +117,12 @@ def test_tabs_restore_exact_run_version_and_project_despite_late_response(owned_
             return response;
           };
         }''',run_id)
-        tab(page,'运行');page.wait_for_function('() => tabLate.held')
+        tab(page,'管道');page.wait_for_function('() => tabLate.held')
         tab(page,'Readme');expect(page.locator('#project-readme')).to_be_visible()
         readme_ref=reference(page)
         page.evaluate('() => releaseTabGraph()');page.wait_for_function('() => tabLate.returned')
         expect_reference(page,readme_ref)
-        tab(page,'运行');expect_reference(page,run_ref)
+        tab(page,'管道');expect_reference(page,run_ref)
         expect(page.locator('.wb-node.selected')).to_have_count(1)
 
         # A separate project gets its own default page; returning restores A's
@@ -136,8 +136,8 @@ def test_tabs_restore_exact_run_version_and_project_despite_late_response(owned_
         expect_reference(page,run_ref)
         tab(page,'数据');expect_reference(page,fixed_ref)
         expect(page.locator('.dictionary-table[open] .dictionary-version')).to_contain_text('v1')
-        tab(page,'运行');expect_reference(page,run_ref)
-        assert not [item for item in requests if item['method']=='POST'],requests
+        tab(page,'管道');expect_reference(page,run_ref)
+        assert not [item for item in requests if item['method']=='POST' and not item['url'].endswith('/plan-preview')],requests
         fx.record('tab-restore-facts',dict(run=run_ref,fixed_version=fixed_ref,other_project=other,
                   late_real_graph_rejected=True,post_requests=0))
 
@@ -148,10 +148,10 @@ def test_flows_tab_never_inherits_run_and_clears_settled_pending_intent(owned_fi
     run_id=fx.run_facts['run_id']
     attempt=fx.run_facts['attempt']
     with tab_page(fx,browser) as (page,_):
-        # 1. Open a historical run on monitor, leave to a non-pipeline tab, then
-        # return directly to 管道. 管道 must stay a clean flow view (enabled
-        # sidebar + action buttons), never a hybrid run view.
-        tab(page,'运行')
+        # 1. Open a historical run inside 管道, leave to a non-pipeline tab, then
+        # return to 管道 (restoring the run), and switch to 当前 for a clean flow view.
+        tab(page,'管道')
+        page.locator('.wb-context-switch').get_by_role('button',name='运行记录',exact=True).click()
         page.get_by_label('运行记录',exact=True).select_option(run_id)
         expect(page.locator('.wb-node')).not_to_have_count(0)
         run_ref=reference(page)
@@ -161,18 +161,16 @@ def test_flows_tab_never_inherits_run_and_clears_settled_pending_intent(owned_fi
         expect(page.locator('.data-dictionary')).to_be_visible()
 
         tab(page,'管道')
+        expect_reference(page,run_ref)
+
+        page.locator('.wb-context-switch').get_by_role('button',name='当前',exact=True).click()
         expect(page.locator('.wb-flow-record').first).to_be_visible()
         expect(page.locator('.wb-flow-record').first).to_be_enabled()
         expect(page.locator('.wb-actions').get_by_role('button',name='运行',exact=True)).to_be_visible()
-        expect(page.locator('.wb-actions').get_by_role('button',name='业务参数',exact=True)).to_be_visible()
+        expect(page.locator('.wb-flow-tabs').get_by_role('button',name='业务参数',exact=True)).to_be_visible()
         page.wait_for_function("()=>ForgeView.decodeView(location.hash)?.kind==='flows'")
         flow_ref=reference(page)
         assert flow_ref['kind']=='flows' and flow_ref.get('panel')=='flows'
-
-        # Monitor tab still retains its own run locator independently.
-        tab(page,'数据')
-        tab(page,'运行')
-        expect_reference(page,run_ref)
 
         # 2. A stale hash combining kind=run with panel=flows must still open a
         # clean 管道 view without locking the flow sidebar.

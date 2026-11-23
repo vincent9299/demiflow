@@ -56,7 +56,7 @@ def test_every_key_the_corpus_produces_has_one_writer(graphs):
                             if key not in owned and key not in schema.COMPILER_KEYS}
     assert unexplained == set()
     stages = {key.stage for key in schema.COMPILER_KEYS.values()}
-    assert stages == {'capture', 'lowering', 'budget', 'graph', 'shared'}
+    assert stages == {'capture', 'lowering', 'budget', 'graph', 'shared', 'seal'}
 
 
 def test_names_owned_by_other_modules_are_mirrored_exactly():

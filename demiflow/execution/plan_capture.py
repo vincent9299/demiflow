@@ -31,12 +31,11 @@ class CompileContext:
     fence = None
     attempt = 0
     ref = None
-    explicit_limits = ()
 
-    def __init__(self, limits=None):
-        from .runtime_limits import execution_limits
+    def __init__(self, limits=None, explicit_limits=None):
+        from .runtime_limits import execution_limits, declared_limit_keys
         self._limits = execution_limits(limits)
-        self.explicit_limits = tuple(limits or ())
+        self.explicit_limits = declared_limit_keys(limits, explicit_limits)
 
     @property
     def limits(self):
@@ -59,9 +58,9 @@ class CapturedAction:
 
 
 class _Capture:
-    def __init__(self, on_compiled=None, *, action_id='preview', limits=None, submission=False):
+    def __init__(self, on_compiled=None, *, action_id='preview', limits=None, explicit_limits=None, submission=False):
         self.result = None
-        self.context = CompileContext(limits)
+        self.context = CompileContext(limits, explicit_limits)
         self.on_compiled = on_compiled
         self.action_id = action_id
         self.submission = submission
@@ -80,7 +79,7 @@ class _Capture:
         raise _Captured()
 
 
-def capture_pipeline(entry, arguments, *, on_compiled=None, _submission=False, _limits=None) -> CapturedAction:
+def capture_pipeline(entry, arguments, *, on_compiled=None, limits=None, explicit_limits=None, _submission=False) -> CapturedAction:
     """Compile the exact first action request from a trusted callable and kwargs.
 
     The same make_action_request/resolve_action_runtime/lower_action functions
@@ -103,7 +102,7 @@ def capture_pipeline(entry, arguments, *, on_compiled=None, _submission=False, _
     if current_capture() is not None or current_run() is not None or current_checked() is not None:
         raise DataflowError('INVALID_CONTRACT', 'plan capture cannot nest inside execution or another capture')
     capture = _Capture(on_compiled, action_id='action-1' if _submission else 'preview',
-                       limits=_limits, submission=_submission)
+                       limits=limits, explicit_limits=explicit_limits, submission=_submission)
     token = _CURRENT.set(capture)
     try:
         try:

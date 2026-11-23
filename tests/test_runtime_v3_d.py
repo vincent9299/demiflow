@@ -592,6 +592,10 @@ class FakeStore:
             raise DataflowError("BUDGET_EXCEEDED", "store read exceeds budget")
         yield raw
 
+    def read_into(self, ref, destination):
+        with self._path(ref.key).open("rb") as stream:
+            assert stream.readinto(destination) == ref.size_bytes
+
     def inspect(self, ref):
         return self._path(ref.key).is_file()
 
@@ -1333,6 +1337,97 @@ def test_program_size_is_independent_of_checkpoint_state(env, shared):
                                                store=env.store, bounds=bounds, shared_cache=cache)
         assert program.value.instantiate()({"index": 100_000}) == {"value": ord("x")}
     assert len(cache) == int(shared)
+
+
+@pytest.mark.parametrize("opaque", [False, True], ids=["function-slots", "sealed-private-class"])
+def test_private_task_loads_large_program_with_small_checkpoint(env, opaque):
+    from test_runtime_v3_k import services, spec, InputPort, rec, rows_of
+    from demiflow.execution.kernels.operator import OperatorKernel
+
+    bounds = replace(make_bounds(), max_state_bytes=9661)
+    graph = make_graph(kinds=("transform",))
+    original = graph.nodes[0]
+    key = original.occurrence_id
+    policy = spec("MapOp", {"program": key, "task_batch_rows": 2},
+                  state="adapter", inputs=[InputPort("input", "incremental")])
+    graph = replace(graph, nodes=(replace(original, kernel=policy),))
+    lookup = "x" * (128 * 1024)
+    count = [0]
+
+    def lookup_row(row):
+        count[0] += 1
+        return {"count": count[0], "size": len(lookup)}
+
+    class Lookup:
+        def __init__(self, lookup):
+            self.size = len(lookup)
+            self.count = 0
+
+        def __call__(self, row):
+            self.count += 1
+            return {"count": self.count, "size": self.size}
+
+    declaration = CallableSpec.create(Lookup, fn_constructor_args=[lookup]) if opaque else CallableSpec.create(lookup_row)
+    compiled = CompiledDataflow(graph=graph, declarations=(ProgramDeclaration(
+        occurrence_id=key, callable_spec=declaration, source_spec=None,
+        action_program=None, code_identity={}),))
+    node, = seal.stage_dataflow_programs(compiled, action=env.action, store=env.store, bounds=bounds).nodes
+    manifest = _program_manifest(env.store, node.program_ref, bounds)
+    payload = seal._artifact_from_json(manifest["payload_ref"])
+    assert payload.size_bytes > bounds.max_state_bytes
+    assert node.kernel.configuration.get("task_load_bytes") == (payload.size_bytes if opaque else None)
+    program = seal.verify_dataflow_program(node.program_ref, expected_pin=manifest["code_identity"],
+                                           store=env.store, bounds=bounds)
+    kernel = OperatorKernel(node.kernel, services=services(programs={key: program}, bounds=bounds),
+                            partition_id="p0")
+    observed = []
+    try:
+        kernel.start()
+        if opaque:
+            assert kernel._instance is None
+        for i in range(3):
+            observed.extend(rows_of(kernel.push("input", rec({"i": i}, sequence=i))))
+            assert kernel.snapshot().size_bytes <= bounds.max_state_bytes
+    finally:
+        kernel.close()
+    assert observed == [{"count": n, "size": len(lookup)} for n in (1, 2, 1)]
+    # Even a same-length modification is rejected on the next opaque task load.
+    if opaque:
+        tighter = replace(bounds, max_resident_bytes=payload.size_bytes - 1)
+        denied = seal.verify_dataflow_program(node.program_ref, expected_pin=manifest["code_identity"],
+                                              store=env.store, bounds=tighter)
+        _code_error(denied.load_private, "RESOURCE_INFEASIBLE")
+        raw = env.store._path(payload.key).read_bytes()
+        env.store.tamper(payload, raw[:-1] + bytes([raw[-1] ^ 1]))
+        with pytest.raises(DataflowError, match=payload.digest) as corrupted:
+            program.load_private()
+        assert corrupted.value.code == 'CORRUPT_ARTIFACT'
+        assert corrupted.value.context['occurrence_id'] == key
+        assert corrupted.value.__cause__ is not None
+
+
+def test_private_payload_reuses_sealed_buffer_at_tighter_live_windows(tmp_path):
+    from demiflow.execution.storage.objects import RunArtifactStore
+    from types import SimpleNamespace
+    import hashlib
+
+    # Verify the reader that both local and Ray workers use. Shrinking the
+    # window after sealing must only change each individual readinto extent.
+    data = b'x' * ((1 << 20) + 7)
+    for size in (64 << 10, (1 << 20) + 7):
+        raw = data[:size]
+        digest = hashlib.sha256(raw).hexdigest()
+        (tmp_path / digest).write_bytes(raw)
+        ref = ArtifactRef(digest, size, "test", digest, seal.PAYLOAD_MEDIA)
+        for window in (2 << 20, 64 << 10, 32 << 10):
+            bounds = replace(make_bounds(), max_row_bytes=window)
+            store = SimpleNamespace(_bounds=bounds, _object_path=lambda ref: tmp_path / ref.digest)
+            destination = bytearray(size)
+            total = 0
+            for chunk in RunArtifactStore._read(store, ref, max_bytes=size, destination=destination):
+                assert chunk.obj is destination and len(chunk) <= window
+                total += len(chunk)
+            assert total == size and destination == raw
 
 
 # --- D016 -------------------------------------------------------------------

@@ -18,9 +18,9 @@ def test_real_block_switch_does_not_hold_extra_wire_during_old_tail_flush(tmp_pa
         from demiflow.execution.dataflow_segments import RECORDS_MEDIA
         from demiflow.execution.dataflow_scratch import ScratchStream
         if getattr(TerminalBlocks, '_owned_flush_trace', None) != trace:
-            append, put, read = TerminalBlocks.append, RunArtifactStore.put, ScratchStream.read
+            append, put, read = TerminalBlocks.append_parts, RunArtifactStore.put, ScratchStream.read
             active = {}
-            def appended(blocks, record, raw):
+            def appended(blocks, record, chunks, *, size):
                 tag = record.block_partition if blocks.partitioned else None
                 key = ((tag.occurrence_id, tag.index) if tag is not None
                        else (blocks.partition_id, -1))
@@ -30,13 +30,13 @@ def test_real_block_switch_does_not_hold_extra_wire_during_old_tail_flush(tmp_pa
                     # substitute or bypass the original scratch/store writer.
                     frame = sys._getframe(1)
                     wire = frame.f_locals.get('delivery_raw')
-                    active.update(tail_id=id(blocks._tail), spool_bytes=len(raw),
+                    active.update(tail_id=id(blocks._tail), spool_bytes=size,
                         row_window=blocks.bounds.max_row_bytes, batch_window=blocks.bounds.max_batch_bytes,
                         held_wire_bytes=len(wire) if type(wire) is bytes else 0,
                         payload_window=blocks.bounds.max_batch_bytes + blocks.bounds.max_row_bytes)
                     del frame, wire
                 try:
-                    return append(blocks, record, raw)
+                    return append(blocks, record, chunks, size=size)
                 finally:
                     active.clear()
             def stored(store, chunks, *, max_bytes, media_type):
@@ -47,42 +47,41 @@ def test_real_block_switch_does_not_hold_extra_wire_during_old_tail_flush(tmp_pa
                             with open(trace, 'a') as output:
                                 output.write(json.dumps({**active, 'old_tail_chunk_bytes': len(chunk)}) + '\n')
                             yield chunk
+                            del chunk
                     chunks = observed_chunks()
                 return put(store, chunks, max_bytes=max_bytes, media_type=media_type)
             def read_tail(stream, count=-1):
-                previous_id, previous = None, 0
+                previous = {}
                 observing = bool(active and id(stream) == active['tail_id'])
                 if observing:
-                    # The original writer still holds its previous chunk/view
-                    # while it asks the generator for the next scratch read.
+                    # Include both the tail generator preparing the next read and
+                    # the artifact writer. Their references may alias one buffer.
                     frame = sys._getframe(1)
                     for _ in range(12):
                         if frame is None:
                             break
-                        if frame.f_code.co_name == '_put_owned':
+                        if frame.f_code.co_name in {'chunks', '_put_owned'}:
                             chunk = frame.f_locals.get('chunk')
                             if type(chunk) is bytes:
-                                previous = len(chunk)
-                                previous_id = id(chunk)
+                                previous[id(chunk)] = len(chunk)
                             del chunk
-                            break
+                            if frame.f_code.co_name == '_put_owned':
+                                break
                         frame = frame.f_back
                     del frame
                 # Inspect before reading so the observer never retains a stale
                 # frame-local snapshot across the next physical allocation.
                 raw = read(stream, count)
                 if observing and raw:
-                    live = {id(raw): len(raw)}
-                    if previous_id is not None:
-                        live[previous_id] = previous
+                    live = {**previous, id(raw): len(raw)}
                     with open(read_trace, 'a') as output:
                         output.write(json.dumps({**active, 'current_chunk_bytes': len(raw),
-                            'previous_chunk_bytes': previous, 'live_tail_bytes': sum(live.values()),
+                            'previous_chunk_bytes': sum(previous.values()), 'live_tail_bytes': sum(live.values()),
                             'scratch_io_window': stream._io}) + '\n')
                 return raw
             ScratchStream.read = read_tail
             TerminalBlocks._owned_flush_trace = trace
-            TerminalBlocks.append = appended
+            TerminalBlocks.append_parts = appended
             RunArtifactStore.put = stored
         return row
 

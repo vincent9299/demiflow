@@ -168,6 +168,12 @@ def test_b002(tmp_path, monkeypatch):
         wrong_plan = env.make(load=False)
         with pytest.raises(DataflowError, match='FENCED'):
             wrong_plan.worker.load(replace(wrong_plan.assignment, plan_id='f' * 64))
+        changed = env.make(load=False)
+        stage = changed.assignment.stages[0]
+        windows = None if stage.kernel_memory_bytes else {stage.occurrences[0]: 1}
+        with pytest.raises(DataflowError, match='stage differs from its sealed physical plan'):
+            changed.worker.load(replace(changed.assignment,
+                stages=(replace(stage, kernel_memory_bytes=windows),)))
         bad = env.make(load=False)
         pin_ref = bad.assignment.sealed.code_pin_ref
         pin = json.loads(b''.join(env.driver.store.read(pin_ref, max_bytes=env.driver.bounds.max_control_bytes)))

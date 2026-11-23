@@ -558,6 +558,9 @@ class DataflowExecution:
                 self._checked.bind_observation_scope(
                     report_key, plan_id=physical.plan_id, dag_id=graph.dag_id,
                     plan_revision=physical.plan_revision, occurrence_id=occurrence)
+        from ..dataflow_publication_budget import PublicationReservation, with_publication_workspace
+        publication_reservation = PublicationReservation(graph, physical.stages, physical.bounds,
+            declared=physical.residency.control_reserved_bytes)
         from ..dataflow_sinks import make_sink_adapter
         for node in graph.nodes:
             if node.kind == "terminal":
@@ -566,7 +569,8 @@ class DataflowExecution:
                         node.kernel, services=self._services)
                 elif self._request.kind in ("write_lance", "write_datasink", "write_file"):
                     from ..dataflow_sinks import make_native_terminal_sink
-                    self._sinks[node.kernel.kind] = make_native_terminal_sink(node.kernel,
+                    self._sinks[node.kernel.kind] = make_native_terminal_sink(
+                        with_publication_workspace(node.kernel, publication_reservation.bytes),
                         request=self._request, services=self._services,
                         publication_reserved_bytes=physical.residency.control_reserved_bytes,
                         admit_publication=lambda: self._scheduler.admit_publication())
@@ -589,9 +593,6 @@ class DataflowExecution:
         self._sealed = sealed
         from ..dataflow_managed_devices import sealed_service_placements
         placements = sealed_service_placements(graph, physical, store=self._store)
-        from ..dataflow_publication_budget import PublicationReservation
-        publication_reservation = PublicationReservation(graph, physical.stages, physical.bounds,
-            declared=physical.residency.control_reserved_bytes)
         from ..contracts.dataflow_codec import runtime_scope_id
         self._scheduler = DataflowScheduler(physical, resources=self._services.resources, sealed=sealed,
             placements=placements, publication_reservation=publication_reservation,

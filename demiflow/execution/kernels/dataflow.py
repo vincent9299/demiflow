@@ -166,7 +166,7 @@ def _input_row_bytes(record: Record) -> int:
     raise _err("INVALID_CONTRACT", "record carries neither inline nor payload_ref")
 
 
-def _materialize_row(record: Record, services: RuntimeServices) -> object:
+def _materialize_row(record: Record, services: RuntimeServices, *, measured=False, retained=0) -> object:
     if (record.inline is None) == (record.payload_ref is None):
         raise _err("INVALID_CONTRACT", "record must carry exactly one of inline/payload_ref")
     if record.inline is not None:
@@ -178,10 +178,25 @@ def _materialize_row(record: Record, services: RuntimeServices) -> object:
     limit = services.bounds.max_row_bytes
     if ref.size_bytes > limit:
         raise _err("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", size=ref.size_bytes)
+    if measured:
+        from ..dataflow_record_frames import admit_receive, admit_workspace, raw_workspace
+        admit_receive(ref.size_bytes, services.bounds, services=services, retained=retained)
     data = b"".join(services.store.read(ref, max_bytes=limit))
+    if measured:
+        admit_workspace(raw_workspace(data), services.bounds, services=services, retained=retained)
     if len(data) > limit:
         raise _err("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", size=len(data))
     return _loads_row(data)
+
+
+def _measured_input(record, services, retained):
+    from ..dataflow_record_frames import admit_row_copies
+    if record.inline is not None:
+        size = admit_row_copies(record.inline, services.bounds, services=services, retained=retained)
+        return _materialize_row(record, services), retained + 2 * size
+    value = _materialize_row(record, services, measured=True, retained=retained)
+    size = admit_row_copies(value, services.bounds, services=services, retained=retained)
+    return value, retained + size
 
 
 def _output_record(
@@ -190,8 +205,11 @@ def _output_record(
     row: object,
     sequence: int,
     services: RuntimeServices,
-    *, schema_ref=None,
+    *, schema_ref=None, retained=None,
 ) -> Record:
+    if retained is not None:
+        from ..dataflow_record_frames import admit_row_copies
+        admit_row_copies(row, services.bounds, services=services, retained=retained)
     from ..exchange.dataflow_bridge import _encode_payload
     from ..contracts.dataflow_codec import _thaw_json
     data = _encode_payload(row, max_bytes=services.bounds.max_row_bytes)
@@ -319,6 +337,7 @@ def invoke_unary(
     services: RuntimeServices,
     schemas=None,
     observe=None,
+    state_bytes=None,
 ) -> Iterator[Record]:
     """K002: per-row map/filter/flat_map/column/sample/limit semantics."""
     _check_stop(services)
@@ -327,7 +346,17 @@ def invoke_unary(
     if kind == 'LimitOp':
         yield record
         return
-    row = _materialize_row(record, services)
+    low_memory = getattr(services, 'measured_workspace', False)
+    output_record = _output_record
+    if low_memory or state_bytes is not None:
+        initial_state = state_bytes() if state_bytes else 0
+        row, retained = _measured_input(record, services, initial_state)
+        input_bytes = retained - initial_state
+        def output_record(*args, **kwargs):
+            current = state_bytes() if state_bytes else 0
+            return _output_record(*args, **kwargs, retained=input_bytes + current)
+    else:
+        row = _materialize_row(record, services)
     position = record.source_position
     sequence = record.sequence
     if schemas is None:
@@ -347,9 +376,13 @@ def invoke_unary(
                 from ..recovery_contract import RecoveryContractError
                 raise RecoveryContractError('Task map must preserve exactly one row')
             raise _err("INVALID_CONTRACT", "map callable must return a mapping row")
-        yield _output_record(record.record_id, position, result, sequence, services)
+        yield output_record(record.record_id, position, result, sequence, services)
     elif kind == "FilterOp":
-        if instance(row):
+        selected = instance(row)
+        if state_bytes is not None:
+            from ..dataflow_record_frames import admit_workspace
+            admit_workspace(state_bytes(), services.bounds, services=services, retained=input_bytes)
+        if selected:
             yield record
     elif kind == "FlatMapOp":
         occurrence = _occurrence(spec)
@@ -364,9 +397,12 @@ def invoke_unary(
                 if not isinstance(item, Mapping):
                     raise _err("INVALID_CONTRACT", "flat_map output rows must be mappings")
                 child_id = _hash_id([RECORD_DOMAIN, record.record_id, occurrence, index])
-                out = _output_record(child_id, position, item, sequence, services)
+                out = output_record(child_id, position, item, sequence, services)
                 budget.charge(out)
                 yield out
+            if state_bytes is not None:
+                from ..dataflow_record_frames import admit_workspace
+                admit_workspace(state_bytes(), services.bounds, services=services, retained=input_bytes)
         finally:
             close = getattr(iterator, "close", None)
             if close is not None:
@@ -402,13 +438,13 @@ def invoke_unary(
             if not isinstance(out_row, Mapping):
                 raise _err("INVALID_CONTRACT", "async map must return row, rows or None")
             child = record.record_id if index == 0 else _hash_id([RECORD_DOMAIN, record.record_id, _occurrence(spec), index])
-            out = _output_record(child, position, out_row, sequence, services)
+            out = output_record(child, position, out_row, sequence, services)
             budget.charge(out)
             yield out
     elif kind == "SelectColumnsOp":
         columns = tuple(_cfg(spec, "columns"))
         projected = {column: row[column] for column in columns}
-        yield _output_record(record.record_id, position, projected, sequence, services,
+        yield output_record(record.record_id, position, projected, sequence, services,
                              schema_ref=schemas.project(record.schema_ref, columns=columns))
     elif kind == "DropColumnsOp":
         columns = tuple(_cfg(spec, "columns"))
@@ -416,7 +452,7 @@ def invoke_unary(
         if missing:
             raise _err("INVALID_CONTRACT", "drop column missing", fields=missing)
         kept = {key: value for key, value in row.items() if key not in columns}
-        yield _output_record(record.record_id, position, kept, sequence, services,
+        yield output_record(record.record_id, position, kept, sequence, services,
                              schema_ref=schemas.project(record.schema_ref, columns=tuple(kept)))
     elif kind == "RenameColumnsOp":
         names = _cfg(spec, "names")
@@ -430,7 +466,7 @@ def invoke_unary(
             if len(row) != len(targets):
                 raise _err("INVALID_CONTRACT", "rename list length must match schema")
             renamed = dict(zip(targets, row.values()))
-        yield _output_record(record.record_id, position, renamed, sequence, services,
+        yield output_record(record.record_id, position, renamed, sequence, services,
                              schema_ref=schemas.project(record.schema_ref, names=tuple(renamed)))
     elif kind == "AddColumnOp":
         column = _cfg(spec, "column")
@@ -441,7 +477,7 @@ def invoke_unary(
         values = _batch_values(instance(batch))
         if len(values) != 1:
             raise _err("INVALID_CONTRACT", "add_column result length must match batch")
-        yield _output_record(
+        yield output_record(
             record.record_id, position, {**row, column: values[0]}, sequence, services
         )
     elif kind == "RandomSampleOp":
@@ -679,7 +715,14 @@ def invoke_batch(
                 yield from _mapped_arrow_output(instance(table), binding=binding, schemas=schemas,
                     services=services, budget=budget, retained_bytes=table.get_total_buffer_size())
                 return
-    rows = [_materialize_row(record, services) for record in records]
+    retained = None
+    if getattr(services, 'measured_workspace', False):
+        rows, retained = [], 0
+        for record in records:
+            value, retained = _measured_input(record, services, retained)
+            rows.append(value)
+    else:
+        rows = [_materialize_row(record, services) for record in records]
     if expected is not None:
         import pyarrow as pa
         from ...data.training_schema import PREDICTION_ROW_ID, validate_columns
@@ -787,7 +830,7 @@ def invoke_batch(
             if expected is not None and output_ref[0] is None:
                 validate_columns(pa.RecordBatch.from_pylist([out_row]).schema, expected)
             out = _output_record(record_id, source.source_position, out_row, source.sequence, services,
-                                 schema_ref=output_ref[0])
+                                 schema_ref=output_ref[0], retained=retained)
             budget.charge(out)
             yield out
         if expected is not None and count != len(records):

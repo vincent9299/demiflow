@@ -248,3 +248,20 @@ def test_unprepared_native_write_still_refuses_ambiguous_replay(tmp_path):
             with native.action({"kind": "write_table"}):
                 pytest.fail("ambiguous native write was replayed")
     assert RunJournal(reference.directory).execution_commits("action-1") == []
+
+
+@pytest.mark.parametrize('original_keys', [None, []])
+def test_legacy_managed_provenance_uses_recorded_identity_on_resume(tmp_path, original_keys):
+    from demiflow.execution.host.control import DEFAULT_LIMITS, RunJournal
+    _, target, journal = control_fixture(tmp_path)
+    journal.transition({'prepared'}, 'running')
+    # Legacy preparation without separate provenance retained all supplied fields.
+    expected = set(DEFAULT_LIMITS if original_keys is None else original_keys)
+    with RunContext.attach(journal, limits=DEFAULT_LIMITS, explicit_limits=original_keys) as run:
+        assert run.explicit_limits == expected
+    journal.transition({'running'}, 'failed', execution_stopped=True, cleanup='complete')
+    journal.begin_attempt(expected_attempt=1, expected_revision=journal.execution_status()['revision'], nodes=[], actions=[])
+    resumed = RunJournal(target, attempt=2)
+    resumed.transition({'prepared'}, 'running')
+    with RunContext.attach(resumed, limits=DEFAULT_LIMITS) as run:
+        assert run.explicit_limits == expected

@@ -14,7 +14,7 @@ from demiflow.planning.dataflow_compile import lower_action
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 from test_map_prompt_async import PACK, server
 from test_execution_payload_limits import wide_graph
-from test_runtime_v3_codec_profile_groups import request
+from test_runtime_v3_codec_profile_groups import physical, request
 
 
 def test_real_wide_prompt_keeps_payload_and_paid_effect_on_final_replay(tmp_path, server):
@@ -44,13 +44,15 @@ def test_native_codec_targets_fit_one_original_incremental_component():
     dataset = data.from_items([{'id': 1}]).map_prompt_async('enrich',
         config=parse_prompt_pack(PACK), inputs={'payload': 'id'}, output='answer',
         concurrency=1, queue_depth=1, max_requests=1)
-    _, bounds = resolve_runtime_policy({}, {}, provider='local')
+    policy, bounds = resolve_runtime_policy({}, {}, provider='local')
     graph = lower_action(request(dataset), bounds=bounds).graph
     model = next(n.kernel for n in graph.nodes if n.kernel.kind == 'prompt')
     assert model.profile.requests['memory_bytes'] > 65_005_338
     assert model.profile.requests['cpu_millis'] == 100
     control = min(bounds.max_control_bytes, bounds.max_resident_bytes // 8)
-    assert sum(n.kernel.profile.requests['memory_bytes'] for n in graph.nodes) <= bounds.max_resident_bytes - control
+    selected = physical(graph, policy, bounds)
+    assert len(selected.residency.simultaneous_groups) == 1
+    assert sum(s.profile.requests['memory_bytes'] for s in selected.stages) <= bounds.max_resident_bytes - control
     assert all(n.kernel.profile.requests['memory_bytes'] >= bounds.max_batch_bytes + bounds.max_row_bytes
                for n in graph.nodes)
 
@@ -59,13 +61,16 @@ def test_native_publication_is_separate_from_workers_and_must_be_sealed():
     from types import SimpleNamespace
     from demiflow.execution.dataflow_publication_budget import graph_workspace_bytes, workspace_bytes
     from demiflow.execution.dataflow_sinks import make_native_terminal_sink
-    _, bounds = resolve_runtime_policy({}, {}, provider='local')
+    policy, bounds = resolve_runtime_policy({}, {}, provider='local')
     action = replace(request(data.from_items([{'id': 1}])), kind='write_lance')
     graph = lower_action(action, bounds=bounds).graph
     publication = graph_workspace_bytes(graph)
     control = min(bounds.max_control_bytes, bounds.max_resident_bytes // 8)
     assert publication > 65_005_338
-    assert sum(n.kernel.profile.requests['memory_bytes'] for n in graph.nodes) + publication + control <= bounds.max_resident_bytes
+    selected = physical(graph, policy, bounds)
+    reserved = selected.residency.control_reserved_bytes
+    assert control < reserved <= control + publication
+    assert sum(s.profile.requests['memory_bytes'] for s in selected.stages) + reserved <= bounds.max_resident_bytes
     assert workspace_bytes({}) == 0  # Historical absence is not a new default grant.
     terminal = next(n.kernel for n in graph.nodes if n.kind == 'terminal')
     with pytest.raises(DataflowError, match='lacks sealed residency reservation'):

@@ -169,7 +169,7 @@ class _SpoolPort:
         self._pending_bytes = self._empty_bytes
         # Retained records coexist with their encoded segment during a flush.
         self._segment_bytes = min(services.bounds.max_batch_bytes,
-            (services.bounds.max_batch_bytes + services.bounds.max_row_bytes) // 2)
+            min(services.bounds.max_resident_bytes, services.bounds.max_batch_bytes + services.bounds.max_row_bytes) // 2)
         self._eoi = False
         self._count = 0
         self._bytes = 0
@@ -210,7 +210,9 @@ class _SpoolPort:
             raise _err("INVALID_CONTRACT", "push after port EOI", port=self.name)
         if _input_row_bytes(record) > self._services.bounds.max_row_bytes:
             raise _err("BUDGET_EXCEEDED", "input spool row exceeds max_row_bytes", port=self.name)
-        raw = state_codec.record_fragment(record, max_bytes=self._services.bounds.max_batch_bytes)
+        measured = self._services if getattr(self._services, 'measured_workspace', False) else None
+        raw = state_codec.record_fragment(record, max_bytes=self._services.bounds.max_batch_bytes,
+                                          services=measured, retained=self._pending_bytes)
         contribution = len(raw)
         workspace = 0
         if getattr(self, '_order_write_window', None) is not None:
@@ -393,9 +395,14 @@ class _SpoolPort:
             raise _err("BUDGET_EXCEEDED", "restored spool exceeds segment row bound")
         if any(_input_row_bytes(record) > self._services.bounds.max_row_bytes for record in pending):
             raise _err("BUDGET_EXCEEDED", "restored spool row exceeds max_row_bytes")
-        self._pending = [state_codec.record_fragment(record,
-            max_bytes=self._services.bounds.max_batch_bytes) for record in pending]
-        self._pending_bytes = self._empty_bytes + sum(map(len, self._pending)) + max(0, len(self._pending) - 1)
+        self._pending = []
+        self._pending_bytes = self._empty_bytes
+        measured = self._services if getattr(self._services, 'measured_workspace', False) else None
+        for record in pending:
+            raw = state_codec.record_fragment(record, max_bytes=self._services.bounds.max_batch_bytes,
+                                              services=measured, retained=self._pending_bytes)
+            self._pending_bytes += len(raw) + bool(self._pending)
+            self._pending.append(raw)
         if getattr(self, '_order_write_window', None) is not None:
             self._pending_workspace = 4096 + sum(state_codec.spool_fragment_workspace(raw,
                 self._order_write_window) for raw in self._pending)
@@ -538,7 +545,39 @@ class OperatorKernel:
         self._task_origin = spec.configuration.get('task_origin', True)
         if type(self._task_origin) is not bool:
             raise _err('INVALID_CONTRACT', 'invalid logical task origin')
-        self._task_declaration = None
+        self._program = None
+        self._task_function_slots = False
+
+        self._measured_task = bool(self._task_rows and spec.state != 'none'
+                                   and getattr(services, 'measured_workspace', False))
+
+    def _admit_task_workspace(self, size):
+        maximum = self._services.bounds.max_resident_bytes
+        if size > maximum:
+            raise _err('RESOURCE_INFEASIBLE',
+                       f'task workspace needs {size} bytes, stage granted {maximum} bytes '
+                       f'(occurrence_id={self._occurrence})',
+                       required_bytes=size, granted_bytes=maximum, occurrence_id=self._occurrence)
+
+    def _task_field_size(self, fields, *, copy=False):
+        # Only a validated closed tree reaches this point. Charge existing
+        # Python data and, for a detached copy, the JSON write/read workspace.
+        from ..dataflow_record_frames import json_copy_workspace, metadata_bytes
+        size = metadata_bytes(fields)
+        if copy:
+            return size + json_copy_workspace(fields)
+        return size
+
+    def _task_state_bytes(self, *, copy=False):
+        instance = self._instance
+        if instance is None:
+            return 0
+        from .task_scope import measurable_task_fields
+        target, args, kwargs = self._function_slots(instance)
+        fields = measurable_task_fields(target, args, kwargs, self._occurrence)
+        size = self._task_field_size(fields, copy=copy)
+        self._admit_task_workspace(size)
+        return size
 
     # -- K017 start ---------------------------------------------------------
     def start(self) -> None:
@@ -555,6 +594,7 @@ class OperatorKernel:
                 if key is None and self._spec.implementation_ref is not None:
                     key = self._spec.implementation_ref.key
                 program = self._services.programs.get(key)
+                self._program = program
                 from ...data.plan import CallableSpec
                 factory = (program is not None and isinstance(program.value, CallableSpec)
                            and program.value.is_class)
@@ -564,7 +604,14 @@ class OperatorKernel:
                     # LoadedProgram is the sealed declaration, never an active
                     # instance. Retain only its existing reference, not a second
                     # resident serialized copy of the whole program.
-                    self._task_declaration = program.value
+                    if program is None:
+                        raise _err('INVALID_CONTRACT', 'task kernel requires a staged program')
+                    from .task_scope import task_uses_function_slots
+                    self._task_function_slots = task_uses_function_slots(program.value)
+                    if self._measured_task:
+                        from .task_scope import task_has_measurable_state
+                        if self._shared_actor is not None or not task_has_measurable_state(program.value):
+                            raise _err('INVALID_CONTRACT', 'elastic state needs a private measurable task')
                 # A restored task constructs only if its snapshot has a live
                 # partial batch. Completed task boundaries do not rerun hooks.
                 if not factory and not (self._task_rows and self._image is not None):
@@ -572,7 +619,13 @@ class OperatorKernel:
                         self._create_instance(slot)
                 if self._concurrency > 1:
                     from .concurrent_calls import ConcurrentCalls
-                    self._calls = ConcurrentCalls(self._concurrency, check_stop=self._services.check_stop)
+                    input_limit = None
+                    minimum = self._spec.configuration.get('codec_min_bytes')
+                    if self._spec.kind == 'AsyncMapOp' and minimum is not None:
+                        grant = self._spec.profile.requests['memory_bytes']
+                        input_limit = self._services.bounds.max_row_bytes + grant - minimum
+                    self._calls = ConcurrentCalls(self._concurrency, check_stop=self._services.check_stop,
+                                                  input_limit=input_limit)
             from ..dataflow_batch_membership import KINDS, NativeBatchMembership
             if self._spec.kind in KINDS:
                 self._batch_membership = NativeBatchMembership(self._services,self._occurrence,self._partition_id)
@@ -584,30 +637,31 @@ class OperatorKernel:
             raise
 
     def _create_instance(self, slot):
-        declaration = None
-        if self._task_declaration is not None and self._shared_actor is None:
-            import cloudpickle
-            raw = cloudpickle.dumps(self._task_declaration)
-            if len(raw) > self._services.bounds.max_state_bytes:
-                raise _err('BUDGET_EXCEEDED', 'task declaration exceeds max_state_bytes')
-            declaration = cloudpickle.loads(raw)
-        if self._spec.state == 'adapter':
-            # LoadedProgram is a frozen declaration, never the active function
-            # owner. Each occurrence/worker slot gets its own admitted data.
-            from ...data.plan import CallableSpec
-            from dataclasses import replace
-            from .task_scope import function_residency_kind, clone_resident_callable
-            key = self._spec.configuration.get('program')
-            if key is None and self._spec.implementation_ref is not None:
-                key = self._spec.implementation_ref.key
-            program = self._services.programs.get(key)
-            original = declaration if declaration is not None else program.value if program is not None else None
-            if isinstance(original, CallableSpec) and function_residency_kind(original.target,
-                    call_args=original.call_args, call_kwargs=original.call_kwargs) == 'adapter':
-                target, args, kwargs = clone_resident_callable(original.target,
-                    max_bytes=self._services.bounds.max_state_bytes,
-                    call_args=original.call_args, call_kwargs=original.call_kwargs)
-                declaration = replace(original, target=target, call_args=args, call_kwargs=kwargs)
+        from dataclasses import replace
+        from ...data.plan import CallableSpec
+        from .task_scope import clone_resident_callable, function_residency_kind
+
+        declaration = self._program.value if self._program is not None else None
+        if self._task_rows and self._shared_actor is None and not self._task_function_slots:
+            if self._program.load_private is None:
+                raise _err('INVALID_CONTRACT', 'task kernel requires a private verified program')
+            declaration = self._program.load_private()
+        # A by-reference function can still own mutable defaults. Detach the
+        # admitted slots even when the surrounding declaration was reloaded.
+        if self._shared_actor is None and isinstance(declaration, CallableSpec) and (
+                self._task_function_slots or self._spec.state == 'adapter' and
+                function_residency_kind(declaration.target, call_args=declaration.call_args,
+                                        call_kwargs=declaration.call_kwargs) == 'adapter'):
+            if self._measured_task:
+                from .task_scope import measurable_task_fields
+                fields = measurable_task_fields(declaration.target, declaration.call_args,
+                                                declaration.call_kwargs, self._occurrence)
+                self._admit_task_workspace(self._task_field_size(fields, copy=True)
+                                           + self._restore_workspace_bytes())
+            target, args, kwargs = clone_resident_callable(declaration.target,
+                max_bytes=self._services.bounds.max_state_bytes,
+                call_args=declaration.call_args, call_kwargs=declaration.call_kwargs, occurrence=self._occurrence)
+            declaration = replace(declaration, target=target, call_args=args, call_kwargs=kwargs)
         instance = _resolve_instance(self._spec, self._services, declaration=declaration)
         if self._spec.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
             from ..dataflow_models import bind_model_services
@@ -678,11 +732,13 @@ class OperatorKernel:
                     target = target._instance
                 instance.validation = validator(target, program.runtime_contract)
         _run_astart(instance)
+        if self._measured_task:
+            self._admit_task_workspace(self._task_state_bytes() + self._restore_workspace_bytes())
         if self._spec.state != 'none':
             from ..operator_policy import classify_operator_state
             owner = self._state_owner(instance)
             policy = classify_operator_state(owner, phase='instance')
-            if policy.mode == 'function':
+            if policy.mode == 'function' and not self._measured_task:
                 state = self._snapshot_state(instance)
                 if state['mode'] == 'nonrecoverable':
                     self.recovery_restriction = state['reason']
@@ -876,7 +932,8 @@ class OperatorKernel:
             if self._calls is None:
                 yield from self._emit(preserve_block(invoke_unary(self._spec, record,
                     instance=self._slot_instance(0) if kind in _INSTANCE_KINDS else self._instance,
-                    services=self._services, schemas=self._schemas, observe=self.observations.observe), record.block_partition))
+                    services=self._services, schemas=self._schemas, observe=self.observations.observe,
+                    state_bytes=self._task_state_bytes if self._measured_task else None), record.block_partition))
             else:
                 yield from self._emit(self._calls.submit(lambda slot: preserve_block(invoke_unary(self._spec, record,
                     instance=self._slot_instance(slot), services=self._services, schemas=self._schemas,
@@ -915,6 +972,11 @@ class OperatorKernel:
         return record
 
     def _push_batch(self, record: Record) -> Iterator[Record]:
+        bounds = self._services.bounds
+        if getattr(self._services, 'measured_workspace', False):
+            from ..dataflow_record_frames import admit_workspace, retained_record_bytes
+            held = sum(retained_record_bytes(item, bounds) for item in self._batch)
+            admit_workspace(held + retained_record_bytes(record, bounds), bounds, services=self._services)
         if self._batch_membership is not None and self._batch:
             yield from self._drain_replay_batches()
         expected = self._batch_membership.expected(self._batch_ordinal) if self._batch_membership else None
@@ -1149,7 +1211,8 @@ class OperatorKernel:
         measured under the original grant. This is not a budget authority or
         checkpoint field; the frame codec adds it to its own output allocation.
         """
-        return self._reducer_retained_bytes + self._order_retained_bytes
+        return (self._reducer_retained_bytes + self._order_retained_bytes
+                + (self._task_state_bytes() if self._measured_task else 0))
 
     def retain_reducer_peers(self, size: int) -> None:
         self._reducer_retained_bytes = size
@@ -1303,6 +1366,8 @@ class OperatorKernel:
         self._require_started()
         if not self.checkpoint_ready:
             raise _err('INVALID_CONTRACT', 'Checkpoint requires drained non-native invocations')
+        if self._measured_task:
+            self._task_state_bytes(copy=True)
         worker_states = [self._snapshot_state(instance) if instance is not None else None for instance in self._instances] if self._worker_scope else None
         completed_task = bool(self._shared_actor is None and self._task_rows and self._task_origin and self._task_frontier and self._task_frontier % self._task_rows == 0)
         image = {
@@ -1345,11 +1410,14 @@ class OperatorKernel:
         observed = self.observations.snapshot()
         if observed['count']:
             image['callback_observations'] = observed
-        raw = state_codec.dumps(image, max_bytes=self._services.bounds.max_state_bytes)
-        limit = self._services.bounds.max_state_bytes
-        if limit > 0 and len(raw) > limit:
-            raise _err("BUDGET_EXCEEDED", "kernel recovery image exceeds max_state_bytes")
-        return raw
+        admit = None
+        if self._measured_task:
+            from ..dataflow_record_frames import metadata_bytes
+            retained = self._task_state_bytes() + metadata_bytes(image)
+            def admit(workspace):
+                self._admit_task_workspace(retained + workspace)
+        return state_codec.dumps(image, max_bytes=self._services.bounds.max_state_bytes,
+                                 occurrence=self._occurrence, admit=admit)
 
     def _state_owner(self, instance=None, *, retain_partial=False):
         import functools
@@ -1393,16 +1461,10 @@ class OperatorKernel:
         if snapshot is not None:
             return {"mode": "adapter", "value": instance.resolve(snapshot())}
         if policy.mode == "function":
-            from .task_scope import function_residency_kind, snapshot_function, snapshot_resident_function
+            from .task_scope import snapshot_resident_function
             target, args, kwargs = self._function_slots(instance)
-            kind = function_residency_kind(target, call_args=args, call_kwargs=kwargs)
-            bound_state = any(type(value) in (list, dict) for value in (*args, *kwargs.values()))
-            if kind != 'nonrecoverable' and self._task_rows and target is owner and not bound_state:
-                state = snapshot_function(owner, max_bytes=self._services.bounds.max_state_bytes)
-                if state['mode'] == 'task_function':
-                    return state  # Preserve every already-readable legacy task image.
             state = snapshot_resident_function(target, call_args=args, call_kwargs=kwargs,
-                                               max_bytes=self._services.bounds.max_state_bytes)
+                                               max_bytes=self._services.bounds.max_state_bytes, occurrence=self._occurrence)
             if state['mode'] == 'nonrecoverable':
                 self._services.journal.restrict_recovery(self._occurrence)
             return state
@@ -1416,7 +1478,7 @@ class OperatorKernel:
             return {"mode": "hooks", "value": instance.resolve(owner.snapshot_state())}
         if policy.mode == "auto_json":
             return {"mode": "plain_json", "value": snapshot_auto_state(
-                owner, max_bytes=self._services.bounds.max_state_bytes)}
+                owner, max_bytes=self._services.bounds.max_state_bytes, occurrence=self._occurrence)}
         # Runtime resources are allowed during the current attempt; the image
         # explicitly forbids restoring a lost cross-row state. No fields vanish.
         return {"mode": "nonrecoverable", "reason": policy.reason or "state adapter missing"}
@@ -1431,9 +1493,18 @@ class OperatorKernel:
             return
         limit = self._services.bounds.max_state_bytes
         from ..dataflow_kernel_pack import read_kernel_image
+        admit = None
+        if self._measured_task:
+            retained = self._task_state_bytes()
+            def admit(size):
+                self._admit_task_workspace(retained + size)
         data = read_kernel_image(self._services.store, ref, self._services.bounds,
-                                 occurrence=self._occurrence, partition=self._partition_id)
-        image = state_codec.loads(data, max_bytes=limit)
+                                 occurrence=self._occurrence, partition=self._partition_id, admit=admit)
+        if self._measured_task:
+            from ..dataflow_record_frames import raw_workspace
+            self._admit_task_workspace(self._task_state_bytes() + raw_workspace(data))
+        image = state_codec.loads(data, max_bytes=limit, occurrence=self._occurrence)
+        del data
         if image.get("schema_version") != IMAGE_VERSION:
             raise _err("INCOMPATIBLE_HISTORY", "kernel image schema mismatch")
         if image.get("kind") != self._spec.kind or image.get("occurrence_id") != self._occurrence:
@@ -1446,6 +1517,10 @@ class OperatorKernel:
         self._restored = True
         if self._started:
             self._apply_image(image)
+
+    def _restore_workspace_bytes(self):
+        from ..dataflow_record_frames import metadata_bytes
+        return 0 if self._image is None else metadata_bytes(self._image)
 
     def _apply_image(self, image: Mapping[str, Any]) -> None:
         if 'recovery_rows' in image:
@@ -1554,6 +1629,7 @@ class OperatorKernel:
             self._calls.restore(inflight, slots=image.get('call_slots'), compute=compute)
         elif inflight:
             raise _err('INCOMPATIBLE_HISTORY', 'Pending calls have no invocation slots')
+        self._image = None
 
     def _restore_state(self, state: Any, instance=None) -> None:
         if self._shared_actor is not None and not self._shared_actor.restoring(self._occurrence, state):
@@ -1565,17 +1641,22 @@ class OperatorKernel:
         owner = self._state_owner(instance)
         if mode == "nonrecoverable":
             raise _err("INCOMPATIBLE_HISTORY", "actor state cannot resume: " + state["reason"])
+        if self._measured_task and mode in ('plain_json', 'function_slots_v1'):
+            from ..dataflow_record_frames import json_copy_workspace
+            fields = state['value']['fields'] if mode == 'plain_json' else state['value']
+            self._admit_task_workspace(self._restore_workspace_bytes() + self._task_state_bytes()
+                                       + json_copy_workspace(fields))
         if mode == "plain_json":
             from ..operator_policy import restore_auto_state
-            restore_auto_state(owner, state["value"], max_bytes=self._services.bounds.max_state_bytes)
+            restore_auto_state(owner, state["value"], max_bytes=self._services.bounds.max_state_bytes, occurrence=self._occurrence)
         elif mode == 'function_slots_v1':
             from .task_scope import restore_resident_function
             target, args, kwargs = self._function_slots(instance)
             restore_resident_function(target, state, call_args=args, call_kwargs=kwargs,
-                                      max_bytes=self._services.bounds.max_state_bytes)
+                                      max_bytes=self._services.bounds.max_state_bytes, occurrence=self._occurrence)
         elif mode == 'task_function' and self._task_rows:
             from .task_scope import restore_function
-            restore_function(owner, state, max_bytes=self._services.bounds.max_state_bytes)
+            restore_function(owner, state, max_bytes=self._services.bounds.max_state_bytes, occurrence=self._occurrence)
         elif mode in ("adapter", "hooks", "auto_json"):
             name = "restore_state" if mode == "hooks" else "__demiflow_restore__"
             restore = getattr(owner, name, None)

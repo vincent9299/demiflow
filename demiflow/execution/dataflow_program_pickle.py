@@ -53,3 +53,21 @@ def load_payload(chunks):
             return cloudpickle.load(stream)
         except Exception as exc:
             raise DataflowError("CORRUPT_ARTIFACT", "Program payload failed to load: " + str(exc)) from exc
+
+
+def load_private_payload(store, ref):
+    """Verify the complete sealed input before running its first pickle opcode.
+
+    Reads into the same buffer for every storage window, including tighter
+    live windows when resuming a previously admitted stage.
+    """
+    import hashlib
+    from .contracts.dataflow_errors import DataflowError
+    buffer = bytearray(ref.size_bytes)
+    store.read_into(ref, buffer)
+    if hashlib.sha256(buffer).hexdigest() != ref.digest:
+        raise DataflowError('CORRUPT_ARTIFACT', 'Private task program digest differs')
+    try:
+        return cloudpickle.loads(buffer)
+    except Exception as exc:
+        raise DataflowError('CORRUPT_ARTIFACT', 'Program payload failed to load: ' + str(exc)) from exc

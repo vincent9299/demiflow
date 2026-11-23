@@ -142,6 +142,7 @@ class LoadedProgram:
     kind: str
     value: Any
     digest: str
+    load_private: Any = None
 
 
 class DataflowError(Exception):
@@ -315,6 +316,9 @@ class FakeStore:
             raise DataflowError("BUDGET_EXCEEDED", "read exceeds max_bytes")
         yield data
 
+    def read_into(self, ref, destination):
+        destination[:] = next(self.read(ref, max_bytes=len(destination)))
+
     def inspect(self, ref):
         return ref.key in self.objects
 
@@ -384,7 +388,9 @@ def rows_of(records):
 
 
 def program(value, kind="callable"):
-    return LoadedProgram(kind, value, hashlib.sha256(repr(value).encode()).hexdigest())
+    import cloudpickle
+    return LoadedProgram(kind, value, hashlib.sha256(repr(value).encode()).hexdigest(),
+                         load_private=lambda: cloudpickle.loads(cloudpickle.dumps(value)))
 
 
 # ---------------------------------------------------------------------------

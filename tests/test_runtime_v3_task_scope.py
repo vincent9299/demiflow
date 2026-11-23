@@ -266,3 +266,197 @@ def test_task_provenance_is_separate_and_cannot_be_forged_at_a_follower():
     with pytest.raises(DataflowError, match='out of order'):
         list(follower.push('input', rec({'i': 1}, position={'dataflow_task': {'group': 'group-1', 'ordinal': 1}})))
     follower.close()
+
+
+@pytest.mark.parametrize("form", ["function", "class"])
+@pytest.mark.parametrize("measured", [False, True])
+def test_private_task_rejects_oversize_mutable_checkpoint(form, measured):
+    from dataclasses import replace
+    from test_runtime_v3_k import services, spec, program, InputPort, rec
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.kernels.operator import OperatorKernel
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+
+    owned = []
+    def grow(row):
+        owned.append('x' * row['n'])
+        return row
+
+    class Grow:
+        def __init__(self):
+            self.value = ''
+
+        def __call__(self, row):
+            self.value = 'x' * row['n']
+            return row
+
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    target = grow if form == "function" else Grow
+    svc = services(programs={'fn': program(CallableSpec.create(target))})
+    svc.bounds = replace(svc.bounds, max_state_bytes=4096)
+    options = {'program': 'fn', 'task_batch_rows': 2}
+    if measured:
+        options['codec_min_bytes'] = svc.bounds.max_resident_bytes
+        svc.measured_workspace = True
+    policy = spec('MapOp', options, state='adapter', inputs=[InputPort('input', 'incremental')])
+    kernel = OperatorKernel(policy, services=svc, partition_id='p0')
+    try:
+        kernel.start()
+        list(kernel.push('input', rec({'n': 16384})))
+        error_type = DataflowError if form == 'function' else RecoveryContractError
+        with pytest.raises(error_type, match='before encoding') as failed:
+            kernel.snapshot()
+        assert 'limit_bytes=4096' in str(failed.value) and 'occurrence_id=occ-MapOp' in str(failed.value)
+        assert 'visited_python_bytes=' in str(failed.value) and 'actual_bytes' not in str(failed.value)
+    finally:
+        kernel.close()
+    assert not owned
+
+
+def test_private_task_reopens_original_whole_function_image(monkeypatch):
+    from test_runtime_v3_k import services, spec, program, InputPort, rec, rows_of
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.kernels.operator import OperatorKernel
+    from demiflow.execution.kernels.task_scope import snapshot_function
+
+    owner = closure()
+    svc = services(programs={'fn': program(CallableSpec.create(owner))})
+    policy = spec('MapOp', {'program': 'fn', 'task_batch_rows': 3}, state='adapter',
+                  inputs=[InputPort('input', 'incremental')])
+    first = OperatorKernel(policy, services=svc, partition_id='p0')
+    first.start()
+    try:
+        assert rows_of(first.push('input', rec({'i': 0}))) == [{'i': 0, 'within_task': 1}]
+        # Exercise the original writer's image shape through the real reader.
+        monkeypatch.setattr(first, '_snapshot_state', lambda instance=None: snapshot_function(
+            first._state_owner(instance), max_bytes=svc.bounds.max_state_bytes))
+        ref = first.snapshot()
+    finally:
+        first.close()
+    second = OperatorKernel(policy, services=svc, partition_id='p0')
+    try:
+        second.restore(ref)
+        second.start()
+        assert rows_of(second.push('input', rec({'i': 1}, sequence=1))) == [{'i': 1, 'within_task': 2}]
+    finally:
+        second.close()
+
+def test_task_checkpoint_reports_measured_bytes_and_owner():
+    from dataclasses import replace
+    from test_runtime_v3_k import services, spec, program, InputPort, rec
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.kernels.operator import OperatorKernel
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+
+    svc = services(programs={'fn': program(CallableSpec.create(closure()))})
+    policy = spec('MapOp', {'program': 'fn', 'task_batch_rows': 3}, state='adapter',
+                  inputs=[InputPort('input', 'incremental')])
+    kernel = OperatorKernel(policy, services=svc, partition_id='p0')
+    try:
+        kernel.start()
+        list(kernel.push('input', rec({'i': 0})))
+        valid = kernel.snapshot()
+        limit = valid.size_bytes - 1
+        svc.bounds = replace(svc.bounds, max_state_bytes=limit)
+        for operation in (kernel.snapshot, lambda: kernel.restore(valid)):
+            with pytest.raises(DataflowError, match='actual_bytes=') as error:
+                operation()
+            assert error.value.context == {'limit_bytes': limit, 'actual_bytes': valid.size_bytes,
+                                           'occurrence_id': 'occ-MapOp'}
+    finally:
+        kernel.close()
+
+
+@pytest.mark.parametrize('form', ['class', 'function'])
+def test_adaptive_task_checkpoint_restores_real_state_with_small_worker_grant(form):
+    from dataclasses import replace
+    from test_runtime_v3_k import services, spec, program, InputPort, rec, rows_of
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.kernels.operator import OperatorKernel
+
+    class Counter:
+        def __init__(self):
+            self.count = 0
+        def __call__(self, row):
+            self.count += 1
+            return {**row, 'count': self.count}
+
+    count = [0]
+    def counter(row):
+        count[0] += 1
+        return {**row, 'count': count[0]}
+
+    target = Counter if form == 'class' else counter
+    svc = services(programs={'fn': program(CallableSpec.create(target))})
+    grant = 256 * 1024
+    svc.bounds = replace(svc.bounds, max_resident_bytes=grant)
+    svc.measured_workspace = True
+    policy = spec('MapOp', {'program': 'fn', 'task_batch_rows': 3, 'codec_min_bytes': grant},
+                  inputs=[InputPort('input', 'incremental')], state='adapter').with_memory_bytes(grant)
+    first = OperatorKernel(policy, services=svc, partition_id='p0')
+    first.start()
+    assert rows_of(first.push('input', rec({'i': 0})))[0]['count'] == 1
+    image = first.snapshot()
+    first.close()
+    second = OperatorKernel(policy, services=svc, partition_id='p0')
+    second.restore(image)
+    second.start()
+    assert rows_of(second.push('input', rec({'i': 1}, sequence=1)))[0]['count'] == 2
+    second.close()
+
+
+def test_adaptive_task_rejects_growth_before_ack_of_filtered_row():
+    from dataclasses import replace
+    from test_runtime_v3_k import services, spec, program, InputPort, rec
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.kernels.operator import OperatorKernel
+
+    class Grow:
+        def __call__(self, row):
+            self.value = 'x' * row['size']
+            return False
+
+    svc = services(programs={'fn': program(CallableSpec.create(Grow))})
+    grant = 32 * 1024
+    svc.bounds = replace(svc.bounds, max_resident_bytes=grant)
+    svc.measured_workspace = True
+    policy = spec('FilterOp', {'program': 'fn', 'task_batch_rows': 4, 'codec_min_bytes': grant},
+                  inputs=[InputPort('input', 'incremental')], state='adapter').with_memory_bytes(grant)
+    worker = OperatorKernel(policy, services=svc, partition_id='p0')
+    worker.start()
+    with pytest.raises(DataflowError) as failure:
+        list(worker.push('input', rec({'size': grant + 1})))
+    assert failure.value.code == 'RESOURCE_INFEASIBLE'
+    assert failure.value.context['granted_bytes'] == grant
+    assert failure.value.context['occurrence_id'] == 'occ-FilterOp'
+    assert failure.value.context['required_bytes'] > grant
+    worker.close()
+
+
+def test_task_checkpoint_rejects_before_building_tagged_container_tree():
+    import tracemalloc
+    from demiflow.execution.kernels import state_codec
+
+    values = list(range(10000))
+    grant = 1 << 20
+
+    class TooLarge(Exception):
+        pass
+
+    peak_at_admission = []
+    def admit(required):
+        peak_at_admission.append(tracemalloc.get_traced_memory()[1])
+        assert required > grant
+        raise TooLarge
+
+    # Imports and the immutable input predate the working grant.
+    from demiflow.execution.dataflow_record_frames import json_encoding_shape
+    json_encoding_shape(0)
+    tracemalloc.start()
+    try:
+        with pytest.raises(TooLarge):
+            state_codec.dumps(values, max_bytes=16 * grant, admit=admit)
+    finally:
+        tracemalloc.stop()
+    assert len(peak_at_admission) == 1 and peak_at_admission[0] < grant

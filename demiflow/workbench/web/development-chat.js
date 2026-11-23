@@ -275,11 +275,13 @@
         const files=data.files||[];
         const item=system(event,'Changed files',files.map(file=>file.path+'\n'+(file.diff||file.diff_unavailable||'')).join('\n'),'change:'+event.sequence);
         if(onOpenFile&&files.length&&item?.row?.heading&&!item.row.heading.querySelector('.dfc-open-code')){
-          const firstPath=files[0].path;
-          const jump=el('button','查看代码','dfc-open-code');jump.type='button';
-          jump.title='在右侧代码面板查看 '+firstPath;
-          jump.onclick=e=>{e.preventDefault();e.stopPropagation();onOpenFile(firstPath,'diff');};
-          item.row.heading.append(jump);
+          const firstPath=files.map(f=>f?.path).find(p=>typeof p==='string'&&!p.includes('__pycache__')&&!p.endsWith('.pyc')&&!p.endsWith('.pyo'));
+          if(firstPath){
+            const jump=el('button','查看代码','dfc-open-code');jump.type='button';
+            jump.title='在右侧代码面板查看 '+firstPath;
+            jump.onclick=e=>{e.preventDefault();e.stopPropagation();onOpenFile(firstPath,'diff');};
+            item.row.heading.append(jump);
+          }
         }
       }
       else if(event.type==='check.reference')system(event,'Checks',JSON.stringify(data.result||data,null,2),'check:'+event.sequence);

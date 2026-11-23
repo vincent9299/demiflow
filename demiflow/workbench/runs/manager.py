@@ -334,7 +334,8 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     audit.require_scope(ws._check_change_scope(root), expected_scope=change_scope)
     requested_limits = limits
     limits, parameter_path = admit_inputs(root, workspace, entry, params, limits)
-    payload_defaults = {'max_row_bytes', 'max_batch_bytes'} - set(requested_limits or {}) - set(workspace.get('budgets') or {})
+    explicit_limits = sorted(set(requested_limits or ()) | set(workspace.get('budgets') or ()))
+    payload_defaults = {'max_row_bytes', 'max_batch_bytes'} - set(explicit_limits)
     if type(new_outputs) is not bool:
         raise ForgeError('new_outputs must be boolean')
     original = ws.read_control(parameter_path) if parameter_path else copy.deepcopy(params)
@@ -395,7 +396,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     native_flow = not output_specs
     if native_flow:
         report, output_specs = native_submission.prepare(root, entry, parameters=effective, limits=limits,
-                                                         metadata=metadata, source_modules=source_modules)
+                                                         metadata=metadata, explicit_limits=explicit_limits, source_modules=source_modules)
         ledgers, budgets, credentials = [], {}, set(report['native_contract']['credential_names'])
         observation_instances = report['observation_instances']
     else:
@@ -572,7 +573,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                 journal_version=2,
                 created_at=time.time(), report_digest=report['digest'], original_parameters=original,
                 parameter_path=str(parameter_path.relative_to(root)) if parameter_path else None,
-                outputs=output_specs, limits=limits, workspace=workspace, capacity_domain=capacity_domain, executable_dirs=executable_dirs,
+                outputs=output_specs, limits=limits, limits_explicit=explicit_limits, workspace=workspace, capacity_domain=capacity_domain, executable_dirs=executable_dirs,
                 observation_instances=observation_instances,
                 credential_names=sorted(credentials), evidence=ledgers, request_budgets=list(budgets.values()),
                 object_locations=object_locations(report=report),

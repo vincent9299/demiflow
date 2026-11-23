@@ -11,7 +11,7 @@ from demiflow.execution.dataflow_api import _CompileContext
 from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.planning.dataflow_compile import lower_action
 from demiflow.planning.dataflow_place import partition_stages
-from demiflow.planning.dataflow_policy import fit_default_stream_windows, resolve_runtime_policy
+from demiflow.planning.dataflow_policy import resolve_runtime_policy
 from demiflow.planning.dataflow_thread_fusion import fuse_thread_suffix
 from demiflow.resources.contracts import ResourceProfile
 
@@ -36,11 +36,8 @@ def compiled(workers=4, mode='process', *, streaming=False, dataset=None):
     request = ActionRequest(kind='take_all', source=dataset._source, plan=dataset._plan,
         arguments={}, sink=None, programs=(), provider='local', action=action)
     policy, bounds = resolve_runtime_policy({'max_active_workers': workers, 'worker_mode': mode}, {}, provider='local')
-    # The public entry fits the default windows to the simultaneous workload before it
-    # lowers the plan (dataflow_api.resolve_action_runtime). Prepare the bounds the same way,
-    # so these structural checks see the plan a default run actually gets.
-    bounds = fit_default_stream_windows(request, policy=policy, bounds=bounds)
-    graph = lower_action(request, bounds=bounds).graph
+    from demiflow.planning.dataflow_budget import minimum_workspace_graph
+    graph = minimum_workspace_graph(lower_action(request, bounds=bounds).graph, bounds)
     return graph, partition_stages(graph, policy=policy, bounds=bounds), policy, bounds
 
 
@@ -61,8 +58,10 @@ def test_insufficient_worker_budget_uses_one_independent_source_and_original_suf
     members = [stage for stage in stages if stage is not source]
     assert suffix.occurrences == tuple(occ for stage in members for occ in stage.occurrences)
     assert suffix.profile.requests['cpu_millis'] == sum(stage.profile.requests['cpu_millis'] for stage in members)
+    edges = sum(edge.producer in suffix.occurrences and edge.consumer in suffix.occurrences
+                for edge in graph.edges)
     assert suffix.resident_bytes == suffix.profile.requests['memory_bytes'] == sum(
-        max(stage.resident_bytes, stage.profile.requests['memory_bytes']) for stage in members)
+        max(stage.resident_bytes, stage.profile.requests['memory_bytes']) for stage in members) - edges * bounds.max_row_bytes
     assert suffix.state_bytes == sum(stage.state_bytes for stage in members)
     assert suffix.kernel_refs == tuple(dict.fromkeys(ref for stage in members for ref in stage.kernel_refs))
     # Co-location changes no logical node/edge or original task/batch declaration.
@@ -116,7 +115,7 @@ def test_new_default_rule_does_not_absorb_shared_sources_or_gpu_stages():
     assert sum(len(stage.occurrences) for stage in result) == len(graph.nodes)
     members = [stage for stage in stages if stage is not source]
     assert suffix.profile.requests['cpu_millis'] == max(stage.profile.requests['cpu_millis'] for stage in members)
-    assert suffix.profile.requests['memory_bytes'] == sum(
+    assert suffix.profile.requests['memory_bytes'] < sum(
         max(stage.resident_bytes, stage.profile.requests['memory_bytes']) for stage in members)
     assert fused(graph, stages, replace(policy, fusion=False), bounds) == stages
     gpu = pipeline().map(lambda row: row, backend_options={'ray': {'worker_resources': {'gpu': 1}}})

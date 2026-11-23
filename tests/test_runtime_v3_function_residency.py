@@ -55,9 +55,23 @@ def recorded(path):
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
+@pytest.fixture
+def separate_stages(monkeypatch):
+    """Keep a real inter-stage parking boundary in residency tests."""
+    from dataclasses import replace
+    from demiflow.execution import dataflow_api
+    resolve = dataflow_api.resolve_runtime_policy
+
+    def without_fusion(*args, **kwargs):
+        policy, bounds = resolve(*args, **kwargs)
+        return replace(policy, fusion=False), bounds
+
+    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', without_fusion)
+
+
 @pytest.mark.parametrize('workers,form', [(1, 'cell'), (4, 'cell'), (1, 'default'),
                                          (1, 'kwdefault'), (1, 'partial')])
-def test_actual_function_keeps_stage_state_across_worker_parking(tmp_path, workers, form):
+def test_actual_function_keeps_stage_state_across_worker_parking(tmp_path, workers, form, separate_stages):
     path = tmp_path / 'calls.jsonl'
     with RunContext.start(tmp_path/'run', limits={'checkpoint_rows':2,
             'checkpoint_interval_ms':60000}) as run, data.local_execution(
@@ -217,14 +231,14 @@ def test_instances_do_not_mutate_sealed_importable_function_or_other_occurrence(
 
 
 @pytest.mark.parametrize('form', ['default','partial'])
-def test_task_function_keeps_original_batch_boundary_through_parking(tmp_path, form):
+def test_task_function_keeps_original_batch_boundary_through_parking(tmp_path, form, separate_stages):
     callback = counter(tmp_path/'calls',form)
     with RunContext.start(tmp_path/'run',limits={'checkpoint_rows':1,'checkpoint_interval_ms':60000}), data.local_execution(
             workers=1,worker_mode='thread',partitions=1,batch_rows=3):
         assert [r['count'] for r in data.from_items([{'i':i} for i in range(8)]).map(callback).take_all()] == [1,2,3,1,2,3,1,2]
 
 
-def test_nonrecoverable_alias_can_run_resident_but_never_silently_park(tmp_path):
+def test_nonrecoverable_alias_can_run_resident_but_never_silently_park(tmp_path, separate_stages):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     path = tmp_path/'calls'
     def build():
@@ -276,7 +290,7 @@ def test_nested_nonlocal_state_and_unused_empty_cell_are_preserved():
         cloned({'read_absent':True})
 
 
-def test_nested_global_cannot_be_downgraded_by_ordinary_task_declaration(tmp_path):
+def test_nested_global_cannot_be_downgraded_by_ordinary_task_declaration(tmp_path, separate_stages):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     namespace = {'outside':[]}
     exec('def callback(row):\n def nested():\n  outside.append(row)\n nested()\n return row',namespace)
@@ -324,7 +338,7 @@ def test_call_bindings_share_alias_detection_with_cells_defaults_and_partial():
         assert snapshot_resident_function(callback,call_kwargs={'bound':state},max_bytes=4096)['mode']=='nonrecoverable'
 
 
-def test_readonly_task_dependencies_need_no_state_reservation(tmp_path):
+def test_readonly_task_dependencies_need_no_state_reservation(tmp_path, separate_stages):
     def readonly(row,module=json,path=tmp_path):
         assert module.loads('null') is None and path.name
         return row
@@ -334,8 +348,11 @@ def test_readonly_task_dependencies_need_no_state_reservation(tmp_path):
         bundle=load_sealed_plan(run.ref.directory,'action-1')
         node=next(n for n in bundle['graph'].nodes if n.kernel.kind=='MapOp')
         assert node.kernel.state=='none' and node.kernel.configuration['task_batch_rows']==3
-        bounds=bundle['physical'].bounds
-        assert node.kernel.profile.requests['memory_bytes']==bounds.max_batch_bytes+bounds.max_row_bytes
+        stage = next(stage for stage in bundle['physical'].stages if node.occurrence_id in stage.occurrences)
+        assert stage.occurrences == (node.occurrence_id,)
+        assert stage.state_bytes == 0
+        assert stage.profile.requests['memory_bytes'] >= stage.resident_bytes
+        assert stage.resident_bytes >= node.kernel.configuration.get('task_load_bytes', 0)
 
 
 def test_nested_external_state_snapshot_cannot_claim_legacy_task_recovery():

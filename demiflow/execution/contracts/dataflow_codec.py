@@ -22,6 +22,7 @@ from demiflow.data.datasink import WriteResult
 from demiflow.resources.contracts import ResourceProfile
 
 from .dataflow import (
+    thaw_json as _thaw_json,
     ActionProgram,
     AggregateState,
     ArtifactCommand,
@@ -253,6 +254,7 @@ _WIRE_TYPES = {
         ("stage_id", _I), ("occurrences", _STRS), ("partitions", _STRS), ("profile", _P),
         ("replica_min", _i(1)), ("replica_target", _i(1)), ("replica_max", _i(1)),
         ("resident_bytes", _i()), ("output_bytes", _i()), ("state_bytes", _i()), ("kernel_refs", _RS),
+        ("kernel_memory_bytes", _OJM),
     )),
     "ExchangeSpec": (ExchangeSpec, (
         ("channel_id", _I), ("edge_id", _S), ("producer_partitions", _STRS), ("consumer_partitions", _STRS),
@@ -417,14 +419,6 @@ _WIRE_TYPES = {
         ("row_ref", _OR), ("native_fact_ref", _OR), ("retry_after_ms", _i()),
     )),
 }
-
-
-def _thaw_json(value):
-    if isinstance(value, Mapping):
-        return {key: _thaw_json(item) for key, item in value.items()}
-    if type(value) in (tuple, list):
-        return [_thaw_json(item) for item in value]
-    return value
 
 
 def _is_json(value, depth=0):
@@ -667,6 +661,8 @@ def _validate_payload(payload, type_name):
         payload = dict(payload, max_active_workers=None)
     if type_name == "RuntimePolicy" and "worker_mode" not in payload:
         payload = dict(payload, worker_mode=None)
+    if type_name == "StageSpec" and "kernel_memory_bytes" not in payload:
+        payload = dict(payload, kernel_memory_bytes=None)
     if type_name in ("RuntimePolicy", "WorkerAssignment") and "native_limits" not in payload:
         payload = dict(payload, native_limits=None)
     if set(payload) != expected:
@@ -818,7 +814,7 @@ def _construct_payload(payload, type_name):
     fields = _wire_fields(type_name, payload)
     kwargs = {}
     for name, spec in fields:
-        optional = (type_name, name) in {("Record", "schema_ref"), ("Record", "block_partition"), ("RuntimePolicy", "max_active_workers"), ("RuntimePolicy", "native_limits"), ("RuntimePolicy", "worker_mode"), ("WorkerAssignment", "native_limits")}
+        optional = (type_name, name) in {("StageSpec", "kernel_memory_bytes"), ("Record", "schema_ref"), ("Record", "block_partition"), ("RuntimePolicy", "max_active_workers"), ("RuntimePolicy", "native_limits"), ("RuntimePolicy", "worker_mode"), ("WorkerAssignment", "native_limits")}
         value = payload.get(name) if optional else payload[name]
         kwargs[name] = _construct_field(value, spec, type_name + "." + name)
     return cls(**kwargs)
@@ -879,6 +875,8 @@ def _project_payload(value, type_name):
         if type_name == "Record" and name in ("schema_ref", "block_partition") and getattr(value, name) is None:
             continue
         if type_name == "RuntimePolicy" and name in ("max_active_workers", "native_limits", "worker_mode") and getattr(value, name) is None:
+            continue
+        if type_name == "StageSpec" and name == "kernel_memory_bytes" and value.kernel_memory_bytes is None:
             continue
         if type_name == "WorkerAssignment" and name == "native_limits" and value.native_limits is None:
             continue
@@ -1171,6 +1169,8 @@ def _identity_project(value):
             for field in dataclasses.fields(value)
             if not (isinstance(value, RuntimePolicy) and field.name in ("max_active_workers", "native_limits", "worker_mode")
                     and getattr(value, field.name) is None)
+            and not (isinstance(value, StageSpec) and field.name == "kernel_memory_bytes"
+                     and value.kernel_memory_bytes is None)
             and not (isinstance(value, WorkerAssignment) and field.name == "native_limits"
                      and value.native_limits is None)
             and not (isinstance(value, (WorkerAssignment, RecoveryImage)) and field.name == "model_bindings"

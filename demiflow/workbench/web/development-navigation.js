@@ -112,6 +112,28 @@
     return idx < 0 ? {name: clean, dir: ''} : {name: clean.slice(idx + 1), dir: clean.slice(0, idx)};
   }
 
+  const IGNORED_DIRS = new Set(['__pycache__', '.pytest_cache', '.mypy_cache', 'node_modules']);
+  const IGNORED_SUFFIXES = ['.pyc', '.pyo'];
+  function ignoredPath(rel) {
+    const clean = String(rel || '').replace(/^\/+/, '');
+    if (!clean) return true;
+    const parts = clean.split('/');
+    if (parts.some(p => !p || p.startsWith('.') || IGNORED_DIRS.has(p) || p.endsWith('.lance'))) return true;
+    const lower = parts[parts.length - 1].toLowerCase();
+    return IGNORED_SUFFIXES.some(ext => lower.endsWith(ext));
+  }
+
+  function chevronIcon() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.classList.add('dev-chevron');
+    const p = document.createElementNS(svg.namespaceURI, 'path');
+    p.setAttribute('d', 'M5 6l3 3.5L11 6');
+    svg.append(p);
+    return svg;
+  }
+
   function filePanel({layout, filesHost, toggle, api, iconButton, onReference, onShowFilesTab, onBadgeChange}) {
     let disposed = false;
     let levels = Object.create(null), expanded = [], treeLoaded = false, projectRootPath = '';
@@ -126,31 +148,119 @@
     let viewMode = 'source'; // 'diff' | 'source'
     let viewerHandle = null;
     let loadEpoch = 0;
-    let latestChecks = {native_flow: null, project_layout: null, review: null};
+    let latestChecks = {native_flow: null, project_layout: null, review: null, reviewDetails: []};
+    let activeCheckKey = null;
 
-    // === LEFT SIDEBAR: Changed files + Project tree ===
+    // === LEFT SIDEBAR: Changed files + Project tree (collapsible + resizable split) ===
     const explorer = node('div', 'dev-file-explorer');
+    let changedOpen = true, treeOpen = true;
+    let splitRatio = 0.4;
+    try {
+      const saved = Number(localStorage.getItem('forge-dev-explorer-split'));
+      if (Number.isFinite(saved) && saved >= 0.15 && saved <= 0.85) splitRatio = saved;
+    } catch {}
+
     const changedSection = node('div', 'dev-changed-section');
     changedSection.hidden = true;
     const changedHeader = node('div', 'dev-section-header');
+    const changedToggle = node('button', 'dev-section-toggle');
+    changedToggle.type = 'button';
+    changedToggle.setAttribute('aria-expanded', 'true');
     const changedTitle = node('span', 'dev-section-title', '已改文件');
     const changedCount = node('span', 'dev-section-count', '0');
+    changedToggle.append(chevronIcon(), changedTitle, changedCount);
     const changedRefresh = iconButton('刷新变更列表', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
-    changedHeader.append(changedTitle, changedCount, changedRefresh);
+    changedHeader.append(changedToggle, changedRefresh);
     const changedList = node('div', 'dev-changed-list');
     changedSection.append(changedHeader, changedList);
 
+    const splitHandle = node('div', 'dev-split-resizer');
+    splitHandle.setAttribute('role', 'separator');
+    splitHandle.setAttribute('aria-orientation', 'horizontal');
+    splitHandle.setAttribute('aria-label', '调整已改文件与项目目录高度');
+    splitHandle.tabIndex = 0;
+    splitHandle.hidden = true;
+
     const treeSection = node('div', 'dev-tree-section');
     const treeHeader = node('div', 'dev-section-header');
+    const treeToggle = node('button', 'dev-section-toggle');
+    treeToggle.type = 'button';
+    treeToggle.setAttribute('aria-expanded', 'true');
     const treeTitle = node('span', 'dev-section-title', '项目目录');
+    treeToggle.append(chevronIcon(), treeTitle);
     const treeRefresh = iconButton('刷新项目目录', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
-    treeHeader.append(treeTitle, treeRefresh);
+    treeHeader.append(treeToggle, treeRefresh);
     const treeBody = node('div', 'dev-tree-body ' + files.body);
     const treeHost = node('ul', files.level);
     treeBody.append(treeHost);
     treeSection.append(treeHeader, treeBody);
-    explorer.append(changedSection, treeSection);
+    explorer.append(changedSection, splitHandle, treeSection);
     if (filesHost) filesHost.append(explorer);
+
+    function applyExplorerSplit() {
+      const hasChanges = !changedSection.hidden;
+      changedToggle.setAttribute('aria-expanded', String(changedOpen));
+      treeToggle.setAttribute('aria-expanded', String(treeOpen));
+      changedList.hidden = !changedOpen;
+      treeBody.hidden = !treeOpen;
+      changedSection.classList.toggle('is-collapsed', !changedOpen);
+      treeSection.classList.toggle('is-collapsed', !treeOpen);
+      const canResize = hasChanges && changedOpen && treeOpen;
+      splitHandle.hidden = !canResize;
+      splitHandle.setAttribute('aria-valuenow', String(Math.round(splitRatio * 100)));
+      if (!hasChanges) {
+        changedSection.style.flex = '';
+        treeSection.style.flex = treeOpen ? '1 1 0%' : '0 0 auto';
+      } else if (changedOpen && treeOpen) {
+        const pct = Math.round(splitRatio * 1000) / 10;
+        changedSection.style.flex = '0 0 ' + pct + '%';
+        treeSection.style.flex = '1 1 0%';
+      } else if (changedOpen && !treeOpen) {
+        changedSection.style.flex = '1 1 0%';
+        treeSection.style.flex = '0 0 auto';
+      } else if (!changedOpen && treeOpen) {
+        changedSection.style.flex = '0 0 auto';
+        treeSection.style.flex = '1 1 0%';
+      } else {
+        changedSection.style.flex = '0 0 auto';
+        treeSection.style.flex = '0 0 auto';
+      }
+    }
+    function setSplitRatio(next) {
+      splitRatio = Math.max(0.15, Math.min(0.85, next));
+      try { localStorage.setItem('forge-dev-explorer-split', String(splitRatio)); } catch {}
+      applyExplorerSplit();
+    }
+    changedToggle.onclick = () => { changedOpen = !changedOpen; applyExplorerSplit(); };
+    treeToggle.onclick = () => { treeOpen = !treeOpen; applyExplorerSplit(); };
+    splitHandle.ondblclick = () => setSplitRatio(0.4);
+    splitHandle.onkeydown = e => {
+      if (e.key === 'ArrowUp') { e.preventDefault(); setSplitRatio(splitRatio - 0.05); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); setSplitRatio(splitRatio + 0.05); }
+      else if (e.key === 'Home') { e.preventDefault(); setSplitRatio(0.18); }
+      else if (e.key === 'End') { e.preventDefault(); setSplitRatio(0.82); }
+    };
+    splitHandle.onpointerdown = e => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      splitHandle.setPointerCapture(e.pointerId);
+      splitHandle.classList.add('is-dragging');
+      const rect = explorer.getBoundingClientRect();
+      const move = ev => {
+        if (rect.height <= 80) return;
+        setSplitRatio((ev.clientY - rect.top) / rect.height);
+      };
+      const end = () => {
+        splitHandle.classList.remove('is-dragging');
+        splitHandle.removeEventListener('pointermove', move);
+        splitHandle.removeEventListener('pointerup', end);
+        splitHandle.removeEventListener('pointercancel', end);
+      };
+      splitHandle.addEventListener('pointermove', move);
+      splitHandle.addEventListener('pointerup', end);
+      splitHandle.addEventListener('pointercancel', end);
+    };
+    applyExplorerSplit();
 
     const treeRoot = createRoot(treeHost);
     const treeText = (key, args) => ({empty:'空目录',loading:'正在读取…',truncated:'加载更多文件',
@@ -168,6 +278,8 @@
 
     const forgeStrip = node('div', 'dev-forge-strip');
     forgeStrip.hidden = true;
+    const forgeDetail = node('div', 'dev-forge-detail');
+    forgeDetail.hidden = true;
 
     const toolbar = node('div', 'dev-code-toolbar');
     toolbar.hidden = true;
@@ -186,7 +298,7 @@
 
     const refBtn = node('button', 'dev-action-btn dev-action-primary', '引用到对话');
     refBtn.type = 'button';
-    const searchBtn = iconButton('在代码中搜索 (Ctrl+F)', 'M11 4a7 7 0 1 0 4.95 11.95L20 20');
+    const searchBtn = iconButton('在代码中搜索 (Ctrl+F)', 'M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14M16.2 16.2L20 20');
     const copyBtn = node('button', 'dev-action-btn', '复制');
     copyBtn.type = 'button';
     const reloadFileBtn = iconButton('刷新当前文件', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
@@ -194,7 +306,7 @@
     toolbar.append(pathMeta, toolActions);
 
     const viewport = node('div', 'dev-code-viewport');
-    pane.append(tabBar, forgeStrip, toolbar, viewport);
+    pane.append(tabBar, forgeStrip, forgeDetail, toolbar, viewport);
     layout.append(pane);
     toggle.setAttribute('aria-expanded', 'false');
 
@@ -245,6 +357,7 @@
       const term = filterTerm.trim().toLocaleLowerCase();
       const visible = term ? all.filter(item => item.path.toLocaleLowerCase().includes(term)) : all;
       changedSection.hidden = total === 0;
+      applyExplorerSplit();
       changedList.replaceChildren();
       for (const item of visible) {
         const btn = node('button', 'dev-changed-item');
@@ -273,28 +386,58 @@
       const checkTone = status => ({passed:'ok', failed:'bad', incomplete:'warn', not_applicable:'muted'})[status] || 'muted';
       if (latestChecks.native_flow && latestChecks.native_flow.status !== 'not_applicable') {
         const c = latestChecks.native_flow;
-        items.push({label: '原生数据流检查', text: checkLabel(c.status), tone: checkTone(c.status),
-          detail: (c.diagnostics || []).map(d => [d.rule, d.path, d.detail].filter(Boolean).join(' · ')).join('\n')});
+        const lines = (c.diagnostics || []).map(d => [d.rule, d.path + (d.line ? ':' + d.line : ''), d.detail].filter(Boolean).join(' · '));
+        const omitted = (c.diagnostic_count || 0) - lines.length;
+        if (omitted > 0) lines.push('另有 ' + omitted + ' 项诊断');
+        items.push({key: 'native_flow', label: '原生数据流检查', text: checkLabel(c.status), tone: checkTone(c.status),
+          lines: lines.length ? lines : ['静态数据流与 SDK 契约检查通过。']});
       }
       if (latestChecks.project_layout && latestChecks.project_layout.status !== 'not_applicable') {
         const c = latestChecks.project_layout;
-        items.push({label: '项目目录检查', text: checkLabel(c.status), tone: checkTone(c.status),
-          detail: (c.diagnostics || []).map(d => [d.rule, d.path, d.detail].filter(Boolean).join(' · ')).join('\n')});
+        const lines = (c.diagnostics || []).map(d => [d.rule, d.path + (d.line ? ':' + d.line : ''), d.detail].filter(Boolean).join(' · '));
+        items.push({key: 'project_layout', label: '项目目录检查', text: checkLabel(c.status), tone: checkTone(c.status),
+          lines: lines.length ? lines : ['业务目录与角色规范检查通过。']});
       }
       if (latestChecks.review) {
         const r = latestChecks.review;
         const rText = ({passed:'已通过', invalid:'需修改', incomplete:'未完成', running:'评审中'})[r] || r;
         const rTone = ({passed:'ok', invalid:'bad', incomplete:'warn', running:'muted'})[r] || 'muted';
-        items.push({label: '独立评审', text: rText, tone: rTone, detail: ''});
+        const lines = latestChecks.reviewDetails.length
+          ? latestChecks.reviewDetails
+          : [r === 'passed' ? '独立只读评审通过。' : '点击聊天流中的「独立评审」查看完整记录。'];
+        items.push({key: 'review', label: '独立评审', text: rText, tone: rTone, lines});
       }
       forgeStrip.replaceChildren();
       forgeStrip.hidden = items.length === 0;
-      if (!items.length) return;
+      if (!items.length) { forgeDetail.hidden = true; return; }
+      if (activeCheckKey && !items.some(i => i.key === activeCheckKey)) activeCheckKey = null;
       forgeStrip.append(node('span', 'dev-forge-strip-label', 'Forge 校验'));
       for (const item of items) {
-        const pill = node('span', 'dev-forge-pill dev-forge-' + item.tone, item.label + ' · ' + item.text);
-        if (item.detail) pill.title = item.detail;
+        const pill = node('button', 'dev-forge-pill dev-forge-' + item.tone + (activeCheckKey === item.key ? ' is-open' : ''), item.label + ' · ' + item.text);
+        pill.type = 'button';
+        pill.setAttribute('aria-expanded', String(activeCheckKey === item.key));
+        pill.title = '点击查看「' + item.label + '」详情';
+        pill.onclick = () => {
+          activeCheckKey = activeCheckKey === item.key ? null : item.key;
+          renderForgeStrip();
+        };
         forgeStrip.append(pill);
+      }
+      const selected = items.find(i => i.key === activeCheckKey);
+      forgeDetail.replaceChildren();
+      if (selected) {
+        const head = node('div', 'dev-forge-detail-head');
+        head.append(node('strong', null, selected.label + ' · ' + selected.text));
+        const closeDetail = node('button', 'dev-forge-detail-close', '收起');
+        closeDetail.type = 'button';
+        closeDetail.onclick = () => { activeCheckKey = null; renderForgeStrip(); };
+        head.append(closeDetail);
+        const list = node('ul', 'dev-forge-detail-list');
+        for (const line of selected.lines) list.append(node('li', null, line));
+        forgeDetail.append(head, list);
+        forgeDetail.hidden = false;
+      } else {
+        forgeDetail.hidden = true;
       }
     }
 
@@ -573,6 +716,7 @@
       for (const file of items) {
         if (!file || typeof file.path !== 'string') continue;
         const clean = file.path.replace(/^\/+/, '');
+        if (ignoredPath(clean)) continue;
         const status = !file.before ? 'A' : !file.after ? 'D' : 'M';
         const stats = diffStatsFromUnified(file.diff);
         observedChanges.set(clean, {
@@ -593,12 +737,18 @@
       if (checks.native_flow) latestChecks.native_flow = checks.native_flow;
       if (checks.project_layout) latestChecks.project_layout = checks.project_layout;
       if (checks.review) latestChecks.review = checks.review;
+      if (checks.reviewReset) latestChecks.reviewDetails = [];
+      if (checks.reviewDetail) {
+        latestChecks.reviewDetails.push(checks.reviewDetail);
+        if (latestChecks.reviewDetails.length > 20) latestChecks.reviewDetails.shift();
+      }
       renderForgeStrip();
     }
 
     function clearSessionChanges() {
       observedChanges.clear();
-      latestChecks = {native_flow: null, project_layout: null, review: null};
+      latestChecks = {native_flow: null, project_layout: null, review: null, reviewDetails: []};
+      activeCheckKey = null;
       renderForgeStrip();
       renderChangedList();
     }

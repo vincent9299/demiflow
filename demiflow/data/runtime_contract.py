@@ -23,7 +23,7 @@ def check_size(value, maximum=8 * 1024**2):
             raise RuntimeContractError('Value nesting/item budget exceeded')
         remaining -= sys.getsizeof(item)
         if remaining < 0:
-            raise RuntimeContractError('Value byte budget exceeded')
+            raise RuntimeContractError(f'Value byte budget exceeded (visited_python_bytes={maximum - remaining})')
         if type(item) is dict:
             for key, child in item.items():
                 visit(key, depth + 1)
