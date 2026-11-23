@@ -653,12 +653,25 @@ class NativeTerminalSink(_DataflowArtifactSink):
             result['native'] = None
             if manifest.get('final', True):
                 blocks = self._batches(manifest)
-                if (self._configuration.get('input_carrier') == 'fixed_scan_batches.v1'
-                        and self.native.spec.schema is None):
+                if self._has_staged_batches(manifest):
                     result['native'] = self.native.prepare_publication(blocks, context, result['ref'])
                 else:
                     result['native'] = self.native.prepare(blocks, context)
         return result
+
+    def _has_staged_batches(self, manifest):
+        if (self._configuration.get('input_carrier') != 'fixed_scan_batches.v1'
+                or self.native.spec.schema is not None or not manifest['total_rows']
+                or len(manifest['partitions']) != 1):
+            return False
+        from .dataflow_segments import ARROW_STREAM_MEDIA, segment_refs
+        root = _artifact_from_json(manifest['partitions'][0]['data_ref'])
+        entries = segment_refs(self._store, root, self._bounds)
+        try:
+            leaf = next(entries, None)
+            return leaf is not None and leaf.media_type == ARROW_STREAM_MEDIA
+        finally:
+            entries.close()
 
     def _batches(self, manifest):
         return publication_blocks(manifest, store=self._store, bounds=self._bounds,
