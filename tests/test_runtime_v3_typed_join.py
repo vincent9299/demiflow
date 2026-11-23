@@ -154,6 +154,50 @@ def test_typed_join_completed_resume_does_not_scan_or_run_sql(tmp_path, monkeypa
         assert run.journal.execution_commits('action-1') == commits
 
 
+def test_legacy_partial_terminal_closure_is_rejected_before_workers_start(tmp_path, monkeypatch):
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.run_journal import RunJournal
+    original = DataflowExecution.satisfy_terminal
+    def legacy_close(execution):
+        original(execution)
+        # Reproduce the old command, not forged recovery bytes: closing an
+        # unbounded iterator incorrectly satisfied and pruned the whole graph.
+        for endpoint in execution._endpoints.values():
+            endpoint.send_business({'kind':'satisfy'})
+    csv_table(tmp_path/'left.csv', ['k','v'], [('x', str(i)) for i in range(20)])
+    csv_table(tmp_path/'right.csv', ['k','r'], [('x', str(i)) for i in range(3)])
+    def build():
+        options = pacsv.ConvertOptions(column_types={'k':pa.string(),'v':pa.string()})
+        left = data.read_csv(str(tmp_path/'left.csv'), read_options=pacsv.ReadOptions(block_size=128),
+                             convert_options=options).limit(17)
+        right = data.read_csv(str(tmp_path/'right.csv'), read_options=pacsv.ReadOptions(block_size=128),
+                              convert_options=pacsv.ConvertOptions(column_types={'k':pa.string(),'r':pa.string()}))
+        return left.join(right, on='k')
+    class Interrupted(Exception):
+        pass
+    with monkeypatch.context() as patch:
+        patch.setattr(DataflowExecution, 'satisfy_terminal', legacy_close)
+        with pytest.raises(Interrupted):
+            with RunContext.start(tmp_path/'run', limits={'memory_bytes':1<<30}) as run, data.local_execution(
+                    workers=1, partitions=1, worker_mode='thread', memory_bytes=1<<30):
+                ref = run.ref
+                stream = build().iter_rows()
+                next(stream)
+                stream.close()
+                commits = run.journal.execution_commits('action-1')
+                manifest = commits[-1]['prepared']['sinks']['iter_rows']['manifest']
+                assert not manifest['final'] and 0 < manifest['total_rows'] < 51
+                raise Interrupted()
+    def forbidden(*args, **kwargs):
+        pytest.fail('invalid historical closure must fail before participant startup')
+    monkeypatch.setattr(DataflowExecution, '_launch_phase', forbidden)
+    with pytest.raises(DataflowError, match='incomplete action closed its terminal input'):
+        with RunContext.resume(ref), data.local_execution(workers=1, partitions=1, worker_mode='thread', memory_bytes=1<<30):
+            list(build().iter_rows())
+    assert RunJournal(ref.directory).execution_commits('action-1') == commits
+
+
 def test_csv_shared_batch_cursor_and_projection_keep_authenticated_occurrences(tmp_path):
     from dataclasses import replace
     from demiflow.data.sources import FileSource

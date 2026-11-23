@@ -748,9 +748,12 @@ class DataflowExecution:
             from ..kernels import state_codec
             from ..dataflow_kernel_pack import read_kernel_image
             from ..contracts.dataflow_codec import compute_participant_id
+            from ..recovery_contract import identity
             partitions = {compute_participant_id(stage.stage_id, partition): partition
                           for stage in self._physical.stages for partition in stage.partitions}
             transforms = {n.occurrence_id for n in self._graph.nodes if n.kind == "transform"}
+            terminal_inputs = {edge.edge_id for edge in self._graph.edges
+                               if edge.consumer in self._graph.terminals}
             from ..dataflow_residency import participants_for
             residency = self._checkpoint.residency or {}
             retired = set(residency.get('completed_stages', ()))
@@ -764,6 +767,20 @@ class DataflowExecution:
                     parts |= member_partitions(self._physical, residency, 'active')
                 retired_ids = set(participant_ids(self._physical, parts))
             for contribution in self._restore_image.contributions:
+                # Older iterator-close cuts can mark the terminal's input
+                # closed while a finite kernel still has an unproduced suffix.
+                # This is not evidence of satisfying the declared action: the
+                # completed/limit-satisfied branch above already handled that.
+                # Refuse before any participant starts, rather than replaying
+                # these closures as proof of a new final publication.
+                frontier_ref = contribution.operator_states.get(identity(
+                    ['worker-frontier', partitions[contribution.participant_id]]))
+                if frontier_ref is not None:
+                    frontier = json.loads(b''.join(self._store.read(
+                        frontier_ref, max_bytes=self._bounds.max_state_bytes)))
+                    if terminal_inputs.intersection(frontier.get('closed_inputs', ())):
+                        raise DataflowError('INCOMPATIBLE_HISTORY',
+                            'incomplete action closed its terminal input without satisfying its declared demand')
                 if contribution.participant_id in retired_ids:
                     continue  # Its original ACKed output is restored, not its actor.
                 for occ, ref in contribution.operator_states.items():
