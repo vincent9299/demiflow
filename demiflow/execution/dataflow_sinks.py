@@ -144,19 +144,20 @@ class _DataflowArtifactSink(Datasink):
                          "commit_id": context.commit_id, "manifest": manifest},
                         self._bounds.max_control_bytes)
 
-    def _verify_leaf(self, ref, witness):
+    def _leaf_present(self, ref, witness):
         # The publication object was written after its leaves. The original
         # filesystem witness excludes a later edit with an identical coarse time.
         # Only a checksum over this exact inode/signature may be reused.
         stamp = self._store.reusable_signature(ref, witness=witness)
         if stamp is not None and self._verified_leaves.get(ref) == stamp:
-            return
+            return True
         if not self._store.inspect(ref):
-            raise DataflowError('UNKNOWN_EFFECT', 'Cannot pin an absent artifact')
+            return False
         capacity = min(self._bounds.max_state_bytes, self._bounds.max_resident_bytes // 32) // 1024
         if (stamp is not None and len(self._verified_leaves) < capacity
                 and self._store.object_signature(ref) == stamp):
             self._verified_leaves[ref] = stamp
+        return True
 
     def prepare(self, blocks, context: WriteContext):
         if type(blocks) is not dict or blocks.get("schema") != _COMBINED_SCHEMA:
@@ -173,7 +174,8 @@ class _DataflowArtifactSink(Datasink):
             for ref in segment_refs(self._store, data_ref, self._bounds):
                 # Authenticate the entire prefix before publication, including
                 # old leaves. The traversal reads and authenticates each index.
-                self._verify_leaf(ref, witness)
+                if not self._leaf_present(ref, witness):
+                    raise DataflowError('UNKNOWN_EFFECT', 'Cannot pin an absent artifact')
         self._store.retain(pub_ref, owner=context.commit_id)
         self._action.context.allocate_artifact(self._marker(context), commit_id=context.commit_id)
         return {"ref": _artifact_json(pub_ref), "sink_id": self._sink_id,
@@ -707,15 +709,18 @@ class NativeTerminalSink(_DataflowArtifactSink):
         if prepared['native'] is None:
             return artifact
         if 'publication' in prepared['native']:
-            from .dataflow_segments import tree_refs
+            from .dataflow_segments import segment_refs
             if (prepared['native']['publication'] != prepared['ref']
                     or prepared['native']['rows'] != prepared['manifest']['total_rows']
                     or hashlib.sha256(self._publication_bytes(prepared['manifest'], context)).hexdigest()
                         != prepared['ref']['digest']):
                 raise DataflowError('CORRUPT_ARTIFACT', 'Native merge input differs from the sealed publication')
+            witness = self._store.object_signature(_artifact_from_json(prepared['ref']))
             for part in prepared['manifest']['partitions']:
-                for ref in tree_refs(self._store, _artifact_from_json(part['data_ref']), self._bounds):
-                    if not self._store.inspect(ref):
+                # Traversal authenticates each index; leaves use the same
+                # inode proof as prepare, including a cold checksum on reopen.
+                for ref in segment_refs(self._store, _artifact_from_json(part['data_ref']), self._bounds):
+                    if not self._leaf_present(ref, witness):
                         raise DataflowError('CORRUPT_ARTIFACT', 'Native merge input segment disappeared')
         native = self.native.inspect(prepared['native'], context)
         if native is None and artifact is not None:
