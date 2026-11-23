@@ -503,7 +503,9 @@ class ArrowBatchCache:
                 _, ref, sizes, schema_ref = self._projection
             else:
                 import pyarrow as pa
-                projected = batch.select(indices).rename_columns(names)
+                schema = pa.schema([batch.schema.field(i).with_name(name) for i, name in zip(indices, names)],
+                                   metadata=batch.schema.metadata)
+                projected = pa.RecordBatch.from_arrays([batch.column(i) for i in indices], schema=schema)
                 if not len(projected.schema):
                     return None  # Zero-column IPC cannot preserve a nonzero row count.
                 schema_ref = schemas.put(projected.schema)

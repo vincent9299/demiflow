@@ -271,8 +271,19 @@ def test_nonsequential_graphs_use_original_rows_without_batch_rereads(tmp_path, 
             expected = sorted(expected, key=lambda row: (row['id'], row['value']))
         assert actual == expected
     proof = events(path)
-    assert any(e['event']=='python_fallback' for e in proof)
-    assert not any(e['event'] in {'publish','read_batch','python_decode'} for e in proof)
+    if kind == 'join':
+        # A co-located fixed Lance probe now retains the original source batches.
+        # Verify the intended safety boundary: each parent is loaded once, with
+        # no interleaved rereads. Other nonsequential graphs still use rows.
+        published = [e for e in proof if e['event']=='publish' and e['carried']]
+        loaded = [e for e in proof if e['event']=='read_batch']
+        assert [e['rows'] for e in published] == [8, 8, 8]
+        assert [e['digest'] for e in loaded] == [e['digest'] for e in published]
+        assert len([e for e in proof if e['event']=='python_decode']) == len(rows)
+        assert not any(e['event']=='python_fallback' for e in proof)
+    else:
+        assert any(e['event']=='python_fallback' for e in proof)
+        assert not any(e['event'] in {'publish','read_batch','python_decode'} for e in proof)
 
 
 def test_wide_parent_buffers_use_original_rows_within_narrow_window(tmp_path, monkeypatch):
@@ -281,15 +292,26 @@ def test_wide_parent_buffers_use_original_rows_within_narrow_window(tmp_path, mo
     rows = [{'id':i, 'payload':'z'*12000} for i in range(9)]
     lance.write_dataset(pa.Table.from_pylist(rows), uri)
     limits = {**LIMITS, 'max_row_bytes':65536, 'max_batch_bytes':131072}
-    rejected = tmp_path/'rejected.lance'
-    # The fallback does not remove native conversion admission: a many-row
-    # builder really exceeds this window. Preserve that rejection, then use a
-    # smaller execution batch with the identical data and byte limits.
-    with pytest.raises(DataflowError, match='batch conversion admission'):
-        with RunContext.start(tmp_path/'rejected-run', limits=limits) as failed, data.local_execution(batch_rows=8):
-            data.read_lance(uri, version=1, batch_size=8).write_lance(str(rejected), mode='create')
-    assert not (rejected/'_versions').exists()
-    assert failed.journal.execution_action('action-1')['result'] is None
+    from demiflow.execution import batch_conversion
+    admission = batch_conversion.admit_batch_conversion
+    conversions = []
+    def checked(batch, fmt, **kwargs):
+        result = admission(batch, fmt, **kwargs)
+        conversions.append((len(batch), result, kwargs))
+        # The exact same writer input must still be rejected before its native
+        # constructor when its real coexistence workspace is unavailable.
+        narrow = {**kwargs, 'bounds':replace(kwargs['bounds'], max_resident_bytes=10000)}
+        with pytest.raises(DataflowError, match='batch conversion admission'):
+            admission(batch, fmt, **narrow)
+        return result
+    monkeypatch.setattr(batch_conversion, 'admit_batch_conversion', checked)
+    larger = str(tmp_path/'batch8.lance')
+    with RunContext.start(tmp_path/'batch8-run', limits=limits), data.local_execution(batch_rows=8):
+        data.read_lance(uri, version=1, batch_size=8).write_lance(larger, mode='create')
+    assert lance.dataset(larger).to_table().to_pylist() == rows
+    assert sum(n for n, _, _ in conversions) == len(rows)
+    assert all(0 < n < 8 and used <= maximum for n, (used, maximum), _ in conversions)
+    assert all(k['resident_workspace'] and k['writer_copies']==2 for _, _, k in conversions)
     target = str(tmp_path/'output.lance')
     with RunContext.start(tmp_path/'run', limits=limits), data.local_execution(
             batch_rows=1, native_resources={'batch_rows':1}):

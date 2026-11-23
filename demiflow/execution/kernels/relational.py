@@ -140,13 +140,19 @@ def typed_join_pairs(left, right, *, spec, services, retained_key):
     sql, functions = typed_join_query(types, how)
     pairs = services.query_region_offsets(sql, tables=tables, max_pairs=upper, rss_bytes=SQL_CHILD_RSS,
                                          check_stop=services.check_stop, key_functions=functions)
+    for li, ri in pairs:
+        if type(li) is not int or not 0 <= li < len(inputs[0]) or (
+                ri is not None and (type(ri) is not int or not 0 <= ri < len(inputs[1]))):
+            raise _err('INTERNAL_PROTOCOL', 'typed join returned invalid input offsets')
+    # Recovery replays an emitted prefix. Order only these pre-admitted offset
+    # pairs, never the business keys or full input rows. The 256 bytes/pair
+    # above include tuple/int/list storage, sort keys and Timsort scratch.
+    pairs.sort(key=lambda pair: (pair[0], -1 if pair[1] is None else pair[1]))
+    services.check_stop()
     retained_key(retained + len(pairs) * 256)
     def output():
         try:
             for li, ri in pairs:
-                if type(li) is not int or not 0 <= li < len(inputs[0]) or (
-                        ri is not None and (type(ri) is not int or not 0 <= ri < len(inputs[1]))):
-                    raise _err('INTERNAL_PROTOCOL', 'typed join returned invalid input offsets')
                 yield inputs[0][li], inputs[1][ri] if ri is not None else None
         finally:
             retained_key(0)

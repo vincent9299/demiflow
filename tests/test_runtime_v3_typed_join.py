@@ -38,10 +38,13 @@ def test_original_string_join_uses_raw_columns_after_structural_chain(tmp_path, 
     queries = []
     original = host.query_region_offsets
     def query(sql, **kwargs):
+        assert 'ORDER BY' not in sql.upper()  # Ordinary join adds no business-key sort.
         assert all(isinstance(value, pa.Table) for value in kwargs['tables'].values())
         assert kwargs['tables']['lkeys'].column('k0').to_pylist() == ['x','','x','absent']
         queries.append((sql, kwargs['key_functions']))
-        return original(sql, **kwargs)
+        # Native hash output can vary between processes; only bounded occurrence
+        # offsets, including duplicate-key pairs, define the replay prefix.
+        return list(reversed(original(sql, **kwargs)))
     monkeypatch.setattr(host, 'query_region_offsets', query)
     with RunContext.start(tmp_path/'run', limits={'memory_bytes': 1<<30, 'max_row_bytes':8192,
                                                  'max_batch_bytes':65536}) as run, data.local_execution(
@@ -60,7 +63,7 @@ def test_original_string_join_uses_raw_columns_after_structural_chain(tmp_path, 
                 expected.append({'key':key,'body':body})
         elif bool(matches) == (how == 'semi'):
             expected.append({'key':key,'body':body})
-    assert sorted(rows, key=repr) == sorted(expected, key=repr)
+    assert rows == expected
 
 
 def test_fixed_typed_lance_join_keeps_original_sql_when_right_payload_exceeds_index(tmp_path, monkeypatch):
@@ -84,6 +87,28 @@ def test_fixed_typed_lance_join_keeps_original_sql_when_right_payload_exceeds_in
             data.read_lance(str(tmp_path/'right'), version=1), on='k', how='left').take_all()
     assert len(queries) == 1 and len(queries[0]) == 2
     assert sorted((r['left'],r.get('right',-1)) for r in rows) == [(0,1),(0,2),(1,1),(1,2),(2,0),(3,-1),(4,-1)]
+
+
+def test_typed_projection_preserves_schema_and_field_metadata_at_both_public_terminals(tmp_path):
+    import lance
+    schema = pa.schema([pa.field('k', pa.int32(), nullable=False, metadata={b'unit':b'key'}),
+                        pa.field('v', pa.int16(), metadata={b'unit':b'metric'})],
+                       metadata={b'contract':b'logical-table-metadata'})
+    lance.write_dataset(pa.table({'k':[1,2], 'v':[11,22]}, schema=schema), str(tmp_path/'left'))
+    lance.write_dataset(pa.table({'key':pa.array([1], type=pa.int32())}), str(tmp_path/'right'))
+    expected_schema = pa.schema([schema.field('k'), schema.field('v').with_name('value')],
+                                metadata=schema.metadata)
+    with RunContext.start(tmp_path/'run', limits={'memory_bytes':1<<30, 'max_batch_bytes':65536,
+                                                 'max_row_bytes':8192}), data.local_execution(
+            workers=1, partitions=1, memory_bytes=1<<30, worker_mode='thread'):
+        left = data.read_lance(str(tmp_path/'left'), version=1).select_columns(['k','v']).rename_columns({'v':'value'})
+        result = left.join(data.read_lance(str(tmp_path/'right'), version=1), on='k', right_on='key', how='semi')
+        taken = result.take_batch(5, batch_format='pyarrow')
+        result.write_lance(str(tmp_path/'target'), mode='create')
+    written = lance.dataset(str(tmp_path/'target')).to_table()
+    for table in (taken, written):
+        assert table.to_pylist() == [{'k':1, 'value':11}]
+        assert table.schema.equals(expected_schema, check_metadata=True)
 
 
 @pytest.mark.parametrize('reason', ['udf', 'native_grant'])

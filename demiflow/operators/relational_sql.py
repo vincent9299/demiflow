@@ -220,5 +220,4 @@ def typed_join_query(types, how):
         joined = builder.join(builder.keyed(left, keys), builder.keyed(right, keys), source)
     lo = left.columns[-1].value
     ro = right.columns[-1].value if how in ('inner', 'left') else 'CAST(NULL AS BIGINT)'
-    return (builder.query(f'SELECT {lo} AS lo, {ro} AS ro FROM {joined.view} '
-                          f'ORDER BY {builder.order_sql(joined)}'), builder.key_functions)
+    return builder.query(f'SELECT {lo} AS lo, {ro} AS ro FROM {joined.view}'), builder.key_functions
