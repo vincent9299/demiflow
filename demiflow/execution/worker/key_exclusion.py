@@ -1,6 +1,6 @@
 """Drive a co-located, sealed fixed-source key exclusion with ordinary worker credits and cuts."""
 from ..contracts.dataflow_errors import DataflowError
-from ..contracts.relational_region import KEY_BATCH_SQL_SUFFIX, fixed_key_inputs
+from ..contracts.relational_region import KEY_BATCH_SUFFIXES, KEY_BATCH_SQL_SUFFIX, fixed_key_inputs
 from ..kernels.lance_keys import BatchKeySelection
 from ..lance_key_source import PinnedKeyPayload
 
@@ -9,7 +9,8 @@ class FixedKeyExclusion:
     @classmethod
     def open(cls, runner):
         executor = runner.e
-        if not any(s.stage_id.endswith(KEY_BATCH_SQL_SUFFIX) for s in executor.assignment.stages):
+        stage = next((s for s in executor.assignment.stages if s.stage_id.endswith(KEY_BATCH_SUFFIXES)), None)
+        if stage is None:
             return None
         shape = fixed_key_inputs(executor._graph)
         if not shape or set(shape) != set(executor._node_specs):
@@ -22,18 +23,19 @@ class FixedKeyExclusion:
         field = spec.configuration['on'][0]
         scans = {occ: executor._readers[split].pinned_keys(field, positions=occ == left)
                  for occ, split in splits.items()}
-        if any(s is None for s in scans.values()) or not BatchKeySelection.admits(scans[left], scans[right]):
+        sql = stage.stage_id.endswith(KEY_BATCH_SQL_SUFFIX)
+        if any(s is None for s in scans.values()) or not BatchKeySelection.admits(scans[left], scans[right], sql=sql):
             return None
         service = executor._finite_services
         payload = PinnedKeyPayload(spec, service)
         if not payload.supports_batch_output():
             return None
-        return cls(shape, splits, scans, payload)
+        return cls(shape, splits, scans, payload, sql=sql)
 
-    def __init__(self, shape, splits, scans, payload):
+    def __init__(self, shape, splits, scans, payload, *, sql):
         self.left, self.right, self.project, self.exclude, self.terminal = shape
         self.splits, self.scans, self.payload = splits, scans, payload
-        self.keys = BatchKeySelection()
+        self.keys = BatchKeySelection(sql=sql)
         self.selection = None
 
     def step(self, runner):

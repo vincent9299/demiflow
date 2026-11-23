@@ -99,7 +99,8 @@ class PinnedKeyScan:
         for fragment in self.fragments:
             offset = 0
             scan = self.dataset.scanner(columns=[self.field], fragments=[fragment], scan_in_order=True,
-                with_row_id=self.positions, batch_size=self.batch_rows, batch_readahead=1, fragment_readahead=1)
+                with_row_id=self.positions, batch_size=self.batch_rows, strict_batch_size=True,
+                io_buffer_size=self.reader._services.bounds.max_batch_bytes, batch_readahead=1, fragment_readahead=1)
             for batch in scan.to_batches():
                 if not batch.num_rows:
                     continue

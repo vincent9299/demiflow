@@ -516,9 +516,9 @@ class DataflowExecution:
             physical = compile_physical_dataflow(
                 graph, tuple(snapshots), tuple(splits), policy=self._policy, hosts=self._services.hosts,
                 bounds=self._bounds, constants_ref=constants_ref)
-            from ..contracts.relational_region import KEY_BATCH_SQL_SUFFIX
+            from ..contracts.relational_region import KEY_BATCH_SUFFIXES
             context = self._action.context
-            if (any(s.stage_id.endswith(KEY_BATCH_SQL_SUFFIX) for s in physical.stages)
+            if (any(s.stage_id.endswith(KEY_BATCH_SUFFIXES) for s in physical.stages)
                     and 'checkpoint_rows' not in context.explicit_limits
                     and self._policy.checkpoint_rows == context.limits['checkpoint_rows']
                     and self._policy.checkpoint_rows < context.limits['checkpoint_unconfirmed_rows']):
@@ -1200,9 +1200,9 @@ class DataflowExecution:
                     raise DataflowError("FENCED", "non-terminal allocation emitted a terminal record")
                 count = 1
                 if 'result_batch' in payload:
-                    from ..contracts.relational_region import KEY_BATCH_SQL_SUFFIX
+                    from ..contracts.relational_region import KEY_BATCH_SUFFIXES
                     count = payload.get('rows')
-                    if (self._request.kind != 'iter_rows' or not lease.stage_id.endswith(KEY_BATCH_SQL_SUFFIX)
+                    if (self._request.kind != 'iter_rows' or not lease.stage_id.endswith(KEY_BATCH_SUFFIXES)
                             or type(count) is not int or not 0 < count <= self._bounds.max_output_rows - self._terminal_seen
                             or type(payload.get('sequence')) is not int or payload['sequence'] != self._terminal_seen):
                         raise DataflowError('FENCED', 'terminal Arrow batch differs from its declared delivery range')
