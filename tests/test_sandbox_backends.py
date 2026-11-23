@@ -748,3 +748,44 @@ def test_deepseek_tool_call_clips_oversized_write_payload():
     assert events[1][0] == 'item.updated'
     wire(events[1][1], 65536)
     assert len(events[1][1]['rawInput']['content']) < 5000
+
+
+def test_resolve_local_uri_tolerates_unreadable_parent_and_loop_continue_break(tmp_path, monkeypatch):
+    from pathlib import Path
+    from demiflow.lance import storage
+    from demiflow.forge.pipeline_check import check_project
+    from demiflow.forge.project import initialize_project
+
+    target = tmp_path / 'sub' / 't.lance'
+    target.mkdir(parents=True)
+    orig_is_file = Path.is_file
+    def guarded_is_file(self):
+        if self.name == 'lance_locations.json':
+            raise PermissionError('EACCES under Landlock')
+        return orig_is_file(self)
+    monkeypatch.setattr(Path, 'is_file', guarded_is_file)
+    assert storage.resolve_local_uri(target) == target.resolve()
+    monkeypatch.undo()
+
+    proj = tmp_path / 'loop_proj'
+    initialize_project(proj)
+    for d in ('flows', 'configs'):
+        (proj / d).mkdir(exist_ok=True)
+    (proj / 'flows' / 'loop_demo.py').write_text(
+        'from demiflow import data\n'
+        'def run(items=None):\n'
+        '    picked = 0\n'
+        '    for v in items:\n'
+        '        if v < 0:\n'
+        '            continue\n'
+        '        if v == 99:\n'
+        '            break\n'
+        '        picked = picked + v\n'
+        '    return data.range(picked).count()\n'
+    )
+    (proj / 'configs' / 'loop_demo.json').write_text(
+        '{"format": "demiflow_forge_flow_parameters_v2", "arguments": {"items": [-1, 2, 3, 99, 100]}}\n'
+    )
+    report = check_project(proj, entry='flows/loop_demo.py:run', params='configs/loop_demo.json')
+    assert report['status'] == 'passed', report
+    assert report['entries'][0]['status'] == 'checked', report
