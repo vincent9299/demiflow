@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 import fcntl
 import json
 import os
@@ -16,7 +18,8 @@ import uuid
 
 from demiflow.errors import PipelineRunCancelled, PipelineRunTimeout
 
-from demiflow.execution.requirements import FrozenRequirements, platform_wheel_paths, read_platform_requirements, render_effective_requirements, resolved_wheel_paths, write_effective_requirements
+from demiflow.execution.contracts.pipeline import FrozenRequirements
+from demiflow.execution.requirements import platform_wheel_paths, read_platform_requirements, render_effective_requirements, resolved_wheel_paths, write_effective_requirements
 
 
 def inspect_local_environment_cache(
@@ -47,7 +50,7 @@ def prepare_local_environment(
     cancellation=None,
     resolution=None,
 ) -> Path:
-    execution_environment.verify_artifacts()
+    verify_environment_artifacts(execution_environment)
     if (
         not requirements.nonempty
         and resolution is None
@@ -287,3 +290,32 @@ def _terminate(process):
 
 
 __all__ = ["inspect_local_environment_cache", "prepare_local_environment", "uses_embedded_current_runtime"]
+
+
+def verify_environment_artifacts(environment) -> None:
+    values = (
+        (
+            environment.runtime_wheel,
+            environment.runtime.wheel_filename,
+            environment.runtime.wheel_sha256,
+            "runtime wheel",
+        ),
+        (
+            environment.platform_requirements,
+            environment.runtime.platform_requirements_filename,
+            environment.runtime.platform_requirements_sha256,
+            "platform requirements",
+        ),
+    )
+    for configured, filename, expected_sha256, label in values:
+        if configured.is_symlink():
+            raise ValueError(f"Configured {label} is unavailable")
+        path = configured.resolve()
+        if not path.is_file() or path.name != filename:
+            raise ValueError(f"Configured {label} is unavailable")
+        if hashlib.sha256(path.read_bytes()).hexdigest() != expected_sha256:
+            raise ValueError(f"Configured {label} digest mismatch")
+    from demiflow.execution.requirements import platform_wheel_paths
+    platform_wheel_paths(
+        environment.runtime.platform_wheels, environment.platform_wheel_directory,
+    )

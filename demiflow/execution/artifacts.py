@@ -2,6 +2,7 @@
 
 Encoding preserves existing artifact identities; callers own layout and policy.
 """
+from demiflow.execution.contracts.artifact import digest, encoded
 from contextlib import contextmanager
 import fcntl
 import hashlib
@@ -65,8 +66,8 @@ def _artifact_locations(filename, modified_ns, size, device=0, inode=0, changed_
         raise ValueError('Invalid artifact location manifest: ' + filename)
     return document['files']
 
-def encoded(value):return json.dumps(value,ensure_ascii=False,sort_keys=True,indent=2).encode()+b'\n'
-def digest(value):return hashlib.sha256(value if isinstance(value,bytes) else encoded(value)).hexdigest()
+
+
 def read(path):return json.loads(resolve_local_artifact(path).read_text())
 
 def immutable(path,value):
@@ -130,21 +131,3 @@ def snapshot(path):
 
 
 import types
-
-def code_record(code):
-    """Stable executable description; excludes interpreter interning/cache state."""
-    def constant(value):
-        if isinstance(value,types.CodeType):return {'code':code_record(value)}
-        if isinstance(value,tuple):return {'tuple':[constant(v) for v in value]}
-        if isinstance(value,frozenset):return {'frozenset':sorted((constant(v) for v in value),key=lambda v:json.dumps(v,sort_keys=True))}
-        return {'type':type(value).__name__,'value':repr(value)}
-    return {'bytecode':code.co_code.hex(),'constants':[constant(c) for c in code.co_consts],
-            'names':list(code.co_names),'varnames':list(code.co_varnames),
-            'freevars':list(code.co_freevars),'cellvars':list(code.co_cellvars),
-            'argcount':code.co_argcount,'posonlyargcount':code.co_posonlyargcount,
-            'kwonlyargcount':code.co_kwonlyargcount,'flags':code.co_flags,
-            'stacksize':code.co_stacksize,'exceptiontable':code.co_exceptiontable.hex()}
-
-def file_record(path):
-    path = Path(path).resolve()
-    return {"path": str(path), "sha256": digest(path.read_bytes())}

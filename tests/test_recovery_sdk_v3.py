@@ -6,7 +6,7 @@ from types import FunctionType
 
 from demiflow import data
 from demiflow.data.sources import frozen_options
-from demiflow.execution.artifacts import code_record
+from demiflow.execution.contracts.recovery_sdk_v3 import code_record
 from demiflow.execution.recovery_contract import identity
 from demiflow.execution.recovery_identity import describe
 from demiflow.execution.recovery_sdk_v3 import function_pin
@@ -94,7 +94,7 @@ def test_dataset_class_v3_qualified_import_in_optimized_python():
     probe = '''
 import json
 from demiflow import data
-from demiflow.execution.artifacts import code_record
+from demiflow.execution.contracts.recovery_sdk_v3 import code_record
 from demiflow.execution.recovery_contract import identity
 from demiflow.execution.recovery_identity import describe
 fn = data.Dataset.join

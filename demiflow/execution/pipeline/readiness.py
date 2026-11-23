@@ -1,5 +1,7 @@
 """Pure, side-effect-free readiness inspection for one Pipeline bundle."""
 from __future__ import annotations
+from demiflow.execution.hosts.python_environment import verify_environment_artifacts
+from demiflow.execution.pipeline.package_loader import verify_bundle
 import importlib.util
 from typing import Mapping
 from demiflow.execution.contracts import PipelineBundleRef, PipelineExecutionEnvironment, PipelineRunReadiness
@@ -10,11 +12,11 @@ from demiflow.execution.hosts.python_environment import inspect_local_environmen
 from demiflow.pipeline import discover_pipeline_definition
 
 def inspect_pipeline_run_readiness(bundle: PipelineBundleRef, execution_environment: PipelineExecutionEnvironment, target: PipelineExecutionTarget, *, environment: Mapping[str, str] | None = None) -> PipelineRunReadiness:
-    root = bundle.verify()
+    root = verify_bundle(bundle)
     definition = discover_pipeline_definition(root)
     requirements = read_candidate_requirements(root)
     issues=[]
-    try: execution_environment.verify_artifacts()
+    try: verify_environment_artifacts(execution_environment)
     except (OSError, ValueError): issues.append("platform_runtime_unavailable")
     required=prompt_environment_names(root)
     missing=missing_required_environment_names(required, environment)

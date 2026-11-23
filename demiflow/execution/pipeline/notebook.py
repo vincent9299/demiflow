@@ -1,6 +1,7 @@
 """Load explicitly tagged notebook code; untagged cells are never executed."""
 from pathlib import Path
-from demiflow.execution.artifacts import read, digest
+from demiflow.execution.artifacts import read
+from demiflow.execution.contracts.artifact import digest
 
 def pipeline_cells(notebook, tag="pipeline"):
     return ["".join(c["source"]) for c in read(notebook)["cells"]

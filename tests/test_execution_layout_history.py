@@ -44,6 +44,17 @@ for module, names in json.loads(sys.argv[2]).items():
     for name in names:
         cls = getattr(imported, name)
         result[name] = [base64.b64encode(pickle.dumps(cls, protocol=5)).decode(), describe(cls)]
+import io
+from demiflow.execution.legacy_queue import LegacyQueueHistoryDatasource
+from demiflow.execution.dataflow_program_pickle import ProgramPickler
+source = LegacyQueueHistoryDatasource('/fixed/archive.sqlite', sha256='0'*64, pool='p', through=0)
+for key, value in [('legacy_read_task', source.get_read_tasks(1)[0]), ('legacy_rows', source.rows)]:
+    buffer = io.BytesIO(); ProgramPickler(buffer, protocol=5).dump(value)
+    result[key] = base64.b64encode(buffer.getvalue()).decode()
+from demiflow import data
+from demiflow.data.guards import require
+for fn in [data.from_items, data.read_legacy_queue_records, require]:
+    result['public.' + fn.__name__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
 print(json.dumps(result))
 '''
     child = subprocess.run([sys.executable, '-P', '-B', '-c', script, str(original), json.dumps(CARRIERS)],
@@ -129,3 +140,18 @@ def test_private_large_unicode_does_not_duplicate_program_buffer():
         tracemalloc.stop()
     assert loaded == value
     assert peak < len(raw) * 2.5
+
+
+@pytest.mark.parametrize('name', ['legacy_read_task', 'legacy_rows'])
+def test_original_source_bound_method_global(original_carriers, name):
+    from demiflow.execution.sources.legacy_queue import LegacyQueueHistoryDatasource
+    loaded = load_payload([base64.b64decode(original_carriers[name])])
+    method = loaded.read_fn if name == 'legacy_read_task' else loaded
+    assert method.__func__ is LegacyQueueHistoryDatasource.rows
+    assert method.__self__.path == '/fixed/archive.sqlite'
+
+
+@pytest.mark.parametrize('name', ['from_items', 'read_legacy_queue_records', 'require'])
+def test_public_function_import_changes_keep_published_pin(original_carriers, name):
+    raw, original = original_carriers['public.' + name]
+    assert describe(load_payload([base64.b64decode(raw)])) == original

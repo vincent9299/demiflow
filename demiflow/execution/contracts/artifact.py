@@ -6,12 +6,15 @@ internal fields and verification algorithms are not redefined here. Distinct
 from the E1 sink-output ``artifact_manifest`` (paged-artifacts-v1), which stays
 owned by the commit path.
 """
+
+import json
+import hashlib
 import re
 from pathlib import Path
 
-from ..recovery_contract import document, identifier, identity
-from .envelope import protocol_version
-from .errors import ProtocolError
+from demiflow.execution.recovery_contract import document, identifier, identity
+from demiflow.execution.contracts.envelope import protocol_version
+from demiflow.execution.contracts.errors import ProtocolError
 
 MANIFEST_SCHEMA = "demiflow.run_artifact_manifest.v1"
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -201,7 +204,7 @@ def amend_manifest(value, changes):
 
 def manifest_digest(value):
     """Storage digest in the existing immutable-artifact encoding convention."""
-    from ..artifacts import digest
+
     return digest(value)
 
 
@@ -216,11 +219,6 @@ def verify_manifest(value, ref):
     return True
 
 
-def save_manifest(directory, value):
-    """Persist via the existing immutable content-addressed JSON mechanism."""
-    from ..file_ref import save_json_artifact
-    validate_manifest(value)
-    ref = save_json_artifact(Path(directory), value)
-    path = Path(ref.artifact_path)
-    return {"manifest_id": value["manifest_id"], "path": str(path),
-            "bytes": path.stat().st_size, "sha256": ref.sha256}
+def encoded(value):return json.dumps(value,ensure_ascii=False,sort_keys=True,indent=2).encode()+b'\n'
+
+def digest(value):return hashlib.sha256(value if isinstance(value,bytes) else encoded(value)).hexdigest()

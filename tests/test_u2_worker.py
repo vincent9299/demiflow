@@ -18,6 +18,7 @@ import pytest
 from demiflow.errors import ExecutionConflict
 from demiflow.execution.artifacts import read
 from demiflow.execution.contracts import artifact
+from demiflow.execution.file_ref import save_manifest
 from demiflow.execution.contracts.envelope import WORKER_PROTOCOL_VERSION
 from demiflow.execution.contracts.worker import validate_message
 from demiflow.execution.contracts.errors import ProtocolError
@@ -56,7 +57,7 @@ def env(tmp_path):
                  "fence": run.fence, "scope_id": ids["scope_id"], "allocation_id": ids["allocation_id"],
                  "boot_id": ids["boot_id"], "controller_epoch": run.attempt,
                  "expires_at_ms": int(time.time() * 1000) + 120000}
-        ref = artifact.save_manifest(run.directory, _manifest(run.ref.run_id))
+        ref = save_manifest(run.directory, _manifest(run.ref.run_id))
         mref = {"manifest_id": ref["manifest_id"], "sha256": ref["sha256"]}
         launch_spec = {"directory": str(run.directory), "run_id": run.ref.run_id,
                        "scope_id": ids["scope_id"], "allocation_id": ids["allocation_id"],

@@ -6,7 +6,7 @@ from pathlib import Path
 import types
 from contextvars import ContextVar
 
-from .artifacts import code_record
+from demiflow.execution.contracts.recovery_sdk_v3 import code_record
 from .recovery_contract import identity, document, RecoveryContractError, MAX_DOCUMENT_BYTES
 from .recovery_sdk_v3 import class_method_pins, function_pin, persistent_source_module
 

@@ -9,7 +9,7 @@ from .refs import DatasetRef
 from .registry import Catalog
 from .checkpoint import read_checkpoint_record
 from .storage import schema_hash
-from ..execution.artifacts import digest
+from demiflow.execution.contracts.artifact import digest
 from ..data.api import DataAPI
 
 

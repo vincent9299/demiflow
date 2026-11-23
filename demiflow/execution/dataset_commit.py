@@ -8,7 +8,8 @@ It never guesses that an interrupted append failed and never retries it.
 from pathlib import Path
 import time
 import uuid
-from .artifacts import digest, immutable, read, run_lock
+from demiflow.execution.contracts.artifact import digest
+from demiflow.execution.artifacts import immutable, read, run_lock
 
 
 class UncertainDatasetCommit(RuntimeError):

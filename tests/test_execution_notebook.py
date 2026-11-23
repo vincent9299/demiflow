@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from demiflow.execution.artifacts import code_record, digest
+from demiflow.execution.contracts.recovery_sdk_v3 import code_record
+from demiflow.execution.contracts.artifact import digest
 from demiflow.execution.pipeline.notebook import load_pipeline, pipeline_cells, graph_version
 from demiflow.execution.hosts import processes
 

@@ -8,6 +8,7 @@ protection evidence, not by this file.
 import threading
 
 import pytest
+from demiflow.execution.file_ref import save_manifest
 
 from demiflow.data import plan as ops
 from demiflow.data.plan import CallableSpec, LogicalPlan
@@ -378,7 +379,7 @@ def test_art_04_secrets_are_references_only():
 
 def test_art_manifest_persistence_roundtrip(tmp_path):
     manifest = artifact.seal_manifest(_manifest(), 123)
-    ref = artifact.save_manifest(tmp_path, manifest)
+    ref = save_manifest(tmp_path, manifest)
     assert set(ref) == {"manifest_id", "path", "bytes", "sha256"}
     assert artifact.verify_manifest(manifest, ref)
 

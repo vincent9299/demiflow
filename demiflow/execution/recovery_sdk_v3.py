@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 from types import CodeType, FunctionType
 
-from .artifacts import code_record
+from demiflow.execution.contracts.recovery_sdk_v3 import code_record
 from .recovery_contract import identity
 
 
@@ -49,6 +49,25 @@ _REVISIONS = {
         '2ac2ab41bb6a1b4eda601b8c06f78e7c0bc74caf638d9c54afe6360190a4912b',
         'dc6858f90a4ea48fb5c950027e405084d9f820ba26b3159592b38a9f42d46788'),
 }
+_REVISIONS.update({'demiflow.data.read_api': ('a2ca56b3a7b3faf33fafca97480bc56ceda4cbd16ad02d4d600f618912538a78',
+                            '1ff5e8431b684f758d2bc2bbe4818783c58ef4fb604e1ad564c4bc9c61f650f1'),
+ 'demiflow.data.guards': ('77fca99debe0b691ef1a64a75de9fae0f8bb1f2921c5ecd20b0b3e6cfed77c7c',
+                          'ce6022c75921d310d962578306c85ed71bd4fa76e88164efcd8834c848c17cec'),
+ 'demiflow.lance.registered_write': ('a067cc2a0ebfcd13750028b803d6eb137707af49d4fdb98a19112130824e08f4',
+                                     '6f04e5f92a72de79c08a8a9d73eaff71f984bb69cc59faf17852e799889456ec')})
+
+# Measured import operands only; executable bodies are authenticated below.
+_LAYOUT_IMPORT_PINS = {'demiflow.data.read_api': {'read_legacy_queue_records': ('eeed1979f39e3f4b225212ed11d0eec142f3528bd19c7b148848374dd2595f67',
+                                                          '86f249dd104fe43c1e03c01efd923339eea70b5a00f95927efd2663206ac112f'),
+                            'from_items': ('0d0424c310038a576634bd9b7ca1b52e7ee933d4df7c153036193243e374b4ff',
+                                           '2fce1f015e244e3441c331d34e576efef3c41bd6745c8fc46d77726e4db6c0b8')},
+ 'demiflow.data.guards': {'require': ('486b78c7736f700d825d53f1144ab5756a4d28af0a9073535b0a34e20aebe653',
+                                      '93eb9c55b49dd757e0e980c77bf39b222a52510268188bf7b732e3571aa49448')},
+ 'demiflow.lance.registered_write': {'_confirmed': ('1f4d3424e9b6b7c2876e54d41cdd960da002fd82f833bb77bf5080bea635ab7e',
+                                                    '51a2e7f519b42c32b11981f13f1cad301f0f8b5b0dcab05bd9c08b6d95900178'),
+                                     'write_registered_native': ('75ab080304ec4a8ab64b155c3437f1ecd256ca988430b85fe2a32678d6121b8e',
+                                                                 '72bbc5624481ec04208e4d6000bffe1a386bc172d5c0aa1001674952f5ddac96')}}
+
 _ROUTING_MODULE = 'demiflow.planning.dataflow_graph_adapter'
 _ROUTING_FUNCTIONS = frozenset(('_identity', '_tag', '_unwrap'))
 _RELATIONAL_METHODS = ('join', 'reduce_by_key', 'group_batches', 'exclude_keys', 'union')
@@ -211,6 +230,9 @@ def _matches_definition(fn, module, compiled, root_name, code, source):
 
 
 def _method_pin(fn, code):
+    pins = _LAYOUT_IMPORT_PINS.get(fn.__module__, {}).get(fn.__qualname__)
+    if pins is not None and pins[0] == code:
+        return pins[1]
     # v3 expresses this one declaration import by its original package. Every
     # other instruction, constant (including the relative level) and operand
     # still enters code_record. This works with the caller's Python optimizer.
@@ -482,8 +504,12 @@ def source_pickle_global(module, name):
     """Resolve only recorded historical GLOBAL names, never arbitrary paths."""
     for key, entry in _LAYOUT_SOURCE_TYPES.items():
         current_module, class_name = key.rsplit('.', 1)
-        if module == entry['old_module'] and name == class_name:
+        if module != entry['old_module']:
+            continue
+        if name == class_name:
             return current_module, class_name
+        if name.startswith(class_name + '.') and name[len(class_name) + 1:] in entry['methods']:
+            return current_module, name
     return None
 
 

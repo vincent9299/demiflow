@@ -32,5 +32,4 @@ __all__ = [
     "PipelineRunReadiness",
     "PipelineRunRequest",
     "PipelineRunResult",
-    "pipeline_bundle_digest",
 ]

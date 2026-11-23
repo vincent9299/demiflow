@@ -1,7 +1,10 @@
 """Content-verified immutable JSON artifacts, for control-plane diagnostics."""
+
+from demiflow.execution.contracts.artifact import validate_manifest
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from .artifacts import digest, immutable, read
+from demiflow.execution.contracts.artifact import digest
+from demiflow.execution.artifacts import immutable, read
 
 
 @dataclass(frozen=True)
@@ -31,3 +34,13 @@ def save_json_artifact(directory, value):
     path = directory / (sha + '.json')
     immutable(path, value)
     return JsonArtifactRef(str(path), sha)
+
+
+def save_manifest(directory, value):
+    """Persist via the existing immutable content-addressed JSON mechanism."""
+
+    validate_manifest(value)
+    ref = save_json_artifact(Path(directory), value)
+    path = Path(ref.artifact_path)
+    return {"manifest_id": value["manifest_id"], "path": str(path),
+            "bytes": path.stat().st_size, "sha256": ref.sha256}

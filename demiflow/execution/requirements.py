@@ -1,5 +1,6 @@
 """Frozen Candidate and trusted platform requirement declarations."""
 from __future__ import annotations
+from demiflow.execution.contracts.pipeline import FrozenRequirements, PythonEnvironmentResolution, ResolvedWheel
 
 from dataclasses import dataclass
 import hashlib
@@ -19,59 +20,10 @@ PLATFORM_WHEEL_BUNDLE_DIRECTORY = "platform-wheels"
 _HASH_CHUNK_BYTES = 1024 * 1024
 
 
-@dataclass(frozen=True)
-class FrozenRequirements:
-    path: Path | None
-    bundle_relative_path: str
-    text: str
-    sha256: str
-
-    @property
-    def nonempty(self) -> bool:
-        return bool(self.text.strip())
 
 
-@dataclass(frozen=True)
-class ResolvedWheel:
-    name: str
-    version: str
-    filename: str
-    sha256: str
 
-    def __post_init__(self) -> None:
-        if canonicalize_name(self.name) != self.name or not self.name:
-            raise ValueError("resolved wheel name must be canonical")
-        if not self.version:
-            raise ValueError("resolved wheel version is required")
-        if Path(self.filename).name != self.filename or not self.filename.endswith(".whl"):
-            raise ValueError("resolved wheel filename is invalid")
-        if len(self.sha256) != 64 or any(character not in "0123456789abcdef" for character in self.sha256):
-            raise ValueError("resolved wheel sha256 is invalid")
-        try:
-            distribution, version, _build, _tags = parse_wheel_filename(self.filename)
-        except Exception as exc:
-            raise ValueError("resolved wheel filename is invalid") from exc
-        if canonicalize_name(str(distribution)) != self.name or str(version) != self.version:
-            raise ValueError("resolved wheel filename does not match its identity")
 
-    def to_dict(self) -> dict[str, str]:
-        return {
-            "name": self.name,
-            "version": self.version,
-            "filename": self.filename,
-            "sha256": self.sha256,
-        }
-
-    @classmethod
-    def from_mapping(cls, value) -> "ResolvedWheel":
-        if not isinstance(value, Mapping) or set(value) != {
-            "name", "version", "filename", "sha256",
-        }:
-            raise ValueError("resolved wheel fields are invalid")
-        return cls(
-            str(value["name"]), str(value["version"]),
-            str(value["filename"]), str(value["sha256"]),
-        )
 
 
 def read_candidate_requirements(root: str | Path) -> FrozenRequirements:
@@ -241,43 +193,7 @@ def write_effective_requirements(text: str, destination: str | Path) -> Path:
     return path
 
 
-@dataclass(frozen=True)
-class PythonEnvironmentResolution:
-    platform_requirements_sha256: str
-    candidate_requirements_sha256: str
-    wheelhouse_sha256: str
-    wheels: tuple[ResolvedWheel, ...]
-    schema_version: str = "demiflow_python_environment_resolution_v1"
 
-    @property
-    def resolution_digest(self):
-        import json
-        return hashlib.sha256(json.dumps(
-            self.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-        ).encode()).hexdigest()
-
-    def to_dict(self):
-        return {
-            "schema_version": self.schema_version,
-            "platform_requirements_sha256": self.platform_requirements_sha256,
-            "candidate_requirements_sha256": self.candidate_requirements_sha256,
-            "wheelhouse_sha256": self.wheelhouse_sha256,
-            "wheels": [wheel.to_dict() for wheel in self.wheels],
-        }
-
-    @classmethod
-    def from_mapping(cls, value):
-        if not isinstance(value, Mapping) or set(value) != {
-            "schema_version", "platform_requirements_sha256",
-            "candidate_requirements_sha256", "wheelhouse_sha256", "wheels",
-        } or value["schema_version"] != "demiflow_python_environment_resolution_v1":
-            raise ValueError("unsupported Python environment resolution")
-        wheels = tuple(ResolvedWheel.from_mapping(wheel) for wheel in value["wheels"])
-        return cls(
-            str(value["platform_requirements_sha256"]),
-            str(value["candidate_requirements_sha256"]),
-            str(value["wheelhouse_sha256"]), wheels,
-        )
 
 
 def resolve_python_environment(
