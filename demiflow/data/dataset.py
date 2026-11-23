@@ -303,8 +303,6 @@ class Dataset:
         """Retired facade; execution-owned recovery uses the platform RunRef."""
         from ..execution.capabilities import require_action
         require_action('checkpoint')
-        from .local_relational import checkpoint
-        return checkpoint(self,path,version)
 
     @_flow_api("checkpoint_async", datasets=("self",), execution="action")
     async def checkpoint_async(self, path, *, version):

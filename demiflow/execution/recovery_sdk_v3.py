@@ -29,7 +29,7 @@ _REVISIONS = {
         '431b27e1065e3fdc02cfd708d60c20b924a1489c78ff2bd6afd36546cf56e134',
         '54bc1fa489826c74c7d67432fdeaba9fb9e54131d681936b5c2ea18180c117e9'),
     'demiflow.data.dataset': (
-        'a4e33ce7e44ff69ef8744febc5dc6b7cef933fa20a4b34d74a28f661633c8b02',
+        '50f2757ff445ecbeb379a88d29e55386dcf241643c694bb95ee0623c0ca17b50',
         '1ba0e80f1ed0853948a97792dc65125fdaec17504bc3396b5f53ffb593da7e88'),
     'demiflow.data.sources': (
         '4c349450034860cbaaa81d7b88e39b5caeea6c9ea56849e031804007cd226e79',
@@ -49,9 +49,12 @@ _ROUTING_FUNCTIONS = frozenset(('_identity', '_tag', '_unwrap'))
 _RELATIONAL_METHODS = ('join', 'reduce_by_key', 'group_batches', 'exclude_keys', 'union')
 
 
-# The explicit checkpoint option was already rejected before these two dead
-# branches. Direct references to the still-supported declarations remain valid.
-_DATASET_MAP_METHODS = {
+# The explicit checkpoint operation and arguments already rejected before
+# these removed branches. Pin only measured still-present declarations.
+_DATASET_CHECKPOINT_METHODS = {
+    'Dataset.checkpoint': (
+        '7a3505e339739860403b1cc5435db189f55a605cf2820da4389f061ea575d637',
+        'ff6767926e0022b28ebecc8e4084ce4bea5a5d66fbcefef109079cabb727d247'),
     'Dataset.map_async': (
         'e129a81cd80980ab713dbdc3ae94d6b949ab368c6f33f43c2c92c4207f0b51bc',
         '0578db7e142a4a404ee0c3bb43342b3d9216e5498163dbc757aaf101f7dff1b2'),
@@ -197,8 +200,8 @@ def _method_pin(fn, code):
     # v3 expresses this one declaration import by its original package. Every
     # other instruction, constant (including the relative level) and operand
     # still enters code_record. This works with the caller's Python optimizer.
-    if fn.__module__ == 'demiflow.data.dataset' and fn.__qualname__ in _DATASET_MAP_METHODS:
-        current, published = _DATASET_MAP_METHODS[fn.__qualname__]
+    if fn.__module__ == 'demiflow.data.dataset' and fn.__qualname__ in _DATASET_CHECKPOINT_METHODS:
+        current, published = _DATASET_CHECKPOINT_METHODS[fn.__qualname__]
         return published if current == code else code
     if (fn.__module__ != 'demiflow.data.dataset' or fn.__name__ not in _RELATIONAL_METHODS
             or fn.__qualname__ != 'Dataset.' + fn.__name__):
@@ -286,7 +289,7 @@ def class_method_pins(cls, methods):
     module = sys.modules.get('demiflow.data.dataset')
     if module is None or cls is not vars(module).get('Dataset'):
         return methods
-    for name in (*_RELATIONAL_METHODS, 'map_async', 'batch_map'):
+    for name in (*_RELATIONAL_METHODS, 'checkpoint', 'map_async', 'batch_map'):
         fn = vars(cls).get(name)
         if type(fn) is FunctionType and fn.__globals__ is vars(module):
             methods[name] = _method_pin(fn, methods[name])
