@@ -376,11 +376,9 @@ def test_y001(executor):
     assert executor.NAME == "ray"
     assert executor.PROVIDER == "ray_core"
     assert ENGINE.policy_calls[-1]["provider"] == "ray_core"
-    assert executor._unified_chain is False and executor._unified_graph is False
-    legacy = RayDatasetExecutor(unified_chain=True, unified_graph=True)
-    assert legacy._unified_chain is True and legacy._unified_graph is True
-    assert ENGINE.policy_calls[-1]["provider"] == "ray_core"
-    assert legacy.PROVIDER == executor.PROVIDER
+    for option in ('unified_chain', 'unified_graph'):
+        with pytest.raises(TypeError, match=option):
+            RayDatasetExecutor(**{option: True})
 
 
 def test_y002(executor):
@@ -632,24 +630,11 @@ def test_y024(executor, source, plan):
     Dataset(source, plan, executor).materialize()._source.handle
     assert executor.operator_llm_usage() == empty
 
-    class _Coordinator:
-        def __init__(self, usage):
-            self._usage = usage
-        def usage(self):
-            return self._usage
-
-    first = OperatorLLMUsage(2, 3, 3, 2, 1, 10, 8)
-    second = OperatorLLMUsage(1, 2, 2, 1, 1, 5, 4)
     observed = OperatorLLMUsage(4, 4, 4, 4, 0, 20, 16).to_dict()
-    executor._prompt_coordinators["a"] = _Coordinator(first)
-    executor._prompt_coordinators["b"] = _Coordinator(second)
     executor._dataflow_prompt_usage = observed.copy()
-    expected = {key: value + second.to_dict()[key] + observed[key]
-                for key, value in first.to_dict().items()}
-    assert executor.operator_llm_usage() == expected
-    assert executor.operator_llm_usage() == expected
+    assert executor.operator_llm_usage() == observed
+    assert executor.operator_llm_usage() == observed
     assert executor._dataflow_prompt_usage == observed
-
 
 
 

@@ -62,7 +62,7 @@ class _AfterGraphAction(RuntimeError):
 def _execute(tmp_path, spec, readers, count, *, checkpoint_rows, interrupt_after_action=False):
     from _native_graph_fixtures import (HISTORICAL_MEMORY, HISTORICAL_WORKERS,
         assert_native_graph, assert_managed_graph)
-    executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS)
     with RunContext.start(tmp_path / "run", limits={
             "memory_bytes": HISTORICAL_MEMORY, "checkpoint_rows": checkpoint_rows,
             "checkpoint_unconfirmed_rows": checkpoint_rows,
@@ -107,7 +107,7 @@ def test_finite_sealed_mode_commits(tmp_path):
     # Recovery reads the original sealed plan and final ACK, starting no worker.
     from _native_graph_fixtures import HISTORICAL_WORKERS, assert_native_graph
     records = set(run.directory.with_name('run-driver-resources').glob('units/*/*/process.json'))
-    executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS)
     with RunContext.resume(run.ref) as resumed:
         with resumed.action({"kind": "materialize", "source": {"fixture": "u3-graph-commit"}}) as execution:
             recovered = executor.materialize_graph(spec)

@@ -14,7 +14,6 @@ from demiflow import data
 from _worker_event_fixtures import emit, events
 from demiflow.execution import RunContext
 from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.stream import StreamStats, _arun, _materialize
 
 
 def mapped(rows, kind, callback, **options):
@@ -23,24 +22,6 @@ def mapped(rows, kind, callback, **options):
     if kind == 'batch':
         return source.batch_map(callback, max_batch=2, **options)
     return source.map_async(callback, **options)
-
-
-@pytest.mark.parametrize('kind', ['row', 'batch'])
-@pytest.mark.parametrize('hard_timeout', [None, 30])
-def test_execution_layer_forwards_original_callback_exception(kind, hard_timeout):
-    # A captured exception deliberately bypasses the native plan identity layer.
-    # No thread bridge is involved: asyncio.wrap_future may translate its error.
-    from demiflow.execution.stream import run_stream
-    error = TimeoutError('original exception')
-
-    async def callback(value):
-        raise error
-
-    rows = [{'id': 0}]
-    ds = mapped(rows, kind, callback, hard_timeout=hard_timeout)
-    with pytest.raises(TimeoutError) as failure:
-        run_stream(iter(rows), ds._plan)
-    assert failure.value is error
 
 
 @pytest.mark.parametrize('kind', ['row', 'batch'])
@@ -196,41 +177,6 @@ def test_unexpired_deadline_keeps_normal_none_and_empty_list(kind):
 
 
 @pytest.mark.parametrize('kind', ['row', 'batch'])
-def test_external_cancellation_drains_timed_call_and_has_no_pending_tasks(kind):
-    events, loop_errors = [], []
-
-    async def scenario():
-        ready = asyncio.Event()
-
-        async def callback(value):
-            ready.set()
-            try:
-                await asyncio.Event().wait()
-            finally:
-                events.append('callback_cancelled')
-
-        ds = mapped([{'id': 0}, {'id': 1}], kind, callback, hard_timeout=30)
-        stages = _materialize(ds._plan)
-        stats = StreamStats()
-        loop = asyncio.get_running_loop()
-        loop.set_exception_handler(lambda loop, context: loop_errors.append(context))
-        task = asyncio.create_task(_arun(iter([{'id': 0}, {'id': 1}]), stages, stats,
-            on_progress=None, on_drain=lambda stats: events.append('drained'),
-            log_every=0, cancellation=None))
-        await asyncio.wait_for(ready.wait(), 2)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(task, 3)
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
-        assert stats.miss == {} and stats.dead_batches == []
-        assert not [t for t in asyncio.all_tasks() if t is not asyncio.current_task() and not t.done()]
-
-    asyncio.run(scenario())
-    assert events == ['callback_cancelled', 'drained'] and loop_errors == []
-
-
-@pytest.mark.parametrize('kind', ['row', 'batch'])
 @pytest.mark.parametrize('hard_timeout', [None, 30])
 @pytest.mark.parametrize('action', ['materialize', 'create', 'overwrite'])
 def test_native_failure_after_output_never_completes_action_or_publishes(tmp_path, kind, hard_timeout, action):
@@ -350,62 +296,3 @@ def test_native_intentional_results_remain_successful(tmp_path, kind, action, ou
     journal = RunJournal(tmp_path / 'run')
     assert journal.execution_status()['status'] == 'succeeded'
     assert journal.execution_action('action-1')['result'] is not None
-
-
-@pytest.mark.parametrize('kind', ['row', 'batch'])
-@pytest.mark.parametrize('outcome', ['fatal_callback', 'caught_callback', 'deadline'])
-def test_timeout_origin_preserves_observation_counts(monkeypatch, kind, outcome):
-    from demiflow.execution import checked as observations
-    from demiflow.execution.stream import _Stage, _make_worker, SENTINEL
-
-    counts = {}
-
-    class Observer:
-        limits = {'max_row_bytes': 4096, 'max_batch_bytes': 16384}
-
-        def progress(self, key, **values):
-            for name, amount in values.items():
-                counts[name] = counts.get(name, 0) + amount
-
-        def check_stop(self):
-            pass
-
-        def duration(self, key, elapsed):
-            assert elapsed >= 0
-
-    observer = Observer()
-    monkeypatch.setattr(observations, 'current', lambda: observer)
-    error = TimeoutError('callback')
-
-    async def callback(value):
-        if outcome == 'deadline':
-            await asyncio.Event().wait()
-        raise error
-
-    async def scenario():
-        q_in = asyncio.Queue()
-        rows = [{'id': i} for i in range(2 if kind == 'batch' else 1)]
-        for row in rows:
-            q_in.put_nowait(row)
-        q_in.put_nowait(SENTINEL)
-        stage = _Stage('probe', callback, 1, 1,
-            (TimeoutError,) if outcome == 'caught_callback' else (), [], [],
-            hard_timeout=.01 if outcome == 'deadline' else 30,
-            max_batch=2 if kind == 'batch' else None)
-        stats = StreamStats()
-        worker = _make_worker(stage, q_in, None, stats, None, 0)
-        if outcome == 'fatal_callback':
-            with pytest.raises(TimeoutError) as failure:
-                await worker()
-            assert failure.value is error
-            assert stats.miss == {} and stats.dead_batches == []
-        else:
-            await worker()
-            reason = 'TimeoutError' if outcome == 'caught_callback' else 'hard_timeout'
-            assert stats.miss == {'probe:' + reason: 1}
-            assert [b['reason'] for b in stats.dead_batches] == ([reason] if kind == 'batch' else [])
-        assert counts['calls'] == counts['errors'] == 1
-        assert counts['rows_input'] == len(rows)
-        assert counts.get('dropped', 0) == (0 if outcome == 'fatal_callback' else len(rows))
-
-    asyncio.run(scenario())

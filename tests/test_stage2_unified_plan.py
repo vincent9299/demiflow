@@ -326,8 +326,7 @@ def test_real_representative_chain_executes_with_pinned_business_code(tmp_path, 
     biz, _ = _load_biz(tmp_path, monkeypatch)
     root = tmp_path / "run"
     with RunContext.start(root, limits=LIMITS) as run:
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             rows = _pipeline(biz, 8).materialize().take_all()
         # The single journal sealed a code-pin binding for the executed plan.
         assert _code_pin_keys(run), "no code-pin binding sealed in the driver journal"
@@ -364,8 +363,7 @@ def test_real_chain_kill_recovers_per_record_equality(tmp_path, monkeypatch):
     with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 _pipeline(biz, 8, hook).materialize().take_all()
     assert_worker_killed(marker, root)
     assert_released(root)
@@ -375,8 +373,7 @@ def test_real_chain_kill_recovers_per_record_equality(tmp_path, monkeypatch):
         pre = [f for f in run2.journal.execution_commits(child) if f["status"] == "acked"]
         assert pre, "no acked prefix survived the worker crash"
         pre_by_id = {f["commit_id"]: f for f in pre}
-        with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="process", partitions=1):
             rows = _pipeline(biz, 8, hook).materialize().take_all()
         # Per-record equality: the recovered settlement equals the clean business output.
         assert {r["concept_id"]: r for r in rows} == expected
@@ -414,8 +411,7 @@ def test_code_edit_after_seal_refuses_resume_then_unedited_recovers(tmp_path, mo
     with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 _pipeline(biz, 8, hook).materialize().take_all()
     assert_worker_killed(marker, root)
     assert_released(root)
@@ -433,8 +429,7 @@ def test_code_edit_after_seal_refuses_resume_then_unedited_recovers(tmp_path, mo
     importlib.reload(biz)
     with pytest.raises(RecoveryContractError):
         with RunContext.resume(reference) as run2:
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 _pipeline(biz, 8, hook).materialize().take_all()
     # The unedited-recovery equality contrast is bound by
     # test_real_chain_kill_recovers_per_record_equality (same kill scenario, no edit
@@ -553,8 +548,7 @@ def test_chain_failure_releases_capacity(tmp_path, monkeypatch):
     root = tmp_path / "run"
     with pytest.raises(RuntimeError):
         with RunContext.start(root, limits=LIMITS):
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="thread", partitions=1):
                 _pipeline(biz, 8).materialize().take_all()
     assert faulted, "the after_prepared fault window did not fire"
     pool = LocalCapacityPool(tmp_path / "run-resources" / "capacity", capacity=CAPACITY)
@@ -571,8 +565,7 @@ def test_chain_success_releases_capacity(tmp_path, monkeypatch):
     biz, _ = _load_biz(tmp_path, monkeypatch)
     root = tmp_path / "run"
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             rows = _pipeline(biz, 8).materialize().take_all()
     assert {r["concept_id"]: r for r in rows} == _expected(slice_rows, {})
     pool = LocalCapacityPool(tmp_path / "run-resources" / "capacity", capacity=CAPACITY)
@@ -619,8 +612,7 @@ def test_chain_settlement_in_driver_single_journal(tmp_path, monkeypatch):
     monkeypatch.setattr(commits.CommitCoordinator, "__init__", spy)
     root = tmp_path / "run"
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             _pipeline(biz, 8).materialize().take_all()
     # Every CommitCoordinator construction happened in the driver process; the
     # managed worker (separate pid) constructed none, all share one journal directory.
@@ -692,8 +684,7 @@ def test_f7b_helper_only_edit_same_run_resume_refuses(tmp_path, monkeypatch):
     with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 pipeline().materialize().take_all()
     # Unedited code runs to the crash point: driver/worker manifests agree (F7-d).
     assert_worker_killed(marker, root)
@@ -702,8 +693,7 @@ def test_f7b_helper_only_edit_same_run_resume_refuses(tmp_path, monkeypatch):
     importlib.reload(sys.modules[helper])
     with pytest.raises((RecoveryContractError, DataflowError), match="code") as excinfo:
         with RunContext.resume(reference):
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 pipeline().materialize().take_all()
     if isinstance(excinfo.value, DataflowError):
         assert excinfo.value.code == "INVALID_CONTRACT"
@@ -801,8 +791,7 @@ def test_f8a_chain_load_failure_identifiable_releases_capacity(tmp_path, monkeyp
     root = tmp_path / "run"
     with pytest.raises((DataflowError, RuntimeError), match="code differs") as excinfo:
         with RunContext.start(root, limits=LIMITS):
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="thread", partitions=1):
                 (data.from_items([{"x": i} for i in range(4)])
                  .map_async(biz.transform, concurrency=1).materialize().take_all())
     assert not isinstance(excinfo.value, TimeoutError)
@@ -849,8 +838,7 @@ def test_f8c_chain_row_error_identifiable_releases_capacity(tmp_path, monkeypatc
     root = tmp_path / "run"
     with pytest.raises(RecoveryContractError, match="Worker failed") as excinfo:
         with RunContext.start(root, limits=LIMITS):
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="thread", partitions=1):
                 (data.from_items([{"x": i} for i in range(4)])
                  .map_async(biz.boom, concurrency=1).materialize().take_all())
     assert not isinstance(excinfo.value, TimeoutError)
@@ -893,8 +881,7 @@ def test_s4b_real_rows_unavailable_carry_real_sha(tmp_path, monkeypatch):
     biz, _ = _load_biz(tmp_path, monkeypatch)
     root = tmp_path / "run"
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             rows = _pipeline(biz, 8).materialize().take_all()
     by_id = {r["concept_id"]: r for r in rows}
     assert by_id == _expected(slice_rows, {})
@@ -923,8 +910,7 @@ def test_s4c_two_row_types_execute_recover_equality(tmp_path, monkeypatch):
     with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 _pipeline_items(biz, mixed, hook).materialize().take_all()
     assert_worker_killed(marker, root)
     assert_released(root)
@@ -933,8 +919,7 @@ def test_s4c_two_row_types_execute_recover_equality(tmp_path, monkeypatch):
         pre = [f for f in run2.journal.execution_commits(child) if f["status"] == "acked"]
         assert pre, "no acked prefix survived the worker crash"
         pre_by_id = {f["commit_id"]: f for f in pre}
-        with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="process", partitions=1):
             rows = _pipeline_items(biz, mixed, hook).materialize().take_all()
         assert {r["concept_id"]: r for r in rows} == expected
         assert {r["status"] for r in rows} == {"ok", "unavailable"}   # both row types

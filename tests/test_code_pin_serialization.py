@@ -220,8 +220,7 @@ def test_f7c_default_edit_same_run_resume_refuses(tmp_path, monkeypatch, form):
     with pytest.raises(DataflowError) as crashed:
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 pipeline().materialize().take_all()
     # SIGKILL belongs to an actual managed child, never pytest's thread host.
     assert crashed.value.code == 'UNKNOWN_EFFECT'
@@ -238,8 +237,7 @@ def test_f7c_default_edit_same_run_resume_refuses(tmp_path, monkeypatch, form):
     importlib.reload(sys.modules[helper])
     with pytest.raises(DataflowError, match="Loaded program code differs from the sealed pin") as excinfo:
         with RunContext.resume(reference):
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 pipeline().materialize().take_all()
     assert not isinstance(excinfo.value, TimeoutError)
     assert excinfo.value.code == 'INVALID_CONTRACT'  # existing v3 code-pin rejection vocabulary
@@ -286,8 +284,7 @@ def test_f7c_default_clean_run_succeeds(tmp_path, monkeypatch, form):
     rows_in = [{"x": i} for i in range(8)]
     root = tmp_path / "run"
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             out = (data.from_items(rows_in).map_async(transform, concurrency=1)
                    .materialize().take_all())
     assert {r["input"]: r["value"] for r in out} == {i: i + 1 for i in range(8)}

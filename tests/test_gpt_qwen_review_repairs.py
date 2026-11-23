@@ -185,7 +185,7 @@ def test_cleanup_cancellation_still_closes_all_owners():
             raise asyncio.CancelledError()
     async def close():
         with pytest.raises(BaseExceptionGroup):
-            await StreamResources([First(), Last()]).close(action_cleanups=False)
+            await StreamResources([First(), Last()]).close()
     asyncio.run(close())
     assert events == ['last', 'first']
 
@@ -235,39 +235,6 @@ def test_folded_predicate_uses_actual_stage_concurrency(tmp_path):
     with RunContext.start(tmp_path/'run'):
         assert sorted(ds.materialize().take_all(), key=lambda r: r['i']) == [{'i': i} for i in range(6)]
     assert observed.read_text().splitlines() == [str(i) for i in range(1, 7)]
-
-
-def test_map_cleanup_cancellation_does_not_abandon_sibling_workers():
-    from demiflow.execution.stream_map import StreamMapRuntime
-    runtime = StreamMapRuntime(SimpleNamespace(stream_options=None))
-    events = []
-    class Worker:
-        def __init__(self, n):
-            self.n = n
-        async def aclose(self):
-            events.append(self.n)
-            if self.n == 1:
-                raise asyncio.CancelledError()
-    runtime.workers = [Worker(1), Worker(2)]
-    with pytest.raises(BaseExceptionGroup):
-        asyncio.run(runtime.aclose())
-    assert events == [1, 2]
-
-
-def test_registration_failure_closes_actor_even_if_stop_fails():
-    from test_upgrade_v2_unit_S012 import Lifecycle, FailingRegister, worker
-    class BrokenStop(Lifecycle):
-        async def astop(self):
-            self.stops += 1
-            raise RuntimeError('stop failed')
-    actor = BrokenStop()
-    w = worker(actor, FailingRegister(RuntimeError('registration failed')))
-    with pytest.raises(RuntimeError, match='registration failed'):
-        asyncio.run(w.prepare())
-    # CallableSpec constructs the execution-owned instance. Inspect that instance,
-    # as S012 does, rather than the original declaration object copied into it.
-    executed = w.callable._fn
-    assert executed.stops == executed.closes == 1
 
 
 def test_runtime_resource_inventory_is_bounded_before_copying_fields():

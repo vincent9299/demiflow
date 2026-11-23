@@ -396,8 +396,7 @@ def _chain_recovery(fixture, *, fault):
                 .map_async(hook, concurrency=1))
 
     def execute():
-        with data.local_execution(workers=1, worker_mode='process', partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode='process', partitions=1):
             return pipeline().materialize().take_all()
 
     run_dir = root / 'run'
@@ -587,7 +586,7 @@ def _graph_recovery(fixture, *, fault):
 
     spec, readers, n = _graph_spec(fixture, target_fns={'c0': crashing_target, 'c1': passthrough},
                                    mode='durable_incremental', cut_rows=8)
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=1)
     run_dir = root / 'run'
     started = time.monotonic()
     with pytest.raises((RecoveryContractError, OSError)):
@@ -733,8 +732,7 @@ def _queue_settle(fixture, root, *, url, unified, max_tasks=10000):
         return 'downloaded' if status == 'ok' else 'failed'
 
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode='thread', partitions=1,
-                                  unified_queue_chain=unified):
+        with data.local_execution(workers=1, worker_mode='thread', partitions=1):
             ds = data.read_queue(cfg, pool=fixture['pool'], max_tasks=max_tasks,
                                  max_inflight=1, idle_timeout_s=.2).fetch(
                 store=LocalObjectStore(root / 'objects'), concurrency=1,
@@ -1116,7 +1114,7 @@ def test_graph_broadcast_multi_consumer_tuple_bytes(tmp_path, pidfds):
                                    credit_rows=4)
     # Override the ancestor to emit tuple/bytes fidelity payloads.
     spec['ancestor']['plan'] = _stream_map(ancestor)
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=1)
     with RunContext.start(fixture['root'] / 'run', limits=GRAPH_LIMITS) as run:
         with run.action({'kind': 'materialize', 'source': {'fixture': 'e-graph-types'}}) as execution:
             result = executor.materialize_graph(spec)
@@ -1147,7 +1145,7 @@ def test_graph_slow_consumer_small_budget_no_loss(tmp_path, pidfds):
 
     spec, readers, n = _graph_spec(fixture, target_fns={'fast': passthrough, 'slow': slow},
                                    credit_rows=4)
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=1)
     started = time.monotonic()
     with RunContext.start(fixture['root'] / 'run', limits=GRAPH_LIMITS) as run:
         with run.action({'kind': 'materialize', 'source': {'fixture': 'e-graph-slow'}}) as execution:

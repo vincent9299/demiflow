@@ -48,7 +48,7 @@ def _plan_and_items():
 
 def test_local_chain_full_real_worker(tmp_path):
     items, plan, expected = _plan_and_items()
-    executor = LocalDatasetExecutor(workers=1, unified_chain=True)
+    executor = LocalDatasetExecutor(workers=1)
     dataset = Dataset(ItemsSource(items), plan, executor)
     with RunContext.start(tmp_path / "run",
                           limits={"checkpoint_rows": 4, "checkpoint_interval_ms": 60000}) as run:
@@ -88,7 +88,7 @@ def test_local_chain_full_real_worker(tmp_path):
 
 def test_default_in_driver_path_unchanged(tmp_path):
     items, plan, expected = _plan_and_items()
-    executor = LocalDatasetExecutor(workers=1, unified_chain=False)
+    executor = LocalDatasetExecutor(workers=1)
     dataset = Dataset(ItemsSource(items), plan, executor)
     with RunContext.start(tmp_path / "run",
                           limits={"checkpoint_rows": 4, "checkpoint_interval_ms": 60000}):
@@ -115,7 +115,7 @@ def test_wide_row_admitted_with_raised_limit(tmp_path):
         MapOp(CallableSpec.create(widen), stream_options=MapStreamOptions(concurrency=1)),
         MapOp(CallableSpec.create(passthrough), stream_options=MapStreamOptions(concurrency=1)),
     ))
-    executor = LocalDatasetExecutor(workers=1, unified_chain=True)
+    executor = LocalDatasetExecutor(workers=1)
     dataset = Dataset(ItemsSource(items), plan, executor)
     with RunContext.start(tmp_path / "run",
                           limits={"max_row_bytes": 4 * 1024 ** 2,
@@ -134,7 +134,7 @@ def test_wide_row_exceeding_limit_rejected(tmp_path):
     plan = LogicalPlan((
         MapOp(CallableSpec.create(widen), stream_options=MapStreamOptions(concurrency=1)),
     ))
-    executor = LocalDatasetExecutor(workers=1, unified_chain=True)
+    executor = LocalDatasetExecutor(workers=1)
     dataset = Dataset(ItemsSource(items), plan, executor)
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     with pytest.raises(DataflowError) as exc_info:

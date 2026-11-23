@@ -202,8 +202,7 @@ def test_unified_chain_repeated_map_async_runs_end_to_end(tmp_path, mode):
 
     limits = {"checkpoint_rows": 2, "checkpoint_interval_ms": 60000}
     with RunContext.start(tmp_path / "run", limits=limits) as run:
-        with data.local_execution(workers=1, worker_mode=mode, partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode=mode, partitions=1):
             handle = (data.from_items([{"x": i} for i in range(8)])
                       .map_async(inc, concurrency=1)
                       .map_async(inc, concurrency=1)

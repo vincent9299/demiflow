@@ -61,7 +61,7 @@ def test_actual_function_keeps_stage_state_across_worker_parking(tmp_path, worke
     path = tmp_path / 'calls.jsonl'
     with RunContext.start(tmp_path/'run', limits={'checkpoint_rows':2,
             'checkpoint_interval_ms':60000}) as run, data.local_execution(
-                workers=workers, worker_mode='thread', partitions=1, unified_chain=True):
+                workers=workers, worker_mode='thread', partitions=1):
         flow = data.from_items([{'i':i} for i in range(8)]).map_async(identity, concurrency=1).map_async(
             counter(path, form), concurrency=1)
         materialized = flow.materialize()

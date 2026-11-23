@@ -52,8 +52,7 @@ def _run_pipeline(root, *, unified):
         return {**row, "x": row["x"] * 2}
 
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=unified):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             handle = data.from_items(_items()).map_async(double, concurrency=1).materialize()
             rows = handle.take_all()
     return rows
@@ -87,8 +86,7 @@ def test_workbench_unified_take_and_count_read_back_committed_handle(tmp_path):
 
     expected = [{"x": i * 2} for i in range(10)]
     with RunContext.start(tmp_path / "run", limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             handle = data.from_items(_items(10)).map_async(double, concurrency=1).materialize()
             assert handle.count() == 10
             # take is bounded sampling: at most 3 committed rows, order not guaranteed.
@@ -107,8 +105,7 @@ def test_unified_readback_is_single_committed_handle_authority(tmp_path):
 
     expected = [{"x": i * 2} for i in range(10)]
     with RunContext.start(tmp_path / "run", limits=LIMITS) as run:
-        with data.local_execution(workers=1, partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, partitions=1):
             handle = data.from_items(_items(10)).map_async(double, concurrency=1).materialize()
             source = handle._source
             assert isinstance(source, MaterializedSource)
@@ -151,8 +148,7 @@ def test_workbench_unified_chain_kill_recovers_acked_prefix_exactly_once(tmp_pat
     with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
         with RunContext.start(tmp_path / "run", limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 data.from_items(_items(10)).map_async(double, concurrency=1).materialize().take_all()
     assert_worker_killed(crash_marker, tmp_path / "run")
     before_processes = process_records(tmp_path / "run")
@@ -162,8 +158,7 @@ def test_workbench_unified_chain_kill_recovers_acked_prefix_exactly_once(tmp_pat
         pre = [f for f in run2.journal.execution_commits(child) if f["status"] == "acked"]
         assert pre, "no acked prefix survived the worker crash"
         pre_by_id = {f["commit_id"]: f for f in pre}
-        with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="process", partitions=1):
             rows = data.from_items(_items(10)).map_async(double, concurrency=1).materialize().take_all()
         assert sorted(rows, key=lambda r: r["x"]) == expected      # state equality: output
         facts = run2.journal.execution_commits(child)
@@ -216,12 +211,7 @@ def test_paid_call_with_unknown_effect_refuses_new_dispatch_after_restart(tmp_pa
             bind_gate(run2)                          # resume rebind fail-closes; never replayed
 
 
-def test_workbench_default_is_unified_with_explicit_legacy_fallback(tmp_path):
-    # S9 controlled default switch: local_execution() now defaults to the unified
-    # chain for the workbench Local stream-materialize slice (a genuine managed
-    # worker is provisioned). Explicit unified_chain=False remains the byte-unchanged
-    # legacy in-driver fallback (no managed worker). Both produce equal rows, so the
-    # seam can be rolled back without a code change.
+def test_public_default_runs_in_managed_workers(tmp_path):
     def double(row):
         return {**row, "x": row["x"] * 2}
 
@@ -232,10 +222,3 @@ def test_workbench_default_is_unified_with_explicit_legacy_fallback(tmp_path):
     assert sorted(rows, key=lambda r: r["x"]) == expected
     default_pids = _managed_worker_pids(tmp_path / "default-resources")
     assert default_pids and os.getpid() not in default_pids   # default -> unified worker
-
-    with RunContext.start(tmp_path / "fallback", limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=False):
-            rows = data.from_items(_items(12)).map_async(double, concurrency=1).materialize().take_all()
-    assert sorted(rows, key=lambda r: r["x"]) == expected
-    assert _managed_worker_pids(tmp_path / "fallback-resources") == set()  # fallback -> in-driver

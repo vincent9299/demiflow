@@ -222,11 +222,8 @@ def test_service_stop_drains_paid_response_but_does_not_publish_partial_success(
         monkeypatch, tmp_path, request_timeout, expected_responses, failure_kind):
     error = (ServiceStopped('search engine unavailable') if failure_kind == 'service'
              else sqlite3.OperationalError('database is locked'))
-    import demiflow.execution.stream as execution
     monkeypatch.setenv('TEST_PROMPT_URL','http://fixture/v1')
     monkeypatch.setenv('TEST_PROMPT_KEY','fixture')
-    monkeypatch.setattr(execution,'_DRAIN_TIMEOUT',.01)
-    monkeypatch.setattr(execution,'_WATCHDOG_INTERVAL',.01)
     original=httpx.AsyncClient;state={'received':None,'requests':0,'closed':False}
     class Body(httpx.AsyncByteStream):
         async def __aiter__(self):

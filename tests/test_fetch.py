@@ -12,9 +12,9 @@ from demiflow.collect.fetch import fetch_tiers
 
 
 @pytest.fixture()
-def clean_policy():
-    saved = (dict(net.SOURCE_LIMITS), dict(net._gates))
-    net._gates.clear()
+def clean_policy(monkeypatch):
+    saved = dict(net.SOURCE_LIMITS)
+    monkeypatch.setattr(net, '_gates', type(net._gates)())
     net.SOURCE_LIMITS.clear()
     net.SOURCE_LIMITS.update({
         "_f": net.SourceLimits(rate=100.0, concurrency=8),
@@ -22,10 +22,7 @@ def clean_policy():
     })
     yield
     net.SOURCE_LIMITS.clear()
-    net.SOURCE_LIMITS.update(saved[0])
-    net._gates.clear()
-    net._gates.update(saved[1])
-    net._dl_client_direct = net._dl_client_proxy = None
+    net.SOURCE_LIMITS.update(saved)
 
 
 def _png_like(n: int) -> bytes:

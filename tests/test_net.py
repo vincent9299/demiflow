@@ -12,12 +12,11 @@ from demiflow.collect import net
 
 
 @pytest.fixture()
-def clean_policy():
+def clean_policy(monkeypatch):
     """每个用例独立的策略注册面（避免跨用例污染模块状态）。"""
     saved_limits = dict(net.SOURCE_LIMITS)
-    saved_gates = dict(net._gates)
+    monkeypatch.setattr(net, '_gates', type(net._gates)())
     saved_proxy = net.PROXY_URL
-    net._gates.clear()
     net.SOURCE_LIMITS.clear()
     net.SOURCE_LIMITS.update({
         "_t_direct": net.SourceLimits(rate=100.0, concurrency=8),
@@ -27,11 +26,7 @@ def clean_policy():
     yield
     net.SOURCE_LIMITS.clear()
     net.SOURCE_LIMITS.update(saved_limits)
-    net._gates.clear()
-    net._gates.update(saved_gates)
     net.PROXY_URL = saved_proxy
-    net._client_direct = net._client_proxy = None
-    net._dl_client_direct = net._dl_client_proxy = None
     net.reset_injected_clients()
 
 
@@ -127,7 +122,6 @@ async def test_gate_stalls_reports_held_slots():
     """U1c：闸门持有登记与超龄快照（活性取证）。"""
     import asyncio
     from demiflow.collect import net
-    net._gates.clear()
     net.register_limits({"liveness_probe_src":
                          net.SourceLimits(rate=100.0, concurrency=2)})
     g = net.gate_for("liveness_probe_src")
@@ -136,4 +130,40 @@ async def test_gate_stalls_reports_held_slots():
         snap = net.gate_stalls(max_age=0.0)
         assert "liveness_probe_src" in snap
     assert net.gate_stalls() == {}          # 释放后无持有
-    net._gates.clear()
+
+
+async def test_stream_clients_close_only_after_the_last_real_borrower(clean_policy, monkeypatch):
+    from demiflow.collect import llm
+    from demiflow.execution.stream_resources import StreamResources
+    name = 'lifecycle-test'
+    monkeypatch.setattr(llm, '_ENDPOINT_CFG', {})
+    llm.register_endpoint(name, base_url='http://localhost', model='test')
+
+    class Actor:
+        async def astart(self):
+            self.http = net.get_client()
+            self.download = net.get_download_client('')
+            self.model = llm.get_llm_client(name)
+
+    one, two = Actor(), Actor()
+    first, second = StreamResources([one]), StreamResources([two])
+    await first.prepare()
+    await second.prepare()
+    assert (one.http, one.download, one.model) == (two.http, two.download, two.model)
+    await first.close()
+    assert not any(c.is_closed for c in (two.http, two.download, two.model._http))
+    await second.close()
+    assert all(c.is_closed for c in (two.http, two.download, two.model._http))
+
+    # Externally supplied clients never belong to an automatic stream close.
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req: httpx.Response(200))) as external:
+        net.set_client(external)
+        net.set_download_client(external)
+        model = llm.AsyncLLMClient(base_url='http://localhost', model='injected', http=external)
+        monkeypatch.setitem(llm._INJECTED, name, model)
+        actor = Actor()
+        scope = StreamResources([actor])
+        await scope.prepare()
+        await scope.close()
+        assert actor.http is actor.download is external and actor.model is model
+        assert (await external.get('http://localhost/')).status_code == 200

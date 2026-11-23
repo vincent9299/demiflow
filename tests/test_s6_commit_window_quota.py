@@ -458,8 +458,7 @@ def _output_budgets(directory):
 def _clean_baseline(tmp_path, rows_in, transform):
     clean_root = tmp_path / "clean"
     with RunContext.start(clean_root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             rows = (data.from_items(rows_in).map_async(transform, concurrency=1)
                     .materialize().take_all())
     return clean_root, {r["input"]: r["value"] for r in rows}
@@ -484,13 +483,11 @@ def test_s6_gate9_real_worker_sigkill_recovery_same_quota(tmp_path, monkeypatch)
     with pytest.raises((RecoveryContractError, OSError)):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="thread", partitions=1):
                 pipeline().materialize().take_all()
     assert marker.exists(), "first run must SIGKILL the worker after acked cuts"
     with RunContext.resume(reference):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             resumed = pipeline().materialize().take_all()
     _release_crash_orphans(tmp_path / "run-resources")
     assert {r["input"]: r["value"] for r in resumed} == clean_values
@@ -529,8 +526,7 @@ def test_s6_gate9_real_worker_window3_recovery_same_quota(tmp_path, monkeypatch)
     with pytest.raises((RecoveryContractError, OSError)):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                      unified_chain=True):
+            with data.local_execution(workers=1, worker_mode="thread", partitions=1):
                 (data.from_items(rows_in).map_async(transform, concurrency=1)
                  .materialize().take_all())
     assert crashed[0], "driver must crash in window-3 with a real worker running"
@@ -539,8 +535,7 @@ def test_s6_gate9_real_worker_window3_recovery_same_quota(tmp_path, monkeypatch)
         "window-3 must leave a pending commit to re-prepare on resume"
     monkeypatch.setattr(commit_module, "fault_point", lambda *_: None)
     with RunContext.resume(reference):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             resumed = (data.from_items(rows_in).map_async(transform, concurrency=1)
                        .materialize().take_all())
     _release_crash_orphans(tmp_path / "run-resources")

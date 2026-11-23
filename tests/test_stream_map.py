@@ -19,7 +19,7 @@ from demiflow.execution.executors.local import LocalDatasetExecutor
 
 @pytest.fixture
 def data():
-    executor = LocalDatasetExecutor(workers=2, block_size=2, materialize_memory_limit=128)
+    executor = LocalDatasetExecutor(workers=2, block_size=2)
     try:
         yield DataAPI(executor)
     finally:
@@ -229,7 +229,6 @@ def test_failure_drains_sibling_thread_before_all_instance_cleanup(data):
         (data.from_items([{'i': 0}, {'i': 1}])
          .map(Work, execution='thread', callable_scope='worker', concurrency=2).materialize())
     assert len(closed) == 2
-    assert not data._executor._spill_paths
 
 
 def test_stop_file_waits_for_thread_before_cleanup(data, tmp_path):
@@ -612,7 +611,6 @@ def test_cleanup_failure_still_closes_all_workers_and_native_actors(data, hook):
         (data.from_items([{'i': 0}, {'i': 1}]).map(Worker, concurrency=2, execution='thread',
                callable_scope='worker').map_async(Native()).materialize())
     assert Counter(events) == {'stop': 2, 'close': 2, 'native_close': 1}
-    assert not data._executor._spill_paths
 
 
 def test_external_cancel_drains_map_calls_before_action_cleanup(data):
@@ -642,7 +640,7 @@ def test_external_cancel_drains_map_calls_before_action_cleanup(data):
     with pytest.raises(asyncio.CancelledError):
         (data.from_items([{'i': 1}]).map(Work, execution='thread')
          .map_async(CancelAction()).materialize())
-    assert events == ['closed'] and not data._executor._spill_paths
+    assert events == ['closed']
 
 
 @pytest.mark.parametrize('execution', ['inline', 'thread'])
@@ -671,7 +669,6 @@ def test_callback_cancellation_never_returns_partial_success(data, execution, co
         allocations = [json.loads(row[0]) for row in db.execute('SELECT document FROM resource_allocations')]
         assert allocations and all(row['cleanup'] == 'CONFIRMED' for row in allocations)
         assert db.execute("SELECT count(*) FROM runtime_commits WHERE status='acked'").fetchone()[0] == 0
-    assert not data._executor._spill_paths
 
 
 @pytest.mark.parametrize('failure', ['schema', 'writer'])

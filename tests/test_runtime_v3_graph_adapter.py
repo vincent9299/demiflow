@@ -103,7 +103,7 @@ def test_real_graph_runs_each_branch_and_shared_ancestor_once(graph_environment,
             'timeout_s': 60}) as run:
         with run.action({'kind': 'materialize', 'source': {'fixture': 'real-graph'}}) as action:
             try:
-                result = LocalDatasetExecutor(workers=3, unified_graph=True).materialize_graph(_spec(directory))
+                result = LocalDatasetExecutor(workers=3).materialize_graph(_spec(directory))
                 assert isinstance(result, dict), 'graph adapter returned the ancestor terminal instead of the graph result'
                 assert result['egress_rows'] == 3
                 assert result['target_rows'] == {'left': 3, 'right': 3}
@@ -141,7 +141,7 @@ def test_real_graph_preserves_caller_and_run_bounds(graph_environment, monkeypat
             'timeout_s': 30}) as run:
         with run.action({'kind': 'materialize', 'source': {'fixture': 'graph-bounds'}}) as action:
             try:
-                LocalDatasetExecutor(workers=3, unified_graph=True).materialize_graph(_spec(directory))
+                LocalDatasetExecutor(workers=3).materialize_graph(_spec(directory))
                 assert len(admitted) == 1
                 policy, bounds = admitted[0]
                 assert policy.max_active_workers == 3
@@ -182,7 +182,7 @@ def test_actual_graph_routes_reach_distinct_programs(graph_environment, monkeypa
             'memory_bytes': 128 * 1024**2, 'max_row_bytes': 4096,
             'max_batch_bytes': 16384, 'max_state_bytes': 2 * 1024**2, 'timeout_s': 90}) as run:
         with run.action({'kind': 'materialize', 'source': {'fixture': 'graph-route', 'route': routing}}) as action:
-            result = LocalDatasetExecutor(workers=3, unified_graph=True).materialize_graph(spec)
+            result = LocalDatasetExecutor(workers=3).materialize_graph(spec)
             assert result['egress_rows'] == 6
             action.complete({'kind': 'graph-materialized'})
         sealed = load_sealed_plan(run.directory, action.action_id, version='v3')

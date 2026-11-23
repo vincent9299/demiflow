@@ -83,8 +83,7 @@ def test_v3_local_caller_seals_and_persists(tmp_path):
     def double(row):
         return {**row, "x": row["x"] * 2}
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                  unified_chain=True):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             data.from_items([{"x": i} for i in range(6)]).map_async(
                 double, concurrency=1).materialize().take_all()
     assert load_sealed_plan(root, "action-1", version="v3")["version"] == "v3"
@@ -113,8 +112,7 @@ def test_v3_queue_caller_seals_and_persists(tmp_path):
     with origin_server() as (url, calls):
         seed(QueueChannel(cfg), tmp_path / 'seed', url)
         with RunContext.start(root, limits=LIMITS):
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
-                                      unified_queue_chain=True):
+            with data.local_execution(workers=1, worker_mode="thread", partitions=1):
                 ds = data.read_queue(cfg, pool='p', max_tasks=1, max_inflight=1,
                                      idle_timeout_s=.2).fetch(
                     store=LocalObjectStore(root / 'objects'), concurrency=1,

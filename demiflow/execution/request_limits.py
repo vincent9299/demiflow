@@ -184,9 +184,8 @@ class ObservedQueue(asyncio.Queue):
         return super().full() or self.max_bytes is not None and self.bytes + self.max_item_bytes > self.max_bytes
 
     def put_nowait(self,item):
-        from demiflow.execution.stream import SENTINEL, _CheckpointBarrier
         size = 0
-        if self.max_item_bytes is not None and item is not SENTINEL and type(item) is not _CheckpointBarrier:
+        if self.max_item_bytes is not None:
             from ..data.runtime_contract import check_size
             from .row_scope import ScopedRow
             size = check_size(item.row if type(item) is ScopedRow else item, self.max_item_bytes)
@@ -201,6 +200,5 @@ class ObservedQueue(asyncio.Queue):
     def get_nowait(self):
         queued,item,size=super().get_nowait()
         self.bytes -= size
-        from demiflow.execution.stream import SENTINEL, _CheckpointBarrier
-        if item is not SENTINEL and type(item) is not _CheckpointBarrier:self.wait.observe(time.monotonic()-queued)
+        self.wait.observe(time.monotonic()-queued)
         return item

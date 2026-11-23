@@ -392,15 +392,22 @@ def test_standard_yaml_forms_preserve_historical_contract_identity():
 
 
 def test_row_actor_cleanup_does_not_run_outer_action_cleanup(APIs, monkeypatch):
-    from demiflow.execution import resource_registry
+    from demiflow.collect.client_scope import ClientPool, ClientScope
     outer = []
-    monkeypatch.setattr(resource_registry, 'stream_cleanups', lambda: [lambda: outer.append(True)])
+    async def close(value):
+        outer.append(value)
+    pool = ClientPool(close)
     async def run():
-        scope = OperatorEnvironment(runtime='codex', operators={'counter': counter_config()}).bind({})
-        try:
-            assert await scope.invoke({'method': 'counter', 'arguments': {'value': 1}}, context=None) == 11
-        finally:
-            await scope.aclose()
+        owner = ClientScope()
+        with owner.active():
+            actual = pool.get('shared', object)
+            scope = OperatorEnvironment(runtime='codex', operators={'counter': counter_config()}).bind({})
+            try:
+                assert await scope.invoke({'method': 'counter', 'arguments': {'value': 1}}, context=None) == 11
+            finally:
+                await scope.aclose()
+            assert not outer
+        await owner.close()
+        assert outer == [actual]
     asyncio.run(run())
-    assert outer == []
     assert fixtures.calls[-1][0] == 'close'

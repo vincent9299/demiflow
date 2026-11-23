@@ -96,7 +96,7 @@ with scope as run:
             return result
         DataflowExecution.finish = read_published
         with run.action({'kind': 'materialize', 'source': {'fixture': 'published-graph'}}) as action:
-            result = LocalDatasetExecutor(workers=3, unified_graph=True).materialize_graph(spec)
+            result = LocalDatasetExecutor(workers=3).materialize_graph(spec)
             assert result['target_rows'] == {'left': 12, 'right': 12}
             action.complete({'kind': 'graph-materialized'})
     else:

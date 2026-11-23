@@ -56,7 +56,7 @@ def _plan(double, items_count=10):
 
 def _dataset(double):
     items, plan, expected = _plan(double)
-    executor = LocalDatasetExecutor(workers=1, unified_chain=True)
+    executor = LocalDatasetExecutor(workers=1)
     return Dataset(ItemsSource(items), plan, executor), expected
 
 

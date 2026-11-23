@@ -6,81 +6,6 @@
       "queue_flow"
     ],
     [
-      "Dataset._run_stream",
-      "demiflow.execution.capabilities",
-      "validate_stream_plan"
-    ],
-    [
-      "Dataset._run_stream",
-      "demiflow.execution.checked",
-      "current"
-    ],
-    [
-      "Dataset._run_stream",
-      "demiflow.execution.commit",
-      "CommitCoordinator"
-    ],
-    [
-      "Dataset._run_stream",
-      "demiflow.execution.object_sink",
-      "ObjectRowsSink"
-    ],
-    [
-      "Dataset._run_stream",
-      "demiflow.execution.object_sink",
-      "image_object_specs"
-    ],
-    [
-      "Dataset._run_stream",
-      "demiflow.execution.queue_execution",
-      "configure_explicit"
-    ],
-    [
-      "Dataset._run_stream",
-      "demiflow.execution.queue_execution",
-      "queue_source"
-    ],
-    [
-      "Dataset._run_stream",
-      "demiflow.execution.queue_producer",
-      "producer_actor"
-    ],
-    [
-      "Dataset._run_stream",
-      "demiflow.execution.recovery_contract",
-      "RecoveryContractError"
-    ],
-    [
-      "Dataset._run_stream",
-      "demiflow.execution.recovery_contract",
-      "SourcePosition"
-    ],
-    [
-      "Dataset._run_stream",
-      "demiflow.execution.run_context",
-      "admit_stream"
-    ],
-    [
-      "Dataset._run_stream",
-      "demiflow.execution.run_context",
-      "current_action"
-    ],
-    [
-      "Dataset._run_stream",
-      "demiflow.execution.stream",
-      "run_stream"
-    ],
-    [
-      "Dataset._run_stream",
-      "demiflow.execution.stream_checkpoint",
-      "StreamCheckpoint"
-    ],
-    [
-      "Dataset._run_stream",
-      "demiflow.execution.stream_resources",
-      "StreamResources"
-    ],
-    [
       "Dataset.ack_queue",
       "demiflow.execution.queue_ack",
       "QueueAcknowledge"
@@ -94,16 +19,6 @@
       "Dataset.batch_map",
       "demiflow.execution.capabilities",
       "require_action"
-    ],
-    [
-      "Dataset.batch_map",
-      "demiflow.execution.operator_checkpoint",
-      "CheckpointedCallable"
-    ],
-    [
-      "Dataset.batch_map",
-      "demiflow.execution.operator_checkpoint",
-      "OperatorCheckpoint"
     ],
     [
       "Dataset.checkpoint",
@@ -159,16 +74,6 @@
       "Dataset.map_async",
       "demiflow.execution.capabilities",
       "require_action"
-    ],
-    [
-      "Dataset.map_async",
-      "demiflow.execution.operator_checkpoint",
-      "CheckpointedCallable"
-    ],
-    [
-      "Dataset.map_async",
-      "demiflow.execution.operator_checkpoint",
-      "OperatorCheckpoint"
     ],
     [
       "Dataset.map_prompt_async",

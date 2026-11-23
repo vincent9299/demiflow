@@ -105,3 +105,36 @@ def test_lazy_materialized_history_verifies_earlier_object_bytes(tmp_path):
     paths[0].write_bytes(b'xxxxx')
     with pytest.raises(RecoveryContractError, match='checksum'):
         list(blocks)
+
+
+def test_released_local_encoded_and_spilled_results_keep_rows_and_release(legacy_seal_writer, tmp_path):
+    import os
+    import pickle
+    from pathlib import Path
+    import subprocess
+    import sys
+
+    archive = tmp_path / 'local-result.pkl'
+    old = """
+from pathlib import Path
+import pickle, sys, tempfile
+from demiflow.execution.executors.local import LocalDatasetExecutor
+
+target = Path(sys.argv[1])
+tempfile.tempdir = str(target.parent)
+executor = LocalDatasetExecutor(workers=1, block_size=1, materialize_memory_limit=128)
+result = executor._materialize_blocks(None, lambda emit: [emit({'id': 1}), emit({'text': 'x' * 300})])
+assert [type(block).__name__ for block in result.blocks] == ['_EncodedBlock', '_SpilledBlock']
+target.write_bytes(pickle.dumps(result))
+"""
+    subprocess.run([sys.executable, '-B', '-c', old, str(archive)], cwd=legacy_seal_writer,
+                   env={**os.environ, 'PYTHONPATH': str(legacy_seal_writer)}, check=True, timeout=30)
+    result = pickle.loads(archive.read_bytes())
+    assert list(result.rows()) == [
+        {'id': 1}, {'text': 'x' * 300}]
+    spill = Path(result.blocks[1].path)
+    assert spill.is_file()
+    result.release()
+    assert not spill.exists()
+    with pytest.raises(RuntimeError, match='released'):
+        result.check_open()

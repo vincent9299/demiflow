@@ -133,7 +133,7 @@ def _release_crash_orphans(root):
 
 def test_graph_stateful_actor_state_closed_loop(tmp_path):
     spec, readers, n = _graph_spec(_make_counter(), n=24, cut_rows=8)
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=1)
     limits = {"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
               "checkpoint_interval_ms": 60000}
     with RunContext.start(tmp_path / "run", limits=limits) as run:
@@ -171,7 +171,7 @@ def test_graph_stateful_actor_kill_recovers_state_exactly(tmp_path):
     trace = str(tmp_path / "ancestor-trace")
     actor = _make_counter(trace=trace, crash_marker=crash_marker, crash_on=8)
     spec, readers, n = _graph_spec(actor, n=24, cut_rows=8)
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=1)
     limits = {"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
               "checkpoint_interval_ms": 60000}
     # The ancestor SIGKILLs itself on the first post-cut row (x==8), strictly after

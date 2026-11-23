@@ -309,9 +309,7 @@ def test_budget_without_journal_is_atomic_across_workers(server):
 
 @pytest.mark.parametrize('prefetch', [0, 2])
 def test_cooperative_stop_drains_only_admitted_calls(server, tmp_path, monkeypatch, prefetch):
-    import demiflow.execution.stream as stream
     from demiflow.execution.request_limits import ServiceStopped
-    monkeypatch.setattr(stream, '_WATCHDOG_INTERVAL', .01)
     stop = tmp_path / 'STOP'
     server['delay'] = .15
     def stop_after_two():
@@ -325,36 +323,6 @@ def test_cooperative_stop_drains_only_admitted_calls(server, tmp_path, monkeypat
         assert db.execute('SELECT count(*) FROM calls WHERE response_json IS NOT NULL').fetchone()[0] == 2
         assert db.execute('SELECT count(*) FROM calls WHERE error_json IS NOT NULL').fetchone()[0] == 0
     assert ds._stages[-1]._pool is ds._stages[-1]._prepare_pool is None
-
-
-@pytest.mark.asyncio
-async def test_cancellation_drains_journal_and_closes_pool(server, tmp_path):
-    from demiflow.execution.stream import _arun, _materialize, StreamStats
-    from demiflow.execution.stream_resources import StreamResources
-    server['delay'] = 1
-    ds = node(server, tmp_path, [{'text': 'a'}])
-    resources = StreamResources(ds._stages)
-    # Validate the passive declaration before starting its actor, matching
-    # run_stream's materialize -> on_start -> _arun lifecycle. A started client
-    # cannot be reinterpreted as a fresh serializable factory declaration.
-    stages = _materialize(ds._plan)
-    async def execute():
-        try:
-            await resources.prepare()
-            await _arun(iter([{'text': 'a'}]), stages, StreamStats(),
-                        on_progress=None, on_drain=None, log_every=0, cancellation=None)
-        finally:
-            await resources.close()
-    task = asyncio.create_task(execute())
-    for _ in range(100):
-        if server['bodies']: break
-        await asyncio.sleep(.01)
-    assert server['bodies']
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError): await task
-    assert ds._stages[-1]._pool is ds._stages[-1]._client is None
-    with sqlite3.connect(tmp_path / 'calls.sqlite') as db:
-        assert db.execute('SELECT error_json FROM calls').fetchone()[0]
 
 
 def test_declaration_validates_limits_and_pooling_command(server, tmp_path):
