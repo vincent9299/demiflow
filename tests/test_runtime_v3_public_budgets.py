@@ -9,7 +9,7 @@ from demiflow.execution.contracts.dataflow_codec import (
     encode_wire, decode_wire, compute_physical_digest,
 )
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 
 

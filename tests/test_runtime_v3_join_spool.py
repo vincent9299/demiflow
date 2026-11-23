@@ -9,7 +9,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from test_runtime_v3_artifact_recovery import _open, _store
 from test_runtime_v3_artifact_accounting import consumed
 from test_runtime_v3_real_seams import PreparationOnly

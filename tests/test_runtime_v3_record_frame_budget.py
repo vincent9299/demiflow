@@ -8,7 +8,7 @@ from dataclasses import replace
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.contracts.record_codec import _encode_payload
 from demiflow.execution.contracts.dataflow import Record, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError

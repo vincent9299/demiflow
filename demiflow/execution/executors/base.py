@@ -85,7 +85,7 @@ def prepare_public_items(request: InputSpec, *, select_executor):
     field or a caller-controlled validation policy. It runs only after checked
     admission, preserving the original validation and capture ordering.
     """
-    from demiflow.execution.checked import action, current
+    from demiflow.execution.pipeline.checked import action, current
     from demiflow.data.runtime_contract import check_size
 
     if request.kind != 'public_items':

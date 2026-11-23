@@ -44,7 +44,7 @@ from ...resources.contracts import (
 )
 
 if TYPE_CHECKING:
-    from ..run_context import RunAction
+    from demiflow.execution.pipeline.run_context import RunAction
     from ...resources.manager import ResourceManager
 
 
@@ -414,7 +414,7 @@ class DataflowExecution:
         from ...planning.dataflow_compile import is_materialized_count
         if not is_materialized_count(self._request):
             return False
-        from ..checked import current
+        from demiflow.execution.pipeline.checked import current
         if (self._request.arguments or self._request.programs or current() is not None
                 or self._action.context.journal.source_binding(self._action.action_id + "-dataflow-sealed")):
             return False
@@ -490,8 +490,8 @@ class DataflowExecution:
                 self._action, graph, physical, sealed, store=self._store, bounds=self._bounds)
         else:
             compiled = lower_action(self._request, bounds=self._bounds)
-            from ..checked import current
-            from ..managed_native import NativeExecution
+            from demiflow.execution.pipeline.checked import current
+            from demiflow.execution.pipeline.managed_native import NativeExecution
             checked = current()
             if isinstance(checked, NativeExecution):
                 compiled = checked.admit_compiled(self._request, compiled, bounds=self._bounds)
@@ -553,7 +553,7 @@ class DataflowExecution:
                 self._policy = replace(self._policy, checkpoint_rows=context.limits['checkpoint_unconfirmed_rows'])
                 physical = compile_physical_dataflow(graph, tuple(snapshots), tuple(splits), policy=self._policy,
                     hosts=self._services.hosts, bounds=self._bounds, constants_ref=constants_ref)
-            from ..checked import current
+            from demiflow.execution.pipeline.checked import current
             from demiflow.execution.seal.identity_bridge import build_identity_bridge
             from ..contracts.dataflow import thaw_record_value
             checked = current()
@@ -585,7 +585,7 @@ class DataflowExecution:
         self._store.bind_driver_bounds(self._bounds)
         self._services.journal_service.bind_bounds(self._bounds)
         self._check_stop()
-        from ..checked import current
+        from demiflow.execution.pipeline.checked import current
         self._checked = current()
         if self._checked is not None:
             bridge_doc = json.loads(b"".join(self._store.read(sealed.identity_bridge_ref,

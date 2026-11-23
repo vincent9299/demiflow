@@ -8,7 +8,7 @@ from demiflow.data.api import DataAPI
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.outputs.dataflow_handles import StoredMaterializedHandle
 from demiflow.execution.recovery_identity import plan_identity
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @contextmanager

@@ -43,7 +43,7 @@ def test_sdk_retained_runtime_dependencies_do_not_expand():
 
 
 def test_execution_rebinding_and_checkpoint_core_do_not_construct_sdk_objects():
-    for filename in ['demiflow/execution/checked.py', 'demiflow/execution/checkpoint_read.py',
+    for filename in ['demiflow/execution/pipeline/checked.py', 'demiflow/execution/checkpoint_read.py',
                      'demiflow/data/relational_declaration.py']:
         found = imports(ROOT / filename)
         assert not {entry for entry in found if entry[1] in {'demiflow.data.api', 'demiflow.data.dataset'}}, found

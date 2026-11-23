@@ -40,8 +40,8 @@ PRIVATE_IMPORT_BUDGET = {
 # package-wide private-name allowance. The checkpoint selector is the existing
 # canonical public entry's assembly seam, not a runtime-core dependency.
 P1_ASSEMBLY_IMPORTS = {
-    ('demiflow.execution.local_kernel', 'demiflow.data.execution_contract', '_current_executor'),
-    ('demiflow.execution.local_kernel', 'demiflow.data.execution_contract', '_use_executor'),
+    ('demiflow.execution.pipeline.local_kernel', 'demiflow.data.execution_contract', '_current_executor'),
+    ('demiflow.execution.pipeline.local_kernel', 'demiflow.data.execution_contract', '_use_executor'),
     ('demiflow.execution.stream_checkpoint', 'demiflow.data.execution_contract', '_current_executor'),
     ('demiflow.pipeline.core', 'demiflow.data.execution_contract', '_use_executor'),
     ('demiflow.execution.stream_checkpoint', 'demiflow.data.api', '_select_executor'),

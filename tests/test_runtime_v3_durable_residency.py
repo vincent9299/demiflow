@@ -3,7 +3,7 @@
 from demiflow.execution.action_driver import services as action_services
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 LIMITS = {'memory_bytes': 40*1024, 'max_batch_bytes': 16*1024,
           'max_row_bytes': 8*1024, 'max_state_bytes': 128*1024,

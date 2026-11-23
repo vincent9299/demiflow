@@ -9,16 +9,16 @@ from dataclasses import replace
 import json
 from pathlib import Path
 
-from .checked import CheckedExecution, CheckedAction, _equal
-from .contracts.dataflow_errors import DataflowError
-from .recovery_contract import identity
+from demiflow.execution.pipeline.checked import CheckedExecution, CheckedAction, _equal
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.recovery_contract import identity
 
-from .contracts.pipeline import NATIVE_SUBMISSION_FORMAT as FORMAT
+from demiflow.execution.contracts.pipeline import NATIVE_SUBMISSION_FORMAT as FORMAT
 
 
 def capture_managed_pipeline(entry, arguments, *, limits, explicit_limits=None, inherited_native_resources=None, on_compiled=None):
-    from .plan_capture import capture_pipeline
-    from .local_kernel import local_execution
+    from demiflow.execution.plan_capture import capture_pipeline
+    from demiflow.execution.pipeline.local_kernel import local_execution
     def construct():
         with local_execution(worker_mode='thread', partitions=1, batch_rows=limits['batch_rows'],
                 block_size=limits['batch_rows'], memory_bytes=limits['memory_bytes'],
@@ -38,10 +38,10 @@ def capture_managed_pipeline(entry, arguments, *, limits, explicit_limits=None, 
 
 def submission_contract(request, compiled, *, bounds):
     """Derive write grants from actual native declarations before any execution."""
-    from .contracts.dataflow_codec import encode_wire
-    from ..lance.schema import schema_identity
-    from ..lance.model import LanceWriteSpec
-    from .dataflow_stream_lance import StreamLanceFactory
+    from demiflow.execution.contracts.dataflow_codec import encode_wire
+    from demiflow.lance.schema import schema_identity
+    from demiflow.lance.model import LanceWriteSpec
+    from demiflow.execution.dataflow_stream_lance import StreamLanceFactory
     import pyarrow as pa
     if request.provider != 'local' or request.kind != 'write_lance':
         raise DataflowError('UNSUPPORTED_CAPABILITY',
@@ -133,7 +133,7 @@ class NativeExecution(CheckedExecution):
         action_id = self.contract['action_id']
         output = self.contract['outputs'][0]
         _equal(spec.to_dict() if spec else None, output['write_spec'], 'native terminal')
-        from .run_context import current_run
+        from demiflow.execution.pipeline.run_context import current_run
         self.active = self.matching_action = action_id
         self.operation_id = identity([current_run().ref.run_id, action_id, 1])
         self.observations.clear()

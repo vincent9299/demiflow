@@ -222,7 +222,7 @@ def _one_business(root, base, calls, model_calls, *, explicit=False, recover=Fal
     from demiflow.environment import OperatorEnvironment
     from demiflow.operator_llm.parser import parse_prompt_pack
     from demiflow.execution.queue import QueueConfig, QueueChannel, ProducerSourceSpec
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     root.mkdir(parents=True)
     channel = QueueChannel(QueueConfig(backend='sqlite', queue_id='full-business', path=str(root/'queue.sqlite')))
@@ -304,7 +304,7 @@ def _one_business(root, base, calls, model_calls, *, explicit=False, recover=Fal
 def _unknown_search(root, base, calls):
     import pytest
     from demiflow.execution.queue import QueueConfig, QueueChannel, ProducerSourceSpec
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.collect.search_contract import NativeSearchResultSink
     from demiflow.execution.recovery_contract import UnresolvedCommit
     root.mkdir(parents=True)

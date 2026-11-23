@@ -264,7 +264,7 @@ def test_real_ray_terminal_acks_use_bounded_batch_rpcs(tmp_path, monkeypatch, pr
     import sys
     from demiflow import data
     from demiflow.execution.dataflow_hosts import RayHostEndpoint
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     original = _EndpointBase.flush_business
     terminal = []
     def flush(endpoint):
@@ -299,8 +299,8 @@ def test_actual_process_terminal_partial_read_and_error_release_workers(tmp_path
     from demiflow.data.api import DataAPI
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.executors.local import LocalDatasetExecutor
-    from demiflow.execution.local_kernel import LocalKernelOptions
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.local_kernel import LocalKernelOptions
+    from demiflow.execution.pipeline.run_context import RunContext
     import demiflow.execution.exchange.dataflow_bridge as bridge
     original_start, original_decode = DataflowExecution.start, record_codec._decode_record_document
     executions, decoded = [], []

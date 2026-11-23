@@ -10,7 +10,7 @@ from demiflow.execution.storage.staging import DriverArtifactPort
 from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.contracts import record_codec as frames
 from demiflow.execution.outputs import sinks
-from demiflow.execution.run_context import RunAction, RunContext
+from demiflow.execution.pipeline.run_context import RunAction, RunContext
 from demiflow.resources.contracts import ResourceProfile
 
 

@@ -12,7 +12,7 @@ from demiflow.embeddings import embedding_execution_config
 from demiflow.inference import request_admission_config
 from demiflow.services.blocking_io import BlockingIOPool
 from demiflow.services.request_limits import RequestGate
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from test_embeddings import server as embedding_server
 from test_map_prompt_async import server as prompt_server, prompt, PACK
 

@@ -2,7 +2,7 @@
 import pytest
 from demiflow import data
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @pytest.mark.parametrize('workers', [1, 2])
@@ -114,7 +114,7 @@ def test_closed_subscription_acknowledges_late_real_output(tmp_path, monkeypatch
 def test_native_input_prefetch_respects_concurrency_without_changing_durable_windows(concurrency, durability):
     from demiflow.execution.contracts.dataflow import ActionRequest
     from demiflow.execution.executors.dataflow_api import _CompileContext
-    from demiflow.execution.run_context import RunAction
+    from demiflow.execution.pipeline.run_context import RunAction
     from demiflow.operator_llm.parser import parse_prompt_pack
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_place import partition_stages, plan_exchanges

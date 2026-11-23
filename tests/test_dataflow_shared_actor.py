@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 class Counter:
@@ -367,7 +367,7 @@ def test_recipe_alias_validation_checks_both_directions(tmp_path, original_share
     from demiflow.execution.contracts.dataflow import ActionRequest
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.executors.dataflow_api import _CompileContext
-    from demiflow.execution.run_context import RunAction
+    from demiflow.execution.pipeline.run_context import RunAction
     from demiflow.execution.seal.program_identity import validate_shared_actor_binding
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
@@ -412,7 +412,7 @@ def test_alias_admission_never_reads_source_or_constructs_factory(tmp_path, monk
     from demiflow.execution.contracts.dataflow import ActionRequest
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.executors.dataflow_api import _CompileContext
-    from demiflow.execution.run_context import RunAction
+    from demiflow.execution.pipeline.run_context import RunAction
     from demiflow.execution.seal.program_identity import validate_shared_actor_binding
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
@@ -463,7 +463,7 @@ def test_passive_actor_relation_matches_multi_input_occurrences(tmp_path, monkey
     from demiflow.execution.contracts.dataflow import ActionRequest
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.executors.dataflow_api import _CompileContext
-    from demiflow.execution.run_context import RunAction
+    from demiflow.execution.pipeline.run_context import RunAction
     from demiflow.execution.seal.program_identity import validate_shared_actor_binding
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_policy import resolve_runtime_policy

@@ -4,7 +4,7 @@ import pyarrow as pa
 import pytest
 from demiflow import data
 from demiflow.errors import InvalidLanceRequest
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 LIMITS = dict(memory_bytes=128*1024**2, max_rss_bytes=2*1024**3,
               max_row_bytes=65536, max_batch_bytes=2*1024**2, timeout_s=90)
 

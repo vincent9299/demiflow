@@ -31,7 +31,7 @@ from demiflow.data import plan as ops  # noqa: E402
 from demiflow.data.dataflow_operation import NativeOperation  # noqa: E402
 from demiflow.data.plan import CallableSpec, LogicalOp, LogicalPlan  # noqa: E402
 from demiflow.data.sources import ItemsSource, RangeSource  # noqa: E402
-from demiflow.execution.local_kernel import KeyedSource, PlanInput, UnionSource  # noqa: E402
+from demiflow.execution.pipeline.local_kernel import KeyedSource, PlanInput, UnionSource  # noqa: E402
 from demiflow.execution.plan_facts import (  # noqa: E402
     execution_instances,
     operation_capability,

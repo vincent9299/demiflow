@@ -8,7 +8,7 @@ import time
 import pytest
 
 from demiflow.errors import ExecutionConflict, LanceResourceNotFound
-from demiflow.execution.run_context import RunContext, clean_stopped_execution, admit_absent_create
+from demiflow.execution.pipeline.run_context import RunContext, clean_stopped_execution, admit_absent_create
 from demiflow.execution.run_journal import RunJournal
 from test_p4_attempt_reservations import managed, resume
 

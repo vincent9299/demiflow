@@ -157,7 +157,7 @@ def execute_driver(request: PipelineDriverRequest) -> None:
         dataset_executor.runtime_bounds = runtime_bounds
         dataset_executor.run_dataset_action = run_dataset_action
         resources.callback(dataset_executor.close)
-        from demiflow.execution.run_context import RunContext
+        from demiflow.execution.pipeline.run_context import RunContext
         with RunContext.start(entry_identity={
                 'launcher_run_id': request.run_id, 'bundle_digest': bundle.content_digest,
                 'entrypoint': definition.entrypoint, 'backend': request.backend,

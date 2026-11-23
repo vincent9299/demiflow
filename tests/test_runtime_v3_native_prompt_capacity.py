@@ -1,7 +1,7 @@
 """Original native journal backpressure survives authenticated worker RPC."""
 from demiflow import data
 from demiflow.execution.contracts.dataflow_failures import failure_payload, restore_failure
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.operator_llm.parser import parse_prompt_pack
 from demiflow.execution.contracts.errors import _CapacityPending
 from test_runtime_v3_native_execution import PACK, native_server

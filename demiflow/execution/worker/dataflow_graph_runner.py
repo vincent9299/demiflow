@@ -1008,7 +1008,7 @@ class WorkerGraphRunner:
                     if self._advance_join_probe(source, split_id, credit):
                         processed += 1
                         break
-                from demiflow.execution.run_context import source_run_scope
+                from demiflow.execution.pipeline.run_context import source_run_scope
                 with source_run_scope(self.e._source_run):
                     if reader is self._batch_source:
                         self._advance_batch(source, split_id, credit)

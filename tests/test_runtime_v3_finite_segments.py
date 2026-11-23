@@ -4,7 +4,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.storage.segments import block_chunks, block_totals, FINITE_RECORDS_MEDIA
 from demiflow.execution.worker.terminal_blocks import TerminalBlocks
 from test_runtime_v3_artifact_accounting import store_fixture

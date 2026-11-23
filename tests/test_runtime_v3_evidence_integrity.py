@@ -83,7 +83,7 @@ def test_api_matrix_guard_preserves_explicit_unverified_entries(monkeypatch,prov
 def test_stream_facade_alias_is_observed_even_when_imported_before_recorder(tmp_path):
     from demiflow import data
     from demiflow.execution.action_driver import stream as dataflow_stream
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     for attempt in range(2):
         with RunContext.start(tmp_path/str(attempt)),data.local_execution():
             with support._ExecuteActionRecorder() as recorder:

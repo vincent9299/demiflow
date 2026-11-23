@@ -10,7 +10,7 @@ from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.record_codec import _typed_shape, encode_document
 from demiflow.execution.exchange import dataflow_bridge as bridge
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
 from test_runtime_v3_c import bounds
 from test_runtime_v3_record_frame_budget import _record

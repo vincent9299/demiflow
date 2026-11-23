@@ -26,7 +26,7 @@ def bind_private_embedding_contracts(service, graph):
     if service._action.declaration.get('kind') not in _DELIVERY:
         raise RecoveryContractError('Native embedding recovery cannot coexist with a private SQLite journal; '
                                     'explicit private journals require a delivery-only terminal')
-    from demiflow.execution.checked import current
+    from demiflow.execution.pipeline.checked import current
     if current() is not None:
         raise RecoveryContractError('Managed execution requires the native embedding journal')
     if service._native is not None or any(node.kernel.kind == 'SaveLanceOp' for node in graph.nodes):

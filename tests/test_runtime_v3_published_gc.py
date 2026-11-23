@@ -14,7 +14,7 @@ from demiflow.execution.storage.gc import collect_published_orphans, recover_pub
 from demiflow.execution.storage.lease import ObjectLease, exclusive_access
 from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.contracts import state_codec
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from test_runtime_v3_artifact_accounting import store_fixture, consumed
 from test_runtime_v3_artifact_recovery import _open, _store
 from test_runtime_v3_real_seams import PreparationOnly

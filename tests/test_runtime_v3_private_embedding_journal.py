@@ -14,7 +14,7 @@ from demiflow.execution.contracts.dataflow_codec import _thaw_json
 from demiflow.execution.journal.dataflow_embedding_journal import bind_private_embedding_contracts
 from demiflow.execution.operator_bindings.dataflow_model_journal import _rpc_operation_id
 from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.operator_llm.errors import PromptBudgetExceededError
 from demiflow.operator_llm.journal import UncertainPromptCall
@@ -128,7 +128,7 @@ def test_materialize_private_still_rejected_before_http(tmp_path, server):
 
 
 def test_managed_private_still_rejected_before_database(tmp_path, monkeypatch):
-    from demiflow.execution import checked
+    from demiflow.execution.pipeline import checked
     with interrupted_run(tmp_path / 'run') as run, service(run) as (authority, store, _):
         authority._action.declaration['kind'] = 'take_all'
         monkeypatch.setattr(checked, 'current', lambda: object())

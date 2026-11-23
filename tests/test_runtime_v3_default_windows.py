@@ -6,7 +6,7 @@ from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.executors.dataflow_api import make_action_request
 from demiflow.execution.action_driver.services import resolve_action_runtime
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.planning.dataflow_compile import lower_action
 from demiflow.planning.dataflow_place import partition_stages
 from demiflow.planning.dataflow_policy import resolve_runtime_policy

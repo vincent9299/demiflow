@@ -3,7 +3,7 @@ import json
 import pytest
 from demiflow import data
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @pytest.fixture(scope='module')

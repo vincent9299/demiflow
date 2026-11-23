@@ -7,7 +7,7 @@ import pytest
 
 from demiflow import data
 from demiflow.data.dataset import Dataset
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 def _ds():

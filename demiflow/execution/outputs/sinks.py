@@ -552,7 +552,7 @@ class NativeTerminalSink(_DataflowArtifactSink):
                 max_resident_bytes=min(self._bounds.max_resident_bytes, self._publication_workspace))
 
     def _native_scope(self):
-        from demiflow.execution.run_context import payload_scope
+        from demiflow.execution.pipeline.run_context import payload_scope
         limits = dict(self._native_limits, memory_bytes=self._bounds.max_resident_bytes,
                       max_row_bytes=self._bounds.max_row_bytes,
                       max_batch_bytes=self._bounds.max_batch_bytes, batch_rows=self._batch_rows)

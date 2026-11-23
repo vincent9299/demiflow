@@ -14,8 +14,8 @@ import lance
 import pytest
 
 from demiflow import data
-from demiflow.execution.checked import CheckedExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.checked import CheckedExecution
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules,LIMITS
 from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
@@ -26,7 +26,7 @@ from demiflow.operator_llm.parser import parse_prompt_pack
 from PIL import Image
 from dataclasses import asdict
 from demiflow.data.datasink import Datasink,WriteResult
-from demiflow.execution.run_context import current_action
+from demiflow.execution.pipeline.run_context import current_action
 from demiflow.execution.outputs.lance_sink import LanceSink
 from demiflow.lance.model import LanceWriteSpec
 

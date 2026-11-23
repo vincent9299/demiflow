@@ -122,7 +122,7 @@ def test_isolated_prepare_commit_race_is_rejected(tmp_path, monkeypatch):
 def test_isolated_prepare_guard_cannot_commit(tmp_path, monkeypatch):
     import demiflow.lance.mutate as mutation
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     target, source = str(tmp_path / 'target.lance'), str(tmp_path / 'patch.lance')
     old = lance.write_dataset(pa.table({'id': [1, 2], 'value': ['old', 'old'], 'keep': [7, 8]}), target)
     lance.write_dataset(pa.table({'id': [1, 2], 'value': ['new', 'new']}), source)

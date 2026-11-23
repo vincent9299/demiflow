@@ -13,7 +13,7 @@ from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.recovery_contract import (
     RecoveryContractError, RunRef, SourcePosition, UnresolvedCommit,
 )
-from demiflow.execution.run_context import RunContext, current_run
+from demiflow.execution.pipeline.run_context import RunContext, current_run
 from demiflow.execution.run_journal import RunJournal
 from demiflow.errors import ExecutionConflict
 

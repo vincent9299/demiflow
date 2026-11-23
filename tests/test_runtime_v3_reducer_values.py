@@ -9,7 +9,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,7 +95,7 @@ def value_executor(request):
     with _RayDataBlocker() as blocker:
         if name == 'local':
             from demiflow.execution.executors.local import LocalDatasetExecutor
-            from demiflow.execution.local_kernel import LocalKernelOptions
+            from demiflow.execution.pipeline.local_kernel import LocalKernelOptions
             executor = LocalDatasetExecutor(workers=2, local_kernel=LocalKernelOptions(
                 workers=2, worker_mode='thread', partitions=1, batch_rows=2))
             try:

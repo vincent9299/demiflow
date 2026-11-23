@@ -60,7 +60,7 @@ class StreamLanceWriter:
     def _open_index(self):
         """Rebuildable membership index; fixed cache, bounded pages, no key set."""
         self._close_index()
-        from demiflow.execution.checked import current
+        from demiflow.execution.pipeline.checked import current
         checked = current()
         directory = (checked.work_root / 'indexes' if checked is not None and checked.work_root is not None
                      else Path(self.uri).with_suffix('.stream-writer'))

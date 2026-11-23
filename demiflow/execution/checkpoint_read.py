@@ -22,7 +22,7 @@ def _read_checkpoint_binding(checkpoint, stage, *, columns, select_executor):
     Both callers share this implementation; the core never imports DataAPI or
     Dataset and never constructs another execution owner.
     """
-    from .checked import action, current
+    from demiflow.execution.pipeline.checked import action, current
     from .stream_checkpoint import StreamCheckpoint, normalize_checkpoint_read
     import lance
     import pyarrow as pa

@@ -10,7 +10,7 @@ from _agent_runtime_fixtures import collect_before_commit, resume_collect
 
 @pytest.mark.parametrize('ceiling', ['node', 'run'])
 def test_model_quota_before_first_cut_and_resume_agree(tmp_path, native_server, monkeypatch, ceiling):
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     pipeline = data.from_items([{'item': 'known'}, {'item': 'no-budget'}]).map_prompt_async(
         'enrich', config=parse_prompt_pack(PACK), inputs={'payload': 'item'},
         output='answer', error_output='error', call_output='call', max_requests=1 if ceiling == 'node' else 2)

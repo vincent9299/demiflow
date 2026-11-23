@@ -5,7 +5,7 @@ import pytest
 
 from demiflow.execution.storage.artifact_manifest import ArtifactManifest, manifest_pages
 from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @pytest.mark.parametrize('damage', ['missing', 'truncated', 'reordered', 'changed', 'index'])

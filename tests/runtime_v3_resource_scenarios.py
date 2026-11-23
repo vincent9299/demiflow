@@ -54,7 +54,7 @@ def arrow_worker_preallocation(directory, *, provider='local', rejected=True):
     """Typed nulls amplify into native fixed-list buffers before any callback."""
     import pyarrow as pa
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
     schema = pa.schema([('value', pa.list_(pa.float64(), 1024) if rejected else pa.float64())])
     count = 16 if rejected else 8  # Separate legal positive; the 16-row red case never shrinks.
@@ -118,7 +118,7 @@ def lance_cast_preallocation(directory, *, provider='local', case='conversion_ne
     from pytest import MonkeyPatch
     from demiflow import data
     from demiflow.execution.outputs.lance_sink import LanceSink
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.contracts import record_codec
     directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
     observed, casts = [], []
@@ -189,7 +189,7 @@ def equal_width_cast_residency(directory, *, rejected):
     conservatively bounded Python-to-Arrow builder.
     """
     import pyarrow as pa
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.commit import CommitCoordinator
     from demiflow.execution.outputs.lance_sink import LanceSink
     from demiflow.execution.recovery_contract import SourcePosition
@@ -471,7 +471,7 @@ def _source_rows(count, width, directory):
 
 def fanout_slow_sink(directory, *, provider='local', partial=False):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from contextlib import nullcontext
     directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
     count, width = (64, 4096) if partial else (8, 8192)
@@ -532,7 +532,7 @@ def _hot_reduce(acc, row):
 
 def hot_key_disk(directory, *, provider='local', small_disk=False):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     limits=dict(memory_bytes=64*1024**2,max_row_bytes=65536,max_batch_bytes=262144,
         max_scratch_bytes=8*1024**2 if small_disk else 2*1024**3,max_state_bytes=2*1024**2,
@@ -570,7 +570,7 @@ def _oversized_row():
 
 def single_row_admission(directory, *, provider='local'):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     limits=dict(memory_bytes=4*1024**2,max_row_bytes=32768,max_batch_bytes=65536,
                 max_state_bytes=512*1024,timeout_s=30)
@@ -593,7 +593,7 @@ def single_row_admission(directory, *, provider='local'):
 
 def state_output_residency(directory, *, provider='local', rejected=False):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     limits=dict(memory_bytes=1024**2 if rejected else 4*1024**2,
         max_row_bytes=128*1024,max_batch_bytes=256*1024,

@@ -7,7 +7,7 @@ import time
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.operator_llm.parser import parse_prompt_pack
 from runtime_v3_managed_http_scenarios import managed_fixture, events, assert_reaped
 from test_map_prompt_async import PACK

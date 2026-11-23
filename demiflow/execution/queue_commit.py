@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from .queue import QueueChannel
 from .queue_contract import StaleQueueOwner
 from .recovery_contract import COMMIT_STATES, RecoveryContractError, document, identity
-from .run_context import RunAction
+from demiflow.execution.pipeline.run_context import RunAction
 
 
 class QueueBudgetTransaction:

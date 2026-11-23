@@ -386,7 +386,7 @@ def test_prepend_rejects_configured_maps_but_accepts_plain_map(data):
 @pytest.mark.parametrize('kind', ['json', 'lance'])
 def test_retired_checkpoint_is_rejected_and_native_run_replays_without_calls(data, kind, tmp_path):
     from _worker_event_fixtures import emit, events
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.recovery_contract import RecoveryContractError
     import lance
     path = str(tmp_path / 'calls.jsonl')
@@ -428,7 +428,7 @@ def test_retired_checkpoint_is_rejected_and_native_run_replays_without_calls(dat
 
 def test_stream_native_recovery_preserves_sealed_policy_and_new_run_can_append(data, tmp_path):
     from demiflow.execution.stream_checkpoint import StreamCheckpoint
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.recovery_contract import RecoveryContractError
     from _worker_event_fixtures import emit, events
     import lance
@@ -647,7 +647,7 @@ def test_external_cancel_drains_map_calls_before_action_cleanup(data):
 @pytest.mark.parametrize('count', [1, 1000])
 def test_callback_cancellation_never_returns_partial_success(data, execution, count, tmp_path):
     from _worker_event_fixtures import emit, events
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     path = str(tmp_path / 'cancel-calls.jsonl')
     class Cancel:
         def __call__(self, row):
@@ -675,7 +675,7 @@ def test_callback_cancellation_never_returns_partial_success(data, execution, co
 def test_native_lance_writer_failure_joins_stream_and_closes_workers(data, tmp_path, monkeypatch, failure):
     from demiflow.execution.recovery_contract import RecoveryContractError
     from demiflow.execution.outputs.lance_sink import LanceSink
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from _worker_event_fixtures import emit, events
     import lance
     import sqlite3, json

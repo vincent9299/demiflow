@@ -9,7 +9,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 
 

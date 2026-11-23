@@ -9,7 +9,7 @@ import sys
 import pytest
 import pyarrow as pa
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from runtime_v3_recovery_scenarios import _http_fixture, _provider
 
 

@@ -31,7 +31,7 @@ def _different_bytes(fx, nodes):
     from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
     from demiflow import data
     from demiflow.execution.hosts import configuration as dataflow_services
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     local = ray.get_runtime_context().get_node_id()
     remote, = set(nodes) - {local}

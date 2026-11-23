@@ -6,7 +6,7 @@ import hashlib
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.executors.dataflow_api import make_action_request
 from demiflow.execution.storage.staging import DriverArtifactPort
 from demiflow.execution.storage.objects import RunArtifactStore

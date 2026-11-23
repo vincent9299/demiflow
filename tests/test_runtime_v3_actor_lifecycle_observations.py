@@ -2,7 +2,7 @@
 from pathlib import Path
 import pytest
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @pytest.mark.parametrize('phase', ['success', 'start', 'call_and_close', 'close', 'cancel', 'empty', 'stale_boot'])

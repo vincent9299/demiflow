@@ -11,7 +11,7 @@ import demiflow
 def _bind_test_process_to_worktree():
     # Business modules may legitimately be imported from their sealed archive.
     assert Path(demiflow.__file__).resolve().is_relative_to(Path(__file__).resolve().parents[1])
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 
 

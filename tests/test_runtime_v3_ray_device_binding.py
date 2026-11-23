@@ -8,7 +8,7 @@ import pytest
 
 ray = pytest.importorskip('ray')
 
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.hosts.run_state import RunResourceState
 from demiflow.execution.hosts.ray_worker_host import RayControlConnector
 from demiflow.resources.manager import ResourceManager

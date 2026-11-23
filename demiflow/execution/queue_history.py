@@ -131,7 +131,7 @@ class QueueHistoryDatasource(Datasource):
         actual=channel.snapshot(self.pool,kind=snapshot.kind)
         if actual.generation!=snapshot.generation or actual.cursor<snapshot.cursor:
             raise RecoveryContractError('History snapshot differs from current queue generation')
-        from .run_context import current_run
+        from demiflow.execution.pipeline.run_context import current_run
         run=current_run();started=time.monotonic();position=self.start;count=total=hashed=resident=0
         resident_limit=min(limits.max_total_record_bytes*8,run.limits['memory_bytes']//2 if run else 128*1024**2)
         def cursor():return {'snapshot':asdict(snapshot),'next_ordinal':position}

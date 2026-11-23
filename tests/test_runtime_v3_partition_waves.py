@@ -7,7 +7,7 @@ import pytest
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.outputs.terminals import materialized_handle
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.storage.state_artifacts import StateArtifacts
 from test_runtime_v3_graph_adapter import _spec, graph_environment
 

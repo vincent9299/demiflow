@@ -16,9 +16,9 @@ import threading
 import time
 import uuid
 
-from .recovery_contract import RunRef, RecoveryContractError, identity
+from demiflow.execution.recovery_contract import RunRef, RecoveryContractError, identity
 from demiflow.planning.dataflow_policy import execution_limits, declared_limit_keys
-from .run_journal import RunJournal
+from demiflow.execution.run_journal import RunJournal
 
 _CURRENT = ContextVar("demiflow_run_context", default=None)
 _ACTION = ContextVar("demiflow_run_action", default=None)
@@ -91,7 +91,7 @@ def _stopped_maintenance(journal, expected_attempt, expected_revision, deadline)
     try:
         descriptor = _open_runtime_lease(maintenance.directory)
     except BlockingIOError as exc:
-        from ..errors import ExecutionConflict
+        from demiflow.errors import ExecutionConflict
         raise ExecutionConflict('Stopped execution runtime lease is busy') from exc
     try:
         with maintenance.connection_scope():
@@ -180,11 +180,11 @@ def clean_stopped_execution(journal, *, expected_attempt, confirm_stopped, deadl
 def admit_absent_create(journal, *, action_id, expected_attempt, expected_revision,
                         expected_uri, confirm_stopped, deadline):
     """Record current absence against the selected attempt's original write identity."""
-    from .recovery_contract import identifier
-    from ..errors import LanceResourceNotFound, ExecutionConflict
+    from demiflow.execution.recovery_contract import identifier
+    from demiflow.errors import LanceResourceNotFound, ExecutionConflict
     from demiflow.execution.outputs.lance_sink import spec_from_identity
-    from ..lance.reconcile import reconcile_lance_create
-    from ..lance.storage import inspect_lance
+    from demiflow.lance.reconcile import reconcile_lance_create
+    from demiflow.lance.storage import inspect_lance
     identifier(action_id)
     if type(expected_uri) is not str or not expected_uri or len(expected_uri.encode()) > 4096:
         raise ValueError('Invalid expected create URI')
@@ -238,9 +238,9 @@ class RunContext:
 
     def __init__(self, directory, *, entry_identity=None, limits=None, resume=False,
                  journal=None, check_stop=None, training=None, explicit_limits=None):
-        from .plan_capture import current_capture
+        from demiflow.execution.plan_capture import current_capture
         if current_capture() is not None:
-            from .contracts.dataflow_errors import DataflowError
+            from demiflow.execution.contracts.dataflow_errors import DataflowError
             raise DataflowError('UNSUPPORTED_CAPABILITY',
                                'plan capture cannot start or resume an explicit run; use the construction entry')
         raw = Path(directory).absolute()
@@ -268,7 +268,7 @@ class RunContext:
 
     @property
     def limits(self):
-        from demiflow.execution.run_context import active_limits
+        from demiflow.execution.pipeline.run_context import active_limits
         return active_limits(self, self._limits)
 
     @limits.setter
@@ -352,7 +352,7 @@ class RunContext:
                     raise RecoveryContractError('Run limits semantics changed on resume')
                 configuration = old
             else:
-                from .recovery_identity import platform_identity
+                from demiflow.execution.recovery_identity import platform_identity
                 revision = platform_identity()  # Birth provenance only; never a resume gate.
                 configuration = dict(format=1, stream_protocol="aligned-barrier-v2", run_id=uuid.uuid4().hex,
                     entry_identity=self.entry_identity, limits=execution_limits(self.requested_limits),
@@ -411,7 +411,7 @@ class RunContext:
                     native_journal = getattr(self, '_native_prompt_journal', None)
                     if native_journal is not None:
                         native_journal.close()
-                    from .storage.gc import finish_run_gc
+                    from demiflow.execution.storage.gc import finish_run_gc
                     finish_run_gc(self)
                     self.journal.clean_orphans(self.fence)
                     if not self.external_control:
@@ -436,7 +436,7 @@ class RunContext:
                 native_journal = getattr(self, '_native_prompt_journal', None)
                 if native_journal is not None:
                     native_journal.close()
-                from .storage.gc import finish_run_gc
+                from demiflow.execution.storage.gc import finish_run_gc
                 finish_run_gc(self)
                 self.journal.clean_orphans(self.fence)
                 if failure is None:
@@ -612,7 +612,7 @@ class RunContext:
         Both consume the same output_bytes ceiling; retries reuse only the
         identical artifact reservation, never a saved model request/result.
         """
-        from .recovery_contract import RecoveryContractError
+        from demiflow.execution.recovery_contract import RecoveryContractError
         self.check_stop()
         if component not in {'row_bytes', 'object_bytes'}:
             raise RecoveryContractError('Unknown native output component')
@@ -640,7 +640,7 @@ class RunAction:
 @contextmanager
 def execution_scope():
     """All ordinary actions acquire the same context; a launcher may bind it."""
-    from .plan_capture import current_capture
+    from demiflow.execution.plan_capture import current_capture
     capture = current_capture()
     if capture is not None:
         yield capture.context
@@ -700,7 +700,7 @@ def bind_iteration(rows):
 
 def admit_stream(plan, *, source_batch_size=1):
     """Native resource admission applies equally with or without a checker."""
-    from .plan_facts import operation_facts
+    from demiflow.execution.plan_facts import operation_facts
     from demiflow.planning.dataflow_policy import stream_residency
     context = current_run()
     if context is None:

@@ -18,7 +18,7 @@ from .recovery_contract import identity, document, SourcePosition, UnresolvedCom
 from demiflow.execution.native_queue.stream_lance import StreamLanceWriter, _canonical
 from demiflow.execution.outputs.lance_sink import LanceSink
 from .commit import CommitCoordinator
-from .run_context import RunAction
+from demiflow.execution.pipeline.run_context import RunAction
 
 from demiflow.execution.outputs.lance_sink import _BatchSink
 

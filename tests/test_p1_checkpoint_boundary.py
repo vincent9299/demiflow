@@ -74,7 +74,7 @@ def _checkpoint(tmp_path, events, *, version=None):
 
 
 def _checked_seam(monkeypatch, events, *, owner=None):
-    from demiflow.execution import checked
+    from demiflow.execution.pipeline import checked
     registrations, arguments = [], []
     class Checked:
         def checkpoint_read(self, source, reference):

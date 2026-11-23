@@ -4,7 +4,7 @@ import json
 import pytest
 from demiflow import data
 from demiflow.execution.queue import ProducerSourceSpec, task_message
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.recovery_contract import UnresolvedCommit
 from test_queue_v2_protocol import channel, search_producer
 from test_native_search_runtime import engines, server

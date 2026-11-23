@@ -39,7 +39,7 @@ class CompileContext:
 
     @property
     def limits(self):
-        from demiflow.execution.run_context import active_limits
+        from demiflow.execution.pipeline.run_context import active_limits
         return active_limits(self, self._limits)
 
     def check_stop(self):
@@ -73,7 +73,7 @@ class _Capture:
         compiled = lower_action(request, bounds=bounds, on_compiled=self.on_compiled)
         contract = None
         if self.submission:
-            from .managed_native import submission_contract
+            from demiflow.execution.pipeline.managed_native import submission_contract
             contract = submission_contract(request, compiled, bounds=bounds)
         self.result = CapturedAction(compiled, request.kind, request.provider, policy, bounds, submission=contract)
         raise _Captured()
@@ -93,12 +93,12 @@ def capture_pipeline(entry, arguments, *, on_compiled=None, limits=None, explici
     propagate (capture context still resets); no success is fabricated.
     """
     from .contracts.dataflow_errors import DataflowError
-    from .run_context import current_run
+    from demiflow.execution.pipeline.run_context import current_run
     if not callable(entry) or type(arguments) is not dict:
         raise TypeError('capture_pipeline requires a callable and keyword arguments')
     if on_compiled is not None and not callable(on_compiled):
         raise TypeError('on_compiled must be a callable or None')
-    from .checked import current as current_checked
+    from demiflow.execution.pipeline.checked import current as current_checked
     if current_capture() is not None or current_run() is not None or current_checked() is not None:
         raise DataflowError('INVALID_CONTRACT', 'plan capture cannot nest inside execution or another capture')
     capture = _Capture(on_compiled, action_id='action-1' if _submission else 'preview',

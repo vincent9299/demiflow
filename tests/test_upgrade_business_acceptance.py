@@ -62,7 +62,7 @@ from demiflow.execution.queue_sinks import QueuePublishSink, QueueResultSink
 from demiflow.execution.recovery_contract import (
     RecoveryContractError, RunRef, SourcePosition, identity,
 )
-from demiflow.execution.run_context import RunAction, RunContext
+from demiflow.execution.pipeline.run_context import RunAction, RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.operator_llm.journal import UncertainPromptCall
 from demiflow.operator_llm.stream_recovery import CALL_RESERVATION
@@ -663,7 +663,7 @@ def _prompt_setup(root, count):
 
 
 def _prompt_execute(root):
-    from demiflow.execution.checked import CheckedExecution
+    from demiflow.execution.pipeline.checked import CheckedExecution
     from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
     root = Path(root)
     os.chdir(root)

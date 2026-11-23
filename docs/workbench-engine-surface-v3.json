@@ -12,7 +12,7 @@
   "exports": {
     "control": {
       "CheckedExecution": [
-        "demiflow.execution.checked",
+        "demiflow.execution.pipeline.checked",
         "CheckedExecution"
       ],
       "DEFAULT_LIMITS": [
@@ -20,11 +20,11 @@
         "DEFAULT_LIMITS"
       ],
       "NativeExecution": [
-        "demiflow.execution.managed_native",
+        "demiflow.execution.pipeline.managed_native",
         "NativeExecution"
       ],
       "RunContext": [
-        "demiflow.execution.run_context",
+        "demiflow.execution.pipeline.run_context",
         "RunContext"
       ],
       "RunJournal": [
@@ -32,11 +32,11 @@
         "RunJournal"
       ],
       "admit_absent_create": [
-        "demiflow.execution.run_context",
+        "demiflow.execution.pipeline.run_context",
         "admit_absent_create"
       ],
       "clean_stopped_execution": [
-        "demiflow.execution.run_context",
+        "demiflow.execution.pipeline.run_context",
         "clean_stopped_execution"
       ],
       "local_capacity": [
@@ -48,7 +48,7 @@
         "local_capacity_domain"
       ],
       "local_execution": [
-        "demiflow.execution.local_kernel",
+        "demiflow.execution.pipeline.local_kernel",
         "local_execution"
       ],
       "observe": [
@@ -114,7 +114,7 @@
         "build_logical_plan_view"
       ],
       "capture_managed_pipeline": [
-        "demiflow.execution.managed_native",
+        "demiflow.execution.pipeline.managed_native",
         "capture_managed_pipeline"
       ],
       "capture_pipeline": [

@@ -10,7 +10,7 @@ import pyarrow as pa
 from demiflow.data.api import DataAPI
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.executors.ray import RayDatasetExecutor
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from test_runtime_v3_native_execution_binding import source, MiB
 
 

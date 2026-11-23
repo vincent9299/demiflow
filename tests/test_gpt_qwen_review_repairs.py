@@ -10,7 +10,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
 from demiflow.execution.recovery_identity import describe, operation_identity, plan_identity
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @pytest.mark.parametrize('size', [1, 1024, 1025, 1500])

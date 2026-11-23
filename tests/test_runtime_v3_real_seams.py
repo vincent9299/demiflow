@@ -27,7 +27,7 @@ from demiflow.execution.action_driver.services import make_driver_services
 from demiflow.execution.sources.snapshots import spool_record
 from demiflow.execution.sources.snapshots import open_source_reader
 from demiflow.execution.recovery_identity import source_identity
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.planning.dataflow_compile import lower_action
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 

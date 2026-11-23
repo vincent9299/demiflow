@@ -100,7 +100,7 @@ def executor_defaults(executor) -> CompileDefaults:
 
 def compile_inputs(request) -> CompileInputs:
     """Read the compiler's inputs from the request's action and the current report context."""
-    from demiflow.execution.checked import current
+    from demiflow.execution.pipeline.checked import current
     context = current()
     return CompileInputs(defaults=executor_defaults(getattr(request.action, '_dataflow_executor', None)),
                          report=ReportBindings(context) if context is not None else None)

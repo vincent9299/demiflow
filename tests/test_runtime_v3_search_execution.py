@@ -5,7 +5,7 @@ from demiflow import data
 from demiflow.collect import SearchConfig
 from demiflow.collect.session import WebSession
 from demiflow.execution.recovery_contract import UnresolvedCommit
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from test_native_search_runtime import engines, server
 
 

@@ -86,7 +86,7 @@
       "ensure_lance_vector_index"
     ],
     "local_execution": [
-      "demiflow.execution.local_kernel",
+      "demiflow.execution.pipeline.local_kernel",
       "local_execution"
     ],
     "from_items": [

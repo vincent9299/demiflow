@@ -5,7 +5,7 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def typed_source(tmp_path, kind):

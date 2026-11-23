@@ -57,7 +57,7 @@ def test_real_ray_api_boundary(ray_api_scope, name):
 
 def test_unrelated_driver_environment_not_copied(ray_api_scope, monkeypatch):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     root, _, _ = ray_api_scope
     from _ray_native_boundary_fixtures import read_worker_environment
     monkeypatch.setenv('DEMIFLOW_RAY_BOUNDARY_UNDECLARED', 'must-not-cross')
@@ -71,7 +71,7 @@ def test_unrelated_driver_environment_not_copied(ray_api_scope, monkeypatch):
 
 def test_missing_declared_environment_is_not_cluster_fallback(ray_api_scope, monkeypatch):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.operator_llm.parser import parse_prompt_pack
     from test_runtime_v3_native_execution import PACK
     root, _, _ = ray_api_scope
@@ -120,7 +120,7 @@ def test_real_ray_finite_join_restores_original_cut(ray_api_scope, tmp_path, mon
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.contracts import state_codec
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from test_runtime_v3_finite_finish import pipeline, Interrupted
     original_event = DataflowExecution._handle_event
     original_commit = DataflowCheckpointCoordinator.commit

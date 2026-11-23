@@ -15,7 +15,7 @@ from demiflow.execution.storage.staging import DriverArtifactPort
 from demiflow.execution.storage.staging import StagingLease, recover_staging, staging_paths
 from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.recovery_contract import RunRef
 from demiflow.planning.dataflow_policy import resolve_runtime_policy

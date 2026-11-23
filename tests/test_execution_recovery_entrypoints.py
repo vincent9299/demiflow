@@ -6,7 +6,7 @@ import pytest
 from demiflow import data
 from demiflow.data.datasink import Datasink
 from demiflow.execution import RunContext, RecoveryContractError, UnresolvedCommit, current_run
-from demiflow.execution.run_context import current_action
+from demiflow.execution.pipeline.run_context import current_action
 import demiflow
 from pathlib import Path
 

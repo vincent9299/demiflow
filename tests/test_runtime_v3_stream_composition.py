@@ -8,7 +8,7 @@ from demiflow.data.plan import LogicalPlan, reject_streaming_map_options
 from demiflow.errors import UnsupportedExecutionOptionError
 from demiflow.planning.dataflow_compile import validate_stream_plan
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from _worker_event_fixtures import emit, events
 from runtime_v3_recovery_scenarios import _provider
 from runtime_v3_support import _RayDataBlocker, _ExecuteActionRecorder

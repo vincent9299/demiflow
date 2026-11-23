@@ -11,7 +11,7 @@ import time
 import pytest
 
 import demiflow
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.hosts.run_state import RunResourceState
 from demiflow.resources.capacity import LocalCapacityPool
 from demiflow.resources.contracts import (

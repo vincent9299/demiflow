@@ -10,8 +10,8 @@ test_execution_payload_limits.py::test_peak_scope_keeps_durable_cumulative_ceili
 import pytest
 
 from demiflow.data.runtime_contract import RuntimeContractError
-from demiflow.execution.run_context import active_limits, payload_scope
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import active_limits, payload_scope
+from demiflow.execution.pipeline.run_context import RunContext
 
 MB = 1024 ** 2
 

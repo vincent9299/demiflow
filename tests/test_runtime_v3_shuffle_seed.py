@@ -6,7 +6,7 @@ import hashlib
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 ROWS = [{'a': i % 3, 'b': i, 'v': float(i)} for i in range(30)]

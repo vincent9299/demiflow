@@ -7,7 +7,7 @@ import sys
 import time
 import pytest
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def test_group_first_output_arrives_before_source_eoi_with_typed_rows(tmp_path):

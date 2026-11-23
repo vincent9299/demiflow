@@ -21,7 +21,7 @@ from demiflow.data.sources import (
     MaterializedSource, RangeSource, SqlSource,
 )
 from demiflow.execution.seal.business_sources import source_callable_roots
-from demiflow.execution.local_kernel import KeyedSource, PlanInput, UnionSource
+from demiflow.execution.pipeline.local_kernel import KeyedSource, PlanInput, UnionSource
 from demiflow.execution.recovery_contract import RecoveryContractError
 
 

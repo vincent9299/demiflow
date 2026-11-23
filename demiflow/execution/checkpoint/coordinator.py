@@ -35,7 +35,7 @@ from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.contracts.dataflow import ArtifactRef, CutContribution, CutRequest, PhysicalDataflow, RecoveryImage, SourceCursor
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.recovery_contract import MAX_SINKS, MAX_STATES, RecoveryContractError, UnresolvedCommit, SourcePosition, document, identifier, identity
-from demiflow.execution.run_context import RunAction
+from demiflow.execution.pipeline.run_context import RunAction
 from demiflow.execution.run_journal import ExecutionBudgetExceeded
 from demiflow.execution.storage.state_artifacts import StateArtifacts
 

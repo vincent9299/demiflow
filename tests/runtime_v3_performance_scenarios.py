@@ -662,7 +662,7 @@ def run_child(config):
     import demiflow
     assert Path(demiflow.__file__).resolve().is_relative_to(expected_root)
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     cancellation = config['phase'] == 'cancel'
     facts = {'schema': 'demiflow.performance.trial.v1', **config,
              'private_environment': private_environment,

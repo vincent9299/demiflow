@@ -32,7 +32,7 @@ from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.executors.ray import RayDatasetExecutor
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunAction, RunContext
+from demiflow.execution.pipeline.run_context import RunAction, RunContext
 
 pytestmark = [
     pytest.mark.ray,

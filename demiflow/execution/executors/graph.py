@@ -24,7 +24,7 @@ def _validate_graph_location(executor, *, host_id, resource_root):
 
 def materialize_graph(executor, graph_spec, *, host_id='local', resource_root=None, control_timeout_s=120):
     from ..action_driver.dataflow import run_graph_action
-    from ..run_context import current_action
+    from demiflow.execution.pipeline.run_context import current_action
     _validate_graph_location(executor, host_id=host_id, resource_root=resource_root)
     if current_action() is None:
         raise RuntimeError('Graph materialization requires the native action context')

@@ -24,7 +24,7 @@ from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOption
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.run_context import RunAction, RunContext
+from demiflow.execution.pipeline.run_context import RunAction, RunContext
 from demiflow.resources.capacity import LocalCapacityPool
 from demiflow.resources.process_unit import ManagedProcessUnit
 

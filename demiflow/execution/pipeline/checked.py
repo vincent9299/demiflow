@@ -68,7 +68,7 @@ class CheckedExecution:
 
     @property
     def limits(self):
-        from demiflow.execution.run_context import current_run
+        from demiflow.execution.pipeline.run_context import current_run
         run = current_run()
         if run is None:
             return self._limits
@@ -540,12 +540,12 @@ class CheckedExecution:
             _equal(spec.to_dict(), expected.to_dict(), identity + '.write')
             if spec.schema is not None:
                 _equal(schema_identity(spec.schema), schema_identity(expected.schema), identity + '.write.schema')
-            from demiflow.execution.run_context import current_run
+            from demiflow.execution.pipeline.run_context import current_run
             from demiflow.execution.recovery_contract import identity as commit_identity
             intent.update(dependencies=self.dependency_identity(identity),
                           spec=spec.to_dict(), request_hash=spec.content_hash,
                           operation_id=commit_identity([current_run().ref.run_id, identity, 1]))
-        from demiflow.execution.run_context import current_run
+        from demiflow.execution.pipeline.run_context import current_run
         run_context = current_run()
         if run_context is not None and run_context.attempt > 1:
             native = run_context.journal.execution_action(identity)
@@ -594,7 +594,7 @@ class CheckedAction:
 
     def value(self, value):
         if self.owner is not None:
-            from ..data.runtime_contract import check_size, check_value
+            from demiflow.data.runtime_contract import check_size, check_value
             check_size(value, self.owner.limits['max_row_bytes'])
             check_value(value, self.owner.nodes[self.identity]['analysis']['value_type'], self.identity)
             raw = json.dumps({'value': value}, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False).encode() + b'\n'
@@ -657,7 +657,7 @@ def _validate_action_source(kind, value):
 @contextmanager
 def action(kind, source, plan, spec=None, *, arguments=None):
     from contextlib import nullcontext
-    from demiflow.execution.run_context import execution_scope
+    from demiflow.execution.pipeline.run_context import execution_scope
     from demiflow.execution.recovery_identity import plan_identity
     from demiflow.execution.compiler_support.capabilities import check_action
     capability = check_action(kind, arguments)
@@ -669,7 +669,7 @@ def action(kind, source, plan, spec=None, *, arguments=None):
     if capture is not None:
         # Validate/build ordinary Dataset requests without allocating an implicit
         # run. The real request is intercepted at the single driver entry.
-        from demiflow.execution.run_context import payload_scope
+        from demiflow.execution.pipeline.run_context import payload_scope
         value = CheckedAction(None, None, source, plan)
         _validate_action_source(kind, value)
         with payload_scope(capture.context, plan, arguments=arguments, source=source,
@@ -684,7 +684,7 @@ def action(kind, source, plan, spec=None, *, arguments=None):
         with checks as value:
             yield value
         return
-    from demiflow.execution.run_context import payload_scope
+    from demiflow.execution.pipeline.run_context import payload_scope
     with execution_scope() as run, payload_scope(run, plan,
             owner_limits=owner._limits if owner is not None else None, arguments=arguments,source=source,
             physical_dataflow=True), checks as value:

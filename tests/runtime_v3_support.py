@@ -548,7 +548,7 @@ class RuntimeV3Fixture:
         from demiflow.data.api import _use_executor
         from demiflow.execution.executors.local import LocalDatasetExecutor
         from demiflow.execution.executors.ray import RayDatasetExecutor
-        from demiflow.execution.run_context import RunContext
+        from demiflow.execution.pipeline.run_context import RunContext
         executor = LocalDatasetExecutor() if self.provider == "local" else RayDatasetExecutor()
         from contextlib import nullcontext
         self_managed = scenario in {'commit_crash_matrix', 'model_effect_recovery', 'remote_journal', 'api_matrix',

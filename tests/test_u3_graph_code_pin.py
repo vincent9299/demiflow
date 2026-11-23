@@ -15,7 +15,7 @@ from demiflow.data.sources import ItemsSource
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 from test_stage2_unified_plan import _load_modules
 from test_u3_graph_faults import _committed_rows, _release_crash_orphans

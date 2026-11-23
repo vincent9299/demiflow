@@ -6,7 +6,7 @@ import pytest
 
 from demiflow import data
 from _worker_event_fixtures import emit, events
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from test_stream_checkpoint_contract import native_scopes, interrupt_after_success

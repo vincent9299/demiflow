@@ -10,8 +10,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
-# Historical programs may import the relational declarations by these names.
-from ..data.sources import KeyedSource, PlanInput, SourcePlan, UnionSource
 
 
 @dataclass(frozen=True)
@@ -84,9 +82,9 @@ def local_execution(*, workers=4, worker_mode=None, partitions=None,
     block_size controls the executor's source blocks independently of batch_rows;
     its ordinary default remains 256. Managed hosts may explicitly bind both.
     """
-    from ..data.execution_contract import _current_executor, _use_executor
-    from .executors.local import LocalDatasetExecutor
-    from ..planning.policy import parse_platform_planning_policy
+    from demiflow.data.execution_contract import _current_executor, _use_executor
+    from demiflow.execution.executors.local import LocalDatasetExecutor
+    from demiflow.planning.policy import parse_platform_planning_policy
     planning_policy = parse_platform_planning_policy(planning)
     if type(block_size) is not int or block_size < 1:
         raise ValueError("local_execution block_size must be a positive integer")
@@ -108,7 +106,7 @@ def local_execution(*, workers=4, worker_mode=None, partitions=None,
                                     resource_root=resource_root, diagnostics_root=diagnostics_root,
                                     block_size=block_size,
                                     planning_policy=planning_policy)
-    from .run_context import execution_scope
+    from demiflow.execution.pipeline.run_context import execution_scope
     try:
         with execution_scope() as run, _use_executor(executor):
             executor._run_ref = run.ref

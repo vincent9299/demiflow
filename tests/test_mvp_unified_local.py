@@ -6,7 +6,7 @@ import pytest
 from runtime_v3_owned_crash import kill_owned_worker
 
 import demiflow.data as data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
                                 reason="Local managed units require Linux")

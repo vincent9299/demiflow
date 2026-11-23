@@ -359,8 +359,8 @@ def test_native_default_row_floor_remains_compatible_when_pool_supports_it(tmp_p
 
 
 def test_peak_scope_keeps_durable_cumulative_ceiling_across_resume(tmp_path):
-    from demiflow.execution.checked import CheckedExecution
-    from demiflow.execution.run_context import payload_scope
+    from demiflow.execution.pipeline.checked import CheckedExecution
+    from demiflow.execution.pipeline.run_context import payload_scope
     with pytest.raises(RuntimeError, match='interrupt'):
         with RunContext.start(tmp_path / 'run', limits={'max_output_bytes': 10}) as run:
             reference = run.ref

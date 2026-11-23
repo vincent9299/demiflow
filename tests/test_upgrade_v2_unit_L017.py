@@ -7,7 +7,7 @@ from dataclasses import replace
 
 import pytest
 
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.contracts.errors import ReservationError
 from demiflow.execution.contracts.dataflow_errors import DataflowError

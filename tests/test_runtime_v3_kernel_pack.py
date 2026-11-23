@@ -211,7 +211,7 @@ def _double(row):
 @pytest.mark.parametrize('old_carrier', [False, True])
 def test_real_dataset_restores_committed_pack_or_old_images_then_continues_packing(tmp_path, monkeypatch, old_carrier):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.contracts.dataflow_codec import compute_participant_id
     class Interrupted(Exception):

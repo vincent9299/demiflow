@@ -91,7 +91,7 @@ def test_service_stop_exception_remains_fixed_known_type():
 def test_real_native_and_private_admitted_responses_survive_cooperative_stop(tmp_path, server, mode, private):
     import sqlite3
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     stop = tmp_path/'STOP'
     server['delay'] = .2
     def on_request():
@@ -149,7 +149,7 @@ def test_cooperative_drain_remains_bounded_by_original_instance_deadline():
 
 def test_native_paid_stop_without_cut_cannot_invent_recovery(tmp_path, server):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.run_journal import RunJournal
     stop = tmp_path/'STOP'
     server['delay'] = .2
@@ -178,7 +178,7 @@ def test_native_paid_stop_without_cut_cannot_invent_recovery(tmp_path, server):
 
 
 def test_handle_requires_original_run_cancel_fact_to_drain(tmp_path):
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.outputs.dataflow_handles import RuntimeActionHandle
     class EndInspection(Exception):pass
     with pytest.raises(EndInspection):

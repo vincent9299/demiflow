@@ -559,7 +559,7 @@ from demiflow.execution import commit as commit_module  # noqa: E402
 from demiflow.execution.recovery_contract import (  # noqa: E402
     RunRef, SourcePosition, document, identifier, identity,
 )
-from demiflow.execution.run_context import RunAction, RunContext  # noqa: E402
+from demiflow.execution.pipeline.run_context import RunAction, RunContext  # noqa: E402
 from demiflow.execution.run_journal import RunJournal  # noqa: E402
 from demiflow.data.datasink import Datasink, WriteContext  # noqa: E402
 from demiflow.data.plan import CallableSpec  # noqa: E402

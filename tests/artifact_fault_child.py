@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import sys
 
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.recovery_contract import RunRef, SourcePosition
 from demiflow.execution.commit import CommitCoordinator

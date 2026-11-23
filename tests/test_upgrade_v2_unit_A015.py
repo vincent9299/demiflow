@@ -8,7 +8,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.executors.dataflow_api import explain_dataset
-from demiflow.execution.run_context import current_action, current_run
+from demiflow.execution.pipeline.run_context import current_action, current_run
 from _runtime_v3_executor_scope import observed_source
 
 

@@ -16,7 +16,7 @@ from demiflow.execution.contracts.dataflow import ActionProgram, ActionRequest, 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.action_driver.dataflow import execute_action
 from demiflow.execution.recovery_identity import describe, operation_identity, plan_identity, source_identity
-from demiflow.execution.run_context import RunAction, current_action, current_run
+from demiflow.execution.pipeline.run_context import RunAction, current_action, current_run
 from demiflow.data.plan import CallableSpec, LogicalOp, LogicalPlan
 from demiflow.data.sources import SourcePlan
 from demiflow.planning.dataflow_declaration import normalize_json_mapping as _json_mapping, normalize_native_fields, validate_native_kind

@@ -30,7 +30,7 @@ class StreamResources:
             for actor in self.actors:
                 begin = getattr(actor, 'astart', None)
                 if begin is not None:
-                    from demiflow.execution.checked import current
+                    from demiflow.execution.pipeline.checked import current
                     checked = current()
                     completed = False
                     try:
@@ -49,7 +49,7 @@ class StreamResources:
         for resource in reversed(owned):
             close = getattr(resource, 'aclose', None)
             if close is not None:
-                from demiflow.execution.checked import current
+                from demiflow.execution.pipeline.checked import current
                 checked = current()
                 completed = False
                 try:

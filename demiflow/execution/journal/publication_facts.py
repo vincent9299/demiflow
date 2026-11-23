@@ -58,7 +58,7 @@ def observation_context(journal, binding=None, *, directory=None, attempt=None):
 def observation_action(journal, action_id, declaration, binding=None, *, directory=None,
                        attempt=None):
     """A ``RunAction`` over :func:`observation_context`, or ``None``."""
-    from demiflow.execution.run_context import RunAction
+    from demiflow.execution.pipeline.run_context import RunAction
     context = observation_context(journal, binding, directory=directory, attempt=attempt)
     if context is None:
         return None

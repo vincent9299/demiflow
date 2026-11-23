@@ -10,7 +10,7 @@ from demiflow.data.native_options import NativeOptions
 from demiflow.data.plan import AsyncMapOp, CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import IterableSource, RangeSource
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.resources.contracts import ResourceProfile
 from _native_graph_fixtures import HISTORICAL_MEMORY, HISTORICAL_WORKERS
 from test_u3_graph_commit import _graph_spec, _stream_map

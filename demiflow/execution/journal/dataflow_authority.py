@@ -33,7 +33,7 @@ from demiflow.execution.recovery_contract import RecoveryContractError, document
 
 if TYPE_CHECKING:
     from demiflow.execution.contracts.dataflow import ArtifactRef, ArtifactStore, Bounds, WorkerLease
-    from demiflow.execution.run_context import RunAction
+    from demiflow.execution.pipeline.run_context import RunAction
 
 _EFFECT_KINDS = frozenset({"lookup", "reserve", "mark_sent", "confirm", "unknown", "release_unsent"})
 

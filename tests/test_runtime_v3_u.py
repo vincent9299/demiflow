@@ -34,7 +34,7 @@ from demiflow import data  # noqa: E402
 from demiflow.data.dataset import Dataset, MaterializedDataset  # noqa: E402
 from demiflow.data.plan import LogicalPlan  # noqa: E402
 from demiflow.data.sources import MaterializedSource, LanceSource  # noqa: E402
-from demiflow.execution.local_kernel import KeyedSource, UnionSource  # noqa: E402
+from demiflow.execution.pipeline.local_kernel import KeyedSource, UnionSource  # noqa: E402
 from demiflow.execution.recovery_contract import RecoveryContractError  # noqa: E402
 from demiflow.errors import LanceWriteError  # noqa: E402
 from demiflow.lance.model import LanceWriteReceipt  # noqa: E402

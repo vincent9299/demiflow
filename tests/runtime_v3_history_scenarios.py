@@ -135,7 +135,7 @@ def original_native_history(root):
     import demiflow
     import lance
     from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.recovery_contract import RunRef
     from demiflow.execution.recovery_identity import platform_identity
     from demiflow.execution.journal.dataflow_history import load_execution_version

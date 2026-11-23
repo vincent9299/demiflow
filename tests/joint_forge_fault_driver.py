@@ -67,7 +67,7 @@ elif mode == 'execute':
         # Bind a deterministic row-trigger workload in each isolated attempt;
         # these defaults are recorded in the native recovery identity.
         RECOVERY_LIMITS.update(checkpoint_rows=128, checkpoint_interval_ms=60000)
-    from demiflow.execution.run_context import current_run
+    from demiflow.execution.pipeline.run_context import current_run
     import demiflow.execution.commit as protocol
     from demiflow.execution.outputs.object_sink import ObjectSink
     def pause(commit_id=None, run=None):

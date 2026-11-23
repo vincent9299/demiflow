@@ -546,7 +546,7 @@ def test_w004():
 # --- W005 CheckedExecution.execution_bindings ------------------------------
 
 def _checked(tmp_path, **overrides):
-    from demiflow.execution.checked import CheckedExecution
+    from demiflow.execution.pipeline.checked import CheckedExecution
     kwargs = dict(nodes=[{"id": "a0", "kind": "take_all"}], edges=[], actions=["a0"],
                   operators=[], source_root=tmp_path, limits={}, record=lambda *a: None,
                   check_stop=lambda: None)
@@ -584,7 +584,7 @@ def test_w005(tmp_path):
 # --- W006 CheckedExecution.action driver_route -----------------------------
 
 def test_w006(tmp_path, monkeypatch):
-    import demiflow.execution.checked as checked
+    import demiflow.execution.pipeline.checked as checked
     events = []
     ce = _checked(tmp_path, edges=[{"from": "p0", "to": "a0", "port": 0}],
                   record=lambda identity, kind, value: events.append((identity, kind, value)))
@@ -788,7 +788,7 @@ def test_w012():
 # --- W013 RunContext.resume admission --------------------------------------
 
 def test_w013(tmp_path, monkeypatch):
-    from demiflow.execution.run_context import RunContext, RunRef
+    from demiflow.execution.pipeline.run_context import RunContext, RunRef
     target, journal, fence, run_id = make_journal(tmp_path)
     reference = RunRef(str(target), run_id)
     # Wrong reference type.
@@ -1164,7 +1164,7 @@ def _real_obs_run(tmp_path, *, action_id="a0", v3=True, nodes=("n0",), scoped=Tr
     from demiflow import data
     from demiflow.workbench.runs import manager
     from demiflow.forge.platform import content_digest
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.planning.dataflow_policy import execution_limits
     from demiflow.execution.executors.dataflow_api import declare_action_v3, make_action_request
     from demiflow.execution.action_driver.dataflow import DataflowExecution

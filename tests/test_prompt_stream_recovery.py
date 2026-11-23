@@ -13,8 +13,8 @@ import pytest
 from demiflow import data
 from demiflow.data.flow_contract import arrow_fields
 from demiflow.data.runtime_contract import RuntimeContractError
-from demiflow.execution.checked import CheckedExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.checked import CheckedExecution
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.recovery_contract import RunRef
 from demiflow.forge.flow_check import FlowChecker

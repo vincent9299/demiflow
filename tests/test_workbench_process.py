@@ -23,4 +23,4 @@ print(json.dumps(sorted(sys.modules)))
     assert "demiflow.workbench.process" in names
     assert "demiflow.execution" not in names
     assert not any(name == "demiflow.workbench.runs" or name.startswith("demiflow.workbench.runs.") for name in names)
-    assert not names & {'demiflow.execution.pipeline.readiness', "demiflow.execution.run_context", "pyarrow", "numpy", "lance", "jupyter_client"}
+    assert not names & {'demiflow.execution.pipeline.readiness', 'demiflow.execution.pipeline.run_context', "pyarrow", "numpy", "lance", "jupyter_client"}

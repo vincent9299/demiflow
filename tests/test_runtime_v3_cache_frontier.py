@@ -162,7 +162,7 @@ def test_cache_creator_metadata_obeys_original_byte_capacity(tmp_path):
 def test_native_kv_sink_keeps_creator_metadata_and_refuses_replacement(tmp_path):
     import sqlite3
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     store = SQLiteKV(tmp_path / 'index.sqlite', 'n', max_value_bytes=128, max_bytes=128)
     store.put_many([('a', 1)], _origin='x' * 126)
     with RunContext.start(tmp_path / 'run'), data.local_execution():
@@ -198,7 +198,7 @@ def test_other_owner_cannot_erase_post_cut_creator_state_evidence(tmp_path):
 
 def test_actual_task_lifetimes_do_not_replay_other_tasks_cache_hits(tmp_path):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     # Each two-input task owns a fresh counter. The second task hits a result
     # made by task 0, which must not count as an invocation on the fresh owner.
     with RunContext.start(tmp_path / 'run'), data.local_execution(batch_rows=2):

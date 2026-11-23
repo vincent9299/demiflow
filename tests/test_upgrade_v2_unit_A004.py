@@ -1,7 +1,7 @@
 """A004 · Dataset.count keeps its single action boundary; streaming counts via borrowed delivery."""
 from demiflow import data
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def _action_spy(monkeypatch):

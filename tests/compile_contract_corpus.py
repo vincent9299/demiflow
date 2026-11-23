@@ -703,7 +703,7 @@ def _refusal(exc):
 
 def lower_case(name, context):
     """Build and lower one direct case; returns (compiled, bounds, source, plan) or raises the refusal."""
-    from demiflow.execution import checked
+    from demiflow.execution.pipeline import checked
     from demiflow.execution.contracts.dataflow import ActionRequest
     from demiflow.planning.dataflow_compile import lower_action
     token = None

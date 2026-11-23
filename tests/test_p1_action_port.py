@@ -10,7 +10,7 @@ from demiflow.data.dataset import Dataset, MaterializedDataset
 from demiflow.data.datasink import WriteResult
 from demiflow.data.plan import LogicalPlan
 from demiflow.data.sources import ItemsSource
-from demiflow.execution import checked
+from demiflow.execution.pipeline import checked
 from demiflow.execution.executors import dataflow_api
 from demiflow.execution.executors import dataset_runtime
 

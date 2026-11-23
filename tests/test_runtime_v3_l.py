@@ -592,7 +592,7 @@ def test_l024(ex, engine):
 def test_l026(ex, engine, monkeypatch):
     from demiflow.execution.executors import graph as graph_mod
     from demiflow.execution.action_driver import dataflow as graph_driver
-    import demiflow.execution.run_context as run_context_mod
+    import demiflow.execution.pipeline.run_context as run_context_mod
 
     seen = {}
 

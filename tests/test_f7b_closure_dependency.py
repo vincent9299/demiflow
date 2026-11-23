@@ -36,7 +36,7 @@ import pytest
 
 import demiflow.data as data
 from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext, RunAction
+from demiflow.execution.pipeline.run_context import RunContext, RunAction
 
 from test_stage2_unified_plan import (
     LIMITS, _crash_hook, _load_modules, _map_plan,

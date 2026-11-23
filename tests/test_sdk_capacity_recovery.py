@@ -13,7 +13,7 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.recovery_contract import RunRef
 from demiflow.execution.run_journal import RunJournal
 from demiflow.resources.capacity import LocalCapacityPool
@@ -22,7 +22,7 @@ from demiflow.resources.manager import ResourceManager
 from demiflow.resources.local import LocalResourceProvider
 from demiflow.resources.process_unit import ManagedProcessUnit
 from demiflow.execution.hosts.run_state import RunResourceState
-from demiflow.execution.run_context import clean_stopped_execution
+from demiflow.execution.pipeline.run_context import clean_stopped_execution
 
 
 def write_graph(root, mode, crash=None):

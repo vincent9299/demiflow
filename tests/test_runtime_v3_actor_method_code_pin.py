@@ -38,7 +38,7 @@ def test_serialized_actor_members_pin_same_sources_as_archive(tmp_path, monkeypa
     from runtime_v3_program_probe import program_store, stage_callable
     from demiflow.execution.contracts.dataflow import ArtifactRef
     from demiflow.execution.seal.business_sources import plan_code_pin
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     helper, paths, name = _helper_graph(tmp_path, monkeypatch, 'actor_' + member)
 
     class Actor:

@@ -20,7 +20,7 @@ import pytest
 from demiflow import data
 from demiflow.errors import LanceWriteConflict
 from demiflow.execution.recovery_contract import RecoveryContractError, RunRef, identity
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.outputs.lance_sink import create_target_absent_binding
 from demiflow.execution.run_journal import RunJournal
 from demiflow.lance.model import LanceWriteSpec

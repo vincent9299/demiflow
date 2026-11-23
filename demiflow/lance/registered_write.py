@@ -8,7 +8,7 @@ from .control import control_directory
 from .model import LanceWriteReceipt
 from .storage import open_lance_dataset, schema_hash
 from ..execution.recovery_contract import RecoveryContractError, RunRef, document
-from ..execution.run_context import RunContext, current_run
+from demiflow.execution.pipeline.run_context import RunContext, current_run
 from ..execution.run_journal import RunJournal
 from demiflow.execution.storage.state_artifacts import atomic_bytes
 

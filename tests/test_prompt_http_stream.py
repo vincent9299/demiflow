@@ -16,7 +16,7 @@ from demiflow.operator_llm.model import OperatorLLMRequest, PromptModel, TextPar
 from demiflow.operator_llm.call_ref import PromptRecordRef, journal_totals
 from demiflow.operator_llm.journal import UncertainPromptCall
 from demiflow.services.request_limits import RequestGate, ServiceStopped
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from test_map_prompt_async import PACK, prompt
 
 

@@ -5,7 +5,7 @@ from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOption
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.contracts.checkpoint import replayable_effects
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.operator_llm.journal import UncertainPromptCall, request_key
 from demiflow.operator_llm.sqlite_journal import _SQLiteJournalShard
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Local managed units require Linux")

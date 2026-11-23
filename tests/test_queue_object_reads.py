@@ -10,7 +10,7 @@ from demiflow.objects import LocalObjectStore,ObjectRef,read_local_object
 from demiflow.execution.raw_objects import RawNamespace
 from demiflow.execution.queue_sinks import QueueResultSink
 from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from test_queue_v2_protocol import channel
 from test_queue_v2_boundaries import seed
 from test_raw_fetch import origin_server,BODY

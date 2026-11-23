@@ -12,7 +12,7 @@ import pytest
 from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def _budgets(path):

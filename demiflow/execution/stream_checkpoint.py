@@ -310,7 +310,7 @@ def open_checkpoint(path, *, identity, outputs, max_bytes=1024**2):
     In checked execution ``path`` is relative to its persistent run directory.
     No table is read until loaded output references pass the declaration check.
     """
-    from .checked import action, current
+    from demiflow.execution.pipeline.checked import action, current
     arguments = normalize_checkpoint(dict(path=path, identity=identity, outputs=outputs, max_bytes=max_bytes))
     owner = current()
     actual_path = Path(path)

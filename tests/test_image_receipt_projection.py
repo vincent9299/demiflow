@@ -11,7 +11,7 @@ from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.outputs.lance_sink import LanceSink
 from demiflow.execution.outputs.object_sink import ObjectRowsSink
 from demiflow.execution.recovery_contract import SourcePosition,UnresolvedCommit
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.lance.model import LanceWriteSpec
 from image_http_fixture import picture
 

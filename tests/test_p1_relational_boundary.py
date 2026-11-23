@@ -34,7 +34,7 @@ def test_keyed_source_retains_exact_plan_inputs_without_sort_or_normalizing_rows
 def test_relational_declarations_keep_historical_pickle_names_and_code_pins(kind):
     from demiflow.execution.recovery_identity import describe
 
-    old_module = 'demiflow.execution.local_kernel'
+    old_module = 'demiflow.execution.pipeline.local_kernel'
     # Protocol 0 GLOBAL is the exact historic module/name lookup, independent
     # of where the candidate's pickler would now choose to store the class.
     old_reference = f'c{old_module}\n{kind.__name__}\n.'.encode('ascii')

@@ -6,7 +6,7 @@ import sqlite3
 import time
 import pytest
 
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.workbench.runs import domain as run_domain
 from test_forge_runtime_review_fixes import control_fixture
 

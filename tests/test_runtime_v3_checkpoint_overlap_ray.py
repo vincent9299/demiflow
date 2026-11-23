@@ -6,7 +6,7 @@ from pathlib import Path
 from demiflow.data.api import DataAPI
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.executors.ray import RayDatasetExecutor
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from test_runtime_v3_checkpoint_overlap import _capture, _lines, _wait
 

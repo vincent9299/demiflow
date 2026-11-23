@@ -35,7 +35,7 @@ def test_conflicting_or_invalid_observation_id_fails_closed():
 
 def test_real_nested_recorders_observe_one_action_once_each(tmp_path):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     with RunContext.start(tmp_path/'run') as run, data.local_execution():
         with support._ExecuteActionRecorder() as outer:
             with support._ExecuteActionRecorder() as inner:

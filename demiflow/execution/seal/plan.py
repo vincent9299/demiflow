@@ -43,7 +43,7 @@ from ..contracts.dataflow_errors import DataflowError
 from demiflow.execution.seal.identity_bridge import build_identity_bridge
 from ..recovery_contract import RecoveryContractError, document, identifier, identity
 from ..recovery_identity import describe
-from ..run_context import RunAction
+from demiflow.execution.pipeline.run_context import RunAction
 from ..run_journal import RunJournal
 
 SEAL_SCHEMA = "demiflow.dataflow_seal.v3"

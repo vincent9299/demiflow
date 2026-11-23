@@ -12,7 +12,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.contracts.dataflow import ActionRequest
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.planning import dataflow_compile as compiler, dataflow_configuration as schema
 from configuration_schema_gate import reports_on_purpose
 import compile_contract_corpus as corpus

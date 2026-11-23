@@ -69,7 +69,7 @@ def _mini_graph_spec(prefetch_slots=None):
 
 def _run_graph(tmp_path, spec):
     from demiflow.execution.executors.local import LocalDatasetExecutor
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     executor = LocalDatasetExecutor(workers=1)
     with RunContext.start(tmp_path / "run",
                           limits={"checkpoint_rows": 8, "checkpoint_interval_ms": 60000}) as run:

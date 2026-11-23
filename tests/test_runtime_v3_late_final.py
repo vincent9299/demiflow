@@ -11,7 +11,7 @@ from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
 from demiflow.execution.dataflow_hosts import _EndpointBase
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.journal.prompt import RunPromptJournal
 
 

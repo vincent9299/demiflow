@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from demiflow import data
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.resources.local import LocalResourceProvider
 
 

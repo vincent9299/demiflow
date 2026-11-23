@@ -243,7 +243,7 @@
     "planning/dataflow_thread_fusion.py"
    ],
    "format": [
-    "execution/run_context.py"
+    "execution/pipeline/run_context.py"
    ],
    "graph_literal_prefix": [
     "planning/dataflow_graph_adapter.py"
@@ -319,12 +319,12 @@
    ],
    "limits": [
     "execution/hosts/execution_recovery.py",
-    "execution/run_context.py",
+    "execution/pipeline/run_context.py",
     "execution/run_journal.py",
     "execution/worker/authority.py"
    ],
    "limits_explicit": [
-    "execution/run_context.py",
+    "execution/pipeline/run_context.py",
     "execution/worker/authority.py"
    ],
    "managed_http_service_digest": [
@@ -469,7 +469,7 @@
    "run_id": [
     "execution/hosts/execution_recovery.py",
     "execution/journal/run_reader.py",
-    "execution/run_context.py",
+    "execution/pipeline/run_context.py",
     "execution/run_journal.py",
     "execution/worker/authority.py"
    ],
@@ -507,11 +507,11 @@
     "operators/ordering.py"
    ],
    "started_at": [
-    "execution/run_context.py",
+    "execution/pipeline/run_context.py",
     "execution/worker/authority.py"
    ],
    "stream_protocol": [
-    "execution/run_context.py"
+    "execution/pipeline/run_context.py"
    ],
    "streaming_map": [
     "execution/kernels/operator.py",

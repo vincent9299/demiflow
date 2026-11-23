@@ -2,7 +2,7 @@
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.contracts.record_codec import _encode_payload
 from _native_relational_fixtures import native_region_evidence, oracle_join
 

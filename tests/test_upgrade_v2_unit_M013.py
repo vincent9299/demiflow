@@ -6,7 +6,7 @@ forbids fresh dispatch, and the ContextVar is always restored on exit.
 """
 import pytest
 
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.operator_llm.errors import PromptBudgetExceededError
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
 from demiflow.operator_llm.stream_recovery import native_request_budget, CALL_RESERVATION

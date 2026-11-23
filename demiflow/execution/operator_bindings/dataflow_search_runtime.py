@@ -8,7 +8,7 @@ from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.raw_budget import budget_delta, record_admission
 from demiflow.execution.recovery_contract import RecoveryContractError, SourcePosition, UnresolvedCommit, identity
 from demiflow.execution.row_scope import RowScope, current_row_scope, set_row_scope
-from demiflow.execution.run_context import RunAction, action_scope
+from demiflow.execution.pipeline.run_context import RunAction, action_scope
 
 
 # Shared WebSessions capture one HTTP admission callback. Each request task
@@ -223,7 +223,7 @@ def prepare_search_bindings(actors):
     from functools import partial
     from demiflow.collect.search_contract import is_native_search_actor
     from demiflow.execution.native_queue.queue_producer import QueueProducer
-    from demiflow.execution.run_context import current_action
+    from demiflow.execution.pipeline.run_context import current_action
     searches = {id(actor) for actor in actors if is_native_search_actor(actor)}
     if not searches:
         return {}

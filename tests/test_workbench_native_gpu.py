@@ -42,7 +42,7 @@ def test_resource_declaration_binds_actual_options_without_changing_old_facts():
     assert check_call(actual)['supported']
     for bad in (None, {'gpu':.5}, {'unregistered':1}):
         assert not check_call({**actual,'resource_declaration':bad})['supported']
-    from demiflow.execution.checked import CheckedExecution
+    from demiflow.execution.pipeline.checked import CheckedExecution
     from demiflow.data.runtime_contract import RuntimeContractError
     context=CheckedExecution.__new__(CheckedExecution)
     node={'id':'changed-resource','capability_fact':{**actual,'resource_declaration':{'gpu':2}}}

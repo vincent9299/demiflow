@@ -7,7 +7,7 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @pytest.mark.parametrize('how', ['inner', 'left', 'semi', 'anti'])

@@ -5,7 +5,7 @@ and the report context. ``lower_action`` resolves it once at entry when the
 caller passes none, and uses exactly what it is given when the caller passes one.
 """
 from demiflow import data
-from demiflow.execution import checked
+from demiflow.execution.pipeline import checked
 from demiflow.execution.contracts.dataflow import ActionRequest
 from demiflow.execution.contracts.dataflow_codec import encode_wire
 from demiflow.execution.compiler_support.dataflow_compile_inputs import CompileDefaults, CompileInputs, ReportBindings, compile_inputs, executor_defaults

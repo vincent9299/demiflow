@@ -2,7 +2,7 @@
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from test_runtime_v3_artifact_accounting import store_fixture
 from test_runtime_v3_terminal_replay_admission import InterruptedAfterAction, _fd_count

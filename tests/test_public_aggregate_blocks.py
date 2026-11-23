@@ -8,7 +8,7 @@ import pytest
 
 from demiflow import data
 from demiflow.data.aggregate import AggregateFnV2, Count, Sum
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @contextmanager

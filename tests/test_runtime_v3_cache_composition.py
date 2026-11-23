@@ -8,7 +8,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.seal.sealed_plans import load_sealed_plan
 from test_runtime_v3_reducer_values import provider, value_executor
 

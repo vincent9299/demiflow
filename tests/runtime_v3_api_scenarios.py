@@ -357,7 +357,7 @@ NA_NEGATIVE={
 
 
 def _run_case(fx,case,index,source):
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from runtime_v3_support import _ExecuteActionRecorder, _RayDataBlocker
     root=fx.root/'api-runs'/('%03d-'%index+case.name)
     root.mkdir(parents=True)
@@ -762,7 +762,7 @@ def _search(root):
 
 def _queue(root,explicit):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.queue import QueueChannel,QueueConfig,ProducerSourceSpec,task_message
     from demiflow.execution.queue_sinks import QueueResultSink
     from demiflow.collect import FetchPolicy,HttpSource

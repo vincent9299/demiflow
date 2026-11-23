@@ -5,7 +5,7 @@ import pytest
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts import state_codec
 from demiflow.execution.kernels.operator import _SpoolPort,_segment_rows
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from test_runtime_v3_artifact_recovery import _store
 from test_runtime_v3_real_seams import PreparationOnly
 from test_runtime_v3_k import rec

@@ -13,7 +13,7 @@ from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.hosts.configuration import NativeBudgetGuard
 from demiflow.execution.scheduler.native_limits import admission_timeout_ms, intersect_native_limits
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def test_policy_and_assignment_preserve_old_wire_and_bind_new_ceilings():

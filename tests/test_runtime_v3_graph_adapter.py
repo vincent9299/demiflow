@@ -7,7 +7,7 @@ import pytest
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def _observe(row, *, directory, name, increment):
@@ -209,7 +209,7 @@ def test_actual_graph_routes_reach_distinct_programs(graph_environment, monkeypa
 @pytest.mark.parametrize('routing', ['broadcast', 'hash', 'rebalance', 'target'])
 def test_actual_graph_recovers_native_routes_and_target_identities(runtime_v3_fixture, monkeypatch, routing):
     from demiflow.data.api import _current_executor
-    from demiflow.execution.run_context import current_run
+    from demiflow.execution.pipeline.run_context import current_run
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.outputs.terminals import materialized_handle
     from runtime_v3_route_recovery_scenarios import _recover

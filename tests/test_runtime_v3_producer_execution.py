@@ -5,7 +5,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.queue import ProducerSourceSpec, task_message
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from test_queue_v2_protocol import channel
 
 

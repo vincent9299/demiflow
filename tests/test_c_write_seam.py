@@ -18,7 +18,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunAction, RunContext
+from demiflow.execution.pipeline.run_context import RunAction, RunContext
 from demiflow.execution.seal.sealed_plans import load_execution_bindings, load_sealed_plan
 from demiflow.workbench.runs.facts import read_sealed_plan
 

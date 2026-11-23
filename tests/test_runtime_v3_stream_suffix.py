@@ -6,7 +6,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @pytest.fixture(autouse=True)
@@ -210,7 +210,7 @@ def test_suffix_does_not_swallow_unknown_effect_device_or_exceed_grant(tmp_path,
     from demiflow.execution.contracts.dataflow import ActionRequest, HostDescriptor
     from demiflow.execution.contracts.dataflow_codec import _thaw_json
     from demiflow.execution.executors.dataflow_api import _CompileContext
-    from demiflow.execution.run_context import RunAction
+    from demiflow.execution.pipeline.run_context import RunAction
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_place import partition_stages
     from demiflow.planning.dataflow_policy import resolve_runtime_policy

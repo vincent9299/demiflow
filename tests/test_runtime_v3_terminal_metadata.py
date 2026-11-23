@@ -18,7 +18,7 @@ def test_small_legal_arrow_batch_reaches_terminal_under_original_budget(tmp_path
 
 def test_insufficient_terminal_state_fails_before_any_launch(tmp_path):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     with observe_execution(workers=4, memory_bytes=4 * 1024**2) as observed:
         with pytest.raises(Exception, match='terminal state budget cannot hold one block and root'):
             with RunContext.start(tmp_path/'run', limits=dict(memory_bytes=4*1024**2,

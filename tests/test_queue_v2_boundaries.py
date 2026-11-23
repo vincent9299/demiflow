@@ -13,7 +13,7 @@ from demiflow.execution.queue import ProducerSourceSpec,task_message
 from demiflow.execution.queue_sinks import QueueResultSink
 from demiflow.execution.queue_contract import QueueIncomplete,HistoryReadLimits
 from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from test_queue_v2_protocol import channel,native_parent,publish,source
 from test_raw_fetch import origin_server
 

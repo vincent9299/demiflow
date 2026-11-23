@@ -11,7 +11,7 @@ from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.record_codec import _encode_record_document, _decode_record_document, _encode_payload
 from demiflow.execution.storage.segments import SegmentForest, segment_refs, block_chunks, RECORDS_MEDIA
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from test_runtime_v3_c import bounds
 from test_runtime_v3_k import FakeStore
 

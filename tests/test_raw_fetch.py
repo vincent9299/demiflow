@@ -13,7 +13,7 @@ import pytest
 from demiflow import data
 from demiflow.collect import FetchPolicy, HttpSource
 from demiflow.objects import LocalObjectStore, ObjectRef
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit
 
 BODY = bytes(range(256))*257

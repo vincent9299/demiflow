@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.operator_bindings.dataflow_model_journal import NativeEmbeddingRecovery
 from demiflow.execution.operator_bindings.dataflow_model_journal import _BorrowedJournal

@@ -6,7 +6,7 @@ import pytest
 from demiflow.data.api import DataAPI
 from demiflow.data.runtime_contract import RuntimeContractError
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.run_context import RunContext, current_run, execution_scope, bind_iteration
+from demiflow.execution.pipeline.run_context import RunContext, current_run, execution_scope, bind_iteration
 from demiflow.execution.run_journal import RunJournal
 
 
@@ -140,8 +140,7 @@ def test_wide_native_row_rejects_without_commit_and_accepts_explicit_budget(tmp_
 
 
 def test_source_scope_shadows_outer_run_and_restores_action_on_error():
-    from demiflow.execution.run_context import (run_scope, action_scope, source_run_scope,
-        current_action, persisting_effect_scope, is_persisting_effect)
+    from demiflow.execution.pipeline.run_context import run_scope, action_scope, source_run_scope, current_action, persisting_effect_scope, is_persisting_effect
     outer, source, action = object(), object(), object()
     with run_scope(outer), action_scope(action):
         with pytest.raises(ValueError, match='source failed'):

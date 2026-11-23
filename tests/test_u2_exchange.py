@@ -3,7 +3,7 @@ import pytest
 from demiflow.execution.contracts.errors import ProtocolError
 from demiflow.execution.contracts.exchange import build_data_ref, seal_allowed, validate_seal
 from demiflow.execution.exchange.segments import read_domain, descriptor_refs, refs_descriptor
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 def _code(exc):
     return exc.value.code

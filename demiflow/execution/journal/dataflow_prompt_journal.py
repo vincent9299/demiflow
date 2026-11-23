@@ -33,7 +33,7 @@ def bind_private_prompt_contracts(service, graph):
             nodes[(node.occurrence_id, None)] = config
     if not nodes:
         return
-    from demiflow.execution.checked import current
+    from demiflow.execution.pipeline.checked import current
     kind = service._action.declaration.get('kind')
     # Ordinary Prompt may finish its current attempt into the ORIGINAL result
     # manifest. A result commit does not make private HTTP intents resumable.

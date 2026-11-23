@@ -55,7 +55,7 @@ def test_yaml_codex_owns_model_and_native_tools(tmp_path, app_server, monkeypatc
     path, _, _ = entries(tmp_path, codex=app_server[0])
     agent = load_agent_config(path)
     assert agent.prompt_pack.required_environment_names == ()
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     with RunContext.start(tmp_path / 'run') as run, data.local_execution():
         row = collect(node(path))[0]
         assert run.journal.budget_consumed('requests') == 1

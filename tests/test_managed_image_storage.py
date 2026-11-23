@@ -4,7 +4,7 @@ import os
 
 import pytest
 from demiflow.execution.outputs.block_sink import storage_usage
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.recovery_contract import RecoveryContractError
 
 

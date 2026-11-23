@@ -1,5 +1,5 @@
 """Equal image requests in independent native runs are still real model calls."""
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.objects import ObjectRef
 from image_http_fixture import fixture_http
 from test_managed_image_execution import native_dataset,run_limits

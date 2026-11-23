@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 
 from demiflow.execution.seal.sealed_plans import PlanContractError, load_sealed_plan
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.workbench.runs.facts import read_sealed_plan
 from test_stage2_unified_plan import LIMITS
 from test_u2_chain_commit import original_chain

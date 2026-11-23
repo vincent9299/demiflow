@@ -157,7 +157,7 @@ def _fake_resolve_runtime_policy(options, limits, *, provider):
 
 
 def _fake_expand_relational_inputs(source, *, path, bounds):
-    from demiflow.execution.local_kernel import KeyedSource, UnionSource
+    from demiflow.execution.pipeline.local_kernel import KeyedSource, UnionSource
     STATE.relational_calls.append({"source": source, "path": path, "bounds": bounds})
     if STATE.relational_bindings is not None:
         return STATE.relational_bindings
@@ -259,7 +259,7 @@ def _record_doubles(request):
 @pytest.fixture
 def fake_action(monkeypatch):
     """Provide a non-None current_action() for the wiring entries."""
-    import demiflow.execution.run_context as rc
+    import demiflow.execution.pipeline.run_context as rc
 
     class _Action:
         action_id = "fake-action"
@@ -468,7 +468,7 @@ def test_f012(monkeypatch, tmp_path):
 
     monkeypatch.setattr(driver, "PipelineBundleRef", _Bundle)
 
-    import demiflow.execution.run_context as rc
+    import demiflow.execution.pipeline.run_context as rc
     class _Ctx:
         @staticmethod
         def start(entry_identity):
@@ -498,7 +498,7 @@ def test_p1_materialize_uses_one_action_on_the_original_provider(monkeypatch, na
     from demiflow.data.execution_contract import Materialize
     from demiflow.data.plan import LogicalPlan
     from demiflow.data.sources import ItemsSource
-    from demiflow.execution import checked
+    from demiflow.execution.pipeline import checked
     from demiflow.execution.executors import dataset_runtime
 
     source, plan = ItemsSource([{'id': 1}]), LogicalPlan()

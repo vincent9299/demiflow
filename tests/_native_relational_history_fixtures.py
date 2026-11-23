@@ -25,7 +25,7 @@ async def echo(row):
 
 
 def source_with_context(log):
-    from demiflow.execution.run_context import current_run, current_action
+    from demiflow.execution.pipeline.run_context import current_run, current_action
     view = current_run()
     assert view is not None and current_action() is None
     assert not hasattr(view, 'journal') and not hasattr(view, 'reserve')

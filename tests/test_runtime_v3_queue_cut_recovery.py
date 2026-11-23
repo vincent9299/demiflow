@@ -85,7 +85,7 @@ def test_completed_native_ack_before_reply_is_reused_by_original_cut(tmp_path, m
     from demiflow import data
     from demiflow.execution.dataflow_queue import NativeAcquisitionService
     from demiflow.execution.queue_sinks import QueueResultSink
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from test_mvp2_queue_unified import _config, _seed_tasks, _make_builder, _records_by_task
     from test_raw_fetch import origin_server
     from runtime_v3_owned_crash import assert_released

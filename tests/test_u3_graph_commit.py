@@ -12,7 +12,7 @@ import pytest
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
                                 reason="Local managed units require Linux")

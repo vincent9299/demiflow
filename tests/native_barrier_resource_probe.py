@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import time
 
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 
 root = Path(sys.argv[1])

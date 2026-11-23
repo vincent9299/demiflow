@@ -12,7 +12,7 @@ import pytest
 
 from demiflow.execution.contracts.dataflow import ArtifactRef, WorkerEvent, WorkerLease
 from demiflow.execution.journal.dataflow_authority import DriverJournalService
-from demiflow.execution.run_context import RunAction, RunContext
+from demiflow.execution.pipeline.run_context import RunAction, RunContext
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 
 

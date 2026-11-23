@@ -8,7 +8,7 @@ import pyarrow.csv as pacsv
 import pytest
 from demiflow import data
 from tests.test_local_relational import _oracle_join, assert_same_rows
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @pytest.mark.slow

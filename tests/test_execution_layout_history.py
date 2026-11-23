@@ -34,7 +34,8 @@ CARRIERS = {
     'dataset_commit': ['DatasetCommit', 'UncertainDatasetCommit'],
     'target': ['PipelineExecutionTarget'],
     'package_loader': ['BundlePackages'],
-    'run_context': ['RunContext', 'create_target_absent_binding'],
+    'run_context': ['RunContext', 'RunAction', '_ContextIterator', 'create_target_absent_binding'],
+    'local_kernel': ['LocalKernelOptions', 'LocalExecutionSession'],
     'checked': ['CheckedExecution', 'CheckedAction'],
     'managed_native': ['NativeExecution'],
     'run_journal': ['RunJournal'],
@@ -527,7 +528,7 @@ def test_old_prompt_binding_requires_bound_response_projection(original_carriers
 
 @pytest.mark.parametrize('name', ['run_scope', 'action_scope', 'persisting_effect_scope', 'is_persisting_effect'])
 def test_original_worker_authority_requires_actual_context_owner(original_carriers, monkeypatch, name):
-    from demiflow.execution import run_context
+    from demiflow.execution.pipeline import run_context
     from demiflow.execution.worker.authority import WorkerAuthority
     from demiflow.execution.recovery_sdk_v3 import authentic_source_global
     fn = getattr(run_context, name)
@@ -540,7 +541,7 @@ def test_original_worker_authority_requires_actual_context_owner(original_carrie
 @pytest.mark.parametrize('name', ['bind_observation_scope', 'progress', 'rows', 'duration',
     'group_duration', 'actor_created', 'actor_lifecycle', 'worker_actor_lifecycle', 'flush_observations'])
 def test_original_observation_method_resolves_actual_owner(original_carriers, name):
-    from demiflow.execution.checked import CheckedExecution
+    from demiflow.execution.pipeline.checked import CheckedExecution
     from demiflow.execution.journal import dataflow_operator_observations as observations
     raw, expected = original_carriers['observation.' + name]
     loaded = load_payload([base64.b64decode(raw)])
@@ -552,7 +553,7 @@ def test_original_observation_method_resolves_actual_owner(original_carriers, na
     'foreign_globals', 'defaults', 'code'])
 def test_original_checked_class_rejects_observation_slot_substitution(original_carriers, monkeypatch, mutation):
     from types import FunctionType
-    from demiflow.execution.checked import CheckedExecution
+    from demiflow.execution.pipeline.checked import CheckedExecution
     from demiflow.execution.journal import dataflow_operator_observations as observations
     from demiflow.execution.recovery_sdk_v3 import authentic_source_global
     fn = observations.progress

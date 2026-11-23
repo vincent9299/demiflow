@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.embeddings.runtime import EmbeddingActor
 from demiflow.embeddings.model import EmbeddingModel
 from demiflow.execution.operator_bindings.dataflow_model_journal import NativeEmbeddingRecovery

@@ -4,7 +4,7 @@ import pytest
 
 from demiflow import data
 from demiflow.data.training import PredictorSpec, TrainingRecipe
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.training.deployment import TrainingDeployment
 from test_training_domain import Provider, setup_request
 

@@ -23,7 +23,7 @@ def test_observation_context_is_the_shape_every_copy_built(tmp_path):
 
 
 def test_observation_action_cannot_advance_a_real_journal(tmp_path):
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     with RunContext.start(tmp_path / 'run') as run:
         journal, native_fence = run.journal, run.fence
     action = facts.observation_action(journal, 'action-1', {'kind': 'write_table'})

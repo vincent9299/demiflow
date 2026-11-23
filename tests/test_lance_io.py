@@ -5,7 +5,7 @@ import fcntl
 import json
 from pathlib import Path
 
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.lance.registry import write_registered_table
 

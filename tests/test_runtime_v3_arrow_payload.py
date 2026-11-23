@@ -10,7 +10,7 @@ from demiflow import data
 from demiflow.execution.storage.arrow_payload import ArrowBatchCache
 from demiflow.execution.contracts.record_codec import is_arrow_record, row_upper
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from _arrow_payload_fixtures import install_arrow_probe
 from _worker_event_fixtures import events
 
@@ -145,7 +145,7 @@ def test_real_multiline_copy_keeps_schema_batch_and_ack(tmp_path, monkeypatch, p
             executor = RayDatasetExecutor(workers=2, resource_root=tmp_path, native_resources={'batch_rows':8})
         else:
             from demiflow.execution.executors.local import LocalDatasetExecutor
-            from demiflow.execution.local_kernel import LocalKernelOptions
+            from demiflow.execution.pipeline.local_kernel import LocalKernelOptions
             executor = LocalDatasetExecutor(workers=2, resource_root=tmp_path,
                 local_kernel=LocalKernelOptions(workers=2, worker_mode=provider, batch_rows=8,
                                                memory_bytes=LIMITS['memory_bytes']))

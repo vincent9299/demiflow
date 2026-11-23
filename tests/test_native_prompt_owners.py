@@ -2,7 +2,7 @@
 import json
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.storage.state_artifacts import StateArtifacts
 from demiflow.operator_llm import parse_prompt_pack

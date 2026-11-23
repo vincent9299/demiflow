@@ -120,7 +120,7 @@ def _cut_facts(coordinator, image):
 
 def _resume_after_ack(fx, name, build, *, eligible=None, workers=4, fusion=True, limits=None,
                       observations=None):
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from runtime_v3_support import _ExecuteActionRecorder, _RayDataBlocker
@@ -267,7 +267,7 @@ def actor_state_lifecycle(fx,fault=None):
     if fault is not None:
         raise ValueError('actor lifecycle covers success, failure and cancellation together')
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from runtime_v3_support import _ExecuteActionRecorder, _RayDataBlocker
     path = str(fx.evidence_dir/'accumulator.jsonl')
     def build():

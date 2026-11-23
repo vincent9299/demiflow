@@ -85,7 +85,7 @@ def test_caller_mutation_does_not_change_sealed_policy():
 def test_policy_preserves_real_stream_concurrency_and_usage(sse_server, tmp_path):
     import json
     from test_map_prompt_async import prompt
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from test_prompt_http_stream import journal_totals
     ds = prompt(data.from_items([{'item':i} for i in range(6)]), concurrency=3,
         request_policy=POLICY, options={'stream':True,'gateway':'litellm','trust_env':False},

@@ -50,7 +50,7 @@ def test_untyped_and_declared_lance_column_order_through_real_provider(tmp_path,
     import lance
     import pyarrow as pa
     from demiflow.data.api import DataAPI
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.seal.sealed_plans import load_sealed_plan
     ray = None
     with tempfile.TemporaryDirectory(prefix='demiflow-order-ray-', dir='/tmp') as ray_temp:

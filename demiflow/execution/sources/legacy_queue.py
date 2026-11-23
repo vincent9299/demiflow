@@ -46,7 +46,7 @@ class LegacyQueueHistoryDatasource(Datasource):
 
     def rows(self):
         path=Path(self.path);limits=self.limits;started=time.monotonic();position=self.after;count=total=resident=0
-        from demiflow.execution.run_context import current_run
+        from demiflow.execution.pipeline.run_context import current_run
         from demiflow.data.runtime_contract import check_size
         run=current_run()
         resident_limit=min(limits.max_total_record_bytes*8,run.limits['memory_bytes']//2 if run else 128*1024**2)

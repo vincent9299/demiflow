@@ -164,7 +164,7 @@ from demiflow.execution.queue_sinks import QueuePublishSink, QueueResultSink  # 
 from demiflow.execution.queue_source import QueueDatasource  # noqa: E402
 from demiflow.execution.raw_fetch import RawFetch  # noqa: E402
 from demiflow.execution.recovery_contract import RecoveryContractError, SourcePosition, identity  # noqa: E402
-from demiflow.execution.run_context import RunAction, RunContext  # noqa: E402
+from demiflow.execution.pipeline.run_context import RunAction, RunContext  # noqa: E402
 from demiflow.data.plan import AsyncMapOp  # noqa: E402
 from test_raw_fetch import origin_server, BODY  # noqa: E402
 

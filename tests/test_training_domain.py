@@ -13,7 +13,7 @@ from demiflow.execution.contracts.training import (
     ProjectObject, TrainingSnapshotRef,
 )
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
-from demiflow.execution.run_context import RunAction, RunContext
+from demiflow.execution.pipeline.run_context import RunAction, RunContext
 from demiflow.execution.training.deployment import TrainingDeployment, bind_action_deployment
 from demiflow.execution.journal.training_index import FitConflict, TrainingIndex
 from demiflow.execution.training.runtime import FitRuntime, read_parent

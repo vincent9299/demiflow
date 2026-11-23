@@ -28,7 +28,7 @@ from demiflow.data.sources import ItemsSource
 from demiflow.execution.contracts import exchange, operator
 from demiflow.execution.plan_facts import operation_facts
 from demiflow.execution.recovery_contract import identifier, identity
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.planning.dag import (
     compile_declared_dag, compile_logical_dag, compile_physical_execution_plan,
     dag_id_for, validate_logical_dag,

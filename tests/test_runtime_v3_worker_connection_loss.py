@@ -172,7 +172,7 @@ def test_owned_worker_loss_before_registration_preserves_recovery_admission(tmp_
     from demiflow import data
     from demiflow.execution.executors import dataflow_api
     from demiflow.execution.scheduler import native_limits as action_limits
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from runtime_v3_owned_crash import assert_released, process_records
     from runtime_v3_graph_history import capture_acks, assert_acks_retained
 

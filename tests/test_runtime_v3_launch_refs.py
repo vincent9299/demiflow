@@ -12,7 +12,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.gc import collect_published_orphans
 from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.recovery_contract import identity
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.worker.runtime import _decode_v3_assignment, _decode_v3_ref, WorkerRuntime
 from test_runtime_v3_artifact_accounting import store_fixture
 

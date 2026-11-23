@@ -121,7 +121,7 @@ def _recover(fx,name,build,*,eligible=None,workers=8,first_run=None,parked=False
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.contracts.dataflow import thaw_record_value
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from runtime_v3_residency_scenarios import _provider,_cut_facts
     from runtime_v3_support import _ExecuteActionRecorder,_RayDataBlocker
@@ -388,7 +388,7 @@ def _first_native_action(fx,dataset,run,routing,evidence):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.executors.dataflow_api import make_action_request
     from demiflow.execution.action_driver.services import make_driver_services
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     from demiflow.planning.dataflow_place import (compile_physical_dataflow,validate_physical_dataflow,
@@ -523,7 +523,7 @@ def native_exchange(fx,routing):
 
 def native_unknown_target(fx):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from runtime_v3_residency_scenarios import _provider
     evidence={}
@@ -544,7 +544,7 @@ def native_unknown_target(fx):
 
 
 def public_unknown_model(fx):
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from runtime_v3_residency_scenarios import _provider
     from test_runtime_v3_routed_prompt import _pipeline
     with _model_server() as calls:

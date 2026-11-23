@@ -8,7 +8,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.commit import CommitCoordinator
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.storage.state_artifacts import StateArtifacts
 

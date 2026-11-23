@@ -136,7 +136,7 @@ def test_v3_public_arrow_batches_cross_fragments_without_row_conversions(tmp_pat
 
 def test_mapped_arrow_refuses_oversized_output_without_lance_publication(tmp_path):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
 
     source, target = str(tmp_path / 'source'), str(tmp_path / 'target')
     table = pa.table({'id': [1, 2, 3]})

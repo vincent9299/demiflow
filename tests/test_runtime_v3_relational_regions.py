@@ -2,7 +2,7 @@
 from pathlib import Path
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
 
@@ -36,7 +36,7 @@ def test_region_planner_preserves_legacy_disable_isolation_and_budget():
     import pytest
     from demiflow.execution.contracts.dataflow import ActionRequest
     from demiflow.execution.executors.dataflow_api import _CompileContext
-    from demiflow.execution.run_context import RunAction
+    from demiflow.execution.pipeline.run_context import RunAction
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_place import partition_stages
     from demiflow.planning.dataflow_policy import resolve_runtime_policy

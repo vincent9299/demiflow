@@ -15,7 +15,7 @@ def forbidden(*args, **kwargs):
 @pytest.fixture
 def no_execution(monkeypatch):
     from demiflow.execution.action_driver import dataflow
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.observability import ActionObserver
     monkeypatch.setattr(dataflow, 'make_driver_services', forbidden)
     monkeypatch.setattr(dataflow, 'snapshot_source', forbidden)
@@ -312,7 +312,7 @@ def test_swallowed_boundary_and_nested_capture_fail_closed(no_execution):
 
 
 def test_explicit_run_start_is_rejected_before_creation(tmp_path):
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     target = tmp_path / 'run'
 
     def entry():
@@ -325,7 +325,7 @@ def test_explicit_run_start_is_rejected_before_creation(tmp_path):
 
 
 def test_capture_does_not_leak_into_ordinary_execution(tmp_path):
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     captured = capture_pipeline(lambda: data.range(3).take_all(), {})
     with RunContext.start(tmp_path / 'run'):
         assert data.range(3).take_all() == [{'id': 0}, {'id': 1}, {'id': 2}]

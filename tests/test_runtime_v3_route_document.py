@@ -130,7 +130,7 @@ def test_joint_path_encodes_entire_payload_once_even_for_broadcast(monkeypatch):
 
 def test_real_worker_uses_validated_document_without_changing_results_or_ack(tmp_path,monkeypatch):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
     publish=WorkerGraphRunner._publish
     seen=[]

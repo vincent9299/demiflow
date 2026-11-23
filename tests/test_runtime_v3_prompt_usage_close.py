@@ -4,7 +4,7 @@ import pytest
 
 from demiflow.data.api import DataAPI
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.local_kernel import LocalKernelOptions
+from demiflow.execution.pipeline.local_kernel import LocalKernelOptions
 from demiflow.operator_llm.errors import PromptBudgetExceededError
 from demiflow.operator_llm.parser import parse_prompt_pack
 from test_map_prompt_async import PACK, server

@@ -175,7 +175,7 @@ def test_modified_current_algorithm_is_not_certified_as_historical(original_call
 def test_moduleless_business_callable_keeps_original_public_execution(tmp_path,monkeypatch):
     import cloudpickle
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     fn=eval('lambda row: {"id": row["id"] + 1}', {})
     assert fn.__module__ is None
     restored=load_payload([cloudpickle.dumps(fn)])
@@ -188,7 +188,7 @@ def test_moduleless_business_callable_keeps_original_public_execution(tmp_path,m
 def test_large_business_helper_keeps_original_public_execution(tmp_path,monkeypatch):
     import cloudpickle
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     # A normal generated lookup can exceed the separate SDK identity budget.
     # Even an SDK-like name in a business module must stay ordinary cloudpickle.
     context={'__name__':'business_lookup'}

@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 from demiflow.data.datasink import WriteResult
-from demiflow.execution.run_context import current_run
+from demiflow.execution.pipeline.run_context import current_run
 from test_execution_recovery_entrypoints import FormalSink
 
 

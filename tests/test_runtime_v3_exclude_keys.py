@@ -1,7 +1,7 @@
 import pyarrow as pa
 import lance
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def test_exclude_keys_keeps_left_scan_order_duplicates_and_null(tmp_path):

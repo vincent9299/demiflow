@@ -3,7 +3,7 @@ import json
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from test_agentmap_async import agent, api_call, resource, server
 from test_codex_agent import app_server, stream, events, assert_stopped
 

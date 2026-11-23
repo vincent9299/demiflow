@@ -67,11 +67,11 @@ def test_original_optional_api_case_on_real_ray(ray_executor, tmp_path, case_nam
 
 def test_real_ray_source_identity_and_bounded_overflow(ray_executor, tmp_path):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext, current_run
+    from demiflow.execution.pipeline.run_context import RunContext, current_run
     from demiflow.execution.run_journal import RunJournal
 
     def identity_rows():
-        from demiflow.execution.run_context import current_run, current_action
+        from demiflow.execution.pipeline.run_context import current_run, current_action
         run = current_run()
         assert not hasattr(run, 'journal') and current_action() is None
         yield {'directory': run.ref.directory, 'run_id': run.ref.run_id, 'pid': os.getpid()}
