@@ -113,6 +113,8 @@ def test_browser_conversation_navigation_refresh_and_mobile(tmp_path):
         second=page.context.new_page();second.goto(server.origin+'/#token='+server.token)
         second.get_by_role('button',name='开发',exact=True).click()
         second.locator('.dfc-message').filter(has_text='fixture answer').wait_for()
+        # Replay renders during mount; the router commits its URL after mount.
+        second.wait_for_url('**/*development_session*')
         assert second.evaluate('ForgeView.decodeView(location.hash).session_id')==sid
         assert len(server.development.store.list(workspace)['sessions'])==1
         assert server.development.store.show(workspace,sid)['revision']==1
