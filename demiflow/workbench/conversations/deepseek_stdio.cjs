@@ -65,3 +65,50 @@ if (fs.promises) {
     };
   }
 }
+
+// When TMPDIR and the project root reside on different mountpoints, atomic
+// rename(tmp, target) returns EXDEV. Fall back to copy+unlink ONLY on EXDEV so
+// built-in edit/write tools work seamlessly across filesystems while still
+// honoring Landlock write rules on both paths.
+if (typeof fs.renameSync === 'function') {
+  const origRenameSync = fs.renameSync.bind(fs);
+  fs.renameSync = function (oldPath, newPath) {
+    try { return origRenameSync(oldPath, newPath); }
+    catch (err) {
+      if (err && err.code === 'EXDEV') {
+        fs.copyFileSync(oldPath, newPath);
+        try { fs.unlinkSync(oldPath); } catch (_) {}
+        return undefined;
+      }
+      throw err;
+    }
+  };
+}
+if (typeof fs.rename === 'function') {
+  const origRename = fs.rename.bind(fs);
+  fs.rename = function (oldPath, newPath, cb) {
+    return origRename(oldPath, newPath, (err) => {
+      if (err && err.code === 'EXDEV') {
+        return fs.copyFile(oldPath, newPath, (copyErr) => {
+          if (copyErr) return cb(copyErr);
+          return fs.unlink(oldPath, () => cb(null));
+        });
+      }
+      return cb(err);
+    });
+  };
+}
+if (fs.promises && typeof fs.promises.rename === 'function') {
+  const origPromiseRename = fs.promises.rename.bind(fs.promises);
+  fs.promises.rename = async function (oldPath, newPath) {
+    try { return await origPromiseRename(oldPath, newPath); }
+    catch (err) {
+      if (err && err.code === 'EXDEV') {
+        await fs.promises.copyFile(oldPath, newPath);
+        try { await fs.promises.unlink(oldPath); } catch (_) {}
+        return undefined;
+      }
+      throw err;
+    }
+  };
+}

@@ -549,3 +549,45 @@ def test_flow_check_supports_static_dict_str_methods_and_comprehensions(tmp_path
     )
     report = check_project(proj, entry='flows/demo.py:run', params='configs/demo.json')
     assert report['status'] == 'passed', report
+
+
+def test_source_opaque_constant_no_recursive_alias_and_static_ifexp(tmp_path):
+    from demiflow.forge.pipeline_check import check_project
+    from demiflow.forge.project import initialize_project
+    from demiflow.forge.source import SourceTree, Symbol
+
+    proj = tmp_path / 'opaque_proj'
+    initialize_project(proj)
+    for d in ('flows', 'operators', 'configs'):
+        (proj / d).mkdir(exist_ok=True)
+    (proj / 'operators' / 'base.py').write_text(
+        'from pathlib import Path\n'
+        'PROJECT = Path(__file__).resolve().parents[1]\n'
+        'OPAQUE = object()\n'
+        'def helper(x):\n'
+        '    return x\n'
+    )
+    (proj / 'operators' / 'reexport.py').write_text(
+        'from . import base\n'
+        'helper = base.helper\n'
+    )
+    tree = SourceTree(proj)
+    resolved_proj = tree.resolve(Symbol('operators.base.PROJECT'))
+    assert resolved_proj == proj.resolve()
+    resolved_const = tree.resolve(Symbol('operators.base.OPAQUE'))
+    assert isinstance(resolved_const, Symbol) and resolved_const.opaque is True
+    resolved_fn = tree.resolve(Symbol('operators.reexport.helper'))
+    assert resolved_fn.module == 'operators.base'
+
+    (proj / 'flows' / 'ifexp.py').write_text(
+        'from demiflow import data\n'
+        'def run(mode="small"):\n'
+        '    n = 3 if mode == "small" else 10\n'
+        '    return data.range(n).count()\n'
+    )
+    (proj / 'configs' / 'ifexp.json').write_text(
+        '{"format": "demiflow_forge_flow_parameters_v2", "arguments": {"mode": "small"}}\n'
+    )
+    report = check_project(proj, entry='flows/ifexp.py:run', params='configs/ifexp.json')
+    assert report['status'] == 'passed', report
+    assert report['entries'][0]['status'] == 'checked', report

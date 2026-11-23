@@ -49,6 +49,7 @@ class InspectionError(ValueError):
 @dataclass(frozen=True)
 class Symbol:
     name: str
+    opaque: bool = False
 
 
 @dataclass
@@ -221,15 +222,19 @@ class SourceTree:
                             if (isinstance(rhs, ast.Name)
                                     and isinstance(namespace.get(rhs.id), (Symbol, Definition))):
                                 val = namespace[rhs.id]
+                            elif (isinstance(rhs, ast.Attribute)
+                                    and isinstance(rhs.value, ast.Name)
+                                    and isinstance(namespace.get(rhs.value.id), Symbol)):
+                                val = Symbol(namespace[rhs.value.id].name + "." + rhs.attr)
                             elif rhs is not None:
                                 try:
                                     val = self.literal(rhs, module)
                                 except InspectionError as exc:
                                     if exc.diagnostic.get("rule") != "FL-01":
                                         raise
-                                    val = Symbol(f"{module}.{elem.id}")
+                                    val = Symbol(f"{module}.{elem.id}", opaque=True)
                             else:
-                                val = Symbol(f"{module}.{elem.id}")
+                                val = Symbol(f"{module}.{elem.id}", opaque=True)
                             namespace[elem.id] = val
                         continue
                     if any(
@@ -249,16 +254,24 @@ class SourceTree:
                     if (isinstance(statement.value, ast.Name)
                             and isinstance(namespace.get(statement.value.id), (Symbol, Definition))):
                         value = namespace[statement.value.id]
+                    elif (isinstance(statement.value, ast.Attribute)
+                            and isinstance(statement.value.value, ast.Name)
+                            and isinstance(namespace.get(statement.value.value.id), Symbol)):
+                        value = Symbol(namespace[statement.value.value.id].name + "." + statement.value.attr)
                     else:
-                        try:
-                            value = self.literal(statement.value, module)
-                        except InspectionError as exc:
-                            if exc.diagnostic.get("rule") != "FL-01":
-                                raise
-                            # Non-literal module constants (e.g. Path(__file__), pa.schema(...),
-                            # re.compile(...)) are bound as opaque symbols so the module still
-                            # loads for downstream operator/flow checks.
-                            value = Symbol(f"{module}.{targets[0].id}")
+                        static_path = self._static_module_path(statement.value, path)
+                        if static_path is not None:
+                            value = static_path
+                        else:
+                            try:
+                                value = self.literal(statement.value, module)
+                            except InspectionError as exc:
+                                if exc.diagnostic.get("rule") != "FL-01":
+                                    raise
+                                # Non-literal module constants (e.g. pa.schema(...),
+                                # re.compile(...)) are bound as opaque symbols so the module still
+                                # loads for downstream operator/flow checks.
+                                value = Symbol(f"{module}.{targets[0].id}", opaque=True)
                     for target in targets:
                         namespace[target.id] = value
                 else:
@@ -287,6 +300,42 @@ class SourceTree:
             return namespace
         finally:
             self.loading.remove(module)
+
+    def _static_module_path(self, node, file_path):
+        """Statically resolve pure Path(__file__)[.resolve()][.parent|.parents[k]] expressions within project root."""
+        def _eval(expr):
+            if (isinstance(expr, ast.Call) and len(expr.args) == 1 and not expr.keywords
+                    and isinstance(expr.args[0], ast.Name) and expr.args[0].id == "__file__"
+                    and ((isinstance(expr.func, ast.Name) and expr.func.id == "Path")
+                         or (isinstance(expr.func, ast.Attribute) and expr.func.attr == "Path"))):
+                return file_path.resolve()
+            if isinstance(expr, ast.Call) and not expr.args and not expr.keywords and isinstance(expr.func, ast.Attribute) and expr.func.attr == "resolve":
+                base = _eval(expr.func.value)
+                return base.resolve() if base is not None else None
+            if isinstance(expr, ast.Attribute) and expr.attr == "parent":
+                base = _eval(expr.value)
+                return base.parent if base is not None else None
+            if (isinstance(expr, ast.Subscript)
+                    and isinstance(expr.value, ast.Attribute) and expr.value.attr == "parents"
+                    and isinstance(expr.slice, ast.Constant) and type(expr.slice.value) is int and expr.slice.value >= 0):
+                base = _eval(expr.value.value)
+                if base is not None and expr.slice.value < len(base.parents):
+                    return base.parents[expr.slice.value]
+            if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Div) and isinstance(expr.right, ast.Constant) and isinstance(expr.right.value, str):
+                base = _eval(expr.left)
+                return (base / expr.right.value) if base is not None else None
+            return None
+
+        resolved = _eval(node)
+        if resolved is None:
+            return None
+        try:
+            resolved = resolved.resolve()
+            if resolved == self.root or self.root in resolved.parents:
+                return resolved
+        except OSError:
+            return None
+        return None
 
     def _definition_initialization(self, node, namespace, module):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -519,6 +568,8 @@ class SourceTree:
                 if name in namespace:
                     value = namespace[name]
                     if isinstance(value, Symbol) and self._local_name(value.name) == local:
+                        if value.opaque:
+                            return value
                         self.fail(
                             "OP-06",
                             "Recursive import alias",
