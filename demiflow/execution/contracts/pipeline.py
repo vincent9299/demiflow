@@ -273,3 +273,6 @@ class PythonEnvironmentResolution:
             str(value["candidate_requirements_sha256"]),
             str(value["wheelhouse_sha256"]), wheels,
         )
+
+
+NATIVE_SUBMISSION_FORMAT = 'demiflow.managed_native_submission.v1'

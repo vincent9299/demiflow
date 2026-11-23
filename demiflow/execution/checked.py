@@ -10,17 +10,16 @@ from dataclasses import replace
 import inspect
 import json
 import uuid
-import time
 import threading
 import hashlib
 from pathlib import Path
 
-from ..data import plan as ops
-from ..data.sources import KeyedSource, LanceSource, MaterializedSource, UnionSource
-from ..data.execution_contract import PlanView
-from ..data.runtime_contract import RuntimeContractError
-from .plan_facts import operation_facts, source_facts
-from .capabilities import check_composition
+from demiflow.data import plan as ops
+from demiflow.data.sources import KeyedSource, LanceSource, MaterializedSource, UnionSource
+from demiflow.data.execution_contract import PlanView
+from demiflow.data.runtime_contract import RuntimeContractError
+from demiflow.execution.plan_facts import operation_facts, source_facts
+from demiflow.execution.capabilities import check_composition
 
 _CURRENT = ContextVar('demiflow_checked_execution', default=None)
 
@@ -69,160 +68,32 @@ class CheckedExecution:
 
     @property
     def limits(self):
-        from .run_context import current_run
+        from demiflow.execution.run_context import current_run
         run = current_run()
         if run is None:
             return self._limits
         from demiflow.execution.contracts.dataflow import PAYLOAD_FIELDS
         return {**self._limits, **{name: run.limits[name] for name in PAYLOAD_FIELDS}}
 
-    def _match(self, identity, *, reused=False):
-        if self.observe is None:
-            return None
-        occurrence = self.occurrences.get(identity, 0)
-        self.occurrences[identity] = occurrence + 1
-        key = (self.matching_action, identity, occurrence)
-        self.observations[key] = {'sequence': 1, 'state': 'reused' if reused else 'running',
-                                  'rows_input': None, 'rows_output': None, 'calls': None,
-                                  'timing_scope': 'unknown'}
-        return key
+    from demiflow.execution.journal.dataflow_operator_observations import match_observation as _match
 
-    def bind_observation_scope(self, key, *, plan_id, dag_id, plan_revision, occurrence_id):
-        """Bind a native producer's observation to its sealed execution instance.
+    from demiflow.execution.journal.dataflow_operator_observations import bind_observation_scope
 
-        The scope is written with the existing observation, never reconstructed
-        by a history reader from whichever plan happens to be selected later.
-        """
-        if key is None or self.observe is None:
-            return
-        from .run_journal import _node_document
-        scope = dict(plan_id=plan_id, dag_id=dag_id, plan_revision=plan_revision,
-                     occurrence_id=occurrence_id)
-        with self.observation_lock:
-            item = self.observations[tuple(key)]
-            if any(name in item and item[name] != value for name, value in scope.items()):
-                raise RuntimeContractError('Native observation execution scope changed')
-            candidate = {**item, **scope, 'sequence': item['sequence'] + 1}
-            _node_document(candidate)
-            item.update(candidate)
+    from demiflow.execution.journal.dataflow_operator_observations import progress
 
-    def progress(self, key, **counts):
-        if key is None or self.observe is None:
-            return
-        with self.observation_lock:
-            item = self.observations[tuple(key)]
-            for name, value in counts.items():
-                if name not in {'rows_input', 'rows_output', 'calls', 'dropped', 'errors'} or type(value) is not int or value < 0:
-                    raise RuntimeContractError('Invalid native observation counter')
-                item[name] = (item.get(name) or 0) + value
-            item['sequence'] += 1
+    from demiflow.execution.journal.dataflow_operator_observations import rows
 
-    def rows(self, rows, key, counter):
-        """Observe a native iterator boundary without retaining its payload."""
-        if key is None:
-            yield from rows
-            return
-        self.progress(key, **{counter: 0})
-        iterator = iter(rows)
-        try:
-            for row in iterator:
-                self.progress(key, **{counter: 1})
-                yield row
-        finally:
-            close = getattr(iterator, 'close', None)
-            if close is not None:
-                close()
+    from demiflow.execution.journal.dataflow_operator_observations import duration
 
-    def duration(self, key, elapsed):
-        if key is not None and self.observe is not None:
-            with self.observation_lock:
-                item = self.observations[tuple(key)]
-                item['elapsed_s'] = item.get('elapsed_s', 0.0) + elapsed
-                item['timing_scope'] = 'node'
-                item['sequence'] += 1
+    from demiflow.execution.journal.dataflow_operator_observations import group_duration
 
-    def group_duration(self, keys, elapsed):
-        if self.observe is None or not keys or len(keys) > 128:
-            return
-        members = [key[1] + ':' + str(key[2]) for key in keys]
-        with self.observation_lock:
-            for key in keys:
-                item = self.observations[tuple(key)]
-                item['elapsed_s'] = item.get('elapsed_s', 0.0) + elapsed
-                item['timing_scope'] = 'group'
-                item['group_members'] = members
-                item['detail'] = 'Cumulative worker time for the fused group, including read/decode/spill; not individual node wall time.'
-                item['sequence'] += 1
+    from demiflow.execution.journal.dataflow_operator_observations import actor_created
 
-    def actor_created(self, owner, key):
-        if key is None or self.observe is None:
-            return
-        with self.observation_lock:
-            binding = (tuple(key), id(owner))
-            if binding not in self.actor_states:
-                if len(self.actor_states) >= 4096:
-                    raise RuntimeContractError('Actor observation count exceeds budget')
-                self.actor_states[binding] = dict(created=True, started=None, stopped=None, closed=None)
-                self.node_actors.setdefault(tuple(key), {})[id(owner)] = self.actor_states[binding]
-                self.actor_bindings.setdefault(id(owner), []).append(tuple(key))
-            self.actor_lifecycle(owner, 'created', True)
+    from demiflow.execution.journal.dataflow_operator_observations import actor_lifecycle
 
-    def actor_lifecycle(self, owner, name, completed):
-        if self.observe is None:
-            return
-        with self.observation_lock:
-            for key in self.actor_bindings.get(id(owner), ()):
-                self.actor_states[(key, id(owner))][name] = completed
-                states = self.node_actors[key].values()
-                self.observations[key]['lifecycle'] = {
-                    field: False if any(s[field] is False for s in states) else
-                           True if all(s[field] is True for s in states) else None
-                    for field in ('created', 'started', 'stopped', 'closed')}
-                self.observations[key]['sequence'] += 1
+    from demiflow.execution.journal.dataflow_operator_observations import worker_actor_lifecycle
 
-    def worker_actor_lifecycle(self, key, counters):
-        """Project actual worker hook outcomes, never driver declaration objects."""
-        if self.observe is None:
-            return
-        from demiflow.execution.journal.dataflow_operator_observations import validated_lifecycle
-        counts = validated_lifecycle(counters)
-        if not counts['created']:
-            return
-        with self.observation_lock:
-            item = self.observations[tuple(key)]
-            item['lifecycle'] = {'created': True}
-            for field, failure in (('started', 'start_failed'), ('stopped', 'stop_failed'), ('closed', 'close_failed')):
-                item['lifecycle'][field] = (False if counts[failure] else
-                    True if counts[field] == counts['created'] else None)
-            item['sequence'] += 1
-
-    def flush_observations(self, *, final=False, succeeded=False, force=False):
-        if self.observe is None:
-            return
-        now = time.monotonic()
-        if not final and not force and now - self.last_flush < 0.5:
-            return
-        updates = []
-        with self.observation_lock:
-            for key, item in self.observations.items():
-                if key[0] != self.matching_action:
-                    continue
-                previous_time, previous_sequence = self.node_flushed.get(key, (0, -1))
-                if not final and not force and (now - previous_time < 1 or previous_sequence == item['sequence']):
-                    continue
-                if final and item['state'] != 'reused':
-                    item['state'] = ('succeeded' if succeeded and (item['rows_output'] is not None or key[1] in self.values) else 'failed' if item.get('errors') or False in item.get('lifecycle', {}).values() else 'incomplete')
-                    item['sequence'] += 1
-                updates.append({'action_id': key[0], 'node_id': key[1], 'occurrence': key[2], 'document': dict(item)})
-            if updates:
-                try:
-                    self.observe(updates)
-                except Exception as exc:
-                    raise RuntimeContractError('Native node observations could not be persisted') from exc
-                for update in updates:
-                    key = (update['action_id'], update['node_id'], update['occurrence'])
-                    self.node_flushed[key] = (now, update['document']['sequence'])
-                self.last_flush = now
+    from demiflow.execution.journal.dataflow_operator_observations import flush_observations
 
     def bind(self, spec, node, observation=None, *, callback=None):
         p, operator = ({}, callback) if callback is not None else (node['parameters'], node['operator'])
@@ -235,7 +106,7 @@ class CheckedExecution:
             target = type(owner)
             identity = construction['construction_id']
             if identity not in self.instances:
-                from ..data.runtime_contract import check_size
+                from demiflow.data.runtime_contract import check_size
                 state = object.__getattribute__(owner, '__dict__')
                 check_size(state, self.limits['max_row_bytes'])
                 _equal(state, construction['state'], node['id'] + '.constructor_state')
@@ -277,7 +148,7 @@ class CheckedExecution:
             if original is not fit:
                 raise RuntimeContractError('Distinct fits share a checked training declaration')
             return checked
-        from ..data.training import ModelSelection, training_json
+        from demiflow.data.training import ModelSelection, training_json
         expected = self.nodes[identity]['normalized_parameters']
         def callable_ref(target):
             module = target.__module__
@@ -338,7 +209,7 @@ class CheckedExecution:
         observation = self._match(identity)
         if hasattr(op, 'callable'):
             if facts.get('native'):
-                from ..data.flow_contract import scalar
+                from demiflow.data.flow_contract import scalar
                 row = {**scalar('record'), 'fields': self.nodes[self.parents[identity][0]]['fields']}
                 result = {**scalar('record'), 'fields': node['fields']}
                 batch = facts['kind'] == 'batch_map'
@@ -351,7 +222,7 @@ class CheckedExecution:
                     contract['max_input_bytes'] = self.limits['max_batch_bytes']
                 op = replace(op, callable=replace(op.callable, runtime_contract=contract))
                 if node.get('callbacks'):
-                    from ..data.runtime_contract import validator
+                    from demiflow.data.runtime_contract import validator
                     owner = op.callable.target.__self__ if inspect.ismethod(op.callable.target) else op.callable.target
                     for port, callback in node['callbacks'].items():
                         target = getattr(owner, port)
@@ -492,7 +363,7 @@ class CheckedExecution:
         raise RuntimeContractError('Native source differs at ' + identity)
 
     def checkpoint_facts(self, checkpoint):
-        from .stream_checkpoint import StreamCheckpoint, normalize_checkpoint
+        from demiflow.execution.stream_checkpoint import StreamCheckpoint, normalize_checkpoint
         if type(checkpoint) is not StreamCheckpoint or id(checkpoint) not in self.checkpoints:
             raise RuntimeContractError('Checkpoint is not a resource from the checked action')
         actual, identity, path = self.checkpoints[id(checkpoint)]
@@ -661,20 +532,20 @@ class CheckedExecution:
             intent['driver_route'] = driver_route
         reused_receipt = None
         if spec is not None:
-            from ..lance.model import LanceWriteSpec
+            from demiflow.lance.model import LanceWriteSpec
             p = node['parameters']
-            from ..lance.schema import build_schema, schema_identity
+            from demiflow.lance.schema import build_schema, schema_identity
             expected = LanceWriteSpec(uri=p['uri'], mode=p['mode'], expected_version=p.get('expected_version'),
                                       schema=build_schema(p['schema']['schema_declaration']) if p.get('schema') is not None else None)
             _equal(spec.to_dict(), expected.to_dict(), identity + '.write')
             if spec.schema is not None:
                 _equal(schema_identity(spec.schema), schema_identity(expected.schema), identity + '.write.schema')
-            from .run_context import current_run
-            from .recovery_contract import identity as commit_identity
+            from demiflow.execution.run_context import current_run
+            from demiflow.execution.recovery_contract import identity as commit_identity
             intent.update(dependencies=self.dependency_identity(identity),
                           spec=spec.to_dict(), request_hash=spec.content_hash,
                           operation_id=commit_identity([current_run().ref.run_id, identity, 1]))
-        from .run_context import current_run
+        from demiflow.execution.run_context import current_run
         run_context = current_run()
         if run_context is not None and run_context.attempt > 1:
             native = run_context.journal.execution_action(identity)
@@ -723,7 +594,7 @@ class CheckedAction:
 
     def value(self, value):
         if self.owner is not None:
-            from ..data.runtime_contract import check_size, check_value
+            from demiflow.data.runtime_contract import check_size, check_value
             check_size(value, self.owner.limits['max_row_bytes'])
             check_value(value, self.owner.nodes[self.identity]['analysis']['value_type'], self.identity)
             raw = json.dumps({'value': value}, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False).encode() + b'\n'
@@ -777,7 +648,7 @@ def _validate_action_source(kind, value):
         from demiflow.execution.native_queue.queue_producer import producer_actor, validate_source
         producer = producer_actor(value.plan)
         if producer is not None:
-            from .recovery_contract import RecoveryContractError
+            from demiflow.execution.recovery_contract import RecoveryContractError
             if kind != 'run_stream':
                 raise RecoveryContractError('Incremental enqueue requires run_stream; source capture and other terminals cannot publish tasks')
             validate_source(value.source, producer[1].producer.source)
@@ -786,14 +657,14 @@ def _validate_action_source(kind, value):
 @contextmanager
 def action(kind, source, plan, spec=None, *, arguments=None):
     from contextlib import nullcontext
-    from .run_context import execution_scope
-    from .recovery_identity import plan_identity
-    from .capabilities import check_action
+    from demiflow.execution.run_context import execution_scope
+    from demiflow.execution.recovery_identity import plan_identity
+    from demiflow.execution.capabilities import check_action
     capability = check_action(kind, arguments)
     if not capability['supported']:
-        from .recovery_contract import RecoveryContractError
+        from demiflow.execution.recovery_contract import RecoveryContractError
         raise RecoveryContractError(capability['reason'])
-    from .plan_capture import current_capture
+    from demiflow.execution.plan_capture import current_capture
     capture = current_capture()
     if capture is not None:
         # Validate/build ordinary Dataset requests without allocating an implicit

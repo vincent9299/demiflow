@@ -474,7 +474,7 @@ _LAYOUT_SOURCE_TYPES = {'demiflow.execution.pipeline.package_loader.pipeline_bun
                                                                                                        'af542e97dd5e649b0270dc1633398d276147c51901ee916da61dbab926ab4ee8']}},
  'demiflow.execution.contracts.pipeline.FrozenRequirements': {'old_module': 'demiflow.execution.requirements',
                                                               'old_source': '01da04645cc97e9d1e437dc3e11a10015af900d5f2f131a46a3e5af0cc1603ba',
-                                                              'source': '396e07853a36e5cfb3b98d7b3f3d3043e274e36a6d37003ff74f2a6951fa603b',
+                                                              'source': '4a08ddee2020d6dfb9938a648013cf97fe8ccf4399b8e1e80bf1f90eacda638e',
                                                               'methods': {'__init__': ['da31e3a42db5e0c6eed76af516ee9731cb015000a95d06be82895cca7e8c8b71',
                                                                                        'da31e3a42db5e0c6eed76af516ee9731cb015000a95d06be82895cca7e8c8b71'],
                                                                           '__repr__': ['67deaf69a2f6a014e3d72d57980f0891fb4525004ae6aee457d30e6039a467fc',
@@ -489,7 +489,7 @@ _LAYOUT_SOURCE_TYPES = {'demiflow.execution.pipeline.package_loader.pipeline_bun
                                                                                        '3a3a6f905931f61a10288cce5676928f5c961e7eed0f7280fd0155de0e09b0fd']}},
  'demiflow.execution.contracts.pipeline.ResolvedWheel': {'old_module': 'demiflow.execution.requirements',
                                                          'old_source': '01da04645cc97e9d1e437dc3e11a10015af900d5f2f131a46a3e5af0cc1603ba',
-                                                         'source': '396e07853a36e5cfb3b98d7b3f3d3043e274e36a6d37003ff74f2a6951fa603b',
+                                                         'source': '4a08ddee2020d6dfb9938a648013cf97fe8ccf4399b8e1e80bf1f90eacda638e',
                                                          'methods': {'__post_init__': ['7cadbf92742c278603f58141c8856bac3a3efed3719e542db585db859eeb2702',
                                                                                        '7cadbf92742c278603f58141c8856bac3a3efed3719e542db585db859eeb2702'],
                                                                      'to_dict': ['c0867e0810059819887f877378b63461a0b965fc47a5d92e6cd809e7f50f57b8',
@@ -508,7 +508,7 @@ _LAYOUT_SOURCE_TYPES = {'demiflow.execution.pipeline.package_loader.pipeline_bun
                                                                                   'e7209ca4223361dad6b73aadf221b20ae503d23355bdf1bc87b3c90a9bf90a13']}},
  'demiflow.execution.contracts.pipeline.PythonEnvironmentResolution': {'old_module': 'demiflow.execution.requirements',
                                                                        'old_source': '01da04645cc97e9d1e437dc3e11a10015af900d5f2f131a46a3e5af0cc1603ba',
-                                                                       'source': '396e07853a36e5cfb3b98d7b3f3d3043e274e36a6d37003ff74f2a6951fa603b',
+                                                                       'source': '4a08ddee2020d6dfb9938a648013cf97fe8ccf4399b8e1e80bf1f90eacda638e',
                                                                        'methods': {'to_dict': ['3164671caf673dba6a2f559e2d9d736ac746ff0ea0248721efb82e7b51b4f1c3',
                                                                                                '3164671caf673dba6a2f559e2d9d736ac746ff0ea0248721efb82e7b51b4f1c3'],
                                                                                    '__init__': ['9b7f4792e5c97302a8cdfb565dc99573518708e503e6ea1167e3099793f021d2',
@@ -661,6 +661,20 @@ def _layout_source_type(value):
     if class_code is None:
         return None
     declared_members = tuple(item for item in class_code.co_consts if isinstance(item, CodeType))
+    # A recorded responsibility move may bind an original method directly from
+    # its actual owner. Authenticate that exact ordinary function and class
+    # slot; this does not admit arbitrary foreign methods or descriptors.
+    method_owners = entry.get('method_owners', {})
+    if method_owners:
+        from importlib import import_module
+        slots = type.__dict__['__dict__'].__get__(cls)
+        for name, owner in method_owners.items():
+            owner_module = import_module(owner['module'])
+            actual = vars(owner_module).get(owner['name'])
+            if (name not in entry['methods'] or type(actual) is not FunctionType
+                    or slots.get(name) is not actual
+                    or not _layout_dependencies_match({'dependencies': [owner]})):
+                return None
     for name, member in vars(cls).items():
         functions = ((member.fget, member.fset, member.fdel) if isinstance(member, property)
                      else (member.__func__,) if isinstance(member, (classmethod, staticmethod)) else (member,))
@@ -669,7 +683,12 @@ def _layout_source_type(value):
                 continue
             code = identity(code_record(method.__code__))
             candidates = tuple(item for item in declared_members if item.co_qualname == method.__qualname__)
-            if candidates:
+            if name in method_owners:
+                owner = method_owners[name]
+                owner_module = sys.modules[owner['module']]
+                owner_source = Path(owner_module.__file__).read_bytes()
+                original_code = identity(code_record(_declared_codes(owner_source, 0)[owner['name']]))
+            elif candidates:
                 declarations[method.__qualname__] += 1
                 original = method
                 if method.__globals__ is not vars(module):
@@ -759,6 +778,15 @@ def persistent_source_module(value):
     """The authenticated original v3 name; no imports or process aliases."""
     entry = _layout_source_type(value)
     return entry['old_module'] if entry is not None and entry.get('preserve_identity', True) else value.__module__
+
+
+def persistent_source_name(value):
+    """Encode a measured original name without changing the live definition."""
+    entry = _layout_source_type(value)
+    if (entry is not None and entry.get('kind') == 'function'
+            and entry.get('preserve_identity', True)):
+        return entry.get('old_name', value.__qualname__)
+    return value.__qualname__
 
 
 def source_pickle_global(module, name):

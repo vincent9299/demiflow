@@ -3,6 +3,9 @@
 These counters describe observed work, not effect billing or commit authority.
 Latency is measured around the callback, excluding downstream delivery waits.
 """
+
+import time
+from demiflow.data.runtime_contract import RuntimeContractError
 from threading import Lock
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
@@ -356,3 +359,148 @@ def stream_observations(execution, stats):
 
     from demiflow.execution.journal.dataflow_model_observations import stream_model_observations
     stream_model_observations(execution, stats)
+
+
+def match_observation(self, identity, *, reused=False):
+    if self.observe is None:
+        return None
+    occurrence = self.occurrences.get(identity, 0)
+    self.occurrences[identity] = occurrence + 1
+    key = (self.matching_action, identity, occurrence)
+    self.observations[key] = {'sequence': 1, 'state': 'reused' if reused else 'running',
+                              'rows_input': None, 'rows_output': None, 'calls': None,
+                              'timing_scope': 'unknown'}
+    return key
+
+def bind_observation_scope(self, key, *, plan_id, dag_id, plan_revision, occurrence_id):
+    "Bind a native producer's observation to its sealed execution instance.\n\n        The scope is written with the existing observation, never reconstructed\n        by a history reader from whichever plan happens to be selected later.\n        "
+    if key is None or self.observe is None:
+        return
+    from demiflow.execution.run_journal import _node_document
+    scope = dict(plan_id=plan_id, dag_id=dag_id, plan_revision=plan_revision,
+                 occurrence_id=occurrence_id)
+    with self.observation_lock:
+        item = self.observations[tuple(key)]
+        if any(name in item and item[name] != value for name, value in scope.items()):
+            raise RuntimeContractError('Native observation execution scope changed')
+        candidate = {**item, **scope, 'sequence': item['sequence'] + 1}
+        _node_document(candidate)
+        item.update(candidate)
+
+def progress(self, key, **counts):
+    if key is None or self.observe is None:
+        return
+    with self.observation_lock:
+        item = self.observations[tuple(key)]
+        for name, value in counts.items():
+            if name not in {'rows_input', 'rows_output', 'calls', 'dropped', 'errors'} or type(value) is not int or value < 0:
+                raise RuntimeContractError('Invalid native observation counter')
+            item[name] = (item.get(name) or 0) + value
+        item['sequence'] += 1
+
+def rows(self, rows, key, counter):
+    """Observe a native iterator boundary without retaining its payload."""
+    if key is None:
+        yield from rows
+        return
+    self.progress(key, **{counter: 0})
+    iterator = iter(rows)
+    try:
+        for row in iterator:
+            self.progress(key, **{counter: 1})
+            yield row
+    finally:
+        close = getattr(iterator, 'close', None)
+        if close is not None:
+            close()
+
+def duration(self, key, elapsed):
+    if key is not None and self.observe is not None:
+        with self.observation_lock:
+            item = self.observations[tuple(key)]
+            item['elapsed_s'] = item.get('elapsed_s', 0.0) + elapsed
+            item['timing_scope'] = 'node'
+            item['sequence'] += 1
+
+def group_duration(self, keys, elapsed):
+    if self.observe is None or not keys or len(keys) > 128:
+        return
+    members = [key[1] + ':' + str(key[2]) for key in keys]
+    with self.observation_lock:
+        for key in keys:
+            item = self.observations[tuple(key)]
+            item['elapsed_s'] = item.get('elapsed_s', 0.0) + elapsed
+            item['timing_scope'] = 'group'
+            item['group_members'] = members
+            item['detail'] = 'Cumulative worker time for the fused group, including read/decode/spill; not individual node wall time.'
+            item['sequence'] += 1
+
+def actor_created(self, owner, key):
+    if key is None or self.observe is None:
+        return
+    with self.observation_lock:
+        binding = (tuple(key), id(owner))
+        if binding not in self.actor_states:
+            if len(self.actor_states) >= 4096:
+                raise RuntimeContractError('Actor observation count exceeds budget')
+            self.actor_states[binding] = dict(created=True, started=None, stopped=None, closed=None)
+            self.node_actors.setdefault(tuple(key), {})[id(owner)] = self.actor_states[binding]
+            self.actor_bindings.setdefault(id(owner), []).append(tuple(key))
+        self.actor_lifecycle(owner, 'created', True)
+
+def actor_lifecycle(self, owner, name, completed):
+    if self.observe is None:
+        return
+    with self.observation_lock:
+        for key in self.actor_bindings.get(id(owner), ()):
+            self.actor_states[(key, id(owner))][name] = completed
+            states = self.node_actors[key].values()
+            self.observations[key]['lifecycle'] = {
+                field: False if any(s[field] is False for s in states) else
+                       True if all(s[field] is True for s in states) else None
+                for field in ('created', 'started', 'stopped', 'closed')}
+            self.observations[key]['sequence'] += 1
+
+def worker_actor_lifecycle(self, key, counters):
+    """Project actual worker hook outcomes, never driver declaration objects."""
+    if self.observe is None:
+        return
+    from demiflow.execution.journal.dataflow_operator_observations import validated_lifecycle
+    counts = validated_lifecycle(counters)
+    if not counts['created']:
+        return
+    with self.observation_lock:
+        item = self.observations[tuple(key)]
+        item['lifecycle'] = {'created': True}
+        for field, failure in (('started', 'start_failed'), ('stopped', 'stop_failed'), ('closed', 'close_failed')):
+            item['lifecycle'][field] = (False if counts[failure] else
+                True if counts[field] == counts['created'] else None)
+        item['sequence'] += 1
+
+def flush_observations(self, *, final=False, succeeded=False, force=False):
+    if self.observe is None:
+        return
+    now = time.monotonic()
+    if not final and not force and now - self.last_flush < 0.5:
+        return
+    updates = []
+    with self.observation_lock:
+        for key, item in self.observations.items():
+            if key[0] != self.matching_action:
+                continue
+            previous_time, previous_sequence = self.node_flushed.get(key, (0, -1))
+            if not final and not force and (now - previous_time < 1 or previous_sequence == item['sequence']):
+                continue
+            if final and item['state'] != 'reused':
+                item['state'] = ('succeeded' if succeeded and (item['rows_output'] is not None or key[1] in self.values) else 'failed' if item.get('errors') or False in item.get('lifecycle', {}).values() else 'incomplete')
+                item['sequence'] += 1
+            updates.append({'action_id': key[0], 'node_id': key[1], 'occurrence': key[2], 'document': dict(item)})
+        if updates:
+            try:
+                self.observe(updates)
+            except Exception as exc:
+                raise RuntimeContractError('Native node observations could not be persisted') from exc
+            for update in updates:
+                key = (update['action_id'], update['node_id'], update['occurrence'])
+                self.node_flushed[key] = (now, update['document']['sequence'])
+            self.last_flush = now

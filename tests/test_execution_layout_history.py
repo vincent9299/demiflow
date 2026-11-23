@@ -107,6 +107,11 @@ from demiflow.operator_llm.stream_recovery import RunPromptJournal, NativePrompt
 from demiflow.embeddings.stream_recovery import NativeEmbeddingRecovery
 for fn in [RunPromptJournal, NativePromptRecovery, native_request_budget, NativeEmbeddingRecovery, _BorrowedJournal, _ProtectedPayload, _CapacityPending, RunPromptJournal.check_recovery, RunPromptJournal.media_references, NativePromptRecovery.delivery_trace, NativePromptRecovery.bind_client]:
     result['public.' + fn.__qualname__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
+from demiflow.execution.checked import CheckedExecution
+for name in ('bind_observation_scope', 'progress', 'rows', 'duration', 'group_duration',
+             'actor_created', 'actor_lifecycle', 'worker_actor_lifecycle', 'flush_observations'):
+    fn = vars(CheckedExecution)[name]
+    result['observation.' + name] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
 from demiflow import PipelineBundleRef
 buffer = io.BytesIO(); ProgramPickler(buffer, protocol=5).dump(PipelineBundleRef.load)
 result['bundle_loader'] = base64.b64encode(buffer.getvalue()).decode()
@@ -530,3 +535,44 @@ def test_original_worker_authority_requires_actual_context_owner(original_carrie
     monkeypatch.setattr(body, '__code__', body.__code__.replace(co_consts=(*body.__code__.co_consts, 'changed')))
     assert not authentic_source_global(WorkerAuthority, 'demiflow.execution.worker.authority')
     assert describe(WorkerAuthority) != original_carriers['WorkerAuthority'][1]
+
+
+@pytest.mark.parametrize('name', ['bind_observation_scope', 'progress', 'rows', 'duration',
+    'group_duration', 'actor_created', 'actor_lifecycle', 'worker_actor_lifecycle', 'flush_observations'])
+def test_original_observation_method_resolves_actual_owner(original_carriers, name):
+    from demiflow.execution.checked import CheckedExecution
+    from demiflow.execution.journal import dataflow_operator_observations as observations
+    raw, expected = original_carriers['observation.' + name]
+    loaded = load_payload([base64.b64decode(raw)])
+    assert loaded is vars(observations)[name] is vars(CheckedExecution)[name]
+    assert describe(loaded) == expected
+
+
+@pytest.mark.parametrize('mutation', ['slot', 'property', 'staticmethod', 'owner',
+    'foreign_globals', 'defaults', 'code'])
+def test_original_checked_class_rejects_observation_slot_substitution(original_carriers, monkeypatch, mutation):
+    from types import FunctionType
+    from demiflow.execution.checked import CheckedExecution
+    from demiflow.execution.journal import dataflow_operator_observations as observations
+    from demiflow.execution.recovery_sdk_v3 import authentic_source_global
+    fn = observations.progress
+    if mutation == 'slot':
+        monkeypatch.setattr(CheckedExecution, 'progress', lambda *args: None)
+    elif mutation == 'property':
+        def forbidden_getter(self):
+            raise AssertionError('Identity validation must not invoke descriptors')
+        monkeypatch.setattr(CheckedExecution, 'progress', property(forbidden_getter))
+    elif mutation == 'staticmethod':
+        monkeypatch.setattr(CheckedExecution, 'progress', staticmethod(fn))
+    elif mutation == 'owner':
+        monkeypatch.setattr(observations, 'progress', lambda *args: None)
+    elif mutation == 'foreign_globals':
+        substitute = FunctionType(fn.__code__, dict(fn.__globals__), fn.__name__, fn.__defaults__)
+        monkeypatch.setattr(CheckedExecution, 'progress', substitute)
+        monkeypatch.setattr(observations, 'progress', substitute)
+    elif mutation == 'defaults':
+        monkeypatch.setattr(fn, '__defaults__', (None,))
+    else:
+        monkeypatch.setattr(fn, '__code__', fn.__code__.replace(co_consts=(*fn.__code__.co_consts, 'changed')))
+    assert not authentic_source_global(CheckedExecution, 'demiflow.execution.checked')
+    assert describe(CheckedExecution) != original_carriers['CheckedExecution'][1]

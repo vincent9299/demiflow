@@ -8,7 +8,7 @@ from contextvars import ContextVar
 
 from demiflow.execution.contracts.recovery_sdk_v3 import code_record
 from .recovery_contract import identity, document, RecoveryContractError, MAX_DOCUMENT_BYTES
-from .recovery_sdk_v3 import class_method_pins, function_pin, persistent_source_module
+from .recovery_sdk_v3 import class_method_pins, function_pin, persistent_source_module, persistent_source_name
 
 _SOURCE_WALK = ContextVar('demiflow_source_identity_walk', default=None)
 
@@ -109,7 +109,7 @@ def describe(value, depth=0):
             source_hash = hashlib.sha256(source).hexdigest()
         code = identity(code_record(value.__code__))
         source_hash, code = function_pin(value, source, source_hash, code)
-        return dict(module=_persistent_module(value), name=value.__qualname__, source_hash=source_hash,
+        return dict(module=_persistent_module(value), name=persistent_source_name(value), source_hash=source_hash,
                     code=code,
                     defaults=describe(value.__defaults__, depth + 1),
                     kwdefaults=describe(value.__kwdefaults__, depth + 1), closure=closure)
