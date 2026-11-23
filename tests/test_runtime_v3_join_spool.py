@@ -130,3 +130,31 @@ def test_real_wide_join_under_small_memory_grant(tmp_path):
         assert all(row['left'] == 'l' * 60000 and row['right'] == 'r' * 60000 for row in rows)
         assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
         assert not list((run.directory / '.dataflow-store').glob('*/staging/.pending-*'))
+
+
+def test_public_join_streams_left_only_after_the_entire_right_fits(tmp_path, monkeypatch):
+    from collections import Counter
+    from demiflow.execution.kernels import join_spool
+
+    appends = Counter()
+    actual_append = join_spool._Spool.append
+    def counted_append(spool, record, fields, **kwargs):
+        appends[tuple(fields)] += 1
+        return actual_append(spool, record, fields, **kwargs)
+    monkeypatch.setattr(join_spool._Spool, 'append', counted_append)
+
+    # At this grant all the small build keys fit, but the large right side
+    # must keep its complete prefix when it switches to partitioned matching.
+    for right_count, fits in ((2, True), (80, False)):
+        appends.clear()
+        limits = {'memory_bytes': 8 << 20, 'max_row_bytes': 4096, 'max_batch_bytes': 65536}
+        with RunContext.start(tmp_path / str(right_count), limits=limits), data.local_execution(
+                worker_mode='thread', workers=1, partitions=1):
+            left = data.from_items([{'lk': 0}, {'lk': right_count - 1}, {'lk': None}])
+            build = data.from_items([{'rk': i, 'value': i} for i in range(right_count)])
+            result = left.join(build, on='lk', right_on='rk', how='left').take_all()
+        assert sorted((r['lk'], r['value']) for r in result if r['lk'] is not None) == [
+            (0, 0), (right_count - 1, right_count - 1)]
+        assert [r for r in result if r['lk'] is None] == [{'lk': None}]
+        assert appends['rk',] == right_count
+        assert appends['lk',] == (0 if fits else 3)

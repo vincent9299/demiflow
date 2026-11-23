@@ -1,4 +1,5 @@
 """Known reducer initial/copy/encoding allocations share the admitted grant."""
+from demiflow.execution.contracts.relational_region import reducer_contract, reducer_resident_bytes
 import json
 import sys
 from types import SimpleNamespace
@@ -79,7 +80,7 @@ def test_none_initial_reserves_replacement_state_without_charging_full_initial(t
             assert _flow(reducer,None,region=region).take_all()==[{'k':1,'n':2}]
             bundle=load_sealed_plan(run.directory,'action-1',version='v3')
             node=next(n for n in bundle['graph'].nodes if n.kernel.kind=='reduce')
-            declared=reducer_memory.contract(node.kernel)
+            declared=reducer_contract(node.kernel)
             assert declared['initial_bytes']==declared['initial_copy_bytes']==0
             stage=next(s for s in bundle['physical'].stages if node.occurrence_id in s.occurrences)
             known=max(json.loads(x)['known_live'] for x in log.read_text().splitlines())
@@ -125,7 +126,7 @@ def test_changed_initial_is_rejected_before_deepcopy(monkeypatch):
     memory=reducer_memory.declare(initial,budget)
     spec=make('KernelSpec',kind='reduce',configuration={'on':['k'],'occurrence_id':'reduce-test',
         'reducer_program':'reduce',reducer_memory.FIELD:memory})
-    grant=reducer_memory.resident_bytes(memory,budget)
+    grant=reducer_resident_bytes(memory,budget)
     stage=make('StageSpec',resident_bytes=grant,profile=ResourceProfile(requests={'cpu_millis':1000,'memory_bytes':grant}))
     program=CallableSpec.create(lambda state,row:{'k':row['k']},fn_args=(initial,))
     svc=SimpleNamespace(bounds=budget,assignment=SimpleNamespace(stages=(stage,)),
@@ -163,7 +164,7 @@ def test_yielded_peers_are_alias_aware_and_release_on_finish_error_and_close():
             return {'k':row['k'],'shared':state['shared']}
         spec=make('KernelSpec',kind='reduce',configuration={'on':['k'],'occurrence_id':'reduce-test',
             'reducer_program':'reduce',reducer_memory.FIELD:memory})
-        grant=reducer_memory.resident_bytes(memory,budget)
+        grant=reducer_resident_bytes(memory,budget)
         stage=make('StageSpec',resident_bytes=grant,profile=ResourceProfile(requests={'cpu_millis':1000,'memory_bytes':grant}))
         program=CallableSpec.create(reducer,fn_args=(initial,))
         svc=SimpleNamespace(bounds=budget,store=None,assignment=SimpleNamespace(stages=(stage,)),
@@ -171,7 +172,7 @@ def test_yielded_peers_are_alias_aware_and_release_on_finish_error_and_close():
         owner=OperatorKernel(spec,services=svc,partition_id='p0')
         rows=[{'k':i} for i in (1,2,3)]
         folded=reduce_ordered_groups(iter((str(row['k']),row,record(row)) for row in rows),
-            spec=spec,services=svc,retain=owner._retain_reducer_peers)
+            spec=spec,services=svc,retain=owner.retain_reducer_peers)
         assert owner.retained_resident_bytes==0
         first=next(folded)
         assert dict(first.inline)=={'k':1,'shared':initial['shared']}

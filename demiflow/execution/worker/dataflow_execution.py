@@ -342,7 +342,7 @@ class DataflowWorkerExecutor:
                         self._kernels[(occ, partition)] = kernel
                 # Only an explicitly versioned sealed stage may bind this finite
                 # compute optimization. Old stages never infer a new region.
-                from ...planning.dataflow_relational_regions import interpret_region
+                from ..contracts.relational_region import interpret_region
                 from ..kernels.relational_region import RelationalRegionRuntime
                 self._relational_regions = {}
                 for stage in assignment.stages:

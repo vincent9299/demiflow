@@ -12,6 +12,7 @@ groups on disk. K007 concatenates inputs in port order preserving multiplicity.
 """
 from __future__ import annotations
 
+from demiflow.operators.relational import merge_join_rows
 import copy
 import itertools
 import pickle
@@ -51,23 +52,6 @@ def _program(services: RuntimeServices, key: str, kind: str) -> Any:
     return program.value
 
 
-def _merge_row(
-    left: Mapping[str, Any],
-    right: Mapping[str, Any],
-    lk: tuple[str, ...],
-    rk: tuple[str, ...],
-    suffix: str,
-) -> dict[str, Any]:
-    out = dict(left)
-    for key, value in right.items():
-        if key in lk and key in rk and key in out and out[key] == value:
-            continue
-        dest = key if key not in out else key + suffix
-        if dest in out:
-            raise ValueError('join column collision: ' + dest)
-        out[dest] = value
-    return out
-
 
 def join_partitions(
     left: Iterator[Record],
@@ -102,12 +86,13 @@ def join_partitions(
     key_bytes = [0]
     pairs = join_pairs(iter(left), iter(right), left_keys=lk, right_keys=rk,
                        how=how, services=services, bounded=stored,
+                       try_small_right=spec.configuration.get('small_right_index') is True,
                        retained_key=lambda size: key_bytes.__setitem__(0, size))
     try:
         for sequence, (left_record, right_record) in enumerate(pairs):
             _check_stop(services)
             left_row = _materialize_row(left_record, services)
-            out_row = (left_row if right_record is None else _merge_row(left_row,
+            out_row = (left_row if right_record is None else merge_join_rows(left_row,
                 _materialize_row(right_record, services), lk, rk, suffix))
             record_id = _hash_id([RECORD_DOMAIN, occurrence, "join", sequence])
             if stored:
@@ -159,7 +144,8 @@ def _ordered_group_rows(
         for record in records:
             _group_key(_materialize_row(record, services), on)
             yield record
-    from .reducer_memory import contract, sort_window
+    from .reducer_memory import sort_window
+    from demiflow.execution.contracts.relational_region import reducer_contract as contract
     window = sort_window(services.bounds,key_only=False) if memory is not None or contract(spec) is not None else None
     runs = build_sort_runs(keyed_records(), spec=sort_spec, services=services,window=window)
     for record in merge_sort_runs(runs, spec=sort_spec, services=services,window=window):
@@ -186,7 +172,8 @@ def reduce_partition(
 
 
 def admit_reducer(spec, services, *, join_depth=None):
-    from .reducer_memory import contract, declare, check_initial, check_grant
+    from .reducer_memory import declare, check_initial, check_grant
+    from demiflow.execution.contracts.relational_region import reducer_contract as contract
     from ...data.plan import CallableSpec
     memory = contract(spec)
     if memory is not None or getattr(services.assignment,'stages',()):
@@ -316,6 +303,16 @@ def emit_groups(
 ) -> Iterator[Record]:
     """K008: finite complete groups, type-faithful keys, bounded batch output."""
     on = tuple(_cfg(spec, "on"))
+    ordered = _ordered_group_rows(records, on, spec, services)
+    try:
+        yield from batch_ordered_groups(ordered, spec=spec, services=services)
+    finally:
+        ordered.close()
+
+
+def batch_ordered_groups(ordered, *, spec, services, retained_limit=None):
+    """One bounded Dataset group implementation for both ordered inputs."""
+    on = tuple(_cfg(spec, "on"))
     max_rows = _cfg(spec, "max_rows", 32)
     output = _cfg(spec, "output", "items")
     if not on or max_rows < 1 or output in on or output in ("group_index", "group_last"):
@@ -324,12 +321,12 @@ def emit_groups(
     budget = _OutputBudget(spec, services, streaming=True)
     sequence = 0
 
-    ordered = _ordered_group_rows(records, on, spec, services)
     for key, items in itertools.groupby(ordered, key=lambda item: item[0]):
         _check_stop(services)
         batch: list[dict[str, Any]] = []
         base: dict[str, Any] | None = None
         index = 0
+        retained = encoded = 0
         for _, row, _record in items:
             if base is None:
                 base = {field: row[field] for field in on}
@@ -339,6 +336,16 @@ def emit_groups(
                 yield out
                 batch = []
                 index += 1
+                retained = encoded = 0
+            if retained_limit is not None:
+                from ..dataflow_record_frames import _typed_shape as typed_shape
+                size, resident, _ = typed_shape(row, services.bounds.max_row_bytes)
+                encoded += size
+                retained += resident + 16  # one slot and its shallow mapping
+                if encoded > services.bounds.max_row_bytes:
+                    raise _err('BUDGET_EXCEEDED', 'grouped rows exceed the output row ceiling')
+                if retained > retained_limit:
+                    raise _err('BUDGET_EXCEEDED', 'grouped rows exceed the admitted resident window')
             batch.append(dict(row))
         if batch:
             out = _emit_batch(base, output, batch, index, True, occurrence, sequence, services, budget)

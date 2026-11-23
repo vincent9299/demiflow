@@ -26,11 +26,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Mapping
 
+from ..operators.relational import merge_join_rows
 from ..data import plan as ops
 from ..data.sources import KeyedSource, LanceSource, RangeSource, UnionSource
 from ..data.local_relational import (
     key_of, _write_records, _read_records, _merge_records, sorted_rows,
-    _right_index, _matched_rows, _merge_row,
+    _right_index, _matched_rows,
 )
 
 
@@ -346,7 +347,7 @@ def _join_records(left, right, spec, directory, chunk_bytes):
                     if not matches: yield dict(row)
                 elif matches:
                     for payload in matches:
-                        yield _merge_row(row, pickle.loads(payload), lk, rk, spec['suffix'])
+                        yield merge_join_rows(row, pickle.loads(payload), lk, rk, spec['suffix'])
                 elif how == 'left':
                     yield dict(row)
             return
@@ -366,7 +367,7 @@ def _join_records(left, right, spec, directory, chunk_bytes):
                     if not matched: yield dict(row)
                 elif matched:
                     for other in matches():
-                        yield _merge_row(row, other, lk, rk, spec['suffix'])
+                        yield merge_join_rows(row, other, lk, rk, spec['suffix'])
                 elif how == 'left':
                     yield dict(row)
             if matched:

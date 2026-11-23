@@ -694,6 +694,8 @@ class _Capture:
             profile=profile, output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
         )
+        if kind == 'join':
+            kernel = replace(kernel, configuration={**_plain(kernel.configuration), 'small_right_index': True})
         if reducer_memory is not None:
             field, declared = reducer_memory
             kernel = replace(kernel, configuration={**_plain(kernel.configuration), field: declared})
