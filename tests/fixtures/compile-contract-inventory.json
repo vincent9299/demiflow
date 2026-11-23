@@ -299,7 +299,6 @@
    "lance_key_source": [
     "execution/contracts/relational_region.py",
     "execution/lance_key_source.py",
-    "execution/worker/dataflow_graph_runner.py",
     "planning/dataflow_configuration.py",
     "planning/dataflow_relational_regions.py"
    ],

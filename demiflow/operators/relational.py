@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import itertools
 from typing import Any
 
 
@@ -12,6 +13,76 @@ def key_membership(column, values):
     """Exact typed membership for canonical join keys; a null never joins a null."""
     import pyarrow.compute as pc
     return pc.is_in(column, value_set=values, skip_nulls=True)
+
+
+def matching_indices(column, values):
+    """Return exact positive probe positions; the caller owns reading and credit."""
+    import pyarrow.compute as pc
+    return pc.indices_nonzero(key_membership(column, values))
+
+
+def probe_values(records, field, dtype, *, read_row, check_stop):
+    """Compute a same-type exact build set without retaining business payloads."""
+    import pyarrow as pa
+
+    values = set()
+    try:
+        for record in records:
+            check_stop()
+            value = read_row(record)[field]
+            if value is None:
+                continue
+            if type(value) is not int or value.bit_length() > dtype.bit_width:
+                return None
+            values.add(value)
+    finally:
+        records.close()
+    try:
+        return pa.array(values, type=dtype)
+    except (pa.ArrowInvalid, OverflowError):
+        return None
+
+
+def right_index(rows, fields, chunk_bytes, *, key_of, encode, decode):
+    """Build the original bounded small-right index, retaining overflow input.
+
+    The algorithm is from data/local_relational._right_index. Only key and
+    record encoding are supplied by the partition binding: they preserve the
+    current typed equality and record identity instead of introducing a second
+    row codec. Neither a source nor an action is opened here.
+    """
+    index = {}
+    buffered = []
+    size = 0
+    for row in rows:
+        key = key_of(row, fields)
+        payload = encode(row)
+        buffered.append(payload)
+        size += len(payload) + 4 * len(key) + 256
+        if size > chunk_bytes:
+            return None, itertools.chain((decode(p) for p in buffered), rows)
+        if key:  # The partition's key codec represents a null join key as b''.
+            index.setdefault(key, []).append(payload)
+    return index, ()
+
+
+def probe_right_index(left, index, how, *, key_of, load_left, decode):
+    """Original inner/left/semi/anti probe over an entirely admitted right side."""
+    for row in left:
+        key = key_of(row)
+        matches = index.get(key, ())
+        if how == 'semi':
+            if matches:
+                yield load_left(row, key), None
+        elif how == 'anti':
+            if not matches:
+                yield load_left(row, key), None
+        elif matches:
+            for payload in matches:
+                # Decode anew for every pair, preserving nested-value isolation.
+                yield load_left(row, key), decode(payload)
+        elif how == 'left':
+            yield load_left(row, key), None
 
 
 class JoinKeyFilter:
@@ -93,33 +164,6 @@ def merge_join_rows(
         out[dest] = value
     return out
 
-
-
-# Tables contain the same canonical binary keys used by hash matching. A SQL
-# NULL on either side never matches. Left duplicates have distinct offsets.
-EXCLUDE_OFFSETS_SQL = """
-    SELECT l.off FROM lkeys l LEFT ANTI JOIN rkeys r ON l.k = r.k
-"""
-
-
-def offset_join_query(first, second, maximum):
-    """One bounded query for a left-deep three-way join, including logical intermediate pairs."""
-    join = {'left': 'LEFT JOIN', 'inner': 'INNER JOIN'}
-    if type(maximum) is not int or maximum < 1:
-        raise ValueError('offset query requires a positive result ceiling')
-    return f"""
-      WITH middle AS (
-          SELECT a.k, a.off AS ao, b.off AS bo, a.ord AS ai, b.ord AS bi
-          FROM akeys a {join[first]} bkeys b ON a.k = b.k
-      ), result AS (
-          SELECT CAST(0 AS BIGINT) AS phase, ao, bo, CAST(NULL AS BIGINT) AS co,
-                 ai, bi, CAST(NULL AS BIGINT) AS ci FROM middle
-          UNION ALL
-          SELECT CAST(1 AS BIGINT), m.ao, m.bo, c.off, m.ai, m.bi, c.ord
-          FROM middle m {join[second]} ckeys c ON m.k = c.k
-      )
-      SELECT phase, ao, bo, co FROM result ORDER BY phase, ai, bi, ci LIMIT {maximum + 1}
-    """
 
 
 def match_probe(spool, key, matches, how, load_left, *left_position):

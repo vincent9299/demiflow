@@ -788,8 +788,7 @@ class WorkerGraphRunner:
 
     def _advance_join_probe(self, source, split_id, credit):
         """Only confirmed non-matches may skip the usual finite input port."""
-        import pyarrow.compute as pc
-        from ...operators.relational import key_membership
+        from ...operators.relational import matching_indices
         _, _, join, scan = self._join_probe
         if self._join_probe_values is None:
             kernel = self.e._kernels[(join, self.partition)]
@@ -812,7 +811,7 @@ class WorkerGraphRunner:
         item, count, charged = step
         if count:
             fragment, offset, batch = item
-            matched = pc.indices_nonzero(key_membership(batch.column(0), self._join_probe_values))
+            matched = matching_indices(batch.column(0), self._join_probe_values)
             if credit and credit['bytes'] < self.bounds.max_row_bytes and len(matched) < count:
                 # This cut can reject even a legal, nonmatching source record.
                 # Read it normally to preserve the original byte-limit outcome.
@@ -868,19 +867,16 @@ class WorkerGraphRunner:
             self._paused = True
             self._flush_metrics()
 
-    def _accept_arrow_result(self, terminal_occurrence, batch, *, positions):
+    def _accept_arrow_result(self, terminal_occurrence, batch, *, positions, producer,
+                             source_split, version):
         """Seal each ordered output batch once and advertise that same leaf under ACK credit."""
         import pyarrow as pa
         from ..dataflow_native_limits import sealed_execution_ceilings
         from ..dataflow_record_frames import admit_workspace
         from ..outputs.arrow_rows import pack_result, validate_row_sizes
         from ..record_schema import RecordSchemas
-        operator = next(node for node in self.e._node_specs.values() if node.kernel.kind == 'exclude_keys')
-        source_id = operator.kernel.configuration['lance_key_source']
-        split, = [s for s in self.e._physical.splits if s.source_id == source_id]
-        snapshot = next(s for s in self.e._physical.sources if s.source_id == source_id)
         caps = sealed_execution_ceilings(self.e._graph)
-        row_budget = min(self.bounds.max_row_bytes, operator.kernel.output_bound_bytes or self.bounds.max_row_bytes)
+        row_budget = min(self.bounds.max_row_bytes, producer.kernel.output_bound_bytes or self.bounds.max_row_bytes)
         validate_row_sizes(batch, row_budget)
         if not batch.num_rows:
             return
@@ -892,9 +888,9 @@ class WorkerGraphRunner:
         while start < batch.num_rows:
             count = min(batch.num_rows - start, caps.get('inflight_rows', batch.num_rows))
             while True:
-                packed = pack_result(batch.slice(start, count), positions.slice(start, count), source_id=source_id,
-                    split_id=split.split_id, version=snapshot.immutable_identity['version'],
-                    occurrence=operator.occurrence_id, sequence=self._terminal_rows, bounds=self.bounds)
+                packed = pack_result(batch.slice(start, count), positions.slice(start, count),
+                    source_id=source_split.source_id, split_id=source_split.split_id, version=version,
+                    occurrence=producer.occurrence_id, sequence=self._terminal_rows, bounds=self.bounds)
                 size = pa.ipc.get_record_batch_size(packed) + len(packed.schema.serialize()) + 8
                 if size <= size_limit:
                     break

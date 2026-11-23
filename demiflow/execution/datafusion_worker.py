@@ -12,25 +12,7 @@ import sys
 import time
 
 
-def register_key_functions(context, spec):
-    """Worker-side canonical keys preserve the existing Python key contract."""
-    import json
-    import pyarrow as pa
-    from datafusion import udf
-    for item in spec['keys']:
-        def canonical(*arrays, names=item['fields']):
-            values = [a.to_pylist() for a in arrays]
-            count = len(names)
-            result = []
-            for i in range(len(arrays[0])):
-                for j, name in enumerate(names):
-                    if not values[count + j][i]:
-                        raise KeyError(name)
-                result.append(json.dumps([values[j][i] for j in range(count)],
-                    ensure_ascii=False, sort_keys=True, separators=(',', ':')))
-            return pa.array(result, type=pa.string())
-        context.register_udf(udf(canonical, [*item['types'], *[pa.bool_()] * len(item['fields'])],
-            pa.string(), 'immutable', name=item['name']))
+from demiflow.operators.relational_sql import register_key_functions
 
 
 def _write_error(path, error, managed):
@@ -64,7 +46,7 @@ def _region_offsets(request):
         for name, rows in request.pop('tables').items():
             if selection:
                 batches, start = [], 0
-                for keys in rows.chunks or [pa.array([], type=pa.binary())]:
+                for keys in rows.chunks or [pa.array([], type=rows.type)]:
                     offsets = pa.array(range(start, start + len(keys)), type=pa.int64())
                     batches.append(pa.record_batch([keys, offsets], names=['k', 'off']))
                     start += len(keys)
@@ -74,6 +56,7 @@ def _region_offsets(request):
                                      pa.array((offset for _, offset in rows), type=pa.int64()),
                                      pa.array(range(len(rows)), type=pa.int64())], names=['k', 'off', 'ord'])
             context.register_record_batches(name, [[table]])
+        register_key_functions(context, {'keys': request.get('key_functions', ())})
         read_only = SQLOptions().with_allow_ddl(False).with_allow_dml(False).with_allow_statements(False)
         frame = context.sql(request['sql'], options=read_only)
         schema = frame.schema()

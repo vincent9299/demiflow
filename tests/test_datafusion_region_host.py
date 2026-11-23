@@ -89,17 +89,19 @@ def test_region_reports_native_pool_exhaustion_within_the_granted_rss():
 
 def test_compact_anti_join_returns_large_selection_under_one_worker_grant():
     import pyarrow as pa
-    from demiflow.operators.relational import EXCLUDE_OFFSETS_SQL
+    from demiflow.operators.relational_sql import exclusion_query
 
     # More rows than can fit as Python output tuples in the native wire budget.
     # Chunk boundaries differ and do not align with the last excluded offset.
     def keys(count, chunk):
-        arrays = [pa.array([str(i).encode() for i in range(start, min(count, start + chunk))],
-                           type=pa.binary()) for start in range(0, count, chunk)]
+        arrays = [pa.array([str(i) for i in range(start, min(count, start + chunk))],
+                           type=pa.string()) for start in range(0, count, chunk)]
         return pa.chunked_array(arrays)
 
     rows, dropped = 1_000_000, 100_003
-    selection = host.query_region_offsets(EXCLUDE_OFFSETS_SQL,
+    sql, key_functions = exclusion_query(pa.string())
+    selection = host.query_region_offsets(sql,
         tables={'lkeys': keys(rows, 8192), 'rkeys': keys(dropped, 5000)},
-        max_pairs=rows, rss_bytes=RSS, selection=True, check_stop=lambda: None)
+        max_pairs=rows, rss_bytes=RSS, selection=True, check_stop=lambda: None,
+        key_functions=key_functions)
     assert selection == bytes(dropped // 8) + bytes([248]) + bytes([255]) * ((rows - dropped) // 8)

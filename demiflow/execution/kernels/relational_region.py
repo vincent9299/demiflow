@@ -7,7 +7,8 @@ of a wide row. Public Record/transport and original ACK formats are unchanged.
 from dataclasses import dataclass
 import struct
 
-from ...operators.relational import hash_join_pairs, merge_join_rows, offset_join_query
+from ...operators.relational import hash_join_pairs, merge_join_rows
+from ...operators.relational_sql import offset_join_query
 from .join_spool import _Spool, _Chain, _HEADER, _ID_BYTES, _NONE, _FANOUT
 from .dataflow import _check_stop, _err, _row_bytes, _output_record, _hash_id, RECORD_DOMAIN, _OutputBudget
 from .dataflow import _materialize_row as materialize_row

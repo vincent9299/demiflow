@@ -887,31 +887,18 @@ class OperatorKernel:
         return self._ports[port].records().for_join(fields)
 
     def fixed_probe_values(self, dtype):
-        """Read the already closed right port without consuming or replacing its original rows."""
-        import pyarrow as pa
+        """Bind the closed build port to the operator's typed probe calculation."""
         from ..contracts.relational_region import JOIN_PROBE_WINDOW
+        from ...operators.relational import probe_values
         from .dataflow import _materialize_row
-        port = self._ports['right']
-        rows = port.records().within_offset_budget(JOIN_PROBE_WINDOW // 192)
+
+        rows = self._ports['right'].records().within_offset_budget(JOIN_PROBE_WINDOW // 192)
         if rows is None:
             return None
         field, = self._spec.configuration.get('right_on') or self._spec.configuration['on']
-        values = set()
-        try:
-            for record in rows:
-                self._finite_services.check_stop()
-                value = _materialize_row(record, self._finite_services)[field]
-                if value is None:
-                    continue
-                if type(value) is not int or value.bit_length() > dtype.bit_width:
-                    return None
-                values.add(value)
-        finally:
-            rows.close()
-        try:
-            return pa.array(values, type=dtype)
-        except (pa.ArrowInvalid, OverflowError):
-            return None
+        return probe_values(rows, field, dtype,
+            read_row=lambda record: _materialize_row(record, self._finite_services),
+            check_stop=self._finite_services.check_stop)
 
     def accepts_finite_reference(self, port):
         return (self._spec.kind != 'StreamPrependOp' and port in self._ports

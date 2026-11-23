@@ -1,7 +1,7 @@
 """Drive a co-located, sealed fixed-source key exclusion with ordinary worker credits and cuts."""
 from ..contracts.dataflow_errors import DataflowError
 from ..contracts.relational_region import KEY_BATCH_SUFFIXES, KEY_BATCH_SQL_SUFFIX, fixed_key_inputs
-from ..kernels.lance_keys import BatchKeySelection
+from ...operators.key_exclusion import BatchKeySelection
 from ..lance_key_source import PinnedKeyPayload
 
 
@@ -35,7 +35,7 @@ class FixedKeyExclusion:
     def __init__(self, shape, splits, scans, payload, *, sql):
         self.left, self.right, self.project, self.exclude, self.terminal = shape
         self.splits, self.scans, self.payload = splits, scans, payload
-        self.keys = BatchKeySelection(sql=sql)
+        self.keys = BatchKeySelection(sql=sql, dtype=scans[self.left].dtype)
         self.selection = None
 
     def step(self, runner):
@@ -80,7 +80,8 @@ class FixedKeyExclusion:
                 runner._flush_metrics()
             return 1
         if self.selection is None:
-            self.selection = self.keys.survivors(runner.e._finite_services, skip=runner._terminal_rows,
+            self.selection = self.keys.survivors(query=runner.e._finite_services.query_region_offsets,
+                                                 check_stop=runner.services.check_stop, skip=runner._terminal_rows,
                                                  batch_size=self.payload.hydration_rows(bulk=True))
         positions = next(self.selection, None)
         if positions is None:
@@ -89,8 +90,12 @@ class FixedKeyExclusion:
             return 1
         table = self.payload.read_table(positions.column('row_id').to_numpy())
         start = 0
+        source_split = next(s for s in runner.e.assignment.source_splits
+                            if s.split_id == self.splits[self.left])
+        producer = runner.e._node_specs[self.exclude]
         for batch in table.to_batches():
-            runner._accept_arrow_result(self.terminal, batch, positions=positions.slice(start,batch.num_rows))
+            runner._accept_arrow_result(self.terminal, batch, positions=positions.slice(start,batch.num_rows),
+                producer=producer, source_split=source_split, version=self.payload.version)
             start += batch.num_rows
         runner._metrics[self.exclude]['rows_output'] += start
         runner._dirty_metrics.add(self.exclude)

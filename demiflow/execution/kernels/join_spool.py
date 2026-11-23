@@ -9,7 +9,8 @@ that work). No global sort, temporary run ledger, or native unbudgeted spill.
 import hashlib
 import struct
 
-from ...operators.relational import JOIN_PARTITION_BITS, JoinKeyFilter, hash_join_pairs, match_probe
+from ...operators.relational import (JOIN_PARTITION_BITS, JoinKeyFilter, hash_join_pairs,
+                                    right_index, probe_right_index)
 
 from ..exchange.dataflow_bridge import _decode_record_document as decode_record_document, _encode_record_document as encode_record_document
 from .dataflow import _check_stop, _err
@@ -117,6 +118,26 @@ class _Spool:
         if how in ('inner', 'semi') and self.index_limit >= 4096:
             return JoinKeyFilter(self.index_limit - self.group_budget, single_key=len(fields) == 1)
         return None
+
+    def encode_index_record(self, record):
+        """Use the original record codec in the in-memory small-right index."""
+        if type(record) is _EncodedJoinInput:
+            raw = record.document
+        elif self.bounded:
+            from ..dataflow_record_frames import encode_document
+            raw = encode_document(record, self.services.bounds, services=self.services,
+                                  retained=self.index_limit)
+        else:
+            raw = encode_record_document(record, max_bytes=self.document_limit)
+        resident = record.resident_bytes if type(record) is _EncodedJoinInput else record.encoded_bytes
+        if len(raw) + resident + _ID_BYTES + 8 > self.row_window:
+            raise _err('BUDGET_EXCEEDED', 'Join input and encoding exceed the admitted resident window')
+        return struct.pack('!Q', record.sequence) + record.record_id.encode('ascii') + raw
+
+    def decode_index_record(self, payload):
+        sequence, = struct.unpack('!Q', payload[:8])
+        return self._decode((None, None, None, None, sequence),
+                            (payload[8:8 + _ID_BYTES].decode('ascii'), payload[8 + _ID_BYTES:]))
 
     def partition_input(self, records, fields, *, build_filter=None, probe_filter=None):
         parts = [_Chain() for _ in range(_FANOUT)]
@@ -318,13 +339,20 @@ class _Spool:
 
 def _probe_stream(left, fields, index, *, spool, how, membership):
     """The right index is complete before any left input or output is consumed."""
-    for record in left:
+    def key_of(record):
         entry = spool.row_key(record, fields, probe_filter=membership)
-        if entry is None:
-            continue
-        key, _ = entry
-        matches = index.get(key, ()) if key else ()
-        yield from match_probe(spool, key, matches, how, spool.hold_stream_record, record, key)
+        return entry[0] if entry is not None else b''
+    pairs = probe_right_index(left, index, how, key_of=key_of,
+                              load_left=spool.hold_stream_record, decode=spool.decode_index_record)
+    try:
+        for left_record, right_record in pairs:
+            # Pair identity/row validation belongs to the partition binding;
+            # matching and duplicate/null semantics belong to the operator.
+            yield left_record, right_record
+            spool.release_probe()
+    finally:
+        pairs.close()
+        spool.release_probe()
 
 
 def join_pairs(left, right, *, left_keys, right_keys, how, services, bounded=False, retained_key=None, try_small_right=False):
@@ -343,20 +371,23 @@ def join_pairs(left, right, *, left_keys, right_keys, how, services, bounded=Fal
         spool = _Spool(file, services, bounded=bounded, retained_key=retained_key, reuse_groups=try_small_right)
         membership = spool.negative_filter(right_keys, how)
         if try_small_right:
-            right_chain = _Chain()
-            for record in right:
-                offset, _ = spool.append(record, right_keys, build_filter=membership)
-                right_chain.link(spool, offset)
+            available = spool.index_limit - spool.group_budget
+            index, remaining = right_index(right, right_keys,
+                available // 2 if membership else available,
+                key_of=lambda record, fields: spool.row_key(record, fields, build_filter=membership)[0],
+                encode=spool.encode_index_record, decode=spool.decode_index_record)
             if membership is not None:
                 membership.finish()
-            # The key/offset index and optional membership bitmap share the
-            # reserved index budget; the payloads stay on the owned extent.
-            available = spool.index_limit - spool.group_budget
-            index = spool.index(right_chain, available // 2 if membership else available)
             if index is not None:
                 yield from _probe_stream(left, left_keys, index, spool=spool, how=how, membership=membership)
                 return
-            rparts = spool.partition(right_chain, 0)
+            # The overflow prefix is replayed from its retained encoded rows,
+            # never by reopening the source or invoking an upstream callback.
+            # A partial membership bitmap must not reject the unseen suffix.
+            membership = spool.negative_filter(right_keys, how)
+            rparts, _ = spool.partition_input(remaining, right_keys, build_filter=membership)
+            if membership is not None:
+                membership.finish()
             lparts, _ = spool.partition_input(left, left_keys, probe_filter=membership)
             del membership
         elif membership is None:

@@ -198,11 +198,12 @@ def _worker_environment(threads):
     return env
 
 
-def query_region_offsets(sql, *, tables, max_pairs, rss_bytes, check_stop, selection=False):
+def query_region_offsets(sql, *, tables, max_pairs, rss_bytes, check_stop, selection=False,
+                         key_functions=()):
     """Use one already-granted CPU and RSS window for a complete finite relation.
 
     Each input is an ordered sequence of (canonical binary key or null, spool
-    offset), or a compact binary-key column for a left-row selection. The
+    offset), or a compact typed-key column for a left-row selection. The
     relation kernel owns SQL, join semantics, and offset hydration.
     Anonymous IPC consumes part of the same grant; no storage or result commits.
     """
@@ -231,8 +232,11 @@ def query_region_offsets(sql, *, tables, max_pairs, rss_bytes, check_stop, selec
         if type(name) is not str or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name):
             raise DataflowError('INVALID_CONTRACT', 'invalid native relation input name')
         if selection:
-            if not isinstance(rows, pa.ChunkedArray) or rows.type != pa.binary():
-                raise DataflowError('INVALID_CONTRACT', 'native selection requires a binary key column')
+            if not isinstance(rows, pa.ChunkedArray) or not (
+                    pa.types.is_binary(rows.type) or pa.types.is_integer(rows.type)
+                    or pa.types.is_boolean(rows.type) or pa.types.is_string(rows.type)
+                    or pa.types.is_large_string(rows.type)):
+                raise DataflowError('INVALID_CONTRACT', 'native selection requires a bounded primitive key column')
             input_bytes += rows.get_total_buffer_size() + 512 * rows.num_chunks
             if input_bytes + 4096 > wire_limit or len(rows) > wire_limit // 8:
                 raise DataflowError('BUDGET_EXCEEDED', 'native key selection exceeds its window')
@@ -252,7 +256,7 @@ def query_region_offsets(sql, *, tables, max_pairs, rss_bytes, check_stop, selec
           tempfile.TemporaryFile(dir='/dev/shm') as result):
         spec = dict(region_offsets=True, selection=selection, tables=tables, sql=sql, max_pairs=max_pairs, parent_pid=os.getpid(),
                     result_fd=result.fileno(), options={'threads': 1}, slot=0, rss_bytes=rss_bytes,
-                    wire_limit=wire_limit)
+                    wire_limit=wire_limit, key_functions=key_functions)
         try:
             pickle.dump(spec, LimitedWriter(request, wire_limit), protocol=5)
         except ValueError as exc:

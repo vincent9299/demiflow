@@ -137,16 +137,24 @@ def test_public_join_streams_left_only_after_the_entire_right_fits(tmp_path, mon
     from demiflow.execution.kernels import join_spool
 
     appends = Counter()
+    index_results = []
     actual_append = join_spool._Spool.append
+    actual_index = join_spool.right_index
+    def indexed(*args, **kwargs):
+        result = actual_index(*args, **kwargs)
+        index_results.append(result[0] is not None)
+        return result
     def counted_append(spool, record, fields, **kwargs):
         appends[tuple(fields)] += 1
         return actual_append(spool, record, fields, **kwargs)
     monkeypatch.setattr(join_spool._Spool, 'append', counted_append)
+    monkeypatch.setattr(join_spool, 'right_index', indexed)
 
     # At this grant all the small build keys fit, but the large right side
     # must keep its complete prefix when it switches to partitioned matching.
     for right_count, fits in ((2, True), (80, False)):
         appends.clear()
+        index_results.clear()
         limits = {'memory_bytes': 8 << 20, 'max_row_bytes': 4096, 'max_batch_bytes': 65536}
         with RunContext.start(tmp_path / str(right_count), limits=limits), data.local_execution(
                 worker_mode='thread', workers=1, partitions=1):
@@ -156,7 +164,8 @@ def test_public_join_streams_left_only_after_the_entire_right_fits(tmp_path, mon
         assert sorted((r['lk'], r['value']) for r in result if r['lk'] is not None) == [
             (0, 0), (right_count - 1, right_count - 1)]
         assert [r for r in result if r['lk'] is None] == [{'lk': None}]
-        assert appends['rk',] == right_count
+        assert index_results == [fits]
+        assert appends['rk',] == (0 if fits else right_count)
         assert appends['lk',] == (0 if fits else 3)
 
 
@@ -211,7 +220,7 @@ def test_public_lance_join_vector_probes_only_true_inner_and_semi_batches(tmp_pa
     assert values == {keys[i]: bytes([i]) * 1024 for i in selected}
 
 
-@pytest.mark.parametrize('width,expected_reads', [(128, 3), (96000, 12)])
+@pytest.mark.parametrize('width,expected_reads', [(128, 0), (96000, 12)])
 def test_public_hot_duplicate_group_reads_cached_or_disk_backed_right_bodies(tmp_path, monkeypatch,
                                                                            width, expected_reads):
     from collections import Counter
@@ -239,4 +248,5 @@ def test_public_hot_duplicate_group_reads_cached_or_disk_backed_right_bodies(tmp
         result = left.join(right, on='lk', right_on='rk').take_all()
     assert sorted((r['a'], r['b']) for r in result) == [(a,b) for a in range(4) for b in range(3)]
     assert all(r['body'] == 'x' * width for r in result)
-    assert len(rights) == 3 and sum(body_reads.values()) == expected_reads
+    assert len(rights) == (0 if expected_reads == 0 else 3)
+    assert sum(body_reads.values()) == expected_reads

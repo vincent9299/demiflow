@@ -9,7 +9,7 @@ from .ordering import build_sort_runs, merge_sort_runs
 
 
 def _sql_survivors(left, right, keys, services):
-    from ...operators.relational import EXCLUDE_OFFSETS_SQL
+    from ...operators.relational_sql import exclusion_query
     from ..contracts.relational_region import KEY_SQL_SUFFIX, SQL_CHILD_RSS, selection_wire_bytes
     from .dataflow import _group_key
 
@@ -17,7 +17,7 @@ def _sql_survivors(left, right, keys, services):
         return None
     if services.query_region_offsets is None:
         raise DataflowError('UNSUPPORTED_CAPABILITY', 'sealed key exclusion requires its SQL host')
-    # Both finite inputs are closed and replayable. Send only canonical keys
+    # Both finite inputs are closed and replayable. Send only canonical UTF-8 keys
     # to SQL, then read the original left port in order for survivor provenance.
     # No source, callback or payload lookup is repeated by this second scan.
     import pyarrow as pa
@@ -34,24 +34,29 @@ def _sql_survivors(left, right, keys, services):
             for record in scan:
                 services.check_stop()
                 row = _materialize_row(record, services)
-                key = None if any(row[f] is None for f in keys) else _group_key(row, keys).encode('utf-8')
-                retained += 5 + (len(key) if key is not None else 0)
+                key = None if any(row[f] is None for f in keys) else _group_key(row, keys)
+                retained += 5 + (len(key.encode('utf-8')) if key is not None else 0)
                 if not pending:
                     retained += 512  # per-buffer and serialization overhead
                 if retained > window:
                     return None
                 pending.append(key)
                 if len(pending) == 8192:
-                    chunks.append(pa.array(pending, type=pa.binary()))
+                    chunks.append(pa.array(pending, type=pa.string()))
                     pending.clear()
             if pending:
-                chunks.append(pa.array(pending, type=pa.binary()))
+                chunks.append(pa.array(pending, type=pa.string()))
         finally:
             scan.close()
-        tables[name] = pa.chunked_array(chunks, type=pa.binary())
+        tables[name] = pa.chunked_array(chunks, type=pa.string())
     rows = len(tables['lkeys'])
-    selection = services.query_region_offsets(EXCLUDE_OFFSETS_SQL, tables=tables, max_pairs=rows,
-        rss_bytes=SQL_CHILD_RSS, check_stop=services.check_stop, selection=True)
+    # Equality of these complete typed tokens is exactly string equality.
+    # Keep the original SQL string-join template without changing the current
+    # engine's key codec or converting a business value to another type.
+    sql, key_functions = exclusion_query(pa.string())
+    selection = services.query_region_offsets(sql, tables=tables, max_pairs=rows,
+        rss_bytes=SQL_CHILD_RSS, check_stop=services.check_stop, selection=True,
+        key_functions=key_functions)
     if not any(selection):
         return iter(())
     return (record for i, record in enumerate(left) if selection[i // 8] & (1 << (i % 8)))
@@ -102,80 +107,3 @@ def exclude_keys(left, right, *, spec, services):
             budget.charge(out)
             sequence += 1
             yield clone_record(out, schema_ref=schema_ref)
-
-
-class BatchKeySelection:
-    """Own only projected equality keys and their selection, never the right or left payloads."""
-    @classmethod
-    def admits(cls, left, right, *, sql):
-        from ..contracts.relational_region import KEY_SET_WINDOW, SQL_CHILD_RSS, selection_wire_bytes
-        if left.dtype != right.dtype:
-            return False
-        if not sql:
-            # Retained key and physical row-id buffers, build array and hash
-            # buckets, one projected input and the transient per-batch mask.
-            maximum = (left.count * 18 + right.count * 64 +
-                       64 * max(left.batch_rows, right.batch_rows) +
-                       1024 * (left.chunk_bound + right.chunk_bound))
-            return maximum <= KEY_SET_WINDOW
-        window = selection_wire_bytes(SQL_CHILD_RSS)
-        # Identical signedness and width give decimal encoding identical SQL
-        # equality and retain NULL. Size the request before either scan starts.
-        return (left.dtype == right.dtype and max(left.count, right.count) <= window // 8
-                and (left.count + right.count) * 26 + 4096
-                    + 1024 * (left.chunk_bound + right.chunk_bound) <= window)
-
-    def __init__(self, *, sql):
-        self.sql = sql
-        self.columns = {'lkeys': [], 'rkeys': []}
-        self.left_positions = []
-
-    def append(self, side, fragment, offset, batch):
-        import pyarrow as pa
-        import pyarrow.compute as pc
-        key = batch.column(0)
-        self.columns[side].append(pc.cast(pc.cast(key, pa.string()), pa.binary()) if self.sql else key)
-        if side == 'lkeys':
-            self.left_positions.append((fragment, offset, batch.column('_rowid')))
-
-    def survivors(self, services, *, skip, batch_size):
-        import numpy as np
-        import pyarrow as pa
-        import pyarrow.compute as pc
-        from ...operators.relational import EXCLUDE_OFFSETS_SQL
-        from ..contracts.relational_region import SQL_CHILD_RSS
-        if self.sql:
-            tables = {side: pa.chunked_array(parts, type=pa.binary()) for side, parts in self.columns.items()}
-            total = len(tables['lkeys'])
-            bits = services.query_region_offsets(EXCLUDE_OFFSETS_SQL, tables=tables, max_pairs=total,
-                rss_bytes=SQL_CHILD_RSS, check_stop=services.check_stop, selection=True)
-            keep = pa.Array.from_buffers(pa.bool_(), total, [None, pa.py_buffer(bits)])
-            self.columns.clear()
-            del tables
-        else:
-            from ...operators.relational import key_membership
-            build = self.columns.pop('rkeys')
-            right = pa.concat_arrays(build) if build else None
-            del build
-        start = 0
-        for i, (fragment, row_offset, row_ids) in enumerate(self.left_positions):
-            services.check_stop()
-            if self.sql:
-                mask = keep.slice(start, len(row_ids))
-            elif right is not None:
-                mask = pc.invert(key_membership(self.columns['lkeys'][i], right))
-            else:
-                mask = None
-            index = pc.indices_nonzero(mask) if mask is not None else pa.array(np.arange(len(row_ids), dtype=np.uint64))
-            start += len(row_ids)
-            if skip:
-                used = min(len(index), skip)
-                index = index.slice(used)
-                skip -= used
-            for begin in range(0, len(index), batch_size):
-                local = index.slice(begin, batch_size)
-                yield pa.record_batch([pa.array(np.full(len(local), fragment, np.uint64)),
-                    pc.add(local, pa.scalar(row_offset, type=pa.uint64())), pc.take(row_ids, local)],
-                    names=['fragment_id', 'row_offset', 'row_id'])
-        if skip:
-            raise DataflowError('INCOMPATIBLE_HISTORY', 'terminal exceeds replayed key selection')
