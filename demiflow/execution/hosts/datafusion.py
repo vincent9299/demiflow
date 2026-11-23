@@ -5,6 +5,11 @@ work through Dataset; only the ordinary writer publishes business destinations.
 """
 from __future__ import annotations
 
+import fcntl
+from demiflow.execution.journal.native_diagnostics import FILE_BYTES, write_document
+
+SLOTS = 16
+
 from contextlib import contextmanager, nullcontext, ExitStack
 from dataclasses import asdict, dataclass, replace
 import json
@@ -185,7 +190,7 @@ def _stop(process):
 def _start_sql_worker(request, env, log, descriptors):
     from demiflow.resources.process_observation import inherited_unit
     return subprocess.Popen(
-        [sys.executable, '-m', 'demiflow.execution.datafusion_worker', str(request)],
+        [sys.executable, '-m', 'demiflow.execution.hosts.datafusion_worker', str(request)],
         env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
         start_new_session=True, pass_fds=(*descriptors, *inherited_unit()))
 
@@ -209,7 +214,7 @@ def query_region_offsets(sql, *, tables, max_pairs, rss_bytes, check_stop, selec
     """
     import pickle
     import psutil
-    from demiflow.execution.native_diagnostics import LimitedWriter
+    from demiflow.execution.hosts.datafusion import LimitedWriter
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     if type(max_pairs) is not int or max_pairs < 0 or type(rss_bytes) is not int or rss_bytes <= 0:
         raise DataflowError('INVALID_CONTRACT', 'invalid native relation window')
@@ -566,7 +571,7 @@ class DataFusionSession:
                 self._condition.notify_all()
 
     def _run(self, sql, bindings, schema, views, transform, label, slot, lock, dataset_spec=None, lance_merge=None, lance_index=None):
-        from demiflow.execution.native_diagnostics import slot as diagnostic_slot
+        from demiflow.execution.hosts.datafusion import slot as diagnostic_slot
         query_id = label + '-' + uuid.uuid4().hex
         with ExitStack() as stack:
             diagnostic=None
@@ -591,7 +596,8 @@ class DataFusionSession:
         diagnostic.mkdir(exist_ok=True)
         ipc_directory = directory / 'control' if self.managed_diagnostics else diagnostic
         ipc_directory.mkdir(exist_ok=True)
-        from demiflow.execution.native_diagnostics import write_document, PipeLog
+        from demiflow.execution.journal.native_diagnostics import write_document
+        from demiflow.execution.hosts.datafusion import PipeLog
         def save_diagnostic(path,value):
             if self.managed_diagnostics:
                 try:
@@ -754,3 +760,126 @@ class DataFusionSession:
             while self._active:
                 self._condition.wait(timeout=0.1)
         self._temporary.cleanup()
+
+
+class LimitedWriter:
+    def __init__(self, stream, maximum):
+        self.stream, self.remaining = stream, maximum
+
+    def write(self, raw):
+        size = memoryview(raw).nbytes
+        if size > self.remaining:
+            raise ValueError("Native result IPC byte budget exceeded")
+        self.remaining -= size
+        return self.stream.write(raw)
+
+def mandatory_json(path, value):
+    # Unlike optional diagnostics, required IPC may not truncate a fact.
+    temporary = path.with_suffix(".tmp")
+    try:
+        with temporary.open("wb") as stream:
+            bounded = LimitedWriter(stream, FILE_BYTES)
+            for chunk in json.JSONEncoder(
+                ensure_ascii=False, allow_nan=False
+            ).iterencode(value):
+                bounded.write(chunk.encode())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+@contextmanager
+def slot(root, identity):
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    candidates = []
+    for number in range(SLOTS):
+        path = root / ("slot-" + str(number))
+        marker = path / "identity.json"
+        candidates.append(
+            (marker.stat().st_mtime_ns if marker.exists() else -1, number)
+        )
+    for _, number in sorted(candidates):
+        path = root / ("slot-" + str(number))
+        path.mkdir(exist_ok=True)
+        fd = os.open(path / "owner.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                continue
+            # Closed names only: never recurse into an unknown directory.
+            with os.scandir(path) as entries:
+                for count, entry in enumerate(entries):
+                    if (
+                        count >= 16
+                        or entry.is_symlink()
+                        or not entry.is_file(follow_symlinks=False)
+                    ):
+                        raise RuntimeError(
+                            "Managed diagnostic slot exceeds shape budget"
+                        )
+                    if entry.name != "owner.lock":
+                        Path(entry.path).unlink()
+            write_document(path / "identity.json", {"query_id": identity})
+            yield path
+            return
+        finally:
+            os.close(fd)
+    raise RuntimeError("Managed diagnostic slots exhausted")
+
+class PipeLog:
+    """Consume a nonblocking pipe with bounded work and four rotating segments."""
+
+    def __init__(self, pipe, directory):
+        self.pipe, self.directory = pipe, Path(directory)
+        os.set_blocking(pipe.fileno(), False)
+        self.total, self.used, self.segment = 0, 0, 0
+        self.stream = None
+        self.eof = False
+        self.disabled = False
+
+    def drain(self):
+        for _ in range(4):
+            try:
+                raw = os.read(self.pipe.fileno(), FILE_BYTES)
+            except BlockingIOError:
+                return
+            if not raw:
+                self.eof = True
+                return
+            self.total += len(raw)
+            if self.disabled:
+                continue
+            try:
+                while raw:
+                    if self.stream is None or self.used == FILE_BYTES:
+                        if self.stream:
+                            self.stream.close()
+                        self.stream = (
+                            self.directory / f"worker-{self.segment%4}.log"
+                        ).open("wb")
+                        self.segment += 1
+                        self.used = 0
+                    chunk, raw = (
+                        raw[: FILE_BYTES - self.used],
+                        raw[FILE_BYTES - self.used :],
+                    )
+                    self.stream.write(chunk)
+                    self.stream.flush()
+                    self.used += len(chunk)
+            except OSError:
+                self.disabled = True
+                if self.stream:
+                    try:
+                        self.stream.close()
+                    except OSError:
+                        pass
+                    self.stream = None
+
+    def close(self):
+        if self.stream:
+            try:
+                self.stream.close()
+            except OSError:
+                pass
+        self.pipe.close()

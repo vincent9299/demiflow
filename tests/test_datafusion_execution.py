@@ -231,7 +231,7 @@ def test_parent_crash_releases_inherited_slot(tmp_path):
     code='''
 import sys,time
 from demiflow import data
-from demiflow.execution.datafusion import DataFusionOptions, DataFusionSession
+from demiflow.execution.hosts.datafusion import DataFusionOptions, DataFusionSession
 def hang(batch):
     time.sleep(30)
     return batch

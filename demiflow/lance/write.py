@@ -1,6 +1,8 @@
 """通用 Lance 追加/覆盖提交；只处理 Arrow 数据、版本和写入回执。"""
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import uuid
 from collections.abc import Iterable, Iterator
 from datetime import timedelta
@@ -368,3 +370,33 @@ __all__ = [
     "write_lance", "commit_lance_append", "prepare_lance_append",
     "verify_committed_append", "write_lance_fragment",
 ]
+
+
+@contextmanager
+def native_arrow_writer(ipc, schema):
+    """Open the private native output; this is not a published table transaction."""
+    with pa.OSFile(str(ipc), 'wb') as stream:
+        with pa.ipc.new_file(stream, schema) as writer:
+            yield writer
+
+def cast_native_result_batch(batch, schema):
+    if not isinstance(batch, pa.RecordBatch):
+        raise TypeError('batch_transform must return a pyarrow.RecordBatch')
+    return batch.cast(schema, safe=True)
+
+
+def write_native_output(ipc, schema, directory, *, writer_batch_rows, writer_batch_bytes, max_row_bytes, rows):
+    import lance
+    from demiflow.lance.arrow_batches import bounded_record_batches, LANCE_FILE_ROWS
+    with pa.OSFile(str(ipc), 'rb') as stream:
+        reader = pa.ipc.open_file(stream)
+        batches = (reader.get_batch(i) for i in range(reader.num_record_batches))
+        output = lance.write_dataset(pa.RecordBatchReader.from_batches(
+            schema, bounded_record_batches(batches, schema, batch_rows=writer_batch_rows,
+                                            batch_bytes=writer_batch_bytes, max_row_bytes=max_row_bytes)),
+            str(directory / 'output.lance'), mode='create', schema=schema,
+            max_rows_per_file=LANCE_FILE_ROWS)
+    if output.count_rows() != rows:
+        raise RuntimeError('Private Lance output is incomplete')
+    ipc.unlink()
+    return output

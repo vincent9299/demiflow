@@ -690,3 +690,14 @@ def make_kernel(
 
     return OperatorKernel(spec, services=services, partition_id=partition_id,
                           finite_services=finite_services)
+
+
+def invoke_native_batch(batch, transform, on_callback_error):
+    """Invoke the sealed native batch callback without owning its algorithm or sink."""
+    if transform is not None:
+        try:
+            batch = transform(batch)
+        except Exception as error:
+            on_callback_error(error)
+            raise
+    return batch

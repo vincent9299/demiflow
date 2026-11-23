@@ -21,7 +21,7 @@ from demiflow.workbench.runs import view as run_view
 from demiflow.forge.schema import ForgeError
 from demiflow.resources.process_observation import unit_stopped, require_pidfds
 from demiflow.execution.journal.run_telemetry import Telemetry, series, latest
-from demiflow.execution.native_diagnostics import PipeLog, slot
+from demiflow.execution.hosts.datafusion import PipeLog, slot
 from demiflow.execution.run_journal import RunJournal
 from test_forge_runs import base, root, prepared, execute
 

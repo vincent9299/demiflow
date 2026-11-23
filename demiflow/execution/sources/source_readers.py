@@ -1317,3 +1317,58 @@ __all__ = [
     "ItemsReader", "RangeReader", "FileReader", "LanceReader", "SqlReader",
     "TaskReader", "IteratorReader", "QueueReader", "HistoryReader",
 ]
+
+
+def register_native_sources(context, sources, *, payload_read, with_row_addr):
+    import lance
+    import pyarrow as pa
+    for name, ref in sources.items():
+        if ref.get('format') == 'csv':
+            from demiflow.execution.sources.csv_source import assert_csv_unchanged
+            from datafusion import CsvReadOptions
+            assert_csv_unchanged(ref)
+            context.register_csv(name, ref['uri'], options=CsvReadOptions(
+                schema=pa.schema([(n, pa.string()) for n in ref['columns']]), delimiter=ref['delimiter'], quote=ref['quote'],
+                newlines_in_values=ref['newlines_in_values'],
+                file_compression_type=ref['compression'],
+                file_extension=Path(ref['uri']).suffix, null_regex=r'\b\B'))
+            continue
+        context.register_table(name, lance.FFILanceTableProvider(lance.dataset(ref['uri'], version=ref['version']),
+            with_row_id=bool(payload_read and name == payload_read['source']),
+            with_row_addr=with_row_addr))
+
+def open_native_payload(sources, payload_read, result, query_batch_rows):
+    import lance
+    payload_snapshot = None
+    if payload_read:
+        ref = sources[payload_read['source']]
+        payload_snapshot = lance.dataset(ref['uri'], version=ref['version'])
+        result['payload_read'] = dict(source=ref, batch_rows=payload_read['batch_rows'],
+            rows=0, batches=0, max_batch_bytes=0, max_lookup_bytes=0, sort_payload_columns=0,
+            query_batch_rows=query_batch_rows)
+    return payload_snapshot
+
+def hydrate_native_payload(batches, payload_snapshot, payload_read, *, writer_batch_bytes, max_row_bytes, stats):
+    from demiflow.lance.arrow_batches import bounded_record_batches
+    for batch in batches:
+        for start in range(0, batch.num_rows, payload_read['batch_rows']):
+            ids = batch.column(payload_read['row_id']).slice(start, payload_read['batch_rows'])
+            # Lance row IDs, not physical addresses or offsets.
+            table = payload_snapshot._take_rows(ids, columns=payload_read['columns'])
+            if table.num_rows != len(ids):
+                raise RuntimeError('Pinned sort payload lookup lost rows')
+            values = stats
+            values['rows'] += table.num_rows
+            values['batches'] += 1
+            values['max_lookup_bytes'] = max(values['max_lookup_bytes'], table.nbytes)
+            for part in bounded_record_batches(table.to_batches(), payload_snapshot.schema,
+                    batch_rows=payload_read['batch_rows'], batch_bytes=writer_batch_bytes, max_row_bytes=max_row_bytes):
+                values['max_batch_bytes'] = max(values['max_batch_bytes'], part.nbytes)
+                yield part
+
+
+def verify_native_sources(sources):
+    from demiflow.execution.sources.csv_source import assert_csv_unchanged
+    for ref in sources.values():
+        if ref.get('format') == 'csv':
+            assert_csv_unchanged(ref)
