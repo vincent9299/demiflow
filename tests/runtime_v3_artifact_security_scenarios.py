@@ -80,7 +80,7 @@ def _mutate(store, ref, invoke, *, replacement=None):
 
 
 def _artifact_attacks(execution, root):
-    from demiflow.execution.dataflow_artifacts import fetch_runtime_bundle
+    from demiflow.execution.seal.runtime_bundle import fetch_runtime_bundle
     from demiflow.execution.seal.plan import (verify_dataflow_program, load_dataflow,
                                                 _artifact_from_json)
     from demiflow.execution.seal.business_sources import mount_sources

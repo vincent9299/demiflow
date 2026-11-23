@@ -32,7 +32,7 @@ from ..seal.plan import (
 )
 from demiflow.execution.sources.snapshots import snapshot_source, plan_source_splits
 from ..dataflow_queue import NativeAcquisitionService
-from ..dataflow_artifacts import stage_runtime_bundle
+from demiflow.execution.seal.runtime_bundle import stage_runtime_bundle
 from ..dataflow_hosts import make_host_endpoint
 from ..exchange.dataflow_channels import close_channels
 from ..exchange.deliveries import DeliveryExchange

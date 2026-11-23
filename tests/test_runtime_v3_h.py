@@ -51,7 +51,8 @@ sys.modules['ray.exceptions'] = _RAY.exceptions
 
 from demiflow.execution.journal import dataflow_authority as AUTH
 from demiflow.execution.storage import staging as ARTIFACT_PORT
-from demiflow.execution import dataflow_artifacts as ART
+from demiflow.execution.seal import runtime_bundle as ART
+from demiflow.execution.hosts import configuration as HOST_DOMAIN
 from demiflow.execution.hosts import dataflow_control as CTRL
 from demiflow.execution import dataflow_hosts as HOSTS
 from demiflow.execution.action_driver import services as DRIVER_SERVICES
@@ -592,19 +593,19 @@ def test_h013():
     challenge = store.put(iter([b'challenge-bytes']), max_bytes=100, media_type='x')
     host = df.HostDescriptor(host_id='host-1', provider='local', runtime_revision='r',
                              store_domains=('store-1',), logical_resources={}, isolation_capabilities=())
-    proof = ART.verify_host_domain(host, store=store, challenge=challenge, bounds=BIG)
+    proof = HOST_DOMAIN.verify_host_domain(host, store=store, challenge=challenge, bounds=BIG)
     assert proof.durable and proof.challenge_digest == challenge.digest
     wrong = ArtifactRef(digest='a' * 64, size_bytes=challenge.size_bytes, store_id='store-1',
                         key=challenge.digest, media_type='x')
     with pytest.raises(DataflowError):
-        ART.verify_host_domain(host, store=store, challenge=wrong, bounds=BIG)
+        HOST_DOMAIN.verify_host_domain(host, store=store, challenge=wrong, bounds=BIG)
     with pytest.raises(DataflowError) as ei:
-        ART.verify_host_domain(host, store=store, challenge=aref('absent'), bounds=BIG)
+        HOST_DOMAIN.verify_host_domain(host, store=store, challenge=aref('absent'), bounds=BIG)
     assert ei.value.code == 'UNKNOWN_EFFECT'
     host2 = df.HostDescriptor(host_id='h2', provider='local', runtime_revision='r',
                               store_domains=('other',), logical_resources={}, isolation_capabilities=())
     with pytest.raises(DataflowError):
-        ART.verify_host_domain(host2, store=store, challenge=challenge, bounds=BIG)
+        HOST_DOMAIN.verify_host_domain(host2, store=store, challenge=challenge, bounds=BIG)
 
 
 def test_h014():
@@ -613,14 +614,14 @@ def test_h014():
     ref = store.put(iter([b'durable']), max_bytes=100, media_type='x')
     host = df.HostDescriptor(host_id='h', provider='local', runtime_revision='r',
                              store_domains=('store-1',), logical_resources={}, isolation_capabilities=())
-    loc = ART.resolve_data_location(ref, host=host, store=store)
+    loc = HOST_DOMAIN.resolve_data_location(ref, host=host, store=store)
     assert loc.domain == 'store-1' and loc.durable_ref == ref and loc.temporary_locator is None
     rayhost = df.HostDescriptor(host_id='h', provider='ray_core', runtime_revision='r',
                                 store_domains=('store-1',), logical_resources={}, isolation_capabilities=())
-    loc2 = ART.resolve_data_location(ref, host=rayhost, store=store)
+    loc2 = HOST_DOMAIN.resolve_data_location(ref, host=rayhost, store=store)
     assert loc2.temporary_locator is None and loc2.durable_ref == ref  # no fabricated Ray object handle
     with pytest.raises(DataflowError) as ei:
-        ART.resolve_data_location(aref('gone'), host=host, store=store)
+        HOST_DOMAIN.resolve_data_location(aref('gone'), host=host, store=store)
     assert ei.value.code == 'UNKNOWN_EFFECT'
 
 

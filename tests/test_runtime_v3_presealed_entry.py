@@ -33,7 +33,7 @@ def _prepared(tmp_path,*,thread=False,wrong_program_pin=False):
             from demiflow.planning.dataflow_compile import lower_action
             from demiflow.execution.seal.plan import stage_dataflow_programs,resolve_execution_constants,seal_dataflow
             from demiflow.execution.sources.snapshots import snapshot_source, plan_source_splits
-            from demiflow.execution.dataflow_artifacts import stage_runtime_bundle
+            from demiflow.execution.seal.runtime_bundle import stage_runtime_bundle
             from demiflow.planning.dataflow_place import compile_physical_dataflow
             try:
                 compiled=lower_action(request,bounds=bounds)

@@ -122,7 +122,7 @@ SCENARIO_MODULES: dict[str, tuple[tuple[str, str], ...]] = {
     "workbench_real_plan": (("demiflow.workbench.runs.facts", "W"), ("demiflow.workbench.graph.model", "W")),
     "product_regression": (("demiflow.workbench.runs.manager", "W"), ("demiflow.workbench.graph.model", "W")),
     "bounded_terminal": (('demiflow.execution.outputs.terminals', "T"), ("demiflow.execution.action_driver.dataflow", "E")),
-    "artifact_security": (("demiflow.execution.dataflow_artifacts", "H"), ("demiflow.execution.storage.objects", "H")),
+    "artifact_security": (("demiflow.execution.seal.runtime_bundle", "H"), ("demiflow.execution.storage.objects", "H")),
     "performance": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.execution.scheduler.placement", "E")),
     "all_regressions": (("demiflow.execution.action_driver.dataflow", "E"),),
 }

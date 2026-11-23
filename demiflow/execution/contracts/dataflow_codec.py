@@ -1220,8 +1220,7 @@ def decode_artifact_reference(value):
 def encode_artifact_reference(ref):
     if ref is None:
         return None
-    return {"digest": ref.digest, "size_bytes": ref.size_bytes, "store_id": ref.store_id,
-            "key": ref.key, "media_type": ref.media_type}
+    return artifact_reference_fields(ref)
 
 def validate_control_payload(event: WorkerEvent, bounds: "Bounds") -> None:
     if event.payload is not None and event.payload_ref is not None:
@@ -1273,3 +1272,8 @@ def private_embedding_rpc_id(command):
 
 def image_request_budget(action_id):
     return 'image-requests-'+identity(action_id)
+
+
+def artifact_reference_fields(ref: "ArtifactRef") -> dict:
+    return {"digest": ref.digest, "size_bytes": ref.size_bytes, "store_id": ref.store_id,
+            "key": ref.key, "media_type": ref.media_type}

@@ -395,7 +395,7 @@ def _first_native_action(fx,dataset,run,routing,evidence):
         solve_residency)
     from demiflow.execution.seal.plan import (stage_dataflow_programs,resolve_execution_constants,seal_dataflow)
     from demiflow.execution.sources.snapshots import snapshot_source, plan_source_splits
-    from demiflow.execution.dataflow_artifacts import stage_runtime_bundle
+    from demiflow.execution.seal.runtime_bundle import stage_runtime_bundle
     from demiflow.execution.contracts.dataflow_codec import compute_physical_digest
     from runtime_v3_residency_scenarios import _provider
     from demiflow.execution.outputs.terminals import open_terminal, collect_rows
