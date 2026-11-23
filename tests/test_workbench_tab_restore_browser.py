@@ -78,7 +78,7 @@ def test_tabs_restore_exact_run_version_and_project_despite_late_response(owned_
     with tab_page(fx,browser) as (page,requests):
         # The unified pipeline tab owns both current definition and sealed runs.
         tab(page,'管道')
-        page.locator('.wb-context-switch').get_by_role('button',name='运行记录',exact=True).click()
+        page.locator('.wb-actions').get_by_role('button',name='运行记录',exact=True).click()
         page.get_by_label('运行记录',exact=True).select_option(run_id)
         page.locator('.wb-node').first.click()
         run_ref=reference(page)
@@ -151,7 +151,7 @@ def test_flows_tab_never_inherits_run_and_clears_settled_pending_intent(owned_fi
         # 1. Open a historical run inside 管道, leave to a non-pipeline tab, then
         # return to 管道 (restoring the run), and switch to 当前 for a clean flow view.
         tab(page,'管道')
-        page.locator('.wb-context-switch').get_by_role('button',name='运行记录',exact=True).click()
+        page.locator('.wb-actions').get_by_role('button',name='运行记录',exact=True).click()
         page.get_by_label('运行记录',exact=True).select_option(run_id)
         expect(page.locator('.wb-node')).not_to_have_count(0)
         run_ref=reference(page)
@@ -163,7 +163,7 @@ def test_flows_tab_never_inherits_run_and_clears_settled_pending_intent(owned_fi
         tab(page,'管道')
         expect_reference(page,run_ref)
 
-        page.locator('.wb-context-switch').get_by_role('button',name='当前配置',exact=True).click()
+        page.locator('.wb-actions').get_by_role('button',name='返回当前配置',exact=True).click()
         expect(page.locator('.wb-flow-record').first).to_be_visible()
         expect(page.locator('.wb-flow-record').first).to_be_enabled()
         expect(page.locator('.wb-actions').get_by_role('button',name='运行',exact=True)).to_be_visible()
