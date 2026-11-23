@@ -6,7 +6,7 @@ CDN paths. Original dimensions are never attributed to a preview rendition.
 """
 from urllib.parse import urlencode, urlsplit
 import re
-from searx.network import get
+from demiflow.collect.native_search.adapter import get
 from demiflow.services.engines.image_source_utils import result_list
 
 about = {'website': 'https://www.inaturalist.org/', 'use_official_api': True,

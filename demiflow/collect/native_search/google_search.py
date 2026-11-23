@@ -108,7 +108,7 @@ def run(query, parameters, source, config, send, receive):
         if config.get('offline_audit'):
             raise BrowserFailure('configuration_error', 'Network disabled during source audit')
         if backend == 'http':
-            from searx.network import get
+            from .worker_network import get
             response = get(url, headers={'User-Agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'},
                            impersonate='chrome', raise_for_httperror=False)
             page = {'html':response.text, 'url':str(response.url), 'status_code':response.status_code}

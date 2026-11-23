@@ -117,6 +117,8 @@ def identity(record):
         return ('images.html', record['url'], record['img_src'])
     parsed = record['parsed_url']
     if not parsed:
+        if record['template'] == 'keyvalue.html' and isinstance(record.get('kvmap'), dict):
+            return ('keyvalue.html', id(record))
         raise ValueError("Search result has no usable 'url'")
     return (record['template'], parsed.netloc, parsed.path, parsed.params, parsed.query,
             parsed.fragment, record['img_src'])

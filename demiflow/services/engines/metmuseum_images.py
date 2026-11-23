@@ -1,6 +1,6 @@
 """Bounded Met Collection API search; original URLs come from object records."""
 from urllib.parse import urlencode
-from searx.network import get
+from demiflow.collect.native_search.adapter import get
 from demiflow.services.engines.image_source_utils import result_list
 
 about = {'website': 'https://www.metmuseum.org/', 'use_official_api': True,

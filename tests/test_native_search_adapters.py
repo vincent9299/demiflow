@@ -8,19 +8,33 @@ from urllib.parse import urlsplit, parse_qs
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def probe(body):
+def probe(body, engines=('google', 'wikisearch', 'wikipedia', 'mwmbl')):
     program = '''
 import json,sys,traceback
 from demiflow.collect.native_search import worker as w
 from demiflow.collect.native_search.config import SearchConfig
-config=SearchConfig(engines=('google','wikisearch','wikipedia','mwmbl'),language='en')
+config=SearchConfig(engines=%r,language='en')
 settings={'sources':config.source_configs(),'outgoing':{},'timeout_s':10,'max_bytes':1048576,'max_results':100,'max_redirects':3,'offline_audit':True}
+
+class Reply:
+ def __init__(self,url,body,status=200,params=None):
+  self.url,self.status_code,self.headers,self.search_params=url,status,{},params
+  self.content=body if isinstance(body,bytes) else json.dumps(body).encode()
+ @property
+ def text(self): return self.content.decode()
+ def json(self): return json.loads(self.content)
+
+def prepare(name,query,**spec):
+ engine=loaded[name]
+ spec={'language':'en','pageno':1,'safesearch':0,'time_range':None,'engine_data':{},**spec}
+ params=w.request_params(engine,query,spec)
+ params={**{k:(v.copy() if isinstance(v,dict) else v) for k,v in w.ONLINE_DEFAULTS.items()},**params}
+ engine.request(query,params)
+ return engine,params
 try:
- processors,errors=w.bootstrap(settings)
+ loaded,errors=w.bootstrap(settings)
  if errors: raise RuntimeError(errors)
- from searx.search.models import SearchQuery,EngineRef
- from searx.extended_types import SXNG_Response
-''' + body + '''
+''' % (tuple(engines),) + body + '''
 except BaseException:
  traceback.print_exc(file=sys.stderr)
  raise
@@ -34,21 +48,15 @@ def test_wikipedia_languages_keyword_and_summary_fixtures():
     result = probe('''
  values={}
  for lang in ('zh-CN','en','ja','nb'):
-  proc=processors['wikisearch']
-  params=proc.get_params(SearchQuery('天牛',[EngineRef('wikisearch','general')],lang=lang),'general')
-  proc.engine.request('天牛',params)
-  resp=SXNG_Response();resp.url=params['url'];resp.status_code=200
-  resp.content=json.dumps({'pages':[{'key':'Cerambycidae','title':'天牛科','excerpt':'<b>天牛</b>科'}]}).encode()
-  values[lang]={'url':params['url'],'result':w.plain(proc.engine.response(resp))}
- proc=processors['wikipedia']
- params=proc.get_params(SearchQuery('Crassula ovata',[EngineRef('wikipedia','general')],lang='en'),'general')
- proc.engine.request('Crassula ovata',params)
- resp=SXNG_Response();resp.url=params['url'];resp.status_code=200
- resp.content=json.dumps({'type':'standard','title':'Crassula ovata','extract':'A succulent plant.',
-   'content_urls':{'desktop':{'page':'https://en.wikipedia.org/wiki/Crassula_ovata'}}}).encode()
- values['summary']={'url':params['url'],'result':w.plain(proc.engine.response(resp))}
+  engine,params=prepare('wikisearch','天牛',language=lang)
+  reply=Reply(params['url'],{'pages':[{'key':'Cerambycidae','title':'天牛科','excerpt':'<b>天牛</b>科'}]})
+  values[lang]={'url':params['url'],'result':engine.response(reply)}
+ engine,params=prepare('wikipedia','Crassula ovata')
+ reply=Reply(params['url'],{'type':'standard','title':'Crassula ovata','extract':'A succulent plant.',
+   'content_urls':{'desktop':{'page':'https://en.wikipedia.org/wiki/Crassula_ovata'}}})
+ values['summary']={'url':params['url'],'result':engine.response(reply)}
  w.send(values)
-''')
+''', engines=('wikisearch', 'wikipedia'))
     for lang, host in [('zh-CN','zh.wikipedia.org'), ('en','en.wikipedia.org'), ('ja','ja.wikipedia.org'), ('nb','no.wikipedia.org')]:
         assert urlsplit(result[lang]['url']).hostname == host
         assert result[lang]['result'][0]['url'] == f'https://{host}/wiki/Cerambycidae'
@@ -56,21 +64,29 @@ def test_wikipedia_languages_keyword_and_summary_fixtures():
     assert result['summary']['result'][0]['infobox'] == 'Crassula ovata'
 
 
+def test_wikisearch_requires_an_explicit_language():
+    result = probe('''
+ value=w.run_search({'engine':'wikisearch','query':'oak','parameters':{'language':'all','pageno':1,'safesearch':0,
+   'time_range':None,'engine_data':{},'network':'default'}},loaded,errors,set(),settings)
+ w.send(value)
+''', engines=('wikisearch',))
+    assert result['status'] == 'unsupported_parameters'
+    assert result['reason'] == 'wikisearch requires an explicit language'
+
+
 def test_google_and_mwmbl_request_parser_fixtures():
     result = probe('''
  values={}
  for name in ('google','mwmbl'):
-  proc=processors[name]
-  sq=SearchQuery('oak tree',[EngineRef(name,'general')],lang='zh-CN',pageno=2 if name=='google' else 1,safesearch=2)
-  params=proc.get_params(sq,'general');proc.engine.request(sq.query,params)
-  resp=SXNG_Response();resp.url=params['url'];resp.status_code=200;resp.search_params=params
+  engine,params=prepare(name,'oak tree',language='zh-CN',pageno=2 if name=='google' else 1,safesearch=2)
   if name=='google':
-   resp.content=b'<html><div class="zMzFAb"><a class="fuLhoc" href="https://example.org/oak"><span class="CVA68e">Oak</span></a><div class="taTFJ"><span class="FrIlee">An oak tree.</span></div></div></html>'
+   body=b'<html><div class="zMzFAb"><a class="fuLhoc" href="https://example.org/oak"><span class="CVA68e">Oak</span></a><div class="taTFJ"><span class="FrIlee">An oak tree.</span></div></div></html>'
   else:
-   resp.content=json.dumps([{'url':'https://example.org/oak','title':[{'value':'Oak'}],'extract':[{'value':'An oak tree.'}]}]).encode()
-  values[name]={'url':params['url'],'results':w.plain(proc.engine.response(resp)),'impersonate':params.get('impersonate')}
+   body=[{'url':'https://example.org/oak','title':[{'value':'Oak'}],'extract':[{'value':'An oak tree.'}]}]
+  reply=Reply(params['url'],body,params=params)
+  values[name]={'url':params['url'],'results':engine.response(reply),'impersonate':params.get('impersonate')}
  w.send(values)
-''')
+''', engines=('google', 'mwmbl'))
     for name in ('google', 'mwmbl'):
         assert result[name]['results'][0]['url'] == 'https://example.org/oak'
         assert result[name]['results'][0]['title'] == 'Oak'
@@ -83,27 +99,23 @@ def test_google_and_mwmbl_request_parser_fixtures():
 def test_all_result_families_roundtrip_and_ranking():
     result = probe('''
  import datetime
- from searx.result_types import MainResult, KeyValue
- from searx.result_types.answer import Answer
- from searx.result_types.image import Image
- from searx.result_types.file import File
- from searx.result_types.code import Code
- from searx.result_types.paper import Paper
- results=[MainResult(url='https://example.org/shared',title='Main',publishedDate=datetime.datetime(2026,1,2)),
-  Image(url='https://example.org/image',title='Image',img_src='https://example.org/pixel.png'),
-  File(url='https://example.org/file',title='File'),Code(url='https://example.org/code',title='Code'),
-  Paper(url='https://example.org/paper',title='Paper'),Answer(answer='42'),
-  KeyValue(kvmap={'__native_type__':'literal','value':'preserved','parsed_url':'data column'}),
+ results=[{'url':'https://example.org/shared','title':'Main','publishedDate':datetime.datetime(2026,1,2)},
+  {'url':'https://example.org/image','title':'Image','img_src':'https://example.org/pixel.png','template':'images.html'},
+  {'url':'https://example.org/file','title':'File','template':'files.html'},
+  {'url':'https://example.org/code','title':'Code','template':'code.html'},
+  {'url':'https://example.org/paper','title':'Paper','template':'paper.html'},{'answer':'42'},
+  {'template':'keyvalue.html','kvmap':{'__native_type__':'literal','value':'preserved','parsed_url':'data column'}},
   {'infobox':'Oak','id':'https://example.org/oak','urls':[{'url':'https://example.org/oak','title':'Oak'}]},
   {'suggestion':'oak trees'},{'correction':'oak'},{'engine_data':'cursor-value','key':'cursor'}]
  packed=json.loads(json.dumps([w.pack(r) for r in results]))
  value=w.merge({'sources':[{'name':'google','weight':1},{'name':'mwmbl','weight':2}],
   'groups':[{'engine':'google','results':packed},{'engine':'mwmbl','results':[w.pack({'url':'https://example.org/shared','title':'Shared again'})]}]})
  w.send(value)
-''')
+''', engines=('mwmbl',))
     assert result['results'][0]['url'] == 'https://example.org/shared'
     assert result['results'][0]['engines'] == ['google', 'mwmbl']
     assert result['results'][0]['score'] == 8
+    assert result['results'][0]['publishedDate'] == '2026-01-02T00:00:00'
     assert len(result['results']) == 6
     keyvalue = next(r for r in result['results'] if r.get('kvmap'))
     assert keyvalue['kvmap']['__native_type__'] == 'literal'
@@ -114,22 +126,39 @@ def test_all_result_families_roundtrip_and_ranking():
     assert len(result['infoboxes']) == 1
 
 
-def test_all_five_processor_families_available_without_flask_context():
+def test_receipts_from_the_previous_runtime_still_decode():
+    """Stored source receipts carry result classes of the formerly vendored engine."""
     result = probe('''
- from searx.search.processors import ProcessorMap
- import flask
- engine=processors['google'].engine
- values={'families':sorted(ProcessorMap.processor_types),'flask_context':flask.has_request_context()}
- for family,query in [('online_dictionary','en-de hello'),('online_currency','10 USD to EUR'),('online_url_search','lookup https://example.org/page')]:
-  p=ProcessorMap.processor_types[family](engine)
-  sq=SearchQuery(query,[EngineRef('google','general')],lang='en')
-  values[family]=w.plain(p.get_params(sq,'general'))
- w.send(values)
-''')
-    assert result['families'] == ['offline','online','online_currency','online_dictionary','online_url_search']
-    assert result['flask_context'] is False
-    assert result['online_dictionary']['query'] == 'hello'
-    assert result['online_dictionary']['from_lang'][1] == 'en'
-    assert result['online_currency']['amount'] == 10
-    assert result['online_currency']['from_iso4217'] == 'USD'
-    assert result['online_url_search']['search_urls']['http'] == 'https://example.org/page'
+ old=[{'__native_type__':'searx.result_types._base:MainResult','value':{'__native_type__':'mapping','value':[
+   ['url','https://example.org/old'],['title','Old'],['parsed_url',['https','example.org','/old','','','']],
+   ['engines',{'__native_type__':'set','value':['google']}]]}},
+  {'__native_type__':'searx.result_types.answer:Answer','value':{'__native_type__':'mapping','value':[['answer','7']]}}]
+ value=w.merge({'sources':[{'name':'google','weight':1}],'groups':[{'engine':'google','results':old}]})
+ try:
+  w.unpack({'__native_type__':'os:system','value':{}})
+  rejected=False
+ except ValueError:
+  rejected=True
+ w.send({'merged':value,'rejected':rejected})
+''', engines=('mwmbl',))
+    assert result['merged']['results'][0]['url'] == 'https://example.org/old'
+    assert result['merged']['answers'][0]['answer'] == '7'
+    assert result['rejected'] is True
+
+
+def test_only_online_and_offline_adapters_are_supported(tmp_path):
+    adapter = tmp_path / 'dictionary_adapter.py'
+    adapter.write_text('\n'.join(["engine_type = 'online_dictionary'", "categories = ['general']",
+                                   'def request(query, params):', "    params['url'] = 'https://example.org'",
+                                   'def response(resp):', '    return []', '']))
+    result = probe(f'''
+ from demiflow.collect.native_search.sources import load, SourceLoadError
+ try:
+  load({{'name':'dictionary','engine':{str(adapter)[:-3]!r}}},10)
+  status='loaded'
+ except SourceLoadError as exc:
+  status=exc.status
+ w.send({{'status':status,'sqlite':loaded['local'].engine_type}})
+''', engines=({'name': 'local', 'engine': 'sqlite', 'database': str(tmp_path / 'db.sqlite'),
+                'query_str': 'select 1'},))
+    assert result == {'status': 'unsupported_processor', 'sqlite': 'offline'}

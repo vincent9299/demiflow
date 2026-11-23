@@ -1,6 +1,6 @@
 """NASA image search with explicit canonical links or a bounded asset manifest."""
 from urllib.parse import urlencode, quote, urlsplit
-from searx.network import get
+from demiflow.collect.native_search.adapter import get
 from demiflow.services.engines.image_source_utils import result_list
 
 about = {'website': 'https://images.nasa.gov/', 'use_official_api': True,

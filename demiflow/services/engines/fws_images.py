@@ -3,7 +3,7 @@ import json
 import re
 from urllib.parse import urlencode, urljoin, urlsplit
 from lxml import html
-from searx.network import get
+from demiflow.collect.native_search.adapter import get
 from demiflow.services.engines.image_source_utils import bounded, image_row, raster_variant
 
 about = {'website': 'https://www.fws.gov/library', 'use_official_api': False,

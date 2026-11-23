@@ -17,7 +17,7 @@ import tempfile
 import time
 
 from demiflow.execution.request_limits import RequestGate
-from .config import SearchConfig, baseline_id, RUNTIME_VERSION, runtime_id, digest, resolve, public, validate_language
+from .config import SearchConfig, RUNTIME_VERSION, runtime_id, digest, resolve, public, validate_language
 
 
 class WorkerError(RuntimeError):

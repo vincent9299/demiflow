@@ -1,0 +1,50 @@
+"""Named search sources available without a custom ``module``.
+
+Each entry names its adapter under ``native_search/engines`` (``engine``) and
+default settings; ``SearchConfig.engines`` entries override any of them.
+``disabled`` marks sources that are not part of a default selection (selection
+is always explicit in ``SearchConfig``). Names are kept stable because stored
+configurations and receipts refer to them.
+"""
+
+SOURCES = (
+    # web
+    {'name': 'google', 'engine': 'google', 'shortcut': 'go', 'disabled': True},
+    {'name': 'bing', 'engine': 'bing', 'shortcut': 'bi', 'disabled': True},
+    {'name': 'yandex', 'engine': 'yandex', 'categories': 'general', 'search_type': 'web', 'shortcut': 'yd',
+     'disabled': True},
+    {'name': 'mwmbl', 'engine': 'mwmbl', 'shortcut': 'mwm', 'disabled': True},
+    {'name': 'wikipedia', 'engine': 'wikipedia', 'shortcut': 'wp', 'display_type': ['infobox'],
+     'categories': ['general']},
+    {'name': 'wikisearch', 'engine': 'wikisearch', 'categories': ['general']},
+    # image search engines
+    {'name': 'google images', 'engine': 'google_images', 'shortcut': 'goi', 'disabled': True},
+    {'name': 'bing images', 'engine': 'bing_images', 'shortcut': 'bii'},
+    {'name': 'yandex images', 'engine': 'yandex', 'categories': 'images', 'search_type': 'images',
+     'shortcut': 'ydi', 'disabled': True},
+    {'name': 'baidu images', 'engine': 'baidu', 'baidu_category': 'images', 'categories': ['images'],
+     'shortcut': 'bdi', 'disabled': True},
+    {'name': 'brave.images', 'engine': 'brave', 'brave_category': 'images', 'categories': ['images', 'web'],
+     'shortcut': 'brimg'},
+    {'name': 'sogou images', 'engine': 'sogou_images', 'shortcut': 'sogoui', 'disabled': True},
+    {'name': 'quark images', 'engine': 'quark', 'quark_category': 'images', 'categories': ['images'],
+     'shortcut': 'qki', 'disabled': True},
+    {'name': 'duckduckgo images', 'engine': 'duckduckgo_images', 'categories': ['images'], 'shortcut': 'ddi'},
+    {'name': 'qwant images', 'engine': 'qwant', 'qwant_categ': 'images', 'categories': ['images', 'web'],
+     'shortcut': 'qwi', 'disabled': True},
+    {'name': 'pinterest', 'engine': 'pinterest', 'shortcut': 'pin'},
+    # open image collections
+    {'name': 'wikicommons.images', 'engine': 'wikicommons', 'categories': 'images', 'wc_search_type': 'image',
+     'shortcut': 'wci'},
+    {'name': 'public domain image archive', 'engine': 'public_domain_image_archive', 'shortcut': 'pdia',
+     'disabled': True},
+    {'name': 'pexels', 'engine': 'pexels', 'shortcut': 'pe'},
+    {'name': 'openverse', 'engine': 'openverse', 'categories': 'images', 'shortcut': 'opv'},
+    {'name': 'unsplash', 'engine': 'unsplash', 'shortcut': 'us'},
+)
+
+
+def entries():
+    """Catalog entries keyed by lowercase name (fresh copies)."""
+    import copy
+    return {entry['name'].lower(): copy.deepcopy(entry) for entry in SOURCES}

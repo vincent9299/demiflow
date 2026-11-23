@@ -1,6 +1,6 @@
 """Library of Congress photographs: bounded item details and explicit JPEGs."""
 from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
-from searx.network import get
+from demiflow.collect.native_search.adapter import get
 from demiflow.services.engines.image_source_utils import bounded, image_row, http_url, raster_variant, result_list
 
 about = {'website': 'https://www.loc.gov/', 'use_official_api': True,

@@ -1,6 +1,6 @@
 """Rijksmuseum Linked Art search; at most four metadata requests per result."""
 from urllib.parse import urlencode, urlsplit
-from searx.network import get
+from demiflow.collect.native_search.adapter import get
 from demiflow.services.engines.image_source_utils import bounded, image_row, result_list, iiif3_variant
 
 about = {'website': 'https://data.rijksmuseum.nl/', 'use_official_api': True,
