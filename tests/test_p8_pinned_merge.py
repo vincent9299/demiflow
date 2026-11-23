@@ -1,12 +1,10 @@
 """Public fixed-source merge uses its original worker cut and one external publication."""
-import json
-
 import lance
 import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution import RunContext
+from demiflow.execution import RunContext, UnresolvedCommit
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.publication_facts import inspect_write_receipt
 
@@ -78,3 +76,36 @@ def test_python_callback_uses_original_record_path(tmp_path):
         assert final['native'].get('path') and 'publication' not in final['native']
         assert receipt.committed_version == 2
     assert lance.dataset(target).to_table()['value'].to_pylist() == [10, 11, 12, 13]
+
+
+def test_fixed_merge_ambiguous_native_commit_never_reinvokes_writer(tmp_path, monkeypatch):
+    from demiflow.execution.lance_sink import LanceSink
+    patch, target = _inputs(tmp_path, 3)
+    source = lambda: data.read_lance(patch, version=1, batch_size=3)
+    directory = tmp_path/'run'
+    def interrupt(*args):
+        raise RuntimeError('native commit returned before receipt')
+    with pytest.raises(RuntimeError, match='before receipt'), RunContext.start(directory) as run:
+        ref = run.ref
+        with monkeypatch.context() as mp:
+            mp.setattr(LanceSink, '_receipt', interrupt)
+            _merge(source(), target)
+    assert lance.dataset(target).version == 2
+    with pytest.raises(UnresolvedCommit), RunContext.resume(ref):
+        _merge(source(), target)
+    assert lance.dataset(target).version == 2
+    assert lance.dataset(target).to_table()['value'].to_pylist() == [0, 1, 2]
+
+
+def test_foreign_target_after_fixed_merge_prepare_fences_commit(tmp_path, monkeypatch):
+    from demiflow.execution import commit as protocol
+    patch, target = _inputs(tmp_path, 3)
+    def compete(name, _):
+        if name == 'after_prepared':
+            lance.write_dataset(pa.table({'key':[9], 'value':[90], 'keep':[9]}), target, mode='append')
+    with pytest.raises(UnresolvedCommit), RunContext.start(tmp_path/'run'):
+        monkeypatch.setattr(protocol, 'fault_point', compete)
+        _merge(data.read_lance(patch, version=1, batch_size=3), target)
+    table = lance.dataset(target)
+    assert table.version == 2
+    assert table.to_table()['value'].to_pylist() == [-1, -1, -1, 90]
