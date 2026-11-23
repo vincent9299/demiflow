@@ -179,12 +179,6 @@
     const tools=$('div',undefined,'wb-canvas-tools');
     const pipelineCode=$('section',undefined,'wb-pipeline-code');pipelineCode.hidden=true;
     pipelineCode.setAttribute('aria-label','Pipeline 源码');
-    const pipelineCodeButton=button('Pipeline 源码',()=>{
-      argumentEditor.hide();
-      if(data().mode==='checks')state.setMode('config');
-      pipelineCodeOpen=true;pipelineSequence++;pipelineReadKey=null;
-      disposeReaders(pipelineCode);pipelineCode.replaceChildren();updateActions();
-    },flowTabs);
     const checksTab=button('检查',()=>{
       argumentEditor.hide();pipelineCodeOpen=false;pipelineSequence++;pipelineReadKey=null;
       disposeReaders(pipelineCode);pipelineCode.replaceChildren();
@@ -314,8 +308,6 @@
       flowGraphTab.setAttribute('aria-pressed',String(graphTabActive));
       argumentsButton.setAttribute('aria-pressed',String(argsShown));
       argumentsButton.disabled=!working?.entry;
-      pipelineCodeButton.setAttribute('aria-pressed',String(codeShown));
-      pipelineCodeButton.disabled=!planPreview&&!data().graph?.binding?.entry;
       checksTab.setAttribute('aria-pressed',String(checksActive));
       planContext.hidden=monitoring||operatorsActive||argsShown||checksActive;
       toolbar.hidden=operatorsActive||(monitoring&&!hasRun&&!comparison);

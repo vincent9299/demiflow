@@ -216,13 +216,13 @@ SOFTWARE.
     const sidebar=el('aside',undefined,'development-session-sidebar'),sideHeading=el('div',undefined,'development-session-heading');
     const createNew=el('button',undefined,'development-new-conversation');createNew.type='button';createNew.append(el('span','＋'),el('span','新会话'));createNew.disabled=true;
     let sidebarTab='sessions';
-    const navigation=ForgeNavigation.header({title:'开发',searchLabel:'搜索会话',placeholder:'筛选会话、文件或算子',onSearch:()=>{if(sidebarTab==='files'||sidebarTab==='operators')state.files?.setFilter(navigation.search.value);else if(!state.initializing)renderConversations();}});
+    const navigation=ForgeNavigation.header({title:'开发',searchLabel:'搜索会话',placeholder:'筛选会话、文件或大纲',onSearch:()=>{if(sidebarTab==='files'||sidebarTab==='operators')state.files?.setFilter(navigation.search.value);else if(!state.initializing)renderConversations();}});
     const sideTabs=el('div',undefined,'dev-sidebar-tabs');
     const sessionsTabBtn=el('button','会话','dev-sidebar-tab is-active');sessionsTabBtn.type='button';sessionsTabBtn.setAttribute('aria-pressed','true');
     const filesTabBtn=el('button',undefined,'dev-sidebar-tab');filesTabBtn.type='button';filesTabBtn.setAttribute('aria-pressed','false');
     const filesBadge=el('span','0','dev-change-badge');filesBadge.hidden=true;
     filesTabBtn.append(el('span','文件'),filesBadge);
-    const operatorsTabBtn=el('button','算子','dev-sidebar-tab');operatorsTabBtn.type='button';operatorsTabBtn.setAttribute('aria-pressed','false');
+    const operatorsTabBtn=el('button','大纲','dev-sidebar-tab');operatorsTabBtn.type='button';operatorsTabBtn.setAttribute('aria-pressed','false');
     sideTabs.append(sessionsTabBtn,filesTabBtn,operatorsTabBtn);
     const sessionsPane=el('div',undefined,'dev-sidebar-pane'),filesPane=el('div',undefined,'dev-sidebar-pane'),operatorsPane=el('div',undefined,'dev-sidebar-pane');filesPane.hidden=true;operatorsPane.hidden=true;
     sideHeading.append(createNew);
