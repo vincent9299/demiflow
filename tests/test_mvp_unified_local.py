@@ -99,51 +99,31 @@ def test_workbench_unified_take_and_count_read_back_committed_handle(tmp_path):
 
 
 def test_unified_readback_is_single_committed_handle_authority(tmp_path):
-    # S7 item 1: Local take/count read back the ONE neutral committed-handle
-    # authority, not a second readback set. run_local_chain returns
-    # _LocalMaterializedHandle(_ChainBlocks(terminal), terminal.rows) where the
-    # blocks iterate the driver's committed chain receipts (DriverStreamTerminal
-    # .replay_descriptors -> sink.block_entries -> durable _SpilledBlock). This is
-    # the exact handle class Ray's _chain_readback delegates to a neutral
-    # LocalDatasetExecutor for (ray.py:537-549), so both backends share one
-    # readback authority. Assert the structure and that readback is repeatable
-    # over committed receipts (no re-execution, no divergent second path).
     from demiflow.data.sources import MaterializedSource
-    from demiflow.execution.chain import DriverStreamTerminal, _ChainBlocks
-    from demiflow.execution.executors.local import (
-        _CheckpointBlocks, _LocalMaterializedHandle, _SpilledBlock,
-    )
+    from demiflow.execution.dataflow_handles import StoredMaterializedHandle
 
     def double(row):
         return {**row, "x": row["x"] * 2}
 
     expected = [{"x": i * 2} for i in range(10)]
     with RunContext.start(tmp_path / "run", limits=LIMITS) as run:
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+        with data.local_execution(workers=1, partitions=1,
                                   unified_chain=True):
             handle = data.from_items(_items(10)).map_async(double, concurrency=1).materialize()
             source = handle._source
             assert isinstance(source, MaterializedSource)
             committed = source.handle
-            assert isinstance(committed, _LocalMaterializedHandle)
-            # Unified chain reads committed chain receipts, NOT the legacy
-            # in-driver checkpoint pages: one authority, distinct block reader.
-            assert isinstance(committed.blocks, _ChainBlocks)
-            assert not isinstance(committed.blocks, _CheckpointBlocks)
-            assert isinstance(committed.blocks.terminal, DriverStreamTerminal)
+            assert isinstance(committed, StoredMaterializedHandle)
             assert committed.row_count == source.row_count == 10
-            assert committed.recovery_reference["run_id"] == run.ref.run_id
-            # count() takes the committed-handle fast path (no re-execution).
-            assert handle.count() == committed.row_count == 10
-            blocks = list(committed.blocks)
-            assert blocks and all(isinstance(b, _SpilledBlock) and b.durable for b in blocks)
-            assert all(str(run.directory) in b.path for b in blocks)
-            # Repeatable lazy readback over the same committed receipts: two
-            # take_all passes are identical, proving no second divergent authority.
+            receipts = run.journal.execution_commits('action-1')
+            assert receipts and all(fact['status'] == 'acked' for fact in receipts)
+            assert sorted(committed.rows(), key=lambda row: row["x"]) == expected
+            assert run.journal.execution_commits('action-1') == receipts
             first = sorted(handle.take_all(), key=lambda r: r["x"])
             second = sorted(handle.take_all(), key=lambda r: r["x"])
             assert first == second == expected
-    assert _managed_worker_pids(tmp_path / "run-resources")
+    from runtime_v3_owned_crash import process_records
+    assert process_records(tmp_path / "run")
 
 
 def test_workbench_unified_chain_kill_recovers_acked_prefix_exactly_once(tmp_path):
@@ -209,26 +189,10 @@ def test_workbench_unified_chain_kill_recovers_acked_prefix_exactly_once(tmp_pat
 
 
 
-def test_unified_chain_shares_legacy_recovery_gate_and_fail_closes_unknown(tmp_path):
-    # R4 "unknown paid call never auto-replayed" half, bound onto the unified chain
-    # seam without re-proving the frozen journal units. Two facts secure no-regression:
-    #   (1) the chain worker (WorkerStreamProgress) and the legacy in-driver terminal
-    #       (StreamMaterialization) bind stages through the IDENTICAL StreamStageProgress
-    #       method, so flipping unified_chain cannot regress the native_stream_recovery
-    #       -> NativePromptRecovery -> check_recovery gate (stream_materialize.py:235);
-    #   (2) that production gate (RunPromptJournal.check_recovery, stream_recovery.py:57)
-    #       fail-closes a persisted unknown effect on resume rebind, before any dispatch.
-    # The journal write uses a synchronous run-level shard for deterministic durability;
-    # the async transport/S2 reservation budget is orthogonal to the fail-closed gate,
-    # which is invoked here as the exact production method over the durable journal.
-    from demiflow.execution.stream_materialize import StreamStageProgress, StreamMaterialization
-    from demiflow.execution.worker.progress import WorkerStreamProgress
+def test_paid_call_with_unknown_effect_refuses_new_dispatch_after_restart(tmp_path):
     from demiflow.operator_llm.journal import UncertainPromptCall
     from demiflow.operator_llm.sqlite_journal import _SQLiteJournalShard
     from demiflow.operator_llm.stream_recovery import RunPromptJournal
-
-    assert WorkerStreamProgress.bind_stages is StreamStageProgress.bind_stages
-    assert StreamMaterialization.bind_stages is StreamStageProgress.bind_stages
 
     def bind_gate(run):
         # Mirrors bind_stages' native_stream_recovery rebind: bind the run-level durable

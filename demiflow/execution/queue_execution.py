@@ -154,28 +154,6 @@ def finalize_task(source,delivery,row):
     return fact
 
 
-def write_queue_datasink(executor,source_plan,plan,sink,action):
-    source=queue_source(source_plan)
-    (index,fetch),contract=validate_topology(source,plan,sink,action=action)
-    source.configure(action,fetch,sink,contract,'node-'+str(index))
-    from .stream_materialize import stream_view
-    async def consume(row):
-        scope=current_row_scope()
-        if scope is None or scope.delivery is None:
-            raise RecoveryContractError('Final task row lost its native delivery sidecar')
-        await source.io.run(finalize_task,source,scope.delivery,row)
-    stats=stream_view(executor,source_plan,plan)._run_stream(source_iter=source.rows(),consume=consume)
-    source.assert_settled()
-    metadata=source.snapshot_metrics()
-    action.complete(dict(kind='write_datasink',queue=metadata))
-    executor._run_ref=action.context.ref
-    from ..data.stats import ExecutionMetadata
-    executor._last_metadata=ExecutionMetadata(source_name='QueueDatasource',rows_read=metadata['claimed'],
-        rows_output=metadata['settled'],diagnostics={'queue':metadata})
-    return WriteResult(written_rows=metadata['settled'],failed_rows=0,blocks_written=metadata['settled'],
-                       target='queue:'+source.config.queue_id+':'+source.pool,metadata=metadata)
-
-
 def configure_explicit(source,plan,action):
     from .queue_ack import QueueAcknowledge
     from ..data.plan import LogicalPlan

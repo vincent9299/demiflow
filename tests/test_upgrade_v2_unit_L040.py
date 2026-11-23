@@ -20,7 +20,7 @@ from demiflow.data.sources import (
     DatasourceSource, FileSource, ItemsSource, IterableSource, LanceSource,
     MaterializedSource, RangeSource, SqlSource,
 )
-from demiflow.execution.chain import source_callable_roots
+from demiflow.execution.seal.business_sources import source_callable_roots
 from demiflow.execution.local_kernel import KeyedSource, PlanInput, UnionSource
 from demiflow.execution.recovery_contract import RecoveryContractError
 
@@ -179,7 +179,7 @@ def test_shared_substructure_is_not_a_cycle():
 
 
 def test_over_budget_structure_fails_closed():
-    from demiflow.execution.chain import _DEP_MAX_NODES
+    from demiflow.execution.seal.business_sources import _DEP_MAX_NODES
     inputs = tuple(_plan_input() for _ in range(_DEP_MAX_NODES))
     with pytest.raises(RecoveryContractError, match="value budget"):
         source_callable_roots(UnionSource(inputs=inputs))

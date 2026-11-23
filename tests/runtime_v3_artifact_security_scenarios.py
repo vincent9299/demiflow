@@ -83,7 +83,7 @@ def _artifact_attacks(execution, root):
     from demiflow.execution.dataflow_artifacts import fetch_runtime_bundle
     from demiflow.execution.seal.plan import (verify_dataflow_program, load_dataflow,
                                                 _artifact_from_json)
-    from demiflow.execution.dataflow_code import mount_sources
+    from demiflow.execution.seal.business_sources import mount_sources
     from demiflow.execution.recovery_contract import identity
     store, bounds, sealed = execution._store, execution._bounds, execution._sealed
     node = next(n for n in execution._graph.nodes if n.kind == 'transform')

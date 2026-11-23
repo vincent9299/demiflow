@@ -5,7 +5,7 @@ import pytest
 
 from demiflow.data.plan import CallableSpec
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_code import business_sources, source_identity
+from demiflow.execution.seal.business_sources import business_sources, source_identity
 
 
 @pytest.fixture
@@ -52,7 +52,7 @@ def test_package_files_refuse_unowned_paths(recipe, tmp_path, filename):
 
 
 def test_large_package_member_stages_and_mounts(recipe, tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_code import mount_sources, stage_sources
+    from demiflow.execution.seal.business_sources import mount_sources, stage_sources
     from test_runtime_v3_d import FakeStore
     entry, parent = recipe
     member = parent / 'extra'
@@ -83,7 +83,7 @@ def test_large_package_member_stages_and_mounts(recipe, tmp_path, monkeypatch):
 def test_inherited_package_root_is_classified_by_the_active_interpreter(tmp_path, monkeypatch):
     import site
     import types
-    from demiflow.execution.chain import _classify_dependency_module
+    from demiflow.execution.seal.business_sources import _classify_dependency_module
     installed = tmp_path / 'base' / 'site-packages'
     source = installed / 'example_wheel.py'
     installed.mkdir(parents=True)

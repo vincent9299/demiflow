@@ -420,3 +420,27 @@ def test_local_worker_rejects_stale_boot_real_process(env):
             process.wait(timeout=5)
         sock.close()
         Path(launch_path).unlink(missing_ok=True)
+
+def test_retired_execution_launch_never_enters_a_control_connector(tmp_path):
+    from demiflow.execution.worker.bootstrap import LocalControlConnector
+
+    invalid = {'execution': {}}
+    with pytest.raises(ProtocolError, match='retired'):
+        WorkerRuntime(invalid)
+    with pytest.raises(ProtocolError, match='retired'):
+        spawn_local_worker(invalid, log_path=tmp_path / 'worker.log')
+    assert list(tmp_path.iterdir()) == []
+    local = LocalControlConnector()
+    with pytest.raises(ProtocolError, match='retired'):
+        local.stage('allocation', invalid)
+    assert local.driver_socks == {} and local._staged == {} and local._pending == {}
+
+
+def test_retired_ray_launch_never_enters_provider_staging():
+    pytest.importorskip('ray')
+    from demiflow.execution.hosts.ray_worker_host import RayControlConnector
+
+    connector = RayControlConnector()
+    with pytest.raises(ProtocolError, match='retired'):
+        connector.stage('allocation', {'execution': {}})
+    assert connector._staged == {} and connector._actors == {}

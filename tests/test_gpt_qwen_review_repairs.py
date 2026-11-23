@@ -31,8 +31,8 @@ def test_prompt_long_enum_preserves_historical_native_bytes(size):
         for key in ('concurrency', 'queue_depth', 'catch', 'hard_timeout', 'execution') if hasattr(op, key)}}
     assert identity(operation_identity(op)) == identity(historical)
     assert identity(plan_identity('materialize', ds._source, ds._plan)['operations'][0]) == identity(historical)
-    from demiflow.execution.chain import plan_code_pin, _stable_code_identity
-    assert plan_code_pin(ds._plan)['operations'] == _stable_code_identity([historical])
+    from demiflow.execution.seal.business_sources import plan_code_pin, stable_code_identity
+    assert plan_code_pin(ds._plan)['operations'] == stable_code_identity([historical])
 
 
 def _encoded(callback):

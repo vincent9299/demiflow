@@ -376,8 +376,8 @@ def clone_resident_callable(target, *, max_bytes, call_args=(), call_kwargs=None
                 if function.__defaults__ is not None else None)
     # Use the same by-value global-name closure as sealing. Self-recursion must
     # resolve to this owner; copying an entire module namespace is unbounded.
-    from ..chain import _code_global_names
-    names = _code_global_names(function.__code__)
+    from ..seal.business_sources import code_global_names
+    names = code_global_names(function.__code__)
     namespace = {name:function.__globals__[name] for name in names if name in function.__globals__}
     for name in ('__builtins__', '__name__', '__package__'):
         if name in function.__globals__:

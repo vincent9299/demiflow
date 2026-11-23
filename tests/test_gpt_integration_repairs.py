@@ -10,7 +10,7 @@ from demiflow import data
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.recovery_identity import plan_identity
-from demiflow.execution.chain import plan_code_pin
+from demiflow.execution.seal.business_sources import plan_code_pin
 from demiflow.execution.plan_facts import operation_facts
 from test_embeddings import server as embedding_server
 
@@ -19,50 +19,30 @@ def _identity(row):
     return row
 
 
-def test_run_stream_consumes_sealed_limits_without_claiming_replay(tmp_path, monkeypatch):
-    from demiflow.execution.native_plan import load_native_execution
-    from demiflow.execution import stream
-    limits = []
-    original = stream.run_stream
-    def observed(*args, **kwargs):
-        limits.append(kwargs['stage_limits'])
-        return original(*args, **kwargs)
-    monkeypatch.setattr(stream, 'run_stream', observed)
-    def pipeline():
-        return data.from_items([{'id': 1}, {'id': 2}]).map(_identity, execution='thread')
-    with RunContext.start(tmp_path/'run') as run:
-        stats = pipeline().run_stream()
-        assert stats is not None and limits[0][0]['inflight_rows'] > 0
-        from demiflow.execution.sealed_plans import load_sealed_plan, load_execution_bindings
-        plan = load_sealed_plan(run.directory, 'action-1')
-        bindings = load_execution_bindings(run.directory, 'action-1', sealed_plan=plan)
-        layout, placement = load_native_execution(run, 'action-1',
-            execution_id=bindings['document']['executions'][0]['execution_id'])
-        assert placement.backend == 'local_stream'
-        assert placement.recovery == 'delivery_only'
-    def fail(row):
-        raise RuntimeError('interrupted delivery fixture')
-    broken = data.from_items([{'id': 1}]).map(fail, execution='thread')
-    with pytest.raises(RuntimeError, match='interrupted delivery fixture'):
-        with RunContext.start(tmp_path/'interrupted') as interrupted:
-            broken.run_stream()
-    with pytest.raises(RecoveryContractError, match='delivery-only'):
-        with RunContext.resume(interrupted.ref):
-            broken.run_stream()
+def test_run_stream_uses_the_sealed_worker_limits(tmp_path):
+    from demiflow.execution.sealed_plans import load_sealed_plan
+    with RunContext.start(tmp_path/'run', limits={'checkpoint_rows':2}) as run:
+        stats = data.from_items([{'id': 1}, {'id': 2}]).map_async(lambda row: row).run_stream()
+        physical = load_sealed_plan(run.directory, 'action-1', version='v3')['physical']
+        assert physical.policy.checkpoint_rows == 2
+        assert stats.emitted == 2
+        assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
 
 
 @pytest.mark.parametrize('terminal', ['take', 'take_all', 'count', 'iter_rows', 'iter_batches',
                                     'materialize', 'schema', 'size_bytes', 'write_lance'])
 def test_public_terminal_consumes_sealed_execution(tmp_path, monkeypatch, terminal):
-    from demiflow.execution import native_plan
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+    from demiflow.execution.sealed_plans import load_sealed_plan
     calls = []
-    original = native_plan.execute_native_plan
-    def observed(*args, **kwargs):
-        calls.append(kwargs['layout'])
-        yield from original(*args, **kwargs)
-    monkeypatch.setattr(native_plan, 'execute_native_plan', observed)
+    original = DataflowExecution.start
+    def observed(execution):
+        result = original(execution)
+        calls.append((execution._action.action_id, execution._physical))
+        return result
+    monkeypatch.setattr(DataflowExecution, 'start', observed)
     with RunContext.start(tmp_path / 'run') as run:
-        ds = data.from_items([{'id': 1}, {'id': 2}]).map(_identity)
+        ds = data.from_items([{'id': 1}, {'id': 2}]).map(lambda row: row)
         if terminal == 'take':
             assert ds.take(1) == [{'id': 1}]
         elif terminal == 'write_lance':
@@ -72,9 +52,9 @@ def test_public_terminal_consumes_sealed_execution(tmp_path, monkeypatch, termin
             assert list(getattr(ds, terminal)())
         else:
             assert getattr(ds, terminal)() is not None
-        assert calls and len(calls) == 1
-        assert calls[0].executions[0].backend == 'local_pull'
-        assert run.journal.source_binding('action-1-sealed-plan') is not None
+        assert len(calls) == 1
+        action_id, physical = calls[0]
+        assert load_sealed_plan(run.directory, action_id, version='v3')['physical'] == physical
 
 
 @pytest.mark.parametrize('change', [dict(batch_size=3), dict(call_output='audit'),
@@ -303,25 +283,21 @@ def test_materialized_inputs_survive_nested_relational_binding(tmp_path):
         assert combined.take_all() == [{'id': 1, 'x': 2, 'y': 3}] * 2
 
 
-def test_native_program_stage_swap_is_rejected_before_execution(tmp_path, monkeypatch):
-    import dataclasses
-    from demiflow.execution import native_plan
-    from demiflow.execution.capabilities import admit_action_plan
-    from demiflow.execution.run_context import RunAction
-    from demiflow.execution.plan_interpreter import PlanContractError
+def test_native_program_stage_swap_is_rejected_before_execution(tmp_path):
+    from dataclasses import replace
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.seal.plan import verify_action_programs
+    from test_runtime_v3_real_seams import prepared
+
     ds = data.range(2).map(_identity).map(_identity)
-    decision = admit_action_plan(ds._source, ds._plan, action_kind='take_all')
-    with RunContext.start(tmp_path/'run') as run:
-        action = RunAction(run, 'mapping-proof', {'kind': 'take_all'})
-        layout, placement = native_plan.bind_native_execution(action, ds._source, ds._plan, decision=decision)
-        programs = [dict(p) for p in placement.programs]
-        bindings = [dict(b) for b in programs[0]['operator_bindings']]
-        bindings[0]['stage_id'], bindings[1]['stage_id'] = bindings[1]['stage_id'], bindings[0]['stage_id']
-        programs[0]['operator_bindings'] = bindings
-        swapped = dataclasses.replace(placement, programs=tuple(programs))
-        monkeypatch.setattr(native_plan, 'load_native_execution', lambda *a, **k: (layout, swapped))
-        with pytest.raises(PlanContractError, match='Program stages'):
-            native_plan.bind_native_execution(action, ds._source, ds._plan, decision=decision)
+    with prepared(tmp_path, ds) as (execution, services):
+        sealed = execution._sealed
+        assert len(sealed.programs) >= 2
+        swapped = replace(sealed, programs=tuple(reversed(sealed.programs)))
+        with pytest.raises(DataflowError, match='membership differs'):
+            verify_action_programs(services.action, execution._graph, execution._physical, swapped,
+                                   store=services.store, bounds=services.bounds)
+        assert not services.action.context.journal.execution_commits(services.action.action_id)
 
 
 def test_embedding_unknown_process_loss_never_resends(embedding_server, tmp_path):

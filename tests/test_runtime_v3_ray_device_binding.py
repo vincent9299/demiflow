@@ -10,7 +10,7 @@ ray = pytest.importorskip('ray')
 
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.resource_state import RunResourceState
-from demiflow.execution.worker.ray_host import RayControlConnector
+from demiflow.execution.hosts.ray_worker_host import RayControlConnector
 from demiflow.resources.manager import ResourceManager
 from demiflow.resources.ray import RayResourceProvider
 from demiflow.resources.contracts import (

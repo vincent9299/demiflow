@@ -1,13 +1,13 @@
 """Actual sealed native caller keeps its take limit while producing Arrow."""
 from contextlib import nullcontext
-from types import SimpleNamespace
 
 import pyarrow as pa
 import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.native_plan import bind_native_execution, execute_native_plan
+from demiflow.execution.dataset_native import execute
+from test_runtime_v3_native_execution_binding import placement
 from demiflow.execution.recovery_identity import plan_identity
 from demiflow.execution.run_context import RunContext
 
@@ -30,14 +30,10 @@ def test_sealed_stream_arrow_keeps_limit_and_the_borrowed_action(tmp_path, kind,
             ds = data.from_iter(source).map(lambda row: row)
             args = {'limit': 3} if kind == 'take' else {'batch_size': 3}
             with run.action(plan_identity(kind, ds._source, ds._plan, arguments=args)) as action:
-                layout, placement = bind_native_execution(action, ds._source, ds._plan,
-                    decision=SimpleNamespace(action_kind=kind, backend='local_stream',
-                        route='stream_delivery', recovery='delivery_only'),
-                    profile={'requests': {'cpu_millis': workers * 1000, 'memory_bytes': 192 * 2**20}})
                 try:
-                    batches = list(execute_native_plan(ds._executor, ds._source, ds._plan,
-                        layout=layout, execution_id=placement.execution_id, arrow=True,
-                        sink_schema=pa.schema([('id', pa.int32())])))
+                    batches = list(execute(ds._executor, ds._source, ds._plan,
+                        execution=placement(cpu=workers*1000, memory=192 * 2**20),
+                        arrow=True, limit=3, sink_schema=pa.schema([('id', pa.int32())])))
                 finally:
                     if workers == 2:
                         assert not marker.exists()

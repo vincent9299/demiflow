@@ -27,7 +27,7 @@ from image_http_fixture import definition, json_definition
 ROOT = Path(sys.argv[1])
 MODE = sys.argv[2] if len(sys.argv) > 2 else 'materialize'
 ROOTS = int(sys.argv[3]) if len(sys.argv) > 3 else 100
-CHILDREN = 100
+CHILDREN = int(sys.argv[4]) if len(sys.argv) > 4 else 100
 COUNTS = Counter()
 LOCK = threading.Lock()
 STARTED = time.monotonic()
@@ -106,7 +106,6 @@ def observed_fsync(fd):
 os.fsync = observed_fsync
 import demiflow.execution.commit as protocol
 from demiflow.execution.recovery_contract import RunRef
-from demiflow.execution.state_artifacts import StateArtifacts
 WRITER_METRICS = []
 ATTEMPTS = []
 INITIAL_USAGE = resource.getrusage(resource.RUSAGE_SELF)
@@ -124,8 +123,9 @@ def fault(name, commit_id):
     else:
         selected = False
         if name == 'after_acked' and fact['action_id'] == 'action-1':
-            ref = fact['prepared']['state'].get('stream-progress')
-            selected = bool(ref and json.loads((ROOT/'run'/ref['path']).read_text())['final'])
+            ref = fact['prepared']['state']['dataflow-cut-v3']
+            cut = json.loads((ROOT/'run'/ref['path']).read_bytes())
+            selected = cut['cut']['final']
     if selected:
         FAULTED = True
         raise RuntimeError('managed-probe-durable-boundary')

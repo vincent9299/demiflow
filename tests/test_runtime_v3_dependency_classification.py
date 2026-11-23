@@ -12,7 +12,8 @@ import types
 import pytest
 
 from demiflow import data
-from demiflow.execution import chain
+from demiflow.execution.seal import business_sources
+from demiflow.execution.chain import stage_plan_artifact
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunContext, RunAction
 
@@ -38,7 +39,7 @@ def test_installation_package_symlink_is_not_business(tmp_path, monkeypatch):
     _installation(monkeypatch, site)
     module = _module('library', site/'library'/'__init__.py')
     assert Path(module.__file__).resolve() == actual/'__init__.py'
-    assert chain._classify_dependency_module(module) is None
+    assert business_sources._classify_dependency_module(module) is None
 
 
 @pytest.mark.parametrize('kind', ['same_name', 'fake_site_packages', 'business_symlink', 'editable', 'dotdot'])
@@ -64,7 +65,7 @@ def test_business_paths_do_not_acquire_installation_exemption(tmp_path, monkeypa
     elif kind == 'dotdot':
         filename = site/'..'/'business'/'site-packages'/'numpy.py'
     module = _module('numpy', filename)
-    assert chain._classify_dependency_module(module) == source.resolve()
+    assert business_sources._classify_dependency_module(module) == source.resolve()
 
 
 def test_source_and_module_path_must_agree_on_installation(tmp_path, monkeypatch):
@@ -76,12 +77,12 @@ def test_source_and_module_path_must_agree_on_installation(tmp_path, monkeypatch
     _installation(monkeypatch, site)
     original = inspect.getsourcefile
     monkeypatch.setattr(inspect, 'getsourcefile', lambda value: str(source) if value is module else original(value))
-    assert chain._classify_dependency_module(module) == source
+    assert business_sources._classify_dependency_module(module) == source
 
 
 @pytest.mark.parametrize('name', ['numpy', 'pandas', 'pyarrow', 'pytest'])
 def test_real_installed_third_party_is_environment_owned(name):
-    assert chain._classify_dependency_module(importlib.import_module(name)) is None
+    assert business_sources._classify_dependency_module(importlib.import_module(name)) is None
 
 
 def _load(path, name, monkeypatch):
@@ -104,17 +105,18 @@ def test_actual_pin_archive_and_fresh_worker_helper_drift(tmp_path, monkeypatch,
     _load(helper, helper_name, monkeypatch)
     module = _load(rule, rule_name, monkeypatch)
     plan = data.from_items([{'x': 1}]).map(module.transform)._plan
-    pin = chain.plan_code_pin(plan)
+    pin = business_sources.plan_code_pin(plan)
     assert set(pin['dependencies']) == {helper_name, rule_name}
     with RunContext.start(tmp_path/'run') as run:
         declaration = {'kind': 'chain-materialize', 'source': {'source_id': 'fixture'}}
         run.journal.bind_execution_action(run.fence, 'main-action', declaration)
         action = RunAction(run, 'main-action', declaration)
-        ref = chain.stage_plan_artifact(action, plan)
+        ref = stage_plan_artifact(action, plan)
         assert {Path(item['source']) for item in ref['code_sources']} == {helper, rule}
         ref_file = tmp_path/'plan-ref.json'; ref_file.write_text(json.dumps(ref))
         script = '''import cloudpickle,json,pathlib,sys
-from demiflow.execution.chain import verify_loaded_plan,plan_code_pin
+from demiflow.execution.chain import verify_loaded_plan
+from demiflow.execution.seal.business_sources import plan_code_pin
 ref=json.loads(pathlib.Path(sys.argv[2]).read_text())
 plan=cloudpickle.loads((pathlib.Path(sys.argv[1])/ref['path']).read_bytes())
 verify_loaded_plan(plan,ref,None)
@@ -143,7 +145,7 @@ def _captured_plan(module):
 
 
 def test_module_count_limit_is_independent_of_source_size(tmp_path):
-    assert chain._DEP_MAX_MODULES == 64
+    assert business_sources._DEP_MAX_MODULES == 64
     modules = []
     for index in range(65):
         path = tmp_path/f'business_{index}.py'; path.write_text('VALUE = 1\n')
@@ -151,10 +153,10 @@ def test_module_count_limit_is_independent_of_source_size(tmp_path):
     for current, next_module in zip(modules, modules[1:]):
         current.next = next_module
     with pytest.raises(RecoveryContractError, match='manifest exceeds budget'):
-        chain.plan_code_pin(_captured_plan(modules[0]))
+        business_sources.plan_code_pin(_captured_plan(modules[0]))
     path = tmp_path/'wide_business.py'
     with path.open('wb') as stream:
         for _ in range(129):
             stream.write(b'#' + b'x'*65534 + b'\n')
-    pin = chain.plan_code_pin(_captured_plan(_module('owned_wide_business', path)))
+    pin = business_sources.plan_code_pin(_captured_plan(_module('owned_wide_business', path)))
     assert pin['dependencies']['owned_wide_business']['bytes'] == path.stat().st_size

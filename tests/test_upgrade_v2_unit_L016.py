@@ -7,8 +7,6 @@ state before any test-owned repair. The five original real cases keep their
 six input rows, two CPUs, checkpoint policy, actual actor death and resume.
 A missing Ray environment is not a passing result. No Ray Data is permitted.
 """
-import ast
-import inspect
 import json
 import time
 
@@ -17,37 +15,9 @@ import pytest
 from demiflow.data.dataset import Dataset
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
-from demiflow.execution import chain
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunContext
 from demiflow.resources.manager import ResourceManager
-
-# Only the facade single-authority check needs the current function AST.
-# Placement, lifecycle, failure and recovery assertions use real runtime facts.
-import textwrap
-
-
-def _function(name):
-    return ast.parse(textwrap.dedent(inspect.getsource(getattr(chain, name)))).body[0]
-
-def _dotted(node):
-    parts = []
-    while isinstance(node, ast.Attribute):
-        parts.append(node.attr)
-        node = node.value
-    if isinstance(node, ast.Name):
-        parts.append(node.id)
-    return ".".join(reversed(parts))
-
-def _calls(node, name):
-    return [item for item in ast.walk(node)
-            if isinstance(item, ast.Call) and _dotted(item.func) == name]
-
-
-
-
-
-
 
 @pytest.mark.ray
 def test_layout_is_interpreted_from_the_sealed_plan(ray_chain_facts):
@@ -153,10 +123,11 @@ def test_actor_kill_stays_after_the_resource_terminal(ray_chain_facts):
 def test_local_and_ray_share_one_terminal_protocol(ray_chain_facts):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     assert type(ray_chain_facts['execution']) is DataflowExecution
-    for name in ('run_local_chain', 'run_ray_chain'):
-        fn = _function(name)
-        assert len(_calls(fn, 'run_dataset_action')) == 1
-        assert not _calls(fn, 'ResourceManager') and not _calls(fn, 'CommitCoordinator')
+    from demiflow.execution.executors.base import DatasetExecutor
+    from demiflow.execution.executors.local import LocalDatasetExecutor
+    from demiflow.execution.executors.ray import RayDatasetExecutor
+    assert LocalDatasetExecutor.execute is RayDatasetExecutor.execute is DatasetExecutor.execute
+
 
 
 
@@ -592,17 +563,8 @@ def _assert_terminal_issued(run, mode):
 
 
 def _materialize_chain(dataset):
-    from demiflow.execution.recovery_identity import plan_identity
-    from demiflow.execution.run_context import current_run
-    run = current_run()
-    with run.action(plan_identity("materialize", dataset._source, dataset._plan)) as action:
-        result = chain.run_ray_chain(dataset._executor, dataset)
-        try:
-            rows = list(result.rows())
-            action.complete({"kind": "materialized", "rows": len(rows)})
-            return rows
-        finally:
-            result.release()
+    with dataset.materialize() as result:
+        return list(result._source.handle.rows())
 
 
 def _assert_no_residual_actor(ray, allocations):
@@ -620,7 +582,7 @@ def _converge_terminal(run, timeout_s=45.0):
     so convergence is bounded by that lease rather than by the kill itself.
     """
     from demiflow.execution.resource_state import RunResourceState
-    from demiflow.execution.worker.ray_host import RayControlConnector
+    from demiflow.execution.hosts.ray_worker_host import RayControlConnector
     from demiflow.resources.manager import ManagerBounds, ResourceManager
     from demiflow.resources.ray import RayResourceProvider
 

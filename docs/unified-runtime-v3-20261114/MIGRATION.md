@@ -13,7 +13,7 @@ ResourceManager及provider契约、WorkerRuntime状态机、原生RunJournal/Com
 | Dataset有效算子、终端 | 纯声明/ActionRequest→v3 | 删除由后端类型造成的前置能力拒绝；保留真实业务安全拒绝 | U |
 | LocalDatasetExecutor | provider+返回值适配 | 明确删除_apply_plan/_execute_plan/_bind_plan/_execution_capabilities/_write_file_body/_require_ray_backend，不保留专属执行循环 | L |
 | RayDatasetExecutor | Ray Core宿主、同一worker | 删除_compile/_build_source及Ray datasource/datasink/private lowering，清空ray.data生产调用 | Y |
-| chain/graph/queue_chain公开兼容入口 | 翻译请求交execute_action | 删除函数内独立启动/调度/提交循环，不再eligibility失败回旧执行器 | F |
+| Dataset 物化、带路由的图与原生队列写出 | Dataset 的 P1 和 Local/Ray 的 materialize_graph 各自绑定一个 v3 action | P8 已退役独立的 chain、queue_chain 及旧签名的图包装。队列事实与原生确认仍由同一队列协议负责。 | F |
 | 原生队列/RawFetch | driver有限服务+worker计算 | 冻结实现不改；不能作为泛化driver UDF fallback | Q |
 | streaming/model/kernel | 同一worker协议 | 复用有消费者的计算/生命周期组件；没有入口后清理旧专属路由，不删历史读取 | B/K/M |
 | 工作台 | 原生封存v3图/物理布局投影 | 静态预览保留但如实标明；新执行认证不可来自重算descriptor | W |

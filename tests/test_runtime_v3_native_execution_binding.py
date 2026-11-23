@@ -194,39 +194,28 @@ def test_cast_admits_input_and_new_output_together_before_allocation(monkeypatch
     assert actual.equals(table.cast(schema))
 
 
-def test_real_legacy_caller_reuses_one_action_and_both_seals(tmp_path, monkeypatch):
+def test_borrowed_native_action_replays_exact_limits_and_schema(tmp_path, monkeypatch):
     from demiflow.execution.checked import action
-    from demiflow.execution.capabilities import ActionDecision
-    from demiflow.execution.native_plan import bind_native_execution, execute_native_plan
-    from demiflow.execution.run_context import current_action
     class Interrupted(Exception):
         pass
     uri = source(tmp_path)
     schema = pa.schema([('id', pa.int32())], metadata={b'legacy': b'bound'})
-    decision = ActionDecision('iter_batches', 'datafusion', 'native_relational', 'final_commit')
-    profile = {'requests': {'cpu_millis': 2000, 'memory_bytes': 32*MiB}}
+
     def execute_caller(session, target_schema=schema, changed_limits=False):
-        from dataclasses import replace
         ds = data.read_lance(uri, version=1).select_columns(['id'])
+        owner = placement(cpu=1000 if changed_limits else 2000)
         with action('iter_batches', ds._source, ds._plan, arguments={'batch_format': 'pyarrow'}):
-            active = current_action()
-            layout, owner = bind_native_execution(active, ds._source, ds._plan,
-                                                  decision=decision, profile=profile)
-            if changed_limits:
-                altered = replace(owner, profile={'requests': {'cpu_millis': 1000, 'memory_bytes': 32*MiB}})
-                layout = replace(layout, executions=(altered,))
-            return list(execute_native_plan(session._executor, ds._source, ds._plan,
-                layout=layout, execution_id=owner.execution_id, arrow=True, sink_schema=target_schema))
+            return list(execute(session._executor, ds._source, ds._plan,
+                                execution=owner, arrow=True, sink_schema=target_schema))
     with pytest.raises(Interrupted):
         with RunContext.start(tmp_path/'legacy-run', limits={'memory_bytes':32*MiB,
                 'batch_rows':2, 'max_row_bytes':8192, 'max_batch_bytes':16384}) as run, \
                 data.local_execution(workers=2, worker_mode='thread') as session:
             ref = run.ref
             expected = execute_caller(session)
-            old_seal = run.journal.source_binding('action-1-sealed-plan')
             new_seal = run.journal.source_binding('action-1-dataflow-sealed')
             commits = run.journal.execution_commits('action-1')
-            assert old_seal and new_seal and commits[-1]['status'] == 'acked'
+            assert new_seal and commits[-1]['status'] == 'acked'
             assert run.position == 1
             assert run.journal.execution_action('action-2') is None
             raise Interrupted()
@@ -245,7 +234,6 @@ def test_real_legacy_caller_reuses_one_action_and_both_seals(tmp_path, monkeypat
     with RunContext.resume(ref) as run, data.local_execution(workers=2, worker_mode='thread') as session:
         actual = execute_caller(session)
         assert run.position == 1
-        assert run.journal.source_binding('action-1-sealed-plan') == old_seal
         assert run.journal.source_binding('action-1-dataflow-sealed') == new_seal
         assert run.journal.execution_commits('action-1') == commits
     assert not launches

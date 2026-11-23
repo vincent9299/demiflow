@@ -91,25 +91,6 @@ class TestScenario1Interpretation:
         assert layout.supported_slice == "chain_v1"
         assert layout.bindings_ref == bindings["ref"]
 
-    def test_load_worker_layout_real(self, workdir):
-        from demiflow.execution.worker.layout import load_worker_layout
-        sc = _sealed_chain(workdir)
-        sp = load_sealed_plan(sc.root, sc.action_id)
-        bindings = load_execution_bindings(sc.root, sc.action_id, sealed_plan=sp)
-        authority = MagicMock()
-        authority.directory = sc.root
-        launch_spec = {"execution_plan": {
-            "action_id": sc.action_id, "group_id": "g0",
-            "bindings_ref": bindings["ref"]}}
-        placement, policy, limits = load_worker_layout(launch_spec, authority, {})
-        assert placement.group_id == "g0"
-        assert isinstance(policy, CheckpointPolicy)
-        assert policy.checkpoint_rows == sc.fx.doc["checkpoint_rows"]
-        assert len(limits) == len(sc.fx.operation_nodes)
-        for idx, budget in limits.items():
-            assert set(budget) == {"inflight_rows", "inflight_bytes", "output_bytes"}
-
-
 # ---------------------------------------------------------------------------
 # Scenario 2: placement profile drives ResourceProfile
 # ---------------------------------------------------------------------------
@@ -147,23 +128,6 @@ class TestScenario3CheckpointPolicy:
         assert isinstance(layout.checkpoint, CheckpointPolicy)
         assert layout.checkpoint.checkpoint_rows == sc.fx.doc["checkpoint_rows"]
         assert layout.checkpoint.interval_ms == sc.fx.pp["recovery"]["checkpoint_interval_ms"]
-
-    def test_progress_uses_policy_rows(self):
-        from demiflow.execution.worker.progress import WorkerStreamProgress
-        action = MagicMock()
-        action.context.limits = {"checkpoint_rows": 999, "max_row_bytes": 4096,
-                                 "checkpoint_interval_ms": 1000,
-                                 "checkpoint_unconfirmed_rows": 2,
-                                 "checkpoint_unconfirmed_bytes": 1024}
-        action.context.directory = Path("/tmp/demiflow-c-test")
-        policy = CheckpointPolicy(checkpoint_rows=42, interval_ms=5000,
-                                  unconfirmed_rows=4, unconfirmed_bytes=64 * 1024 ** 2)
-        progress = WorkerStreamProgress.__new__(WorkerStreamProgress)
-        progress.run = action.context
-        progress.checkpoint_policy = policy
-        progress.batch_rows = (policy.checkpoint_rows if policy is not None
-                               else progress.run.limits["checkpoint_rows"])
-        assert progress.batch_rows == 42
 
     def test_barrier_interval_from_policy(self):
         from demiflow.execution.stream_barrier import CheckpointControl
@@ -402,12 +366,6 @@ class TestScenario8AssignmentValidation:
 # ---------------------------------------------------------------------------
 
 class TestScenario9LegacyPath:
-    def test_no_execution_plan_returns_none(self, workdir):
-        from demiflow.execution.worker.layout import load_worker_layout
-        authority = MagicMock()
-        authority.directory = workdir
-        assert load_worker_layout({}, authority, {}) is None
-
     def test_run_stream_default_no_limits(self):
         from demiflow.data.plan import AsyncMapOp, CallableSpec, LogicalPlan
         from demiflow.execution.stream import run_stream

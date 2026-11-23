@@ -1,49 +1,21 @@
-"""Graph code-pin regression lock (gap④, real-person priority #2 on the graph path).
+"""A routed graph uses the same authenticated program pin at driver and worker load.
 
-The chain/queue carriers seal a code-sensitive code-pin and gate the worker load
-(``verify_loaded_plan``) plus the driver resume (``stage_plan_artifact`` bind_source)
-so a same-Run resume can never mix business-code versions. The graph carrier rode
-``stage_plan_artifact`` (code-pin-aware) on the seal side but its worker
-(``GraphWorkerExecutor._load_plan``) only checked the pickle sha256 and never called
-``verify_loaded_plan``, and the graph spec carried no ``sealed_operators`` — so an
-edited by-reference business UDF could load on a graph worker, and a graph resume
-had no structural operator binding. Option A wires the graph through the SAME shared
-helpers: the driver seals ``_sealed_operators(plan)`` per worker (mirroring
-``verify_loaded_plan``'s recompute exactly) and the worker load calls
-``verify_loaded_plan(plan, plan_ref, sealed_operators)``.
-
-These tests lock that wiring with GENUINE counterexamples, not self-assertion:
-  * worker load gate: unedited graph plan passes (no false reject — the seal formula
-    mirrors the recompute), edited captured business helper -> "code-pin differs";
-  * driver resume seam: re-staging the same graph action with edited business code
-    fail-closes against the sealed binding before any worker launches;
-  * end-to-end real Local graph workers, default memory_incremental, by-reference
-    helper re-imported on the worker: unedited run preserves rows (no false reject);
-  * end-to-end crash -> edit helper -> resume: the graph resume refuses with an
-    identifiable RecoveryContractError (never a TimeoutError, never mixed rows).
-
-Env: standard suite invocation (cwd=repo, PYTHONPATH=repo:repo/tests) so spawned
-worker hosts inherit the engine code AND the business-helper dir (``_load_modules``
-prepends it to PYTHONPATH). The by-value closures cross to the worker by value; the
-captured business helper crosses BY NAME (re-imported). No paid model, no network.
-Tests write only under pytest tmp_path and reclaim only their own graph workers.
+An unchanged business helper must run. Editing only its captured module must refuse
+both a worker load and replay of the original acknowledged run before a new launch.
 """
 import importlib
 import os
-import signal
 import sys
 import uuid
-from types import SimpleNamespace
 
 import pytest
 
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunAction, RunContext
+from demiflow.execution.run_context import RunContext
 
 from test_stage2_unified_plan import _load_modules
 from test_u3_graph_faults import _committed_rows, _release_crash_orphans
@@ -59,21 +31,6 @@ def pidfds_available():
         require_pidfds()
     except (OSError, RuntimeError) as exc:
         pytest.skip("pidfd exit evidence unavailable: " + str(exc))
-
-
-@pytest.fixture
-def sealed(tmp_path):
-    with RunContext.start(tmp_path / "run") as run:
-        declaration = {"kind": "graph-materialize", "source": {"source_id": "fixed"}}
-        run.journal.bind_execution_action(run.fence, "main-action", declaration)
-        action = RunAction(run, "main-action", declaration)
-        try:
-            yield SimpleNamespace(run=run, action=action)
-        finally:
-            record = run.journal.execution_action("main-action")
-            if record is not None and record["result"] is None:
-                run.journal.complete_execution_action(
-                    run.fence, "main-action", {"kind": "test-complete"})
 
 
 def _stream_map(fn):
@@ -102,59 +59,40 @@ def _graph_spec(ancestor_fn, target_fns, *, n, cut_rows, mode, source_id, fixtur
             "queue_depth": 4096, "cut_rows": cut_rows}, readers
 
 
-# --- worker load gate: graph seal mirrors recompute; edited business code refuses ---
+@pytest.mark.parametrize("owner", ["worker", "driver"])
+def test_graph_program_pin_refuses_edited_code(tmp_path, monkeypatch, owner):
+    import json
+    from demiflow import data
+    from demiflow.execution.seal.plan import verify_action_programs, verify_dataflow_program
+    from test_runtime_v3_real_seams import prepared
 
-def test_graph_worker_load_gate_refuses_edited_code(sealed, tmp_path, monkeypatch):
-    from demiflow.execution.chain import (
-        _business_dependency_manifest, stage_plan_artifact, verify_loaded_plan)
-    from demiflow.execution.graph import _sealed_operators
-    from demiflow.planning.dag import _operation_semantics
-    helper_mod, paths, helper = _helper(tmp_path, monkeypatch, "gcpload")
-
-    def transform(row):
-        return {**row, "x": row["x"] + helper_mod.delta()}
-
-    plan = _stream_map(transform)
-    assert helper in _business_dependency_manifest(plan), "captured helper must be pinned"
-    plan_ref = stage_plan_artifact(sealed.action, plan)
-    sealed_ops = _sealed_operators(plan)
-    # The graph seal formula must equal verify_loaded_plan's recompute, else every
-    # graph worker would falsely reject its own sealed plan. The unedited pass below
-    # is the genuine proof (it runs the actual recompute inside verify_loaded_plan).
-    recomputed = [{"logical_node_id": identity([_operation_semantics(op)[0], i])}
-                  for i, op in enumerate(plan.operations)]
-    assert sealed_ops == recomputed
-    verify_loaded_plan(plan, plan_ref, sealed_ops)        # unedited: no false reject
-    paths[helper].write_text("def delta():\n    return 9999\n")
-    importlib.reload(sys.modules[helper])
-    with pytest.raises(RecoveryContractError, match="code-pin differs"):
-        verify_loaded_plan(_stream_map(transform), plan_ref, sealed_ops)
-
-
-# --- driver resume seam: re-staging edited graph code fail-closes before launch ---
-
-def test_graph_driver_resume_seam_refuses_edited_code(sealed, tmp_path, monkeypatch):
-    import cloudpickle
-    import hashlib
-    from demiflow.execution.chain import stage_plan_artifact
-    helper_mod, paths, helper = _helper(tmp_path, monkeypatch, "gcpresume")
+    helper_mod, paths, helper = _helper(tmp_path, monkeypatch, "graph_pin")
 
     def transform(row):
         return {**row, "x": row["x"] + helper_mod.delta()}
 
-    plan = _stream_map(transform)
-    first = stage_plan_artifact(sealed.action, plan)
-    again = stage_plan_artifact(sealed.action, plan)
-    assert again["code_pin_digest"] == first["code_pin_digest"]
-    # Edit ONLY the captured helper; the by-reference closure pickle bytes are unchanged,
-    # so only the code-sensitive code-pin (not the sha256) can catch it.
-    paths[helper].write_text("def delta():\n    return 9999\n")
-    importlib.reload(sys.modules[helper])
-    edited = _stream_map(transform)
-    assert hashlib.sha256(cloudpickle.dumps(edited)).hexdigest() == first["sha256"]
-    with pytest.raises(RecoveryContractError,
-                       match="Business code changed since the plan was sealed"):
-        stage_plan_artifact(sealed.action, edited)
+    ds = data.from_items([{"x": 1}]).map(transform)
+    with prepared(tmp_path, ds) as (execution, services):
+        graph, physical, sealed = execution._graph, execution._physical, execution._sealed
+        pins = json.loads(b"".join(services.store.read(
+            sealed.code_pin_ref, max_bytes=services.bounds.max_control_bytes)))
+        node = next(n for n in graph.nodes if n.kind == 'transform')
+        expected = pins["programs"][node.occurrence_id]
+        assert helper in expected["imports"]
+        ports = {"store": services.store, "bounds": services.bounds}
+
+        def verify():
+            if owner == "driver":
+                return verify_action_programs(services.action, graph, physical, sealed, **ports)
+            return verify_dataflow_program(node.program_ref, expected_pin=expected, **ports)
+
+        verified = verify()
+        if owner == "worker":
+            assert verified.value.instantiate()({"x": 2}) == {"x": 3}
+        paths[helper].write_text("def delta():\n    return 9999\n")
+        importlib.reload(sys.modules[helper])
+        with pytest.raises(DataflowError, match="Loaded program code differs from the sealed pin"):
+            verify()
 
 
 # --- end-to-end: real Local graph workers, by-reference helper, unedited succeeds ---
