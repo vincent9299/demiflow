@@ -83,11 +83,9 @@ PLANNING_MAY_IMPORT = {
     'demiflow.execution.scheduler.dataflow_publication_budget',
     'demiflow.execution.dataflow_schema',
     'demiflow.execution.compiler_support.operator_policy',
-    'demiflow.execution.payload_limits',
     'demiflow.execution.plan_facts',
     'demiflow.execution.recovery_contract',
     'demiflow.execution.recovery_identity',
-    'demiflow.execution.runtime_limits',
 }
 
 

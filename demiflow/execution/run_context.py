@@ -3,6 +3,9 @@
 No scheduler lives here. Drivers bind one context, lower their ordinary plans,
 and use RunJournal for every durable execution decision.
 """
+
+from demiflow.execution.contracts.dataflow import PAYLOAD_FIELDS
+from demiflow.execution.compiler_support.payload_limits import stream_limits
 from contextlib import contextmanager, ExitStack
 from contextvars import ContextVar, copy_context
 from pathlib import Path
@@ -14,7 +17,7 @@ import time
 import uuid
 
 from .recovery_contract import RunRef, RecoveryContractError, identity
-from .runtime_limits import execution_limits, declared_limit_keys
+from demiflow.planning.dataflow_policy import execution_limits, declared_limit_keys
 from .run_journal import RunJournal
 
 _CURRENT = ContextVar("demiflow_run_context", default=None)
@@ -341,7 +344,7 @@ class RunContext:
 
     @property
     def limits(self):
-        from .payload_limits import active_limits
+        from demiflow.execution.run_context import active_limits
         return active_limits(self, self._limits)
 
     @limits.setter
@@ -824,3 +827,44 @@ def admit_stream(plan, *, source_batch_size=1):
             reservation['reserved_bytes'] + source_batch_size * context.limits['max_row_bytes'] > context.limits['memory_bytes']):
         raise RecoveryContractError('Stream source prefetch exceeds its run memory budget')
     return reservation
+
+
+_ACTIVE = ContextVar('demiflow_payload_limits', default=None)
+
+def active_limits(run, base):
+    active = _ACTIVE.get()
+    return active[1] if active is not None and active[0] is run else base
+
+@contextmanager
+def payload_scope(run, plan, *, owner_limits=None, arguments=None, source=None, physical_dataflow=False):
+    limits = dict(run.limits)
+    if owner_limits is not None:
+        for name in PAYLOAD_FIELDS:
+            if name in owner_limits:
+                limits[name] = min(limits[name], owner_limits[name])
+    if source is not None:
+        from demiflow.execution.queue_execution import queue_source
+        queued=queue_source(source)
+        if queued is not None:
+            ceiling=min(queued.config.limits.max_payload_bytes,queued.config.limits.max_result_bytes)
+            limits['max_row_bytes']=min(limits['max_row_bytes'],ceiling)
+            limits['max_batch_bytes']=min(limits['max_batch_bytes'],ceiling)
+    # The unified physical plan admits each worker/edge profile. Applying the
+    # former folded single-stream residency model here both invents a second
+    # topology and rejects valid combinations (e.g. async model -> sort).
+    if plan is not None and not physical_dataflow:
+        from demiflow.data.plan import is_stream_operation
+        if any(is_stream_operation(op) for op in plan.operations):
+            from demiflow.execution.plan_facts import operation_facts
+            from demiflow.execution.recovery_contract import RecoveryContractError
+            try:
+                limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
+                                       (arguments or {}).get('source_batch_size') or 1,
+                                       retained_rows=(arguments or {}).get('_retained_rows',0))
+            except ValueError as exc:
+                raise RecoveryContractError(str(exc)) from exc
+    token = _ACTIVE.set((run, limits))
+    try:
+        yield limits
+    finally:
+        _ACTIVE.reset(token)

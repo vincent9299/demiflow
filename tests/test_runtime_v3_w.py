@@ -1165,7 +1165,7 @@ def _real_obs_run(tmp_path, *, action_id="a0", v3=True, nodes=("n0",), scoped=Tr
     from demiflow.workbench.runs import manager
     from demiflow.forge.platform import content_digest
     from demiflow.execution.run_context import RunContext
-    from demiflow.execution.runtime_limits import execution_limits
+    from demiflow.planning.dataflow_policy import execution_limits
     from demiflow.execution.executors.dataflow_api import declare_action_v3, make_action_request
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.action_driver.services import make_driver_services

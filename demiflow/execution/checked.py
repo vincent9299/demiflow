@@ -73,7 +73,7 @@ class CheckedExecution:
         run = current_run()
         if run is None:
             return self._limits
-        from .payload_limits import PAYLOAD_FIELDS
+        from demiflow.execution.contracts.dataflow import PAYLOAD_FIELDS
         return {**self._limits, **{name: run.limits[name] for name in PAYLOAD_FIELDS}}
 
     def _match(self, identity, *, reused=False):
@@ -798,7 +798,7 @@ def action(kind, source, plan, spec=None, *, arguments=None):
     if capture is not None:
         # Validate/build ordinary Dataset requests without allocating an implicit
         # run. The real request is intercepted at the single driver entry.
-        from .payload_limits import payload_scope
+        from demiflow.execution.run_context import payload_scope
         value = CheckedAction(None, None, source, plan)
         _validate_action_source(kind, value)
         with payload_scope(capture.context, plan, arguments=arguments, source=source,
@@ -813,7 +813,7 @@ def action(kind, source, plan, spec=None, *, arguments=None):
         with checks as value:
             yield value
         return
-    from .payload_limits import payload_scope
+    from demiflow.execution.run_context import payload_scope
     with execution_scope() as run, payload_scope(run, plan,
             owner_limits=owner._limits if owner is not None else None, arguments=arguments,source=source,
             physical_dataflow=True), checks as value:

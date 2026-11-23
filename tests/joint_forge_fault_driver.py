@@ -62,7 +62,7 @@ if mode == 'supervise':
     finally:
         observe('finish')
 elif mode == 'execute':
-    from demiflow.execution.runtime_limits import RECOVERY_LIMITS
+    from demiflow.planning.dataflow_policy import RECOVERY_LIMITS
     if window.get('image_checkpoint_fixture') and 'checkpoint_rows' in RECOVERY_LIMITS:
         # Bind a deterministic row-trigger workload in each isolated attempt;
         # these defaults are recorded in the native recovery identity.

@@ -16,7 +16,7 @@
         "CheckedExecution"
       ],
       "DEFAULT_LIMITS": [
-        "demiflow.execution.runtime_limits",
+        "demiflow.planning.dataflow_policy",
         "DEFAULT_LIMITS"
       ],
       "NativeExecution": [
@@ -60,7 +60,7 @@
         "reconcile_stopped_fits"
       ],
       "resolve_payload_bounds": [
-        "demiflow.execution.payload_limits",
+        "demiflow.planning.dataflow_policy",
         "resolve_payload_bounds"
       ],
       "retained_process_units": [
@@ -68,7 +68,7 @@
         "retained_process_units"
       ],
       "stream_limits": [
-        "demiflow.execution.payload_limits",
+        "demiflow.execution.compiler_support.payload_limits",
         "stream_limits"
       ],
       "training_deployment_reference": [

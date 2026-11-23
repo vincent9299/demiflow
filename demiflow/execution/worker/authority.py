@@ -21,7 +21,7 @@ from ..contracts.envelope import validate_grant
 from ..run_context import _CURRENT, _ACTION, _PERSISTING_EFFECT
 from ..run_journal import RunJournal
 from ..recovery_contract import RunRef, RecoveryContractError, identity
-from ..payload_limits import active_limits
+from demiflow.execution.run_context import active_limits
 
 
 class WorkerAuthority:

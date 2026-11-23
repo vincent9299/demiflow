@@ -44,7 +44,7 @@ def test_optional_worker_limit_keeps_historical_wire_and_identity():
 
 
 def test_memory_option_tightens_defaults_without_erasing_explicit_limits():
-    from demiflow.execution.runtime_limits import execution_limits
+    from demiflow.planning.dataflow_policy import execution_limits
     run = execution_limits({'memory_bytes': 512 * 1024})
     policy, limits = resolve_runtime_policy({'memory_bytes': 64 * 1024, 'max_active_workers': 1},
                                            run, provider='local')
@@ -217,7 +217,7 @@ def test_public_worker_count_keeps_one_legal_wide_row(tmp_path, workers):
 
 
 def test_equal_small_run_and_executor_keep_the_run_row_contract(tmp_path):
-    from demiflow.execution.runtime_limits import execution_limits
+    from demiflow.planning.dataflow_policy import execution_limits
     memory = 1024**2
     inherited = execution_limits({'memory_bytes': memory})
     with RunContext.start(tmp_path / 'equal', limits={'memory_bytes': memory}), data.local_execution(

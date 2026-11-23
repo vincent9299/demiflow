@@ -33,13 +33,13 @@ class CompileContext:
     ref = None
 
     def __init__(self, limits=None, explicit_limits=None):
-        from .runtime_limits import execution_limits, declared_limit_keys
+        from demiflow.planning.dataflow_policy import execution_limits, declared_limit_keys
         self._limits = execution_limits(limits)
         self.explicit_limits = declared_limit_keys(limits, explicit_limits)
 
     @property
     def limits(self):
-        from .payload_limits import active_limits
+        from demiflow.execution.run_context import active_limits
         return active_limits(self, self._limits)
 
     def check_stop(self):

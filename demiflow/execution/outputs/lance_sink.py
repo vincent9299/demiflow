@@ -53,7 +53,7 @@ class LanceSink(Datasink):
         schema = self.spec.schema
         try:
             with path.open("xb") as stream:
-                from demiflow.execution.payload_limits import arrow_batches
+                from demiflow.lance.arrow_batches import arrow_batches
                 for block in arrow_batches(blocks, self.run.limits):
                     self.run.check_stop()
                     if not isinstance(block, (pa.Table, pa.RecordBatch)):

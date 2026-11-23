@@ -80,7 +80,7 @@ def test_real_process_hooks_survive_cleanup_and_preserve_failures(tmp_path, monk
 
 
 def test_declared_payload_limits_are_not_silently_shrunk():
-    from demiflow.execution.payload_limits import stream_limits
+    from demiflow.execution.compiler_support.payload_limits import stream_limits
     from demiflow.execution.plan_facts import operation_facts
     from demiflow.workbench.pipeline_policy import limits_with
     async def batch(rows): return rows

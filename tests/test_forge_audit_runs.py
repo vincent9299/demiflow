@@ -53,7 +53,7 @@ def test_start_rechecks_scope_and_cancel_remains_available(root):
     # Supply a legitimate protocol for the scope-specific control fixture. This
     # claim/release constructs no native execution, artifact or successful run.
     import time
-    from demiflow.execution.runtime_limits import execution_limits
+    from demiflow.planning.dataflow_policy import execution_limits
     configuration = dict(format=1, stream_protocol='aligned-barrier-v2', run_id='4'*32,
                          entry_identity=None, started_at=time.time(), limits_explicit=[],
                          platform_revision='original-platform', limits=execution_limits(None))

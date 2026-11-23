@@ -552,7 +552,7 @@ def test_b019():
 
 
 def _bootstrap_launch(tmp_path):
-    from demiflow.execution.runtime_limits import execution_limits
+    from demiflow.planning.dataflow_policy import execution_limits
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     _, bounds = resolve_runtime_policy({}, execution_limits(), provider='local')
     # No assignment is decoded for Register -> Cancel before Verify/Activate.

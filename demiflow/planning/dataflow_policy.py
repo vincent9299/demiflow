@@ -10,11 +10,88 @@ from __future__ import annotations
 import math
 import re
 from typing import Mapping
+from demiflow.resources.contracts import ResourceProfile
 
 from demiflow.execution.contracts.dataflow import Bounds, RuntimePolicy
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.runtime_limits import execution_limits
-from demiflow.resources.contracts import ResourceProfile
+from demiflow.execution.contracts.dataflow import BATCH_TARGET_BYTES, MAX_NATIVE_ROW_BYTES
+
+def native_row_limit(pool, rss, ceiling=MAX_NATIVE_ROW_BYTES):
+    """Reuse native Dataset's pool/16 and RSS/64 resident-copy allowance."""
+    estimate = max(BATCH_TARGET_BYTES, min(MAX_NATIVE_ROW_BYTES, pool // 16, rss // 64))
+    return max(1, min(ceiling, estimate, pool, max(1, rss // 2)))
+
+def run_row_limit(limits):
+    # The driver and one native worker share the run RSS allowance, as in Forge.
+    native_rss = max(1, limits['max_rss_bytes'] // 2)
+    pool = min(limits['memory_bytes'], max(1, native_rss // 2))
+    return native_row_limit(pool, native_rss)
+
+def resolve_payload_bounds(limits, overrides=None, *, inherited_explicit=(), ceiling=None, local_memory=False):
+    """Default estimates never replace an explicitly declared finite ceiling."""
+    explicit = set(overrides or ()) | set(inherited_explicit)
+    derived = run_row_limit(limits)
+    # A separately tightened local executor has historically shared this pool
+    # between driver/worker payload and codec. Changing a worker-count ceiling
+    # does not change which rows the action is allowed to accept.
+    if local_memory and ceiling is not None and limits['memory_bytes'] < ceiling['memory_bytes']:
+        derived = min(derived, max(1, limits['memory_bytes'] // 4))
+    row = limits['max_row_bytes'] if 'max_row_bytes' in explicit else derived
+    row = min(row, MAX_NATIVE_ROW_BYTES, limits['memory_bytes'], max(1, limits['max_rss_bytes'] // 4))
+    batch = limits['max_batch_bytes'] if 'max_batch_bytes' in explicit else max(derived, row)
+    batch = min(batch, limits['memory_bytes'])
+    if ceiling is not None:
+        row, batch = min(row, ceiling['max_row_bytes']), min(batch, ceiling['max_batch_bytes'])
+    return dict(max_row_bytes=min(row, batch), max_batch_bytes=batch)
+
+# Finite execution defaults; Forge may admit/tighten the same native budgets.
+
+DEFAULT_LIMITS = dict(timeout_s=600, admission_timeout_s=30, cancel_grace_s=10,
+    memory_bytes=256 * 1024**2, max_rss_bytes=4 * 1024**3,
+    max_scratch_bytes=4 * 1024**3, max_output_bytes=2 * 1024**3, max_evidence_bytes=64 * 1024**2,
+    max_input_rows=100000, max_output_rows=200000, batch_rows=256, log_bytes=16 * 1024**2)
+
+
+DEFAULT_LIMITS.update(max_row_bytes=run_row_limit(DEFAULT_LIMITS),
+                      max_batch_bytes=run_row_limit(DEFAULT_LIMITS))
+
+RECOVERY_LIMITS = dict(max_state_bytes=16 * 1024**2, max_control_bytes=64 * 1024**2,
+                       max_commits=16384, max_requests=100000, max_artifacts=65536,
+                       checkpoint_rows=512, checkpoint_interval_ms=1000, checkpoint_timeout_s=60,
+                       checkpoint_unconfirmed_rows=4096, checkpoint_unconfirmed_bytes=64 * 1024**2)
+
+
+def declared_limit_keys(values, explicit):
+    """A full admitted envelope may carry a smaller set of caller declarations."""
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    if values is not None and type(values) is not dict:
+        raise RecoveryContractError('Unknown execution budget')
+    keys = frozenset(values or ())
+    if explicit is None:
+        return keys
+    declared = frozenset(explicit)
+    if not declared <= keys:
+        raise RecoveryContractError("Explicit execution budgets must have admitted values")
+    return declared
+
+
+def execution_limits(values=None):
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    result = {**DEFAULT_LIMITS, **RECOVERY_LIMITS}
+    if values is not None:
+        if type(values) is not dict or values.keys() - result.keys():
+            raise RecoveryContractError("Unknown execution budget")
+        result.update(values)
+    if any(type(v) is not int or not 0 < v < 2**63 for v in result.values()):
+        raise RecoveryContractError("Execution budgets must be finite positive integers")
+
+    result.update(resolve_payload_bounds(result, values))
+    if result["max_row_bytes"] > result["max_batch_bytes"]:
+        raise RecoveryContractError("A row must fit the admitted batch budget")
+    if result["max_commits"] > 16384 or result["max_artifacts"] > 65536:
+        raise RecoveryContractError("Execution metadata cardinality exceeds protocol limits")
+    return result
+
 
 RUNTIME_POLICY_VERSION = "demiflow.runtime_policy.v3"
 
@@ -105,7 +182,7 @@ def resolve_runtime_policy(
         raise _reject(f"invalid run limits: {exc}") from exc
 
     if "memory_bytes" in options:
-        from ..execution.payload_limits import resolve_payload_bounds
+
         ceiling = dict(native)
         native["memory_bytes"] = _tighten(options["memory_bytes"], native["memory_bytes"], "memory_bytes")
         explicit = set(explicit_limits)

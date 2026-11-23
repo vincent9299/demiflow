@@ -60,7 +60,7 @@ def _bounded_batches(batches, limits, check_stop):
     Total Arrow bytes are a conservative logical output budget, not encoded disk
     bytes or RSS. The enclosing process also guards allocations and actual disk.
     """
-    from ..execution.payload_limits import arrow_batches
+    from demiflow.lance.arrow_batches import arrow_batches
     rows = size = 0
     for batch in arrow_batches(batches, limits):
         if check_stop is not None:

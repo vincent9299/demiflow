@@ -8,8 +8,10 @@ import pytest
 from demiflow import data
 from demiflow.data.runtime_contract import RuntimeContractError
 from demiflow.execution import RunContext, RecoveryContractError, current_run
-from demiflow.execution.runtime_limits import execution_limits
-from demiflow.execution.payload_limits import BATCH_TARGET_BYTES, run_row_limit, arrow_batches
+from demiflow.planning.dataflow_policy import execution_limits
+from demiflow.execution.contracts.dataflow import BATCH_TARGET_BYTES
+from demiflow.planning.dataflow_policy import run_row_limit
+from demiflow.lance.arrow_batches import arrow_batches
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.outputs.lance_sink import LanceSink
 from demiflow.execution.commit import CommitCoordinator
@@ -342,7 +344,7 @@ def test_explicit_row_allowance_can_exceed_default_estimate_without_raising_othe
 
 
 def test_native_default_row_floor_remains_compatible_when_pool_supports_it(tmp_path):
-    from demiflow.execution.payload_limits import native_row_limit
+    from demiflow.planning.dataflow_policy import native_row_limit
     assert native_row_limit(64 * 2**20, 2 * 2**30) == 8 * 2**20
     assert native_row_limit(2 * 2**20, 2 * 2**30) <= 2 * 2**20
     payload = b'full-original\x00' * 450000
@@ -358,7 +360,7 @@ def test_native_default_row_floor_remains_compatible_when_pool_supports_it(tmp_p
 
 def test_peak_scope_keeps_durable_cumulative_ceiling_across_resume(tmp_path):
     from demiflow.execution.checked import CheckedExecution
-    from demiflow.execution.payload_limits import payload_scope
+    from demiflow.execution.run_context import payload_scope
     with pytest.raises(RuntimeError, match='interrupt'):
         with RunContext.start(tmp_path / 'run', limits={'max_output_bytes': 10}) as run:
             reference = run.ref
