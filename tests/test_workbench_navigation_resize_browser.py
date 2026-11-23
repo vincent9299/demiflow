@@ -22,7 +22,7 @@ def test_all_navigation_resize_ellipsis_and_retained_width(project,tmp_path,brow
     index=tmp_path/'registry.json';registry.add(index,project)
     with service(None,registry=index) as app,opened(browser,app) as (page,requests):
         page.set_viewport_size(dict(width=1440,height=900))
-        for kind,rail,label in [('development','.development-session-sidebar','会话目录'),('operators','.op-tree','算子目录'),('flows','.wb-flow-navigation','管道目录'),('tables','.data-dictionary','数据字典目录'),('overview','.document-directory','文档目录')]:
+        for kind,rail,label in [('development','.development-session-sidebar','会话目录'),('flows','.wb-flow-navigation','管道目录'),('tables','.data-dictionary','数据字典目录'),('overview','.document-directory','文档目录')]:
             page.locator(f'.function-nav [data-page={kind}]').click()
             page.wait_for_function('(kind)=>{const v=JSON.parse(new URLSearchParams(location.hash.slice(1)).get("view")||"{}");return (v.panel||v.kind)===kind;}',arg=kind)
             sidebar=page.locator(rail);expect(sidebar).to_be_visible()
@@ -38,15 +38,22 @@ def test_all_navigation_resize_ellipsis_and_retained_width(project,tmp_path,brow
             expect(separator).to_be_hidden();expect(sidebar).to_be_hidden()
             page.get_by_role('button',name=name,exact=True).click()
             expect(separator).to_be_visible();assert abs(sidebar.bounding_box()['width']-expected)<2
-            if kind=='operators':
+            if kind=='development':
+                sidebar.locator('.dev-sidebar-tabs').get_by_role('button',name='算子',exact=True).click()
                 page.get_by_role('tab',name='Prompt 算子',exact=True).click()
-                summary=page.locator('.op-tree-file>summary').filter(has_text=long_name)
+                summary=sidebar.locator('.op-tree-file>summary').filter(has_text=long_name)
                 facts=summary.locator('span').evaluate('(n)=>({scroll:n.scrollWidth,width:n.clientWidth,wrap:getComputedStyle(n).whiteSpace,align:getComputedStyle(n).textAlign,height:n.getBoundingClientRect().height})')
                 assert facts['scroll']>facts['width'] and facts['wrap']=='nowrap' and facts['align']=='left' and facts['height']<30
                 assert summary.get_attribute('title')=='prompts/'+long_name
-                expect(page.get_by_role('button',name='P review',exact=True)).to_be_visible()
-                summary.click();expect(page.get_by_role('button',name='P review',exact=True)).to_be_hidden()
-                summary.click();expect(page.get_by_role('button',name='P review',exact=True)).to_be_visible()
+                prompt_btn=sidebar.get_by_role('button',name='P review',exact=True)
+                expect(prompt_btn).to_be_visible()
+                prompt_btn.click()
+                expect(page.locator('.dev-operator-pane')).to_be_visible()
+                expect(page.locator('.dev-op-badge.is-prompt')).to_have_text('Prompt 算子')
+                expect(page.locator('.dev-operator-pane')).to_contain_text('Prompt 模板')
+                expect(page.locator('.dev-operator-pane')).to_contain_text('输入变量')
+                summary.click();expect(prompt_btn).to_be_hidden()
+                summary.click();expect(prompt_btn).to_be_visible()
             page.reload();expect(sidebar).to_be_visible(timeout=45000)
             assert abs(sidebar.bounding_box()['width']-expected)<2
             # Narrow viewports clamp stored widths instead of overflowing the page.
