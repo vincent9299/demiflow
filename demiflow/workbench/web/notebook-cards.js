@@ -207,17 +207,67 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
     if(!cell||cell.isDisposed||cell.model.type!=='code')throw Error('目标 cell 已删除。');
     const source=sourceOf(cell);
     if(name==='cell.show'||name==='context.show'){
-      const index=cells().indexOf(cell);
-      const before=index>0?cells().slice(Math.max(0,index-3),index).filter(c=>c.model.type==='code').map(sourceOf).join('\n').slice(0,2000):'';
-      let env={};
-      try{
-        const inv=await api('projects');
-        const proj=(inv.projects||[]).find(p=>p.workspace_id===project);
-        if(proj)env={kernel_python:proj.python||null,sandbox:proj.notebook_sandbox||{mode:'readonly',write_paths:[]}};
-      }catch{}
+      const allCells=cells();
+      const index=allCells.indexOf(cell);
+      const prevCodeCells=index>0
+        ?allCells.slice(Math.max(0,index-3),index)
+          .map((c,i)=>({cell:c,index:Math.max(0,index-3)+i}))
+          .filter(({cell:c})=>c.model.type==='code')
+        :[];
+      const before=prevCodeCells.map(({cell:c})=>sourceOf(c)).join('\n').slice(0,2000);
+      const outputText=cell.outputArea?.node.innerText||'';
       const selectedRefs=(refs.get(id)||[]).map(i=>[i.path,i.symbol]);
-      return {path,source,before,output:(cell.outputArea?.node.innerText||'').slice(0,1600),
-        selected:selectedRefs,allow_run:pending.allowRun&&!!permissions().analysis_execute,...env};
+      const allowRun=pending.allowRun&&!!permissions().analysis_execute;
+      const loadEnv=async()=>{
+        try{
+          const inv=await api('projects');
+          const proj=(inv.projects||[]).find(p=>p.workspace_id===project);
+          if(proj)return {kernel_python:proj.python||null,sandbox:proj.notebook_sandbox||{mode:'readonly',write_paths:[]}};
+        }catch{}
+        return {kernel_python:null,sandbox:{mode:'readonly',write_paths:[]}};
+      };
+      if(name==='cell.show'){
+        const env=await loadEnv();
+        return {path,source,before,output:outputText.slice(0,1600),selected:selectedRefs,allow_run:allowRun,...env};
+      }
+      const topic=args?.topic||null;
+      if(topic==='cell'){
+        return {path,cell_index:index,source,selected:selectedRefs,allow_run:allowRun};
+      }
+      if(topic==='before'){
+        return {path,cell_index:index,before_cells:prevCodeCells.map(({cell:c,index:ci})=>({index:ci,source:sourceOf(c).slice(0,1200)}))};
+      }
+      if(topic==='output'){
+        return {path,cell_index:index,output:outputText.slice(0,2400)};
+      }
+      if(topic==='env'){
+        const env=await loadEnv();
+        return {path,allow_run:allowRun,...env};
+      }
+      if(topic==='catalog'){
+        const [dictList,toolList]=await Promise.all([
+          catalogCommand('catalog.list',{group:'dictionary',offset:0}),
+          catalogCommand('catalog.list',{group:'tools',offset:0}),
+        ]);
+        return {dictionary:dictList,tools:toolList};
+      }
+      // Compact overview (progressive disclosure): expand details via `data context --topic <...>`
+      const env=await loadEnv();
+      let catalogSummary=null;
+      try{
+        const [dictList,toolList]=await Promise.all([
+          catalogCommand('catalog.list',{group:'dictionary',offset:0}),
+          catalogCommand('catalog.list',{group:'tools',offset:0}),
+        ]);
+        catalogSummary={tables:dictList.total,tools:toolList.total};
+      }catch{}
+      return {
+        path,cell_index:index,total_cells:allCells.length,allow_run:allowRun,...env,
+        source:source.slice(0,1200),source_truncated:source.length>1200,
+        before_cells_count:prevCodeCells.length,has_output:outputText.trim().length>0,
+        selected:selectedRefs,catalog_summary:catalogSummary,
+        topics:['cell','before','output','env','catalog'],
+      };
     }
     if(source!==(pending.current??pending.source))throw Error('cell 已被手动修改，这条命令未应用。');
     if(!writable())throw Error('当前文档只读。');

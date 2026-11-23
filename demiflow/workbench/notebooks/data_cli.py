@@ -14,7 +14,9 @@ def main():
         os.execv(args[0], [arg.replace('__DEMIFLOW_CELL_ENDPOINT__', endpoint) for arg in args])
     parser = argparse.ArgumentParser(prog='data', description='Inspect the notebook context, catalogs, and operate on the current cell.')
     groups = parser.add_subparsers(dest='group', required=True)
-    groups.add_parser('context', help='Show current notebook cell context, kernel Python, and sandbox policy')
+    ctx = groups.add_parser('context', help='Show compact notebook context overview, or expand one --topic')
+    ctx.add_argument('--topic', choices=['cell', 'before', 'output', 'env', 'catalog'],
+                     help='Progressive-disclosure topic to expand')
     catalog = groups.add_parser('catalog').add_subparsers(dest='action', required=True)
     listing = catalog.add_parser('list')
     listing.add_argument('kind', choices=['dictionary', 'tools'])
@@ -38,7 +40,7 @@ def main():
         return call('', token, turn, epoch, method, params)
     if args.group == 'context':
         method = 'context.show'
-        params = {}
+        params = {'topic': args.topic} if args.topic else {}
     elif args.group == 'catalog':
         method = 'catalog.' + args.action
         params = {'group': args.kind, **({'offset': args.offset} if args.action == 'list' else {'id': args.id, 'offset': args.offset})}

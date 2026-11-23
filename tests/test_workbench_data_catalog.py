@@ -81,6 +81,26 @@ def test_cell_cli_uses_turn_channel_and_claims_once(tmp_path):
         store.respond(*args,{'value':{'state':'edited'}})
         assert proc.wait(timeout=20)==0,proc.stderr.read().decode()
         assert json.loads(proc.stdout.read())=={'state':'edited'}
+
+        # Progressive-disclosure `data context --topic <...>` passes through cleanly and rejects unknown topics.
+        p_ctx=launch_sandbox([str(bridge.bin/'data'),'context','--topic','catalog'],spec=scope,
+                             env={'PATH':'/usr/bin:/bin','HOME':str(home)},cwd=root,control_socket=bridge.path)
+        deadline=time.monotonic()+20
+        while not store.pending(turn['id']) and time.monotonic()<deadline and p_ctx.poll() is None:
+            time.sleep(.05)
+        pending_ctx=store.pending(turn['id'])
+        assert pending_ctx, f'context --topic did not reach turn, rc={p_ctx.poll()}'
+        q2=pending_ctx[0]
+        req2=json.loads(q2['request'])
+        assert req2['command']=='context.show' and req2['arguments']=={'topic':'catalog'}
+        args2=('w',sid,turn['id'],q2['id'],q2['digest'])
+        assert store.claim_cell_command(*args2)=={'claimed':True}
+        store.respond(*args2,{'value':{'dictionary':{'items':[],'total':0},'tools':{'items':[],'total':0}}})
+        assert p_ctx.wait(timeout=20)==0,p_ctx.stderr.read().decode()
+        assert json.loads(p_ctx.stdout.read())['dictionary']['total']==0
+
+        with pytest.raises(Exception):
+            bridge.dispatch('context.show', {'topic': 'invalid_topic'}, bridge)
     finally:
         bridge.close()
 
