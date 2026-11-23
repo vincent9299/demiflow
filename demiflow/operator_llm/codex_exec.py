@@ -29,8 +29,8 @@ class CodexExecPromptClient:
         if native_journal is not None:
             from demiflow.execution.contracts.dataflow import PromptJournalPort
             from demiflow.execution.contracts.dataflow import PrivatePromptJournalPort
-            if (not isinstance(native_journal, PromptJournalPort)
-                    or isinstance(native_journal, PrivatePromptJournalPort)
+            if (PromptJournalPort not in type(native_journal).__mro__
+                    or PrivatePromptJournalPort in type(native_journal).__mro__
                     or native_journal.read_only or type(native_journal.limit) is not int
                     or native_journal.limit < 0):
                 raise ValueError('Codex native journal requires a writable bounded RemotePromptJournal')

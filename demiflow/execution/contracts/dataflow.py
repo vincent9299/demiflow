@@ -2144,7 +2144,8 @@ class PromptJournalPort(ABC):
     """Bound model journal operations; driver still verifies occurrence and lease.
 
     read_only, limit, max_record_bytes and timeout_s are the original sealed
-    finite constraints. This is not an independently registrable extension API.
+    finite constraints. Consumers require real inheritance; ABC virtual
+    registration does not confer bound-journal eligibility.
     """
     read_only: bool
     limit: int

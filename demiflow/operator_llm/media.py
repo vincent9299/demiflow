@@ -350,7 +350,7 @@ def image_decode_policy(limits, *, memory_bytes, timeout_s):
 def store_image(raw, options, *, store=None):
     from demiflow.execution.contracts.dataflow import BoundImageWriter
     if store is not None:
-        if not isinstance(store, BoundImageWriter):
+        if BoundImageWriter not in type(store).__mro__:
             raise TypeError('Image output requires a bound image writer')
         return store.store_image(raw, options)
     from demiflow.objects import LocalObjectStore

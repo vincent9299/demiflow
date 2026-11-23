@@ -378,7 +378,7 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
                     # writable journal; bind_client then installs the scopes.
                     from demiflow.execution.contracts.dataflow import PromptJournalPort
                     journal = getattr(recovery, 'journal', None)
-                    if isinstance(journal, PromptJournalPort):
+                    if PromptJournalPort in type(journal).__mro__:
                         native_journal = journal
                 # Standalone transports retain their original factory call
                 # shape; only an actual native journal requires this binding.
