@@ -109,9 +109,10 @@ def test_pipeline_directory_preserves_drafts_late_selection_and_narrow_space(roo
         page.get_by_role('button', name='业务参数', exact=True).click()
         expect(page.get_by_label('minimum', exact=True)).to_have_value('0.71')
 
-        tab(page, 'operators')
-        expect(page.locator('.op-tree')).to_be_visible()
-        expect(page.locator('.wb-section-navigation:visible')).to_have_count(0)
+        tab(page, 'development')
+        expect(page.locator('.development-session-sidebar')).to_be_visible()
+        page.locator('.dev-sidebar-tabs').get_by_role('button', name='算子', exact=True).click()
+        expect(page.locator('.dev-op-sidebar')).to_be_visible()
         tab(page, 'flows')
         page.locator('.wb-actions').get_by_role('button', name='运行记录', exact=True).click()
         expect(page.locator('.wb-section-navigation:visible')).to_have_count(1)

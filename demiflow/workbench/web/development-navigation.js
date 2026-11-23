@@ -134,12 +134,13 @@
     return svg;
   }
 
-  function filePanel({layout, filesHost, toggle, api, iconButton, onReference, onRework, onRequestReview, onShowFilesTab, onBadgeChange}) {
+  function filePanel({layout, filesHost, operatorsHost, toggle, api, iconButton, mountText, disposeReaders, project, onReference, onRework, onRequestReview, onShowFilesTab, onBadgeChange}) {
     let disposed = false;
     let levels = Object.create(null), expanded = [], treeLoaded = false, projectRootPath = '';
     let gitChanges = [], gitBranch = '', gitIsRepo = false;
     const observedChanges = new Map(); // path -> {path, status, added, removed, diff}
     let filterTerm = '';
+    let paneMode = 'file'; // 'file' | 'operator'
 
     // Open tabs & active code view state
     const openTabs = []; // array of relative paths (no leading slash), max 8
@@ -306,9 +307,23 @@
     toolbar.append(pathMeta, toolActions);
 
     const viewport = node('div', 'dev-code-viewport');
-    pane.append(tabBar, forgeStrip, forgeDetail, toolbar, viewport);
+    const operatorPane = node('div', 'dev-operator-pane');
+    operatorPane.hidden = true;
+    pane.append(tabBar, forgeStrip, forgeDetail, toolbar, viewport, operatorPane);
     layout.append(pane);
     toggle.setAttribute('aria-expanded', 'false');
+
+    function setPaneMode(mode) {
+      paneMode = mode === 'operator' ? 'operator' : 'file';
+      const isOp = paneMode === 'operator';
+      tabBar.hidden = isOp;
+      forgeStrip.hidden = isOp || (!latestChecks.native_flow && !latestChecks.project_layout && !latestChecks.review);
+      forgeDetail.hidden = isOp || !activeCheckKey;
+      toolbar.hidden = isOp || !activePath;
+      viewport.hidden = isOp;
+      operatorPane.hidden = !isOp;
+      if (isOp) destroyViewer();
+    }
 
     const resize = globalThis.ForgeNavigation?.resizable
       ? ForgeNavigation.resizable({layout, sidebar:pane, label:'代码面板', right:true, cssVar:'--side-detail-width', minWidth:320, maxWidth:860, minMain:320, active:false})
@@ -639,6 +654,7 @@
     function openFile(path, preferredMode = null) {
       const clean = String(path || '').replace(/^\/+/, '');
       if (!clean) return;
+      setPaneMode('file');
       if (pane.hidden) setOpen(true, {skipFocus: true});
       loadFile(clean, preferredMode);
     }
@@ -790,6 +806,343 @@
     function setFilter(term) {
       filterTerm = String(term || '');
       renderChangedList();
+      paintOperatorTree();
+    }
+
+    // === OPERATORS SIDEBAR + TYPE-AWARE RIGHT PANEL ===
+    let opIndex = null, opSelected = null, opRevision = 'current', opDetail = null, opKind = 'code', opSeq = 0, opLoading = null;
+    const opStorageKey = project ? 'demiflow.operator-selection.' + project : '';
+    try { if (opStorageKey) opSelected = sessionStorage.getItem(opStorageKey); } catch {}
+    const opCodeType = item => ({class: '可调用类', async_function: '异步函数', function: '函数'})[item.definition_type] || 'Python 定义';
+    const opVisible = item => item.kind === 'prompt' || item.export_status === 'declared' || (item.export_status === 'legacy' && item.flow_references?.length) || item.id === opSelected;
+
+    let opTabs = null, opList = null;
+    if (operatorsHost) {
+      const opWrap = node('div', 'dev-op-sidebar');
+      opTabs = globalThis.ForgeNavigation?.categoryTabs
+        ? ForgeNavigation.categoryTabs('算子分类', [['code', '代码算子'], ['prompt', 'Prompt 算子']], kind => {
+            opKind = kind;
+            paintOperatorTree();
+          })
+        : null;
+      opList = node('div', 'op-tree-items dev-op-list');
+      opList.setAttribute('role', 'tabpanel');
+      opList.setAttribute('aria-label', '代码算子');
+      if (opTabs) opWrap.append(opTabs.element);
+      opWrap.append(opList);
+      operatorsHost.replaceChildren(opWrap);
+    }
+
+    function paintOperatorTree() {
+      if (!opList) return;
+      opTabs?.select(opKind);
+      opList.setAttribute('aria-label', opKind === 'code' ? '代码算子' : 'Prompt 算子');
+      opList.replaceChildren();
+      if (!opIndex) {
+        opList.append(node('p', 'op-muted dev-op-pad', '正在读取项目算子…'));
+        return;
+      }
+      const term = filterTerm.trim().toLocaleLowerCase();
+      const matches = (opIndex.definitions || []).filter(item => opVisible(item) && item.kind === opKind &&
+        [item.symbol, item.path, item.description].join(' ').toLocaleLowerCase().includes(term));
+      const declared = matches.filter(item => item.kind === 'prompt' || item.export_status === 'declared');
+      const legacy = matches.filter(item => item.kind === 'code' && item.export_status !== 'declared');
+      for (const rows of [declared, legacy]) {
+        if (!rows.length) continue;
+        const group = node(rows === legacy ? 'details' : 'div', 'op-tree-group');
+        if (rows === legacy) {
+          group.open = !declared.length || !!term || rows.some(item => item.id === opSelected);
+          group.append(node('summary', 'op-legacy-heading', '流程已引用 · 未声明'));
+        }
+        const paths = new Map();
+        for (const row of rows) {
+          if (!paths.has(row.path)) paths.set(row.path, []);
+          paths.get(row.path).push(row);
+        }
+        for (const [path, items] of paths) {
+          const folder = node('details', 'op-tree-file');
+          folder.open = !!term || items.some(i => i.id === opSelected) || paths.size < 4;
+          const summary = node('summary');
+          summary.append(node('span', null, path));
+          summary.title = path;
+          folder.append(summary);
+          for (const item of items) {
+            const b = node('button', 'op-tree-leaf');
+            b.type = 'button';
+            b.dataset.definition = item.id;
+            b.setAttribute('aria-pressed', String(opSelected === item.id));
+            b.title = (opKind === 'code' ? (item.export_status === 'declared' ? '已声明算子' : '流程引用 · 未声明') + ' · ' + opCodeType(item) + ' · ' : '') + item.path + ' · ' + item.symbol;
+            b.append(node('span', 'op-glyph', opKind === 'code' ? (item.definition_type === 'class' ? 'C' : 'ƒ') : 'P'), node('span', null, item.symbol));
+            b.onclick = () => openOperator(item.id);
+            folder.append(b);
+          }
+          group.append(folder);
+        }
+        opList.append(group);
+      }
+      if (!opList.childNodes.length) {
+        opList.append(node('p', 'op-muted dev-op-pad', term ? '没有匹配的算子' : opKind === 'code' ? '项目尚未声明代码算子。' : '项目尚未声明 Prompt 算子。'));
+      }
+      for (const issue of opIndex.diagnostics || []) {
+        opList.append(node('p', 'op-error dev-op-pad', issue.path + '：' + issue.detail));
+      }
+    }
+
+    function paintOperatorCard(parent, title, contentFn) {
+      const card = node('section', 'dev-op-card');
+      if (title) card.append(node('h4', 'dev-op-card-title', title));
+      contentFn(card);
+      parent.append(card);
+    }
+
+    function paintOperatorDetail() {
+      if (typeof disposeReaders === 'function') disposeReaders(operatorPane);
+      operatorPane.replaceChildren();
+      if (!opDetail) return;
+      const d = opDetail, isPrompt = d.kind === 'prompt';
+      const head = node('div', 'dev-op-header');
+      const headTop = node('div', 'dev-op-header-top');
+      const badges = node('div', 'dev-op-badges');
+      badges.append(node('span', 'dev-op-badge ' + (isPrompt ? 'is-prompt' : 'is-code'),
+        isPrompt ? 'Prompt 算子' : '代码算子 · ' + opCodeType(d)));
+      if (!isPrompt) {
+        badges.append(node('span', 'dev-op-badge is-subtle', d.export_status === 'declared' ? '已声明' : '流程引用 · 未声明'));
+      }
+      if (d.declared_version) badges.append(node('span', 'dev-op-badge is-subtle', 'v' + d.declared_version));
+      const headBtns = node('div', 'dev-op-actions');
+      const refOp = node('button', 'dev-action-btn dev-action-primary', '引用到对话');
+      refOp.type = 'button';
+      refOp.onclick = () => {
+        if (typeof onReference === 'function') {
+          onReference(d.path + (d.line ? ':' + d.line : '') + ' (' + d.symbol + ')');
+        }
+      };
+      const openSrc = node('button', 'dev-action-btn', '打开原文件');
+      openSrc.type = 'button';
+      openSrc.onclick = () => { if (d.path) openFile(d.path, 'source'); };
+      const histBtn = node('button', 'dev-action-btn', opRevision === 'current' ? '版本历史' : opRevision.slice(0, 8) + ' · 历史');
+      histBtn.type = 'button';
+      histBtn.onclick = () => openOperatorHistory(head);
+      const closeOp = iconButton('关闭算子面板', 'M6 6l12 12M18 6L6 18');
+      closeOp.onclick = () => setOpen(false);
+      headBtns.append(refOp, openSrc, histBtn, closeOp);
+      headTop.append(badges, headBtns);
+
+      const title = node('h3', 'dev-op-title', d.symbol);
+      const loc = node('div', 'dev-op-location', d.path + (d.line ? ' · L' + d.line + (d.end_line ? '–' + d.end_line : '') : ''));
+      head.append(headTop, title, loc);
+
+      const body = node('div', 'dev-op-body');
+      if (d.historical) {
+        const notice = node('div', 'dev-op-notice');
+        notice.append(node('span', null, '正在阅读历史版本（只读）；不会修改当前代码。'));
+        const back = node('button', 'dev-action-btn', '返回当前版本');
+        back.type = 'button';
+        back.onclick = () => openOperator(opSelected, 'current');
+        notice.append(back);
+        body.append(notice);
+      }
+
+      if (d.description || d.module_summary) {
+        body.append(node('p', 'dev-op-desc', d.description ? d.description.split('\n')[0] : '模块说明 · ' + d.module_summary));
+      }
+
+      const refs = opIndex?.definitions?.find(x => x.id === opSelected)?.flow_references;
+      if (!d.historical && refs?.length) {
+        const refStrip = node('div', 'dev-op-refs');
+        refStrip.append(node('span', 'dev-op-refs-label', '引用流程：'));
+        for (const r of refs) {
+          const name = r.entry.split(':')[0].split('/').pop().replace(/\.py$/, '');
+          const chip = node('span', 'dev-op-ref-chip', name + ' · ' + r.api);
+          chip.title = r.entry + ' · L' + r.line + ' · ' + r.port;
+          refStrip.append(chip);
+        }
+        body.append(refStrip);
+      }
+
+      if (isPrompt) {
+        // Prompt-specific presentation: model/format chips -> template -> input vars -> output schema -> defaults
+        const modelInfo = d.model && typeof d.model === 'object' ? d.model : (d.model ? {name: d.model} : null);
+        const chips = node('div', 'dev-op-chips');
+        if (modelInfo) {
+          const label = [modelInfo.name || modelInfo.model || modelInfo.id || modelInfo, modelInfo.transport || d.transport].filter(Boolean).join(' · ');
+          if (label) chips.append(node('span', 'definition-model', '模型 ' + label));
+        }
+        if (d.response_format) chips.append(node('span', 'definition-chip', '输出 ' + d.response_format));
+        if (d.defaults && Object.keys(d.defaults).length) {
+          for (const [k, v] of Object.entries(d.defaults).slice(0, 4)) {
+            chips.append(node('span', 'definition-chip', k + ': ' + (typeof v === 'string' ? v : JSON.stringify(v))));
+          }
+        }
+        if (chips.childNodes.length) body.append(chips);
+
+        const tpl = d.template ?? (d.messages ? JSON.stringify(d.messages, null, 2) : d.source);
+        paintOperatorCard(body, 'Prompt 模板', card => {
+          if (typeof tpl === 'string' && typeof mountText === 'function') {
+            mountText(card, tpl, {sourceOnly: true, compactSource: true, continuousSource: true});
+            const st = card.querySelector('.reading-status');
+            if (st?.textContent === '源码完整显示。') st.hidden = true;
+          } else {
+            card.append(node('pre', 'dev-op-pre', typeof tpl === 'string' ? tpl : '无可用模板正文。'));
+          }
+        });
+
+        paintOperatorCard(body, '输入变量', card => {
+          if (d.input_variables?.length) {
+            const table = node('table', 'op-contract');
+            const tr0 = node('tr');
+            ['变量', '类型', '要求'].forEach(h => tr0.append(node('th', null, h)));
+            table.append(tr0);
+            for (const v of d.input_variables) {
+              const tr = node('tr');
+              [v.name, v.type ?? '未声明', v.required ? '必填' : '可选'].forEach(val => tr.append(node('td', null, val)));
+              table.append(tr);
+            }
+            card.append(table);
+          } else {
+            card.append(node('p', 'definition-note', d.input_diagnostic || '未声明模板输入变量。'));
+          }
+        });
+
+        paintOperatorCard(body, '输出 Schema', card => {
+          if (d.output_schema) {
+            card.append(node('pre', 'dev-op-pre', JSON.stringify(d.output_schema, null, 2)));
+          } else {
+            card.append(node('p', 'definition-note', d.response_format === 'image' ? '图片对象引用 ObjectRef；字段结构以该 API 的原生图片协议为准。' : '未声明结构化响应 Schema。'));
+          }
+        });
+      } else {
+        // Code operator presentation: signature -> Python source -> collapsible contract/defaults
+        if (d.signature) {
+          paintOperatorCard(body, '接口签名', card => {
+            card.append(node('pre', 'dev-op-pre', d.signature));
+          });
+        }
+        paintOperatorCard(body, '算子源码', card => {
+          if (typeof d.source === 'string' && typeof mountText === 'function') {
+            const wrap = node('div', 'definition-source');
+            card.append(wrap);
+            mountText(wrap, d.source, {sourceOnly: true, compactSource: true, continuousSource: true, pythonLine: d.line || 1});
+            const st = wrap.querySelector('.reading-status');
+            if (st?.textContent === '源码完整显示。') st.hidden = true;
+          } else {
+            card.append(node('pre', 'dev-op-pre', typeof d.source === 'string' ? d.source : '无可用源码正文。'));
+          }
+        });
+        if (globalThis.DemiFlowDefinition?.render) {
+          const fold = node('details', 'dev-op-contract-fold');
+          fold.append(node('summary', null, '参数与默认值契约'));
+          DemiFlowDefinition.render(fold, d, {mountText, mode: 'contract'});
+          body.append(fold);
+        }
+      }
+
+      operatorPane.append(head, body);
+    }
+
+    async function openOperatorHistory(anchor) {
+      const existing = operatorPane.querySelector('.op-history');
+      if (existing) { existing.remove(); return; }
+      const ticket = opSeq, id = opSelected;
+      if (!id) return;
+      try {
+        const value = await api('operator-history', {id});
+        if (disposed || ticket !== opSeq || id !== opSelected) return;
+        const pop = node('aside', 'op-history dev-op-history');
+        const heading = node('div', 'op-history-heading');
+        heading.append(node('strong', null, '版本历史'));
+        const close = node('button', 'op-text-button', '关闭');
+        close.type = 'button';
+        close.onclick = () => pop.remove();
+        heading.append(close);
+        pop.append(heading);
+        const curBtn = node('button', 'op-version', '当前工作区');
+        curBtn.type = 'button';
+        curBtn.onclick = () => { pop.remove(); openOperator(id, 'current'); };
+        pop.append(curBtn);
+        for (const v of value.versions || []) {
+          const vb = node('button', 'op-version');
+          vb.type = 'button';
+          vb.append(node('span', null, new Date(v.timestamp * 1000).toLocaleString()), node('code', null, v.revision.slice(0, 8)));
+          vb.onclick = () => { pop.remove(); openOperator(id, v.revision); };
+          pop.append(vb);
+        }
+        if (!(value.versions || []).length) pop.append(node('p', 'op-muted', value.reason || '尚无已保存提交。'));
+        anchor.append(pop);
+      } catch (err) {
+        if (!disposed) operatorPane.append(node('p', 'op-error dev-op-pad', err.message));
+      }
+    }
+
+    async function openOperator(id, version = 'current') {
+      if (!id || disposed) return;
+      opSelected = id;
+      opRevision = version;
+      const meta = opIndex?.definitions?.find(item => item.id === id);
+      if (meta?.kind) opKind = meta.kind;
+      const ticket = ++opSeq;
+      paintOperatorTree();
+      try { if (opStorageKey) sessionStorage.setItem(opStorageKey, id); } catch {}
+      setPaneMode('operator');
+      if (pane.hidden) setOpen(true, {skipFocus: true});
+      operatorPane.replaceChildren(node('p', 'op-muted dev-op-pad', '正在读取算子定义…'));
+      try {
+        const value = await api('operator-definition', {id, revision: version});
+        if (disposed || ticket !== opSeq) return;
+        opDetail = value;
+        paintOperatorDetail();
+      } catch (err) {
+        if (!disposed && ticket === opSeq) {
+          operatorPane.replaceChildren(node('p', 'op-error dev-op-pad', err.message));
+        }
+      }
+    }
+
+    async function ensureOperatorsLoaded({force = false} = {}) {
+      if (disposed) return;
+      if (opIndex && !force) { paintOperatorTree(); return; }
+      if (opLoading && !force) return opLoading;
+      opLoading = (async () => {
+        try {
+          const data = await api('project-operators');
+          if (disposed) return;
+          opIndex = data;
+          if (!opSelected || !opIndex.definitions?.some(d => d.id === opSelected)) {
+            const first = opIndex.definitions?.find(d => d.kind === opKind && opVisible(d)) || opIndex.definitions?.find(opVisible);
+            if (first) opSelected = first.id;
+          }
+          paintOperatorTree();
+        } catch (err) {
+          if (!disposed && opList) opList.replaceChildren(node('p', 'op-error dev-op-pad', err.message));
+        } finally {
+          opLoading = null;
+        }
+      })();
+      return opLoading;
+    }
+
+    async function selectOperatorTarget(target) {
+      await ensureOperatorsLoaded({force: true});
+      if (disposed || !opIndex) return false;
+      let match = null;
+      if (target && typeof target === 'object') {
+        if (target.path) {
+          const normalized = target.path.replaceAll('\\', '/');
+          const hits = (opIndex.definitions || []).filter(item => item.kind === 'code' && item.path === normalized &&
+            (!target.sha256 || item.file_sha256 === target.sha256) &&
+            (!target.line || item.line <= target.line && target.line <= item.end_line));
+          if (hits.length === 1) match = hits[0];
+        } else if (target.name) {
+          const hits = (opIndex.definitions || []).filter(item => item.kind === 'prompt' &&
+            item.symbol === target.name &&
+            (!target.version || item.declared_version === target.version) &&
+            (!target.template_sha256 || item.template_sha256 === target.template_sha256));
+          if (hits.length >= 1) match = hits[0];
+        }
+      }
+      const chosen = match || opIndex.definitions?.find(d => d.id === opSelected) || opIndex.definitions?.find(opVisible);
+      if (chosen) { await openOperator(chosen.id); return !!match; }
+      return false;
     }
 
     function setOpen(value, {skipFocus = false} = {}) {
@@ -798,9 +1151,13 @@
       toggle.setAttribute('aria-expanded', String(value));
       resize?.setActive(value && !matchMedia('(max-width:900px)').matches);
       if (value) {
-        if (!activePath) renderEmptyState();
-        else paintActiveCode();
-        if (!skipFocus) closePanelBtn.focus();
+        if (paneMode === 'operator') {
+          if (!opDetail && opSelected) openOperator(opSelected);
+        } else {
+          if (!activePath) renderEmptyState();
+          else paintActiveCode();
+        }
+        if (!skipFocus) (paneMode === 'operator' ? operatorPane.querySelector('button') : closePanelBtn)?.focus();
       } else {
         destroyViewer();
         if (!skipFocus) toggle.focus();
@@ -835,6 +1192,9 @@
 
     return {
       openFile,
+      openOperator,
+      ensureOperatorsLoaded,
+      selectOperatorTarget,
       setOpen,
       isOpen: () => !pane.hidden,
       ensureTreeLoaded() { if (!treeLoaded) list('/'); refreshChanges(); },
@@ -847,6 +1207,7 @@
       dispose() {
         disposed = true;
         destroyViewer();
+        if (typeof disposeReaders === 'function') disposeReaders(operatorPane);
         resize?.dispose();
         treeRoot.unmount();
       },
