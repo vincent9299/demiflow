@@ -3,6 +3,7 @@ import json
 from dataclasses import asdict
 from collections.abc import Mapping
 
+from ..dataflow_record_frames import raw_workspace
 from ..contracts.dataflow import Record, ArtifactRef, AggregateState
 from ..contracts.dataflow_errors import DataflowError
 from ..exchange.dataflow_bridge import _encode_value, _decode_value, _encode_record_document, _decode_record_document
@@ -19,6 +20,35 @@ def record_fragment(record, *, max_bytes):
     if len(raw) + len(RECORD_LIST_PREFIX) + len(RECORD_LIST_SUFFIX) > max_bytes:
         raise DataflowError('BUDGET_EXCEEDED', 'kernel image exceeds state byte budget')
     return raw
+
+
+def spool_fragment_workspace(raw, maximum):
+    """Decode projection for one unchanged state-codec record fragment."""
+    outer = 2 * raw_workspace(raw, typed=False)
+    if outer > maximum:
+        raise DataflowError('BUDGET_EXCEEDED', 'ordering input record exceeds its reader subwindow')
+    item = json.loads(raw)
+    if item[0] != 'record':
+        raise DataflowError('CORRUPT_ARTIFACT', 'ordering input fragment is not a record')
+    size = outer + raw_workspace(item[3].encode('utf-8')) + 256
+    if size + 4096 > maximum:
+        raise DataflowError('BUDGET_EXCEEDED', 'decoded ordering input record exceeds its reader subwindow')
+    return size
+
+
+def admit_spool_image(raw, maximum):
+    """Pre-admit an existing bounded segment before decoding its record list."""
+    outer = 2 * raw_workspace(raw, typed=False)
+    if outer > maximum:
+        raise DataflowError('BUDGET_EXCEEDED', 'ordering input segment exceeds its reader subwindow')
+    envelope = json.loads(raw)
+    held = outer
+    for item in envelope[1][1]:
+        if item[0] != 'record':
+            raise DataflowError('CORRUPT_ARTIFACT', 'ordering input segment contains a non-record')
+        held += raw_workspace(item[3].encode('utf-8'))
+        if held > maximum:
+            raise DataflowError('BUDGET_EXCEEDED', 'decoded ordering segment exceeds its reader subwindow')
 
 
 def record_list_chunks(fragments):
