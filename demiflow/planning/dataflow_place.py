@@ -988,7 +988,8 @@ def compile_physical_dataflow(
     stages = specialize_graph_stages(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
     stages = tuple(stage for stage in stages if not refs.intersection(stage.occurrences))
     if _allow_offset_sql:
-        from .dataflow_relational_regions import place_key_exclusion
+        from .dataflow_relational_regions import place_key_exclusion, place_join_probe
+        stages = place_join_probe(graph, snapshots, splits, stages, policy=policy, bounds=bounds, hosts=hosts)
         stages = place_key_exclusion(graph, snapshots, splits, stages, policy=policy, bounds=bounds, hosts=hosts)
     jobs, values = physical_values(graph, stages)
     exchanges = plan_exchanges(graph, stages, policy=policy, bounds=bounds)
@@ -999,9 +1000,9 @@ def compile_physical_dataflow(
         exchanges, residency = _select_budgeted_residency(
             graph, snapshots, stages, exchanges, hosts=hosts, bounds=bounds, policy=policy)
     except DataflowError as exc:
-        from ..execution.contracts.relational_region import KEY_BATCH_ARROW_SUFFIX, needs_native_offsets
+        from ..execution.contracts.relational_region import JOIN_PROBE_SUFFIX, KEY_BATCH_ARROW_SUFFIX, needs_native_offsets
         if exc.code != 'RESOURCE_INFEASIBLE' or not any(
-                needs_native_offsets(s) or s.stage_id.endswith(KEY_BATCH_ARROW_SUFFIX) for s in stages):
+                needs_native_offsets(s) or s.stage_id.endswith((KEY_BATCH_ARROW_SUFFIX, JOIN_PROBE_SUFFIX)) for s in stages):
             raise
         # A larger optional stage may not coexist with other mandatory
         # reservations. Retry only this fresh physical choice, before sealing.

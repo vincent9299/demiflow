@@ -111,7 +111,7 @@ class PinnedKeyScan:
 
     def close(self):
         self._scan.close()
-        self._pending = None
+        self._pending = self._admitted = None
 
     def advance(self, max_rows, max_bytes):
         """Return a new native buffer once; only admitted rows advance the durable cursor."""
@@ -148,7 +148,76 @@ class PinnedKeyScan:
                                    'row_offset': self.reader._row_offset}
         consumed += n
         self._pending = (frag, start, batch, consumed) if consumed < batch.num_rows else None
+        self._admitted = ((frag, start + consumed - n, batch.slice(consumed - n, n)) if charged else None)
         return new, charged, size
+
+    def probe_payload_is_bounded(self):
+        """Skipping negative rows must not hide a source row validation failure."""
+        import json
+        import pyarrow as pa
+        fields = self.reader._plan.query.columns or self.dataset.schema.names
+        encoded = 64
+        for name in fields:
+            dtype = self.dataset.schema.field(name).type
+            if pa.types.is_integer(dtype) or pa.types.is_boolean(dtype):
+                width = 48
+            elif pa.types.is_fixed_size_binary(dtype):
+                width = 32 + 4 * ((dtype.byte_width + 2) // 3)
+            else:
+                # Variable output or nonfinite floats need the ordinary row codec.
+                return False
+            encoded += len(json.dumps(name, ensure_ascii=True).encode()) + width
+            if encoded > self.reader._services.bounds.max_row_bytes:
+                return False
+        return True
+
+    def next_probe(self, rows, size):
+        """Read original keys/row IDs with the cursor advanced by exactly this slice."""
+        step = self.advance(rows, size)
+        if step is None:
+            return None
+        if self._admitted is None:
+            return (), 0, 0
+        return self._admitted, step[1], step[2]
+
+    def matched_records(self, fragment, offset, projection, matches):
+        """Restore original row, ID, schema and sequence only for probe positives."""
+        from .contracts.dataflow import Record
+        from .recovery_contract import identity
+        from .arrow_payload import fallback_row
+        import pyarrow.compute as pc
+        reader = self.reader
+        query = reader._plan.query
+        columns = list(query.columns or self.dataset.schema.names)
+        schema = self.dataset.schema
+        requested = query.batch_size or 1024
+        maximum = _hydration_rows([schema.field(c) for c in columns], reader._services, requested)
+        sequence = reader._next_sequence - projection.num_rows
+        for start in range(0, len(matches), maximum):
+            indices = matches.slice(start, maximum)
+            table = _take_pinned(self.dataset, columns, pc.take(projection.column('_rowid'), indices),
+                                 reader._services)
+            reader._schema_ref = reader._schemas.put(table.schema)
+            ordinal = 0
+            for batch in table.to_batches():
+                for i in range(batch.num_rows):
+                    local = indices[ordinal].as_py()
+                    pos = {'version': reader._version, 'fragment_id': fragment, 'row_offset': offset + local}
+                    row = fallback_row(batch, i)
+                    encoded = reader.measured_row_size(row)
+                    yield Record(identity([reader._snapshot.source_id,reader._split.split_id,pos]), pos,
+                        None,row,encoded,sequence+local,reader._schema_ref)
+                    ordinal += 1
+
+
+def _take_pinned(dataset, columns, row_ids, services):
+    services.check_stop()
+    table = dataset._take_rows(row_ids, columns=columns)
+    if table.num_rows != len(row_ids):
+        raise DataflowError('SOURCE_CHANGED', 'Pinned Lance row IDs did not resolve one-for-one')
+    if table.nbytes > services.bounds.max_batch_bytes:
+        raise DataflowError('BUDGET_EXCEEDED', 'Lance payload hydration exceeds batch budget')
+    return table
 
 
 class PinnedKeyPayload:
@@ -195,13 +264,7 @@ class PinnedKeyPayload:
                    or pa.types.is_fixed_size_binary(f.type) for f in self.schema)
 
     def read_table(self, row_ids):
-        self.services.check_stop()
-        table = self.dataset._take_rows(row_ids, columns=self.columns)
-        if table.num_rows != len(row_ids):
-            raise DataflowError('SOURCE_CHANGED', 'Pinned Lance row IDs did not resolve one-for-one')
-        if table.nbytes > self.services.bounds.max_batch_bytes:
-            raise DataflowError('BUDGET_EXCEEDED', 'Lance payload hydration exceeds batch budget')
-        return table
+        return _take_pinned(self.dataset, self.columns, row_ids, self.services)
 
     def read_rows(self, row_ids, *, bulk):
         table = self.read_table(row_ids)

@@ -30,6 +30,7 @@ from ..dataflow_record_frames import (encode_document, decode_document, document
 
 class WorkerGraphRunner:
     _fixed_key_exclusion = None
+    _join_probe = None
 
     def __init__(self, executor):
         self.e = executor
@@ -166,6 +167,18 @@ class WorkerGraphRunner:
                 self._batch_source = reader
         from .key_exclusion import FixedKeyExclusion
         self._fixed_key_exclusion = FixedKeyExclusion.open(self)
+        from ..contracts.relational_region import JOIN_PROBE_SUFFIX, fixed_join_inputs
+        if any(stage.stage_id.endswith(JOIN_PROBE_SUFFIX) for stage in executor.assignment.stages):
+            left, right, join = fixed_join_inputs(executor._graph)
+            splits = {split.source_id:split.split_id for split in executor.assignment.source_splits}
+            if {left, right} != set(splits):
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'join probe differs from its original source splits')
+            field, = executor._node_specs[join].kernel.configuration['on']
+            scan = executor._readers[splits[left]].pinned_keys(field, positions=True)
+            if scan is not None and scan.probe_payload_is_bounded():
+                right_edge, = [e.edge_id for e in self._incoming[join] if e.input_port == 'right']
+                self._join_probe = (splits[left], right_edge, join, scan)
+                self._join_probe_values = None
         args = self._terminal_spec.configuration.get('arguments', {}) if self._terminal_spec else {}
         self._limit = (args.get('limit') if self._terminal_spec and self._terminal_spec.kind == 'take'
                        else args.get('batch_size', 20) if self._terminal_spec and self._terminal_spec.kind == 'take_batch'
@@ -768,6 +781,49 @@ class WorkerGraphRunner:
             frames.close()
         return processed
 
+    def _advance_join_probe(self, source, split_id, credit):
+        """Only confirmed non-matches may skip the usual finite input port."""
+        import pyarrow.compute as pc
+        from ...operators.relational import key_membership
+        _, _, join, scan = self._join_probe
+        if self._join_probe_values is None:
+            kernel = self.e._kernels[(join, self.partition)]
+            self._join_probe_values = kernel.fixed_probe_values(scan.dtype)
+            if self._join_probe_values is None:
+                scan.close()
+                self._join_probe = None
+                return False
+        rows = self._source_quantum if self._publication_overlap else self._source_quantum - self._source_rows_since_cut
+        size = self.bounds.max_batch_bytes
+        if credit is not None:
+            available = credit['bytes'] - self._unconfirmed_bytes
+            rows = min(rows, credit['rows'] - self._unconfirmed_rows,
+                       max(1, available // (self.bounds.max_row_bytes + 17)))
+            size = min(size, available)
+        step = scan.next_probe(rows, size)
+        if step is None:
+            self._finish_source_split(split_id, source)
+            return True
+        item, count, charged = step
+        if count:
+            fragment, offset, batch = item
+            matched = pc.indices_nonzero(key_membership(batch.column(0), self._join_probe_values))
+            for record in scan.matched_records(fragment, offset, batch, matched):
+                charged += record.encoded_bytes
+                if credit and self._unconfirmed_bytes + charged > credit['bytes']:
+                    raise DataflowError('BUDGET_EXCEEDED', 'join probe exceeds unconfirmed source bytes')
+                self._output(source, record)
+            self._metrics[source]['rows_output'] += count-len(matched)
+            self._metrics[join]['rows_input'] += count-len(matched)
+            self._dirty_metrics.update((source, join))
+            self._source_rows_since_cut += count
+            self._unconfirmed_rows += count
+            self._unconfirmed_bytes += charged
+        if not self._publication_overlap and self._source_rows_since_cut >= self._source_quantum:
+            self._paused = True
+            self._flush_metrics()
+        return True
+
     def _advance_batch(self, source, split_id, credit):
         """Transfer a co-located source batch within the same cut and credit window."""
         rows, size = self.bounds.max_output_rows, self.bounds.max_batch_bytes
@@ -941,6 +997,12 @@ class WorkerGraphRunner:
                 if self._park_mode and not self._park_can_output(source):
                     self._paused = True
                     break
+                if self._join_probe is not None and split_id == self._join_probe[0]:
+                    if self._join_probe[1] not in self._finished_ports:
+                        continue
+                    if self._advance_join_probe(source, split_id, credit):
+                        processed += 1
+                        break
                 from ..dataflow_source_context import source_run_scope
                 with source_run_scope(self.e._source_run):
                     if reader is self._batch_source:
@@ -1720,6 +1782,9 @@ class WorkerGraphRunner:
         self._active_finishes.clear()
         if self._fixed_key_exclusion is not None:
             self._fixed_key_exclusion.close()
+        if self._join_probe is not None:
+            self._join_probe[3].close()
+            self._join_probe_values = self._join_probe = None
         self._finite_input.close()
         self._peer.close()
         self._terminal_blocks.close()

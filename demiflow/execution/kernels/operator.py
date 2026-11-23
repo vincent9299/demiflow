@@ -886,6 +886,33 @@ class OperatorKernel:
     def finite_join_records(self, port, fields):
         return self._ports[port].records().for_join(fields)
 
+    def fixed_probe_values(self, dtype):
+        """Read the already closed right port without consuming or replacing its original rows."""
+        import pyarrow as pa
+        from ..contracts.relational_region import JOIN_PROBE_WINDOW
+        from .dataflow import _materialize_row
+        port = self._ports['right']
+        rows = port.records().within_offset_budget(JOIN_PROBE_WINDOW // 192)
+        if rows is None:
+            return None
+        field, = self._spec.configuration['right_on']
+        values = set()
+        try:
+            for record in rows:
+                self._finite_services.check_stop()
+                value = _materialize_row(record, self._finite_services)[field]
+                if value is None:
+                    continue
+                if type(value) is not int or value.bit_length() > dtype.bit_width:
+                    return None
+                values.add(value)
+        finally:
+            rows.close()
+        try:
+            return pa.array(values, type=dtype)
+        except (pa.ArrowInvalid, OverflowError):
+            return None
+
     def accepts_finite_reference(self, port):
         return (self._spec.kind != 'StreamPrependOp' and port in self._ports
                 and any(p.name == port and p.requirement == 'finite_complete' for p in self._spec.inputs))
