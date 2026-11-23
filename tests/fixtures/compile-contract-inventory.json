@@ -137,9 +137,9 @@
   },
   "constant": {
    "FIELD": [
-    "execution/dataflow_publication_budget.py",
     "execution/kernels/operator.py",
     "execution/kernels/shuffle_order.py",
+    "execution/scheduler/dataflow_publication_budget.py",
     "planning/dataflow_budget.py",
     "planning/dataflow_compile.py"
    ],
@@ -171,7 +171,7 @@
     "planning/dataflow_place.py"
    ],
    "batch_size": [
-    "execution/dataflow_batch_membership.py",
+    "execution/kernels/batch_membership.py",
     "execution/kernels/operator.py",
     "planning/dataflow_compile.py",
     "planning/dataflow_configuration.py"
@@ -211,7 +211,7 @@
     "planning/dataflow_thread_fusion.py"
    ],
    "default_batch_size": [
-    "execution/dataflow_batch_membership.py",
+    "execution/kernels/batch_membership.py",
     "execution/kernels/operator.py",
     "planning/dataflow_configuration.py"
    ],
@@ -308,7 +308,7 @@
     "execution/worker/dataflow_graph_runner.py"
    ],
    "limits": [
-    "execution/dataflow_resource_recovery.py",
+    "execution/hosts/execution_recovery.py",
     "execution/run_context.py",
     "execution/run_journal.py",
     "execution/worker/authority.py"
@@ -321,8 +321,8 @@
     "execution/dataflow_prompt_service.py"
    ],
    "max_batch": [
-    "execution/dataflow_batch_membership.py",
     "execution/dataflow_embedding_journal.py",
+    "execution/kernels/batch_membership.py",
     "execution/kernels/operator.py"
    ],
    "max_requests": [
@@ -350,8 +350,8 @@
    ],
    "native_operation": [
     "execution/action_driver/dataflow.py",
+    "execution/compiler_support/dataflow_native.py",
     "execution/dataflow_fetch.py",
-    "execution/dataflow_native.py",
     "execution/dataflow_producer.py",
     "execution/dataflow_queue.py",
     "execution/dataflow_search.py",
@@ -435,7 +435,7 @@
     "planning/dataflow_budget.py"
    ],
    "query": [
-    "execution/program_materials.py"
+    "execution/journal/program_materials.py"
    ],
    "reducer_kwargs": [
     "execution/kernels/relational.py"
@@ -455,7 +455,7 @@
     "execution/dataflow_routed_prompt.py"
    ],
    "run_id": [
-    "execution/dataflow_resource_recovery.py",
+    "execution/hosts/execution_recovery.py",
     "execution/run_context.py",
     "execution/run_journal.py",
     "execution/worker/authority.py"
@@ -595,10 +595,10 @@
     "execution/dataflow_prompt_service.py"
    ],
    "native_key": [
-    "execution/dataflow_native.py"
+    "execution/compiler_support/dataflow_native.py"
    ],
    "native_operation": [
-    "execution/dataflow_native.py"
+    "execution/compiler_support/dataflow_native.py"
    ],
    "node_id": [
     "execution/dataflow_routed_prompt.py"
@@ -826,10 +826,10 @@
  },
  "implicit_inputs": [],
  "input_resolver": [
-  "execution/dataflow_compile_inputs.py::compile_inputs: context = current()",
-  "execution/dataflow_compile_inputs.py::compile_inputs: return CompileInputs(defaults=executor_defaults(getattr(request.action, '_dataflow_executor', None)),",
-  "execution/dataflow_compile_inputs.py::executor_defaults: block_size=getattr(executor, '_block_size', None),",
-  "execution/dataflow_compile_inputs.py::executor_defaults: local = getattr(executor, '_local_kernel', None)"
+  "execution/compiler_support/dataflow_compile_inputs.py::compile_inputs: context = current()",
+  "execution/compiler_support/dataflow_compile_inputs.py::compile_inputs: return CompileInputs(defaults=executor_defaults(getattr(request.action, '_dataflow_executor', None)),",
+  "execution/compiler_support/dataflow_compile_inputs.py::executor_defaults: block_size=getattr(executor, '_block_size', None),",
+  "execution/compiler_support/dataflow_compile_inputs.py::executor_defaults: local = getattr(executor, '_local_kernel', None)"
  ],
  "predicates": {
   "AddColumnOp": {
@@ -2917,7 +2917,7 @@
      "segment",
      "record"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:TaskReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:TaskReader"
    },
    "exclude_keys": {
     "cursor_fields": [],
@@ -2928,7 +2928,7 @@
      "file_index",
      "record_index"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:FileReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:FileReader"
    },
    "groups": {
     "cursor_fields": [],
@@ -2938,14 +2938,14 @@
     "cursor_fields": [
      "index"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:ItemsReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:ItemsReader"
    },
    "iterable": {
     "cursor_fields": [
      "segment",
      "record"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:IteratorReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:IteratorReader"
    },
    "join": {
     "cursor_fields": [],
@@ -2957,40 +2957,40 @@
      "fragment_id",
      "row_offset"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:LanceReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:LanceReader"
    },
    "materialized": {
     "cursor_fields": [
      "index"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:ItemsReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:ItemsReader"
    },
    "producer": {
     "cursor_fields": [
      "producer_position",
      "producer_cursor"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:ProducerReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:ProducerReader"
    },
    "queue": {
     "cursor_fields": [
      "claim_ref",
      "record_index"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:QueueReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:QueueReader"
    },
    "queue_history": {
     "cursor_fields": [
      "claim_ref",
      "record_index"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:HistoryReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:HistoryReader"
    },
    "range": {
     "cursor_fields": [
      "next"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:RangeReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:RangeReader"
    },
    "reduce": {
     "cursor_fields": [],
@@ -3002,7 +3002,7 @@
      "partition",
      "last_key"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:SqlReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:SqlReader"
    },
    "union": {
     "cursor_fields": [],

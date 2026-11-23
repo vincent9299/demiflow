@@ -13,7 +13,7 @@
       ],
       [
         "Dataset.enqueue",
-        "from ..execution.queue_producer import QueueProducer"
+        "from demiflow.execution.native_queue.queue_producer import QueueProducer"
       ],
       [
         "Dataset.fetch",
@@ -29,7 +29,7 @@
       ],
       [
         "Dataset.save_lance",
-        "from ..execution.stream_lance import StreamLanceSink"
+        "from demiflow.execution.native_queue.stream_lance import StreamLanceSink"
       ]
     ],
     "map_cached": [
@@ -158,7 +158,7 @@
         ],
         [
           "read_legacy_queue_records",
-          "demiflow.execution.legacy_queue",
+          "demiflow.execution.sources.legacy_queue",
           "LegacyQueueHistoryDatasource",
           null
         ],

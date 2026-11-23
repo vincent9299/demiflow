@@ -52,7 +52,7 @@
     ],
     [
       "Dataset.enqueue",
-      "demiflow.execution.queue_producer",
+      "demiflow.execution.native_queue.queue_producer",
       "QueueProducer"
     ],
     [
@@ -97,7 +97,7 @@
     ],
     [
       "Dataset.save_lance",
-      "demiflow.execution.stream_lance",
+      "demiflow.execution.native_queue.stream_lance",
       "StreamLanceSink"
     ],
     [

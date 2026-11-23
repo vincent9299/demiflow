@@ -143,8 +143,8 @@ def test_one_function_resolves_the_compiler_inputs():
     """Executor defaults and report bindings are read in one module and handed over explicitly."""
     reads = inventory.implicit_inputs((inventory.INPUT_RESOLVER,))
     assert sorted({item.split(': ', 1)[0] for item in reads}) == [
-        'execution/dataflow_compile_inputs.py::compile_inputs',       # the action's executor, the report context
-        'execution/dataflow_compile_inputs.py::executor_defaults',    # the three executor attributes
+        'execution/compiler_support/dataflow_compile_inputs.py::compile_inputs',       # the action's executor, the report context
+        'execution/compiler_support/dataflow_compile_inputs.py::executor_defaults',    # the three executor attributes
     ]
     compiler = inventory.source(inventory.COMPILER)
     assert compiler.count('compile_inputs(request)') == 1             # resolved once, at the capture entry

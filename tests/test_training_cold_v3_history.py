@@ -48,7 +48,10 @@ from demiflow.execution import commit
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.recovery_contract import RunRef
-from demiflow.execution.state_artifacts import StateArtifacts
+if (Path(demiflow.__file__).parent / 'execution/storage/state_artifacts.py').is_file():
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
+else:
+    from demiflow.execution.state_artifacts import StateArtifacts
 
 checkout, root, fault, operation, family = sys.argv[1:]
 assert Path(demiflow.__file__).resolve().parent.parent == Path(checkout)

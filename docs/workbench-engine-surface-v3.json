@@ -40,11 +40,11 @@
         "clean_stopped_execution"
       ],
       "local_capacity": [
-        "demiflow.execution.dataflow_capacity",
+        "demiflow.execution.hosts.capacity",
         "local_capacity"
       ],
       "local_capacity_domain": [
-        "demiflow.execution.dataflow_capacity",
+        "demiflow.execution.hosts.capacity",
         "local_capacity_domain"
       ],
       "local_execution": [
@@ -56,7 +56,7 @@
         "observe"
       ],
       "reconcile_stopped_fits": [
-        "demiflow.execution.training.maintenance",
+        "demiflow.execution.pipeline.training_maintenance",
         "reconcile_stopped_fits"
       ],
       "resolve_payload_bounds": [
@@ -64,7 +64,7 @@
         "resolve_payload_bounds"
       ],
       "retained_process_units": [
-        "demiflow.execution.dataflow_resource_recovery",
+        "demiflow.execution.hosts.execution_recovery",
         "retained_process_units"
       ],
       "stream_limits": [
@@ -94,7 +94,7 @@
         "PublicationMismatch"
       ],
       "RunReadError": [
-        "demiflow.execution.run_reader",
+        "demiflow.execution.journal.run_reader",
         "RunReadError"
       ],
       "VERSION": [
@@ -126,7 +126,7 @@
         "compile_declared_dag"
       ],
       "compiled_node_materials": [
-        "demiflow.execution.program_materials",
+        "demiflow.execution.journal.program_materials",
         "compiled_node_materials"
       ],
       "dataset_declaration_links": [
@@ -150,7 +150,7 @@
         "native_submission_view"
       ],
       "observe_storage": [
-        "demiflow.execution.run_reader",
+        "demiflow.execution.journal.run_reader",
         "observe_storage"
       ],
       "read_action_plan": [
@@ -158,7 +158,7 @@
         "read_action_plan"
       ],
       "read_run": [
-        "demiflow.execution.run_reader",
+        "demiflow.execution.journal.run_reader",
         "read_run"
       ],
       "read_verified_identity_bridge": [
@@ -229,7 +229,7 @@
         "demiflow/workbench/runs/worker.py"
       ]
     },
-    "demiflow.execution.datafusion": {
+    "demiflow.execution.hosts.datafusion": {
       "DataFusionOptions": [
         "demiflow/workbench/analysis/case_worker.py",
         "demiflow/workbench/analysis/materialize.py",
@@ -243,7 +243,7 @@
         "demiflow/workbench/analysis/read_worker.py"
       ]
     },
-    "demiflow.execution.output_watch": {
+    "demiflow.execution.journal.output_watch": {
       "OutputWatch": [
         "demiflow/workbench/runs/worker.py"
       ]
@@ -781,7 +781,6 @@
     "contextlib.ExitStack": "stdlib:ExitStack",
     "demiflow.data.dataset.Dataset": "Dataset",
     "demiflow.data.dataset.MaterializedDataset": "Dataset",
-    "demiflow.execution.datafusion.DataFusionSession": "DataFusionSession",
     "demiflow.execution.host.control.CheckedExecution": "CheckedExecution",
     "demiflow.execution.host.control.NativeExecution": "NativeExecution",
     "demiflow.execution.host.control.RunContext": "RunContext",
@@ -794,7 +793,8 @@
     "demiflow.execution.host.inspection.read_run": "RunReader",
     "demiflow.execution.host.inspection.verify_published_output": "record:VerifiedPublication",
     "demiflow.execution.host.inspection.verify_write_receipt": "record:VerifiedPublication",
-    "demiflow.execution.output_watch.OutputWatch": "OutputWatch",
+    "demiflow.execution.hosts.datafusion.DataFusionSession": "DataFusionSession",
+    "demiflow.execution.journal.output_watch.OutputWatch": "OutputWatch",
     "demiflow.lance.preview": "LancePreview",
     "demiflow.lance.refs.DatasetRef": "DatasetRef",
     "demiflow.lance.refs.DatasetRef.from_dict": "DatasetRef",

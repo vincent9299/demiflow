@@ -143,7 +143,11 @@ with RunContext.start('run', limits={'checkpoint_rows': 8, 'checkpoint_interval_
     read = """import json
 from pathlib import Path
 from types import SimpleNamespace
-from demiflow.execution.run_reader import _ReadonlyJournal
+import demiflow
+if (Path(demiflow.__file__).parent / 'execution/journal/run_reader.py').is_file():
+    from demiflow.execution.journal.run_reader import _ReadonlyJournal
+else:
+    from demiflow.execution.run_reader import _ReadonlyJournal
 from _native_receipt_fixtures import committed_rows
 root = Path('run').resolve()
 facts = _ReadonlyJournal(root).execution_commits('action-1')
