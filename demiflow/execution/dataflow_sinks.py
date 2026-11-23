@@ -16,6 +16,7 @@ from collections.abc import Mapping
 
 from ..data.datasink import Datasink, WriteContext
 from .contracts.dataflow import (
+    FIXED_SCAN_BATCHES,
     ArtifactRef, DriverServices, KernelSpec, Record, RecoveryImage, RuntimeServices,
 )
 from .contracts.dataflow_errors import DataflowError
@@ -484,11 +485,15 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
                             raw = b''.join(store.read(leaf, max_bytes=leaf.size_bytes))
                             buffer = pa.py_buffer(raw)
                             _uncompressed_ipc(buffer, bounds)
-                            with pa.ipc.open_stream(buffer) as scanner:
+                            options = pa.ipc.IpcReadOptions(ensure_alignment=pa.ipc.Alignment.DataTypeSpecific)
+                            with pa.ipc.open_stream(buffer, options=options) as scanner:
                                 value = scanner.read_next_batch()
                             value.validate(full=True)
-                            if value.num_rows != count:
-                                raise DataflowError('INVALID_CONTRACT', 'native terminal segment row count changed')
+                            sealed_schema = manifest.get('schema_ref')
+                            expected = schemas.read(_artifact_from_json(sealed_schema)) if sealed_schema else None
+                            if (value.num_rows != count or expected is None
+                                    or not value.schema.equals(expected, check_metadata=True)):
+                                raise DataflowError('INVALID_CONTRACT', 'native segment differs from row count or schema')
                             for start in range(0, count, batch_rows):
                                 output = pa.Table.from_batches([value.slice(start, batch_rows)])
                                 yield output
@@ -660,7 +665,7 @@ class NativeTerminalSink(_DataflowArtifactSink):
         return result
 
     def _has_staged_batches(self, manifest):
-        if (self._configuration.get('input_carrier') != 'fixed_scan_batches.v1'
+        if (self._configuration.get('input_carrier') != FIXED_SCAN_BATCHES
                 or self.native.spec.schema is not None or not manifest['total_rows']
                 or len(manifest['partitions']) != 1):
             return False
@@ -677,7 +682,7 @@ class NativeTerminalSink(_DataflowArtifactSink):
         return publication_blocks(manifest, store=self._store, bounds=self._bounds,
             batch_rows=self._batch_rows, publication_workspace=self._publication_workspace,
             publication_metadata=self._publication_metadata,
-            fixed_scan_batches=self._configuration.get('input_carrier') == 'fixed_scan_batches.v1',
+            fixed_scan_batches=self._configuration.get('input_carrier') == FIXED_SCAN_BATCHES,
             declared_schema=getattr(getattr(self.native, "spec", None), "schema", None))
 
     def inspect(self, prepared, context):
@@ -802,7 +807,7 @@ def make_native_terminal_sink(spec, *, request, services, publication_reserved_b
         raise DataflowError('INVALID_CONTRACT', 'unknown native terminal adapter')
     batch_rows = min(256, (services.policy.native_limits or {}).get("batch_rows", 256),
                      services.action.context.limits['batch_rows'])
-    if spec.configuration.get('input_carrier') == 'fixed_scan_batches.v1':
+    if spec.configuration.get('input_carrier') == FIXED_SCAN_BATCHES:
         requested = request.source.query.batch_size or batch_rows
         batch_rows = min(requested, (services.policy.native_limits or {}).get('batch_rows', requested))
         if 'batch_rows' in services.action.context.explicit_limits:

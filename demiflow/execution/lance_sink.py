@@ -145,8 +145,10 @@ class LanceSink(Datasink):
             self.run.check_stop()
             rows += block.num_rows
             size += block.nbytes
-            if rows > self.run.limits['max_output_rows'] or size > self.run.limits['max_output_bytes']:
-                raise ExecutionBudgetExceeded('max_output_bytes', 'Merge publication exceeds run limits')
+            if rows > self.run.limits['max_output_rows']:
+                raise ExecutionBudgetExceeded('max_output_rows', 'Merge publication exceeds the row budget')
+            if size > self.run.limits['max_output_bytes']:
+                raise ExecutionBudgetExceeded('max_output_bytes', 'Merge publication exceeds the byte budget')
             if schema is not None and schema != block.schema:
                 raise RecoveryContractError('Merge publication schema changed')
             schema = block.schema

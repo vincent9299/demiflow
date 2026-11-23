@@ -23,7 +23,7 @@ from dataclasses import replace
 from typing import Mapping, NamedTuple
 
 from ..data.plan import LogicalOp
-from ..execution.contracts.dataflow import Bounds
+from ..execution.contracts.dataflow import FIXED_SCAN_BATCHES, Bounds
 from ..execution.contracts.dataflow_errors import DataflowError
 from ..resources.contracts import ResourceProfile
 
@@ -174,7 +174,7 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
                 and source.native_options is None and source.query.version is not None
                 and not source.query.filter and not source.query.projection and source.query.limit is None
                 and type(spec) is LanceWriteSpec and spec.mode == 'merge'):
-            configuration['input_carrier'] = 'fixed_scan_batches.v1'
+            configuration['input_carrier'] = FIXED_SCAN_BATCHES
     if native_publication:
         from ..execution.dataflow_publication_budget import FIELD, SCHEMA
         # A native consumer can still hold its previous yielded Arrow

@@ -7,6 +7,7 @@ recovery authority. Resource grants cover the sum of all live kernel windows.
 from dataclasses import replace
 
 from ..resources.contracts import ResourceProfile
+from ..execution.contracts.dataflow import FIXED_SCAN_BATCHES
 
 _SOURCES = frozenset({'items', 'range', 'file', 'lance', 'materialized', 'iterable', 'literal_empty'})
 _TERMINALS = frozenset({'take', 'take_all', 'take_batch', 'iter_rows', 'iter_batches',
@@ -20,7 +21,7 @@ def fuse_single_worker_pipeline(graph, stages, *, policy, bounds, hosts=None):
     # can already host them. Automatic co-location only extends the layout that
     # worker pressure would otherwise force into a shared suffix.
     fixed_scan = (len(graph.nodes) == 2 and any(
-        n.kind == 'terminal' and n.kernel.configuration.get('input_carrier') == 'fixed_scan_batches.v1'
+        n.kind == 'terminal' and n.kernel.configuration.get('input_carrier') == FIXED_SCAN_BATCHES
         for n in graph.nodes))
     if not fixed_scan and policy.max_active_workers != 1 and (policy.max_active_workers is None
             or sum(len(stage.partitions) for stage in stages) <= policy.max_active_workers):
