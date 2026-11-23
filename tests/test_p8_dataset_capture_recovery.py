@@ -80,8 +80,9 @@ def _invoke(checkout, root, script, args=(), log=None):
 @pytest.mark.parametrize(('capture', 'operation', 'rejection'), [
     ('Dataset', 'resume', 'Action semantic/source identity differs on resume'),
     ('Dataset.join', 'resume', None),
+    ('Dataset.checkpoint', 'resume', None),
     ('Dataset.join', 'reject-at-seal', 'test rejection inside sealed program verification'),
-], ids=['captured-class', 'captured-public-method', 'seal-validation'])
+], ids=['captured-class', 'captured-public-method', 'unchanged-rejection', 'seal-validation'])
 def test_old_cut_and_sink_effects(published, tmp_path, capture, operation, rejection):
     (tmp_path / 'historical_business.py').write_text(
         BUSINESS + f'\ndef observed():\n    return CountingMap({capture})\n'
