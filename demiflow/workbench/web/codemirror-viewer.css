@@ -1,0 +1,312 @@
+/* Static stylesheet for CodeMirror 6 viewer (100% CSP style-src 'self' compliant). */
+.dev-cm-host .cm-editor {
+  position: relative !important;
+  box-sizing: border-box;
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 0%;
+  min-height: 0;
+  height: 100%;
+  background: #ffffff;
+  color: #18181b;
+  font-size: 12.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+.dev-cm-host .cm-editor.cm-focused {
+  outline: none;
+}
+.dev-cm-host .cm-scroller {
+  display: flex !important;
+  align-items: flex-start !important;
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: auto !important;
+  overscroll-behavior: contain;
+  position: relative;
+  z-index: 0;
+  font-family: inherit;
+  line-height: 1.62;
+  tab-size: 4;
+}
+.dev-cm-host .cm-gutters {
+  display: flex !important;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  min-height: 100%;
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  background: #fafafa;
+  color: #a1a1aa;
+  border-right: 1px solid #ededf0;
+  user-select: none;
+  padding: 8px 0 28px;
+}
+.dev-cm-host .cm-gutter {
+  display: flex !important;
+  flex-direction: column;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  min-height: 100%;
+  overflow: hidden;
+}
+.dev-cm-host .cm-gutterElement {
+  box-sizing: border-box;
+  line-height: 1.62;
+}
+.dev-cm-host .cm-lineNumbers .cm-gutterElement {
+  padding: 0 8px 0 10px;
+  min-width: 38px;
+  text-align: right;
+  white-space: nowrap;
+}
+.dev-cm-host .cm-foldGutter .cm-gutterElement {
+  padding: 0 4px;
+  min-width: 16px;
+  text-align: center;
+  cursor: pointer;
+  color: #a1a1aa;
+}
+.dev-cm-host .cm-foldGutter .cm-gutterElement:hover {
+  color: #18181b;
+}
+.dev-cm-host .cm-activeLineGutter {
+  background: #f4f4f5;
+  color: #52525b;
+}
+.dev-cm-host .cm-content {
+  margin: 0;
+  flex-grow: 2;
+  flex-shrink: 0;
+  display: block;
+  white-space: pre;
+  word-wrap: normal;
+  box-sizing: border-box;
+  min-height: 100%;
+  min-width: 0;
+  padding: 8px 0 28px;
+  outline: none;
+  user-select: text;
+}
+.dev-cm-host .cm-line {
+  display: block;
+  padding: 0 16px 0 12px;
+  line-height: 1.62;
+}
+.dev-cm-host .cm-selectionLayer,
+.dev-cm-host .cm-cursorLayer {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+}
+.dev-cm-host .cm-selectionBackground {
+  background: rgba(59, 130, 246, 0.18);
+}
+.dev-cm-host .cm-content ::selection {
+  background: rgba(59, 130, 246, 0.22);
+}
+
+/* Search panel */
+.dev-cm-host .cm-panels {
+  flex: none;
+  background: #fafafa;
+  color: #18181b;
+  z-index: 20;
+}
+.dev-cm-host .cm-panels-top {
+  border-bottom: 1px solid #e4e4e7;
+}
+.dev-cm-host .cm-panel.cm-search {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.dev-cm-host .cm-panel.cm-search input[type="text"],
+.dev-cm-host .cm-panel.cm-search input:not([type="checkbox"]) {
+  font: inherit;
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+  background: #fff;
+  color: #18181b;
+  padding: 3px 8px;
+  min-width: 140px;
+}
+.dev-cm-host .cm-panel.cm-search button {
+  font: inherit;
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+  background: #fff;
+  color: #27272a;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.dev-cm-host .cm-panel.cm-search button:hover {
+  background: #f4f4f5;
+  color: #09090b;
+}
+.dev-cm-host .cm-panel.cm-search button[name="close"] {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+  color: #71717a;
+}
+.dev-cm-host .cm-panel.cm-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #52525b;
+  font-size: 11.5px;
+}
+.dev-cm-host .cm-searchMatch {
+  background: #fef08a;
+  border-radius: 2px;
+}
+.dev-cm-host .cm-searchMatch.cm-searchMatch-selected {
+  background: #fde047;
+  outline: 1px solid #ca8a04;
+}
+.dev-cm-host .cm-selectionMatch {
+  background: #e0f2fe;
+  border-radius: 2px;
+}
+.dev-cm-host .cm-matchingBracket {
+  background: #e4e4e7;
+  border-radius: 2px;
+}
+
+/* Diff & Merge styles */
+.dev-cm-host .cm-changeGutter {
+  width: 4px;
+  padding: 0;
+}
+.dev-cm-host .cm-changedLineGutter {
+  background: #16a34a;
+  width: 4px;
+}
+.dev-cm-host .cm-deletedLineGutter {
+  background: #dc2626;
+  width: 4px;
+}
+.dev-cm-host .cm-changedLine {
+  background: #ecfdf5;
+}
+.dev-cm-host .cm-changedText {
+  background: #bbf7d0;
+  border-radius: 2px;
+}
+.dev-cm-host .cm-deletedChunk {
+  background: #fef2f2;
+  padding: 2px 16px 2px 12px;
+  border-top: 1px solid #fee2e2;
+  border-bottom: 1px solid #fee2e2;
+}
+.dev-cm-host .cm-deletedChunk del {
+  text-decoration: none;
+  color: #7f1d1d;
+}
+.dev-cm-host .cm-deletedText {
+  background: #fecaca;
+  border-radius: 2px;
+}
+.dev-cm-host .cm-collapsedLines {
+  background: #f4f4f5;
+  color: #52525b;
+  font-size: 11.5px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  padding: 3px 12px;
+  border-top: 1px solid #ededf0;
+  border-bottom: 1px solid #ededf0;
+  cursor: pointer;
+}
+.dev-cm-host .cm-collapsedLines:hover {
+  background: #ececef;
+  color: #09090b;
+}
+.dev-cm-host .cm-forge-diff-add {
+  background: #ecfdf5;
+  color: #14532d;
+}
+.dev-cm-host .cm-forge-diff-del {
+  background: #fef2f2;
+  color: #7f1d1d;
+}
+.dev-cm-host .cm-forge-diff-hunk {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+.dev-cm-host .cm-forge-diff-meta {
+  background: #f4f4f5;
+  color: #52525b;
+  font-weight: 600;
+}
+
+/* @lezer/highlight classHighlighter static syntax palette (GitHub/Zinc light) */
+.dev-cm-host .tok-keyword,
+.dev-cm-host .tok-controlKeyword,
+.dev-cm-host .tok-definitionKeyword,
+.dev-cm-host .tok-moduleKeyword,
+.dev-cm-host .tok-operatorKeyword,
+.dev-cm-host .tok-modifier {
+  color: #cf222e;
+}
+.dev-cm-host .tok-string,
+.dev-cm-host .tok-string2,
+.dev-cm-host .tok-regexp {
+  color: #0a3069;
+}
+.dev-cm-host .tok-comment {
+  color: #6e7781;
+  font-style: italic;
+}
+.dev-cm-host .tok-number,
+.dev-cm-host .tok-bool,
+.dev-cm-host .tok-atom,
+.dev-cm-host .tok-literal,
+.dev-cm-host .tok-null {
+  color: #0550ae;
+}
+.dev-cm-host .tok-propertyName,
+.dev-cm-host .tok-attributeName {
+  color: #0550ae;
+}
+.dev-cm-host .tok-typeName,
+.dev-cm-host .tok-className,
+.dev-cm-host .tok-namespace,
+.dev-cm-host .tok-macroName {
+  color: #953800;
+}
+.dev-cm-host .tok-variableName.tok-definition,
+.dev-cm-host .tok-variableName2,
+.dev-cm-host .tok-labelName {
+  color: #6639ba;
+}
+.dev-cm-host .tok-operator,
+.dev-cm-host .tok-punctuation {
+  color: #52525b;
+}
+.dev-cm-host .tok-meta {
+  color: #71717a;
+}
+.dev-cm-host .tok-heading {
+  color: #09090b;
+  font-weight: 600;
+}
+.dev-cm-host .tok-strong {
+  font-weight: 600;
+}
+.dev-cm-host .tok-emphasis {
+  font-style: italic;
+}
+.dev-cm-host .tok-link,
+.dev-cm-host .tok-url {
+  color: #2563eb;
+  text-decoration: underline;
+}

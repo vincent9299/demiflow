@@ -437,6 +437,14 @@ SOFTWARE.
           }
         }catch{}
         if(!replaying&&event.data?.cleanup==='complete')state.files?.refreshChanges();
+      }else if(event.type==='review.requested'||event.type==='review.started'){
+        state.files?.recordChecks({review:'running',reviewReset:event.type==='review.requested'});
+      }else if(event.type==='review.detail'){
+        const val=event.data?.item;
+        const loc=val?.path?val.path+(val.line?':'+val.line:''):'';
+        const txt=typeof val==='string'?val:[loc,val?.trigger,val?.impact,val?.suggestion,val?.reason,val?.detail].filter(Boolean).join(' · ');
+        const tag=({findings:val?.severity==='blocking'?'需修正':'建议',gaps:'待核实',checks:'已核对',diagnostics:'说明'})[event.data?.field]||'';
+        if(txt)state.files?.recordChecks({reviewDetail:(tag?tag+' · ':'')+txt});
       }else if(event.type==='review.completed'){
         state.files?.recordChecks({review:event.data?.status});
       }

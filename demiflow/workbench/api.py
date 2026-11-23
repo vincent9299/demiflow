@@ -81,6 +81,7 @@ STATIC_ASSETS = {
     "/data-tools.js": ("data-tools.js", "text/javascript; charset=utf-8"),
     "/python-syntax.js": ("python-syntax.js", "text/javascript; charset=utf-8"),
     "/codemirror-viewer.js": ("codemirror-viewer.js", "text/javascript; charset=utf-8"),
+    "/codemirror-viewer.css": ("codemirror-viewer.css", "text/css; charset=utf-8"),
     "/codemirror-viewer-LICENSE.txt": ("codemirror-viewer-LICENSE.txt", "text/plain; charset=utf-8"),
     "/markdown-worker.js": ("markdown-worker.js", "text/javascript; charset=utf-8"),
     "/markdown-it.min.js": ("markdown-it.min.js", "text/javascript; charset=utf-8"),

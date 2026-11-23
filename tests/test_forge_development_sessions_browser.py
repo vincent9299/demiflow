@@ -314,6 +314,11 @@ def test_turn_rail_history_and_project_files_share_the_conversation(tmp_path):
             expect(pane).to_be_visible()
             expect(pane.locator('.cm-editor')).to_be_visible()
             expect(pane).to_contain_text('print(1)')
+            # CodeMirror gutter and code content must sit side-by-side under strict CSP (not stacked vertically!).
+            gutter_box = pane.locator('.cm-gutters').bounding_box()
+            content_box = pane.locator('.cm-content').bounding_box()
+            assert content_box['x'] >= gutter_box['x'] + gutter_box['width'] - 2, (gutter_box, content_box)
+            assert abs(content_box['y'] - gutter_box['y']) < 20, (gutter_box, content_box)
             # CodeMirror scroller must scroll through full source (not clip at viewport height).
             scroll_metrics = pane.locator('.cm-scroller').evaluate('n => ({ch: n.clientHeight, sh: n.scrollHeight, ov: getComputedStyle(n).overflowY})')
             assert scroll_metrics['ov'] in ('auto', 'scroll') and scroll_metrics['sh'] > scroll_metrics['ch'], scroll_metrics
