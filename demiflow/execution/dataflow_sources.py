@@ -89,11 +89,11 @@ def _factory_identity(factory: Any) -> dict[str, Any]:
     return {"callable": name, "code_digest": hashlib.sha256(document(payload)).hexdigest()}
 
 
-def verified_materialized_count(source):
+def verified_materialized_count(source, *, recheck=None):
     from .dataflow_handles import StoredMaterializedHandle
     if type(source.handle) is not StoredMaterializedHandle:
         return None
-    rows = source.handle.verified_row_count()
+    rows = source.handle.verified_row_count(recheck=recheck)
     if source.row_count is not None and source.row_count != rows:
         return None
     return rows

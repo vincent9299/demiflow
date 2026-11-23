@@ -584,24 +584,38 @@ class StoredMaterializedHandle:
         elif self._count_proof is not None:
             proof[ref] = before
 
-    def verified_row_count(self):
+    def verified_row_count(self, *, recheck=None):
         """Only the live pin owner can reuse a checksum established at publication."""
         with self._lock:
             self._check_open()
-            if self._count_proof is None:
+            if self._count_proof is None and recheck is None:
                 return None
             manifest = self._read_manifest()
             if manifest['rows'] != self._rows:
                 raise _error("CORRUPT_ARTIFACT", "materialized row count differs from manifest")
             if self._declared_schema_ref is not None and not self._store.inspect(self._declared_schema_ref):
                 raise _error("CORRUPT_ARTIFACT", "materialized schema is absent")
+            if self._count_proof is None:
+                if tuple(map(_artifact_ref, manifest['blocks'])) != self._blocks:
+                    raise _error("CORRUPT_ARTIFACT", "materialized blocks differ from the sealed manifest")
+                # Reopening an already completed direct count cannot launch a new
+                # scan action. Its existing reader authenticates frames and payloads.
+                rows = self._iter_rows(with_schema=True)
+                try:
+                    for _ in rows:
+                        recheck()
+                finally:
+                    rows.close()
+                return self._rows
             for ref, stamp in self._count_proof.items():
                 if self._store.object_signature(ref) != stamp:
-                    # Replacements may be byte-identical. Authorize reads and authenticate
-                    # again before the ordinary source reader takes over.
+                    # A metadata change invalidates reuse of the previous checksum.
+                    # Authenticate the changed reference before accepting the old result.
                     if not self._store.inspect(ref):
                         raise _error("UNKNOWN_EFFECT", "materialized block is absent")
-                    return None
+                    if recheck is None:
+                        return None
+                    recheck()
             return self._rows
 
     def _read_manifest(self) -> dict:

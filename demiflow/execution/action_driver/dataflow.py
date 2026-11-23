@@ -418,12 +418,23 @@ class DataflowExecution:
             return False
         from ..dataflow_sources import verified_materialized_count
         self._check_stop()
-        rows = verified_materialized_count(self._request.source)
+        source = self._request.source
+        previous = self._action.record['result']
+        if previous is not None and (previous.get('kind') != 'count'
+                                     or previous.get('source') != source.handle.recovery_reference):
+            raise DataflowError('INCOMPATIBLE_HISTORY', 'Completed count belongs to another source')
+        rows = verified_materialized_count(source, recheck=self._check_stop if previous is not None else None)
         if rows is None or rows > self._bounds.max_output_rows:
+            if previous is not None:
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'Cannot verify completed count with its original limits')
             return False
+        receipt = {"kind": "count", "scalar": rows, "source": source.handle.recovery_reference}
+        if previous is not None and (type(previous.get('scalar')) is not int or receipt != previous):
+            raise DataflowError('INCOMPATIBLE_HISTORY', 'Completed count differs from its verified source')
         self._check_stop()
         self._terminal = TerminalSubscription(self._bounds, self._exchange, ())
-        self._action.complete({"kind": "count", "scalar": rows, "source": self._request.source.handle.recovery_reference})
+        if previous is None:
+            self._action.complete(receipt)
         self._started = True
         self._confirmed_rows = rows
         self._terminal_result = TerminalResult(kind="count", rows=rows, scalar=rows, result_ref=None,
