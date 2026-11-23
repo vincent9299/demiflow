@@ -30,12 +30,18 @@ def tree_usage(paths, maximum=8192):
     pending = []
     try:
         for path in paths:
-            info = os.stat(path, follow_symlinks=False)
+            try:
+                info = os.stat(path, follow_symlinks=False)
+            except (FileNotFoundError, NotADirectoryError):
+                continue
             if stat.S_ISREG(info.st_mode):
                 count += 1
                 used += info.st_size
             elif stat.S_ISDIR(info.st_mode):
-                pending.append(os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC))
+                try:
+                    pending.append(os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC))
+                except (FileNotFoundError, NotADirectoryError):
+                    continue
             else:
                 raise RuntimeError('Sandbox writable scope contains an unsupported inode')
         while pending:
@@ -46,10 +52,16 @@ def tree_usage(paths, maximum=8192):
                         count += 1
                         if count > maximum:
                             raise RuntimeError('Sandbox writable file count exceeded budget')
-                        info = entry.stat(follow_symlinks=False)
+                        try:
+                            info = entry.stat(follow_symlinks=False)
+                        except (FileNotFoundError, NotADirectoryError):
+                            continue
                         if stat.S_ISDIR(info.st_mode):
-                            pending.append(os.open(entry.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
-                                                   dir_fd=descriptor))
+                            try:
+                                pending.append(os.open(entry.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                                                       dir_fd=descriptor))
+                            except (FileNotFoundError, NotADirectoryError):
+                                continue
                         elif stat.S_ISREG(info.st_mode):
                             used += info.st_size
                         else:
