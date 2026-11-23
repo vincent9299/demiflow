@@ -129,7 +129,7 @@ def validate_recovered_residency(physical, cut, contributions, residency, *, fac
     Its origin cut/boot is retained. No synthetic initial worker is admitted.
     Old v3 cuts without residency continue to require the full participant table.
     """
-    from .checkpoint.coordinator import _contribution_json, _artifact_from_json
+    from demiflow.execution.contracts.checkpoint import contribution_json as _contribution_json, artifact_from_json as _artifact_from_json
     def reject(message):
         raise DataflowError('CORRUPT_ARTIFACT', message)
     if (type(residency) is not dict or set(residency) - {'satisfied_source_splits'} != {

@@ -1500,7 +1500,7 @@ class OperatorKernel:
                 raise _err("INCOMPATIBLE_HISTORY", "stateful kernel cannot restore from an empty ref")
             return
         limit = self._services.bounds.max_state_bytes
-        from demiflow.execution.dataflow_kernel_pack import read_kernel_image
+        from demiflow.execution.storage.streams import read_kernel_image
         admit = None
         if self._measured_task:
             retained = self._task_state_bytes()

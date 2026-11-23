@@ -1076,7 +1076,7 @@ class WorkerGraphRunner:
         if wait_notice is not None:
             self._send('checkpoint_wait', wait_notice)
         if notify_done:
-            from demiflow.execution.checkpoint.coordinator import _cursor_json
+            from demiflow.execution.contracts.checkpoint import cursor_json as _cursor_json
             self._send('eoi', {'scope': 'worker', 'cursors': [_cursor_json(r.snapshot())
                                                            for r in self.e._readers.values()],
                 'pruned_splits': [s.split_id for s in self.e.assignment.source_splits
@@ -1714,7 +1714,7 @@ class WorkerGraphRunner:
             raise DataflowError('INVALID_CONTRACT', 'cut requires drained inputs and acknowledged deliveries')
         for reader in self.e._readers.values():
             reader.acknowledge_output()
-        from demiflow.execution.dataflow_kernel_pack import snapshot_kernel_images
+        from demiflow.execution.kernels.image_pack import snapshot_kernel_images
         states = snapshot_kernel_images(self.e._kernels, store=self.services.store, bounds=self.bounds)
         from demiflow.execution.recovery_contract import identity
         for spec in self.e._output_specs:

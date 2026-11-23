@@ -234,7 +234,7 @@ def restore_node_metrics(execution, image):
 def restore_operator_observations(execution, image):
     from demiflow.execution.contracts.dataflow_codec import compute_participant_id
     from demiflow.execution.contracts import state_codec
-    from demiflow.execution.dataflow_kernel_pack import read_kernel_image
+    from demiflow.execution.storage.streams import read_kernel_image
     participants = {compute_participant_id(s.stage_id, p): p
                     for s in execution._physical.stages for p in s.partitions}
     nodes = {n.occurrence_id for n in execution._graph.nodes}

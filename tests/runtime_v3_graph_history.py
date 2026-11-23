@@ -72,7 +72,7 @@ def acknowledged_ancestor_rows(run, action_id, facts):
     """Read the actual business boundary, not a pre-read source cursor/cut size."""
     from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from demiflow.execution.storage.objects import RunArtifactStore
-    from demiflow.execution.checkpoint.coordinator import _artifact_from_json
+    from demiflow.execution.contracts.checkpoint import artifact_from_json as _artifact_from_json
     from demiflow.execution.storage.state_artifacts import StateArtifacts
     from demiflow.execution.contracts.dataflow_codec import compute_participant_id
     from demiflow.execution.recovery_contract import identity

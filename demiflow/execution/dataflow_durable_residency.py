@@ -194,7 +194,7 @@ class DurableResidency:
             self._exchange.prove_parked(cut.cut_id, partition, state)
             # Nonrecoverable state cannot disappear merely because it has a cut.
             from demiflow.execution.contracts import state_codec
-            from .dataflow_kernel_pack import read_kernel_image
+            from demiflow.execution.storage.streams import read_kernel_image
             for occurrence, ref in contribution.operator_states.items():
                 if occurrence not in self._transforms:
                     continue
@@ -214,7 +214,7 @@ class DurableResidency:
 
 
 def validate_recovered(physical, cut, contributions, residency, *, facts, artifacts, current_commit, store):
-    from .checkpoint.coordinator import _contribution_json, _contribution_from_json, _artifact_from_json
+    from demiflow.execution.contracts.checkpoint import contribution_json as _contribution_json, contribution_from_json as _contribution_from_json, artifact_from_json as _artifact_from_json
     from .contracts.dataflow_codec import compute_participant_id
     def reject(reason):
         raise DataflowError('CORRUPT_ARTIFACT', reason)

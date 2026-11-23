@@ -9,7 +9,8 @@ import pytest
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.state_codec import PACK_MEDIA, _MAGIC, _header
 from demiflow.execution.storage.streams import iter_kernel_images
-from demiflow.execution.dataflow_kernel_pack import read_kernel_image, snapshot_kernel_images
+from demiflow.execution.storage.streams import read_kernel_image
+from demiflow.execution.kernels.image_pack import snapshot_kernel_images
 from demiflow.execution.contracts import state_codec
 from demiflow.execution.kernels.operator import OperatorKernel, IMAGE_MEDIA_TYPE
 from test_runtime_v3_artifact_accounting import store_fixture, consumed
@@ -236,7 +237,7 @@ def test_real_dataset_restores_committed_pack_or_old_images_then_continues_packi
                                                                   media_type=IMAGE_MEDIA_TYPE)
                 pending.contributions[participant] = replace(contribution, operator_states=states)
                 # Digest is the original bounded contribution calculation.
-                from demiflow.execution.checkpoint.coordinator import _contribution_digest
+                from demiflow.execution.contracts.checkpoint import contribution_digest as _contribution_digest
                 pending.digests[participant] = _contribution_digest(pending.contributions[participant])
         image = original_commit(coordinator, *args, **kwargs)
         assert not image.cut.final

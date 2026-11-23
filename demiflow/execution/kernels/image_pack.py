@@ -5,27 +5,15 @@ member retains its original bytes and digest; all readers authenticate the whole
 carrier before using a selected member. Stateful/native/buffered kernels keep
 their existing individual image protocol.
 """
-from demiflow.execution.storage.streams import iter_kernel_images
 from demiflow.execution.contracts.state_codec import PACK_MEDIA, _HEADER_BYTES, _MAGIC, _MAX_MEMBERS, _header, pack_limit
 import hashlib
-import json
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-
-
-
-
 
 
 # Pure images contain fixed platform counters and at most 33 bounded miss names.
 # Account their encoding workspace and all bounded member headers before packing.
 _IMAGE_WORKSPACE = 256 * 1024
-
-
-
-
-
-
 
 
 def _pack(kernels, *, store, bounds):
@@ -109,36 +97,3 @@ def snapshot_kernel_images(kernels, *, store, bounds):
                 states[key[0]] = ref
     flush()
     return states
-
-
-
-
-
-def read_kernel_image(store, ref, bounds, *, occurrence, partition, admit=None):
-    """Single bounded compatibility reader shared by runtime and observations."""
-    if ref.media_type != PACK_MEDIA:
-        if ref.size_bytes > bounds.max_state_bytes:
-            from demiflow.execution.contracts.state_codec import size_error
-            raise size_error('kernel image exceeds state byte budget', bounds.max_state_bytes,
-                             actual=ref.size_bytes, occurrence=occurrence)
-        if admit is not None:
-            admit(ref.size_bytes)
-            raw = bytearray(ref.size_bytes)
-            store.read_into(ref, raw)
-            return raw
-        return b''.join(store.read(ref, max_bytes=bounds.max_state_bytes))
-    if admit is not None:
-        raise DataflowError('INCOMPATIBLE_HISTORY', 'stateful task needs its individual kernel image')
-    selected = None
-    for key, raw in iter_kernel_images(store, ref, bounds):
-        if key == (occurrence, partition):
-            selected = raw
-        del raw
-    if selected is None:
-        raise DataflowError('INCOMPATIBLE_HISTORY', 'kernel pack has no matching occurrence/partition')
-    from demiflow.execution.contracts import state_codec
-    image = state_codec.loads(selected, max_bytes=bounds.max_state_bytes, occurrence=occurrence)
-    if (type(image) is not dict or image.get('schema_version') != 'demiflow-kernel-image-v3'
-            or image.get('occurrence_id') != occurrence or image.get('partition_id') != partition):
-        raise DataflowError('INCOMPATIBLE_HISTORY', 'kernel pack header differs from original image identity')
-    return selected

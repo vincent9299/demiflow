@@ -747,7 +747,7 @@ class DataflowExecution:
             # Validate all actor images before ANY participant executes again.
             # A completed final result is safe to read without recreating actors.
             from demiflow.execution.contracts import state_codec
-            from ..dataflow_kernel_pack import read_kernel_image
+            from demiflow.execution.storage.streams import read_kernel_image
             from ..contracts.dataflow_codec import compute_participant_id
             from ..recovery_contract import identity
             partitions = {compute_participant_id(stage.stage_id, partition): partition
@@ -1319,7 +1319,7 @@ class DataflowExecution:
                         self._idle.discard(target._allocation_id)
                         target.send_business(dict(payload, kind="edge_eoi"))
             else:
-                from ..checkpoint.coordinator import _cursor_from_json
+                from demiflow.execution.contracts.checkpoint import cursor_from_json as _cursor_from_json
                 assignment = endpoint._assignment
                 allowed = {s.split_id for s in assignment.source_splits}
                 cursors = tuple(_cursor_from_json(c) for c in payload["cursors"])

@@ -102,7 +102,7 @@ def test_region_original_final_ack_replay_does_not_repeat_reducer(tmp_path):
 def test_region_pure_join_nonfinal_ack_restores_original_input_refs(tmp_path,monkeypatch):
     import pytest
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.dataflow_kernel_pack import read_kernel_image
+    from demiflow.execution.storage.streams import read_kernel_image
     from demiflow.execution.contracts import state_codec
     def flow():
         return data.from_items([{'k':1,'v':i} for i in range(20)]).join(

@@ -91,7 +91,7 @@ def _provider(fx, *, workers=4, fusion=True):
 
 
 def _cut_facts(coordinator, image):
-    from demiflow.execution.checkpoint.coordinator import _contribution_json, _cursor_json
+    from demiflow.execution.contracts.checkpoint import contribution_json as _contribution_json, cursor_json as _cursor_json
     from demiflow.execution.contracts import state_codec
     states = []
     for owner in image.contributions:

@@ -89,7 +89,7 @@ def test_single_worker_partition_wave_resume_keeps_original_membership(graph_env
         # Every inherited participant must retain an actual earlier ACKed fact;
         # a forged "completed" partition may not be used to skip business work.
         from demiflow.execution.dataflow_durable_residency import validate_recovered
-        from demiflow.execution.checkpoint.coordinator import _cut_from_json, _contribution_from_json
+        from demiflow.execution.contracts.checkpoint import cut_from_json as _cut_from_json, contribution_from_json as _contribution_from_json
         from demiflow.execution.contracts.dataflow_errors import DataflowError
         value = states[-1]
         kwargs = dict(facts=after, artifacts=StateArtifacts(run), current_commit=after[-1]['commit_id'],
