@@ -377,7 +377,7 @@ def test_function_predicate_state_uses_the_same_acknowledged_cache_frontier(tmp_
 
 def test_unadapted_and_shared_function_data_remain_usable_but_cannot_restore(tmp_path):
     from demiflow.data.plan import CallableSpec
-    from demiflow.execution.dataflow_model_factory import CacheFactory
+    from demiflow.execution.operator_bindings.dataflow_model_factory import CacheFactory
     namespace = {'counter': [0]}
     exec('def count(value):\n counter[0]+=1\n return counter[0]', namespace)
     actor = cache(tmp_path / 'global', counter=namespace['count'])

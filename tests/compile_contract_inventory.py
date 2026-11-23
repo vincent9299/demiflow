@@ -34,7 +34,7 @@ DECLARATION = 'planning/dataflow_declaration.py'
 # An SDK entry preflights through the pure validator, which returns nothing. The node
 # constructor is recognised too: an entry that called it and kept the result would be listed as used.
 PREFLIGHT = ('validate_native_operation', 'make_native_operation')
-NATIVE_DECLARATION = 'execution/dataflow_model_factory.py'
+NATIVE_DECLARATION = 'execution/operator_bindings/dataflow_model_factory.py'
 PLAN_FACTS = 'execution/plan_facts.py'
 LEGACY_TRAITS = 'planning/traits.py'
 # Files on the call chain of capture_graph(): the compile stage proper.
@@ -279,9 +279,14 @@ def _imported_type_predicates(function, relative):
     nodes = list(ast.walk(function))
     calls = {n.func.id for n in nodes if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
     for node in nodes:
-        if not isinstance(node, ast.ImportFrom) or not node.level or not node.module:
+        if not isinstance(node, ast.ImportFrom) or not node.module:
             continue
-        target = Path(relative).parents[node.level - 1] / (node.module.replace('.', '/') + '.py')
+        if node.level:
+            target = Path(relative).parents[node.level - 1] / (node.module.replace('.', '/') + '.py')
+        elif node.module.startswith('demiflow.'):
+            target = Path(node.module.removeprefix('demiflow.').replace('.', '/') + '.py')
+        else:
+            continue
         for alias in node.names:
             if alias.name.startswith('is_') and (alias.asname or alias.name) in calls:
                 yield target, alias.name

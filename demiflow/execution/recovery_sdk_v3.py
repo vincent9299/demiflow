@@ -29,7 +29,7 @@ _REVISIONS = {
         '431b27e1065e3fdc02cfd708d60c20b924a1489c78ff2bd6afd36546cf56e134',
         '54bc1fa489826c74c7d67432fdeaba9fb9e54131d681936b5c2ea18180c117e9'),
     'demiflow.data.dataset': (
-        '1acb8a3356ee264257d9f419fb2374620f91421268cd886b4210564453c187fb',
+        '7c3d3f95b0fa7384a32367f439b730bd381b673b36c9b78cae134adbf392e05d',
         '1ba0e80f1ed0853948a97792dc65125fdaec17504bc3396b5f53ffb593da7e88'),
     'demiflow.data.sources': (
         '4c349450034860cbaaa81d7b88e39b5caeea6c9ea56849e031804007cd226e79',
@@ -41,7 +41,7 @@ _REVISIONS = {
         '1c38779585642c638837951296a61ac58cf3f47298fcab83ed1153f69e14e1d0',
         '0ab9e3db6f4dffe74c2f614ac887ce0a69749910b083db63eaa95c819652cbcf'),
     'demiflow.data.result_cache': (
-        '87d713a525abf2ec713521b77da1008fbd0a04e399b1b9cd97ec6bc54af04270',
+        'e3020b591ab8dec8be60f70b63a02e9413a2cfef38afb6b7d6bb21917b59c0f2',
         'dc6858f90a4ea48fb5c950027e405084d9f820ba26b3159592b38a9f42d46788'),
 }
 _REVISIONS.update({'demiflow.data.read_api': ('a2ca56b3a7b3faf33fafca97480bc56ceda4cbd16ad02d4d600f618912538a78',
@@ -71,6 +71,7 @@ _RELATIONAL_METHODS = ('join', 'reduce_by_key', 'group_batches', 'exclude_keys',
 # The explicit checkpoint operation and arguments already rejected before
 # these removed branches. Pin only measured still-present declarations.
 _DATASET_METHODS = {
+    'Dataset.map_embeddings': ('4319758ab733dfdb7dc059abfc23753249f07af1259b00ef3fdcb9c669d257d8', '7b2c26f325b5a33519ba5b213c2e35f5b39a8f1224dc43e3c7b19be4f357a33f'),
     'Dataset.map_prompt_async': ('ec04f2b257e2405b0d82150ef74b07924e8c4e1e7f25120c6588510b31a4653f', '995d11e4cb7a97cba1a936b67faeec7656cba225f274387927fd5846e3c40f9d'),
     # ④ import relocation only; live body/globals and this source revision
     # are authenticated before encoding the original v3 import identity.

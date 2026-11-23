@@ -140,6 +140,11 @@
    "KEY": [
     "execution/dataflow_schema.py"
    ],
+   "MANAGED_HTTP_DEVICES_FIELD": [
+    "execution/operator_bindings/dataflow_managed_http.py",
+    "execution/seal/plan.py",
+    "planning/dataflow_place.py"
+   ],
    "REDUCER_MEMORY_FIELD": [
     "execution/contracts/relational_region.py"
    ],
@@ -147,9 +152,6 @@
     "execution/kernels/operator.py",
     "execution/kernels/shuffle_order.py",
     "planning/dataflow_compile.py"
-   ],
-   "_KEY": [
-    "execution/dataflow_managed_devices.py"
    ]
   },
   "literal": {
@@ -322,7 +324,7 @@
     "execution/worker/authority.py"
    ],
    "managed_http_service_digest": [
-    "execution/dataflow_prompt_service.py"
+    "execution/operator_bindings/dataflow_prompt_service.py"
    ],
    "max_batch": [
     "execution/dataflow_embedding_journal.py",
@@ -456,8 +458,8 @@
    "routes": [
     "execution/dataflow_model_observations.py",
     "execution/dataflow_offline.py",
-    "execution/dataflow_routed_prompt.py",
-    "execution/operator_bindings/dataflow_models.py"
+    "execution/operator_bindings/dataflow_models.py",
+    "execution/operator_bindings/dataflow_routed_prompt.py"
    ],
    "run_id": [
     "execution/hosts/execution_recovery.py",

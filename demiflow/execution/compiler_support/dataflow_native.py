@@ -60,7 +60,7 @@ def model_variant(declaration) -> str | None:
     """Which model factory a validated native declaration names, if any."""
     if declaration is None:
         return None
-    from demiflow.execution.dataflow_model_factory import CacheFactory, PromptFactory, RoutedPromptFactory
+    from demiflow.execution.operator_bindings.dataflow_model_factory import CacheFactory, PromptFactory, RoutedPromptFactory
     if declaration.target is RoutedPromptFactory:
         return ROUTED_PROMPT
     if declaration.target is PromptFactory:

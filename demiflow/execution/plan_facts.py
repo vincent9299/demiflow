@@ -7,8 +7,8 @@ from collections.abc import Mapping
 from dataclasses import fields
 import inspect
 
-from ..data import plan as ops
-from ..data.runtime_contract import RuntimeContractError
+from demiflow.data import plan as ops
+from demiflow.data.runtime_contract import RuntimeContractError
 
 
 def execution_instances(nodes, edges, actions, *, maximum=1024, value_edges=()):
@@ -40,20 +40,20 @@ def execution_instances(nodes, edges, actions, *, maximum=1024, value_edges=()):
 
 
 def source_facts(source):
-    from ..data.sources import DatasourceSource, KeyedSource, LanceSource, MaterializedSource, UnionSource
-    from ..lance.model import LanceScanSpec
+    from demiflow.data.sources import DatasourceSource, KeyedSource, LanceSource, MaterializedSource, UnionSource
+    from demiflow.lance.model import LanceScanSpec
 
-    from .queue_source import QueueDatasource
-    from .queue_history import QueueHistoryDatasource
+    from demiflow.execution.queue_source import QueueDatasource
+    from demiflow.execution.queue_history import QueueHistoryDatasource
     if type(source) is DatasourceSource and type(source.datasource) is QueueHistoryDatasource:
         if source.native_options is not None:raise RuntimeContractError('History has no alternate execution backend')
-        from .queue_flow import resource
+        from demiflow.execution.queue_flow import resource
         return {'kind':'read_queue_records','arguments':source.datasource.declaration(),'inputs':0,
                 'effects':['queue_read','objects_read'], 'resources':[resource(source.datasource.config,'read')]}
     if type(source) is DatasourceSource and type(source.datasource) is QueueDatasource:
         if source.native_options is not None:
             raise RuntimeContractError('Queue source has no alternate execution backend')
-        from .queue_flow import resource
+        from demiflow.execution.queue_flow import resource
         return {'kind':'read_queue','arguments':source.datasource.declaration(),'inputs':0,
                 'effects':['queue'], 'resources':[resource(source.datasource.config,'claim')]}
     if type(source) is LanceSource:
@@ -84,9 +84,9 @@ def source_facts(source):
 
 
 def operation_capability(operation):
-    from ..data.dataflow_operation import NativeOperation
+    from demiflow.data.dataflow_operation import NativeOperation
     if isinstance(operation, NativeOperation):
-        from ..planning.dataflow_registry import operator_registry
+        from demiflow.planning.dataflow_registry import operator_registry
         definition = operator_registry().get(operation.kind)
         kind = operation.kind if definition is not None else "unknown"
         return {"kind": kind, "driver": "stream", "native_options": False,
@@ -119,7 +119,7 @@ def operation_capability(operation):
             "native_options": native is not None, "stream_options": stream is not None,
             "bound": type(operation) is ops.BoundMapOp}
     if native is not None:
-        from ..data.native_options import resource_only_options
+        from demiflow.data.native_options import resource_only_options
         try:
             fact['resource_declaration'] = resource_only_options(native,
                 family='batch_transform' if kind in {'map_batches', 'batch_map','predict'} else 'row_transform')
@@ -150,8 +150,8 @@ def _thaw_json(value):
 
 def _native_operation_facts(operation):
     """Lazy v3 native declaration projection; never instantiates the factory."""
-    from ..planning.dataflow_registry import operator_registry
-    from .recovery_identity import describe
+    from demiflow.planning.dataflow_registry import operator_registry
+    from demiflow.execution.recovery_identity import describe
     definition = operator_registry().get(operation.kind)
     if definition is None:
         raise RuntimeContractError("Unknown native operation kind: " + operation.kind)
@@ -164,7 +164,7 @@ def _native_operation_facts(operation):
 
 def operation_facts(operation):
     """Read complete supported operation parameters independently of a report."""
-    from ..data.dataflow_operation import NativeOperation
+    from demiflow.data.dataflow_operation import NativeOperation
     if isinstance(operation, NativeOperation):
         return _native_operation_facts(operation)
     fact = operation_capability(operation)
@@ -240,7 +240,7 @@ def operation_facts(operation):
     domain = {}
     if type(operation) is ops.SaveLanceOp:
         from demiflow.execution.native_queue.stream_lance import StreamLanceSink
-        from ..lance.flow_contract import save_facts
+        from demiflow.lance.flow_contract import save_facts
         target = operation.callable.target
         target = target.__self__ if inspect.ismethod(target) else target
         if type(target) is not StreamLanceSink:
@@ -254,8 +254,8 @@ def operation_facts(operation):
             raise RuntimeContractError('Stream sink key differs from actual actor')
         domain = {'native': native, 'reserved_bytes': 8 * 1024**2 + operation.max_batch * target.max_row_bytes * 3}
     if type(operation) is ops.SearchWebOp:
-        from ..collect.operators import SearchWeb
-        from ..collect.search_contract import search_facts
+        from demiflow.collect.operators import SearchWeb
+        from demiflow.collect.search_contract import search_facts
         target=getattr(operation.callable.target,'__self__',operation.callable.target)
         if type(target) is not SearchWeb or operation.requests!=target.requests or operation.output!=target.output:
             raise RuntimeContractError('Search declaration differs from actual native actor')
@@ -263,14 +263,14 @@ def operation_facts(operation):
             raise RuntimeContractError('Explicit search checkpoint orchestration is retired')
         domain=search_facts(target)
     if type(operation) is ops.AsyncMapOp:
-        from .stream_lookup import LanceLookup
-        from ..lance.flow_contract import lookup_facts
-        from ..operator_llm.native_actor import is_native_prompt_actor
+        from demiflow.execution.stream_lookup import LanceLookup
+        from demiflow.lance.flow_contract import lookup_facts
+        from demiflow.operator_llm.native_actor import is_native_prompt_actor
         target = operation.callable.target
         target = target.__self__ if inspect.ismethod(target) else target
-        from .raw_fetch import RawFetch, raw_fetch_facts
+        from demiflow.execution.raw_fetch import RawFetch, raw_fetch_facts
         from demiflow.execution.native_queue.queue_producer import QueueProducer, producer_facts
-        from .queue_ack import QueueAcknowledge, ack_facts
+        from demiflow.execution.queue_ack import QueueAcknowledge, ack_facts
         if type(target) is QueueAcknowledge:
             domain=ack_facts(target)
         elif type(target) is QueueProducer:
@@ -280,7 +280,7 @@ def operation_facts(operation):
         elif type(target) is LanceLookup:
             domain = {'native': lookup_facts(target), 'reserved_bytes': 8 * 1024**2 + 2 * target.max_bytes}
         elif is_native_prompt_actor(target):
-            from ..operator_llm.flow_contract import prompt_facts
+            from demiflow.operator_llm.flow_contract import prompt_facts
             native = prompt_facts(target)
             options = native['options'] or {}
             token_bytes = 0
@@ -289,15 +289,15 @@ def operation_facts(operation):
             domain = {'native': native, 'reserved_bytes': operation.concurrency * 8 *
                       (options.get('max_request_bytes', 0) + options.get('max_response_bytes', 0)) + token_bytes}
             if native['prompt']['response_format']=='image':
-                from ..operator_llm.media import reserved_media_bytes
+                from demiflow.operator_llm.media import reserved_media_bytes
                 domain['reserved_bytes']=reserved_media_bytes(options,operation.concurrency)
         else:
-            from ..objects import ReadLocalObject
-            from ..operator_llm.packing import PackPromptInputs, packing_facts
-            from ..collect.documents import DecodeDocument
-            from ..collect.image_resize import EncodeImage
-            from ..collect.wiki_syntax import ParseWikitext
-            from ..collect.flow_contract import collect_facts
+            from demiflow.objects import ReadLocalObject
+            from demiflow.operator_llm.packing import PackPromptInputs, packing_facts
+            from demiflow.collect.documents import DecodeDocument
+            from demiflow.collect.image_resize import EncodeImage
+            from demiflow.collect.wiki_syntax import ParseWikitext
+            from demiflow.collect.flow_contract import collect_facts
             if type(target) in {ReadLocalObject, DecodeDocument, EncodeImage, ParseWikitext}:
                 domain = collect_facts(target)
             elif type(target) is PackPromptInputs:
@@ -335,8 +335,8 @@ def _model_map_options(options):
 
 
 def _deduplicate_arguments(actor):
-    from .recovery_identity import describe
-    from .stream_admission import canonical
+    from demiflow.execution.recovery_identity import describe
+    from demiflow.execution.stream_admission import canonical
     policy = {name: getattr(actor, name) for name in
               ('key', 'quotas', 'max_entries', 'max_key_bytes', 'max_disk_bytes')}
     policy['unique_on'] = list(actor.unique_on)
@@ -354,30 +354,15 @@ def _specialization_domain(operation):
     32-level budget cannot carry a specialization's nested declarations.
     """
     if type(operation) is ops.VectorSearchOp:
-        from .recovery_contract import identity
-        from ..lance.search import VectorSearch
-        target = operation.callable.target
-        actor = getattr(target, '__self__', None)
-        if (type(actor) is not VectorSearch or getattr(target, '__func__', None) is not VectorSearch.__call__
-                or actor.spec != operation.search_spec or actor.query != operation.query
-                or actor.output != operation.output or actor.options != operation.search_spec.get('options')
-                or actor.filter_column != operation.search_spec.get('filter_column')):
-            raise RuntimeContractError('VectorSearch actor differs from its declared plan')
-        spec = dict(operation.search_spec)
-        storage = spec.get("storage_options") or {}
-        # Reference storage options by bounded identity; never copy credential
-        # material into the permanent plan fact.
-        spec["storage_options"] = {"sha256": identity(sorted(storage.items())),
-                                   "keys": sorted(storage)}
-        return {'contract': 'demiflow.search_vectors',
-                'arguments': dict(spec, query=operation.query, output=operation.output)}
+        from demiflow.lance.flow_contract import vector_search_facts
+        return vector_search_facts(operation)
     if type(operation) is ops.StreamGroupBatchesOp:
         return {'contract': 'demiflow.stream_group_batches',
                 'arguments': {name: getattr(operation, name) for name in
                               ('on', 'output', 'chunk_bytes', 'max_groups', 'buffer_bytes')}}
     if type(operation) is ops.DeduplicateOp:
-        from .stream_admission import StreamAdmission
-        from .recovery_contract import identity
+        from demiflow.execution.stream_admission import StreamAdmission
+        from demiflow.execution.recovery_contract import identity
         target = operation.callable.target
         actor = getattr(target, '__self__', None)
         if type(actor) is not StreamAdmission or getattr(target, '__func__', None) is not StreamAdmission.__call__:
@@ -389,10 +374,10 @@ def _specialization_domain(operation):
             raise RuntimeContractError('Deduplicate actor differs from its declared plan')
         return {'contract': 'demiflow.deduplicate', 'arguments': arguments}
     if type(operation) is ops.EmbeddingMapOp:
-        from ..embeddings.flow_contract import embedding_facts
+        from demiflow.embeddings.flow_contract import embedding_facts
         return embedding_facts(operation)
     if type(operation) is ops.StreamPrependOp:
-        from .recovery_identity import plan_identity
+        from demiflow.execution.recovery_identity import plan_identity
         other = operation.source_dataset
         return {'contract': 'demiflow.stream_prepend',
                 'arguments': dict(max_rows=operation.max_rows, max_row_bytes=operation.max_row_bytes,

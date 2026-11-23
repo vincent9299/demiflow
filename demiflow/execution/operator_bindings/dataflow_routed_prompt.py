@@ -40,7 +40,7 @@ class _RoutedPromptJournal(RemotePromptJournal):
 def routed_declaration(actor, target):
     from demiflow.operator_llm.routed import RoutedPromptActor
     from demiflow.operator_llm.native_actor import is_native_prompt_actor
-    from demiflow.execution.dataflow_model_factory import native_model_declaration, RoutedPromptFactory
+    from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration, RoutedPromptFactory
     if (getattr(target, '__func__', None) is not RoutedPromptActor.__call__
             or type(actor.actors) is not dict or not 1 <= len(actor.actors) <= 32
             or type(actor.limits) is not dict or set(actor.actors) != set(actor.limits)
@@ -60,9 +60,6 @@ def routed_declaration(actor, target):
         children[name] = native_model_declaration(SimpleNamespace(callable=CallableSpec.create(child)))
     return CallableSpec.create(RoutedPromptFactory, fn_constructor_args=(
         children, dict(actor.limits), actor.route, actor.isolate_failures, actor.max_requests))
-
-
-
 
 
 def bind_routed_prompt(actor, *, services, node_id, configuration):

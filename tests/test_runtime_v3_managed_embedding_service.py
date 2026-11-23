@@ -7,8 +7,8 @@ import pytest
 
 from demiflow import data
 from demiflow.embeddings.flow_contract import actor_declaration, embedding_facts
-from demiflow.execution.dataflow_managed_http import freeze_managed_http, restore_managed_http
-from demiflow.execution.dataflow_model_factory import native_model_declaration
+from demiflow.services.http import freeze_managed_http, restore_managed_http
+from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
 from demiflow.execution.run_context import RunContext
 from runtime_v3_managed_http_scenarios import managed_fixture, assert_reaped, events
 

@@ -81,7 +81,7 @@ def test_public_pinned_lance_operation_runs_and_replays_original_commit(tmp_path
 def test_native_query_factory_is_passive_binds_policy_and_rejects_live_handles(tmp_path, monkeypatch, kind):
     from dataclasses import replace
     import cloudpickle
-    from demiflow.execution.dataflow_model_factory import native_model_declaration
+    from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
     from demiflow.execution.seal.plan import _base_code_identity_from_value
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.planning.dataflow_compile import _callable_code_identity

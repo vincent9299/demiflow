@@ -43,7 +43,7 @@ class RemoteOfflinePromptClient:
 def _sealed_declaration(service, node_id, *, route=None):
     """Read the original passive factory; never construct an actor on driver."""
     from .seal.plan import load_dataflow, load_sealed_dataflow, verify_dataflow_program
-    from .dataflow_model_factory import PromptFactory, RoutedPromptFactory
+    from demiflow.execution.operator_bindings.dataflow_model_factory import PromptFactory, RoutedPromptFactory
     from ..data.plan import CallableSpec
     if route is not None and (type(route) is not str or not route):
         raise DataflowError('INVALID_CONTRACT', 'Offline route must name a sealed prompt declaration')

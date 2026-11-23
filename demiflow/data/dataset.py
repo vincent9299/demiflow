@@ -1325,7 +1325,7 @@ class Dataset:
         """
         from ..embeddings.runtime import EmbeddingActor
         from ..embeddings import embedding_execution_config
-        from ..inference import _resolve_request_gate
+        from demiflow.inference import resolve_request_gate as _resolve_request_gate
         from ..planning.dataflow_declaration import validate_native_operation
         from .plan import EmbeddingMapOp
         execution = embedding_execution_config(batch_size=batch_size, concurrency=concurrency,
@@ -1537,7 +1537,7 @@ class Dataset:
                            declared._stages+tuple(actors.values()))
         if route is not None or isolate_route_failures:
             raise ValueError('route/isolate_route_failures require routes')
-        from ..inference import _resolve_request_gate, request_admission_config
+        from demiflow.inference import resolve_request_gate as _resolve_request_gate, request_admission_config
         declared_request_policy = request_admission_config(request_policy, concurrency=concurrency)
         request_gate = _resolve_request_gate(policy=request_policy, gate=request_gate, concurrency=concurrency)
         if isinstance(token_budget, Mapping):
@@ -1571,7 +1571,7 @@ class Dataset:
         actor = PromptActor(operation, operation.config,
             InProcessOperatorLLMCoordinator(operation.max_requests), operation.options, service=service)
         if service is not None:
-            from ..execution.dataflow_managed_http import managed_http_digest
+            from demiflow.services.http import managed_http_digest
             actor._sealed_service_declaration = managed_http_digest(service)
         if not any(key in (options or {}) for key in ('offline_dir', 'offline_store', 'codex_exec', 'codex_agent')):
             from ..operator_llm.http_options import validate_http_options

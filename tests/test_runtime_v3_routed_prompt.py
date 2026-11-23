@@ -224,7 +224,7 @@ def test_routed_mutable_predicate_cannot_claim_http_only_recovery(tmp_path, rout
 
 @pytest.mark.parametrize('change', ['capacity', 'gates', 'external_gate'])
 def test_routed_declaration_refuses_live_or_changed_children(change):
-    from demiflow.execution.dataflow_model_factory import native_model_declaration
+    from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     pipeline = _pipeline([{'item': 1, 'route': 'a'}])
     operation = pipeline._plan.operations[-1]

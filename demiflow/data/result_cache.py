@@ -428,3 +428,11 @@ class CachedMap(CacheCall):
                 if not cached.get('state_replay'):
                     await self._io(self.error, key, exc)
                 raise
+
+
+def cache_constructor_options(actor):
+    options = {name: getattr(actor, name) for name in ('inputs', 'output', 'outputs',
+        'when', 'cache_when', 'wait_timeout_s', 'max_input_bytes')}
+    options.update(namespace=actor.store.namespace, max_result_bytes=actor.store.max_value_bytes,
+                   max_entries=actor.store.max_entries, max_cache_bytes=actor.store.max_bytes)
+    return options

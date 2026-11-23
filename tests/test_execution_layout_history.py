@@ -235,9 +235,10 @@ def test_published_whole_dataset_class_keeps_all_audited_method_pins(original_ca
     assert describe(loaded) == expected
 
 
-def test_changed_dataset_prompt_method_is_not_normalized_to_old_code(original_carriers, monkeypatch):
+@pytest.mark.parametrize("name", ["map_prompt_async", "map_embeddings"])
+def test_changed_dataset_method_is_not_normalized_to_old_code(original_carriers, monkeypatch, name):
     from demiflow import Dataset
-    method = Dataset.map_prompt_async
+    method = getattr(Dataset, name)
     before = describe(Dataset)
     monkeypatch.setattr(method, '__code__', method.__code__.replace(co_consts=(*method.__code__.co_consts, 'changed')))
     after = describe(Dataset)

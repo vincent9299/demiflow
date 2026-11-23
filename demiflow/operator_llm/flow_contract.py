@@ -3,6 +3,9 @@
 No file, environment, network, service or candidate callback is read here.
 """
 
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.services.http import freeze_managed_http, managed_http_digest
+
 import math
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
@@ -254,7 +257,7 @@ def analyze_prompt(arguments, *, inputs, callables, resources):
 def prompt_facts(actor):
     op, runtime = actor._operation, actor._runtime
     prompt = resolve_prompt(op.config, op.prompt_name)
-    from ..execution.dataflow_prompt_service import prompt_service_declaration
+
     prompt_service_declaration(actor)
     from ..execution.adaptive_requests import AdaptiveRequestGate
     from ..inference import request_admission_config
@@ -312,3 +315,32 @@ def private_prompt_declaration(options):
     if any(key in options for key in ('journal_dir', 'offline_dir', 'offline_store', 'codex_exec', 'codex_agent')):
         raise ValueError('Private Prompt cache requires a single explicit HTTP journal')
     return dict(value)
+
+
+def prompt_service_declaration(actor):
+    service = actor._runtime._service
+    expected = getattr(actor, '_sealed_service_declaration', None)
+    if service is None:
+        if expected is not None:
+            raise DataflowError('INVALID_CONTRACT', 'Managed Prompt service was removed after declaration')
+        return None
+    value = freeze_managed_http(service)
+    if expected is None or managed_http_digest(service) != expected:
+        raise DataflowError('INVALID_CONTRACT', 'Managed Prompt service differs from its sealed declaration')
+    return value
+
+
+def prompt_constructor_settings(actor, operation):
+    if actor.environment is not None:
+        agent_facts(actor, getattr(operation, 'environment', actor.environment))
+    else:
+        prompt_facts(actor)
+    settings = {name: getattr(actor, name) for name in ('when', 'call_output', 'error_output', 'environment')}
+    settings.update(concurrency=actor._runtime.concurrency,
+                    token_budget=actor._runtime.token_budget,
+                    request_policy=dict(actor._request_policy) if hasattr(actor, '_request_policy') else None)
+
+    service = prompt_service_declaration(actor)
+    if service is not None:
+        settings['service'] = service
+    return settings

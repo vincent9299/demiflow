@@ -268,7 +268,7 @@ def compile_kernel_spec(
     # Ray Data pool controls must not be silently discarded by this compiler.
     from ..data.native_options import validate_stream_native_options
     validate_stream_native_options(getattr(operation, 'native_options', None))
-    from ..execution.dataflow_model_factory import native_model_declaration
+    from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
     from demiflow.execution.compiler_support.dataflow_native import cache_runtime_state, declaration_lowering, model_variant, native_variant
     native_declaration = native_model_declaration(operation)
     # The compiler asks which declaration this is; the classes stay on the execution side.
@@ -772,7 +772,7 @@ class _Capture:
                 if count is not None and count > self.bounds.max_partitions:
                     raise _error('BUDGET_EXCEEDED', 'logical block count exceeds max_partitions')
             callable_spec = getattr(operation, "callable", None)
-            from ..execution.dataflow_model_factory import native_model_declaration
+            from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
             native_declaration = native_model_declaration(operation)
             if native_declaration is not None:
                 callable_spec = replace(native_declaration,

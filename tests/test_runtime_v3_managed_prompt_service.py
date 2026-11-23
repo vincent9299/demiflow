@@ -74,7 +74,7 @@ def test_zero_prompt_budget_starts_no_service(tmp_path, monkeypatch, request):
 
 def test_service_facts_keep_native_identity_and_private_environment_in_program(tmp_path, monkeypatch, request):
     from demiflow.operator_llm.flow_contract import prompt_facts
-    from demiflow.execution.dataflow_model_factory import native_model_declaration
+    from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
     from demiflow.planning.dataflow_models import service_kernel
     from demiflow.planning.dataflow_models import build_model_factory
     from demiflow.execution.contracts.dataflow import thaw_record_value
@@ -101,7 +101,7 @@ def test_service_facts_keep_native_identity_and_private_environment_in_program(t
 
 @pytest.mark.parametrize('mutation', ['environment', 'removed', 'owner', 'method'])
 def test_prompt_service_mutations_are_rejected_before_start(tmp_path, monkeypatch, request, mutation):
-    from demiflow.execution.dataflow_model_factory import native_model_declaration
+    from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
     value = fixture(tmp_path, monkeypatch, request)
     op = dataset(value, tmp_path)._plan.operations[-1]
     actor = op.callable.target.__self__

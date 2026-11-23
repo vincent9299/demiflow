@@ -51,7 +51,7 @@ def _recipe_actor_relation(request, *, bounds):
     from demiflow.data.sources import KeyedSource, UnionSource
     from demiflow.execution.contracts.dataflow import NativeOperation
     from demiflow.planning.dataflow_compile import expand_relational_inputs, expand_operation_inputs, _hash
-    from demiflow.execution.dataflow_model_factory import native_model_declaration
+    from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
     if (request.kind == 'take' and request.arguments.get('limit') == 0
             or request.kind == 'take_batch' and request.arguments.get('batch_size') == 0):
         return {}

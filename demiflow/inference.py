@@ -16,7 +16,7 @@ def request_admission_config(value=None, *, concurrency=None):
     return policy
 
 
-def _resolve_request_gate(*, policy, gate, concurrency):
+def resolve_request_gate(*, policy, gate, concurrency):
     if policy is not None and gate is not None:
         raise ValueError('Choose request_policy or request_gate, not both')
     normalized = request_admission_config(policy, concurrency=concurrency)

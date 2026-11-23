@@ -37,8 +37,7 @@ def _declare(target, *args):
 
 
 def test_model_factories_are_recognised_by_identity_only():
-    from demiflow.execution.dataflow_model_factory import (
-        CacheFactory, EmbeddingFactory, PromptFactory, RoutedPromptFactory)
+    from demiflow.execution.operator_bindings.dataflow_model_factory import CacheFactory, EmbeddingFactory, PromptFactory, RoutedPromptFactory
     assert native.model_variant(None) is None
     assert native.model_variant(_declare(RoutedPromptFactory)) == 'routed_prompt'
     assert native.model_variant(_declare(PromptFactory)) == 'prompt'
@@ -85,7 +84,7 @@ def test_service_declarations_and_the_configuration_they_add():
 def test_acquire_takes_its_key_from_the_declared_actor(tmp_path):
     from demiflow import data
     from demiflow.execution.dataflow_fetch import fetch_declaration_key
-    from demiflow.execution.dataflow_model_factory import native_model_declaration
+    from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
     from demiflow.objects import LocalObjectStore
     operation = data.from_items([{'request': 'r'}]).fetch(store=LocalObjectStore(str(tmp_path / 'objs')))._plan.operations[-1]
     variant = native.native_variant(operation, native_model_declaration(operation))

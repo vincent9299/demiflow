@@ -12,6 +12,8 @@ The historical code-pin (``chain.plan_code_pin``) and identity-bridge
 """
 from __future__ import annotations
 
+from demiflow.execution.contracts.dataflow_kinds import MANAGED_HTTP_DEVICES_FIELD
+
 from demiflow.execution.contracts.dataflow import EXECUTION_LIMITS, DELIVERY_LIMIT
 
 import json
@@ -211,7 +213,6 @@ def _code_identity_from_value(kind, value, *, sources=None):
     from .business_sources import business_sources, source_identity
     return {**_base_code_identity_from_value(kind, value),
             'imports': source_identity(business_sources(kind, value) if sources is None else sources)}
-
 
 
 def _matches_original_program(kind, value, expected):
@@ -537,7 +538,7 @@ def resolve_execution_constants(graph: DataflowGraph, *, action: RunAction, stor
     constants = _generate_constants(graph)
     for occurrence, binding in (column_bindings or {}).items():
         constants.setdefault(occurrence, {}).update(binding)
-    from ..dataflow_managed_devices import service_constants
+
     for occurrence, value in service_constants(graph, policy=policy).items():
         constants.setdefault(occurrence, {}).update(value)
     raw = document({"schema": CONSTANTS_SCHEMA, "action_id": action.action_id,
@@ -895,3 +896,47 @@ def validate_execution_binding(request, graph):
         if actual != expected:
             raise DataflowError('INCOMPATIBLE_HISTORY',
                                 'native execution limits or schema differ from the sealed binding')
+
+
+def service_constants(graph, *, policy):
+    result = {}
+    for node in graph.nodes:
+        declaration = node.kernel.configuration.get(MANAGED_HTTP_DEVICES_FIELD)
+        if not declaration:
+            continue
+        if policy is None or policy.provider != 'local' or policy.worker_mode == 'thread':
+            raise DataflowError('UNSUPPORTED_CAPABILITY', 'Legacy managed service GPU slots require a Local process host')
+        rss = (policy.native_limits or {}).get('max_rss_bytes')
+        if type(rss) is not int or rss <= 0:
+            raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed GPU service requires explicit native_resources.max_rss_bytes')
+        from demiflow.execution.hosts.managed_devices import service_device_facts
+        facts = service_device_facts(declaration)
+        result[node.occurrence_id] = {MANAGED_HTTP_DEVICES_FIELD: dict(facts, max_rss_bytes=rss)}
+    return result
+
+def sealed_service_placements(graph, physical, *, store):
+    from demiflow.execution.hosts.managed_devices import deployment_inventory, device_binding
+    occurrences = {n.occurrence_id: n for n in graph.nodes if n.kernel.configuration.get(MANAGED_HTTP_DEVICES_FIELD)}
+    if not occurrences:
+        return None
+    raw = b''.join(store.read(physical.constants_ref, max_bytes=physical.bounds.max_state_bytes))
+    constants = json.loads(raw)
+    if constants.get('dag_id') != graph.dag_id or physical.dag_id != graph.dag_id:
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed service placement differs from the sealed graph')
+    inventory_digest = identity(deployment_inventory())
+    placements = {}
+    for stage in physical.stages:
+        selected = set(stage.occurrences) & occurrences.keys()
+        if not selected:
+            continue
+        if len(selected) != 1 or len(stage.occurrences) != 1:
+            raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed GPU service requires its original exclusive worker stage')
+        occurrence = next(iter(selected)); binding = device_binding(constants, occurrence)
+        if binding['inventory_digest'] != inventory_digest:
+            raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed GPU deployment inventory changed since sealing')
+        if stage.profile.requests['memory_bytes'] < binding['max_rss_bytes']:
+            raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed service worker profile lacks its sealed RSS grant')
+        placements[stage.stage_id] = {'required': {'device_ids': list(binding['device_ids'])}}
+    if len(placements) != len(occurrences):
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed service placement does not cover every original occurrence')
+    return placements

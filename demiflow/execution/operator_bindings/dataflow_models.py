@@ -79,10 +79,10 @@ def bind_model_services(instance: CallableInstance, spec: KernelSpec, *, service
     kind = spec.kind
     if kind == 'prompt':
         if 'routes' not in spec.configuration:
-            from demiflow.execution.dataflow_prompt_service import bind_prompt_service
+            from demiflow.execution.operator_bindings.dataflow_prompt_service import bind_prompt_service
             bind_prompt_service(instance, spec, services=services, node_id=node_id)
         if 'routes' in spec.configuration:
-            from demiflow.execution.dataflow_routed_prompt import bind_routed_prompt
+            from demiflow.execution.operator_bindings.dataflow_routed_prompt import bind_routed_prompt
             bind_routed_prompt(instance, services=services, node_id=node_id, configuration=spec.configuration)
         elif spec.configuration.get('private_journal') is not None:
             from demiflow.execution.dataflow_prompt_journal import bind_private_prompt_adapter
@@ -92,7 +92,7 @@ def bind_model_services(instance: CallableInstance, spec: KernelSpec, *, service
         else:
             journal.bind_prompt_adapter(instance, services=services, node_id=node_id)
     elif kind == 'embedding':
-        from demiflow.execution.dataflow_managed_devices import bind_worker_service
+        from demiflow.execution.operator_bindings.dataflow_managed_http import bind_worker_service
         bind_worker_service(instance, spec, services=services, node_id=node_id)
         # Embedding owns its NativeEmbeddingRecovery and atomic budget; it has no
         # Prompt coordinator and never borrows bind_client.

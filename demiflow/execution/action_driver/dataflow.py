@@ -629,7 +629,7 @@ class DataflowExecution:
         self._policy = live_policy
         self._services.journal_service.bind_recovery_policy(physical.policy)
         self._sealed = sealed
-        from ..dataflow_managed_devices import sealed_service_placements
+        from demiflow.execution.seal.plan import sealed_service_placements
         placements = sealed_service_placements(graph, physical, store=self._store)
         from ..contracts.dataflow_codec import runtime_scope_id
         self._scheduler = DataflowScheduler(physical, resources=self._services.resources, sealed=sealed,

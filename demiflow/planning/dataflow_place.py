@@ -7,6 +7,8 @@ admitted budgets. ``resources/contracts.py`` is byte-frozen and only consumed.
 """
 from __future__ import annotations
 
+from demiflow.execution.contracts.dataflow_kinds import MANAGED_HTTP_DEVICES_FIELD
+
 import json
 from dataclasses import replace
 from typing import Mapping
@@ -182,7 +184,7 @@ def partition_stages(
                 resident = resident_bytes(reducer_memory,bounds)
                 state_bytes = bounds.max_state_bytes
         replica_min, replica_target, replica_max = _replica_bounds(node, count, policy)
-        from ..execution.dataflow_managed_devices import service_profile
+
         profile = service_profile(kernel, policy=policy, bounds=bounds)
         # Task-scoped opaque declarations are reloaded synchronously once per
         # worker. The sealed payload size accounts its decode buffer; Python
@@ -1118,3 +1120,16 @@ def batch_carrier(graph, physical):
     # Existing seals did not request contiguous native batches. Keep their
     # original scan boundaries and reference representation on recovery.
     return 'original_scan_batches'
+
+
+def service_profile(kernel, *, policy, bounds):
+    if not kernel.configuration.get(MANAGED_HTTP_DEVICES_FIELD):
+        return kernel.profile
+    if policy.provider != 'local' or policy.worker_mode == 'thread':
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'Legacy managed service GPU slots require a Local process host')
+    rss = (policy.native_limits or {}).get('max_rss_bytes')
+    if type(rss) is not int or rss <= 0:
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed GPU service requires explicit native_resources.max_rss_bytes')
+    if rss < kernel.profile.requests['memory_bytes'] or rss > bounds.max_resident_bytes:
+        raise DataflowError('RESOURCE_INFEASIBLE', 'Managed GPU service RSS does not fit the original run envelope')
+    return replace(kernel.profile, requests={**kernel.profile.requests, 'memory_bytes': rss})

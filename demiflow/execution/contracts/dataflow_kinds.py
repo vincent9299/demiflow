@@ -201,3 +201,6 @@ def traits_of(entry: str) -> Mapping[str, tuple]:
 
 
 TASK_KINDS = kinds_with('task')
+
+
+MANAGED_HTTP_DEVICES_FIELD = 'managed_http_devices'
