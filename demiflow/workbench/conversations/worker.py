@@ -104,9 +104,11 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
     """Assemble only controller-declared scope; no provider-supplied path grants."""
     from demiflow.workbench.conversations.sandbox import SandboxSpec
     root = Path(project['root'])
-    sources = [Path(source['canonical_path']) for source in manifest.get('sources', [])
+    readonly = turn.get('operation') in ('compact', 'notebook_cell', 'notebook_cell_cli')
+    notebook_op = turn.get('operation') in ('notebook_cell', 'notebook_cell_cli')
+    sources = [] if notebook_op else [Path(source['canonical_path']) for source in manifest.get('sources', [])
                if source.get('origin') == 'authoritative_file']
-    read = [root, *[path for path in sources if path.is_file()]]
+    read = [] if notebook_op else [root, *[path for path in sources if path.is_file()]]
     openssl = Path('/etc/ssl/openssl.cnf')
     if openssl.is_file(): read.append(openssl)
     direct_network = bool(deployment.mode == 'restricted' and getattr(deployment, 'direct_model', False))
@@ -122,12 +124,11 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
             if cred_path.is_file():
                 active_cred = cred_path
                 read.append(cred_path)
-    readonly = turn.get('operation') in ('compact', 'notebook_cell', 'notebook_cell_cli')
-    notebook_op = turn.get('operation') in ('notebook_cell', 'notebook_cell_cli')
     writes = [] if readonly else [root / name for name in project['writes']]
-    protected = [root / name for name in ('.git', '.forge', 'AGENTS.md', 'workspace.json', 'PIPELINE_SPEC.md')]
+    protected = [] if notebook_op else [root / name for name in ('.git', '.forge', 'AGENTS.md', 'workspace.json', 'PIPELINE_SPEC.md')]
     protected.extend(path for path in sources if path.name in {'AGENTS.md', 'PIPELINE_SPEC.md'})
-    protected.extend(root / name for name in project.get('protected', []))
+    if not notebook_op:
+        protected.extend(root / name for name in project.get('protected', []))
     if active_cred is not None:
         protected.append(active_cred)
     denied = [deployment.state / 'chat.sqlite3',
@@ -407,13 +408,14 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
             warm_operation = st_operation
             standby_lease = None
             try:
+                st_cwd = str(st_provider_home) if st_notebook else st_project['root']
                 if standby_spec is not None:
                     sandbox_deadline = time.time() + standby_spec.seconds
                     if st_cell_cli:
                         from dataclasses import replace
                         standby_spec = replace(standby_spec, runtime_paths=(*standby_spec.runtime_paths, str(control_bridge.bin)))
                     from demiflow.workbench.conversations.sandbox import specification
-                    specification(standby_spec, [sys.executable], {}, st_project['root'])
+                    specification(standby_spec, [sys.executable], {}, st_cwd)
                     if not getattr(deployment, 'direct_model', False):
                         from demiflow.workbench.conversations.model_broker import start_model_broker
                         model_broker = start_model_broker(deployment, None, st_session, st_broker_home, defer_handshake=True)
@@ -427,7 +429,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     st_config = {**st_config, '_project_python': st_py}
                 process = launch_provider(
                     mode=deployment.mode, adapter=st_adapter, config=st_config,
-                    home=st_provider_home, root=st_project['root'],
+                    home=st_provider_home, root=st_cwd,
                     lease_fd=standby_lease.fileno() if standby_lease is not None else None,
                     sandbox_spec=standby_spec,
                     control_socket=control_bridge.path if control_bridge is not None else None,
@@ -437,7 +439,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 if standby_lease is not None:
                     standby_lease.close()
             transport = Transport(process, limits, acp=acp)
-            provider = st_adapter(transport, st_config, st_project, None)
+            provider = st_adapter(transport, st_config, dict(st_project, root=st_cwd) if st_notebook else st_project, None)
 
             def _check_standby_parent():
                 nonlocal tid, lease_fd, already_claimed
@@ -842,13 +844,14 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     confined = (sandbox_spec(deployment, project, session, turn, manifest, config, provider_home, seconds=warm_sandbox_secs)
                                 if deployment.mode == 'restricted' else None)
                     warm_operation = turn_op
+                    provider_cwd = str(provider_home) if notebook else project['root']
                     if confined is not None:
                         sandbox_deadline = time.time() + confined.seconds
                         if cell_cli:
                             from dataclasses import replace
                             confined = replace(confined, runtime_paths=(*confined.runtime_paths, str(control_bridge.bin)))
                         from demiflow.workbench.conversations.sandbox import specification
-                        specification(confined, [sys.executable], {}, project['root'])
+                        specification(confined, [sys.executable], {}, provider_cwd)
                         if not getattr(deployment, 'direct_model', False):
                             from demiflow.workbench.conversations.model_broker import start_model_broker
                             model_broker = start_model_broker(deployment, turn, session, broker_home, defer_handshake=True)
@@ -859,12 +862,12 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     if proj_py:
                         config = {**config, '_project_python': proj_py}
                     process = launch_provider(mode=deployment.mode, adapter=adapter, config=config,
-                        home=provider_home, root=project['root'], lease_fd=lease_fd, sandbox_spec=confined,
+                        home=provider_home, root=provider_cwd, lease_fd=lease_fd, sandbox_spec=confined,
                         control_socket=control_bridge.path if control_bridge is not None else None,
                         model_socket=model_broker.socket_path if model_broker is not None else None)
                     transport = Transport(process, limits, acp=acp)
                     saved_session = session['provider_session'] if acp or store.has_dispatched(session['id']) else None
-                    provider = adapter(transport, config, project, saved_session)
+                    provider = adapter(transport, config, dict(project, root=provider_cwd) if notebook else project, saved_session)
                     if acp and guided:
                         provider.mcp_servers = [dict(name='development-protocol', command=sys.executable,
                             args=['-I', '-B', str(Path(__file__).with_name('mcp_bridge.py')), '--connect', str(control_bridge.path),

@@ -4,11 +4,8 @@ const limited=(value,length)=>value.length<=length?value:value.slice(0,length)+'
 
 function promptFor(request,context,tools,cli=false){
   if(cli){
-    const parts=[request,'当前 Notebook：'+context.path,'本轮运行许可：'+(context.allowRun?'允许':'仅编辑')];
-    if(context.selected?.length)parts.push('引用的模块：'+JSON.stringify(context.selected.map(i=>[i.path,i.symbol])));
-    const text=parts.join('\n\n');
-    if(utf8.encode(text).length>32768)throw Error('当前要求较长，请缩短要求再试。');
-    return text;
+    if(utf8.encode(request).length>32768)throw Error('当前要求较长，请缩短要求再试。');
+    return request;
   }
   const parts=[request,'当前 Notebook：'+context.path,'本轮运行许可：'+(context.allowRun?'允许':'仅编辑'),
     '要调整的单元格：\n'+limited(context.source,3000),

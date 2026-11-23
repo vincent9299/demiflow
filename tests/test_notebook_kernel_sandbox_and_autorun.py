@@ -60,6 +60,8 @@ def test_notebook_assistant_sandbox_excludes_project_python(tmp_path):
     assert str(fake_venv.resolve()) in dev_spec.runtime_paths
     assert str(fake_venv.resolve()) not in nb_spec.runtime_paths
     assert str(fake_bin.resolve()) not in nb_spec.runtime_paths
+    assert str(proj.resolve()) in dev_spec.read_paths
+    assert str(proj.resolve()) not in nb_spec.read_paths
     assert nb_spec.role == 'readonly'
     assert nb_spec.write_paths == ()
 

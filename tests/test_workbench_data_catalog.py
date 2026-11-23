@@ -126,7 +126,7 @@ def test_assistant_cli_edits_runs_and_reads_native_output(browser,native_project
                         assert (result.returncode==0)==success,(args,result.stdout,result.stderr)
                         return json.loads(result.stdout)
                     if not cli('cell','show')['allow_run']:
-                        assert '数据字典（固定版本）' not in turn['text']
+                        assert turn['text'] in {'inspect','重试中断的连接'}
                         ctx_info=cli('context')
                         assert ctx_info['kernel_python']==str(PYTHON)
                         assert ctx_info['sandbox']=={'mode':'readonly','write_paths':[]}
