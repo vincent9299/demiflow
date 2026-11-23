@@ -227,12 +227,7 @@ class Notebooks:
         except Exception:
             item = {}
         configured_py = item.get('python')
-        if configured_py is None:
-            kernel_python = str(self.python)
-        elif configured_py == '':
-            kernel_python = ''
-        else:
-            kernel_python = configured_py
+        kernel_python = configured_py.strip() if isinstance(configured_py, str) else ''
         sandbox = console.notebook_sandbox(item)
         locations = []
         try:

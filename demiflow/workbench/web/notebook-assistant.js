@@ -2,7 +2,14 @@
 const utf8=new TextEncoder();
 const limited=(value,length)=>value.length<=length?value:value.slice(0,length)+'…';
 
-function promptFor(request,context,tools){
+function promptFor(request,context,tools,cli=false){
+  if(cli){
+    const parts=[request,'当前 Notebook：'+context.path,'本轮运行许可：'+(context.allowRun?'允许':'仅编辑')];
+    if(context.selected?.length)parts.push('引用的模块：'+JSON.stringify(context.selected.map(i=>[i.path,i.symbol])));
+    const text=parts.join('\n\n');
+    if(utf8.encode(text).length>32768)throw Error('当前要求较长，请缩短要求再试。');
+    return text;
+  }
   const parts=[request,'当前 Notebook：'+context.path,'本轮运行许可：'+(context.allowRun?'允许':'仅编辑'),
     '要调整的单元格：\n'+limited(context.source,3000),
     '此前相邻代码：\n'+limited(context.before,2000),
@@ -133,8 +140,8 @@ export function notebookConversation({api,project,path,cell,active,command,onSes
       record.provider||=provider.id;record.cli=caps.notebook_cli===true;
     }
     if(!pending){
-      const index=await api('project-data-tools');
-      pending={cell:context.cell,source:context.source,allowRun:context.allowRun===true,request,prompt:promptFor(request,context,index.definitions),id:crypto.randomUUID()};
+      const definitions=record.cli?[]:(await api('project-data-tools')).definitions;
+      pending={cell:context.cell,source:context.source,allowRun:context.allowRun===true,request,prompt:promptFor(request,context,definitions,record.cli),id:crypto.randomUUID()};
       record.pending=pending;save();
     }
     if(!record.sid){

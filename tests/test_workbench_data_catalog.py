@@ -126,14 +126,22 @@ def test_assistant_cli_edits_runs_and_reads_native_output(browser,native_project
                         assert (result.returncode==0)==success,(args,result.stdout,result.stderr)
                         return json.loads(result.stdout)
                     if not cli('cell','show')['allow_run']:
+                        assert '数据字典（固定版本）' not in turn['text']
+                        ctx_info=cli('context')
+                        assert ctx_info['kernel_python']==str(PYTHON)
+                        assert ctx_info['sandbox']=={'mode':'readonly','write_paths':[]}
                         assert '运行许可' in cli('cell','run',success=False)
                     else:
-                        tools=cli('catalog','list','tools')['items']
+                        tools=cli('catalog','list','tools','--query','column_profile')['items']
                         profile=next(i['name'] for i in tools if i['name'].endswith('.column_profile'))
                         tool=cli('catalog','show','tools',profile)
-                        table=next(i for i in cli('catalog','list','dictionary')['items'] if i['name']=='samples')
+                        filtered=cli('catalog','list','dictionary','--query','sam')['items']
+                        assert len(filtered)==1 and filtered[0]['name']=='samples'
+                        assert cli('catalog','list','dictionary','--query','nonexistent_table_xyz')['items']==[]
+                        table=filtered[0]
                         fixed=cli('catalog','show','dictionary',table['name'])
                         assert 'binding=' not in fixed['read'] and 'version=1' in fixed['read']
+                        assert fixed['sample_limit']==100 and 'count(' in fixed['count']
                         assert dict(fixed['fields']).keys()=={'name','score'}
                         cmd=tool['import']+'\n'+fixed['read']+'\nprint("count=",column_profile(df).loc["score","present"])'
                         assert cli('cell','edit',source=cmd)['state']=='edited'

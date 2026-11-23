@@ -116,7 +116,7 @@ def test_kernel_launcher_rejects_disabled_or_missing_ipykernel(tmp_path):
     res = subprocess.run([sys.executable, '-I', '-B', str(launcher), str(cfg_disabled), str(conn)],
                          capture_output=True, text=True, timeout=15)
     assert res.returncode != 0
-    assert '不挂载 Python 环境' in res.stderr
+    assert '不继承平台 Python' in res.stderr
 
     # 2. Fake python missing ipykernel -> explicit error guiding user to install ipykernel.
     fake_py = tmp_path / 'no_ipy_python'

@@ -902,24 +902,26 @@
     dialog.append($('h2','项目设置'),$('p',project.name),path);
     if(projectManageEnabled){
       const pySection=$('section',undefined,'project-python-settings');
-      pySection.append($('strong','项目 Python 环境（开发测试与数据分析共用）'));
+      pySection.append($('strong','项目业务 Python 环境（开发测试与 Notebook 内核共用，沙箱只读）'));
       const modeSelect=$('select',undefined,'project-python-select');modeSelect.setAttribute('aria-label','Python 环境模式');
-      modeSelect.append(new Option('继承工作台默认环境','default'),new Option('自定义项目虚拟环境 (venv / conda)','custom'),new Option('不挂载 Python 环境','disabled'));
-      const currentPy=project.python;
-      modeSelect.value=currentPy===undefined||currentPy===null?'default':currentPy===''?'disabled':'custom';
+      modeSelect.append(new Option('未配置（不继承平台环境）','disabled'),new Option('指定项目业务 Python 环境 (venv / conda)','custom'));
+      const currentPy=typeof project.python==='string'?project.python.trim():'';
+      modeSelect.value=currentPy?'custom':'disabled';
       const pyInput=$('input',undefined,'project-python-input');pyInput.type='text';pyInput.setAttribute('aria-label','自定义 Python 解释器路径');
-      pyInput.placeholder='/path/to/venv/bin/python';pyInput.value=typeof currentPy==='string'&&currentPy?currentPy:'';
+      pyInput.placeholder='/path/to/project-venv/bin/python';pyInput.value=currentPy;
       const pyHint=$('p','','muted small project-python-hint');
       const pyMsg=$('p','','small project-python-msg');pyMsg.hidden=true;
       const syncPyUi=()=>{
         const m=modeSelect.value;
         pyInput.hidden=m!=='custom';
-        pyHint.textContent=m==='default'?('当前默认：'+(projectDefaultPython||'工作台宿主 Python')+'（同时用于开发测试与 Notebook 内核，环境目录只读）'):m==='disabled'?'开发沙箱不挂载 Python；Notebook 内核也将暂停启动，不会回退到平台 Python。':'填写该项目的 venv 或 conda Python 绝对路径（需安装 ipykernel 供 Notebook 内核使用，工作台将以只读方式挂载）。';
+        pyHint.textContent=m==='custom'
+          ?'填写该业务项目独立的 venv / conda Python 绝对路径（同时用于开发测试与 Notebook 内核，Notebook 运行需安装 ipykernel；工作台以只读方式挂载）。'
+          :'未配置时不继承工作台平台 Python，开发沙箱不挂载 Python，Notebook 内核也将等待配置项目 Python 后再启动。';
       };
       modeSelect.onchange=syncPyUi;syncPyUi();
       const savePy=button('保存 Python 环境',async()=>{
         const m=modeSelect.value;
-        const payloadPy=m==='default'?null:m==='disabled'?'':pyInput.value.trim();
+        const payloadPy=m==='custom'?pyInput.value.trim():null;
         if(m==='custom'&&!payloadPy){pyMsg.textContent='请填写 Python 解释器的绝对路径。';pyMsg.dataset.tone='error';pyMsg.hidden=false;return;}
         savePy.disabled=true;pyMsg.hidden=true;
         try{

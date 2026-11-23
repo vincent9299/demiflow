@@ -80,8 +80,11 @@ class CellCommands(BridgeServer):
             if time.time() >= row['expires']:
                 reject('Notebook did not return a result before this command expired', 'conflict')
             return {'done': False}
-        fields = {'catalog.list': {'group', 'offset'}, 'catalog.show': {'group', 'id', 'offset'},
+        fields = {'context.show': set(), 'catalog.list': {'group', 'offset'}, 'catalog.show': {'group', 'id', 'offset'},
                   'cell.show': set(), 'cell.edit': {'source'}, 'cell.run': set()}
+        if method == 'catalog.list' and type(params) is dict and 'query' in params:
+            text(params['query'], 256)
+            fields[method].add('query')
         if method == 'catalog.show' and type(params) is dict and 'version' in params:
             integer(params['version'], 1, 2**63-1)
             fields[method].add('version')

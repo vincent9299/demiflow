@@ -206,8 +206,19 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
     const cell=cellById(id);
     if(!cell||cell.isDisposed||cell.model.type!=='code')throw Error('目标 cell 已删除。');
     const source=sourceOf(cell);
-    if(name==='cell.show')return {source,output:(cell.outputArea?.node.innerText||'').slice(0,1600),
-      allow_run:pending.allowRun&&!!permissions().analysis_execute};
+    if(name==='cell.show'||name==='context.show'){
+      const index=cells().indexOf(cell);
+      const before=index>0?cells().slice(Math.max(0,index-3),index).filter(c=>c.model.type==='code').map(sourceOf).join('\n').slice(0,2000):'';
+      let env={};
+      try{
+        const inv=await api('projects');
+        const proj=(inv.projects||[]).find(p=>p.workspace_id===project);
+        if(proj)env={kernel_python:proj.python||null,sandbox:proj.notebook_sandbox||{mode:'readonly',write_paths:[]}};
+      }catch{}
+      const selectedRefs=(refs.get(id)||[]).map(i=>[i.path,i.symbol]);
+      return {path,source,before,output:(cell.outputArea?.node.innerText||'').slice(0,1600),
+        selected:selectedRefs,allow_run:pending.allowRun&&!!permissions().analysis_execute,...env};
+    }
     if(source!==(pending.current??pending.source))throw Error('cell 已被手动修改，这条命令未应用。');
     if(!writable())throw Error('当前文档只读。');
     if(name==='cell.edit'){

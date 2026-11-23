@@ -135,7 +135,7 @@ def main() -> None:
 
     target_python = config.get('python')
     if not target_python:
-        _fail('当前项目已设为「不挂载 Python 环境」，Notebook 内核无法启动。请在「项目设置」中配置项目 Python 环境。')
+        _fail('当前项目尚未配置业务 Python 环境（Notebook 内核不继承平台 Python）。请在「项目设置」中指定该项目的独立 Python 解释器（需安装 ipykernel）。')
     py_path = Path(target_python)
     if not py_path.is_absolute() or not py_path.is_file() or not os.access(py_path, os.X_OK):
         _fail(f'项目配置的 Python 解释器不可用: {target_python}。请在「项目设置」中重新配置。')
