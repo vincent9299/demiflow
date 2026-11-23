@@ -42,7 +42,7 @@ def test_submit_history_snapshot_and_result(root, browser):
         result = runs.show(root, records[0]['run_id'], include_report=True)
         assert result['status'] == 'succeeded', result
         expect(page.get_by_label('运行记录', exact=True).locator('option')).to_have_count(1)
-        expect(page.locator('.wb-history')).to_be_visible()
+        expect(page.locator('.wb-flow-navigation')).to_be_visible()
         page.get_by_role('button', name='本次参数与版本', exact=True).click()
         expect(page.get_by_label('封存业务参数')).to_contain_text('0.8')
         assert page.get_by_label('封存业务参数').inner_text() == json.dumps(
@@ -86,7 +86,8 @@ def test_history_recovers_when_its_first_read_is_not_dispatched(root, browser):
                 route.continue_()
 
         page.route('**/runs?*', read_history)
-        page.locator('.function-nav').get_by_role('button', name='运行', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.wb-context-switch').get_by_role('button', name='运行记录', exact=True).click()
         record = page.get_by_role('combobox',name='运行记录')
         expect(record).to_have_value(value['run_id'])
         assert attempts[:2] == [503, 'retry']
@@ -115,7 +116,8 @@ def run(*, source, target, other):
     run_id = value['run_id']
     with service(root, enable_runs=True) as app, page_for(browser, app) as (page, errors):
         try:
-            page.locator('.function-nav').get_by_role('button', name='运行', exact=True).click()
+            page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+            page.locator('.wb-context-switch').get_by_role('button', name='运行记录', exact=True).click()
             expect(page.get_by_label('运行记录', exact=True)).to_have_value(run_id)
             page.get_by_role('button', name='开始这次运行', exact=True).click()
             deadline = time.monotonic() + 60
@@ -183,7 +185,8 @@ def test_late_parameter_response_does_not_replace_selected_run(root, browser):
     b = execute(root, prepared(root))
     assert a['status'] == b['status'] == 'succeeded'
     with service(root, enable_runs=True) as app, page_for(browser, app) as (page, errors):
-        page.locator('.function-nav').get_by_role('button', name='运行', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.wb-context-switch').get_by_role('button', name='运行记录', exact=True).click()
         page.get_by_label('运行记录',exact=True).select_option(a['run_id'])
         held = []
         page.route('**/run?*', lambda route: held.append(route) if 'report=1' in route.request.url
