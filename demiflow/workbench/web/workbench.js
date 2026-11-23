@@ -15,7 +15,7 @@
   const restrictionText={INCOMPATIBLE_HISTORY:'历史封存与当前运行时不兼容，不能恢复；请新建运行。',UNKNOWN_EFFECT:'存在未知效果的执行，恢复准入待服务端核对。',CAPACITY_PENDING:'容量待满足，尚未执行完成；不会自动新建或重复提交。'};
   async function mount(options) {
     const {main,api,icon,workspaceId:project,view={},mountText,disposeReaders,onContext=()=>{},rememberView:saveView=()=>{},onPageChange=()=>{},
-      openResult=async()=>{},navigate=async()=>{},projectSettings={}}=options;
+      openResult=async()=>{},navigate=async()=>{},openOperator=null,projectSettings={}}=options;
     const presentation=globalThis.ForgeWorkbenchPresentation;
     if(!presentation||typeof presentation.chooseGraphView!=='function'||typeof presentation.buildGraphModel!=='function'||typeof presentation.buildNodeDetails!=='function')
       throw new Error('图呈现模块未加载或不完整：ForgeWorkbenchPresentation');
@@ -164,7 +164,12 @@
     const body=$('div',undefined,'wb-body'),graphSection=$('div',undefined,'wb-graph-section'),inspector=$('div',undefined,'wb-inspector');
     const nodePanel=$('aside',undefined,'wb-node-panel');nodePanel.setAttribute('aria-label','算子详情');
     const nodePanelTools=$('div',undefined,'wb-node-panel-tools');
-    const definitionButton=button('项目算子',async()=>{const target=definitionSource;await showPage('operators');if(target){const found=target.path?await operatorBrowser.selectSource(target.path,target.line,target.sha256):await operatorBrowser.selectPrompt(target);if(!found)message('当前项目未找到唯一匹配的定义；运行快照仍保留。','notice');}},nodePanelTools);
+    const definitionButton=button('项目算子',async()=>{
+      const target=definitionSource;
+      if(typeof openOperator==='function'){await openOperator(target);return;}
+      await showPage('operators');
+      if(target){const found=target.path?await operatorBrowser.selectSource(target.path,target.line,target.sha256):await operatorBrowser.selectPrompt(target);if(!found)message('当前项目未找到唯一匹配的定义；运行快照仍保留。','notice');}
+    },nodePanelTools);
     const nodeOutputs=button('查看本次输出',()=>changeMode('results'),nodePanelTools);nodeOutputs.hidden=true;
     const closeDetail=button('关闭详情',()=>{detailOpen=false;updateActions();},nodePanelTools);
     nodePanel.append(nodePanelTools,inspector);

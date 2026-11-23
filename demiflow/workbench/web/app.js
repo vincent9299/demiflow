@@ -151,7 +151,7 @@
   }
   window.addEventListener('hashchange', reloadSessionEntry);
   let workspaceId = '', projectList = [], projectNav, projectDigest = '', projectRemovalEnabled = false, projectManageEnabled = false;
-  let pendingOriginalPath = null;
+  let pendingOriginalPath = null, pendingOperatorTarget = null;
   let developmentView = null, workbenchView = null, notebooksView = null;
   const readers = new Set();
   // Cleanup registry only: view-scoped DOM handles disposed
@@ -244,13 +244,13 @@
   const staleRequest = () => new DOMException('页面选择已变化', 'AbortError');
   function pageKind(reference = pendingView || view) {
     const kind = reference?.kind || 'overview';
-    if(reference?.panel==='operators')return 'operators';
+    if(reference?.panel==='operators')return 'development';
     if(reference?.panel==='flows'||reference?.panel==='monitor')return 'flows';
     return ({development_new:'development',development_session:'development',table:'tables',table_request:'tables',case:'tables',inspection:'flows',run:'flows',run_compare:'flows',runs:'flows',checks:'flows'})[kind] || kind;
   }
-  const pipelinePage=page=>['flows','operators'].includes(page);
+  const pipelinePage=page=>page==='flows';
   function markFunction(page=pageKind()) {
-    const active=page==='monitor'?'flows':page;
+    const active=page==='monitor'?'flows':page==='operators'?'development':page;
     for(const b of nav.querySelectorAll('[data-page]')){
       const selected=b.dataset.page===active;b.classList.toggle('active',selected);b.setAttribute('aria-pressed',String(selected));
       if(selected)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');
@@ -258,14 +258,14 @@
     revealTab();
   }
   function target(kind, fields = {}) { return V.validateView({v:2, workspace:workspaceId, kind, ...fields}); }
-  // At most five validated locators per registered project. Drafts stay in
+  // At most four validated locators per registered project. Drafts stay in
   // their existing Stores; only a confirmed current view is remembered here.
   function rememberTab() {
     if (viewState !== 'ready') return;
     const reference = selection || view;
     if (!reference || reference.v !== 2 || reference.workspace !== workspaceId) return;
     const page = pageKind(reference);
-    if (!['development','flows','operators','tables','overview'].includes(page)) return;
+    if (!['development','flows','tables','overview'].includes(page)) return;
     const saved = projectTabs.get(workspaceId) || {page, views:new Map()};
     saved.page = page; saved.views.set(page, V.validateView(reference));
     if(pipelinePage(page))saved.pipeline=V.validateView(reference);
@@ -276,17 +276,10 @@
     if (viewState === 'ready' && current?.workspace === workspaceId && pageKind(current) === page) return current;
     const saved=projectTabs.get(workspaceId)?.views;
     if(pipelinePage(page)){
-      if(page==='flows'){
-        const own=saved?.get('flows');
-        if(own)return V.validateView(own);
-        const fallback=saved?.get('operators')||projectTabs.get(workspaceId)?.pipeline;
-        return target('flows',{panel:'flows',...(fallback?.entry?{entry:fallback.entry}:{})});
-      }
-      const isRunKind=ref=>['run','runs','run_compare'].includes(ref?.kind);
-      const own=saved?.get(page);
-      if(own&&!isRunKind(own))return V.validateView({...own,panel:page});
-      const fallback=[saved?.get('flows'),saved?.get('operators'),projectTabs.get(workspaceId)?.pipeline].find(ref=>ref?.entry);
-      return target('flows',{panel:page,...(fallback?.entry?{entry:fallback.entry}:{})});
+      const own=saved?.get('flows');
+      if(own)return V.validateView(own);
+      const fallback=projectTabs.get(workspaceId)?.pipeline;
+      return target('flows',{panel:'flows',...(fallback?.entry?{entry:fallback.entry}:{})});
     }
     return saved?.get(page) || target(page);
   }
@@ -455,13 +448,16 @@
       const page = pageKind();
       if (page === 'development') {
         const project=workspaceId,developmentApi=(path,query,body)=>{if(epoch!==viewEpoch)throw staleRequest();return api(path,query,body,project);};
+        const operatorTarget=pendingOperatorTarget;pendingOperatorTarget=null;
+        const openOperators=value?.panel==='operators'||!!operatorTarget;
         const mounted = await ForgeDevelopment.mount({main, api:developmentApi, workspaceId:project, view:value, mountText, disposeReaders,
+          openOperators, operatorTarget,
           openNew:()=>epoch===viewEpoch?openView(target('development_new')):undefined,
           openSession:id=>epoch===viewEpoch?openView(target('development_session',{session_id:id})):undefined,
           error, register:handle=>{if(epoch===viewEpoch)developmentView=handle;else handle.dispose();}});
         if(epoch!==viewEpoch){mounted.dispose();throw staleRequest();}
         developmentView=mounted;
-        if(developmentView?.sessionId)value=target('development_session',{session_id:developmentView.sessionId});
+        if(developmentView?.sessionId&&value?.panel!=='operators')value=target('development_session',{session_id:developmentView.sessionId});
       }
       else if (page === 'overview') await overview(value);
       else if (page === 'tables') await tables(value,reference=>{
@@ -842,6 +838,7 @@
     const id=workspaceId,epoch=viewEpoch;let reference=request,mountedHandle=null,checkVersion=0,checksPending=0;
     const isCurrent=()=>epoch===viewEpoch&&workspaceId===id;
     const handle=await ForgeWorkbench.mount({main,api,icon,context,workspaceId:id,view:request,mountText,disposeReaders,openResult,navigate,
+      openOperator:async targetOp=>{pendingOperatorTarget=targetOp||true;await openView(target('development'));},
       register:handle=>{mountedHandle=handle;if(isCurrent())workbenchView=handle;else handle.dispose();},
       projectCheckState:()=>({version:checkVersion,active:checksPending>0}),
       continueInput,
@@ -881,7 +878,7 @@
     mode.textContent=context?(context.runs_enabled?'可查看、检查与运行':canRun('run_control')?'可查看、检查与停止已有运行':'可查看、检查 · 运行未开启'):'';
     mode.hidden=!context;
     const path=document.getElementById('workspace-path');
-    if(path){const current=pendingView||view;path.textContent=({development:'开发',overview:'Readme',tables:'数据',flows:'管道',operators:'算子',monitor:'管道'})[pageKind()]+(current?.alias?' / '+current.alias:'')+(current?.row_id?' / Case '+current.row_id:'');}
+    if(path){const current=pendingView||view;path.textContent=({development:'开发',overview:'Readme',tables:'数据',flows:'管道',operators:'开发',monitor:'管道'})[pageKind()]+(current?.alias?' / '+current.alias:'')+(current?.row_id?' / Case '+current.row_id:'');}
     const settings=document.getElementById('project-settings');if(settings)settings.disabled=offline||!workspaceId;
     const status=document.getElementById('workspace-status');if(status){status.hidden=!workspaceId;if(!workspaceId)status.open=false;}
   }
@@ -902,7 +899,7 @@
     dialog.append($('h2','项目设置'),$('p',project.name),path);
     if(projectManageEnabled){
       const pySection=$('section',undefined,'project-python-settings');
-      pySection.append($('strong','业务 Python 环境（开发沙箱只读）'));
+      pySection.append($('strong','项目业务 Python 环境（开发测试与 Notebook 内核共用，沙箱只读）'));
       const modeSelect=$('select',undefined,'project-python-select');modeSelect.setAttribute('aria-label','Python 环境模式');
       modeSelect.append(new Option('未配置（不继承平台环境）','disabled'),new Option('指定项目业务 Python 环境 (venv / conda)','custom'));
       const currentPy=typeof project.python==='string'?project.python.trim():'';
@@ -915,8 +912,8 @@
         const m=modeSelect.value;
         pyInput.hidden=m!=='custom';
         pyHint.textContent=m==='custom'
-          ?'填写该业务项目独立的 venv / conda Python 绝对路径。沙箱仅开放只读执行（自动支持导入纯 demiflow SDK），写权限仍限于本项目内。'
-          :'未配置时不挂载任何 Python（默认不继承 DemiFlow 平台环境，保证业务项目自闭环）。';
+          ?'填写该业务项目独立的 venv / conda Python 绝对路径（同时用于开发测试与 Notebook 内核，Notebook 运行需安装 ipykernel；沙箱仅开放只读执行，自动支持导入纯 demiflow SDK）。'
+          :'未配置时不继承工作台平台 Python，开发沙箱不挂载 Python，Notebook 内核也将等待配置项目 Python 后再启动。';
       };
       modeSelect.onchange=syncPyUi;syncPyUi();
       const savePy=button('保存 Python 环境',async()=>{
@@ -927,13 +924,45 @@
         try{
           await api('project-python',{},{workspace_id:project.workspace_id,expected:projectDigest,python:payloadPy});
           await refreshProjects();
-          pyMsg.textContent=payloadPy?'已保存，新发起的开发回合将使用此业务 Python 环境（只读）。':'已清除，开发回合将不挂载业务 Python 环境。';pyMsg.dataset.tone='ok';pyMsg.hidden=false;
+          pyMsg.textContent=payloadPy?'已保存，新发起的开发回合及重启后的 Notebook 内核将使用此业务 Python 环境（只读）。':'已清除，开发回合与 Notebook 内核将不再使用业务 Python 环境。';pyMsg.dataset.tone='ok';pyMsg.hidden=false;
         }catch(err){
           pyMsg.textContent=err?.message||'保存失败';pyMsg.dataset.tone='error';pyMsg.hidden=false;
         }finally{savePy.disabled=false;}
       },pySection);
       pySection.insertBefore(modeSelect,savePy);pySection.insertBefore(pyInput,savePy);pySection.insertBefore(pyHint,savePy);pySection.append(pyMsg);
       dialog.append(pySection);
+
+      const nbSection=$('section',undefined,'project-python-settings');
+      nbSection.append($('strong','Notebook 内核沙箱（只读硬隔离）'));
+      const nbSelect=$('select',undefined,'project-python-select');nbSelect.setAttribute('aria-label','Notebook 内核沙箱模式');
+      nbSelect.append(new Option('只读沙箱（默认，Landlock 硬隔离项目源码）','readonly'),new Option('关闭沙箱（允许内核自由读写）','off'));
+      const currentSb=project.notebook_sandbox||{mode:'readonly',write_paths:[]};
+      nbSelect.value=currentSb.mode==='off'?'off':'readonly';
+      const nbWrites=$('input',undefined,'project-python-input');nbWrites.type='text';nbWrites.setAttribute('aria-label','允许内核写入的项目相对子目录');
+      nbWrites.placeholder='可选，逗号分隔项目相对子目录，如 notebooks/outputs, data/annotations';
+      nbWrites.value=(currentSb.write_paths||[]).join(', ');
+      const nbHint=$('p','','muted small project-python-hint');
+      const nbMsg=$('p','','small project-python-msg');nbMsg.hidden=true;
+      const syncNbUi=()=>{
+        const ro=nbSelect.value==='readonly';
+        nbWrites.hidden=!ro;
+        nbHint.textContent=ro?'项目源码、其他 Notebook、数据目录与 Python 环境全部只读；仅内核私有临时目录与上方白名单子目录可写。':'关闭后内核拥有与宿主相同的读写权限，仅在确需无隔离执行时使用。';
+      };
+      nbSelect.onchange=syncNbUi;syncNbUi();
+      const saveNb=button('保存内核沙箱配置',async()=>{
+        const mode=nbSelect.value;
+        const write_paths=mode==='readonly'?nbWrites.value.split(/[,，\n]/).map(s=>s.trim()).filter(Boolean):[];
+        saveNb.disabled=true;nbMsg.hidden=true;
+        try{
+          await api('project-notebook-sandbox',{},{workspace_id:project.workspace_id,expected:projectDigest,mode,write_paths});
+          await refreshProjects();
+          nbMsg.textContent='已保存，重启或新建 Notebook 内核后生效。';nbMsg.dataset.tone='ok';nbMsg.hidden=false;
+        }catch(err){
+          nbMsg.textContent=err?.message||'保存失败';nbMsg.dataset.tone='error';nbMsg.hidden=false;
+        }finally{saveNb.disabled=false;}
+      },nbSection);
+      nbSection.insertBefore(nbSelect,saveNb);nbSection.insertBefore(nbWrites,saveNb);nbSection.insertBefore(nbHint,saveNb);nbSection.append(nbMsg);
+      dialog.append(nbSection);
     }
     if(projectRemovalEnabled)button('移除项目 '+project.name,()=>{dialog.close();removeProjectDialog(project);},dialog);
     else dialog.append($('p','此服务未授予项目管理权限。','notice'));
@@ -1048,7 +1077,7 @@
     });
     picker.addEventListener('focusout',event=>{if(event.relatedTarget&&!picker.contains(event.relatedTarget)&&event.relatedTarget!==toggle)closeProjectPicker();});
     nav=$('nav',undefined,'function-nav');nav.setAttribute('aria-label','项目功能');nav.hidden=true;
-    for(const [page,label]of [['development','开发'],['operators','算子'],['flows','管道'],['tables','数据'],['overview','Readme']]){const b=button(label,()=>navigate(page),nav);b.dataset.page=page;b.disabled=true;}
+    for(const [page,label]of [['development','开发'],['flows','管道'],['tables','数据'],['overview','Readme']]){const b=button(label,()=>navigate(page),nav);b.dataset.page=page;b.disabled=true;}
     const actions=$('div',undefined,'header-actions');
     const settings=iconButton('设置',settingsDialog,actions,['M4 7h10m4 0h2M4 17h2m4 0h10M14 4v6M10 14v6']);settings.id='project-settings';
     iconButton('刷新当前视图',refreshView,actions,['M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 11-2l3 3M4 16l3 3a7 7 0 0 0 11-2']);

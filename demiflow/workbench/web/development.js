@@ -208,7 +208,7 @@ SOFTWARE.
   const labels={preparing:'准备开发依据',starting:'正在连接',running:'正在开发',waiting_input:'等待回答',waiting_approval:'等待许可',stopping:'已请求停止，正在清理',completed:'本轮已完成',failed:'本轮失败',interrupted:'连接中断',cancelled:'已停止'};
   const uid=()=>crypto.randomUUID();
   const iconButton=(label,path,viewBox='0 0 24 24',filled=false)=>{const b=el('button',undefined,'development-icon');b.type='button';b.title=label;b.setAttribute('aria-label',label);const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',viewBox);svg.setAttribute('aria-hidden','true');if(filled)svg.classList.add('development-filled-icon');const p=document.createElementNS(svg.namespaceURI,typeof path==='string'?'path':'rect');for(const [key,value]of Object.entries(typeof path==='string'?{d:path}:path))p.setAttribute(key,value);svg.append(p);b.append(svg);return b;};
-  async function mount({main,api,workspaceId,view,disposeReaders,openSession,openNew,error,register}) {
+  async function mount({main,api,workspaceId,view,mountText,disposeReaders,openOperators=false,operatorTarget=null,openSession,openNew,error,register}) {
     const state={disposed:false,navigationEpoch:0,initializing:true,timer:null,session:null,sequence:0,items:new Map(),pending:new Set(),submission:null,dialogs:new Set(),stats:null,statsAt:0,newDraft:view?.kind==='development_new',listOffset:0,listAt:0,writerBusy:false,activeSession:null};
     const layout=el('section',undefined,'development-layout'),body=el('div',undefined,'development-conversation');
     layout.append(body);main.append(layout);main.classList.add('development-main');active.add(state);
@@ -216,34 +216,37 @@ SOFTWARE.
     const sidebar=el('aside',undefined,'development-session-sidebar'),sideHeading=el('div',undefined,'development-session-heading');
     const createNew=el('button',undefined,'development-new-conversation');createNew.type='button';createNew.append(el('span','＋'),el('span','新会话'));createNew.disabled=true;
     let sidebarTab='sessions';
-    const navigation=ForgeNavigation.header({title:'开发',searchLabel:'搜索会话',placeholder:'筛选会话或文件',onSearch:()=>{if(sidebarTab==='files')state.files?.setFilter(navigation.search.value);else if(!state.initializing)renderConversations();}});
+    const navigation=ForgeNavigation.header({title:'开发',searchLabel:'搜索会话',placeholder:'筛选会话、文件或算子',onSearch:()=>{if(sidebarTab==='files'||sidebarTab==='operators')state.files?.setFilter(navigation.search.value);else if(!state.initializing)renderConversations();}});
     const sideTabs=el('div',undefined,'dev-sidebar-tabs');
     const sessionsTabBtn=el('button','会话','dev-sidebar-tab is-active');sessionsTabBtn.type='button';sessionsTabBtn.setAttribute('aria-pressed','true');
     const filesTabBtn=el('button',undefined,'dev-sidebar-tab');filesTabBtn.type='button';filesTabBtn.setAttribute('aria-pressed','false');
     const filesBadge=el('span','0','dev-change-badge');filesBadge.hidden=true;
     filesTabBtn.append(el('span','文件'),filesBadge);
-    sideTabs.append(sessionsTabBtn,filesTabBtn);
-    const sessionsPane=el('div',undefined,'dev-sidebar-pane'),filesPane=el('div',undefined,'dev-sidebar-pane');filesPane.hidden=true;
+    const operatorsTabBtn=el('button','算子','dev-sidebar-tab');operatorsTabBtn.type='button';operatorsTabBtn.setAttribute('aria-pressed','false');
+    sideTabs.append(sessionsTabBtn,filesTabBtn,operatorsTabBtn);
+    const sessionsPane=el('div',undefined,'dev-sidebar-pane'),filesPane=el('div',undefined,'dev-sidebar-pane'),operatorsPane=el('div',undefined,'dev-sidebar-pane');filesPane.hidden=true;operatorsPane.hidden=true;
     sideHeading.append(createNew);
     const sessionList=el('nav',undefined,'development-session-list');sessionList.setAttribute('aria-label','项目会话');
     const sessionPages=el('div',undefined,'development-session-pages'),sessionNote=el('p','正在读取会话…','development-session-note');
     sessionsPane.append(sideHeading,sessionList,sessionPages,sessionNote);
-    sidebar.append(navigation.element,sideTabs,sessionsPane,filesPane);layout.prepend(sidebar);
+    sidebar.append(navigation.element,sideTabs,sessionsPane,filesPane,operatorsPane);layout.prepend(sidebar);
     state.navigationResize=ForgeNavigation.resizable({layout,sidebar,label:'会话目录',active:false});
     const backdrop=el('button',undefined,'development-sidebar-backdrop');backdrop.type='button';backdrop.setAttribute('aria-label','关闭会话列表');layout.append(backdrop);
     const head=el('div',undefined,'development-controls'),sideToggle=iconButton('会话列表','M3 4h18v16H3zM9 4v16');
     function sidebarOpen(value){layout.dataset.sidebar=value?'open':'closed';sideToggle.setAttribute('aria-expanded',String(value));sidebar.hidden=!value;backdrop.hidden=!value;state.navigationResize.setActive(value);if(value)navigation.actions.append(sideToggle);else head.prepend(sideToggle);}
     function setSidebarTab(next){
-      sidebarTab=next==='files'?'files':'sessions';
-      const isFiles=sidebarTab==='files';
-      sessionsPane.hidden=isFiles;filesPane.hidden=!isFiles;
-      sessionsTabBtn.classList.toggle('is-active',!isFiles);filesTabBtn.classList.toggle('is-active',isFiles);
-      sessionsTabBtn.setAttribute('aria-pressed',String(!isFiles));filesTabBtn.setAttribute('aria-pressed',String(isFiles));
+      sidebarTab=['files','operators'].includes(next)?next:'sessions';
+      const isSessions=sidebarTab==='sessions',isFiles=sidebarTab==='files',isOps=sidebarTab==='operators';
+      sessionsPane.hidden=!isSessions;filesPane.hidden=!isFiles;operatorsPane.hidden=!isOps;
+      sessionsTabBtn.classList.toggle('is-active',isSessions);filesTabBtn.classList.toggle('is-active',isFiles);operatorsTabBtn.classList.toggle('is-active',isOps);
+      sessionsTabBtn.setAttribute('aria-pressed',String(isSessions));filesTabBtn.setAttribute('aria-pressed',String(isFiles));operatorsTabBtn.setAttribute('aria-pressed',String(isOps));
       if(isFiles){state.files?.setFilter(navigation.search.value);state.files?.ensureTreeLoaded();}
+      else if(isOps){state.files?.setFilter(navigation.search.value);state.files?.ensureOperatorsLoaded();}
       else if(!state.initializing)renderConversations();
     }
     sessionsTabBtn.onclick=()=>setSidebarTab('sessions');
     filesTabBtn.onclick=()=>setSidebarTab('files');
+    operatorsTabBtn.onclick=()=>setSidebarTab('operators');
     sideToggle.onclick=()=>{sidebarOpen(layout.dataset.sidebar!=='open');sideToggle.focus();};
     const closeSidebar=()=>{sidebarOpen(false);sideToggle.focus();};backdrop.onclick=closeSidebar;
     sidebar.onkeydown=event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();closeSidebar();}};
@@ -272,12 +275,16 @@ SOFTWARE.
         box.focus();
       }
     };
-    state.files=DevelopmentNavigation.filePanel({layout,filesHost:filesPane,toggle:filesToggle,api,iconButton,
+    state.files=DevelopmentNavigation.filePanel({layout,filesHost:filesPane,operatorsHost:operatorsPane,toggle:filesToggle,api,iconButton,mountText,disposeReaders,project:workspaceId,
       onReference:insertReference,
       onRework:prompt=>sendGuidedMessage(prompt),
       onRequestReview:()=>sendGuidedMessage('请调用 request_pipeline_review 对当前会话的源码改动发起独立只读评审，无需修改代码。'),
       onShowFilesTab:()=>{sidebarOpen(true);setSidebarTab('files');},
       onBadgeChange:count=>{filesBadge.textContent=String(count);filesBadge.hidden=!count;}});
+    if(openOperators){
+      sidebarOpen(true);setSidebarTab('operators');
+      state.files.selectOperatorTarget(operatorTarget).catch(()=>{});
+    }
     const status=el('p','正在读取开发能力…','development-status');status.setAttribute('role','status');status.setAttribute('aria-live','polite');
     let capabilities=await api('dev-capabilities');state.capabilitiesAt=Date.now();if(state.disposed||!layout.isConnected)return handle;
     const running=value=>!!(value?.turn&&value.turn.cleanup!=='complete');

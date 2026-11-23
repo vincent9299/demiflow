@@ -51,6 +51,8 @@ def inspection_environment(pass_fds=(), *, allow_preparation=True):
     from demiflow.resources.process_observation import inherited_unit, UNIT_ENV
     if os.environ.get("DEMIFLOW_FORGE_DOMAIN"):
         env["DEMIFLOW_FORGE_DOMAIN"]=os.environ["DEMIFLOW_FORGE_DOMAIN"]
+    if os.environ.get("TMPDIR"):
+        env["TMPDIR"]=os.environ["TMPDIR"]
     unit_fds=inherited_unit()
     if unit_fds:env[UNIT_ENV]=str(unit_fds[0])
     preparation_fds=pass_fds if allow_preparation else ()

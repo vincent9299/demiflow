@@ -56,8 +56,12 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
       renderThread();
     }catch{} // Sending checks capabilities again and displays the service error.
   }
-  const executionLabel=element(document,'label','df-run-consent','允许本轮运行');
-  const execution=element(document,'input');execution.type='checkbox';executionLabel.prepend(execution);
+  const executionLabel=element(document,'label','df-run-consent','允许自动运行');
+  const execution=element(document,'input');execution.type='checkbox';
+  const autoRunKey='demiflow.notebook.auto_run';
+  try{execution.checked=localStorage.getItem(autoRunKey)!=='false';}catch{execution.checked=true;}
+  execution.onchange=()=>{try{localStorage.setItem(autoRunKey,String(execution.checked));}catch{}};
+  executionLabel.prepend(execution);
   const send=icon(document,'up','发送要求');send.type='submit';
   const messages=new Map(),drafts=new Map(),refs=new Map(),decorated=new Map();
   const conversations=new Map(),inFlight=new Set();
@@ -129,7 +133,6 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
   }
   function sourceOf(cell){return cell.model.sharedModel.getSource();}
   function trackSelection(){
-    execution.checked=false;
     if(selectedId)drafts.set(selectedId,input.value);
     selectedId=selected()?.model.id||null;follow=true;input.value=drafts.get(selectedId)||'';
     if(assistantOpen)renderThread();
@@ -169,7 +172,7 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
     const interrupted=last?.retryable||(!last?.turn&&/^本轮未完成。\s*interrupted$/.test(last?.text||''));
     if(interrupted&&!busy&&!pending){
       const retry=element(document,'button','df-apply','重新发送');
-      retry.onclick=()=>{input.value=last.request;execution.checked=false;submit(last.request);};
+      retry.onclick=()=>{input.value=last.request;submit(last.request);};
       actions.append(retry);
     }
     if(busy)actions.append(element(document,'p','df-chat-status','助手正在生成…'));
@@ -203,8 +206,19 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
     const cell=cellById(id);
     if(!cell||cell.isDisposed||cell.model.type!=='code')throw Error('目标 cell 已删除。');
     const source=sourceOf(cell);
-    if(name==='cell.show')return {source,output:(cell.outputArea?.node.innerText||'').slice(0,1600),
-      allow_run:pending.allowRun&&!!permissions().analysis_execute};
+    if(name==='cell.show'||name==='context.show'){
+      const index=cells().indexOf(cell);
+      const before=index>0?cells().slice(Math.max(0,index-3),index).filter(c=>c.model.type==='code').map(sourceOf).join('\n').slice(0,2000):'';
+      let env={};
+      try{
+        const inv=await api('projects');
+        const proj=(inv.projects||[]).find(p=>p.workspace_id===project);
+        if(proj)env={kernel_python:proj.python||null,sandbox:proj.notebook_sandbox||{mode:'readonly',write_paths:[]}};
+      }catch{}
+      const selectedRefs=(refs.get(id)||[]).map(i=>[i.path,i.symbol]);
+      return {path,source,before,output:(cell.outputArea?.node.innerText||'').slice(0,1600),
+        selected:selectedRefs,allow_run:pending.allowRun&&!!permissions().analysis_execute,...env};
+    }
     if(source!==(pending.current??pending.source))throw Error('cell 已被手动修改，这条命令未应用。');
     if(!writable())throw Error('当前文档只读。');
     if(name==='cell.edit'){
@@ -227,7 +241,7 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
     const id=cell.model.id,source=sourceOf(cell),index=book.activeCellIndex,initialPath=path;
     const context={path,cell:id,source,allowRun:execution.checked&&!!permissions().analysis_execute,before:cells().slice(Math.max(0,index-3),index).filter(c=>c.model.type==='code').map(sourceOf).join('\n'),
       output:cell.outputArea?.node.innerText||'',tables:tables(),selected:refs.get(id)||[]};
-    execution.checked=false;inFlight.add(id);schedulePaint();renderThread();
+    inFlight.add(id);schedulePaint();renderThread();
     try{
       const result=await assistantFor(id).generate(request,context);
       if(!valid()||path!==initialPath)return;

@@ -37,6 +37,44 @@ def validate_python(value):
     return value
 
 
+PROTECTED_SANDBOX_ROOTS = {'.git', '.forge', 'flows', 'operators', 'prompts', 'data_tools', 'tests', 'src', 'lib'}
+
+
+def validate_notebook_sandbox(value):
+    """Validate optional per-project Notebook Kernel sandbox policy."""
+    if value is None:
+        return None
+    if type(value) is not dict or not set(value) <= {'mode', 'write_paths'}:
+        raise ForgeError('Notebook 沙箱配置格式不正确。', code='invalid_request')
+    mode = value.get('mode', 'readonly')
+    if mode not in {'readonly', 'off'}:
+        raise ForgeError('Notebook 沙箱模式仅支持 readonly 或 off。', code='invalid_request')
+    raw_writes = value.get('write_paths', [])
+    if type(raw_writes) not in (list, tuple) or len(raw_writes) > 16:
+        raise ForgeError('允许写入目录最多 16 项。', code='invalid_request')
+    cleaned = []
+    for item in raw_writes:
+        if type(item) is not str or not item.strip() or len(item.encode('utf-8')) > 512:
+            raise ForgeError('允许写入目录必须是非空相对路径。', code='invalid_request')
+        rel = item.strip().strip('/')
+        parts = Path(rel).parts
+        if Path(item).is_absolute() or not parts or '..' in parts or '.' in parts:
+            raise ForgeError('允许写入目录必须是项目内的相对子目录路径：' + item, code='invalid_request')
+        if parts[0] in PROTECTED_SANDBOX_ROOTS or rel == 'notebooks' or rel.endswith('.ipynb'):
+            raise ForgeError('不允许向受保护源码或 Notebook 根目录开放内核写入：' + item, code='invalid_request')
+        norm = '/'.join(parts)
+        if norm not in cleaned:
+            cleaned.append(norm)
+    return {'mode': mode, 'write_paths': cleaned}
+
+
+def notebook_sandbox(item):
+    raw = item.get('notebook_sandbox') if isinstance(item, dict) else None
+    if isinstance(raw, dict):
+        return {'mode': raw.get('mode', 'readonly'), 'write_paths': list(raw.get('write_paths', []))}
+    return {'mode': 'readonly', 'write_paths': []}
+
+
 def load_registry(path):
     path = ws.no_symlinks(Path(path).absolute())
     value = ws.read_control(path, 256*1024)
@@ -48,12 +86,14 @@ def load_registry(path):
     for key, item in value['projects'].items():
         identity(key)
         fields = {'root','name','allow_runs'} if value['format']==FORMAT else {'root','name','permissions'}
-        if type(item) is not dict or set(item) - {'python'} != fields:
+        if type(item) is not dict or set(item) - {'python', 'notebook_sandbox'} != fields:
             raise ForgeError('Invalid console project')
         if 'python' in item:
             py = item['python']
             if py != '' and (type(py) is not str or not Path(py).is_absolute() or str(Path(py)) != py or '..' in Path(py).parts):
                 raise ForgeError('Invalid project python configuration')
+        if 'notebook_sandbox' in item:
+            validate_notebook_sandbox(item['notebook_sandbox'])
         if value['format']==FORMAT:
             if type(item['allow_runs']) is not bool:
                 raise ForgeError('Invalid run permission')
@@ -165,6 +205,7 @@ def projects(value):
         row['permissions']=permissions(item)
         row['capabilities']=capabilities(item)
         row['python'] = item.get('python')
+        row['notebook_sandbox'] = notebook_sandbox(item)
         try:
             resolve_workspace(value, key)
             row['status'] = 'available'
@@ -280,6 +321,24 @@ def set_python(path, workspace_id, *, expected, python):
             value['projects'][workspace_id]['python'] = cleaned
         ws.write_control(path, value, expected=expected)
     return dict(status='updated', workspace_id=workspace_id, python=cleaned, digest=content_digest(value))
+
+
+def set_notebook_sandbox(path, workspace_id, *, expected, mode, write_paths=()):
+    """Configure optional per-project Notebook Kernel Landlock sandbox policy."""
+    identity(workspace_id)
+    cleaned = validate_notebook_sandbox({'mode': mode, 'write_paths': list(write_paths or ())})
+    with _locked(path) as path:
+        value = load_registry(path)
+        if content_digest(value) != expected:
+            raise ForgeError('Registry changed before notebook sandbox update', code='conflict')
+        if workspace_id not in value['projects']:
+            raise ForgeError('Workspace is not registered', code='not_found')
+        if cleaned == {'mode': 'readonly', 'write_paths': []}:
+            value['projects'][workspace_id].pop('notebook_sandbox', None)
+        else:
+            value['projects'][workspace_id]['notebook_sandbox'] = cleaned
+        ws.write_control(path, value, expected=expected)
+    return dict(status='updated', workspace_id=workspace_id, notebook_sandbox=cleaned, digest=content_digest(value))
 
 
 def register(forge):

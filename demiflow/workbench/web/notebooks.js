@@ -295,10 +295,14 @@
       if(dictionary)await scanning;
       const tools=dictionary?[]:(await api('project-data-tools')).definitions;
       if(command==='catalog.list'){
-        const values=dictionary?[...tables.values()].map(({item})=>({name:item.label,version:item.version})):
-          tools.map(item=>({name:item.module?item.module+'.'+item.symbol:item.path+'::'+item.symbol,origin:item.origin,kind:item.tool_kind}));
+        const q=(args.query||'').trim().toLocaleLowerCase();
+        const values=dictionary
+          ?[...tables.values()].filter(({item,fieldNames})=>!q||[item.label,...fieldNames].join(' ').toLocaleLowerCase().includes(q))
+              .map(({item})=>({name:item.label,version:item.version}))
+          :tools.filter(item=>!q||[item.symbol,item.module,item.path,item.description].join(' ').toLocaleLowerCase().includes(q))
+              .map(item=>({name:item.module?item.module+'.'+item.symbol:item.path+'::'+item.symbol,origin:item.origin,kind:item.tool_kind}));
         const offset=args.offset,items=values.slice(offset,offset+12);
-        return {items,next_offset:offset+items.length<values.length?offset+items.length:null};
+        return {items,total:values.length,next_offset:offset+items.length<values.length?offset+items.length:null};
       }
       if(dictionary){
         const matches=[...tables.values()].filter(({item})=>item.label===args.id&&(args.version==null||item.version==null||item.version===args.version));
@@ -307,7 +311,8 @@
         if(matches.length>1&&args.version==null)throw Error('这张表有多个版本，请指定 --version。');
         const {fields,fixedVersion,rows,code}=await tableDetail(entry.item);
         const names=Object.keys(fields),offset=args.offset||0;
-        return {version:fixedVersion,rows,read:code,fields:names.slice(offset,offset+12).map(name=>[name,fields[name]?.type?.kind||fields[name]?.type||'']),
+        const countCode='from demiflow.workbench.notebooks.data import count\n\ncount('+JSON.stringify(entry.item.label)+', version='+fixedVersion+')';
+        return {version:fixedVersion,rows,sample_limit:100,read:code,count:countCode,fields:names.slice(offset,offset+12).map(name=>[name,fields[name]?.type?.kind||fields[name]?.type||'']),
           next_offset:offset+12<names.length?offset+12:null};
       }
       const item=tools.find(i=>(i.module?i.module+'.'+i.symbol:i.path+'::'+i.symbol)===args.id);if(!item)throw Error('未找到此工具。');
