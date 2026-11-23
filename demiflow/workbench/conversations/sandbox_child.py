@@ -203,6 +203,9 @@ def main():
             try:
                 private_size, private_files = tree_usage([spec['private_home']])
                 source_size, source_files = tree_usage(spec['source_roots'])
+            except (FileNotFoundError, NotADirectoryError):
+                time.sleep(.05)
+                continue
             except Exception as exc:
                 sys.stderr.write(f'[sandbox] terminated (125): disk scan failed ({type(exc).__name__}: {exc})\n')
                 sys.stderr.flush()

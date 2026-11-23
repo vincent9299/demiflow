@@ -468,6 +468,8 @@ class FlowChecker:
                                      'arguments': self._json_value([left, right])}, types[0])
             if isinstance(node.op, ast.Div) and isinstance(left, Path) and isinstance(right, (str, Path)):
                 return left / right
+            if (isinstance(left, Symbol) and left.opaque) or (isinstance(right, Symbol) and right.opaque):
+                self.fail('FL-07', 'Opaque module constant used in wiring expression', node, module, incomplete=True)
             if isinstance(node.op, (ast.Add, ast.Sub)):
                 if type(left) is not type(right) or type(left) not in (int, float, str) or type(left) is str and isinstance(node.op, ast.Sub):
                     self.fail('FL-07', 'Unsupported configured arithmetic', node, module)
@@ -685,6 +687,11 @@ class FlowChecker:
             )
         if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
             return self._static_comprehension(node, env, module)
+        if isinstance(node, ast.IfExp):
+            cond = visit(node.test)
+            if isinstance(cond, (RuntimeValue, DatasetPort, Action)):
+                self.fail("FL-07", "Runtime value used in topology", node.test, module)
+            return visit(node.body) if bool(cond) else visit(node.orelse)
         self.fail(
             "FL-07",
             f"Unsupported wiring expression: {type(node).__name__}",

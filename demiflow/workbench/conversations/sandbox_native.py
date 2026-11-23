@@ -47,25 +47,28 @@ def tree_usage(paths, maximum=8192):
         while pending:
             descriptor = pending.pop()
             try:
-                with os.scandir(descriptor) as entries:
-                    for entry in entries:
-                        count += 1
-                        if count > maximum:
-                            raise RuntimeError('Sandbox writable file count exceeded budget')
-                        try:
-                            info = entry.stat(follow_symlinks=False)
-                        except (FileNotFoundError, NotADirectoryError):
-                            continue
-                        if stat.S_ISDIR(info.st_mode):
+                try:
+                    with os.scandir(descriptor) as entries:
+                        for entry in entries:
+                            count += 1
+                            if count > maximum:
+                                raise RuntimeError('Sandbox writable file count exceeded budget')
                             try:
-                                pending.append(os.open(entry.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
-                                                       dir_fd=descriptor))
+                                info = entry.stat(follow_symlinks=False)
                             except (FileNotFoundError, NotADirectoryError):
                                 continue
-                        elif stat.S_ISREG(info.st_mode):
-                            used += info.st_size
-                        else:
-                            raise RuntimeError('Sandbox writable scope contains an unsupported inode')
+                            if stat.S_ISDIR(info.st_mode):
+                                try:
+                                    pending.append(os.open(entry.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                                                           dir_fd=descriptor))
+                                except (FileNotFoundError, NotADirectoryError):
+                                    continue
+                            elif stat.S_ISREG(info.st_mode):
+                                used += info.st_size
+                            else:
+                                raise RuntimeError('Sandbox writable scope contains an unsupported inode')
+                except (FileNotFoundError, NotADirectoryError):
+                    continue
             finally:
                 os.close(descriptor)
         return used, count
