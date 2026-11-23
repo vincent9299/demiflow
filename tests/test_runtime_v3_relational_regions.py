@@ -382,11 +382,11 @@ def test_public_join_propagates_overflow_after_sql_started(tmp_path, monkeypatch
         pytest.fail('SQL has started; replaying the action with hash join is invalid')
     monkeypatch.setattr(datafusion, 'query_region_offsets', reduce_output_budget)
     monkeypatch.setattr(relational_region, 'hash_join_pairs', unexpected_hash)
-    with RunContext.start(tmp_path / 'run', limits={'memory_bytes': 1 << 30,
-            'max_row_bytes': 65536, 'max_batch_bytes': 1 << 20}) as run, data.local_execution(
-            workers=2, partitions=2, worker_mode='thread', memory_bytes=1 << 30):
-        a, b, c = [data.read_lance(str(tmp_path / name), version=1) for name in ('a', 'b', 'c')]
-        with pytest.raises(Exception, match='more offset pairs than admitted'):
+    with pytest.raises(Exception, match='more offset pairs than admitted'):
+        with RunContext.start(tmp_path / 'run', limits={'memory_bytes': 1 << 30,
+                'max_row_bytes': 65536, 'max_batch_bytes': 1 << 20}) as run, data.local_execution(
+                workers=2, partitions=2, worker_mode='thread', memory_bytes=1 << 30):
+            a, b, c = [data.read_lance(str(tmp_path / name), version=1) for name in ('a', 'b', 'c')]
             a.join(b, on='k').join(c, on='k').take_all()
-        assert launched == [True]
-        assert run.journal.execution_action('action-1')['result'] is None
+    assert launched == [True]
+    assert run.journal.execution_action('action-1')['result'] is None
