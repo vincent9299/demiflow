@@ -215,22 +215,56 @@ SOFTWARE.
     const handle={workspaceId,get sessionId(){return state.session?.id;},navigate:async nextView=>{if(state.disposed)return;await switchView(nextView);},dispose(){if(state.disposed)return;flushDrafts();state.disposed=true;clearTimeout(state.timer);state.observer?.disconnect();state.releaseViewport?.();state.navigationResize?.dispose();state.rail?.dispose();state.files?.dispose();state.composer?.dispose();state.chat?.dispose();active.delete(state);main.classList.remove('development-main');disposeReaders(layout);for(const dialog of state.dialogs)dialog.remove();state.dialogs.clear();}};register(handle);
     const sidebar=el('aside',undefined,'development-session-sidebar'),sideHeading=el('div',undefined,'development-session-heading');
     const createNew=el('button',undefined,'development-new-conversation');createNew.type='button';createNew.append(el('span','＋'),el('span','新会话'));createNew.disabled=true;
-    const navigation=ForgeNavigation.header({title:'会话',searchLabel:'搜索会话',placeholder:'筛选当前页会话',onSearch:()=>{if(!state.initializing)renderConversations();}});
+    let sidebarTab='sessions';
+    const navigation=ForgeNavigation.header({title:'会话',searchLabel:'搜索会话',placeholder:'筛选会话或文件',onSearch:()=>{if(sidebarTab==='files')state.files?.setFilter(navigation.search.value);else if(!state.initializing)renderConversations();}});
+    const sideTabs=el('div',undefined,'dev-sidebar-tabs');
+    const sessionsTabBtn=el('button','会话','dev-sidebar-tab is-active');sessionsTabBtn.type='button';sessionsTabBtn.setAttribute('aria-pressed','true');
+    const filesTabBtn=el('button',undefined,'dev-sidebar-tab');filesTabBtn.type='button';filesTabBtn.setAttribute('aria-pressed','false');
+    const filesBadge=el('span','0','dev-change-badge');filesBadge.hidden=true;
+    filesTabBtn.append(el('span','文件'),filesBadge);
+    sideTabs.append(sessionsTabBtn,filesTabBtn);
+    const sessionsPane=el('div',undefined,'dev-sidebar-pane'),filesPane=el('div',undefined,'dev-sidebar-pane');filesPane.hidden=true;
     sideHeading.append(createNew);
     const sessionList=el('nav',undefined,'development-session-list');sessionList.setAttribute('aria-label','项目会话');
-    const sessionPages=el('div',undefined,'development-session-pages'),sessionNote=el('p','正在读取会话…','development-session-note');sidebar.append(navigation.element,sideHeading,sessionList,sessionPages,sessionNote);layout.prepend(sidebar);
+    const sessionPages=el('div',undefined,'development-session-pages'),sessionNote=el('p','正在读取会话…','development-session-note');
+    sessionsPane.append(sideHeading,sessionList,sessionPages,sessionNote);
+    sidebar.append(navigation.element,sideTabs,sessionsPane,filesPane);layout.prepend(sidebar);
     state.navigationResize=ForgeNavigation.resizable({layout,sidebar,label:'会话目录',active:false});
     const backdrop=el('button',undefined,'development-sidebar-backdrop');backdrop.type='button';backdrop.setAttribute('aria-label','关闭会话列表');layout.append(backdrop);
     const head=el('div',undefined,'development-controls'),sideToggle=iconButton('会话列表','M3 4h18v16H3zM9 4v16');
     function sidebarOpen(value){layout.dataset.sidebar=value?'open':'closed';sideToggle.setAttribute('aria-expanded',String(value));sidebar.hidden=!value;backdrop.hidden=!value;state.navigationResize.setActive(value);if(value)navigation.actions.append(sideToggle);else head.prepend(sideToggle);}
+    function setSidebarTab(next){
+      sidebarTab=next==='files'?'files':'sessions';
+      const isFiles=sidebarTab==='files';
+      sessionsPane.hidden=isFiles;filesPane.hidden=!isFiles;
+      sessionsTabBtn.classList.toggle('is-active',!isFiles);filesTabBtn.classList.toggle('is-active',isFiles);
+      sessionsTabBtn.setAttribute('aria-pressed',String(!isFiles));filesTabBtn.setAttribute('aria-pressed',String(isFiles));
+      if(isFiles){state.files?.setFilter(navigation.search.value);state.files?.ensureTreeLoaded();}
+      else if(!state.initializing)renderConversations();
+    }
+    sessionsTabBtn.onclick=()=>setSidebarTab('sessions');
+    filesTabBtn.onclick=()=>setSidebarTab('files');
     sideToggle.onclick=()=>{sidebarOpen(layout.dataset.sidebar!=='open');sideToggle.focus();};
     const closeSidebar=()=>{sidebarOpen(false);sideToggle.focus();};backdrop.onclick=closeSidebar;
     sidebar.onkeydown=event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();closeSidebar();}};
     let narrowViewport=matchMedia('(max-width:900px)').matches;sidebarOpen(!narrowViewport);
     createNew.onclick=()=>{if(!createNew.disabled&&typeof openNew==='function')openNew();};
-    const filesToggle=iconButton('打开项目根目录','M3 4h18v16H3zM15 4v16');
+    const filesToggle=iconButton('打开代码面板','M3 4h18v16H3zM15 4v16');
     head.append(filesToggle);body.append(head);
-    state.files=DevelopmentNavigation.filePanel({layout,toggle:filesToggle,api,iconButton});
+    const insertReference=path=>{
+      if(!path||!state.composer)return;
+      const box=state.composer.input;
+      const line='引用文件：'+path;
+      if(!box.value.includes(line)){
+        box.value+=(box.value?'\n':'')+line;
+        box.dispatchEvent(new Event('input',{bubbles:true}));
+      }
+      box.focus();
+    };
+    state.files=DevelopmentNavigation.filePanel({layout,filesHost:filesPane,toggle:filesToggle,api,iconButton,
+      onReference:insertReference,
+      onShowFilesTab:()=>{sidebarOpen(true);setSidebarTab('files');},
+      onBadgeChange:count=>{filesBadge.textContent=String(count);filesBadge.hidden=!count;}});
     const status=el('p','正在读取开发能力…','development-status');status.setAttribute('role','status');status.setAttribute('aria-live','polite');
     let capabilities=await api('dev-capabilities');state.capabilitiesAt=Date.now();if(state.disposed||!layout.isConnected)return handle;
     const running=value=>!!(value?.turn&&value.turn.cleanup!=='complete');
@@ -322,6 +356,7 @@ SOFTWARE.
     stage.append(busyNotice,form,status);state.observer.observe(form);
     window.addEventListener('resize',sizeViewport);sizeViewport();state.releaseViewport=()=>window.removeEventListener('resize',sizeViewport);
     const chat=globalThis.ForgeDevelopmentChat.create({flow,onRaw:output,
+      onOpenFile:(path,mode)=>state.files?.openFile(path,mode),
       onChange:()=>{if(state.disposed||!state.chat)return;rail.update();hero.hidden=!!state.chat.items.size;layout.classList.toggle('development-empty',!state.chat.items.size);},
       onTrim:()=>{earlier.hidden=false;}});
     state.chat=chat;state.items=chat.items;
@@ -390,9 +425,21 @@ SOFTWARE.
       }catch(e){error(d,e);}finally{next.disabled=false;}}
       next.onclick=load;d.showModal();load();
     }
-    function project(event){
+    function project(event, {replaying=false}={}){
       if(event.type==='compaction.completed'&&event.data.status==='compacted'&&!state.historyOnly){clearTimeline();earlier.hidden=false;}
       chat.project(event);
+      if(event.type==='change.observed'){state.files?.recordObservedChanges(event.data?.files||[]);}
+      else if(event.type==='turn.state'){
+        try{
+          const result=(typeof event.data?.result==='string'?JSON.parse(event.data.result):event.data?.result)||{};
+          if(result.pipeline_checks||result.pipeline_review){
+            state.files?.recordChecks({native_flow:result.pipeline_checks?.native_flow,project_layout:result.pipeline_checks?.project_layout,review:result.pipeline_review});
+          }
+        }catch{}
+        if(!replaying&&event.data?.cleanup==='complete')state.files?.refreshChanges();
+      }else if(event.type==='review.completed'){
+        state.files?.recordChecks({review:event.data?.status});
+      }
       if(follow.active)follow.toBottom(timeline,scrollMetrics(timeline),'instant');else if(event.type==='message.delta'||event.type==='message.user')newContent.hidden=false;
     }
     function pending(request){
@@ -511,7 +558,7 @@ SOFTWARE.
         const epoch=state.feedEpoch||0;
         const replay=await api('dev-replay',{session_id:state.session.id});
         if(state.disposed||epoch!==(state.feedEpoch||0))return;
-        for(const event of replay.events)project(event);
+        for(const event of replay.events)project(event,{replaying:true});
         state.sequence=replay.next_sequence;
         state.windowStart=Math.max(0,(replay.first_sequence||1)-1);
         earlier.hidden=!replay.has_earlier;
@@ -527,7 +574,7 @@ SOFTWARE.
       state.historyOnly=true;state.displaySession=sid;pendingHost.replaceChildren();state.pending.clear();
       follow.setFollowing(false);clearTimeline();
       state.windowStart=after;earlier.hidden=after===0;latest.hidden=false;availability();
-      for(const event of page.events)project(event);
+      for(const event of page.events)project(event,{replaying:true});
       timeline.scrollTop=0;rail.update();
     }
     earlier.onclick=()=>loadWindow(state.displaySession||state.session.id,Math.max(0,(state.windowStart||0)-50)).catch(e=>error(body,e));
@@ -542,7 +589,7 @@ SOFTWARE.
       state.submission=null;state.creation=null;state.createdHere=false;
       state.stats=null;state.statsAt=0;state.railRevision=null;state.sequence=0;
       state.newDraft=nextView?.kind==='development_new';
-      follow.setFollowing(true);clearTimeline();
+      follow.setFollowing(true);clearTimeline();state.files?.clearSessionChanges();
       if(nextView?.session_id){
         const cached=(state.sessionRows||[]).find(r=>r.id===nextView.session_id);
         if(cached){state.session=cached;renderConversations();}

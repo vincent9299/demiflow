@@ -57,7 +57,7 @@
   const timestamp=value=>Number.isFinite(value)&&value>0?value:null;
   function localTime(seconds){if(!seconds)return '';const date=new Date(seconds*1000);return (date.getMonth()+1)+'/'+date.getDate()+' '+String(date.getHours()).padStart(2,'0')+':'+String(date.getMinutes()).padStart(2,'0');}
   function duration(seconds){const value=Math.max(0,Math.floor(seconds));return value<60?value+'s':value<3600?Math.floor(value/60)+'m '+value%60+'s':Math.floor(value/3600)+'h '+Math.floor(value%3600/60)+'m';}
-  function create({flow,onRaw=()=>{},onChange=()=>{},onTrim=()=>{}}={}){
+  function create({flow,onRaw=()=>{},onChange=()=>{},onTrim=()=>{},onOpenFile=null}={}){
     if(!(flow instanceof Element))throw new TypeError('A chat flow element is required');
     const items=new Map(),turns=new Map(),textItems=new Map(),toolItems=new Map(),seen=new Map();
     let textBytes=0,trimmed=0,disposed=false,lastText=null,pagedText=null,latestTurn=null,renderTimer=null;
@@ -271,7 +271,17 @@
           }
         }catch{}
       }else if(['review.requested','review.started','review.detail','review.completed'].includes(event.type))review(event);
-      else if(event.type==='change.observed')system(event,'Changed files',(data.files||[]).map(file=>file.path+'\n'+(file.diff||file.diff_unavailable||'')).join('\n'),'change:'+event.sequence);
+      else if(event.type==='change.observed'){
+        const files=data.files||[];
+        const item=system(event,'Changed files',files.map(file=>file.path+'\n'+(file.diff||file.diff_unavailable||'')).join('\n'),'change:'+event.sequence);
+        if(onOpenFile&&files.length&&item?.row?.heading&&!item.row.heading.querySelector('.dfc-open-code')){
+          const firstPath=files[0].path;
+          const jump=el('button','查看代码','dfc-open-code');jump.type='button';
+          jump.title='在右侧代码面板查看 '+firstPath;
+          jump.onclick=e=>{e.preventDefault();e.stopPropagation();onOpenFile(firstPath,'diff');};
+          item.row.heading.append(jump);
+        }
+      }
       else if(event.type==='check.reference')system(event,'Checks',JSON.stringify(data.result||data,null,2),'check:'+event.sequence);
 
       else if(event.type==='questions.observed')system(event,'Questions',JSON.stringify(data,null,2));

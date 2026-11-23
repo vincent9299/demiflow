@@ -107,9 +107,9 @@ def test_browser_conversation_navigation_refresh_and_mobile(tmp_path):
             page.set_viewport_size({'width':width,'height':850});page.screenshot(path=str(shots/f'development-{width}.png'),full_page=True)
             assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth'),width
             assert page.locator('.development-history').count()==0
-            page.get_by_role('button',name='打开项目根目录').click()
-            page.get_by_role('complementary',name='项目文件').wait_for()
-            page.get_by_role('button',name='关闭项目目录').click()
+            page.get_by_role('button',name='打开代码面板').click()
+            page.get_by_role('complementary',name='代码面板').wait_for()
+            page.get_by_role('button',name='关闭代码面板').click()
         second=page.context.new_page();second.goto(server.origin+'/#token='+server.token)
         second.get_by_role('button',name='开发',exact=True).click()
         second.locator('.dfc-message').filter(has_text='fixture answer').wait_for()
@@ -147,6 +147,12 @@ def test_acp_permission_diff_markdown_and_dialog_lifecycle(tmp_path):
         changed.locator('summary').click()
         assert '+# fixture addition' in changed.inner_text()
         assert (root / 'code.py').read_text() == '# initial dirty bytes\n# fixture addition\n'
+        changed.get_by_role('button', name='查看代码').click()
+        code_pane = page.get_by_role('complementary', name='代码面板')
+        playwright.expect(code_pane).to_be_visible()
+        playwright.expect(code_pane.locator('.cm-editor')).to_be_visible()
+        playwright.expect(code_pane).to_contain_text('fixture addition')
+        page.get_by_role('button', name='关闭代码面板').click()
         changed.get_by_role('button', name='View original').click()
         page.get_by_role('dialog').wait_for()
         playwright.expect(page.get_by_role('dialog')).to_contain_text('fixture addition')
@@ -231,7 +237,7 @@ def test_unconfigured_chat_is_compact_and_read_only(tmp_path):
         waiting=[];page.route('**/dev-capabilities',lambda route:waiting.append(route))
         page.goto(server.origin+'/#token='+server.token)
         page.get_by_role('button',name='开发',exact=True).click()
-        page.get_by_role('button',name='打开项目根目录').wait_for()
+        page.get_by_role('button',name='打开代码面板').wait_for()
         page.wait_for_timeout(100)
         assert len(waiting)==1
         waiting[0].fulfill(response=waiting[0].fetch())
