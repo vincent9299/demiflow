@@ -216,7 +216,7 @@ SOFTWARE.
     const sidebar=el('aside',undefined,'development-session-sidebar'),sideHeading=el('div',undefined,'development-session-heading');
     const createNew=el('button',undefined,'development-new-conversation');createNew.type='button';createNew.append(el('span','＋'),el('span','新会话'));createNew.disabled=true;
     let sidebarTab='sessions';
-    const navigation=ForgeNavigation.header({title:'会话',searchLabel:'搜索会话',placeholder:'筛选会话或文件',onSearch:()=>{if(sidebarTab==='files')state.files?.setFilter(navigation.search.value);else if(!state.initializing)renderConversations();}});
+    const navigation=ForgeNavigation.header({title:'开发',searchLabel:'搜索会话',placeholder:'筛选会话或文件',onSearch:()=>{if(sidebarTab==='files')state.files?.setFilter(navigation.search.value);else if(!state.initializing)renderConversations();}});
     const sideTabs=el('div',undefined,'dev-sidebar-tabs');
     const sessionsTabBtn=el('button','会话','dev-sidebar-tab is-active');sessionsTabBtn.type='button';sessionsTabBtn.setAttribute('aria-pressed','true');
     const filesTabBtn=el('button',undefined,'dev-sidebar-tab');filesTabBtn.type='button';filesTabBtn.setAttribute('aria-pressed','false');
