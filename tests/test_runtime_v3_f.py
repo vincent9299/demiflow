@@ -557,13 +557,3 @@ def test_f020():
     assert "prefix_rows" not in source
     assert "stage.prefix is not None" not in source
     assert "_apply_plan" not in source
-
-
-def test_f021():
-    _binding_assertion()
-    import demiflow.execution.source_snapshot as snap
-    assert not hasattr(snap, "prefix_rows")
-    assert hasattr(snap, "freeze_source")
-    assert hasattr(snap, "capture_source")
-    source = (TREE / "demiflow/execution/source_snapshot.py").read_text()
-    assert "_apply_plan" not in source

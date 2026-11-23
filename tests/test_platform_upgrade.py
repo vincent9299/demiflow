@@ -162,7 +162,7 @@ def test_append_commit_receipt_gap_and_uncertainty(tmp_path):
     import lance
     import pyarrow as pa
     from demiflow import data
-    from demiflow.execution.dataset_commit import DatasetCommit, UncertainDatasetCommit
+    from demiflow.execution.checkpoint.dataset_commit import DatasetCommit, UncertainDatasetCommit
     uri = str(tmp_path / 'data.lance')
     args = (tmp_path / 'control', 'batch-1', uri)
     source = data.from_items([{'v':1}])
@@ -190,7 +190,7 @@ def test_append_commit_receipt_gap_and_uncertainty(tmp_path):
 
 
 def test_explicit_append_recovery_checks_unchanged_target(tmp_path):
-    from demiflow.execution.dataset_commit import DatasetCommit
+    from demiflow.execution.checkpoint.dataset_commit import DatasetCommit
     args = (tmp_path / 'control', 'batch', str(tmp_path / 'absent.lance'))
     with pytest.raises(OSError):
         with DatasetCommit(*args):
@@ -204,7 +204,7 @@ def test_explicit_append_recovery_checks_unchanged_target(tmp_path):
 def test_file_uri_and_path_share_append_intent_and_detect_changed_target(tmp_path):
     import pyarrow as pa
     from demiflow import data
-    from demiflow.execution.dataset_commit import DatasetCommit, UncertainDatasetCommit
+    from demiflow.execution.checkpoint.dataset_commit import DatasetCommit, UncertainDatasetCommit
     path = tmp_path / 'data.lance'
     source = data.from_items([{'v': 1}])
     schema = pa.schema([('v', pa.int64())])

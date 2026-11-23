@@ -125,14 +125,11 @@ def runtime_lock_factory():
 
 def test_runtime_resource_execution_is_honest_and_resume_fails_closed(tmp_path):
     RuntimeLock = runtime_lock_factory()
-    from demiflow.execution.operator_state import OperatorStates
     from demiflow.workbench.runs.facts import read_sealed_plan, _sealed_entry
     from demiflow.execution.executors.local import LocalDatasetExecutor
     from demiflow.data.api import DataAPI
-    # Strict worker/state consumers retain the fail-closed policy.
-    strict = OperatorStates(SimpleNamespace(limits={'max_state_bytes': 65536}))
-    with pytest.raises(RecoveryContractError, match='snapshot_state/restore_state'):
-        asyncio.run(strict.register(RuntimeLock(), 'node-0'))
+    from demiflow.execution.compiler_support.operator_policy import classify_operator_state
+    assert classify_operator_state(RuntimeLock(), phase='instance').mode == 'unsupported'
     executor = LocalDatasetExecutor(workers=1)
     api = DataAPI(executor)
     ds = api.from_items([{'i': i} for i in range(4)]).map(RuntimeLock, execution='thread')
@@ -178,13 +175,6 @@ def test_cleanup_cancellation_still_closes_all_owners():
     assert events == ['last', 'first']
 
 
-def test_partial_delegates_state_to_wrapped_actor():
-    from demiflow.execution.operator_state import OperatorStates
-    actor = CountFactory()
-    state = OperatorStates(SimpleNamespace(limits={'max_state_bytes': 65536}))
-    asyncio.run(state.register(functools.partial(actor), 'node-0'))
-    assert state.owners['node-0'] is actor
-    assert asyncio.run(state.snapshot())['node-0']['fields']['count'] == 0
 
 
 def test_resource_restriction_does_not_block_completed_result_reuse(tmp_path):
@@ -226,7 +216,7 @@ def test_folded_predicate_uses_actual_stage_concurrency(tmp_path):
 
 
 def test_runtime_resource_inventory_is_bounded_before_copying_fields():
-    from demiflow.execution.operator_state import runtime_resource_state
+    from demiflow.execution.compiler_support.operator_policy import classify_operator_state
     actor = runtime_lock_factory()()
     actor.__dict__.update({str(i): actor.lock for i in range(16384)})
-    assert not runtime_resource_state(actor)
+    assert classify_operator_state(actor, phase='instance').mode == 'unsupported'

@@ -24,7 +24,7 @@ from demiflow.data.sources import ItemsSource
 from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.contracts.errors import ProtocolError
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.operator_precheck import precheck_operator_state, precheck_plan_state
+from demiflow.execution.compiler_support.operator_policy import classify_operator_state
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.execution.storage.state_artifacts import StateArtifacts
@@ -246,27 +246,20 @@ class _AdapterActor:
 
 
 def test_precheck_rejects_stateful_owner_without_adapter():
-    spec = CallableSpec.create(_StatefulNoAdapter())
-    with pytest.raises(ProtocolError) as error:
-        precheck_operator_state(spec, {"state_ownership": "partitionable"})
-    assert error.value.code == "STATE_ADAPTER_MISSING"
+    policy = classify_operator_state(_StatefulNoAdapter(), phase='instance', ownership='partitionable')
+    assert policy.mode == 'unsupported' and not policy.adapter_present
 
 
-def test_precheck_rejects_ownership_none_instance_carrying_state():
-    spec = CallableSpec.create(_StatefulNoAdapter())
-    with pytest.raises(ProtocolError) as error:
-        precheck_operator_state(spec, {"state_ownership": "none"})
-    assert error.value.code == "STATE_ADAPTER_MISSING"
+def test_precheck_hookless_state_is_auto_json_not_stateless():
+    policy = classify_operator_state(_StatefulNoAdapter(), phase='instance')
+    assert policy.mode == 'auto_json' and policy.ownership == 'shared_colocated'
 
 
 def test_precheck_accepts_stateless_function_and_adapter_actor():
-    assert precheck_operator_state(CallableSpec.create(_passthrough),
-                                   {"state_ownership": "none"}) is False
-    assert precheck_operator_state(CallableSpec.create(_AdapterActor()),
-                                   {"state_ownership": "partitionable"}) is True
-    # An adapter-present instance is accepted even under ownership none.
-    assert precheck_operator_state(CallableSpec.create(_AdapterActor()),
-                                   {"state_ownership": "none"}) is True
+    assert classify_operator_state(_passthrough, phase='declaration').mode == 'function'
+    for ownership in ('partitionable', 'none'):
+        policy = classify_operator_state(_AdapterActor(), phase='instance', ownership=ownership)
+        assert policy.mode == 'hooks' and policy.adapter_present
 
 
 def test_precheck_plan_fires_before_stream_materialization(tmp_path):

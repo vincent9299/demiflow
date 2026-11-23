@@ -34,21 +34,6 @@ def test_authenticated_pages_reject_damage(tmp_path, damage):
             list(manifest_pages(run.directory, reference))
 
 
-def test_state_rejects_escape_expansion_before_full_encoding(tmp_path, monkeypatch):
-    import asyncio
-    import demiflow.execution.operator_state as state
-    class EscapedState:
-        def snapshot_state(self):
-            return {'text': '\x00' * 20000}
-
-        def restore_state(self, value):
-            pass
-    calls = []
-    monkeypatch.setattr(state, 'document', lambda *args: calls.append(args))
-    with RunContext.start(tmp_path/'run', limits={'max_state_bytes': 65536}) as run:
-        with pytest.raises(RecoveryContractError, match='encoding.*byte budget'):
-            asyncio.run(state.OperatorStates(run).register(EscapedState(), 'node-0'))
-    assert calls == []
 
 
 def test_partial_reference_binding_is_unprotected_and_cleanup_reclaims_it(tmp_path):

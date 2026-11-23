@@ -18,7 +18,7 @@ class UncertainDatasetCommit(RuntimeError):
 
 class DatasetCommit:
     def __init__(self, directory, identity, uri, *, mode='append'):
-        from ..lance.storage import normalize_lance_uri
+        from demiflow.lance.storage import normalize_lance_uri
         uri = normalize_lance_uri(str(uri))
         self.directory = Path(directory) / digest([str(uri), identity])
         self.intent = {'identity': identity, 'uri': str(uri), 'mode': mode}
@@ -72,7 +72,7 @@ class DatasetCommit:
         from urllib.parse import urlsplit
         if urlsplit(self.intent['uri']).scheme not in ('', 'file'):
             raise ValueError('Durable append intents currently require a local filesystem target')
-        from ..lance.storage import resolve_local_uri
+        from demiflow.lance.storage import resolve_local_uri
         path = resolve_local_uri(self.intent['uri'])
         if not path.exists():
             return None
