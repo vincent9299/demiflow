@@ -8,10 +8,13 @@ PREFIX = 'relational-v1-'
 SQL_PREFIX = PREFIX + 'sql1-'
 KEY_SQL_SUFFIX = '-key-sql1'
 KEY_BATCH_SQL_SUFFIX = '-batches' + KEY_SQL_SUFFIX
+KEY_BATCH_ARROW_SUFFIX = '-batches-key-set1'
+KEY_BATCH_SUFFIXES = (KEY_BATCH_SQL_SUFFIX, KEY_BATCH_ARROW_SUFFIX)
 # Separate from the v3 Python row/codec window. The child imports Arrow and
 # DataFusion, processes only bounded keys/offsets, and never owns business rows.
 SQL_CHILD_RSS = 256 << 20
 SQL_PARENT_WINDOW = 64 << 20
+KEY_SET_WINDOW = 32 << 20
 MAX_JOIN_DEPTH = 2
 REDUCER_MEMORY_FIELD = 'reducer_memory_v1'
 

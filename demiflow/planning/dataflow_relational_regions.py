@@ -96,9 +96,11 @@ def place_key_exclusion(graph, snapshots, splits, stages, *, policy, bounds, hos
              type(s.immutable_identity.get('version')) is int}
     exclusion = {n.occurrence_id for n in graph.nodes if n.kernel.kind == 'exclude_keys'
                  and n.kernel.configuration.get('lance_key_source') in fixed}
-    if not exclusion or (policy.native_limits or {}).get('max_rss_bytes', SQL_CHILD_RSS) < SQL_CHILD_RSS:
+    if not exclusion:
         return stages
-    from ..execution.contracts.relational_region import KEY_BATCH_SQL_SUFFIX, fixed_key_inputs
+    from ..execution.contracts.relational_region import (KEY_BATCH_SQL_SUFFIX, KEY_BATCH_ARROW_SUFFIX,
+        KEY_SET_WINDOW, fixed_key_inputs)
+    sql_allowed = (policy.native_limits or {}).get('max_rss_bytes', SQL_CHILD_RSS) >= SQL_CHILD_RSS
     shape = fixed_key_inputs(graph)
     if (policy.fusion and shape and set(shape[:2]) <= fixed and len(splits) == 2
             and {s.source_id for s in splits} == set(shape[:2])
@@ -106,20 +108,27 @@ def place_key_exclusion(graph, snapshots, splits, stages, *, policy, bounds, hos
             and all(s.replica_target == 1 and len(s.partitions) == 1 and not s.profile.limits
                     and not s.profile.requirements and not set(s.profile.requests) - {'cpu_millis', 'memory_bytes'}
                     for s in stages)):
-        total = sum(s.resident_bytes for s in stages) + SQL_CHILD_RSS + SQL_PARENT_WINDOW
+        base = sum(s.resident_bytes for s in stages)
         cpu = max(1000, *(s.profile.requests['cpu_millis'] for s in stages))
         control = min(bounds.max_control_bytes, bounds.max_resident_bytes // 8)
-        if total + control <= bounds.max_resident_bytes and any(
-                h.logical_resources.get('memory_bytes', 0) >= total and
-                h.logical_resources.get('cpu_millis', h.logical_resources.get('cpu', 0)*1000) >= cpu
-                for h in hosts):
-            marker = stages[0].stage_id + KEY_BATCH_SQL_SUFFIX
+        choices = [(KEY_BATCH_SQL_SUFFIX, SQL_CHILD_RSS + SQL_PARENT_WINDOW)] if sql_allowed else []
+        choices.append((KEY_BATCH_ARROW_SUFFIX, KEY_SET_WINDOW))
+        for suffix, reserved in choices:
+            total = base + reserved
+            if total + control > bounds.max_resident_bytes or not any(
+                    h.logical_resources.get('memory_bytes', 0) >= total and
+                    h.logical_resources.get('cpu_millis', h.logical_resources.get('cpu', 0)*1000) >= cpu
+                    for h in hosts):
+                continue
+            marker = stages[0].stage_id + suffix
             return (replace(stages[0], stage_id=marker, partitions=(marker+'-p0',),
                 occurrences=tuple(n.occurrence_id for n in graph.nodes),
                 profile=ResourceProfile(requests={'cpu_millis': cpu, 'memory_bytes': total}),
                 replica_min=1, replica_target=1, replica_max=1, resident_bytes=total,
                 output_bytes=sum(s.output_bytes for s in stages), state_bytes=sum(s.state_bytes for s in stages),
                 kernel_refs=tuple(dict.fromkeys(k for s in stages for k in s.kernel_refs))),)
+    if not sql_allowed:
+        return stages
     result = []
     for stage in stages:
         if exclusion.isdisjoint(stage.occurrences):

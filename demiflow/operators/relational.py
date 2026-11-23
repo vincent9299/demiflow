@@ -8,6 +8,12 @@ from typing import Any
 JOIN_PARTITION_BITS = 4
 
 
+def key_membership(column, values):
+    """Exact typed membership for canonical join keys; a null never joins a null."""
+    import pyarrow.compute as pc
+    return pc.is_in(column, value_set=values, skip_nulls=True)
+
+
 class JoinKeyFilter:
     """Negative membership on an already-evaluated inner/semi build side.
 
@@ -64,9 +70,8 @@ class JoinKeyFilter:
                 or len(column) > self.exact_limit):
             return False
         if token != self.batch_token:
-            import pyarrow.compute as pc
             self.mask = None
-            self.mask = pc.is_in(column, value_set=self.arrow_values)
+            self.mask = key_membership(column, self.arrow_values)
             self.batch_token = token
         return not self.mask[index].as_py()
 

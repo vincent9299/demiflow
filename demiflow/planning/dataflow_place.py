@@ -924,8 +924,9 @@ def compile_physical_dataflow(
         exchanges, residency = _select_budgeted_residency(
             graph, snapshots, stages, exchanges, hosts=hosts, bounds=bounds, policy=policy)
     except DataflowError as exc:
-        from ..execution.contracts.relational_region import needs_native_offsets
-        if exc.code != 'RESOURCE_INFEASIBLE' or not any(needs_native_offsets(s) for s in stages):
+        from ..execution.contracts.relational_region import KEY_BATCH_ARROW_SUFFIX, needs_native_offsets
+        if exc.code != 'RESOURCE_INFEASIBLE' or not any(
+                needs_native_offsets(s) or s.stage_id.endswith(KEY_BATCH_ARROW_SUFFIX) for s in stages):
             raise
         # A larger optional stage may not coexist with other mandatory
         # reservations. Retry only this fresh physical choice, before sealing.

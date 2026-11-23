@@ -107,8 +107,17 @@ def exclude_keys(left, right, *, spec, services):
 class BatchKeySelection:
     """Own only projected equality keys and their selection, never the right or left payloads."""
     @classmethod
-    def admits(cls, left, right):
-        from ..contracts.relational_region import SQL_CHILD_RSS, selection_wire_bytes
+    def admits(cls, left, right, *, sql):
+        from ..contracts.relational_region import KEY_SET_WINDOW, SQL_CHILD_RSS, selection_wire_bytes
+        if left.dtype != right.dtype:
+            return False
+        if not sql:
+            # Retained key and physical row-id buffers, build array and hash
+            # buckets, one projected input and the transient per-batch mask.
+            maximum = (left.count * 18 + right.count * 64 +
+                       64 * max(left.batch_rows, right.batch_rows) +
+                       1024 * (left.chunk_bound + right.chunk_bound))
+            return maximum <= KEY_SET_WINDOW
         window = selection_wire_bytes(SQL_CHILD_RSS)
         # Identical signedness and width give decimal encoding identical SQL
         # equality and retain NULL. Size the request before either scan starts.
@@ -116,14 +125,16 @@ class BatchKeySelection:
                 and (left.count + right.count) * 26 + 4096
                     + 1024 * (left.chunk_bound + right.chunk_bound) <= window)
 
-    def __init__(self):
+    def __init__(self, *, sql):
+        self.sql = sql
         self.columns = {'lkeys': [], 'rkeys': []}
         self.left_positions = []
 
     def append(self, side, fragment, offset, batch):
         import pyarrow as pa
         import pyarrow.compute as pc
-        self.columns[side].append(pc.cast(pc.cast(batch.column(0), pa.string()), pa.binary()))
+        key = batch.column(0)
+        self.columns[side].append(pc.cast(pc.cast(key, pa.string()), pa.binary()) if self.sql else key)
         if side == 'lkeys':
             self.left_positions.append((fragment, offset, batch.column('_rowid')))
 
@@ -133,16 +144,29 @@ class BatchKeySelection:
         import pyarrow.compute as pc
         from ...operators.relational import EXCLUDE_OFFSETS_SQL
         from ..contracts.relational_region import SQL_CHILD_RSS
-        tables = {side: pa.chunked_array(parts, type=pa.binary()) for side, parts in self.columns.items()}
-        total = len(tables['lkeys'])
-        bits = services.query_region_offsets(EXCLUDE_OFFSETS_SQL, tables=tables, max_pairs=total,
-            rss_bytes=SQL_CHILD_RSS, check_stop=services.check_stop, selection=True)
-        self.columns.clear()
-        del tables
-        keep = pa.Array.from_buffers(pa.bool_(), total, [None, pa.py_buffer(bits)])
+        if self.sql:
+            tables = {side: pa.chunked_array(parts, type=pa.binary()) for side, parts in self.columns.items()}
+            total = len(tables['lkeys'])
+            bits = services.query_region_offsets(EXCLUDE_OFFSETS_SQL, tables=tables, max_pairs=total,
+                rss_bytes=SQL_CHILD_RSS, check_stop=services.check_stop, selection=True)
+            keep = pa.Array.from_buffers(pa.bool_(), total, [None, pa.py_buffer(bits)])
+            self.columns.clear()
+            del tables
+        else:
+            from ...operators.relational import key_membership
+            build = self.columns.pop('rkeys')
+            right = pa.concat_arrays(build) if build else None
+            del build
         start = 0
-        for fragment, row_offset, row_ids in self.left_positions:
-            index = pc.indices_nonzero(keep.slice(start, len(row_ids)))
+        for i, (fragment, row_offset, row_ids) in enumerate(self.left_positions):
+            services.check_stop()
+            if self.sql:
+                mask = keep.slice(start, len(row_ids))
+            elif right is not None:
+                mask = pc.invert(key_membership(self.columns['lkeys'][i], right))
+            else:
+                mask = None
+            index = pc.indices_nonzero(mask) if mask is not None else pa.array(np.arange(len(row_ids), dtype=np.uint64))
             start += len(row_ids)
             if skip:
                 used = min(len(index), skip)
