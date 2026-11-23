@@ -55,6 +55,34 @@ def test_real_dataset_pid_and_original_allocation_envelope(tmp_path, mode):
     assert not any(t.name in {'demiflow-thread-host', 'dataflow-business'} for t in threading.enumerate())
 
 
+@pytest.mark.parametrize('keep_current_assignment', [False, True], ids=['legacy', 'mixed'])
+def test_thread_host_rejects_retired_launch_before_allocation(tmp_path, monkeypatch, keep_current_assignment):
+    from demiflow.execution.contracts.errors import ProtocolError
+    from demiflow.execution.dataflow_thread_host import DataflowThreadConnector
+
+    stage = DataflowThreadConnector.stage
+
+    def inject_retired_launch(connector, allocation_id, launch):
+        assert 'dataflow_v3' in launch and 'execution' not in launch
+        original = launch if keep_current_assignment else {}
+        return stage(connector, allocation_id, {**original, 'execution': {}})
+
+    marker = tmp_path / 'business-called'
+
+    def write_marker(row):
+        marker.touch()
+        return row
+
+    monkeypatch.setattr(DataflowThreadConnector, 'stage', inject_retired_launch)
+    with pytest.raises(ProtocolError) as refused:
+        with RunContext.start(tmp_path/'run') as run, data.local_execution(worker_mode='thread', workers=1):
+            data.range(1).map(write_marker).take_all()
+    assert refused.value.code == 'INVALID_SPEC'
+    assert not marker.exists()
+    with run.journal._connection() as db:
+        assert db.execute('SELECT COUNT(*) FROM resource_allocations').fetchone()[0] == 0
+
+
 async def _async_pid(row):
     import asyncio
     return await asyncio.to_thread(_pid, row)
