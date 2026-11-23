@@ -792,6 +792,13 @@ class OperatorKernel:
             except BaseException:
                 pass
 
+    @property
+    def spec(self):
+        return self._spec
+
+    def bind_relational_region(self, region):
+        self._relational_region = region
+
     def checkpoint_region_state(self):
         return (self._image or {}).get('relational_region')
 

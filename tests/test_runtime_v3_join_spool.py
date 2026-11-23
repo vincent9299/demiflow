@@ -209,3 +209,34 @@ def test_public_lance_join_vector_probes_only_true_inner_and_semi_batches(tmp_pa
     values = {row['k']: row['blob'] for row in result}
     assert len(result) == len(selected)
     assert values == {keys[i]: bytes([i]) * 1024 for i in selected}
+
+
+@pytest.mark.parametrize('width,expected_reads', [(128, 3), (96000, 12)])
+def test_public_hot_duplicate_group_reads_cached_or_disk_backed_right_bodies(tmp_path, monkeypatch,
+                                                                           width, expected_reads):
+    from collections import Counter
+    from demiflow.execution.kernels import join_spool
+
+    rights = set()
+    body_reads = Counter()
+    append, read = join_spool._Spool.append, join_spool._Spool._document
+    def append_input(spool, record, fields, **kwargs):
+        entry = append(spool, record, fields, **kwargs)
+        if fields == ('rk',) and entry is not None:
+            rights.add(entry[0])
+        return entry
+    def read_body(spool, offset, header):
+        if offset in rights:
+            body_reads[offset] += 1
+        return read(spool, offset, header)
+    monkeypatch.setattr(join_spool._Spool, 'append', append_input)
+    monkeypatch.setattr(join_spool._Spool, '_document', read_body)
+    with RunContext.start(tmp_path / 'run', limits={'memory_bytes': 128 << 20,
+             'max_batch_bytes': 2 << 20, 'max_row_bytes': 256 << 10}), data.local_execution(
+             workers=1, worker_mode='thread', partitions=1):
+        left = data.from_items([{'lk': 1, 'a': i} for i in range(4)])
+        right = data.from_items([{'rk': 1, 'b': i, 'body': 'x' * width} for i in range(3)])
+        result = left.join(right, on='lk', right_on='rk').take_all()
+    assert sorted((r['a'], r['b']) for r in result) == [(a,b) for a in range(4) for b in range(3)]
+    assert all(r['body'] == 'x' * width for r in result)
+    assert len(rights) == 3 and sum(body_reads.values()) == expected_reads

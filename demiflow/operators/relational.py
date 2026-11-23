@@ -117,7 +117,7 @@ def offset_join_query(first, second, maximum):
     """
 
 
-def match_probe(spool, matches, how, load_left, *left_position):
+def match_probe(spool, key, matches, how, load_left, *left_position):
     """Apply inner/left/semi/anti multiplicity before hydrating either payload."""
     left = None
     try:
@@ -129,7 +129,7 @@ def match_probe(spool, matches, how, load_left, *left_position):
             if how == 'semi':
                 yield left, None
                 return
-            yield left, spool.record(offset, header)
+            yield left, spool.matched_record(key, offset, header)
         if left is None and how in ('left', 'anti'):
             yield load_left(*left_position), None
     finally:
@@ -171,4 +171,4 @@ def hash_join_pairs(spool, left, right, *, how, shift=JOIN_PARTITION_BITS):
             # Only headers and the current key/row are resident during this scan.
             matches = ((offset, header) for offset, header in spool.entries(right)
                 if header[1] == lheader[1] and spool.key(offset, header) == key)
-        yield from match_probe(spool, matches, how, spool.hold_probe_record, loffset, lheader)
+        yield from match_probe(spool, key, matches, how, spool.hold_probe_record, loffset, lheader)
