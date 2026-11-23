@@ -1,17 +1,4 @@
-"""B-package sealed reading: durable sealing + bounded, safe, run-relative reads.
-
-These exercise the real RunContext/RunJournal lifecycle: seal F1 via the existing
-chain.seal_plan_facts seam and the new execution-bindings carrier, then read back
-post-run through the run root (=target). All scratch is confined to /tmp/demiflow-b-*
-(the workdir fixture); no business worker is spawned, so nothing external is killed.
-
-Positive: F1/carrier roundtrip, bindings bound to the same sealed run/action/dag/
-plan, seal->interpret equality, idempotent re-seal, post-run durability + read-only.
-Negative: missing plan/bindings, corrupt/oversize/unsafe carriers, identity mismatch
-and invalid contracts all fail closed on .reason. read_plan_artifact is also unit-
-tested directly against fixed carriers.
-"""
-import copy
+"""Read genuine historical seals, verify identity, and reject malformed or unsafe carriers."""
 import hashlib
 import json
 import shutil
@@ -24,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from demiflow.execution import sealed_plans
+from _v2_native_fixtures import retarget_history_bindings
 from runtime_v3_history_scenarios import write_legacy_seal
 from demiflow.execution.plan_interpreter import (
     PlanContractError, interpret_physical_plan, to_wire, validate_worker_assignment,
@@ -33,7 +21,7 @@ from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.sealed_plans import (
     MAX_BINDINGS_BYTES, MAX_SEALED_PLAN_BYTES, SEALED_PLAN_FACTS_SCHEMA,
-    load_execution_bindings, load_sealed_plan, read_plan_artifact, seal_execution_bindings,
+    load_execution_bindings, load_sealed_plan, read_plan_artifact,
 )
 from test_execution_layout import (
     MANIFEST_REF, PROFILE, PROFILE_REF, assignment_for, bundle_for, chain_fixture,
@@ -51,15 +39,6 @@ def workdir():
         yield path
     finally:
         shutil.rmtree(path, ignore_errors=True)
-
-
-def _seal_bindings(run, action, fx):
-    return seal_execution_bindings(
-        run, action, logical_dag=fx.ld, physical_plan=fx.pp,
-        profiles=fx.doc["profiles"], programs=fx.doc["programs"],
-        driver_stage_ids=fx.doc["driver_stage_ids"], source_bindings=fx.doc["source_bindings"],
-        channel_options=fx.doc["channel_options"], checkpoint_rows=fx.doc["checkpoint_rows"],
-        supported_slice=fx.doc["supported_slice"])
 
 
 def _bind(run, action_id):
@@ -192,21 +171,6 @@ def test_post_run_read_is_read_only(sealed_chain):
     reader = RunJournal(sc.root)
     assert reader.source_binding(sc.action_id + "-sealed-plan") == sp["facts"]
     assert journal.stat().st_mtime_ns == before
-
-
-def test_seal_idempotent_reseal_identical(workdir):
-    fx = chain_fixture()
-    root = workdir / "run"
-    with RunContext.start(root) as run:
-        action = _bind(run, "main-action")
-        first = _seal_bindings(run, action, fx)
-        carrier = root / first["path"]
-        mtime = carrier.stat().st_mtime_ns
-        again = _seal_bindings(run, action, fx)
-        assert again == first
-        assert carrier.stat().st_mtime_ns == mtime
-        assert run.journal.source_binding("main-action-execution-bindings") == first
-        run.journal.complete_execution_action(run.fence, "main-action", {"kind": "test-complete"})
 
 
 def test_load_sealed_plan_without_bindings(workdir, legacy_seal_writer):
@@ -412,37 +376,15 @@ def test_read_plan_artifact_bad_ref_shape(workdir):
     assert _reason(exc) == "invalid_contract"
 
 
-# --- seal-time fail-closed ---
-
-def test_seal_rejects_invalid_bindings(workdir):
-    fx = chain_fixture()
-    root = workdir / "run"
-    with RunContext.start(root) as run:
-        action = _bind(run, "main-action")
-        with pytest.raises(PlanContractError) as exc:
-            seal_execution_bindings(
-                run, action, logical_dag=fx.ld, physical_plan=fx.pp,
-                profiles=fx.doc["profiles"], programs=fx.doc["programs"],
-                driver_stage_ids=fx.doc["driver_stage_ids"],
-                source_bindings=fx.doc["source_bindings"],
-                channel_options=fx.doc["channel_options"], checkpoint_rows=0,  # invalid
-                supported_slice=fx.doc["supported_slice"])
-        assert _reason(exc) == "invalid_contract"
-        run.journal.complete_execution_action(run.fence, "main-action", {"kind": "done"})
-
-
-def test_seal_rejects_unsupported_slice(workdir):
-    fx = chain_fixture()
-    root = workdir / "run"
-    with RunContext.start(root) as run:
-        action = _bind(run, "main-action")
-        with pytest.raises(PlanContractError) as exc:
-            seal_execution_bindings(
-                run, action, logical_dag=fx.ld, physical_plan=fx.pp,
-                profiles=fx.doc["profiles"], programs=fx.doc["programs"],
-                driver_stage_ids=fx.doc["driver_stage_ids"],
-                source_bindings=fx.doc["source_bindings"],
-                channel_options=fx.doc["channel_options"], checkpoint_rows=2,
-                supported_slice="dynamic_v9")
-        assert _reason(exc) == "unsupported_layout"
-        run.journal.complete_execution_action(run.fence, "main-action", {"kind": "done"})
+@pytest.mark.parametrize(("change", "reason"), [
+    ({"checkpoint_rows": 0}, "invalid_contract"),
+    ({"supported_slice": "dynamic_v9"}, "unsupported_layout"),
+])
+def test_invalid_historical_bindings_fail_closed(sealed_chain, change, reason):
+    sc = sealed_chain
+    plan = load_sealed_plan(sc.root, sc.action_id)
+    doc = load_execution_bindings(sc.root, sc.action_id, sealed_plan=plan)["document"]
+    retarget_history_bindings(sc.root, sc.action_id, {**doc, **change})
+    with pytest.raises(PlanContractError) as exc:
+        load_execution_bindings(sc.root, sc.action_id, sealed_plan=plan)
+    assert _reason(exc) == reason

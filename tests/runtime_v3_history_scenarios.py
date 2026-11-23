@@ -265,8 +265,14 @@ with RunContext.start(root) as run:
         run.journal.bind_source(run.fence, action_id + '-identity-bridge', ref)
     ref = None
     if params['bindings'] is not None:
-        ref = seal_execution_bindings(run, action, logical_dag=params['logical_dag'],
-                                     physical_plan=params['physical_plan'], **params['bindings'])
+        args = dict(logical_dag=params['logical_dag'], physical_plan=params['physical_plan'],
+                    **params['bindings'])
+        ref = seal_execution_bindings(run, action, **args)
+        path = root / ref['path']
+        mtime = path.stat().st_mtime_ns
+        assert seal_execution_bindings(run, action, **args) == ref
+        assert path.stat().st_mtime_ns == mtime
+        assert run.journal.source_binding(action_id + '-execution-bindings') == ref
     run.journal.complete_execution_action(run.fence, action_id, {'kind': 'test-complete'})
 print(json.dumps({'facts': facts, 'ref': ref}))
 """

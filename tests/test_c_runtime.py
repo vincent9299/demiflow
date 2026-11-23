@@ -23,7 +23,6 @@ from demiflow.execution.plan_interpreter import (
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
 from demiflow.execution.sealed_plans import (
     load_execution_bindings, load_sealed_plan, read_plan_artifact,
-    seal_execution_bindings,
 )
 from demiflow.resources.contracts import ResourceProfile
 from test_execution_layout import (
