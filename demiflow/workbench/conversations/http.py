@@ -18,7 +18,7 @@ GET_FIELDS = {
     'dev-stats': ({'session_id'}, set()),
     'dev-context': ({'session_id', 'turn_id'}, set()),
     'dev-events': ({'session_id'}, {'after_sequence', 'limit', 'wait_ms', 'include_session'}),
-    'dev-replay': ({'session_id'}, {'limit', 'max_turns'}),
+    'dev-replay': ({'session_id'}, {'limit', 'max_turns', 'before_sequence'}),
     'dev-output': ({'session_id', 'item_id'}, {'after_sequence', 'turn_id', 'provider_epoch', 'from_sequence', 'through_sequence'}),
 }
 POST_FIELDS = {
@@ -43,7 +43,7 @@ def disabled():
 
 
 def get(server, workspace, root, name, query, *, consumer_closed=None):
-    for key in ('offset', 'limit', 'after_sequence', 'wait_ms', 'from_sequence', 'through_sequence', 'max_turns'):
+    for key in ('offset', 'limit', 'after_sequence', 'before_sequence', 'wait_ms', 'from_sequence', 'through_sequence', 'max_turns'):
         if key in query and (type(query[key]) is not str or not re.fullmatch(r'[0-9]{1,16}', query[key])):
             reject('Invalid integer query field: ' + key, 'invalid_request')
     if 'include_session' in query and query['include_session'] not in {'0', '1'}:
@@ -78,8 +78,9 @@ def get(server, workspace, root, name, query, *, consumer_closed=None):
             value['delivery'] = turn['delivery']
         return dict(context=value)
     if name == 'dev-replay':
+        before = int(query['before_sequence']) if 'before_sequence' in query else None
         return service.store.replay(workspace, sid, limit=int(query.get('limit', 100)),
-                                    max_turns=int(query.get('max_turns', 12)))
+                                    max_turns=int(query.get('max_turns', 12)), before_sequence=before)
     after = int(query.get('after_sequence', 0))
     if name == 'dev-output':
         selected_turn=query.get('turn_id')

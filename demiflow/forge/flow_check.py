@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import copy
 from dataclasses import dataclass
+from pathlib import Path
 import hashlib
 import json
 
@@ -328,13 +329,23 @@ class FlowChecker:
                     self.parameter_scopes[-1][target.id] = self._parameter_origin(node.value)
             elif isinstance(node, ast.If):
                 test = self._expr(node.test, env, module)
-                if type(test) is not bool:
+                if isinstance(test, (RuntimeValue, DatasetPort, Action)):
                     self.fail(
                         "FL-07",
                         "Topology condition must be determined by bound configuration",
                         node,
                         module,
                     )
+                if type(test) is not bool:
+                    if type(test) in (dict, list, tuple, str, int, float, type(None)):
+                        test = bool(test)
+                    else:
+                        self.fail(
+                            "FL-07",
+                            "Topology condition must be determined by bound configuration",
+                            node,
+                            module,
+                        )
                 returned, value = self._body(
                     node.body if test else node.orelse, env, module
                 )
@@ -395,7 +406,11 @@ class FlowChecker:
             namespace = self.tree.load(module)
             if node.id in namespace:
                 return self._resolve(namespace[node.id])
-            if node.id in {"ValueError", "TypeError", "RuntimeError", "Exception"}:
+            if node.id in {
+                "ValueError", "TypeError", "RuntimeError", "Exception",
+                "type", "isinstance", "len", "str", "int", "float", "bool",
+                "min", "max", "list", "tuple", "dict", "set", "sorted",
+            }:
                 return Symbol("builtins." + node.id)
             self.fail("FL-01", f"Unbound name: {node.id}", node, module)
         if isinstance(node, ast.Attribute):
@@ -436,19 +451,46 @@ class FlowChecker:
                     module,
                 )
             return parent[key]
-        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub)):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod)):
             left, right = visit(node.left), visit(node.right)
             if isinstance(left, RuntimeValue) or isinstance(right, RuntimeValue):
+                if not isinstance(node.op, (ast.Add, ast.Sub)):
+                    self.fail('FL-07', 'Unsupported native value arithmetic', node, module)
                 types = [self._value_type(value) for value in (left, right)]
                 if any(value['kind'] not in {'int', 'float'} or value.get('nullable') for value in types) or types[0]['kind'] != types[1]['kind']:
                     self.fail('FL-06', 'Native value arithmetic requires matching non-null numeric types', node, module)
                 return RuntimeValue({'value_expression': 'add' if isinstance(node.op, ast.Add) else 'sub',
                                      'arguments': self._json_value([left, right])}, types[0])
-            if type(left) is not type(right) or type(left) not in (int, float, str) or type(left) is str and isinstance(node.op, ast.Sub):
-                self.fail('FL-07', 'Unsupported configured arithmetic', node, module)
-            result = left + right if isinstance(node.op, ast.Add) else left - right
+            if isinstance(node.op, ast.Div) and isinstance(left, Path) and isinstance(right, (str, Path)):
+                return left / right
+            if isinstance(node.op, (ast.Add, ast.Sub)):
+                if type(left) is not type(right) or type(left) not in (int, float, str) or type(left) is str and isinstance(node.op, ast.Sub):
+                    self.fail('FL-07', 'Unsupported configured arithmetic', node, module)
+                result = left + right if isinstance(node.op, ast.Add) else left - right
+            else:
+                if type(left) not in (int, float) or type(right) not in (int, float):
+                    self.fail('FL-07', 'Unsupported configured arithmetic', node, module)
+                if isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)) and right == 0:
+                    self.fail('FL-07', 'Division by zero in configured arithmetic', node, module)
+                result = (left * right if isinstance(node.op, ast.Mult) else
+                          left / right if isinstance(node.op, ast.Div) else
+                          left // right if isinstance(node.op, ast.FloorDiv) else
+                          left % right)
             bounded_json(result, 1024 * 1024)
             return result
+        if isinstance(node, ast.BoolOp) and isinstance(node.op, (ast.And, ast.Or)):
+            is_and = isinstance(node.op, ast.And)
+            last = None
+            for operand in node.values:
+                val = visit(operand)
+                if isinstance(val, (RuntimeValue, DatasetPort, Action)):
+                    self.fail('FL-07', 'Runtime value used in topology', node, module)
+                last = val
+                if is_and and not val:
+                    return val
+                if not is_and and val:
+                    return val
+            return last
         if isinstance(node, (ast.List, ast.Tuple)):
             if len(node.elts) > 1024:
                 self.fail(
@@ -500,10 +542,26 @@ class FlowChecker:
                 if any(t['kind'] not in {'bool', 'int', 'float', 'str'} or t.get('nullable') for t in types) or types[0]['kind'] != types[1]['kind']:
                     self.fail('FL-06', 'Native comparison requires matching non-null scalar types', node, module)
                 return RuntimeValue({'value_expression': operators[type(node.ops[0])], 'arguments': self._json_value(values)}, scalar('bool'))
-            if any(type(v) not in (str, int, float, bool, type(None)) for v in values):
+            if any(isinstance(v, (RuntimeValue, DatasetPort, Action)) for v in values):
                 self.fail("FL-07", "Runtime value used in topology", node, module)
+            type_map = {'builtins.int': int, 'builtins.str': str, 'builtins.float': float,
+                        'builtins.bool': bool, 'builtins.list': list, 'builtins.dict': dict,
+                        'builtins.tuple': tuple, 'builtins.set': set}
+            values = [type_map.get(v.name, v) if isinstance(v, Symbol) else v for v in values]
             result = True
             for a, op, b in zip(values, node.ops, values[1:]):
+                if isinstance(op, (ast.In, ast.NotIn)):
+                    if not isinstance(b, (tuple, list, set, dict, str)):
+                        self.fail("FL-07", "Unsupported configured membership test", node, module)
+                    present = a in b
+                    result &= present if isinstance(op, ast.In) else not present
+                    continue
+                if isinstance(op, (ast.Is, ast.IsNot)):
+                    same = a is b
+                    result &= same if isinstance(op, ast.Is) else not same
+                    continue
+                if type(a) not in (str, int, float, bool, type(None), type) or type(b) not in (str, int, float, bool, type(None), type):
+                    self.fail("FL-07", "Runtime value used in topology", node, module)
                 if isinstance(op, ast.Eq):
                     result &= a == b
                 elif isinstance(op, ast.NotEq):
@@ -516,10 +574,6 @@ class FlowChecker:
                     result &= a > b
                 elif isinstance(op, ast.GtE):
                     result &= a >= b
-                elif isinstance(op, ast.Is):
-                    result &= a is b
-                elif isinstance(op, ast.IsNot):
-                    result &= a is not b
                 else:
                     self.fail(
                         "FL-07",
@@ -545,6 +599,36 @@ class FlowChecker:
                 self.fail("FL-03", "Repeated keyword argument", node, module)
             args = [visit(a) for a in node.args]
             kwargs = {k.arg: visit(k.value) for k in node.keywords}
+            if isinstance(target, Symbol):
+                pure_builtins = {
+                    'builtins.type': type,
+                    'builtins.isinstance': isinstance,
+                    'builtins.len': len,
+                    'builtins.str': str,
+                    'builtins.int': int,
+                    'builtins.float': float,
+                    'builtins.bool': bool,
+                    'builtins.min': min,
+                    'builtins.max': max,
+                    'builtins.list': list,
+                    'builtins.tuple': tuple,
+                    'builtins.dict': dict,
+                    'builtins.set': set,
+                    'builtins.sorted': sorted,
+                    'pathlib.Path': Path,
+                    'pathlib.PurePosixPath': Path,
+                }
+                fn = pure_builtins.get(target.name)
+                if fn is not None and not any(isinstance(a, (RuntimeValue, DatasetPort, Action)) for a in (*args, *kwargs.values())):
+                    try:
+                        # Map Symbol('builtins.int') etc. when passed as type argument to isinstance/type comparisons.
+                        type_map = {'builtins.int': int, 'builtins.str': str, 'builtins.float': float,
+                                    'builtins.bool': bool, 'builtins.list': list, 'builtins.dict': dict,
+                                    'builtins.tuple': tuple, 'builtins.set': set}
+                        norm_args = [type_map.get(a.name, a) if isinstance(a, Symbol) else a for a in args]
+                        return fn(*norm_args, **kwargs)
+                    except (TypeError, ValueError) as exc:
+                        self.fail("FL-07", str(exc), node, module)
             if isinstance(target, API):
                 return self._native(target, args, kwargs, node, module)
             if isinstance(target, Definition):

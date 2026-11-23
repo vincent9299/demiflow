@@ -824,7 +824,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     if cell_cli and control_bridge is not None:
                         control_bridge.set_turn(turn, deadline)
                     elif control_bridge is not None and input_access is not None:
-                        control_bridge.set_turn(input_access, delivery_review=delivery_review)
+                        layout_root = Path(project['root']) if (not compact and not notebook and project.get('writes')) else None
+                        control_bridge.set_turn(input_access, delivery_review=delivery_review, project_root=layout_root)
                     transport.frame_count = 0
                     transport.output_bytes = 0
                     provider.items.clear()
@@ -860,7 +861,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         from demiflow.workbench.notebooks.cell_commands import CellCommands
                         control_bridge = CellCommands(store, turn, deadline)
                     elif acp and guided:
-                        control_bridge = BridgeServer(input_access, delivery_review=delivery_review)
+                        layout_root = Path(project['root']) if (not compact and not notebook and project.get('writes')) else None
+                        control_bridge = BridgeServer(input_access, delivery_review=delivery_review, project_root=layout_root)
                     provider_home = home / 'provider' if deployment.mode == 'restricted' else home
                     provider_home.mkdir(mode=0o700, exist_ok=True)
                     if broker_home is not None:
@@ -1039,7 +1041,20 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         if pending_steer:
                             steering, message = pending_steer
                             steer_rpc = provider.steer(message, steering)
-                    if transport.closed and not completed: raise ConnectionError('Provider connection lost')
+                    if transport.closed and not completed:
+                        rc = process.poll() if process is not None else None
+                        if rc is None and process is not None:
+                            try:
+                                rc = process.wait(timeout=0.5)
+                            except Exception:
+                                rc = process.poll()
+                        stderr_tail = bytes(getattr(transport, 'stderr', b'')).decode('utf-8', 'replace').strip()[-400:]
+                        detail = 'Provider connection lost'
+                        if rc is not None:
+                            detail += f' (exit={rc})'
+                        if stderr_tail:
+                            detail += ': ' + ' '.join(stderr_tail.splitlines()[-3:])[:320]
+                        raise ConnectionError(detail)
                     # Interrupt has its own RPC result; it is not proof of child cleanup.
                     for key in list(transport.responses):
                         transport.take(key)
