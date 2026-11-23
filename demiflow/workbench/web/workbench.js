@@ -146,15 +146,6 @@
     const runFacts=$('div',undefined,'wb-run-facts');runFacts.hidden=true;
     const runAlerts=$('div',undefined,'wb-run-alerts');root.append(runAlerts);
     let definitionSource=null;
-    const argumentEditor=DemiFlowArguments.mount({host:root,request,canWrite:configWrite,onVisibility:()=>updateActions(),
-      onChange:()=>{clearPlanPreview(true);updateActions();},
-      onSaved:async value=>{clearPlanPreview(true);await fetchGraph(state.capture(),{preserveSelection:false,refresh:true});updateActions();}});
-    const argumentsButton=button('业务参数',async()=>{
-      if(!working?.entry)return;
-      if(argumentEditor.visible()){argumentEditor.hide();updateActions();return;}
-      if(data().mode==='checks')state.setMode('config');
-      await argumentEditor.show(working.entry);updateActions();
-    },actions);
     const body=$('div',undefined,'wb-body'),graphSection=$('div',undefined,'wb-graph-section'),inspector=$('div',undefined,'wb-inspector');
     const nodePanel=$('aside',undefined,'wb-node-panel');nodePanel.setAttribute('aria-label','算子详情');
     const nodePanelTools=$('div',undefined,'wb-node-panel-tools');
@@ -169,7 +160,7 @@
     const tools=$('div',undefined,'wb-canvas-tools');
     const closeChecks=button('收起检查',()=>changeMode('config'),checks);checks.prepend(closeChecks);
     const previewButton=button('解析执行计划',()=>compilePlanPreview(),actions);previewButton.title='只解析当前入口与已保存入参，不启动数据处理';
-    actions.append(runsContextButton,currentContextButton,argumentsButton,previewButton,runButton,refreshRunButton,more);
+    actions.append(runsContextButton,currentContextButton,previewButton,runButton,refreshRunButton,more);
     const graph=ForgeWorkbenchGraph.mount(graphHost,{controls:tools,onSelect:selection=>{selectGraphNode(selection).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});}});
     const nodeJump=select('定位算子',[],null);nodeJump.className='wb-node-jump';tools.append(nodeJump);
     nodeJump.onchange=()=>{const card=graphModel?.nodes.find(n=>n.key===nodeJump.value);if(card)selectGraphNode(card.selection).catch(e=>message(e.message,'error-box'));};
@@ -284,13 +275,9 @@
       runContextLine.hidden=!monitoring||!!comparison;
       selectors.hidden=true;
       monitorTabs.hidden=!monitoring||!hasRun;
-      const argsShown=argumentEditor.visible()&&activePage==='flows';
-      argumentsButton.hidden=monitoring||!!run;
-      argumentsButton.setAttribute('aria-pressed',String(argsShown));
-      argumentsButton.disabled=!working?.entry;
-      planContext.hidden=monitoring||argsShown||checksActive;
+      planContext.hidden=monitoring||checksActive;
       toolbar.hidden=!monitoring||!hasRun||!!comparison;
-      body.hidden=resultsActive||definitionActive||argsShown||checksActive||(monitoring&&!hasRun);
+      body.hidden=resultsActive||definitionActive||checksActive||(monitoring&&!hasRun);
       checks.hidden=!checksActive;
       performanceToggle.hidden=!monitoring||!hasRun||resultsActive||definitionActive;
       refreshRunButton.hidden=!monitoring||!hasRun;
@@ -319,7 +306,7 @@
       root.dataset.page=activePage;onPageChange(activePage);
       runBar.hidden=!run||!!comparison||activePage!=='monitor';
       if(!checksActive)documents.open=false;
-      const dirty=argumentEditor.dirty()||working&&Object.keys(getDraft().values).length>0;
+      const dirty=working&&Object.keys(getDraft().values).length>0;
       const checkDisabled=busy||previewBusy||!!run||!registered()||dirty;
       if(scopedCheckButton?.isConnected)scopedCheckButton.disabled=checkDisabled;
       runButton.disabled=busy||previewBusy||!!run||!registered()||!can('run_submit')||dirty||!data().graph?.parameters.available||data().graph?.freshness.current===false;
@@ -347,7 +334,7 @@
       guardSettings();
     }
     function uniqueParams(entry){const paths=ctx.flows.find(f=>f.entry===entry)?.parameters||[];return paths.length===1?paths[0]:null;}
-    entryChoice.onchange=async()=>{if(disposed)return;const entry=entryChoice.value;try{await useWorking(entry,uniqueParams(entry));if(working?.entry===entry&&!argumentEditor.dirty())await compilePlanPreview();}catch(error){if(!disposed&&working?.entry===entry&&error.name!=='AbortError')message('解析未完成：'+error.message,'error-box');}finally{if(!disposed)paintSelectors();}};
+    entryChoice.onchange=async()=>{if(disposed)return;const entry=entryChoice.value;try{await useWorking(entry,uniqueParams(entry));if(working?.entry===entry)await compilePlanPreview();}catch(error){if(!disposed&&working?.entry===entry&&error.name!=='AbortError')message('解析未完成：'+error.message,'error-box');}finally{if(!disposed)paintSelectors();}};
     function diagnosticTarget(d){return (d.related_nodes||[])[0]||data().graph?.nodes.find(n=>n.source===d.path&&n.line===d.line)?.id;}
     function renderDiagnostics(items,parent,onLocate=null){
       if(!items.length){parent.append($('p','此范围没有诊断；是否通过仍以检查状态和覆盖为准。','wb-caption'));return;}
@@ -404,7 +391,7 @@
       if(previewBusy||busy||run||data().run)return;
       if(!working?.entry)throw new Error('请先选择流程入口。');
       if(declaredEntry()?.status==='invalid'){message(working.entry+' · '+entryIssue(),'error-box');return;}
-      if(argumentEditor.dirty()||Object.keys(getDraft().values).length)throw new Error('请先保存业务参数；计划解析只使用已保存值。');
+      if(Object.keys(getDraft().values).length)throw new Error('请先保存业务参数；计划解析只使用已保存值。');
       clearPlanPreview(true);
       const ticket=state.capture(),sequence=++previewSequence,entry=working.entry,params=(working?.params||'')||null;
       previewBusy=true;updateActions();message('正在由引擎解析执行计划；不会启动数据处理或模型请求。');
@@ -619,7 +606,7 @@
     }
     async function useWorking(entry,params,report=null,mode='config'){
       if(disposed)throw new DOMException('工作台已关闭','AbortError');
-      argumentEditor.changeFlow(entry);activePage='flows';lastPipelinePage='flows';detailOpen=false;historyOpen=false;
+      activePage='flows';lastPipelinePage='flows';detailOpen=false;historyOpen=false;
       sourceOpen=true;sourceBody.hidden=sourceTabs.hidden=false;
       run=null;comparison=null;working={entry,params};const ticket=transition({entry,params,report,run:null,attempt:null,mode});
       runBar.hidden=runFacts.hidden=results.hidden=true;results.replaceChildren();paintSelectors();
@@ -1031,7 +1018,6 @@
         await selectRunFlow(working?.entry||choices()[0]?.value||'');return;
       }
       historyOpen=page==='monitor';state.setMode(page==='monitor'?'monitor':'config');
-      argumentEditor.hide();
       updateActions();
       if(page==='monitor'){paintRunBar();paintRunFacts();await Promise.all([listRuns(),loadRunDetail()]);}
       if(page==='flows'&&!run&&!data().graph&&working?.entry){await useWorking(working.entry,working.params);await compilePlanPreview();}
@@ -1249,7 +1235,6 @@
     }
     async function selectRunFlow(entry){
       activePage='monitor';lastPipelinePage='monitor';historyOpen=true;run=null;comparison=null;records=null;runFlowFilter=entry;
-      argumentEditor.hide();
       transition({entry,params:uniqueParams(entry),run:null,attempt:null,report:null,mode:'history'});
       rememberView(entry?{kind:'flows',entry}:{kind:'runs'});
       paintHistory();await listRuns();
@@ -1609,7 +1594,6 @@
       sync:async(fresh,{graphChanged=false,catalogChanged=false,runsChanged=false,force=false}={})=>{
         const permissionsChanged=json(ctx.run_permissions)!==json(fresh.run_permissions)||json(ctx.capabilities)!==json(fresh.capabilities);
         ctx=fresh;paintSelectors();if(historyOpen&&graphChanged)paintHistory();updateActions();
-        if(graphChanged||force)argumentEditor.invalidate(working?.entry);
         if(permissionsChanged){if(run){paintRunBar();paintResults();}if(data().graph&&data().mode!=='checks')paintConfiguration(inspectorWhole?null:data().graph.nodes.find(n=>n.id===data().node)||null);}
         if(historyOpen&&(runsChanged||force))await listRuns();
         if(catalogChanged||force){projectInfoRendered=false;if(documents.open)await refreshProjectInfo();}
@@ -1621,9 +1605,9 @@
           else if(working.entry)await fetchGraph(state.capture(),{preserveSelection:true,refresh:true});
         }
       },
-      dirty:()=>argumentEditor.dirty()||!!working&&Object.keys(getDraft().values).length>0,
+      dirty:()=>!!working&&Object.keys(getDraft().values).length>0,
       projectCheckSettled:()=>{if(!disposed&&documents.open&&projectInfoDirty)refreshProjectInfo();},
-      dispose:()=>{disposed=true;flowCollapse?.dispose();nodePanelResize?.dispose();argumentEditor.dispose();if(advancedDialog.open)advancedDialog.close();document.removeEventListener('fullscreenchange',fullscreenChanged);window.removeEventListener('resize',positionMore);window.removeEventListener('scroll',positionMore,true);if(document.fullscreenElement===body)document.exitFullscreen().catch(()=>{});observer.dispose();graph.dispose();controller.abort();state.dispose();disposeReaders(sourceBody);disposeReaders(runDetailBody);},
+      dispose:()=>{disposed=true;flowCollapse?.dispose();nodePanelResize?.dispose();if(advancedDialog.open)advancedDialog.close();document.removeEventListener('fullscreenchange',fullscreenChanged);window.removeEventListener('resize',positionMore);window.removeEventListener('scroll',positionMore,true);if(document.fullscreenElement===body)document.exitFullscreen().catch(()=>{});observer.dispose();graph.dispose();controller.abort();state.dispose();disposeReaders(sourceBody);disposeReaders(runDetailBody);},
     });
     options.register?.(handle);
     let firstEntry=view.entry||ctx.flows[0]?.entry||choices()[0]?.value||null;

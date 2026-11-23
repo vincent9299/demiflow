@@ -167,7 +167,7 @@ def test_flows_tab_never_inherits_run_and_clears_settled_pending_intent(owned_fi
         expect(page.locator('.wb-flow-record').first).to_be_visible()
         expect(page.locator('.wb-flow-record').first).to_be_enabled()
         expect(page.locator('.wb-actions').get_by_role('button',name='运行',exact=True)).to_be_visible()
-        expect(page.locator('.wb-actions').get_by_role('button',name='业务参数',exact=True)).to_be_visible()
+        expect(page.locator('.wb-actions').get_by_role('button',name='业务参数',exact=True)).to_have_count(0)
         expect(page.locator('.wb-toolbar')).to_be_hidden()
         page.wait_for_function("()=>ForgeView.decodeView(location.hash)?.kind==='flows'")
         flow_ref=reference(page)

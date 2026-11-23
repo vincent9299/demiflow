@@ -74,16 +74,12 @@ def test_pipeline_directory_preserves_drafts_late_selection_and_narrow_space(roo
         assert directory['x'] + directory['width'] == canvas['x']
         screenshot(page, 'project-pipeline-navigation-desktop')
 
-        page.get_by_role('button', name='业务参数', exact=True).click()
-        page.get_by_label('minimum', exact=True).fill('0.71')
+        expect(page.locator('.wb-actions').get_by_role('button', name='业务参数', exact=True)).to_have_count(0)
+        expect(page.locator('.wb-toolbar')).to_be_hidden()
         flow(page, SECOND).click()
         expect(flow(page, SECOND)).to_have_attribute('aria-current', 'page')
-        page.get_by_role('button', name='业务参数', exact=True).click()
-        expect(page.get_by_label('minimum', exact=True)).to_have_value('0.3')
         flow(page, FIRST).click()
-        page.get_by_role('button', name='业务参数', exact=True).click()
-        expect(page.get_by_label('minimum', exact=True)).to_have_value('0.71')
-        expect(page.locator('.wb-actions').get_by_role('button', name='运行', exact=True)).to_be_disabled()
+        expect(flow(page, FIRST)).to_have_attribute('aria-current', 'page')
         assert (root / 'flows/select_a.json').read_bytes() == before
 
         # Hold a genuine graph response after fetch resolves. The first request
@@ -106,8 +102,7 @@ def test_pipeline_directory_preserves_drafts_late_selection_and_narrow_space(roo
         expect(flow(page, FIRST)).to_have_attribute('aria-current', 'page')
         page.evaluate('releaseNavigationGraph()')
         page.wait_for_function('entry=>ForgeView.decodeView(location.hash)?.entry===entry', arg=FIRST)
-        page.get_by_role('button', name='业务参数', exact=True).click()
-        expect(page.get_by_label('minimum', exact=True)).to_have_value('0.71')
+        expect(flow(page, FIRST)).to_have_attribute('aria-current', 'page')
 
         tab(page, 'development')
         expect(page.locator('.development-session-sidebar')).to_be_visible()
