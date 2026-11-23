@@ -48,6 +48,16 @@ def test_integer_aggregates_follow_real_row_and_byte_limits(tmp_path):
         assert sizes == {2: 10} and merges == {'Count': 5, 'Sum': 5}
 
 
+def test_public_512_integer_rows_share_native_partials(tmp_path):
+    with RunContext.start(tmp_path/'run', limits={'batch_rows': 32}), data.local_execution(
+            workers=1, worker_mode='thread', temp_directory=str(tmp_path)):
+        with observed_blocks() as (sizes, merges):
+            result = data.from_items([{'n': i} for i in range(512)]).aggregate(Count(), Sum('n'))
+        assert result == {'count()': 512, 'sum(n)': 130816}
+        assert sizes == {32: 32}
+        assert merges == {'Count': 16, 'Sum': 16}
+
+
 class Ordered(AggregateFnV2):
     def __init__(self):
         super().__init__('trace', tuple, on='n', ignore_nulls=False)
