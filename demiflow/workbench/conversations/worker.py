@@ -1155,10 +1155,15 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                             if requested:
                                 raise InterruptedError(reason)
                         try:
+                            from dataclasses import replace
                             from functools import partial
                             from demiflow.workbench.conversations.pipeline_review import run_deployment_reviewer
+                            review_author_spec = (
+                                replace(confined, runtime_paths=tuple(p for p in confined.runtime_paths if Path(p).exists()))
+                                if confined is not None else None
+                            )
                             reviewer = partial(run_deployment_reviewer, deployment=deployment, turn=turn,
-                                session=session, scratch=scratch, broker_home=broker_home, author_spec=confined, lease_fd=lease_fd,
+                                session=session, scratch=scratch, broker_home=broker_home, author_spec=review_author_spec, lease_fd=lease_fd,
                                 deadline=min(deadline, time.time()+180), check_cancel=check_review_cancel)
                             store.event(tid, 'review.started', {'request_id': tid})
                             send_parent('notify')

@@ -97,7 +97,7 @@ GET_FIELDS = {
     'project-file-text': ({'path'}, set()),
     'project-file-diff': ({'path'}, set()),
     'project-changes': (set(), set()),
-    'project-files': (set(), {'path', 'offset', 'limit'}),
+    'project-files': (set(), {'path', 'offset', 'limit', 'query'}),
     'project-documents': (set(), {'path', 'offset', 'limit'}),
     'project-markdown': ({'path'}, set()),
     'project-operators': (set(), set()),
@@ -802,9 +802,12 @@ class Handler(BaseHTTPRequestHandler):
                     value = documents.git_changes(root)
                 elif url.path in {'/api/project-files', '/api/project-documents', '/api/project-markdown'}:
                     from demiflow.workbench.projects import documents
-                    value = (documents.read(root, query['path']) if url.path == '/api/project-markdown' else
-                             documents.listing(root, query.get('path', ''), int(query.get('offset', 0)), int(query.get('limit', 50)),
-                                               all_files=url.path == '/api/project-files'))
+                    if url.path == '/api/project-files' and query.get('query', '').strip():
+                        value = documents.search_files(root, query['query'], limit=int(query.get('limit', 50)))
+                    else:
+                        value = (documents.read(root, query['path']) if url.path == '/api/project-markdown' else
+                                 documents.listing(root, query.get('path', ''), int(query.get('offset', 0)), int(query.get('limit', 50)),
+                                                   all_files=url.path == '/api/project-files'))
                     if url.path == '/api/project-files':
                         value['root'] = str(root)
                 elif url.path == '/api/project-discovery':

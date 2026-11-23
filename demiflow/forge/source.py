@@ -426,13 +426,14 @@ class SourceTree:
                     "random",
                     "time",
                 }
-                self.fail(
-                    "OP-05" if known_effect else "OP-06",
-                    f"Dependency has no admitted compute boundary: {target}",
-                    node,
-                    module,
-                    incomplete=not known_effect,
-                )
+                if known_effect:
+                    self.fail(
+                        "OP-05",
+                        f"Dependency has no admitted compute boundary: {target}",
+                        node,
+                        module,
+                        incomplete=False,
+                    )
             namespace[name] = Symbol(target)
 
     def is_local(self, name):

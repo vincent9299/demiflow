@@ -174,10 +174,15 @@ def test_linux_landlock_execution_facts_and_deepseek_chmod_enosys_shim(tmp_path)
     js = (
         'const fs = require("fs");\n'
         'const target = process.argv[1];\n'
-        'fs.writeFileSync(target, "{\\"ok\\":true}\\n");\n'
-        'fs.chmodSync(target, 0o644);\n'
-        'fs.promises.chmod(target, 0o600).then(() => console.error("CHMOD_OK"))\n'
-        '  .then(() => process.stdout.write("DONE\\n"));\n'
+        '(async () => {\n'
+        '  fs.writeFileSync(target, "{\\"ok\\":true}\\n");\n'
+        '  fs.chmodSync(target, 0o644);\n'
+        '  await fs.promises.chmod(target, 0o600);\n'
+        '  const fh = await fs.promises.open(target, "r+");\n'
+        '  await fh.chmod(0o644);\n'
+        '  await fh.close();\n'
+        '  process.stdout.write("DONE\\n");\n'
+        '})().catch(e => { console.error(e); process.exit(1); });\n'
     )
     target = proj / 'configs/out.json'
     proc = launch_sandbox(
@@ -205,3 +210,101 @@ def test_differences_generates_ondemand_diff_even_when_preview_budget_exhausted(
     assert len(changes) == 1
     assert changes[0]['path'] == 'configs/new_manifest.json'
     assert '+  "concepts": ["a", "b"]' in changes[0]['diff']
+
+
+def test_documents_search_files_finds_nested_files_and_skips_hidden(tmp_path):
+    from demiflow.workbench.projects import documents
+    (tmp_path / 'parameters').mkdir()
+    (tmp_path / 'parameters/reference_delivery.json').write_text('{}\n', encoding='utf-8')
+    (tmp_path / 'flows').mkdir()
+    (tmp_path / 'flows/reference_delivery.py').write_text('def run(): pass\n', encoding='utf-8')
+    (tmp_path / '__pycache__').mkdir()
+    (tmp_path / '__pycache__/reference_delivery.cpython-311.pyc').write_bytes(b'x')
+    (tmp_path / '.hidden').mkdir()
+    (tmp_path / '.hidden/reference_delivery.json').write_text('{}\n', encoding='utf-8')
+    res = documents.search_files(tmp_path, 'reference_delivery.json', limit=20)
+    assert [e['path'] for e in res['entries']] == ['parameters/reference_delivery.json']
+    res2 = documents.search_files(tmp_path, 'reference_delivery', limit=20)
+    assert sorted(e['path'] for e in res2['entries']) == [
+        'flows/reference_delivery.py',
+        'parameters/reference_delivery.json',
+    ]
+
+
+def test_static_check_drops_op06_and_denoises_incomplete_op03(tmp_path):
+    from demiflow.forge.pipeline_check import result as check_result
+    from demiflow.forge.source import InspectionError, SourceTree
+    (tmp_path / 'mod_ok.py').write_text('from pathlib import Path\nX = 1\n', encoding='utf-8')
+    (tmp_path / 'mod_bad.py').write_text('import requests\nX = 1\n', encoding='utf-8')
+    tree = SourceTree(tmp_path)
+    ns = tree.load('mod_ok')
+    assert 'Path' in ns
+    with pytest.raises(InspectionError) as exc_info:
+        tree.load('mod_bad')
+    assert exc_info.value.diagnostic['rule'] == 'OP-05'
+    assert exc_info.value.diagnostic['status'] == 'invalid'
+
+    # OP-06 / OP-03 incomplete warnings are suppressed; hard invalid errors are preserved.
+    clean = check_result([
+        {'rule': 'OP-06', 'status': 'incomplete', 'path': 'a.py', 'detail': 'unknown'},
+        {'rule': 'OP-03', 'status': 'incomplete', 'path': 'a.py', 'detail': 'untyped'},
+    ], ['a.py'])
+    assert clean['status'] == 'passed'
+    assert clean['diagnostic_count'] == 0
+
+    hard = check_result([
+        {'rule': 'OP-03', 'status': 'invalid', 'path': 'a.py', 'detail': 'wrong return'},
+    ], ['a.py'])
+    assert hard['status'] == 'failed'
+    assert hard['diagnostic_count'] == 1
+
+
+def test_reviewer_strips_deleted_author_runtime_paths(tmp_path, monkeypatch):
+    from demiflow.workbench.conversations import pipeline_review
+    stale = tmp_path / 'demiflow-dev-shims-gone'
+    existing = tmp_path / 'existing-runtime'
+    existing.mkdir()
+    author_home = tmp_path / 'author-home'
+    author_home.mkdir()
+    scratch = tmp_path / 'scratch' / 'work'
+    scratch.mkdir(parents=True)
+
+    author_spec = SandboxSpec(
+        read_paths=(str(tmp_path),),
+        write_paths=(),
+        runtime_paths=(str(existing), str(stale)),
+        protected_paths=(),
+        denied_paths=(),
+        private_home=str(author_home),
+        role='developer',
+        seconds=30,
+    )
+    captured = {}
+
+    class DummyBroker:
+        socket_path = str(tmp_path / 'sock')
+        child_config = {'model': 'deepseek-chat'}
+        failure = None
+        def close(self):
+            pass
+
+    class DummyDeployment:
+        mode = 'restricted'
+        providers = {'deepseek': {'model': 'deepseek-chat', 'credential_env': 'KEY', 'model_provider': 'deepseek-official'}}
+
+    monkeypatch.setattr('demiflow.workbench.conversations.model_broker.start_model_broker', lambda *a, **kw: DummyBroker())
+    def fake_launch(**kw):
+        captured['spec'] = kw['sandbox_spec']
+        return object()
+    monkeypatch.setattr('demiflow.workbench.conversations.execution.launch_provider', fake_launch)
+    monkeypatch.setattr('demiflow.forge.review_deepseek.collect_review', lambda *a, **kw: {'status': 'passed'})
+
+    out = pipeline_review.run_deployment_reviewer(
+        'prompt', deployment=DummyDeployment(), turn={'id': 't1'},
+        session={'id': 's1', 'provider': 'deepseek'}, scratch=scratch,
+        broker_home=tmp_path / 'broker', author_spec=author_spec,
+        lease_fd=None, deadline=9999999999.0, check_cancel=lambda: None,
+    )
+    assert out == {'status': 'passed'}
+    assert str(existing) in captured['spec'].runtime_paths
+    assert str(stale) not in captured['spec'].runtime_paths

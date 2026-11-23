@@ -138,9 +138,49 @@
     let disposed = false;
     let levels = Object.create(null), expanded = [], treeLoaded = false, projectRootPath = '';
     let gitChanges = [], gitBranch = '', gitIsRepo = false;
-    const observedChanges = new Map(); // path -> {path, status, added, removed, diff}
+    const observedChanges = new Map(); // path -> {path, status, added, removed, diff, sha256}
     let filterTerm = '';
     let paneMode = 'file'; // 'file' | 'operator'
+
+    // Per-project approved review state & preserved history (persisted in localStorage).
+    const projectKey = String(project?.workspace_id || project?.root || 'default');
+    const approvalStorageKey = 'forge-dev-approvals:' + projectKey;
+    const approvedMap = new Map(); // path -> fingerprint
+    let approvedHistory = []; // [{path, fingerprint, status, added, removed, approvedAt}]
+    let historyOpen = false;
+    try {
+      const raw = JSON.parse(localStorage.getItem(approvalStorageKey) || 'null');
+      if (raw && typeof raw === 'object') {
+        if (raw.map && typeof raw.map === 'object') {
+          for (const [k, v] of Object.entries(raw.map)) {
+            if (typeof k === 'string' && typeof v === 'string') approvedMap.set(k, v);
+          }
+        }
+        if (Array.isArray(raw.history)) {
+          approvedHistory = raw.history.filter(r => r && typeof r.path === 'string').slice(0, 100);
+        }
+      }
+    } catch {}
+    function persistApprovals() {
+      try {
+        localStorage.setItem(approvalStorageKey, JSON.stringify({
+          map: Object.fromEntries(approvedMap.entries()),
+          history: approvedHistory.slice(0, 100),
+        }));
+      } catch {}
+    }
+    function changeFingerprint(item) {
+      if (!item) return '';
+      const cached = fileCache.get(item.path);
+      const sha = item.sha256 || cached?.sha256 || '';
+      if (sha) return 'sha:' + sha;
+      return [item.status || 'M', item.added ?? '', item.removed ?? '', item.diff ? item.diff.length : ''].join(':');
+    }
+    function isApprovedItem(item) {
+      if (!item) return false;
+      const fp = changeFingerprint(item);
+      return Boolean(fp) && approvedMap.get(item.path) === fp;
+    }
 
     // Open tabs & active code view state
     const openTabs = []; // array of relative paths (no leading slash), max 8
@@ -154,7 +194,8 @@
 
     // === LEFT SIDEBAR: Changed files + Project tree (collapsible + resizable split) ===
     const explorer = node('div', 'dev-file-explorer');
-    let changedOpen = true, treeOpen = true;
+    let changedOpen = true, treeOpen = true, treeSearchOpen = false;
+    let treeSearchTimer = null, treeSearchEpoch = 0;
     let splitRatio = 0.4;
     try {
       const saved = Number(localStorage.getItem('forge-dev-explorer-split'));
@@ -167,13 +208,36 @@
     const changedToggle = node('button', 'dev-section-toggle');
     changedToggle.type = 'button';
     changedToggle.setAttribute('aria-expanded', 'true');
-    const changedTitle = node('span', 'dev-section-title', '已改文件');
+    const changedTitle = node('span', 'dev-section-title', '待审核变更');
     const changedCount = node('span', 'dev-section-count', '0');
     changedToggle.append(chevronIcon(), changedTitle, changedCount);
+    const changedHeaderActions = node('div', 'dev-section-actions');
+    const approveAllBtn = node('button', 'dev-approve-all-btn', '全部通过');
+    approveAllBtn.type = 'button';
+    approveAllBtn.title = '标记当前全部改动已审核通过（保留修改历史）';
+    approveAllBtn.hidden = true;
     const changedRefresh = iconButton('刷新变更列表', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
-    changedHeader.append(changedToggle, changedRefresh);
+    changedHeaderActions.append(approveAllBtn, changedRefresh);
+    changedHeader.append(changedToggle, changedHeaderActions);
     const changedList = node('div', 'dev-changed-list');
-    changedSection.append(changedHeader, changedList);
+    const historyWrap = node('div', 'dev-approved-history');
+    historyWrap.hidden = true;
+    const historyToggle = node('button', 'dev-history-toggle');
+    historyToggle.type = 'button';
+    historyToggle.setAttribute('aria-expanded', 'false');
+    const historyLabel = node('span', null, '已通过历史');
+    const historyCount = node('span', 'dev-section-count', '0');
+    historyToggle.append(chevronIcon(), historyLabel, historyCount);
+    const historyList = node('div', 'dev-history-list');
+    historyList.hidden = true;
+    historyToggle.onclick = () => {
+      historyOpen = !historyOpen;
+      historyToggle.setAttribute('aria-expanded', String(historyOpen));
+      historyToggle.classList.toggle('is-open', historyOpen);
+      historyList.hidden = !historyOpen;
+    };
+    historyWrap.append(historyToggle, historyList);
+    changedSection.append(changedHeader, changedList, historyWrap);
 
     const splitHandle = node('div', 'dev-split-resizer');
     splitHandle.setAttribute('role', 'separator');
@@ -189,12 +253,30 @@
     treeToggle.setAttribute('aria-expanded', 'true');
     const treeTitle = node('span', 'dev-section-title', '项目目录');
     treeToggle.append(chevronIcon(), treeTitle);
+    const treeHeaderActions = node('div', 'dev-section-actions');
+    const treeSearchToggle = iconButton('搜索项目目录', 'M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14M16.2 16.2L20 20');
+    treeSearchToggle.setAttribute('aria-expanded', 'false');
     const treeRefresh = iconButton('刷新项目目录', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
-    treeHeader.append(treeToggle, treeRefresh);
+    treeHeaderActions.append(treeSearchToggle, treeRefresh);
+    treeHeader.append(treeToggle, treeHeaderActions);
+    const treeSearchBar = node('div', 'dev-tree-search');
+    treeSearchBar.hidden = true;
+    const treeSearchInput = document.createElement('input');
+    treeSearchInput.type = 'search';
+    treeSearchInput.className = 'dev-tree-search-input';
+    treeSearchInput.placeholder = '搜索项目文件…';
+    treeSearchInput.setAttribute('aria-label', '搜索项目文件');
+    const treeSearchClear = node('button', 'dev-tree-search-clear', '×');
+    treeSearchClear.type = 'button';
+    treeSearchClear.setAttribute('aria-label', '清除目录搜索');
+    treeSearchClear.hidden = true;
+    treeSearchBar.append(treeSearchInput, treeSearchClear);
     const treeBody = node('div', 'dev-tree-body ' + files.body);
+    const treeSearchResults = node('div', 'dev-search-results');
+    treeSearchResults.hidden = true;
     const treeHost = node('ul', files.level);
-    treeBody.append(treeHost);
-    treeSection.append(treeHeader, treeBody);
+    treeBody.append(treeSearchResults, treeHost);
+    treeSection.append(treeHeader, treeSearchBar, treeBody);
     explorer.append(changedSection, splitHandle, treeSection);
     if (filesHost) filesHost.append(explorer);
 
@@ -203,6 +285,8 @@
       changedToggle.setAttribute('aria-expanded', String(changedOpen));
       treeToggle.setAttribute('aria-expanded', String(treeOpen));
       changedList.hidden = !changedOpen;
+      historyWrap.hidden = !changedOpen || approvedHistory.length === 0;
+      treeSearchBar.hidden = !treeOpen || !treeSearchOpen;
       treeBody.hidden = !treeOpen;
       changedSection.classList.toggle('is-collapsed', !changedOpen);
       treeSection.classList.toggle('is-collapsed', !treeOpen);
@@ -297,13 +381,17 @@
     sourceModeBtn.type = 'button';
     modeSwitch.append(diffModeBtn, sourceModeBtn);
 
+    const approveFileBtn = node('button', 'dev-action-btn dev-action-approve', '审核通过');
+    approveFileBtn.type = 'button';
+    approveFileBtn.title = '标记当前文件改动已审核通过（保留修改历史）';
+    approveFileBtn.hidden = true;
     const refBtn = node('button', 'dev-action-btn dev-action-primary', '引用到对话');
     refBtn.type = 'button';
     const searchBtn = iconButton('在代码中搜索 (Ctrl+F)', 'M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14M16.2 16.2L20 20');
     const copyBtn = node('button', 'dev-action-btn', '复制');
     copyBtn.type = 'button';
     const reloadFileBtn = iconButton('刷新当前文件', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
-    toolActions.append(modeSwitch, refBtn, searchBtn, copyBtn, reloadFileBtn);
+    toolActions.append(modeSwitch, approveFileBtn, refBtn, searchBtn, copyBtn, reloadFileBtn);
     toolbar.append(pathMeta, toolActions);
 
     const viewport = node('div', 'dev-code-viewport');
@@ -337,7 +425,7 @@
       for (const [p, obs] of observedChanges.entries()) {
         const prev = map.get(p);
         if (prev) {
-          map.set(p, {...prev, diff: obs.diff || prev.diff, source: 'both'});
+          map.set(p, {...prev, diff: obs.diff || prev.diff, sha256: prev.sha256 || obs.sha256 || '', source: 'both'});
         } else {
           map.set(p, {...obs, source: 'session'});
         }
@@ -354,7 +442,50 @@
         status: gitHit?.status || obsHit?.status || 'M',
         added: gitHit?.added ?? obsHit?.added ?? null,
         removed: gitHit?.removed ?? obsHit?.removed ?? null,
+        sha256: gitHit?.sha256 || obsHit?.sha256 || '',
         diff: obsHit?.diff || null};
+    }
+
+    function formatShortTime(ts) {
+      if (!Number.isFinite(ts)) return '';
+      try {
+        const d = new Date(ts);
+        return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+      } catch {
+        return '';
+      }
+    }
+
+    function approveItems(items, {advance = false} = {}) {
+      if (!Array.isArray(items) || !items.length) return;
+      const now = Date.now();
+      for (const item of items) {
+        if (!item?.path) continue;
+        const fp = changeFingerprint(item);
+        if (!fp) continue;
+        approvedMap.set(item.path, fp);
+        approvedHistory = [
+          {
+            path: item.path,
+            fingerprint: fp,
+            status: item.status || 'M',
+            added: Number.isFinite(item.added) ? item.added : null,
+            removed: Number.isFinite(item.removed) ? item.removed : null,
+            approvedAt: now,
+          },
+          ...approvedHistory.filter(r => !(r.path === item.path && r.fingerprint === fp)),
+        ].slice(0, 100);
+      }
+      persistApprovals();
+      const remaining = mergedChanges().filter(item => !isApprovedItem(item));
+      renderChangedList();
+      renderTabs();
+      if (advance && remaining.length) {
+        openFile(remaining[0].path, 'diff');
+      } else if (activePath) {
+        const ch = changeFor(activePath);
+        approveFileBtn.hidden = !(ch && !isApprovedItem(ch));
+      }
     }
 
     function destroyViewer() {
@@ -366,16 +497,42 @@
 
     function renderChangedList() {
       const all = mergedChanges();
-      const total = all.length;
-      if (typeof onBadgeChange === 'function') onBadgeChange(total);
-      changedCount.textContent = String(total);
+      const pending = all.filter(item => !isApprovedItem(item));
+      if (typeof onBadgeChange === 'function') onBadgeChange(pending.length);
+      changedCount.textContent = String(pending.length);
+      approveAllBtn.hidden = pending.length === 0;
       const term = filterTerm.trim().toLocaleLowerCase();
-      const visible = term ? all.filter(item => item.path.toLocaleLowerCase().includes(term)) : all;
-      changedSection.hidden = total === 0;
+      const visiblePending = term ? pending.filter(item => item.path.toLocaleLowerCase().includes(term)) : pending;
+      const visibleHistory = term ? approvedHistory.filter(item => item.path.toLocaleLowerCase().includes(term)) : approvedHistory;
+      changedSection.hidden = pending.length === 0 && approvedHistory.length === 0;
+      historyCount.textContent = String(approvedHistory.length);
       applyExplorerSplit();
       changedList.replaceChildren();
-      for (const item of visible) {
-        const btn = node('button', 'dev-changed-item');
+      if (visiblePending.length) {
+        for (const item of visiblePending) {
+          const btn = node('button', 'dev-changed-item');
+          btn.type = 'button';
+          btn.dataset.path = item.path;
+          btn.title = item.path;
+          btn.setAttribute('aria-current', activePath === item.path ? 'true' : 'false');
+          const badge = node('span', 'dev-status-tag dev-status-' + (item.status || 'M').toLowerCase(), item.status || 'M');
+          const {name, dir} = splitPath(item.path);
+          const textWrap = node('span', 'dev-changed-text');
+          textWrap.append(node('span', 'dev-changed-name', name));
+          if (dir) textWrap.append(node('span', 'dev-changed-dir', dir));
+          const stats = node('span', 'dev-changed-stats');
+          if (Number.isFinite(item.added) && item.added > 0) stats.append(node('span', 'dev-stat-add', '+' + item.added));
+          if (Number.isFinite(item.removed) && item.removed > 0) stats.append(node('span', 'dev-stat-del', '-' + item.removed));
+          btn.append(badge, textWrap, stats);
+          btn.onclick = () => openFile(item.path, 'diff');
+          changedList.append(btn);
+        }
+      } else if (pending.length === 0 && approvedHistory.length > 0) {
+        changedList.append(node('div', 'dev-changed-empty', '当前改动已全部审核通过'));
+      }
+      historyList.replaceChildren();
+      for (const item of visibleHistory) {
+        const btn = node('button', 'dev-changed-item dev-history-item');
         btn.type = 'button';
         btn.dataset.path = item.path;
         btn.title = item.path;
@@ -385,12 +542,14 @@
         const textWrap = node('span', 'dev-changed-text');
         textWrap.append(node('span', 'dev-changed-name', name));
         if (dir) textWrap.append(node('span', 'dev-changed-dir', dir));
-        const stats = node('span', 'dev-changed-stats');
-        if (Number.isFinite(item.added) && item.added > 0) stats.append(node('span', 'dev-stat-add', '+' + item.added));
-        if (Number.isFinite(item.removed) && item.removed > 0) stats.append(node('span', 'dev-stat-del', '-' + item.removed));
-        btn.append(badge, textWrap, stats);
+        const meta = node('span', 'dev-changed-stats');
+        if (Number.isFinite(item.added) && item.added > 0) meta.append(node('span', 'dev-stat-add', '+' + item.added));
+        if (Number.isFinite(item.removed) && item.removed > 0) meta.append(node('span', 'dev-stat-del', '-' + item.removed));
+        const ts = formatShortTime(item.approvedAt);
+        if (ts) meta.append(node('span', 'dev-history-time', ts));
+        btn.append(badge, textWrap, meta);
         btn.onclick = () => openFile(item.path, 'diff');
-        changedList.append(btn);
+        historyList.append(btn);
       }
       if (!activePath && !pane.hidden) renderEmptyState();
     }
@@ -467,8 +626,8 @@
         const head = node('div', 'dev-forge-detail-head');
         head.append(node('strong', null, selected.label + ' · ' + selected.text));
         const headBtns = node('div', 'dev-forge-detail-actions');
-        if (typeof onRework === 'function' && selected.tone === 'bad' && selected.lines.length) {
-          const reworkBtn = node('button', 'dev-forge-rework', '带问题打回修改');
+        if (typeof onRework === 'function' && (selected.tone === 'bad' || selected.tone === 'warn') && selected.lines.length) {
+          const reworkBtn = node('button', 'dev-forge-rework', selected.tone === 'bad' ? '带问题打回修改' : '交给助手修复');
           reworkBtn.type = 'button';
           reworkBtn.onclick = () => {
             const prompt = '请针对以下 Forge「' + selected.label + '」诊断逐项排查修复，并运行项目 pytest 验证：\n' + selected.lines.map(l => '- ' + l).join('\n');
@@ -566,6 +725,8 @@
       sourceModeBtn.setAttribute('aria-pressed', String(viewMode === 'source'));
       diffModeBtn.classList.toggle('is-active', viewMode === 'diff');
       sourceModeBtn.classList.toggle('is-active', viewMode === 'source');
+      const pendingHit = ch && !isApprovedItem(ch);
+      approveFileBtn.hidden = !pendingHit;
 
       if (st && st !== 'clean') {
         const added = entry.changed ? entry.added : (ch?.added || (st === 'A' && entry.modified ? entry.modified.split('\n').length : null));
@@ -779,6 +940,7 @@
           status,
           added: stats.added,
           removed: stats.removed,
+          sha256: file.after?.sha256 || file.before?.sha256 || '',
           diff: typeof file.diff === 'string' ? file.diff : null,
         });
         if (clean === activePath) activeTouched = true;
@@ -808,9 +970,113 @@
       renderChangedList();
     }
 
+    function effectiveTreeQuery() {
+      return (treeSearchInput.value || '').trim() || filterTerm.trim();
+    }
+
+    function renderTreeSearchState(query, entries, {loading = false, error = '', truncated = false} = {}) {
+      treeSearchResults.replaceChildren();
+      if (!query) {
+        treeSearchResults.hidden = true;
+        treeHost.hidden = false;
+        return;
+      }
+      treeHost.hidden = true;
+      treeSearchResults.hidden = false;
+      if (loading) {
+        treeSearchResults.append(node('div', 'dev-search-empty', '正在搜索项目文件…'));
+        return;
+      }
+      if (error) {
+        treeSearchResults.append(node('div', 'dev-search-empty', error));
+        return;
+      }
+      if (!entries.length) {
+        treeSearchResults.append(node('div', 'dev-search-empty', '未找到匹配文件'));
+        return;
+      }
+      for (const row of entries) {
+        const btn = node('button', 'dev-changed-item dev-search-item');
+        btn.type = 'button';
+        btn.dataset.path = row.path;
+        btn.title = row.path;
+        btn.setAttribute('aria-current', activePath === row.path ? 'true' : 'false');
+        const {name, dir} = splitPath(row.path);
+        const textWrap = node('span', 'dev-changed-text');
+        textWrap.append(node('span', 'dev-changed-name', name));
+        if (dir) textWrap.append(node('span', 'dev-changed-dir', dir));
+        btn.append(textWrap);
+        btn.onclick = () => openFile(row.path, changeFor(row.path) ? 'diff' : 'source');
+        treeSearchResults.append(btn);
+      }
+      if (truncated) {
+        treeSearchResults.append(node('div', 'dev-search-empty', '结果较多，请输入更精确的文件名'));
+      }
+    }
+
+    function scheduleTreeSearch({immediate = false} = {}) {
+      if (treeSearchTimer) { clearTimeout(treeSearchTimer); treeSearchTimer = null; }
+      const q = effectiveTreeQuery();
+      treeSearchClear.hidden = !treeSearchInput.value;
+      if (!q) {
+        treeSearchEpoch++;
+        renderTreeSearchState('', []);
+        return;
+      }
+      const epoch = ++treeSearchEpoch;
+      const run = async () => {
+        treeSearchTimer = null;
+        renderTreeSearchState(q, [], {loading: true});
+        try {
+          const data = await api('project-files', {query: q, limit: 50});
+          if (disposed || epoch !== treeSearchEpoch) return;
+          renderTreeSearchState(q, Array.isArray(data.entries) ? data.entries : [], {truncated: data.truncated === true});
+        } catch (err) {
+          if (disposed || epoch !== treeSearchEpoch) return;
+          renderTreeSearchState(q, [], {error: err?.message || '搜索失败'});
+        }
+      };
+      if (immediate) run();
+      else treeSearchTimer = setTimeout(run, 140);
+    }
+
+    function setTreeSearchOpen(open) {
+      treeSearchOpen = Boolean(open);
+      treeSearchToggle.setAttribute('aria-expanded', String(treeSearchOpen));
+      treeSearchToggle.classList.toggle('is-active', treeSearchOpen);
+      if (treeSearchOpen && !treeOpen) treeOpen = true;
+      applyExplorerSplit();
+      if (treeSearchOpen) {
+        treeSearchInput.focus();
+      } else if (treeSearchInput.value) {
+        treeSearchInput.value = '';
+        scheduleTreeSearch({immediate: true});
+      }
+    }
+
+    treeSearchToggle.onclick = () => setTreeSearchOpen(!treeSearchOpen);
+    treeSearchInput.oninput = () => scheduleTreeSearch();
+    treeSearchInput.onkeydown = e => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (treeSearchInput.value) {
+          treeSearchInput.value = '';
+          scheduleTreeSearch({immediate: true});
+        } else {
+          setTreeSearchOpen(false);
+        }
+      }
+    };
+    treeSearchClear.onclick = () => {
+      treeSearchInput.value = '';
+      scheduleTreeSearch({immediate: true});
+      treeSearchInput.focus();
+    };
+
     function setFilter(term) {
       filterTerm = String(term || '');
       renderChangedList();
+      scheduleTreeSearch();
       paintOperatorTree();
     }
 
@@ -1294,6 +1560,15 @@
 
     diffModeBtn.onclick = () => { if (!diffModeBtn.disabled) { viewMode = 'diff'; paintActiveCode(); } };
     sourceModeBtn.onclick = () => { viewMode = 'source'; paintActiveCode(); };
+    approveFileBtn.onclick = () => {
+      if (!activePath) return;
+      const ch = changeFor(activePath);
+      if (ch && !isApprovedItem(ch)) approveItems([ch], {advance: true});
+    };
+    approveAllBtn.onclick = () => {
+      const pending = mergedChanges().filter(item => !isApprovedItem(item));
+      if (pending.length) approveItems(pending, {advance: false});
+    };
     searchBtn.onclick = () => { viewerHandle?.openSearch(); };
     reloadFileBtn.onclick = () => { if (activePath) loadFile(activePath); refreshChanges(); };
     refBtn.onclick = () => { if (activePath && typeof onReference === 'function') onReference(activePath); };
@@ -1334,6 +1609,7 @@
       setFilter,
       dispose() {
         disposed = true;
+        if (treeSearchTimer) { clearTimeout(treeSearchTimer); treeSearchTimer = null; }
         destroyViewer();
         if (typeof disposeReaders === 'function') disposeReaders(operatorPane);
         resize?.dispose();

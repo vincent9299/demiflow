@@ -63,6 +63,64 @@ def listing(root, path='', offset=0, limit=50, *, all_files=False):
         raise ForgeError('Document directory cannot be read', code='invalid_request') from exc
 
 
+def search_files(root, query, *, limit=50):
+    """Bounded BFS filename/path search inside project root for sidebar tree filtering."""
+    from collections import deque
+    if not isinstance(query, str) or len(query.encode('utf-8')) > 256 or any(ord(c) < 32 for c in query):
+        raise ForgeError('Invalid file search query', code='invalid_request')
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise ForgeError('Invalid search limit', code='invalid_request')
+    needle = query.strip().casefold()
+    if not needle:
+        return dict(path='', query='', entries=[], next_offset=None, truncated=False)
+    base = _path(root, '', directory=True)
+    # Visit source/config dirs first via BFS; defer heavy run/output trees so shallow files match fast.
+    queue = deque([('', base, 0)])
+    deferred = deque()
+    matches, visited, truncated = [], 0, False
+    max_visited, max_depth = DIRECTORY_ENTRIES, 12
+    while queue or deferred:
+        rel_dir, cur_dir, depth = queue.popleft() if queue else deferred.popleft()
+        try:
+            with os.scandir(cur_dir) as entries:
+                items = sorted(entries, key=lambda e: (not e.is_dir(follow_symlinks=False), e.name.casefold(), e.name))
+        except OSError:
+            continue
+        for entry in items:
+            visited += 1
+            if visited > max_visited:
+                truncated = True
+                break
+            name = entry.name
+            if name.startswith('.') or name in SKIP or name.endswith('.lance') or entry.is_symlink():
+                continue
+            item = '/'.join(filter(None, [rel_dir, name]))
+            if len(item.encode('utf-8')) > 1024 or len(item.split('/')) > 24 or '\\' in item:
+                continue
+            is_dir = entry.is_dir(follow_symlinks=False)
+            if is_dir:
+                if depth + 1 <= max_depth:
+                    target_q = deferred if (depth == 0 and name in CHANGE_SKIP) else queue
+                    target_q.append((item, Path(entry.path), depth + 1))
+                continue
+            if not entry.is_file(follow_symlinks=False):
+                continue
+            if needle in name.casefold() or needle in item.casefold():
+                suffix = Path(name).suffix.lower()
+                kind = 'markdown' if suffix in MARKDOWN else ('text' if suffix in TEXT else 'file')
+                matches.append((0 if needle in name.casefold() else 1, item.casefold(), dict(name=name, path=item, kind=kind)))
+                if len(matches) >= limit * 4:
+                    truncated = True
+                    break
+        if truncated:
+            break
+    matches.sort(key=lambda row: (row[0], row[1]))
+    results = [row[2] for row in matches[:limit]]
+    if len(matches) > limit:
+        truncated = True
+    return dict(path='', query=query.strip(), entries=results, next_offset=None, truncated=truncated)
+
+
 def read(root, path, *, project_text=False):
     target = _path(root, path)
     if project_text and target.suffix.lower() not in TEXT:
@@ -172,15 +230,19 @@ def git_changes(root):
         suffix = Path(rel).suffix.lower()
         preview = suffix in TEXT
         added, removed = stats.get(rel, (None, None))
-        if kind == 'A' and added is None and preview:
+        file_sha = ''
+        if preview and kind != 'D':
             try:
                 target = _path(base, rel)
                 if target.is_file() and not target.is_symlink() and target.stat().st_size <= 256 * 1024:
-                    added = len(target.read_bytes().splitlines())
-                    removed = 0
+                    raw_bytes = target.read_bytes()
+                    file_sha = hashlib.sha256(raw_bytes).hexdigest()
+                    if kind == 'A' and added is None:
+                        added = len(raw_bytes.splitlines())
+                        removed = 0
             except (ForgeError, OSError):
                 pass
-        rows.append(dict(path=rel, status=kind, added=added, removed=removed, preview=preview))
+        rows.append(dict(path=rel, status=kind, added=added, removed=removed, preview=preview, sha256=file_sha))
     rows.sort(key=lambda item: item['path'].casefold())
     return dict(is_git=True, branch=branch, changes=rows, truncated=truncated)
 
