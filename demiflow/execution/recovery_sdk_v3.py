@@ -113,9 +113,9 @@ _RETAINED_METHODS = {
 
 
 @lru_cache(maxsize=len(_REVISIONS))
-def _declared_codes(source):
+def _declared_codes(source, optimize=-1):
     # Compile only measured, allowlisted platform source. No module is executed.
-    module = compile(source, '<sdk-v3>', 'exec', dont_inherit=True)
+    module = compile(source, '<sdk-v3>', 'exec', dont_inherit=True, optimize=optimize)
     functions = {}
     for item in module.co_consts:
         if isinstance(item, CodeType):
@@ -426,11 +426,50 @@ def _layout_source_type(value):
         return None
     if sha256(source).hexdigest() != entry['source']:
         return None
-    methods = {name: identity(code_record(method.__code__)) for name, method in vars(cls).items()
-               if type(method) is FunctionType}
-    if methods != {name: pins[0] for name, pins in entry['methods'].items()}:
+    compiled = _declared_codes(source)
+    default_codes = _declared_codes(source, 0)
+    methods = {}
+    declarations = set()
+    for name, member in vars(cls).items():
+        functions = (member.fget, member.fset, member.fdel) if isinstance(member, property) else (member,)
+        for method in functions:
+            if type(method) is not FunctionType:
+                continue
+            code = identity(code_record(method.__code__))
+            declared = compiled.get(method.__qualname__)
+            if declared is not None:
+                declarations.add(method.__qualname__)
+                if (method.__globals__ is not vars(module)
+                        or code != identity(code_record(declared))):
+                    return None
+                # Python -OO removes docstrings. Authenticate against the
+                # same compilation mode, while preserving that mode's old pin.
+                original_code = identity(code_record(default_codes[method.__qualname__]))
+            else:
+                if isinstance(member, property):
+                    return None
+                # dataclasses generate methods at class construction; their
+                # measured bodies still bind to this class's actual module.
+                wrapped = getattr(method, '__wrapped__', None)
+                if wrapped is not None:
+                    import dataclasses
+                    if (method.__globals__ is not vars(dataclasses)
+                            or type(wrapped) is not FunctionType
+                            or wrapped.__globals__ is not vars(module)):
+                        return None
+                elif method.__globals__ is not vars(module):
+                    return None
+                original_code = code
+            if not isinstance(member, property):
+                pins = entry['methods'].get(name)
+                if pins is None or original_code != pins[0]:
+                    return None
+                methods[name] = (code, code if pins[0] == pins[1] else pins[1])
+    expected = {name for name in compiled if name.startswith(class_name + '.')
+                and name.count('.') == 1}
+    if declarations != expected or set(methods) != set(entry['methods']):
         return None
-    return entry
+    return {**entry, 'methods': methods}
 
 
 def persistent_source_module(value):
@@ -446,3 +485,9 @@ def source_pickle_global(module, name):
         if module == entry['old_module'] and name == class_name:
             return current_module, class_name
     return None
+
+
+def authentic_source_global(value, original_module):
+    """A successful measured relocation, without the ordinary identity fallback."""
+    entry = _layout_source_type(value)
+    return entry is not None and entry['old_module'] == original_module

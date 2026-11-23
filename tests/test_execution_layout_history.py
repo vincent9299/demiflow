@@ -86,3 +86,46 @@ def test_private_payload_verifies_bytes_before_resolving_original_global(origina
     ref = SimpleNamespace(size_bytes=len(raw), digest='0' * 64)
     with pytest.raises(DataflowError, match='digest differs'):
         load_private_payload(OriginalStore(raw), ref)
+
+
+def test_optimized_reader_accepts_measured_source_carrier(original_carriers):
+    raw = original_carriers['InputMaterializedHandle'][0]
+    child = subprocess.run([sys.executable, '-OO', '-P', '-B', '-c',
+        'import base64,sys; from demiflow.execution.seal.program_pickle import load_payload; '
+        'print(load_payload([base64.b64decode(sys.argv[1])]).__name__)', raw],
+        env={**os.environ, 'PYTHONPATH': str(REPO)}, text=True, capture_output=True, check=True)
+    assert child.stdout.strip() == 'InputMaterializedHandle'
+
+
+def test_same_method_code_with_unrelated_globals_is_not_authenticated(original_carriers, monkeypatch):
+    from types import FunctionType
+    from demiflow.execution.sources.legacy_queue import LegacyQueueHistoryDatasource
+    method = LegacyQueueHistoryDatasource.rows
+    copied = FunctionType(method.__code__, dict(method.__globals__), method.__name__, method.__defaults__)
+    copied.__qualname__ = method.__qualname__
+    monkeypatch.setattr(LegacyQueueHistoryDatasource, 'rows', copied)
+    with pytest.raises(DataflowError, match='audited definition'):
+        load_payload([base64.b64decode(original_carriers['LegacyQueueHistoryDatasource'][0])])
+
+
+def test_source_properties_are_authenticated(original_carriers, monkeypatch):
+    from demiflow.execution.sources.materialized_input import InputMaterializedHandle
+    monkeypatch.setattr(InputMaterializedHandle, 'blocks', property(lambda self: ()))
+    with pytest.raises(DataflowError, match='audited definition'):
+        load_payload([base64.b64decode(original_carriers['InputMaterializedHandle'][0])])
+
+
+def test_private_large_unicode_does_not_duplicate_program_buffer():
+    import pickle
+    import tracemalloc
+    value = 'a' * (4 << 20)
+    raw = pickle.dumps(value, protocol=5)
+    ref = SimpleNamespace(size_bytes=len(raw), digest=hashlib.sha256(raw).hexdigest())
+    tracemalloc.start()
+    try:
+        loaded = load_private_payload(OriginalStore(raw), ref)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert loaded == value
+    assert peak < len(raw) * 2.5

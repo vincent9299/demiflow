@@ -33,7 +33,7 @@ class _ProgramBuffer:
 
     def read(self, size=-1):
         end = len(self.buffer) if size < 0 else min(len(self.buffer), self.position + size)
-        value = bytes(memoryview(self.buffer)[self.position:end])
+        value = memoryview(self.buffer)[self.position:end]
         self.position = end
         return value
 
@@ -55,12 +55,12 @@ class ProgramUnpickler(pickle.Unpickler):
     pickle bytes remain intact; there are no import hooks or global aliases.
     """
     def find_class(self, module, name):
-        from demiflow.execution.recovery_sdk_v3 import source_pickle_global, persistent_source_module
+        from demiflow.execution.recovery_sdk_v3 import source_pickle_global, authentic_source_global
         target = source_pickle_global(module, name)
         if target is None:
             return super().find_class(module, name)
         value = super().find_class(*target)
-        if persistent_source_module(value) != module:
+        if not authentic_source_global(value, module):
             raise pickle.UnpicklingError('Relocated source declaration differs from its audited definition')
         return value
 
