@@ -90,6 +90,13 @@ def merge_join_rows(
 
 
 
+# Tables contain the same canonical binary keys used by hash matching. A SQL
+# NULL on either side never matches. Left duplicates have distinct offsets.
+EXCLUDE_OFFSETS_SQL = """
+    SELECT l.off FROM lkeys l LEFT ANTI JOIN rkeys r ON l.k = r.k ORDER BY l.ord
+"""
+
+
 def offset_join_query(first, second, maximum):
     """One bounded query for a left-deep three-way join, including logical intermediate pairs."""
     join = {'left': 'LEFT JOIN', 'inner': 'INNER JOIN'}

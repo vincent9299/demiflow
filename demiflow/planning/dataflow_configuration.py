@@ -151,6 +151,7 @@ COMPILER_KEYS: Mapping[str, ConfigurationKey] = {key.name: key for key in (
     _key('occurrence_id', 'capture', _text, 'the occurrence this kernel was captured as; equals the node identity'),
     _key('program', 'capture', _text, 'the occurrence whose sealed program this transform runs; equals the node identity'),
     _key('reducer_program', 'capture', _text, 'the occurrence whose sealed reducer a reduce node folds with'),
+    _key('bulk_key_hydration', 'capture', _true, 'hydrate ordered surviving Lance row IDs in bounded batches'),
     _key('lance_key_source', 'capture', _text, 'the key-only source occurrence an exclude_keys node reads its left side from'),
     _key('payload_columns', 'capture', _sequence, 'the columns the excluded side originally selected'),
     _key('default_batch_size', 'capture', _count, 'map_batches batch size taken from the executor when none is declared; rows'),
@@ -166,6 +167,7 @@ COMPILER_KEYS: Mapping[str, ConfigurationKey] = {key.name: key for key in (
     _key('terminal_memory', 'budget', _terminal_memory, 'terminal index and payload windows, or one bounded workspace; bytes'),
     _key('publication_workspace', 'budget', _publication, 'resident window of a native publication; bytes'),
     _key('input_carrier', 'budget', _text, 'the terminal consumes stored row references from its producer'),
+    _key('wide_body_refs', 'capture', _true, 'sort may retain wide record bodies once across merge passes'),
     _key('small_right_index', 'capture', _true, 'finite join may probe a complete bounded right index'),
     _key('output_carrier', 'budget', _text, 'the join publishes stored row references to its terminal'),
     _key('reducer_memory_v1', 'budget', _mapping, 'declared memory contract of a reducer'),
@@ -201,7 +203,7 @@ SOURCE_KEYS: Mapping[str, frozenset] = {
     'queue_history': frozenset({'kind', 'datasource'}),
     'literal_empty': frozenset({'kind'}),
     'join': _KEYED | {'output_carrier', 'small_right_index'},
-    'exclude_keys': _KEYED | {'lance_key_source', 'payload_columns'},
+    'exclude_keys': _KEYED | {'lance_key_source', 'payload_columns', 'bulk_key_hydration'},
     'reduce': _KEYED | {'reducer_program', 'reducer_memory_v1'},
     'groups': _KEYED,
     'union': frozenset({'kind', 'inputs'}),
@@ -291,6 +293,8 @@ def _admitted(node) -> frozenset | None:
         keys |= VARIANT_KEYS
     if kind == 'MapBatchesOp':
         keys |= {'default_batch_size', *PREDICTION_KEYS}
+    if kind == 'SortOp':
+        keys |= {'wide_body_refs'}
     if kind == 'RandomShuffleOp':
         keys |= {'shuffle_order_version'}
     if kind in TASK_KINDS:

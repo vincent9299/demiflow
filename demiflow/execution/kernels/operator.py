@@ -403,6 +403,14 @@ class _SpoolRecords:
             self._iterator = self.port._records()
         return next(self._iterator)
 
+    def within_offset_budget(self, maximum_rows):
+        """The closed port owns a repeatable immutable input, including any borrowed prefix."""
+        if self._iterator is not None or not self.port.eoi:
+            return None
+        if self.port._count > maximum_rows:
+            return None
+        return self.port._records()
+
     def for_join(self, fields):
         if self._iterator is not None:
             raise _err('INVALID_CONTRACT', 'cannot project a partially consumed spool')
@@ -1178,8 +1186,12 @@ class OperatorKernel:
                     sort_spec = replace(sort_spec, configuration={**dict(sort_spec.configuration),
                         'keys': list(sort_spec.configuration.get('keys') or ()),
                         'num_blocks': block_count(sort_spec, rows=port._count, bounds=self._services.bounds)})
-                runs = build_sort_runs(records, spec=sort_spec, services=services)
-                records = merge_sort_runs(runs, spec=sort_spec, services=services)
+                if kind == 'SortOp' and sort_spec.configuration.get('wide_body_refs'):
+                    from .ordering import sort_with_body_references
+                    records = sort_with_body_references(records, spec=sort_spec, services=services, rows=port._count)
+                else:
+                    runs = build_sort_runs(records, spec=sort_spec, services=services)
+                    records = merge_sort_runs(runs, spec=sort_spec, services=services)
             if kind in ('RepartitionOp', 'RandomShuffleOp'):
                 records = partition_records(records, spec=self._spec, rows=port._count, services=services)
             elif layout is not None:

@@ -6,12 +6,17 @@ from ..recovery_contract import identity
 
 PREFIX = 'relational-v1-'
 SQL_PREFIX = PREFIX + 'sql1-'
+KEY_SQL_SUFFIX = '-key-sql1'
 # Separate from the v3 Python row/codec window. The child imports Arrow and
 # DataFusion, processes only bounded keys/offsets, and never owns business rows.
 SQL_CHILD_RSS = 256 << 20
 SQL_PARENT_WINDOW = 64 << 20
 MAX_JOIN_DEPTH = 2
 REDUCER_MEMORY_FIELD = 'reducer_memory_v1'
+
+
+def needs_native_offsets(stage):
+    return stage.stage_id.startswith(SQL_PREFIX) or stage.stage_id.endswith(KEY_SQL_SUFFIX)
 
 
 def reducer_contract(spec):
