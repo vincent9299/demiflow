@@ -58,14 +58,15 @@ def recorded(path):
 def separate_stages(monkeypatch):
     """Keep a real inter-stage parking boundary in residency tests."""
     from dataclasses import replace
-    from demiflow.execution import dataflow_api
-    resolve = dataflow_api.resolve_runtime_policy
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
+    resolve = action_limits.resolve_runtime_policy
 
     def without_fusion(*args, **kwargs):
         policy, bounds = resolve(*args, **kwargs)
         return replace(policy, fusion=False), bounds
 
-    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', without_fusion)
+    monkeypatch.setattr(action_limits, 'resolve_runtime_policy', without_fusion)
 
 
 @pytest.mark.parametrize('workers,form', [(1, 'cell'), (4, 'cell'), (1, 'default'),

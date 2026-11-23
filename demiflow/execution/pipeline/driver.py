@@ -128,7 +128,7 @@ def execute_driver(request: PipelineDriverRequest) -> None:
 
     with ExitStack() as resources:
         from demiflow.planning.dataflow_policy import resolve_runtime_policy
-        from demiflow.execution.dataflow_api import run_dataset_action
+        from demiflow.execution.executors.dataflow_api import run_dataset_action
         provider = "local" if request.backend == "local" else "ray_core"
         runtime_policy, runtime_bounds = resolve_runtime_policy(
             dict(request.planning_policy), {}, provider=provider)

@@ -6,7 +6,7 @@ import json
 def committed_rows(run, action_id, reader_id, facts, *, require_final=True):
     from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from demiflow.execution.storage.objects import RunArtifactStore
-    from demiflow.execution.dataflow_replay import PublishedRecordReader
+    from demiflow.execution.outputs.replay import PublishedRecordReader
     from demiflow.execution.contracts.record_codec import document_limit
     from demiflow.execution.contracts.record_codec import _decode_record_document
     sealed = load_sealed_plan(run.directory, action_id, version='v3')

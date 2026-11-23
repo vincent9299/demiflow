@@ -257,7 +257,7 @@ def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds
         payload_ref = None if force_live else stage_payload(
             value, store=store, media_type=PAYLOAD_MEDIA, allow_live=live_binding is not None)
     if payload_ref is None:
-        from ..dataflow_thread_programs import marker
+        from demiflow.execution.seal.thread_programs import marker
         manifest['thread_attempt'] = marker(declaration.occurrence_id, code_identity)
     else:
         manifest['payload_ref'] = _artifact_json(payload_ref)
@@ -265,7 +265,7 @@ def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds
     raw = document(manifest, bounds.max_control_bytes)
     ref = store.put(iter([raw]), max_bytes=bounds.max_control_bytes, media_type=PROGRAM_MEDIA)
     if 'thread_attempt' in manifest:
-        from ..dataflow_thread_programs import register
+        from demiflow.execution.seal.thread_programs import register
         register(value, binding=live_binding, occurrence_id=declaration.occurrence_id,
                  max_entries=bounds.max_nodes, program_marker=manifest['thread_attempt'])
     return ref
@@ -342,7 +342,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
                           and node.kernel.kind == 'AsyncMapOp' and not config.get('task_batch_rows')))
         eligible = worker_mode == 'thread' and not config.get('task_batch_rows') and (
             thread_stream or force_live or node.kernel.kind == 'AsyncMapOp')
-        from ..dataflow_thread_programs import owner
+        from demiflow.execution.seal.thread_programs import owner
         ref = _stage_one_program(declaration, store=store, bounds=bounds,
             live_binding=owner(action) if eligible else None, force_live=force_live,
             shared_payload=shared_payloads.get(config.get("shared_actor", {}).get("owner")))
@@ -393,7 +393,7 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
     if 'thread_attempt' in manifest:
         if 'payload_ref' in manifest:
             raise DataflowError('CORRUPT_ARTIFACT', 'live program cannot also claim a pickle payload')
-        from ..dataflow_thread_programs import lookup
+        from demiflow.execution.seal.thread_programs import lookup
         value = lookup(manifest['thread_attempt'], binding=live_binding,
                        occurrence_id=manifest['occurrence_id'])
     else:
@@ -447,7 +447,7 @@ def verify_completed_live_program(ref, *, expected_pin, declaration, store, boun
     Current declarations are inspected, never instantiated or invoked.
     """
     from .business_sources import MAX_SOURCES, source_media
-    from ..dataflow_thread_programs import marker
+    from demiflow.execution.seal.thread_programs import marker
     manifest = _read_json(store, ref, max_bytes=bounds.max_control_bytes, media_type=PROGRAM_MEDIA)
     if type(manifest) is not dict:
         raise DataflowError('CORRUPT_ARTIFACT', 'completed live program manifest must be an object')
@@ -785,7 +785,7 @@ def verify_action_programs(action, graph, physical, sealed, *, store, bounds):
             if action.replaying:
                 pending.append((node, expected))
                 continue
-            from ..dataflow_thread_programs import owner
+            from demiflow.execution.seal.thread_programs import owner
             live_binding = owner(action)
         verify_dataflow_program(node.program_ref, expected_pin=expected, store=store,
                                 bounds=bounds, live_binding=live_binding)

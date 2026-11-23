@@ -1,4 +1,6 @@
 """Real ACKed output replays through original read credit before data decoding."""
+from functools import partial
+from demiflow.execution.dataflow_hosts import batch_business_commands
 from demiflow.execution.contracts import record_codec
 import json
 import os
@@ -28,7 +30,7 @@ def _fd_count(directory):
 @pytest.mark.parametrize('limited', [True, False])
 def test_final_ack_replay_admits_each_window_and_preserves_result(tmp_path, monkeypatch, limited):
     from demiflow.execution.action_driver import dataflow
-    from demiflow.execution.dataflow_terminals import TerminalSubscription
+    from demiflow.execution.outputs.terminals import TerminalSubscription
     from demiflow.execution.exchange import dataflow_bridge
     rows = [{'i': i, 'payload': 'x' * 6000} for i in range(20)]
     source = tmp_path / 'input.jsonl'
@@ -135,7 +137,7 @@ def test_checkpoint_prefix_counts_toward_limit(tmp_path,monkeypatch,count,overfl
 def test_original_published_blocks_probe_limit_without_decoding_payload(tmp_path, monkeypatch, limit):
     """A read-level negative proof over real ACKed blocks, with no new commit."""
     from demiflow.execution.action_driver import dataflow
-    from demiflow.execution.dataflow_terminals import TerminalSubscription
+    from demiflow.execution.outputs.terminals import TerminalSubscription
     from demiflow.execution.exchange import dataflow_bridge
     from demiflow.execution.run_journal import RunJournal
     captured = []
@@ -150,7 +152,7 @@ def test_original_published_blocks_probe_limit_without_decoding_payload(tmp_path
             assert data.from_items(rows).repartition(2).take_all() == rows
             before = run.journal.execution_commits('action-1')
     execution, publication = captured[-1]
-    subscription = TerminalSubscription(execution._bounds, execution._exchange, ())
+    subscription = TerminalSubscription(execution._bounds, execution._exchange, batch_commands=partial(batch_business_commands, ()))
     subscription.restore(publication, store=execution._store)
     decoded = []
     decode = record_codec._decode_record_document

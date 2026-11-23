@@ -18,6 +18,10 @@ from demiflow.execution.seal.program_pickle import load_payload, load_private_pa
 REPO = Path(__file__).resolve().parents[1]
 BASE = '3459559152ac51c6aa80d91b7b9c1f5f8ee5eee7'
 CARRIERS = {
+    'dataflow_api': ['_native_operation_factory'],
+    'dataflow_handles': ['RuntimeActionHandle', 'StoredMaterializedHandle'],
+    'stream': ['StreamStats'],
+    'dataflow_operator_observations': ['_ObservedTiming'],
     'legacy_queue': ['LegacyQueueHistoryDatasource'],
     'dataflow_inputs': ['InputMaterializedHandle'],
     'dataflow_acquisition_call': ['QueueSourceDeclaration', 'AcquisitionCall'],
@@ -26,7 +30,7 @@ CARRIERS = {
     'executors.base': ['DatasetExecutor'],
     'source_readers': ['LanceReader'],
     'requirements': ['FrozenRequirements', 'ResolvedWheel', 'PythonEnvironmentResolution'],
-    'request_limits': ['ObservedQueue'],
+    'request_limits': ['ObservedQueue', 'LatencySummary'],
     'dataset_commit': ['DatasetCommit', 'UncertainDatasetCommit'],
     'target': ['PipelineExecutionTarget'],
     'package_loader': ['BundlePackages'],
@@ -284,3 +288,19 @@ def test_relocated_commit_class_rejects_changed_body(original_carriers, monkeypa
     monkeypatch.setattr(method, '__code__', method.__code__.replace(co_consts=(*method.__code__.co_consts, 'changed')))
     with pytest.raises(DataflowError, match='audited definition'):
         load_payload([base64.b64decode(original_carriers['DatasetCommit'][0])])
+
+
+@pytest.mark.parametrize('change', ['code', 'globals'])
+def test_native_factory_old_global_requires_its_actual_definition(original_carriers, monkeypatch, change):
+    from types import FunctionType
+    from demiflow.execution.executors import dataflow_api
+    fn = dataflow_api._native_operation_factory
+    if change == 'code':
+        monkeypatch.setattr(fn, '__code__', fn.__code__.replace(co_consts=(*fn.__code__.co_consts, 'changed')))
+    else:
+        replacement = FunctionType(fn.__code__, dict(fn.__globals__), fn.__name__, fn.__defaults__)
+        replacement.__qualname__ = fn.__qualname__
+        monkeypatch.setattr(dataflow_api, '_native_operation_factory', replacement)
+    raw = base64.b64decode(original_carriers['_native_operation_factory'][0])
+    with pytest.raises(DataflowError, match='audited definition'):
+        load_payload([raw])

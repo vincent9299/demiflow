@@ -53,10 +53,10 @@ P1_ASSEMBLY_IMPORTS = {
 # Listing a module here does not say it can be deleted. It says: do not build new
 # code on it without deciding that on purpose. Value: today's importers.
 PRE_V3_MODULES = {
-    'demiflow.execution.stream': {
+    'demiflow.execution.journal.stream': {
         'demiflow.data.dataset',
         'demiflow.data.execution_contract',  # TYPE_CHECKING only: original StreamStats identity
-        'demiflow.execution.dataflow_stream',
+        'demiflow.execution.action_driver.stream',
         'demiflow.services.request_limits',
         'demiflow.execution.worker.graph_execution', 'demiflow.execution.worker.queue_transform'},
     'demiflow.execution.seal.plan_interpreter': {

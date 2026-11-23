@@ -504,7 +504,7 @@ CASES = {
 # entries never do this: they preflight the name and append a typed operation.
 def _direct_native(c, name):
     from demiflow.data.plan import LogicalPlan
-    from demiflow.execution.dataflow_api import make_native_operation
+    from demiflow.execution.executors.dataflow_api import make_native_operation
     base = c.rows()
     return dict(dataset=None, source=base._source, plan=LogicalPlan((make_native_operation(name, {}, bindings={}),)),
                 kind='take', arguments={'limit': 1})

@@ -5,11 +5,11 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-from .contracts.dataflow_errors import DataflowError
-from .action_driver.dataflow import execute_action
-from .kernels.async_instance import AsyncInstance
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.action_driver.dataflow import execute_action
+from demiflow.execution.kernels.async_instance import AsyncInstance
 from demiflow.services.request_limits import ServiceStopped
-from .stream import StreamStats
+from demiflow.execution.journal.stream import StreamStats
 
 
 def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
@@ -22,9 +22,9 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
     for hook in (on_progress, on_drain):
         if hook is not None and not callable(hook):
             raise TypeError('stream hooks must be callable')
-    from .dataflow_api import resolve_action_runtime
+    from demiflow.execution.action_driver.services import resolve_action_runtime
     policy, bounds = resolve_action_runtime(request)
-    from .plan_capture import current_capture
+    from demiflow.execution.plan_capture import current_capture
     capture = current_capture()
     if capture is not None:
         # Do not enter callback ownership: its finally block invokes on_drain.
@@ -40,21 +40,8 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
     def observe():
         if handle is None:
             return 0
-        execution = handle._execution
-        from demiflow.execution.journal.dataflow_operator_observations import stream_observations
-        stream_observations(execution, stats)
-        if getattr(execution, '_stream_lance', None) is not None:
-            stats.outputs = execution._stream_lance.outputs
-        total = 0
-        for node in execution._graph.nodes:
-            counters = [value for (occ, _), value in execution._node_metrics.items()
-                        if occ == node.occurrence_id]
-            if not counters:
-                continue
-            rows_in = sum(value['rows_input'] for value in counters)
-            rows_out = sum(value['rows_output'] for value in counters)
-            total += rows_in + rows_out
-        return total
+        from demiflow.execution.journal.run_telemetry import observe_stream_progress
+        return observe_stream_progress(handle._execution, stats)
 
     def report_progress():
         nonlocal reported
@@ -92,7 +79,7 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
             if total != previous:
                 tick, previous = time.monotonic(), total
             elif stall_timeout is not None and time.monotonic() - tick >= stall_timeout:
-                from ..errors import StallError
+                from demiflow.errors import StallError
                 raise StallError('unified stream made no observed progress')
             if on_progress is not None and log_every == 0:
                 callbacks.resolve(on_progress(stats))
@@ -132,11 +119,11 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
 
         if handle is not None:
             def record_metadata():
-                from .dataflow_api import record_execution_metadata
+                from demiflow.execution.journal.run_telemetry import record_execution_metadata
                 record_execution_metadata(request, handle._execution)
 
             def finish_audit():
-                from .dataflow_model_observations import finish_journal_audit
+                from demiflow.execution.dataflow_model_observations import finish_journal_audit
                 finish_journal_audit(handle._execution, stats)
 
             cleanup(observe)

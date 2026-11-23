@@ -9,7 +9,7 @@ from demiflow import data
 @pytest.fixture
 def receipts(monkeypatch):
     """Observe actual engine receipts without changing public writer returns."""
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.executors import dataflow_api
     original = dataflow_api.run_dataset_action
     observed = []
     def run(request):

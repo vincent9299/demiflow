@@ -6,7 +6,7 @@ from test_u3_graph_local import _execute, _graph_spec, _stream_map
 
 @pytest.mark.parametrize('business_failure', [False, True])
 def test_graph_keeps_primary_failure_when_final_metadata_fails(tmp_path, monkeypatch, business_failure):
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.journal import run_telemetry as dataflow_api
     original = dataflow_api.record_execution_metadata
     observed = []
 

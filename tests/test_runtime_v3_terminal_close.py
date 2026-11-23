@@ -35,7 +35,7 @@ def test_closed_subscription_acknowledges_late_real_output(tmp_path, monkeypatch
     """Delay one genuine terminal envelope past close, without forging output."""
     import time
     from dataclasses import replace
-    from demiflow.execution.dataflow_terminals import TerminalSubscription
+    from demiflow.execution.outputs.terminals import TerminalSubscription
     from demiflow.execution.contracts.dataflow_codec import _thaw_json
     from demiflow.execution.contracts.dataflow_errors import DataflowError
 
@@ -113,7 +113,7 @@ def test_closed_subscription_acknowledges_late_real_output(tmp_path, monkeypatch
 @pytest.mark.parametrize('durability', ['ephemeral', 'durable'])
 def test_native_input_prefetch_respects_concurrency_without_changing_durable_windows(concurrency, durability):
     from demiflow.execution.contracts.dataflow import ActionRequest
-    from demiflow.execution.dataflow_api import _CompileContext
+    from demiflow.execution.executors.dataflow_api import _CompileContext
     from demiflow.execution.run_context import RunAction
     from demiflow.operator_llm.parser import parse_prompt_pack
     from demiflow.planning.dataflow_compile import lower_action

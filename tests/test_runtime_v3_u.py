@@ -82,7 +82,7 @@ def _reset_record(monkeypatch):
     # This gate proves public delegation only. Scope recording call boundaries
     # to each test, keeping real DTOs and modules installed for other gates.
     import _runtime_v3_u_fakes as recording
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.executors import dataflow_api
     real_make = dataflow_api.make_action_request
     def request(*args, **kwargs):
         recorded = recording.make_action_request(*args, **kwargs)
@@ -635,7 +635,7 @@ def test_u036(monkeypatch):
     assert _ds([{"x": 1}, {"x": 2}]).take_all(limit=2) == [{"x": 1}, {"x": 2}]
     assert RECORD.request_kinds() == ["take_all"]
     assert RECORD.last_request().arguments == {"limit": 2}
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.executors import dataflow_api
     overflow = ValueError("Dataset contains more than the take_all limit of 2 rows")
     def reject(request):
         assert request.kind == "take_all"

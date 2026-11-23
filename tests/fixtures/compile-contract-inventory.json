@@ -363,7 +363,7 @@
     "planning/dataflow_configuration.py"
    ],
    "node_id": [
-    "execution/dataflow_models.py"
+    "execution/operator_bindings/dataflow_models.py"
    ],
    "num_blocks": [
     "execution/worker/terminal_blocks.py",
@@ -372,10 +372,10 @@
     "planning/dataflow_compile.py"
    ],
    "occurrence_id": [
-    "execution/dataflow_models.py",
     "execution/kernels/dataflow.py",
     "execution/kernels/lance_keys.py",
     "execution/kernels/relational_region.py",
+    "execution/operator_bindings/dataflow_models.py",
     "planning/dataflow_configuration.py"
    ],
    "on": [
@@ -425,8 +425,8 @@
    ],
    "private_journal": [
     "execution/dataflow_embedding_journal.py",
-    "execution/dataflow_models.py",
     "execution/dataflow_prompt_journal.py",
+    "execution/operator_bindings/dataflow_models.py",
     "planning/dataflow_models.py"
    ],
    "program": [
@@ -446,7 +446,7 @@
     "execution/kernels/relational.py"
    ],
    "response_format": [
-    "execution/dataflow_models.py"
+    "execution/operator_bindings/dataflow_models.py"
    ],
    "right_on": [
     "execution/kernels/operator.py",
@@ -455,9 +455,9 @@
    ],
    "routes": [
     "execution/dataflow_model_observations.py",
-    "execution/dataflow_models.py",
     "execution/dataflow_offline.py",
-    "execution/dataflow_routed_prompt.py"
+    "execution/dataflow_routed_prompt.py",
+    "execution/operator_bindings/dataflow_models.py"
    ],
    "run_id": [
     "execution/hosts/execution_recovery.py",
@@ -2569,7 +2569,7 @@
     "inputs": [
      "main"
     ],
-    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+    "kernel_symbol": "demiflow.execution.operator_bindings.dataflow_models:bind_model_services"
    },
    "AsyncMapOp": {
     "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
@@ -2611,7 +2611,7 @@
     "inputs": [
      "main"
     ],
-    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+    "kernel_symbol": "demiflow.execution.operator_bindings.dataflow_models:bind_model_services"
    },
    "FilterOp": {
     "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
@@ -2653,7 +2653,7 @@
     "inputs": [
      "main"
     ],
-    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+    "kernel_symbol": "demiflow.execution.operator_bindings.dataflow_models:bind_model_services"
    },
    "PredictOp": {
     "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
@@ -2773,7 +2773,7 @@
     "inputs": [
      "main"
     ],
-    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+    "kernel_symbol": "demiflow.execution.operator_bindings.dataflow_models:bind_model_services"
    },
    "decode_document": {
     "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
@@ -2794,7 +2794,7 @@
     "inputs": [
      "main"
     ],
-    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+    "kernel_symbol": "demiflow.execution.operator_bindings.dataflow_models:bind_model_services"
    },
    "encode_image": {
     "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
@@ -2836,7 +2836,7 @@
     "inputs": [
      "main"
     ],
-    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+    "kernel_symbol": "demiflow.execution.operator_bindings.dataflow_models:bind_model_services"
    },
    "queue_ack": {
     "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
@@ -3017,67 +3017,67 @@
   },
   "registry.terminals": {
    "aggregate": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:collect_rows",
     "result_kind": "scalar"
    },
    "collect_summary": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:collect_rows",
     "result_kind": "rows"
    },
    "columns": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:inspect_result",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:inspect_result",
     "result_kind": "columns"
    },
    "count": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:collect_rows",
     "result_kind": "scalar"
    },
    "iter_batches": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:iterate_batches",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:iterate_batches",
     "result_kind": "batch_iterator"
    },
    "iter_rows": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:iterate_rows",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:iterate_rows",
     "result_kind": "row_iterator"
    },
    "materialize": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:materialized_handle",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:materialized_handle",
     "result_kind": "materialized"
    },
    "run_stream": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:iterate_rows",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:iterate_rows",
     "result_kind": "row_iterator"
    },
    "schema": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:inspect_result",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:inspect_result",
     "result_kind": "schema"
    },
    "size_bytes": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:inspect_result",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:inspect_result",
     "result_kind": "scalar"
    },
    "take": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:collect_rows",
     "result_kind": "rows"
    },
    "take_all": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:collect_rows",
     "result_kind": "rows"
    },
    "take_batch": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:collect_rows",
     "result_kind": "batches"
    },
    "write_datasink": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:write_result",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:write_result",
     "result_kind": "write_result"
    },
    "write_file": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:write_result",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:write_result",
     "result_kind": "write_result"
    },
    "write_lance": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:write_result",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:write_result",
     "result_kind": "write_result"
    }
   },

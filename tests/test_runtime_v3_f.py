@@ -211,7 +211,7 @@ def _install_fakes():
     df = _make_module("demiflow.execution.action_driver.dataflow")
     df.execute_action = _fake_execute_action
 
-    api = _make_module("demiflow.execution.dataflow_api")
+    api = _make_module('demiflow.execution.executors.dataflow_api')
     api.make_action_request = _fake_make_action_request
     api.run_dataset_action = _fake_run_dataset_action
 
@@ -234,7 +234,7 @@ from demiflow.execution.sources.materialized_input import build_input_handle, In
 def _reset_state(monkeypatch):
     """These are adapter unit tests; fake only the called cross-module seam."""
     import demiflow.execution.action_driver.dataflow as engine
-    import demiflow.execution.dataflow_api as api
+    import demiflow.execution.executors.dataflow_api as api
     import demiflow.planning.dataflow_policy as policy
     import demiflow.planning.dataflow_compile as compiler
     import demiflow.execution.pipeline.driver as driver
@@ -553,7 +553,7 @@ def test_graph_request_uses_its_configured_executor_once(fake_action, monkeypatc
 # ---------------------------------------------------------------------------
 def test_f020():
     _binding_assertion()
-    source = (TREE / "demiflow/execution/stream.py").read_text()
+    source = (TREE / 'demiflow/execution/journal/stream.py').read_text()
     assert "prefix_rows" not in source
     assert "stage.prefix is not None" not in source
     assert "_apply_plan" not in source

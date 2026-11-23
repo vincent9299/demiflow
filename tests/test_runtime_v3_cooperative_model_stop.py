@@ -179,7 +179,7 @@ def test_native_paid_stop_without_cut_cannot_invent_recovery(tmp_path, server):
 
 def test_handle_requires_original_run_cancel_fact_to_drain(tmp_path):
     from demiflow.execution.run_context import RunContext
-    from demiflow.execution.dataflow_handles import RuntimeActionHandle
+    from demiflow.execution.outputs.dataflow_handles import RuntimeActionHandle
     class EndInspection(Exception):pass
     with pytest.raises(EndInspection):
         with RunContext.start(tmp_path/'run') as run:

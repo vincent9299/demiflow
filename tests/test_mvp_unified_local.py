@@ -72,7 +72,7 @@ def test_workbench_unified_take_and_count_read_back_committed_handle(tmp_path):
 
 def test_unified_readback_is_single_committed_handle_authority(tmp_path):
     from demiflow.data.sources import MaterializedSource
-    from demiflow.execution.dataflow_handles import StoredMaterializedHandle
+    from demiflow.execution.outputs.dataflow_handles import StoredMaterializedHandle
 
     def double(row):
         return {**row, "x": row["x"] * 2}

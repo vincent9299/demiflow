@@ -297,7 +297,7 @@ _install_fake_module(
     InputMaterializedHandle=FakeInputHandle,
 )
 _install_fake_module(
-    "demiflow.execution.dataflow_api",
+    'demiflow.execution.executors.dataflow_api',
     make_action_request=ENGINE.make_action_request,
     run_dataset_action=ENGINE.run_dataset_action,
     explain_dataset=ENGINE.explain_dataset,
@@ -328,7 +328,7 @@ _assert_tree_binding()
 @pytest.fixture(autouse=True)
 def _reset_engine(monkeypatch):
     """Unit-test the Ray adapter against explicit facade seams, never sys.modules."""
-    import demiflow.execution.dataflow_api as api
+    import demiflow.execution.executors.dataflow_api as api
     import demiflow.execution.sources.materialized_input as inputs
     import demiflow.execution.executors.base as input_runtime
     import demiflow.planning.dataflow_policy as policy

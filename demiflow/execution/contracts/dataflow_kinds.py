@@ -74,7 +74,7 @@ _UNARY = "demiflow.execution.kernels.dataflow:invoke_unary"
 _BATCH = "demiflow.execution.kernels.dataflow:invoke_batch"
 _ORDER = "demiflow.execution.kernels.ordering:build_sort_runs"
 _REPARTITION = "demiflow.execution.exchange.dataflow_channels:repartition_records"
-_MODEL_KERNEL = "demiflow.execution.dataflow_models:bind_model_services"
+_MODEL_KERNEL = "demiflow.execution.operator_bindings.dataflow_models:bind_model_services"
 
 
 @dataclass(frozen=True)

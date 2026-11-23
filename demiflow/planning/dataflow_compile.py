@@ -1001,3 +1001,10 @@ def revalidate_action(request: ActionRequest, *, bounds: Bounds) -> CompiledData
     """
     from .dataflow_configuration import _HISTORY_REVALIDATION
     return lower_action(request, bounds=bounds, _configuration_purpose=_HISTORY_REVALIDATION)
+
+
+def explain_action(request, *, inputs, bounds, policy):
+    """Compile the supplied declaration and report unresolved recovery domains."""
+    from demiflow.planning.dataflow_place import infer_recovery
+    compiled = lower_action(request, bounds=bounds, inputs=inputs)
+    return infer_recovery(compiled.graph, (), policy=policy)

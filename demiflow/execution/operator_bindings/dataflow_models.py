@@ -1,6 +1,8 @@
 """Bind worker model instances to their authorized effect and result-cache services."""
 from __future__ import annotations
 
+from demiflow.execution.journal.dataflow_usage import empty_usage
+
 
 from typing import Mapping
 
@@ -107,3 +109,27 @@ def bind_model_services(instance: CallableInstance, spec: KernelSpec, *, service
     else:
         raise DataflowError('UNSUPPORTED_CAPABILITY', 'Unknown model kernel kind: ' + str(kind))
     return instance
+
+
+def worker_prompt_usage(kernel, *, final=False):
+    from demiflow.operator_llm.runtime import PromptActor
+    from demiflow.operator_llm.routed import RoutedPromptActor
+    from demiflow.data.result_cache import CacheCall
+    if getattr(kernel, '_closed', False) and not final:
+        return getattr(kernel, '_prompt_usage', None)
+    totals, observed = empty_usage(), False
+    for instance in getattr(kernel, '_instances', ()):
+        owner = kernel._state_owner(instance)
+        if isinstance(owner, CacheCall):
+            owner = owner.fn
+        owners = owner.actors.values() if isinstance(owner, RoutedPromptActor) else (owner,)
+        for child in owners:
+            if not isinstance(child, PromptActor):
+                continue
+            observed = True
+            for key, value in child._runtime.coordinator.usage().to_dict().items():
+                totals[key] += value
+    if observed:
+        kernel._prompt_usage = totals
+        return totals
+    return None

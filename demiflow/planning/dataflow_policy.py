@@ -325,3 +325,40 @@ def parse_native_resources(value):
         if not valid:
             raise ValueError('native_resources ' + name + ' must be finite and positive')
     return tuple(sorted(value.items()))
+
+
+PREFLIGHT_BOUNDS = Bounds(
+    max_nodes=4096, max_edges=16384, max_partitions=4096, max_depth=64,
+    max_control_bytes=65536, max_row_bytes=16 * 1024 * 1024,
+    max_batch_bytes=64 * 1024 * 1024, max_resident_bytes=1024 * 1024 * 1024,
+    max_spill_bytes=1024 * 1024 * 1024, max_state_bytes=256 * 1024 * 1024,
+    max_pending_events=1024, max_open_files=256, max_output_rows=1000000,
+    timeout_ms=60000)
+
+
+def explain_policy(provider, options, *, action_kinds):
+    """Validate explain declarations without source I/O or runtime admission."""
+    if provider not in ("local", "ray_core"):
+        raise DataflowError("INVALID_CONTRACT", "unknown provider: " + str(provider))
+    metadata_fields = {'action_kind', 'terminal_category', 'terminal_native_options',
+                       'source_parallelism_cap', 'terminal_parallelism_cap'}
+    if not isinstance(options, Mapping):
+        raise DataflowError('INVALID_CONTRACT', 'explain options must be a mapping')
+    # Executor plan() carries declaration metadata alongside runtime policy.
+    # Only these closed metadata fields are separated; unknown policy keys still
+    # pass to the canonical validator and fail rather than being swallowed.
+    runtime_options = {key: value for key, value in options.items() if key not in metadata_fields}
+    policy, bounds = resolve_runtime_policy(runtime_options, {}, provider=provider)
+    action_kind = options.get('action_kind', 'collect_summary')
+    if type(action_kind) is not str or action_kind not in action_kinds:
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'unknown explain action kind')
+    category = options.get('terminal_category', 'action')
+    if type(category) is not str or category not in ('action', 'sink'):
+        raise DataflowError('INVALID_CONTRACT', 'unknown explain terminal category')
+    for name in ('source_parallelism_cap', 'terminal_parallelism_cap'):
+        value = options.get(name)
+        if value is not None and (type(value) is not int or not 1 <= value <= bounds.max_partitions):
+            raise DataflowError('INVALID_CONTRACT', name + ' must be within the partition budget')
+    if options.get('terminal_native_options') is not None:
+        normalize_native_options(options['terminal_native_options'], operation_kind=action_kind)
+    return policy, bounds

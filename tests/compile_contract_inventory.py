@@ -28,7 +28,7 @@ BATCH_MEMBERSHIP = 'execution/kernels/batch_membership.py'
 TERMINAL_BLOCKS = 'execution/worker/terminal_blocks.py'
 SEAL = 'execution/seal/plan.py'
 KINDS = 'execution/contracts/dataflow_kinds.py'
-API = 'execution/dataflow_api.py'
+API = 'execution/executors/dataflow_api.py'
 SDK = 'data/dataset.py'
 DECLARATION = 'planning/dataflow_declaration.py'
 # An SDK entry preflights through the pure validator, which returns nothing. The node

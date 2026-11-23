@@ -156,7 +156,7 @@ def test_hook_failure_never_substitutes_for_physical_exit(tmp_path, monkeypatch)
 
 def test_live_streaming_scope_is_attempt_only_and_releases_registry(tmp_path, monkeypatch):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution import dataflow_thread_programs as live
+    from demiflow.execution.seal import thread_programs as live
     from demiflow.execution.seal.plan import _read_json, PROGRAM_MEDIA
     seen, shared = [], []
     prepare = DataflowExecution.prepare
@@ -206,7 +206,7 @@ def test_plain_task_nonpickleable_program_does_not_become_shared(tmp_path):
 
 
 def test_registry_rejects_other_attempt_and_missing_entry():
-    from demiflow.execution import dataflow_thread_programs as live
+    from demiflow.execution.seal import thread_programs as live
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     binding = {'run_id': 'run', 'action_id': 'action', 'attempt': 1, 'fence': 'fence'}
     value = object()
@@ -290,7 +290,7 @@ def test_live_program_still_checks_real_code_pin(tmp_path):
     from demiflow.execution.dataflow_authority import DriverArtifactPort
     from demiflow.execution.seal.plan import (_stage_one_program, verify_dataflow_program,
         _read_json, PROGRAM_MEDIA)
-    from demiflow.execution.dataflow_thread_programs import owner, release
+    from demiflow.execution.seal.thread_programs import owner, release
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     _, bounds = resolve_runtime_policy({}, {}, provider='local')
     def original(row): return row
@@ -397,7 +397,7 @@ def test_live_manifest_and_plan_identity_exclude_attempt_fence_and_token(tmp_pat
     from demiflow.execution.storage.objects import RunArtifactStore
     from demiflow.execution.dataflow_authority import DriverArtifactPort
     from demiflow.execution.seal.plan import _stage_one_program, _read_json, PROGRAM_MEDIA
-    from demiflow.execution import dataflow_thread_programs as live
+    from demiflow.execution.seal import thread_programs as live
     from demiflow.execution.contracts.dataflow_codec import compute_graph_digest, compute_physical_digest
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from test_runtime_v3_c import _graph, _physical

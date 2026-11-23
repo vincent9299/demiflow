@@ -70,12 +70,13 @@ def test_memory_option_tightens_defaults_without_erasing_explicit_limits():
 def _require_separate_stages(monkeypatch):
     # These tests exercise parking/resuming an unchanged sealed plan. Optional
     # pure-kernel fusion can remove the very phase boundary being tested.
-    from demiflow.execution import dataflow_api
-    original = dataflow_api.resolve_runtime_policy
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
+    original = action_limits.resolve_runtime_policy
     def resolve(*args, **kwargs):
         policy, bounds = original(*args, **kwargs)
         return replace(policy, fusion=False), bounds
-    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', resolve)
+    monkeypatch.setattr(action_limits, 'resolve_runtime_policy', resolve)
 
 
 @pytest.mark.parametrize('workers', [1, 2])
@@ -145,8 +146,9 @@ def test_concurrent_profile_must_fit_before_any_upstream_launch(tmp_path, monkey
 
 
 def test_real_source_split_coverage_with_fewer_active_workers(tmp_path, monkeypatch):
-    from demiflow.execution import dataflow_api
-    original = dataflow_api.resolve_runtime_policy
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
+    original = action_limits.resolve_runtime_policy
     seen = []
     def policy(*args, **kwargs):
         policy, bounds = original(*args, **kwargs)
@@ -156,7 +158,7 @@ def test_real_source_split_coverage_with_fewer_active_workers(tmp_path, monkeypa
         result = prepare(execution)
         seen.append(execution._physical)
         return result
-    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', policy)
+    monkeypatch.setattr(action_limits, 'resolve_runtime_policy', policy)
     monkeypatch.setattr(DataflowExecution, 'prepare', capture)
     with RunContext.start(tmp_path/'run'), data.local_execution(workers=2):
         rows = _three_stage_dataset().take_all()

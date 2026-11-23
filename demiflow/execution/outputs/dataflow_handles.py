@@ -275,7 +275,7 @@ class RuntimeActionHandle:
 
     def _deliver(self, records, values):
         from demiflow.execution.outputs.arrow_rows import PublishedArrowRows
-        from demiflow.execution.dataflow_terminals import _record_row
+        from demiflow.execution.outputs.terminals import _record_row
         while records:
             record = records.popleft()
             if isinstance(record, PublishedArrowRows):

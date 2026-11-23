@@ -105,7 +105,7 @@ def test_offline_worker_cannot_supply_an_unverified_port():
 
 def test_prompt_observation_replay_and_new_boot_do_not_duplicate_accounting():
     from types import SimpleNamespace
-    from demiflow.execution.dataflow_usage import empty_usage, observe_prompt_usage, publish_prompt_usage
+    from demiflow.execution.journal.dataflow_usage import empty_usage, observe_prompt_usage, publish_prompt_usage
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     execution, executor = SimpleNamespace(), SimpleNamespace()
     counts = {**empty_usage(), 'provider_requests_started': 2}

@@ -7,7 +7,7 @@ from demiflow.execution.contracts.dataflow import ArtifactRef, thaw_record_value
 if (Path(demiflow.__file__).parent / 'execution/storage/streams.py').is_file():
     from demiflow.execution.storage.streams import _ChunkStream
 else:
-    from demiflow.execution.dataflow_handles import _ChunkStream
+    from demiflow.execution.outputs.dataflow_handles import _ChunkStream
 if (Path(demiflow.__file__).parent / 'execution/storage/segments.py').is_file():
     from demiflow.execution.storage.segments import segment_refs
 else:

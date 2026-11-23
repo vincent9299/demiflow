@@ -366,7 +366,7 @@ def test_same_function_remains_two_real_invocations(tmp_path):
 def test_recipe_alias_validation_checks_both_directions(tmp_path, original_shared, current_shared, allowed):
     from demiflow.execution.contracts.dataflow import ActionRequest
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.dataflow_api import _CompileContext
+    from demiflow.execution.executors.dataflow_api import _CompileContext
     from demiflow.execution.run_context import RunAction
     from demiflow.execution.seal.program_identity import validate_shared_actor_binding
     from demiflow.planning.dataflow_compile import lower_action
@@ -411,7 +411,7 @@ def test_alias_admission_never_reads_source_or_constructs_factory(tmp_path, monk
     from demiflow.data.sources import ItemsSource, IterableSource, SqlSource
     from demiflow.execution.contracts.dataflow import ActionRequest
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.dataflow_api import _CompileContext
+    from demiflow.execution.executors.dataflow_api import _CompileContext
     from demiflow.execution.run_context import RunAction
     from demiflow.execution.seal.program_identity import validate_shared_actor_binding
     from demiflow.planning.dataflow_compile import lower_action
@@ -462,7 +462,7 @@ def test_alias_admission_never_reads_source_or_constructs_factory(tmp_path, monk
 def test_passive_actor_relation_matches_multi_input_occurrences(tmp_path, monkeypatch, shape, changed):
     from demiflow.execution.contracts.dataflow import ActionRequest
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.dataflow_api import _CompileContext
+    from demiflow.execution.executors.dataflow_api import _CompileContext
     from demiflow.execution.run_context import RunAction
     from demiflow.execution.seal.program_identity import validate_shared_actor_binding
     from demiflow.planning.dataflow_compile import lower_action

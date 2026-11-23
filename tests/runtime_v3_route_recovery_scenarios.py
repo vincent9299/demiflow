@@ -386,7 +386,7 @@ def _first_native_action(fx,dataset,run,routing,evidence):
     """
     from dataclasses import replace
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_api import make_action_request
+    from demiflow.execution.executors.dataflow_api import make_action_request
     from demiflow.execution.action_driver.services import make_driver_services
     from demiflow.execution.run_context import RunContext
     from demiflow.planning.dataflow_compile import lower_action
@@ -398,7 +398,7 @@ def _first_native_action(fx,dataset,run,routing,evidence):
     from demiflow.execution.dataflow_artifacts import stage_runtime_bundle
     from demiflow.execution.contracts.dataflow_codec import compute_physical_digest
     from runtime_v3_residency_scenarios import _provider
-    from demiflow.execution.dataflow_terminals import open_terminal,collect_rows
+    from demiflow.execution.outputs.terminals import open_terminal, collect_rows
     request=make_action_request(dataset._executor,dataset._source,dataset._plan,kind='take_all',arguments={'limit':None})
     policy,bounds=resolve_runtime_policy({'worker_mode':'process'},run.limits,provider=fx.provider)
     policy=replace(policy,fusion=False,default_partitions=1,max_replicas=2)

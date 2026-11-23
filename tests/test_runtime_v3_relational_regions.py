@@ -35,7 +35,7 @@ def test_region_planner_preserves_legacy_disable_isolation_and_budget():
     from dataclasses import replace
     import pytest
     from demiflow.execution.contracts.dataflow import ActionRequest
-    from demiflow.execution.dataflow_api import _CompileContext
+    from demiflow.execution.executors.dataflow_api import _CompileContext
     from demiflow.execution.run_context import RunAction
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_place import partition_stages

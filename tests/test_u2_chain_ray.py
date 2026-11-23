@@ -106,7 +106,7 @@ def _commit_shape(run):
 def _k6_shapes(run, execution, expected):
     """Verify native cuts/retained ACK proofs and every ordered published prefix."""
     import hashlib
-    from demiflow.execution.dataflow_replay import PublishedRecordReader
+    from demiflow.execution.outputs.replay import PublishedRecordReader
     from demiflow.execution.contracts.record_codec import document_limit
     from demiflow.execution.contracts.record_codec import _decode_record_document
     shapes, inherited, prior_ids, growth = [], {}, [], []
@@ -170,7 +170,7 @@ def _k6_shapes(run, execution, expected):
 # ---------------- SEM: same plan/source, two providers, identical semantics ----------------
 
 def test_sem_local_ray_equivalence(tmp_path, ray_cluster, monkeypatch):
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.executors import dataflow_api
     original = dataflow_api.execute_action
     executions = []
     def observe(request, **kwargs):

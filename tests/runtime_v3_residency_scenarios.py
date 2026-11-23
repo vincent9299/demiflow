@@ -52,15 +52,16 @@ async def _batch(rows):
 @contextmanager
 def _provider(fx, *, workers=4, fusion=True):
     from demiflow import data
-    from demiflow.execution import dataflow_api
-    resolve = dataflow_api.resolve_runtime_policy
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
+    resolve = action_limits.resolve_runtime_policy
     def policy(options, limits, **kwargs):
         if fx.provider == 'local':
             options = {**options, 'worker_mode':'process'}
         value, bounds = resolve(options, limits, **kwargs)
         return replace(value, fusion=fusion), bounds
     with patch.dict(os.environ, {'DEMIFLOW_RESOURCE_ROOT': str(fx.root/'capacity')}), \
-            patch.object(dataflow_api, 'resolve_runtime_policy', policy):
+            patch.object(action_limits, 'resolve_runtime_policy', policy):
         if fx.provider == 'local':
             from demiflow.data.api import _use_executor
             from demiflow.execution.executors.local import LocalDatasetExecutor

@@ -170,7 +170,8 @@ def test_registration_rejects_wrong_frames_without_hiding_protocol_failure(messa
 def test_owned_worker_loss_before_registration_preserves_recovery_admission(tmp_path, monkeypatch, after_ack):
     from dataclasses import replace
     from demiflow import data
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
     from demiflow.execution.run_context import RunContext
     from runtime_v3_owned_crash import assert_released, process_records
     from runtime_v3_graph_history import capture_acks, assert_acks_retained
@@ -183,13 +184,13 @@ def test_owned_worker_loss_before_registration_preserves_recovery_admission(tmp_
 
     # Keep real separate stages so a later bootstrap can fail after a real
     # acknowledged phase, without manufacturing a recoverable journal record.
-    resolve = dataflow_api.resolve_runtime_policy
+    resolve = action_limits.resolve_runtime_policy
 
     def unfused(*args, **kwargs):
         policy, bounds = resolve(*args, **kwargs)
         return replace(policy, fusion=False), bounds
 
-    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', unfused)
+    monkeypatch.setattr(action_limits, 'resolve_runtime_policy', unfused)
     initialize, activate = LocalHostEndpoint.__init__, LocalHostEndpoint.activate
     paused = 'import time; time.sleep(30)'
     deaths, actions = [], []

@@ -108,9 +108,9 @@ SCENARIO_MODULES: dict[str, tuple[tuple[str, str], ...]] = {
     "multiworker_barrier": (("demiflow.execution.checkpoint.coordinator", "D"), ("demiflow.execution.worker.dataflow_execution", "B")),
     "route_recovery": (("demiflow.execution.exchange.dataflow_state", "X"), ("demiflow.execution.checkpoint.coordinator", "D")),
     "commit_crash_matrix": (("demiflow.execution.checkpoint.coordinator", "D"), ("demiflow.execution.commit", "D")),
-    "model_effect_recovery": (("demiflow.execution.dataflow_models", "M"), ('demiflow.execution.operator_bindings.dataflow_model_journal', "M")),
+    "model_effect_recovery": (('demiflow.execution.operator_bindings.dataflow_models', "M"), ('demiflow.execution.operator_bindings.dataflow_model_journal', "M")),
     "actor_state_lifecycle": (("demiflow.execution.kernels.operator", "K"), ("demiflow.execution.worker.runtime", "B")),
-    "cache_materialize": (("demiflow.execution.dataflow_models", "M"), ("demiflow.execution.dataflow_handles", "T")),
+    "cache_materialize": (('demiflow.execution.operator_bindings.dataflow_models', "M"), ('demiflow.execution.outputs.dataflow_handles', "T")),
     "queue_full_business": (("demiflow.execution.dataflow_queue", "Q"), ("demiflow.execution.queue_execution", "Q")),
     "memory_peak": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.execution.payload_limits", "E")),
     "disk_gc": (("demiflow.execution.exchange.dataflow_channels", "X"), ("demiflow.execution.storage.objects", "H")),
@@ -121,7 +121,7 @@ SCENARIO_MODULES: dict[str, tuple[tuple[str, str], ...]] = {
     "history_identity": (("demiflow.execution.dataflow_history", "W"), ("demiflow.execution.recovery_identity", "W")),
     "workbench_real_plan": (("demiflow.workbench.runs.facts", "W"), ("demiflow.workbench.graph.model", "W")),
     "product_regression": (("demiflow.workbench.runs.manager", "W"), ("demiflow.workbench.graph.model", "W")),
-    "bounded_terminal": (("demiflow.execution.dataflow_terminals", "T"), ("demiflow.execution.action_driver.dataflow", "E")),
+    "bounded_terminal": (('demiflow.execution.outputs.terminals', "T"), ("demiflow.execution.action_driver.dataflow", "E")),
     "artifact_security": (("demiflow.execution.dataflow_artifacts", "H"), ("demiflow.execution.storage.objects", "H")),
     "performance": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.execution.scheduler.placement", "E")),
     "all_regressions": (("demiflow.execution.action_driver.dataflow", "E"),),
@@ -387,7 +387,7 @@ class _ExecuteActionRecorder:
 
         wrapped._runtime_v3_observe = observe
         aliases = [importlib.import_module(name) for name in
-                   ("demiflow.execution.dataflow_api", "demiflow.execution.dataflow_stream")]
+                   ('demiflow.execution.executors.dataflow_api', 'demiflow.execution.action_driver.stream')]
         self._module.execute_action = wrapped
         for api in aliases:
             if getattr(api, "execute_action", None) is self._original:
@@ -1031,7 +1031,7 @@ def _s_incremental_first_row(fx: RuntimeV3Fixture, fault: str | None) -> dict[st
 def _s_three_exchange_modes(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
     from dataclasses import replace
     from pytest import MonkeyPatch
-    from demiflow.execution import dataflow_api as api
+    from demiflow.execution.executors import dataflow_api as api
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     resolve, prepare = api.resolve_runtime_policy, DataflowExecution.prepare
     observed, results = [], {}

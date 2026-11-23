@@ -116,7 +116,7 @@ def declaration(operation, actor):
         'max_rows','max_row_bytes','max_key_bytes','max_index_bytes')}
     value['key'] = list(actor.key) if isinstance(actor.key,tuple) else [actor.key]
     from demiflow.execution.contracts.record_schema import encode_schema
-    from .dataflow_api import _PREFLIGHT_BOUNDS
+    from demiflow.planning.dataflow_policy import PREFLIGHT_BOUNDS as _PREFLIGHT_BOUNDS
     value['schema'] = encode_schema(actor.schema,bounds=_PREFLIGHT_BOUNDS).hex()
     value['max_batch'] = operation.max_batch
     return value

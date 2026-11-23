@@ -2,7 +2,7 @@
 
 
 def graph_action_request(graph_spec, executor):
-    from ..dataflow_api import make_action_request
+    from demiflow.execution.executors.dataflow_api import make_action_request
     from ...data.plan import LogicalPlan
     from ...planning.dataflow_graph_adapter import translate_graph
     source = translate_graph(graph_spec)

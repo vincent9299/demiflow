@@ -1,5 +1,7 @@
 """Live incremental parking with real Dataset workers and native cut receipts."""
 
+from demiflow.execution.action_driver import services as action_services
+
 from demiflow import data
 from demiflow.execution.run_context import RunContext
 
@@ -166,8 +168,8 @@ def test_attempt_only_input_cannot_automatically_park(tmp_path, monkeypatch):
     from runtime_v3_resource_scenarios import observe_execution
 
     from dataclasses import replace
-    from demiflow.execution import dataflow_api
-    resolve = dataflow_api.resolve_action_runtime
+    from demiflow.execution.executors import dataflow_api
+    resolve = action_services.resolve_action_runtime
 
     def unfused(request):
         policy, bounds = resolve(request)
@@ -175,7 +177,7 @@ def test_attempt_only_input_cannot_automatically_park(tmp_path, monkeypatch):
 
     # A genuinely separate source and terminal cannot park this iterator to
     # share one active worker slot. Check the original safety decision.
-    monkeypatch.setattr(dataflow_api, 'resolve_action_runtime', unfused)
+    monkeypatch.setattr(action_services, 'resolve_action_runtime', unfused)
     with observe_execution(workers=1, memory_bytes=LIMITS['memory_bytes']) as observed:
         with pytest.raises(DataflowError, match='cannot safely park'):
             with RunContext.start(tmp_path/'run', limits=LIMITS), data.local_execution(workers=1):

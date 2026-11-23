@@ -1097,7 +1097,7 @@ class WorkerGraphRunner:
             self._finish_node(source)
 
     def _metrics_payload(self, occ):
-        from demiflow.execution.dataflow_usage import worker_prompt_usage
+        from demiflow.execution.operator_bindings.dataflow_models import worker_prompt_usage
         kernel = self.e._kernels.get((occ, self.partition))
         payload = {'occurrence_id': occ, 'partition_id': self.partition,
                    'metrics': dict(self._metrics[occ])}

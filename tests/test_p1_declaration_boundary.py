@@ -105,7 +105,7 @@ INVALID_DECLARATIONS = [
 def test_preflight_and_real_factory_preserve_full_errors_and_order(
         kind, configuration, bindings, error_type, code, message):
     from demiflow.planning.dataflow_declaration import validate_native_operation
-    from demiflow.execution.dataflow_api import make_native_operation
+    from demiflow.execution.executors.dataflow_api import make_native_operation
 
     for function in (validate_native_operation, make_native_operation):
         with pytest.raises(Exception) as raised:
@@ -122,7 +122,7 @@ def test_preflight_and_real_factory_preserve_full_errors_and_order(
 ])
 def test_preflight_returns_none_and_real_factory_keeps_its_original_target(kind):
     from demiflow.data.dataflow_operation import NativeOperation
-    from demiflow.execution.dataflow_api import make_native_operation, _native_operation_factory
+    from demiflow.execution.executors.dataflow_api import make_native_operation, _native_operation_factory
     from demiflow.planning.dataflow_declaration import validate_native_operation
 
     configuration, bindings = {'values': [1, True, None]}, {'key': 'value'}

@@ -1,34 +1,13 @@
 """Observed worker prompt usage, separate from authoritative request budgets."""
-from ..operator_llm.model import OperatorLLMUsage
-from .contracts.dataflow_errors import DataflowError
+from demiflow.operator_llm.model import OperatorLLMUsage
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 def empty_usage():
     return OperatorLLMUsage().to_dict()
 
 
-def worker_prompt_usage(kernel, *, final=False):
-    from ..operator_llm.runtime import PromptActor
-    from ..operator_llm.routed import RoutedPromptActor
-    from ..data.result_cache import CacheCall
-    if getattr(kernel, '_closed', False) and not final:
-        return getattr(kernel, '_prompt_usage', None)
-    totals, observed = empty_usage(), False
-    for instance in getattr(kernel, '_instances', ()):
-        owner = kernel._state_owner(instance)
-        if isinstance(owner, CacheCall):
-            owner = owner.fn
-        owners = owner.actors.values() if isinstance(owner, RoutedPromptActor) else (owner,)
-        for child in owners:
-            if not isinstance(child, PromptActor):
-                continue
-            observed = True
-            for key, value in child._runtime.coordinator.usage().to_dict().items():
-                totals[key] += value
-    if observed:
-        kernel._prompt_usage = totals
-        return totals
-    return None
+
 
 
 def observe_prompt_usage(execution, event, payload):

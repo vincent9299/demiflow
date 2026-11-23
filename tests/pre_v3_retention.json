@@ -352,7 +352,7 @@
     "never_ran": 0
    }
   },
-  "demiflow.execution.stream": {
+  "demiflow.execution.journal.stream": {
    "status": "live",
    "reason": "公开 Dataset.run_stream 返回的 StreamStats 及其历史类型。"
   }

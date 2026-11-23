@@ -137,7 +137,7 @@ def test_admission_precedes_second_record_decode(monkeypatch, mode):
     """Narrow sequencing proof complements the real worker cases above."""
     from dataclasses import replace
     from types import SimpleNamespace
-    from demiflow.execution import dataflow_terminals as terminals
+    from demiflow.execution.outputs import terminals as terminals
     from demiflow.execution.contracts.dataflow import Record
     from demiflow.execution.contracts.record_codec import _encode_payload
     from demiflow.planning.dataflow_policy import resolve_runtime_policy

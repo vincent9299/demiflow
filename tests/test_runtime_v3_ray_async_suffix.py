@@ -4,7 +4,7 @@ from dataclasses import replace
 import pytest
 from demiflow import data
 from demiflow.execution.contracts.dataflow import ActionRequest, HostDescriptor
-from demiflow.execution.dataflow_api import _CompileContext
+from demiflow.execution.executors.dataflow_api import _CompileContext
 from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.planning.dataflow_compile import lower_action
 from demiflow.planning.dataflow_place import partition_stages

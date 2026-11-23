@@ -8,7 +8,7 @@ from demiflow.data.native_options import NativeOptions
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp
 from demiflow.execution.contracts.dataflow import ActionRequest
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_api import _CompileContext
+from demiflow.execution.executors.dataflow_api import _CompileContext
 from demiflow.execution.run_context import RunAction
 from demiflow.planning.dataflow_compile import lower_action
 from demiflow.planning.dataflow_policy import resolve_runtime_policy

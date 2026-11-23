@@ -12,7 +12,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_terminals import _convert_batch
+from demiflow.execution.outputs.terminals import _convert_batch
 from demiflow.execution.run_context import RunContext
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 

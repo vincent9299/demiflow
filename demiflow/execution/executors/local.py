@@ -124,7 +124,7 @@ class LocalDatasetExecutor(DatasetExecutor):
         self.diagnostics_root = Path(diagnostics_root).resolve() if diagnostics_root is not None else None
 
     def operator_llm_usage(self) -> dict[str, int]:
-        from ..dataflow_usage import executor_prompt_usage
+        from demiflow.execution.journal.dataflow_usage import executor_prompt_usage
         return executor_prompt_usage(self)
 
     def plan(
@@ -133,7 +133,7 @@ class LocalDatasetExecutor(DatasetExecutor):
         terminal_parallelism_cap=None,
     ):
         reject_streaming_map_options(plan, 'local')
-        from ..dataflow_api import explain_dataset
+        from demiflow.execution.executors.dataflow_api import explain_dataset
         options: dict[str, Any] = {
             'action_kind': action_kind,
             'terminal_category': terminal_category,
@@ -154,7 +154,7 @@ class LocalDatasetExecutor(DatasetExecutor):
     def schema(self, source: SourcePlan, plan: LogicalPlan, *, fetch_if_missing: bool = True) -> Any:
         if not fetch_if_missing:
             return None
-        from ..dataflow_api import make_action_request, run_dataset_action
+        from demiflow.execution.executors.dataflow_api import make_action_request, run_dataset_action
         request = make_action_request(self, source, plan, kind='schema',
             arguments={'fetch_if_missing': fetch_if_missing})
         return run_dataset_action(request)
@@ -164,7 +164,7 @@ class LocalDatasetExecutor(DatasetExecutor):
     ) -> list[str] | None:
         if not fetch_if_missing:
             return None
-        from ..dataflow_api import make_action_request, run_dataset_action
+        from demiflow.execution.executors.dataflow_api import make_action_request, run_dataset_action
         request = make_action_request(self, source, plan, kind='columns',
             arguments={'fetch_if_missing': fetch_if_missing})
         return run_dataset_action(request)

@@ -25,7 +25,7 @@ from ..contracts.dataflow import (
 from ..contracts.dataflow_errors import DataflowError
 from ..scheduler.placement import DataflowScheduler
 from demiflow.execution.action_driver.services import make_driver_services
-from ..dataflow_terminals import open_terminal, TerminalSubscription
+from demiflow.execution.outputs.terminals import open_terminal, TerminalSubscription
 from ..checkpoint.coordinator import DataflowCheckpointCoordinator
 from ..seal.plan import (
     seal_dataflow, stage_dataflow_programs, resolve_execution_constants,
@@ -74,7 +74,7 @@ def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bou
         except Exception as cleanup:
             failure.add_note("Execution cleanup also failed: " + str(cleanup))
         try:
-            from ..dataflow_api import record_execution_metadata
+            from demiflow.execution.journal.run_telemetry import record_execution_metadata
             record_execution_metadata(request, execution)
         except Exception as observation:
             failure.add_note('Execution metadata also failed: ' + str(observation))
@@ -83,7 +83,8 @@ def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bou
 
 def run_graph_action(request, *, control_timeout_s):
     from dataclasses import replace
-    from ..dataflow_api import resolve_action_runtime, record_execution_metadata
+    from demiflow.execution.action_driver.services import resolve_action_runtime
+    from demiflow.execution.journal.run_telemetry import record_execution_metadata
     from ...planning.dataflow_graph_adapter import graph_credit
     from ..seal.plan import validate_graph_replay
     policy, bounds = resolve_action_runtime(request)
@@ -433,7 +434,10 @@ class DataflowExecution:
         if previous is not None and (type(previous.get('scalar')) is not int or receipt != previous):
             raise DataflowError('INCOMPATIBLE_HISTORY', 'Completed count differs from its verified source')
         self._check_stop()
-        self._terminal = TerminalSubscription(self._bounds, self._exchange, ())
+        from functools import partial
+        from demiflow.execution.dataflow_hosts import batch_business_commands
+        self._terminal = TerminalSubscription(self._bounds, self._exchange,
+            batch_commands=partial(batch_business_commands, ()))
         if previous is None:
             self._action.complete(receipt)
         self._started = True
@@ -697,7 +701,10 @@ class DataflowExecution:
         if self._closed or self._cancelled:
             raise DataflowError("CANCELLED", "execution is closed")
         self._check_stop()
-        self._terminal = TerminalSubscription(self._bounds, self._exchange, self._endpoints.values(), store=self._store)
+        from functools import partial
+        from demiflow.execution.dataflow_hosts import batch_business_commands
+        self._terminal = TerminalSubscription(self._bounds, self._exchange,
+            batch_commands=partial(batch_business_commands, self._endpoints.values()), store=self._store)
         budget = {"cpu_millis": max(1, int(sum(h.logical_resources.get('cpu_millis', 0)
                                              for h in self._services.hosts))),
                   "memory_bytes": self._bounds.max_resident_bytes,
@@ -1212,7 +1219,7 @@ class DataflowExecution:
             if any(metrics[k] < old[k] for k in metrics):
                 raise DataflowError("FENCED", "node counters moved backwards within a worker boot")
             self._node_metrics[(occ, partition)] = metrics
-            from ..dataflow_usage import observe_prompt_usage
+            from demiflow.execution.journal.dataflow_usage import observe_prompt_usage
             observe_prompt_usage(self, event, payload)
             from ..dataflow_model_observations import observe_models
             observe_models(self, event, payload)
@@ -1953,7 +1960,7 @@ class DataflowExecution:
         self._active_worker_allocations.clear()
         self._current_worker_observations.clear()
         if physical_closed:
-            from ..dataflow_thread_programs import owner, release
+            from demiflow.execution.seal.thread_programs import owner, release
             release(owner(self._action))
         if cleanup_error is not None:
             raise cleanup_error

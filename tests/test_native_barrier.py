@@ -76,7 +76,7 @@ def test_upstream_continues_before_commit_and_snapshot_is_detached(tmp_path, mon
                         if state.get('state') is not None:
                             states.append(state['state'])
             assert states == [{'mode': 'hooks', 'value': {'seen': [0, 1, 2, 3]}}]
-            from demiflow.execution.dataflow_replay import PublishedRecordReader
+            from demiflow.execution.outputs.replay import PublishedRecordReader
             prepared = fact['prepared']['sinks']['materialize']
             publication = json.loads(b''.join(execution._store.read(_artifact_from_json(prepared['ref']),
                 max_bytes=execution._bounds.max_control_bytes)))

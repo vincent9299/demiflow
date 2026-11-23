@@ -17,7 +17,7 @@ from test_runtime_v3_chain_compatibility import _entry
 
 
 def _materialize(dataset):
-    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.executors.dataflow_api import make_action_request, run_dataset_action
     request = make_action_request(dataset._executor, dataset._source, dataset._plan, kind='materialize', arguments={})
     return run_dataset_action(request)
 

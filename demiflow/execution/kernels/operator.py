@@ -654,7 +654,7 @@ class OperatorKernel:
             declaration = replace(declaration, target=target, call_args=args, call_kwargs=kwargs)
         instance = _resolve_instance(self._spec, self._services, declaration=declaration)
         if self._spec.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
-            from demiflow.execution.dataflow_models import bind_model_services
+            from demiflow.execution.operator_bindings.dataflow_models import bind_model_services
             instance = bind_model_services(instance, self._spec, services=self._services)
         from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
         from demiflow.execution.dataflow_producer import ProducerCall
@@ -686,7 +686,7 @@ class OperatorKernel:
                 (self._task_ordinal or 0) if self._task_rows and self._shared_actor is None else None]),
                 snapshot_function=snapshot_resident_function, restore_function=restore_resident_function,
                 snapshot_instance=snapshot_auto_state, restore_instance=restore_auto_state)
-            from demiflow.execution.dataflow_models import bind_cached_model_services
+            from demiflow.execution.operator_bindings.dataflow_models import bind_cached_model_services
             bind_cached_model_services(instance.fn, services=self._services, node_id=self._occurrence)
         import inspect
         owner = self._state_owner(instance)
@@ -1702,7 +1702,7 @@ class OperatorKernel:
                 _close_instance(instance)
             except BaseException as exc:
                 errors.append(exc)
-        from demiflow.execution.dataflow_usage import worker_prompt_usage
+        from demiflow.execution.operator_bindings.dataflow_models import worker_prompt_usage
         try:
             # Calls have drained even if an actor's resource cleanup failed.
             # Preserve actual request outcomes before discarding their owners;

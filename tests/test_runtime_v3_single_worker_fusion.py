@@ -11,7 +11,7 @@ def pipeline():
 
 
 def test_timer_operator_cannot_share_a_blocking_source_business_thread():
-    from demiflow.execution.dataflow_api import _CompileContext
+    from demiflow.execution.executors.dataflow_api import _CompileContext
     from demiflow.execution.contracts.dataflow import ActionRequest
     from demiflow.execution.run_context import RunAction
     from demiflow.planning.dataflow_compile import lower_action

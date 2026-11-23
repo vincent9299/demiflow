@@ -2,7 +2,7 @@
 import secrets
 import threading
 
-from .contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 _VALUES = {}
 _LOCK = threading.Lock()
@@ -27,7 +27,7 @@ _KEYS = {}
 
 
 def marker(occurrence_id, code_identity):
-    from .recovery_contract import identity
+    from demiflow.execution.recovery_contract import identity
     return {'schema': 'demiflow.thread_attempt.v1', 'capability': 'attempt_only',
             'program_key': identity(['thread-program-v3', occurrence_id, code_identity])}
 
@@ -69,31 +69,3 @@ def release(binding):
         for token in [key for key, item in _VALUES.items() if item[0] == binding]:
             item = _VALUES.pop(token)
             _KEYS.pop(item[3], None)
-
-
-def select_worker_mode(request, local):
-    """Explicit streaming thread scopes select a local host unless overridden."""
-    if request.provider != 'local':
-        return None
-    if local is not None and getattr(local, 'worker_mode_explicit', True):
-        return local.worker_mode
-    from ..planning.dataflow_compile import expand_relational_inputs, expand_operation_inputs
-    from ..data.plan import AsyncMapOp, MapOp, BoundMapOp
-    from ..planning.dataflow_policy import resolve_runtime_policy
-    _, bounds = resolve_runtime_policy({}, request.action.context.limits, provider='local')
-    pending = [(request.source, request.plan, ())]
-    count = 0
-    while pending:
-        source, plan, path = pending.pop()
-        count += 1 + len(plan.operations)
-        if count > bounds.max_nodes:
-            raise DataflowError('BUDGET_EXCEEDED', 'thread mode selection exceeds graph budget')
-        for operation in plan.operations:
-            stream = operation.stream_options if isinstance(operation, (MapOp, BoundMapOp)) else None
-            if (stream is not None and stream.execution == 'thread'
-                    or isinstance(operation, AsyncMapOp) and operation.execution == 'thread'):
-                return 'thread'
-            pending.extend((b.source, b.plan, b.path) for b in
-                           expand_operation_inputs(operation, path=path, bounds=bounds))
-        pending.extend((b.source, b.plan, b.path) for b in expand_relational_inputs(source, path=path, bounds=bounds))
-    return getattr(local, 'worker_mode', 'process')

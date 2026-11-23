@@ -3,7 +3,7 @@ from dataclasses import replace
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow import ActionRequest, HostDescriptor
-from demiflow.execution.dataflow_api import _CompileContext
+from demiflow.execution.executors.dataflow_api import _CompileContext
 from demiflow.execution.run_context import RunAction
 from demiflow.planning.dataflow_compile import lower_action
 from demiflow.planning.dataflow_finite_fusion import fuse_finite_suffix

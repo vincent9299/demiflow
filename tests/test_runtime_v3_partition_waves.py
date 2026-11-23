@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.dataflow_terminals import materialized_handle
+from demiflow.execution.outputs.terminals import materialized_handle
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.storage.state_artifacts import StateArtifacts

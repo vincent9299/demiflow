@@ -414,7 +414,7 @@ RuntimeServices = DTO.RuntimeServices
 DataflowError = ERRORS.DataflowError
 
 # --- production symbols under test (imported AFTER doubles are installed) ----
-from demiflow.execution import dataflow_models as models
+from demiflow.execution.operator_bindings import dataflow_models as models
 from demiflow.planning import dataflow_models as model_plan
 from demiflow.execution.kernels import model_state
 from demiflow.execution.operator_bindings import dataflow_model_journal as journal

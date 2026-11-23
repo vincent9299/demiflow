@@ -71,7 +71,7 @@ def _factory_identity(factory: Any) -> dict[str, Any]:
 
 
 def verified_materialized_count(source, *, recheck=None):
-    from demiflow.execution.dataflow_handles import StoredMaterializedHandle
+    from demiflow.execution.outputs.dataflow_handles import StoredMaterializedHandle
     if type(source.handle) is not StoredMaterializedHandle:
         return None
     rows = source.handle.verified_row_count(recheck=recheck)

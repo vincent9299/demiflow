@@ -83,7 +83,7 @@ def test_stream_preflight_is_bounded_and_rejects_async_map_callables():
 def test_public_explain_separates_metadata_from_closed_runtime_policy(provider):
     from demiflow.execution.executors.local import LocalDatasetExecutor
     from demiflow.execution.executors.ray import RayDatasetExecutor
-    from demiflow.execution.dataflow_api import explain_dataset
+    from demiflow.execution.executors.dataflow_api import explain_dataset
     from demiflow.data.api import DataAPI
     executor = LocalDatasetExecutor() if provider == 'local' else RayDatasetExecutor()
     def forbidden():

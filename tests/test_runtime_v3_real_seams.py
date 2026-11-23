@@ -19,7 +19,7 @@ from demiflow.execution.contracts.dataflow import Record, thaw_record_value
 from demiflow.execution.contracts.dataflow import WorkerLease, RuntimeServices
 from demiflow.execution.contracts.dataflow_codec import compute_graph_digest, compute_physical_digest
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.dataflow_api import make_action_request
+from demiflow.execution.executors.dataflow_api import make_action_request
 from demiflow.execution.sources.materialized_input import build_input_handle
 from demiflow.execution.seal.plan import load_dataflow
 from demiflow.execution.seal.plan import verify_dataflow_program

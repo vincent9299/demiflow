@@ -1,4 +1,6 @@
 """Public stream behavior across the real sealed process worker boundary."""
+
+from demiflow.execution.action_driver import services as action_services
 import pytest
 
 from demiflow.data.api import DataAPI
@@ -56,9 +58,10 @@ def test_stream_progress_comes_from_intermediate_business_frontiers():
 @pytest.mark.parametrize('drain_failure', ['same', 'unprintable'])
 def test_stream_cleanup_preserves_primary_failure_and_runs_each_owner(monkeypatch, drain_failure):
     from types import SimpleNamespace
-    from demiflow.execution import dataflow_api, dataflow_model_observations
+    from demiflow.execution.journal import run_telemetry as dataflow_api
+    from demiflow.execution import dataflow_model_observations
     from demiflow.execution.journal import dataflow_operator_observations
-    from demiflow.execution import dataflow_stream
+    from demiflow.execution.action_driver import stream as dataflow_stream
 
     events = []
     failure = RuntimeError('worker failed')
@@ -91,7 +94,7 @@ def test_stream_cleanup_preserves_primary_failure_and_runs_each_owner(monkeypatc
                                 close=lambda: events.append('callbacks.close'))
     monkeypatch.setattr(dataflow_stream, 'AsyncInstance', lambda *args: callbacks)
     monkeypatch.setattr(dataflow_stream, 'execute_action', lambda *args, **kwargs: handle)
-    monkeypatch.setattr(dataflow_api, 'resolve_action_runtime', lambda request: (None, None))
+    monkeypatch.setattr(action_services, 'resolve_action_runtime', lambda request: (None, None))
     monkeypatch.setattr(dataflow_api, 'record_execution_metadata', metadata)
     monkeypatch.setattr(dataflow_operator_observations, 'stream_observations', observe)
     monkeypatch.setattr(dataflow_model_observations, 'finish_journal_audit',

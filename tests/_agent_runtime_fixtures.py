@@ -9,7 +9,7 @@ from demiflow.execution.run_context import RunContext
 
 def collect_before_commit(dataset, directory, monkeypatch):
     """Run actual workers, observe their actual rows, interrupt before native commit."""
-    from demiflow.execution.dataflow_terminals import TerminalSubscription
+    from demiflow.execution.outputs.terminals import TerminalSubscription
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.contracts.dataflow import thaw_record_value
 

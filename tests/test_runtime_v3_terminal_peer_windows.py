@@ -1,11 +1,13 @@
 """Actual peer sockets through the original terminal decoder and ACK order."""
+from functools import partial
+from demiflow.execution.dataflow_hosts import batch_business_commands
 from types import SimpleNamespace
 import socket
 
 import pytest
 
 from demiflow.execution.contracts.dataflow import Record, thaw_record_value
-from demiflow.execution.dataflow_terminals import TerminalSubscription
+from demiflow.execution.outputs.terminals import TerminalSubscription
 from demiflow.execution.contracts.record_codec import _encode_record_document
 from demiflow.execution.contracts.record_codec import row_bytes as _row_bytes
 from demiflow.execution.recovery_contract import identity
@@ -39,7 +41,7 @@ def test_terminal_honours_original_or_low_fd_peer_window(tmp_path, monkeypatch, 
             peer.release(payloads[int(delivery_id)]['peer']['key'])
         exchange = SimpleNamespace(terminal=lambda key, producer: None,
                                    acknowledge=lambda key, receiver: ack(key))
-        subscription = TerminalSubscription(bounds, exchange, ())
+        subscription = TerminalSubscription(bounds, exchange, batch_commands=partial(batch_business_commands, ()))
         for payload in payloads:
             subscription.receive(payload, None)
         records = subscription.read_admitted(max_records=3, deadline_ms=1000)
@@ -53,7 +55,7 @@ def test_result_batch_uses_one_ack_and_replays_original_record_positions(tmp_pat
     from dataclasses import asdict
     import pyarrow as pa
     from demiflow.execution.contracts.record_codec import decode_document
-    from demiflow.execution.dataflow_replay import PublishedRecordReader
+    from demiflow.execution.outputs.replay import PublishedRecordReader
     from demiflow.execution.outputs.arrow_rows import pack_result
     from demiflow.execution.storage.record_schema import RecordSchemas
     from demiflow.execution.worker.terminal_blocks import TerminalBlocks
@@ -74,7 +76,7 @@ def test_result_batch_uses_one_ack_and_replays_original_record_positions(tmp_pat
         acked = []
         exchange = SimpleNamespace(terminal=lambda key, producer: None,
                                    acknowledge=lambda key, receiver: acked.append(key))
-        sub = TerminalSubscription(bounds, exchange, (), store=store)
+        sub = TerminalSubscription(bounds, exchange, batch_commands=partial(batch_business_commands, ()), store=store)
         event = dict(result_batch=asdict(ref), schema_ref=asdict(schema_ref), rows=2, sequence=0, delivery_id='one')
         sub.receive(event, None)
         batch, = sub.read_admitted(max_records=1, deadline_ms=0, batch_values=True)

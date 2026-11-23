@@ -21,7 +21,7 @@ from test_u3_graph_commit import _graph_spec, _stream_map
     'partitions', 'host_small', 'host_cpu', 'fusion_off', 'no_hosts'])
 def test_literal_prefix_only_colocates_proven_safe_source_and_callbacks(tmp_path, variant):
     from demiflow.execution.executors.graph import graph_action_request
-    from demiflow.execution.dataflow_api import resolve_action_runtime
+    from demiflow.execution.action_driver.services import resolve_action_runtime
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_place import partition_stages
     from demiflow.planning.dataflow_graph_adapter import specialize_graph_stages

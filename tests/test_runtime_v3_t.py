@@ -28,8 +28,8 @@ import demiflow  # noqa: E402
 
 assert Path(demiflow.__file__).resolve().is_relative_to(WORKTREE), "demiflow not tree-bound"
 
-from demiflow.execution import dataflow_handles as handles  # noqa: E402
-from demiflow.execution import dataflow_terminals as terminals  # noqa: E402
+from demiflow.execution.outputs import dataflow_handles as handles  # noqa: E402
+from demiflow.execution.outputs import terminals as terminals  # noqa: E402
 from demiflow.data.datasink import WriteResult  # noqa: E402
 
 
@@ -380,7 +380,7 @@ def build_materialized(store, rows, *, columns=None, num_blocks=1, owner_rows=No
 @pytest.fixture(autouse=True)
 def _tree_binding():
     assert Path(demiflow.__file__).resolve().is_relative_to(WORKTREE)
-    for name in ("demiflow.execution.dataflow_handles", "demiflow.execution.dataflow_terminals"):
+    for name in ('demiflow.execution.outputs.dataflow_handles', 'demiflow.execution.outputs.terminals'):
         assert Path(sys.modules[name].__file__).resolve().is_relative_to(WORKTREE)
     yield
 

@@ -3,7 +3,8 @@ from dataclasses import replace
 import pytest
 from demiflow.data.api import DataAPI
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.dataflow_api import make_action_request, resolve_action_runtime
+from demiflow.execution.executors.dataflow_api import make_action_request
+from demiflow.execution.action_driver.services import resolve_action_runtime
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.run_context import RunContext
 from demiflow.planning.dataflow_compile import lower_action

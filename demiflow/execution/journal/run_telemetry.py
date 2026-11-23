@@ -529,3 +529,80 @@ def committed_graph_metrics(graph, physical, image, store, *, max_state_bytes):
                 raise DataflowError('CORRUPT_ARTIFACT', 'graph node has no committed completion counters')
             result[(occurrence, partition)] = values
     return result
+
+
+def record_execution_metadata(request, execution):
+    """Project only observed workers/counters and confirmed completion facts."""
+    executor = getattr(request.action, '_dataflow_executor', None)
+    if executor is None:
+        return
+    from demiflow.execution.journal.dataflow_usage import publish_prompt_usage
+    publish_prompt_usage(executor, execution)
+    from demiflow.data.stats import ExecutionMetadata, StageStats
+    graph, physical = execution._graph, execution._physical
+    kinds = {node.occurrence_id: node.kernel.kind for node in graph.nodes} if graph is not None else {}
+    observations = [{'name': kinds[occ], 'occurrence_id': occ, 'partition_id': partition,
+                     'rows_input': values['rows_input'], 'rows_output': values['rows_output']}
+                    for (occ, partition), values in execution._node_metrics.items() if occ in kinds]
+    stages = tuple(StageStats(name=item['occurrence_id'] + ':' + item['partition_id'],
+        rows_input=item['rows_input'], rows_output=item['rows_output']) for item in observations)
+    workers = list(getattr(execution, '_observed_workers', {}).values())
+    failure = getattr(execution, '_failure', None)
+    if failure is not None:
+        import asyncio
+        status = 'cancelled' if isinstance(failure, asyncio.CancelledError) else 'failed'
+    elif execution._state == 'succeeded':
+        result = execution._terminal_result
+        status = 'closed_early' if result is not None and result.completion == 'terminal_satisfied' else 'complete'
+    else:
+        status = execution._state
+    diagnostics = {'state': execution._state, 'status': status, 'engine': 'dataflow_v3',
+        'dag_id': graph.dag_id if graph is not None else None,
+        'plan_id': physical.plan_id if physical is not None else None,
+        'stages': observations, 'workers': workers,
+        'workers_used': [(item['worker_process_id'], item['runner_thread_id']) for item in workers],
+        'observed_worker_count': getattr(execution, '_observed_worker_count', len(workers)),
+        'worker_details_truncated': getattr(execution, '_observed_worker_count', len(workers)) > len(workers),
+        'peak_active_workers': getattr(execution, '_peak_active_workers', 0),
+        'action_id': request.action.action_id}
+    if failure is not None:
+        diagnostics['failure_type'] = type(failure).__module__ + '.' + type(failure).__qualname__
+    if physical is not None:
+        live_bounds = getattr(execution, '_bounds', physical.bounds)
+        diagnostics['admitted_bounds'] = {'max_row_bytes': live_bounds.max_row_bytes,
+            'max_batch_bytes': live_bounds.max_batch_bytes,
+            'max_resident_bytes': live_bounds.max_resident_bytes,
+            'max_spill_bytes': live_bounds.max_spill_bytes,
+            'max_output_rows': live_bounds.max_output_rows,
+            'timeout_ms': live_bounds.timeout_ms,
+            'max_active_workers': getattr(execution, '_active_worker_limit', physical.policy.max_active_workers)}
+    native = getattr(execution, '_native_summary', None)
+    if native is not None:
+        if execution._acquisition.binding.mode == 'native_search':
+            diagnostics.update(native)
+        else:
+            diagnostics['queue'] = dict(native)
+    executor._run_ref = request.action.context.ref
+    executor._last_metadata = ExecutionMetadata(source_name=type(request.source).__name__,
+        stages=stages, rows_output=execution._confirmed_rows, diagnostics=diagnostics,
+        run_ref=request.action.context.ref)
+    if hasattr(executor, '_local_kernel_stats'):
+        executor._local_kernel_stats = {**diagnostics, 'rows_output': execution._confirmed_rows}
+
+
+def observe_stream_progress(execution, stats):
+    """Project actual node observations and return their current progress total."""
+    from demiflow.execution.journal.dataflow_operator_observations import stream_observations
+    stream_observations(execution, stats)
+    if getattr(execution, '_stream_lance', None) is not None:
+        stats.outputs = execution._stream_lance.outputs
+    total = 0
+    for node in execution._graph.nodes:
+        counters = [value for (occ, _), value in execution._node_metrics.items()
+                    if occ == node.occurrence_id]
+        if not counters:
+            continue
+        rows_in = sum(value['rows_input'] for value in counters)
+        rows_out = sum(value['rows_output'] for value in counters)
+        total += rows_in + rows_out
+    return total

@@ -10,7 +10,8 @@ from demiflow.data.dataset import Dataset, MaterializedDataset
 from demiflow.data.datasink import WriteResult
 from demiflow.data.plan import LogicalPlan
 from demiflow.data.sources import ItemsSource
-from demiflow.execution import checked, dataflow_api
+from demiflow.execution import checked
+from demiflow.execution.executors import dataflow_api
 from demiflow.execution.executors import dataset_runtime
 
 
@@ -214,7 +215,7 @@ def test_datasink_preserves_original_source_and_file_uses_checked_source(boundar
 
 
 def test_stream_controls_keep_objects_outside_checked_arguments(boundary, monkeypatch):
-    from demiflow.execution import dataflow_stream
+    from demiflow.execution.action_driver import stream as dataflow_stream
     state = boundary
     controls = [object() for _ in range(4)]
     progress, drain, cancel, stop_file = controls

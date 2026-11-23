@@ -65,7 +65,7 @@ def test_store_optional_chunk_is_physical_bounded_and_keeps_hash_and_fd(tmp_path
 @pytest.mark.parametrize('limited', [True, False])
 def test_schema_change_conversion_retains_real_replay_prefetch(tmp_path, monkeypatch, limited):
     import pyarrow as pa
-    from demiflow.execution import dataflow_terminals as terminals
+    from demiflow.execution.outputs import terminals as terminals
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     first = pa.Table.from_pylist([{'v': None}], schema=pa.schema([('v', pa.binary(16384))]))
     second = pa.Table.from_pylist([{'v': 'x'*500} for _ in range(32)])
@@ -128,7 +128,7 @@ def test_suspended_replay_does_not_retain_previous_credit_callback():
     import gc
     import weakref
     from types import SimpleNamespace
-    from demiflow.execution.dataflow_replay import PublishedRecordReader
+    from demiflow.execution.outputs.replay import PublishedRecordReader
     class Window:
         pass
     window = Window()

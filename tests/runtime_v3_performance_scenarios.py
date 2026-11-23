@@ -462,12 +462,12 @@ class Observations:
         old = getattr(owner, name); self.patches.append((owner, name, old)); setattr(owner, name, fn)
     def __enter__(self):
         import importlib.util
-        if importlib.util.find_spec('demiflow.execution.dataflow_api') is None:
+        if importlib.util.find_spec('demiflow.execution.executors.dataflow_api') is None:
             self.copy = {'status': 'not_observable', 'reason': 'historical carrier has no matching v3 codec boundary'}
             return self
         # Import the consumer first, then patch both aliases, so the first API
         # call is observed rather than getting an unpatched late import alias.
-        from demiflow.execution import dataflow_api
+        from demiflow.execution.executors import dataflow_api
         from demiflow.execution.action_driver import dataflow
         from demiflow.execution import dataflow_hosts
         from demiflow.execution.contracts import dataflow_codec

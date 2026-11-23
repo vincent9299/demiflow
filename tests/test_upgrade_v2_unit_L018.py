@@ -25,8 +25,8 @@ def ray_credit_case():
     from unittest.mock import patch
     from demiflow.data.api import _current_executor
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_terminals import materialized_handle
-    from demiflow.execution.dataflow_api import resolve_action_runtime
+    from demiflow.execution.outputs.terminals import materialized_handle
+    from demiflow.execution.action_driver.services import resolve_action_runtime
     from demiflow.execution.executors.graph import graph_action_request
     from runtime_v3_residency_scenarios import _provider
     from runtime_v3_support import RuntimeV3Fixture, make_scope, DEFAULT_BOUNDS, _RayDataBlocker

@@ -241,7 +241,7 @@ def test_multi_host_remote_gpu_actor_loss_resumes_original_ack(tmp_path, monkeyp
                      'rows': publication['manifest']['total_rows'], 'attempt': execution._attempt()})
         if not image.cut.final and cuts[-1]['rows'] and not killed:
             prefix = []
-            from demiflow.execution.dataflow_replay import PublishedRecordReader
+            from demiflow.execution.outputs.replay import PublishedRecordReader
             reader = PublishedRecordReader(publication, store=execution._store, bounds=execution._bounds)
             try:
                 while True:
