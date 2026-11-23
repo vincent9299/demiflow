@@ -60,12 +60,13 @@ def begin(source, timeout_s):
     _State.deadline = time.monotonic() + timeout_s
 
 
-def network_settings(outgoing, source=None, sources=()):
-    """Resolve the network of ``source`` from worker defaults and source overrides.
+def network_settings(outgoing, source=None, sources=(), module=None):
+    """Network options of one source.
 
-    ``source['network']`` may name another source (shared network) or hold a
-    mapping of network options. Source-level network options (for example
-    ``enable_http``) apply as well.
+    Worker-wide ``outgoing`` options are the base. ``source['network']`` may name
+    another source (shared network) or hold a mapping of options laid over the
+    base; otherwise the adapter module's attributes (source settings already
+    applied) supply any network option they define.
     """
     settings = {**NETWORK_DEFAULTS, **{k: v for k, v in outgoing.items() if k in NETWORK_KEYS}}
     if source is None:
@@ -76,15 +77,16 @@ def network_settings(outgoing, source=None, sources=()):
         if shared is None:
             raise ValueError('Unknown shared search network: ' + declared)
         return network_settings(outgoing, shared, ())
-    settings.update({k: source[k] for k in NETWORK_KEYS if k in source})
     if isinstance(declared, dict):
-        unknown = set(declared) - set(NETWORK_KEYS) - {'retries', 'retry_on_http_error', 'request_timeout'}
+        unknown = set(declared) - set(NETWORK_KEYS) - {'retries', 'retry_on_http_error', 'request_timeout',
+                                                       'max_connections', 'using_tor_proxy'}
         if unknown:
             raise ValueError('Unsupported search network options: ' + ', '.join(sorted(unknown)))
-        settings.update({k: declared[k] for k in NETWORK_KEYS if k in declared})
-    elif declared is not None:
+        return {**settings, **{k: declared[k] for k in NETWORK_KEYS if k in declared}}
+    if declared is not None:
         raise ValueError('Search network must be a source name or a mapping')
-    return settings
+    attributes = vars(module) if module is not None else source
+    return {**settings, **{k: attributes[k] for k in NETWORK_KEYS if k in attributes}}
 
 
 def _proxies(declared):

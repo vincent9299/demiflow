@@ -13,7 +13,8 @@ import re
 from urllib.parse import urlsplit, parse_qsl
 
 ENGINES = Path(__file__).with_name('engines')
-RUNTIME_VERSION = 'native-search-2'
+# Format version of native search results; implementation changes show in runtime_id().
+RUNTIME_VERSION = 'native-search-1'
 
 
 # One shared declaration; preserve this historical import location.

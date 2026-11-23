@@ -90,17 +90,18 @@ def bootstrap(config):
     loaded, errors, networks = {}, {}, {}
     for settings in config['sources']:
         name = settings['name'].lower()
+        module = None
+        if settings.get('backend') not in ('http', 'browser'):
+            try:
+                module = loaded[name] = load(settings, config['timeout_s'])
+            except SourceLoadError as exc:
+                errors[name] = exc.status
+                continue
         try:
-            networks[name] = worker_network.network_settings(config['outgoing'], settings, config['sources'])
+            networks[name] = worker_network.network_settings(config['outgoing'], settings, config['sources'], module)
         except ValueError:
             errors[name] = 'configuration_error'
-            continue
-        if settings.get('backend') in ('http', 'browser'):
-            continue
-        try:
-            loaded[name] = load(settings, config['timeout_s'])
-        except SourceLoadError as exc:
-            errors[name] = exc.status
+            loaded.pop(name, None)
     worker_network.install(config, send, receive, networks)
     return loaded, errors
 
