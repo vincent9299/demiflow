@@ -35,7 +35,8 @@ def test_method_closure_code_edit_rejected_before_call(tmp_path, monkeypatch, fo
 
 @pytest.mark.parametrize('member', ['method', 'staticmethod', 'classmethod', 'property', 'inherited'])
 def test_serialized_actor_members_pin_same_sources_as_archive(tmp_path, monkeypatch, member):
-    from demiflow.execution.chain import snapshot_code_sources
+    from runtime_v3_program_probe import program_store, stage_callable
+    from demiflow.execution.contracts.dataflow import ArtifactRef
     from demiflow.execution.seal.business_sources import plan_code_pin
     from demiflow.execution.run_context import RunContext
     helper, paths, name = _helper_graph(tmp_path, monkeypatch, 'actor_' + member)
@@ -78,11 +79,11 @@ def test_serialized_actor_members_pin_same_sources_as_archive(tmp_path, monkeypa
     assert plan_code_pin(carried) == before
     with RunContext.start(tmp_path/'archive') as run:
         with run.action({'kind':'code-pin-fixture'}) as action:
-            refs = snapshot_code_sources(action, plan)
-            helper_refs = [r for r in refs if r['source'] == str(paths[name])]
-            assert len(helper_refs) == 1
-            assert helper_refs[0]['sha256'] == before['dependencies'][name]['sha256']
-            assert (run.directory/helper_refs[0]['path']).read_bytes() == paths[name].read_bytes()
+            with program_store(action) as (store, bounds):
+                _, manifest = stage_callable(plan.operations[0].callable, store=store, bounds=bounds)
+                ref = ArtifactRef(**manifest['business_sources'][name])
+                assert ref.digest == before['dependencies'][name]['sha256']
+                assert b''.join(store.read(ref, max_bytes=ref.size_bytes)) == paths[name].read_bytes()
             action.complete({'kind':'done'})
     paths[name].write_text('def delta():\n    return 9999\n')
     importlib.reload(sys.modules[name])

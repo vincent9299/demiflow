@@ -453,7 +453,9 @@ def sealed(tmp_path):
         run.journal.bind_execution_action(run.fence, "main-action", declaration)
         action = RunAction(run, "main-action", declaration)
         try:
-            yield SimpleNamespace(run=run, action=action)
+            from runtime_v3_program_probe import program_store
+            with program_store(action) as (store, bounds):
+                yield SimpleNamespace(run=run, action=action, store=store, bounds=bounds)
         finally:
             record = run.journal.execution_action("main-action")
             if record is not None and record["result"] is None:
@@ -658,19 +660,19 @@ def _direct_graph(tmp_path, monkeypatch, prefix):
 
 # F7-a: helper-only edit -> worker LOAD gate recomputes from its own imports -> refuse.
 def test_f7a_helper_only_edit_worker_load_gate_refuses(sealed, tmp_path, monkeypatch):
-    from demiflow.execution.chain import stage_plan_artifact, verify_loaded_plan
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_program_probe import worker_loader
     from demiflow.execution.seal.business_sources import _business_dependency_manifest
     biz, paths, helper = _direct_graph(tmp_path, monkeypatch, "f7a")
     plan = _map_plan(biz.transform)
     assert helper in _business_dependency_manifest(plan)
-    plan_ref = stage_plan_artifact(sealed.action, plan)
-    topology, _, _ = _topology(sealed, plan, plan_ref)
-    verify_loaded_plan(plan, plan_ref, topology["operators"])      # unedited passes
+    load = worker_loader(sealed, plan.operations[0].callable)
+    load()      # unedited passes
     # Edit ONLY the helper; biz source + by-reference pickle bytes are unchanged.
     paths[helper].write_text("def delta():\n    return 9999\n")
     importlib.reload(sys.modules[helper])
-    with pytest.raises(RecoveryContractError, match="code-pin differs"):
-        verify_loaded_plan(_map_plan(biz.transform), plan_ref, topology["operators"])
+    with pytest.raises(DataflowError, match="Loaded program code differs"):
+        load()
 
 
 # F7-b: helper-only edit -> SAME RunRef recovery explicitly refused (not mix/timeout).
@@ -713,23 +715,19 @@ def test_f7b_helper_only_edit_same_run_resume_refuses(tmp_path, monkeypatch):
 
 # F7-transitive: edit ONLY the transitive leaf helper2 -> load + resume refuse.
 def test_f7_transitive_helper2_edit_refuses(sealed, tmp_path, monkeypatch):
-    from demiflow.execution.chain import stage_plan_artifact, verify_loaded_plan
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_program_probe import worker_loader
     from demiflow.execution.seal.business_sources import _business_dependency_manifest
     biz, paths, (biz_name, dep_name, h2_name) = _f7_graph(tmp_path, monkeypatch)
     plan = _map_plan(biz.transform)
     manifest = _business_dependency_manifest(plan)
     assert {biz_name, dep_name, h2_name} <= set(manifest), "transitive closure must pin helper2"
-    plan_ref = stage_plan_artifact(sealed.action, plan)
-    topology, _, _ = _topology(sealed, plan, plan_ref)
-    verify_loaded_plan(plan, plan_ref, topology["operators"])
+    load = worker_loader(sealed, plan.operations[0].callable)
+    load()
     paths[h2_name].write_text("def base():\n    return 9999\n")
     importlib.reload(sys.modules[h2_name])
-    plan2 = _map_plan(biz.transform)
-    with pytest.raises(RecoveryContractError, match="code-pin differs"):
-        verify_loaded_plan(plan2, plan_ref, topology["operators"])
-    with pytest.raises(RecoveryContractError,
-                       match="Business code changed since the plan was sealed"):
-        stage_plan_artifact(sealed.action, plan2)
+    with pytest.raises(DataflowError, match="Loaded program code differs"):
+        load()
 
 
 # F7-boundary: platform/stdlib/third-party skip; business helper pin (classification).

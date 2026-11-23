@@ -23,7 +23,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from demiflow.execution import chain, sealed_plans
+from demiflow.execution import sealed_plans
+from runtime_v3_history_scenarios import write_legacy_seal
 from demiflow.execution.plan_interpreter import (
     PlanContractError, interpret_physical_plan, to_wire, validate_worker_assignment,
 )
@@ -52,11 +53,6 @@ def workdir():
         shutil.rmtree(path, ignore_errors=True)
 
 
-def _seal_f1(run, action, fx):
-    sealed_at = int(run.journal.recovery_identity()["started_at"] * 1000)
-    return chain.seal_plan_facts(run, action, fx.ld, fx.pp, fx.mref, sealed_at)
-
-
 def _seal_bindings(run, action, fx):
     return seal_execution_bindings(
         run, action, logical_dag=fx.ld, physical_plan=fx.pp,
@@ -72,26 +68,24 @@ def _bind(run, action_id):
     return RunAction(run, action_id, declaration)
 
 
-def _sealed(workdir, fx, action_id, *, with_bindings=True):
+def _sealed(workdir, writer, fx, action_id, *, with_bindings=True):
     root = workdir / "run"
-    with RunContext.start(root) as run:
-        action = _bind(run, action_id)
-        _seal_f1(run, action, fx)
-        if with_bindings:
-            _seal_bindings(run, action, fx)
-        run_id = run.ref.run_id
-        run.journal.complete_execution_action(run.fence, action_id, {"kind": "test-complete"})
-    return SimpleNamespace(root=root, run_id=run_id, fx=fx, action_id=action_id)
+    keys = ("profiles", "programs", "driver_stage_ids", "source_bindings",
+            "channel_options", "checkpoint_rows", "supported_slice")
+    bindings = {key: fx.doc[key] for key in keys} if with_bindings else None
+    result = write_legacy_seal(writer, root, action_id=action_id, logical_dag=fx.ld,
+                               physical_plan=fx.pp, manifest_ref=fx.mref, bindings=bindings)
+    return SimpleNamespace(root=root, run_id=result["facts"]["run_id"], fx=fx, action_id=action_id)
 
 
 @pytest.fixture
-def sealed_chain(workdir):
-    return _sealed(workdir, chain_fixture(), "main-action")
+def sealed_chain(workdir, legacy_seal_writer):
+    return _sealed(workdir, legacy_seal_writer, chain_fixture(), "main-action")
 
 
 @pytest.fixture
-def sealed_fanout(workdir):
-    return _sealed(workdir, fanout_fixture(), "fanout-action")
+def sealed_fanout(workdir, legacy_seal_writer):
+    return _sealed(workdir, legacy_seal_writer, fanout_fixture(), "fanout-action")
 
 
 def _tamper_binding(root, key, mutate):
@@ -205,7 +199,6 @@ def test_seal_idempotent_reseal_identical(workdir):
     root = workdir / "run"
     with RunContext.start(root) as run:
         action = _bind(run, "main-action")
-        _seal_f1(run, action, fx)
         first = _seal_bindings(run, action, fx)
         carrier = root / first["path"]
         mtime = carrier.stat().st_mtime_ns
@@ -216,8 +209,8 @@ def test_seal_idempotent_reseal_identical(workdir):
         run.journal.complete_execution_action(run.fence, "main-action", {"kind": "test-complete"})
 
 
-def test_load_sealed_plan_without_bindings(workdir):
-    sc = _sealed(workdir, chain_fixture(), "main-action", with_bindings=False)
+def test_load_sealed_plan_without_bindings(workdir, legacy_seal_writer):
+    sc = _sealed(workdir, legacy_seal_writer, chain_fixture(), "main-action", with_bindings=False)
     sp = load_sealed_plan(sc.root, sc.action_id)  # F1 readable even without bindings
     assert sp["facts"]["schema"] == SEALED_PLAN_FACTS_SCHEMA
     with pytest.raises(PlanContractError) as exc:
@@ -426,7 +419,6 @@ def test_seal_rejects_invalid_bindings(workdir):
     root = workdir / "run"
     with RunContext.start(root) as run:
         action = _bind(run, "main-action")
-        _seal_f1(run, action, fx)
         with pytest.raises(PlanContractError) as exc:
             seal_execution_bindings(
                 run, action, logical_dag=fx.ld, physical_plan=fx.pp,
@@ -444,7 +436,6 @@ def test_seal_rejects_unsupported_slice(workdir):
     root = workdir / "run"
     with RunContext.start(root) as run:
         action = _bind(run, "main-action")
-        _seal_f1(run, action, fx)
         with pytest.raises(PlanContractError) as exc:
             seal_execution_bindings(
                 run, action, logical_dag=fx.ld, physical_plan=fx.pp,
