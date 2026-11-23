@@ -693,7 +693,33 @@ def _layout_source_type(value):
                             or wrapped.__globals__ is not vars(module)):
                         return None
                 elif method.__globals__ is not vars(module):
-                    return None
+                    # Protocol synthesizes these two methods in typing rather
+                    # than the declaring module. Authenticate the actual stdlib
+                    # definition and its one class cell, as well as the recorded
+                    # method pins below; foreign globals are otherwise refused.
+                    import typing
+                    if (cls.__bases__ != (typing.Protocol,)
+                            or method.__globals__ is not vars(typing)
+                            or method.__defaults__ is not None
+                            or method.__kwdefaults__ is not None):
+                        return None
+                    if name == '__init__':
+                        if method is not typing._no_init_or_replace_init:
+                            return None
+                    elif name == '__subclasshook__':
+                        parent = vars(typing.Protocol)['__init_subclass__'].__func__
+                        if (not any(method.__code__ is item for item in parent.__code__.co_consts)
+                                or method.__code__.co_freevars != ('cls',)
+                                or method.__closure__ is None
+                                or len(method.__closure__) != 1):
+                            return None
+                        try:
+                            if method.__closure__[0].cell_contents is not cls:
+                                return None
+                        except ValueError:
+                            return None
+                    else:
+                        return None
                 original_code = code
             if not isinstance(member, (property, classmethod, staticmethod)):
                 pins = entry['methods'].get(name)

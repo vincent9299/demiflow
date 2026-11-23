@@ -19,7 +19,7 @@ REPO = Path(__file__).resolve().parents[1]
 BASE = '3459559152ac51c6aa80d91b7b9c1f5f8ee5eee7'
 CARRIERS = {
     'dataflow_api': ['_native_operation_factory'],
-    'dataflow_handles': ['RuntimeActionHandle', 'StoredMaterializedHandle'],
+    'dataflow_handles': ['RuntimeActionHandle', 'StoredMaterializedHandle', 'TerminalSubscription'],
     'stream': ['StreamStats'],
     'dataflow_operator_observations': ['_ObservedTiming'],
     'legacy_queue': ['LegacyQueueHistoryDatasource'],
@@ -304,3 +304,27 @@ def test_native_factory_old_global_requires_its_actual_definition(original_carri
     raw = base64.b64decode(original_carriers['_native_operation_factory'][0])
     with pytest.raises(DataflowError, match='audited definition'):
         load_payload([raw])
+
+
+@pytest.mark.parametrize('change', ['code', 'globals', 'class_cell', 'initializer'])
+def test_original_protocol_rejects_forged_typing_methods(original_carriers, monkeypatch, change):
+    from types import FunctionType
+    from demiflow.execution.outputs.dataflow_handles import TerminalSubscription
+    hook = vars(TerminalSubscription)['__subclasshook__']
+    if change == 'initializer':
+        original = TerminalSubscription.__init__
+        forged = FunctionType(original.__code__, original.__globals__, original.__name__)
+        monkeypatch.setattr(TerminalSubscription, '__init__', forged)
+    else:
+        code, namespace, closure = hook.__code__, hook.__globals__, hook.__closure__
+        if change == 'code':
+            code = code.replace(co_consts=(*code.co_consts, 'changed'))
+        elif change == 'globals':
+            namespace = dict(namespace)
+        else:
+            other = object()
+            closure = (lambda: other).__closure__
+        forged = FunctionType(code, namespace, hook.__name__, None, closure)
+        monkeypatch.setattr(TerminalSubscription, '__subclasshook__', forged)
+    with pytest.raises(DataflowError, match='audited definition'):
+        load_payload([base64.b64decode(original_carriers['TerminalSubscription'][0])])
