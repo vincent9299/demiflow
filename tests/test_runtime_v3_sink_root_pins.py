@@ -159,3 +159,24 @@ def test_abort_releases_legacy_descendant_pins_and_new_publication_pin(tmp_path)
         result = _gc(store, port)
         assert result['blocked'] is None and result['removed'] >= len(refs) + 1
         assert not store.inspect(root)
+
+
+def test_previously_checked_leaf_is_revalidated_after_same_size_edit(tmp_path):
+    with store_fixture(tmp_path) as (run, store, port):
+        forest, _ = _prefix(store, port._bounds, count=4)
+        sink = _sink(store, port)
+        manifest = _manifest(forest)
+        coordinator = CommitCoordinator(port._action)
+        prior = coordinator.commit(1, outputs={'test': (sink, manifest)}, position=SourcePosition('fixture', 4))
+        root = ArtifactRef(**manifest['partitions'][0]['data_ref'])
+        leaf = next(ref for ref in tree_refs(store, root, port._bounds) if ref.media_type == RECORDS_MEDIA)
+        path = store._object_path(leaf)
+        original = path.read_bytes()
+        path.write_bytes(bytes([original[0] ^ 1]) + original[1:])
+        suffix = b'{"value":4}\n'
+        forest.append(store.put(iter([suffix]), max_bytes=len(suffix), media_type=RECORDS_MEDIA), rows=1)
+        with pytest.raises(DataflowError, match='artifact bytes do not match'):
+            coordinator.commit(2, outputs={'test': (sink, _manifest(forest))}, position=SourcePosition('fixture', 5))
+        first, second = run.journal.execution_commits(port._action.action_id)
+        assert first == prior and second['status'] == 'pending' and not second['receipts']
+        store.close()

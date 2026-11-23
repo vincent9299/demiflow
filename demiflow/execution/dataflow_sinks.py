@@ -129,6 +129,7 @@ class _DataflowArtifactSink(Datasink):
         self._action = action
         self._bounds = bounds
         self._configuration = configuration
+        self._verified_leaves = {}
         self._root = action.context.directory / "materializations" / "dataflow-sinks" / sink_id
 
     def recovery_identity(self):
@@ -143,6 +144,20 @@ class _DataflowArtifactSink(Datasink):
                          "commit_id": context.commit_id, "manifest": manifest},
                         self._bounds.max_control_bytes)
 
+    def _verify_leaf(self, ref, witness):
+        # The publication object was written after its leaves. The original
+        # filesystem witness excludes a later edit with an identical coarse time.
+        # Only a checksum over this exact inode/signature may be reused.
+        stamp = self._store.reusable_signature(ref, witness=witness)
+        if stamp is not None and self._verified_leaves.get(ref) == stamp:
+            return
+        if not self._store.inspect(ref):
+            raise DataflowError('UNKNOWN_EFFECT', 'Cannot pin an absent artifact')
+        capacity = min(self._bounds.max_state_bytes, self._bounds.max_resident_bytes // 32) // 1024
+        if (stamp is not None and len(self._verified_leaves) < capacity
+                and self._store.object_signature(ref) == stamp):
+            self._verified_leaves[ref] = stamp
+
     def prepare(self, blocks, context: WriteContext):
         if type(blocks) is not dict or blocks.get("schema") != _COMBINED_SCHEMA:
             raise DataflowError("INVALID_CONTRACT", "Sink prepare requires a combined manifest")
@@ -151,14 +166,14 @@ class _DataflowArtifactSink(Datasink):
         raw = self._publication_bytes(blocks, context)
         pub_ref = self._store.put(iter([raw]), max_bytes=self._bounds.max_control_bytes,
                                   media_type=PUBLICATION_MEDIA)
+        witness = self._store.object_signature(pub_ref)
         for partition in blocks["partitions"]:
             data_ref = _artifact_from_json(partition["data_ref"])
             from .dataflow_segments import segment_refs
             for ref in segment_refs(self._store, data_ref, self._bounds):
                 # Authenticate the entire prefix before publication, including
                 # old leaves. The traversal reads and authenticates each index.
-                if not self._store.inspect(ref):
-                    raise DataflowError('UNKNOWN_EFFECT', 'Cannot pin an absent artifact')
+                self._verify_leaf(ref, witness)
         self._store.retain(pub_ref, owner=context.commit_id)
         self._action.context.allocate_artifact(self._marker(context), commit_id=context.commit_id)
         return {"ref": _artifact_json(pub_ref), "sink_id": self._sink_id,
