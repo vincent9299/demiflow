@@ -277,7 +277,6 @@ class OperatorLLMRuntime:
         raise RuntimeError("unreachable Operator LLM schema retry state")
 
 
-
 def validate_prompt_binding(operation, config):
     prompt = resolve_prompt(config, operation.prompt_name)
     required_inputs = set(prompt.arguments)
@@ -502,31 +501,6 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
 class PromptActor(BoundOperatorLLMMap):
     """Native map_async actor; uses exactly the map_prompt row contract."""
 
-    def native_stream_recovery(self, action, node_id):
-        options = self._runtime.options or {}
-        if self.environment is not None or any(k in options for k in ('offline_dir', 'offline_store', 'codex_exec', 'codex_agent')):
-            return None
-        from .stream_recovery import NativePromptRecovery
-        self._runtime.native_recovery = NativePromptRecovery(self, action, node_id)
-        return self._runtime.native_recovery
-
-    def bind_execution(self, context, node_id):
-        self._runtime.coordinator.bind_execution(context, node_id)
-        if self._prompt.response_format=='image':
-            from ..execution.run_context import current_action
-            from .media import media_limits
-            action=current_action()
-            stores=getattr(action,'object_sinks',{}) if action is not None else {}
-            store=stores.get(self._runtime.options['object_store'])
-            if store is None:
-                raise ValueError('Image output has no native artifact participant')
-            from demiflow.execution.journal.dataflow_authority import check_image_replay
-            from demiflow.execution.contracts.dataflow_codec import image_request_budget
-            check_image_replay(action)
-            self._runtime.coordinator._artifact_request_budget=image_request_budget(action.action_id)
-            store.reserve_capacity(self._operation.max_requests,
-                media_limits(self._runtime.options)['max_image_bytes'],node_id)
-            self._runtime.artifact_store=store
 
     def snapshot_state(self):
         return {}  # clients/leases/metrics are resources, not semantic row state

@@ -41,10 +41,11 @@ _KNOWN[RuntimeContractError.__module__ + "." + RuntimeContractError.__qualname__
 from demiflow.operator_llm.errors import PromptBudgetExceededError, PromptReplayMissError
 _KNOWN[PromptBudgetExceededError.__module__ + '.' + PromptBudgetExceededError.__qualname__] = PromptBudgetExceededError
 _KNOWN[PromptReplayMissError.__module__ + '.' + PromptReplayMissError.__qualname__] = PromptReplayMissError
-from demiflow.operator_llm.stream_recovery import _CapacityPending
+from demiflow.execution.contracts.errors import _CapacityPending
 # Preserve the original non-admission signal so the existing async client
 # releases its journal slot and retries; never block the driver response lane.
-_KNOWN[_CapacityPending.__module__ + '.' + _CapacityPending.__qualname__] = _CapacityPending
+# The wire vocabulary is stable when the implementation changes module.
+_KNOWN['demiflow.operator_llm.stream_recovery._CapacityPending'] = _CapacityPending
 from demiflow.operator_llm.journal import UncertainPromptCall
 from demiflow.embeddings.payload import EmbeddingProtocolError
 _KNOWN.update({cls.__module__ + '.' + cls.__qualname__: cls
@@ -122,7 +123,8 @@ def _http_status_fields(value, *, redact=False):
 def failure_payload(exc, *, _depth=0, _budget=None):
     _budget = [32] if _budget is None else _budget
     _budget[0] -= 1
-    name = type(exc).__module__ + '.' + type(exc).__qualname__
+    name = next((name for name, cls in _KNOWN.items() if type(exc) is cls),
+                type(exc).__module__ + '.' + type(exc).__qualname__)
     message = (exc._message if isinstance(exc, DataflowError) else str(exc)) or type(exc).__name__
     payload = {'code': getattr(exc, 'code', 'INTERNAL_PROTOCOL'),
             'error_type': name if name in _KNOWN or name in {_RECOVERY_TYPE, _UNRESOLVED_TYPE, _BUDGET_TYPE} else None,

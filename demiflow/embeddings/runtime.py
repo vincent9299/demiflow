@@ -83,12 +83,6 @@ class EmbeddingActor:
         self._native_recovery = None
         self._journal_binding = None
 
-    def native_stream_recovery(self, action, node_id):
-        from .stream_recovery import NativeEmbeddingRecovery
-        if (self._native_recovery is None or self._native_recovery.action is not action
-                or self._native_recovery.node_id != node_id):
-            self._native_recovery = NativeEmbeddingRecovery(self, action, node_id)
-        return self._native_recovery
 
     @property
     def cancel_drain_timeout_s(self):

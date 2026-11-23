@@ -7,6 +7,7 @@ import pytest
 from demiflow.execution.run_context import RunContext
 from demiflow.embeddings.runtime import EmbeddingActor
 from demiflow.embeddings.model import EmbeddingModel
+from demiflow.execution.operator_bindings.dataflow_model_journal import NativeEmbeddingRecovery
 
 
 def _actor():
@@ -21,7 +22,7 @@ def test_aclose_drains_before_closing_client(tmp_path):
     with RunContext.start(tmp_path / 'run', limits={'max_requests': 5}) as run:
         actor = _actor()
         action = SimpleNamespace(context=run, action_id='act-1', object_sinks={})
-        rec = actor.native_stream_recovery(action, 'node')
+        rec = actor._native_recovery = NativeEmbeddingRecovery(actor, action, 'node')
 
         async def exercise():
             await actor.astart()
@@ -51,7 +52,7 @@ def test_aclose_drain_timeout_leaves_client_open(tmp_path):
     with RunContext.start(tmp_path / 'run', limits={'max_requests': 5}) as run:
         actor = _actor()
         action = SimpleNamespace(context=run, action_id='act-1', object_sinks={})
-        rec = actor.native_stream_recovery(action, 'node')
+        rec = actor._native_recovery = NativeEmbeddingRecovery(actor, action, 'node')
 
         async def exercise():
             await actor.astart()

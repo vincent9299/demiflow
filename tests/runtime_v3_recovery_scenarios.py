@@ -358,7 +358,7 @@ def _native_calls(journal):
 def _run_model_child(config):
     import demiflow
     assert Path(demiflow.__file__).resolve().is_relative_to(WORKTREE)
-    from demiflow.operator_llm.stream_recovery import RunPromptJournal
+    from demiflow.execution.journal.prompt import RunPromptJournal
     from runtime_v3_support import _ExecuteActionRecorder, _RayDataBlocker
     root, mode, fault = Path(config['root']), config['mode'], config['fault']
     directory = root / 'run'

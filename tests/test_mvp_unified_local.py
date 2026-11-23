@@ -160,7 +160,7 @@ def test_workbench_unified_chain_kill_recovers_acked_prefix_exactly_once(tmp_pat
 def test_paid_call_with_unknown_effect_refuses_new_dispatch_after_restart(tmp_path):
     from demiflow.operator_llm.journal import UncertainPromptCall
     from demiflow.operator_llm.sqlite_journal import _SQLiteJournalShard
-    from demiflow.operator_llm.stream_recovery import RunPromptJournal
+    from demiflow.execution.journal.prompt import RunPromptJournal
 
     def bind_gate(run):
         # Mirrors bind_stages' native_stream_recovery rebind: bind the run-level durable

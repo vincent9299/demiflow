@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from demiflow.execution.run_context import RunContext
-from demiflow.embeddings.stream_recovery import NativeEmbeddingRecovery
+from demiflow.execution.operator_bindings.dataflow_model_journal import NativeEmbeddingRecovery
 
 
 def _rec(run):

@@ -88,3 +88,7 @@ class PublicationMismatch(RecoveryContractError):
 
 class PreparedPublicationUnresolved(RecoveryContractError):
     """Native sink inspection could not conclude a prepared publication."""
+
+
+class _CapacityPending(Exception):
+    """No intent was written: a live response can release admission capacity."""

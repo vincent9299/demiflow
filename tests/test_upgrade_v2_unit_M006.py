@@ -8,7 +8,8 @@ from demiflow.execution.run_context import RunContext
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.embeddings.runtime import EmbeddingActor
 from demiflow.embeddings.model import EmbeddingModel
-from demiflow.operator_llm.stream_recovery import _BorrowedJournal
+from demiflow.execution.operator_bindings.dataflow_model_journal import NativeEmbeddingRecovery
+from demiflow.execution.operator_bindings.dataflow_model_journal import _BorrowedJournal
 from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
 
 
@@ -27,7 +28,7 @@ def _action(run):
 def test_astart_native_borrows_run_journal(tmp_path):
     with RunContext.start(tmp_path / 'run', limits={'max_requests': 5}) as run:
         actor = _actor()
-        rec = actor.native_stream_recovery(_action(run), 'node')
+        rec = actor._native_recovery = NativeEmbeddingRecovery(actor, _action(run), 'node')
 
         async def exercise():
             await actor.astart()
@@ -46,7 +47,7 @@ def test_astart_native_rejects_private_journal(tmp_path):
     with RunContext.start(tmp_path / 'run', limits={'max_requests': 5}) as run:
         actor = _actor(sqlite_journal={'path': str(tmp_path / 'private.sqlite')})
         with pytest.raises(RecoveryContractError, match='private SQLite journal'):
-            actor.native_stream_recovery(_action(run), 'node')
+            actor._native_recovery = NativeEmbeddingRecovery(actor, _action(run), 'node')
         assert not (tmp_path / 'private.sqlite').exists()
         assert actor._client is None
 

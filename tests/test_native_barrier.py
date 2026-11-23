@@ -480,7 +480,7 @@ def test_native_inflight_cut_allows_free_slots_past_slow_call(tmp_path, monkeypa
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.contracts import state_codec
     from demiflow.execution.kernels.operator import IMAGE_MEDIA_TYPE
-    from demiflow.operator_llm.stream_recovery import RunPromptJournal
+    from demiflow.execution.journal.prompt import RunPromptJournal
     monkeypatch.setenv('DEMIFLOW_NATIVE_SLOW_TEST_KEY', 'fixture-only')
     original_commit = DataflowCheckpointCoordinator.commit
     original_pump, original_start = DataflowExecution.pump, DataflowExecution.start

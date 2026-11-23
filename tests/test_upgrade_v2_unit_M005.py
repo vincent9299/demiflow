@@ -1,10 +1,10 @@
-"""M005/M009/M010: adapter caching, ctor field, and finite native drain timeout."""
+"""M005/M009/M010: ctor field, and finite native drain timeout."""
 from types import SimpleNamespace
 
 from demiflow.execution.run_context import RunContext
 from demiflow.embeddings.runtime import EmbeddingActor
 from demiflow.embeddings.model import EmbeddingModel
-from demiflow.embeddings.stream_recovery import NativeEmbeddingRecovery
+from demiflow.execution.operator_bindings.dataflow_model_journal import NativeEmbeddingRecovery
 
 
 def _actor(**options):
@@ -23,17 +23,6 @@ def test_ctor_initializes_native_recovery_none():
     assert _actor()._native_recovery is None
 
 
-def test_native_stream_recovery_caches_per_action_node(tmp_path):
-    with RunContext.start(tmp_path / 'run', limits={'max_requests': 5}) as run:
-        actor = _actor()
-        action = _action(run)
-        first = actor.native_stream_recovery(action, 'node')
-        assert isinstance(first, NativeEmbeddingRecovery)
-        assert actor.native_stream_recovery(action, 'node') is first  # cached
-        other = actor.native_stream_recovery(action, 'node-2')
-        assert other is not first and other.node_id == 'node-2'
-
-
 def test_cancel_drain_timeout_no_effect_path_is_zero():
     assert _actor().cancel_drain_timeout_s == 0
 
@@ -46,7 +35,7 @@ def test_cancel_drain_timeout_private_journal_formula():
 def test_cancel_drain_timeout_native_is_finite(tmp_path):
     with RunContext.start(tmp_path / 'run', limits={'max_requests': 5}) as run:
         actor = _actor()
-        actor.native_stream_recovery(_action(run), 'node')
+        actor._native_recovery = NativeEmbeddingRecovery(actor, _action(run), 'node')
         # sqlite_journal is None yet a native journal exists: must not return 0.
         assert actor.options['sqlite_journal'] is None
         assert actor.cancel_drain_timeout_s == 30 + 3 * actor._native_recovery.journal.timeout_s + 1

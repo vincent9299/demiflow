@@ -77,7 +77,7 @@ if mode=='crash':
         'batch_ordinal':state['batch_ordinal']}))
   return image
  DataflowCheckpointCoordinator.commit=commit
- from demiflow.operator_llm.stream_recovery import RunPromptJournal
+ from demiflow.execution.journal.prompt import RunPromptJournal
  response=RunPromptJournal.response
  def confirmed(journal,*args,**kwargs):
   result=response(journal,*args,**kwargs)

@@ -5,8 +5,8 @@ import pytest
 
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.embeddings.stream_recovery import NativeEmbeddingRecovery
-from demiflow.operator_llm.stream_recovery import _BorrowedJournal
+from demiflow.execution.operator_bindings.dataflow_model_journal import NativeEmbeddingRecovery
+from demiflow.execution.operator_bindings.dataflow_model_journal import _BorrowedJournal
 
 
 def _setup(run, *, max_response_bytes=4096, journal=None):

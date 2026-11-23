@@ -112,7 +112,7 @@ if mode=='crash':
             os._exit(77)
         commit.fault_point=fault
     else:
-        from demiflow.operator_llm.stream_recovery import RunPromptJournal
+        from demiflow.execution.journal.prompt import RunPromptJournal
         original=RunPromptJournal.response
         def response(journal,*args,**kwargs):
             result=original(journal,*args,**kwargs)

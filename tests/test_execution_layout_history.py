@@ -101,8 +101,9 @@ result['public.Dataset'] = [base64.b64encode(pickle.dumps(Dataset, protocol=5)).
 from demiflow.data.result_cache import CachedMap, CachedSyncMap
 for fn in [CachedMap.__call__, CachedMap._io, CachedSyncMap.__call__, CachedSyncMap.__init__]:
     result['public.' + fn.__qualname__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
-from demiflow.operator_llm.stream_recovery import RunPromptJournal, NativePromptRecovery, native_request_budget
-for fn in [RunPromptJournal, NativePromptRecovery, native_request_budget, RunPromptJournal.check_recovery, RunPromptJournal.media_references, NativePromptRecovery.delivery_trace, NativePromptRecovery.bind_client]:
+from demiflow.operator_llm.stream_recovery import RunPromptJournal, NativePromptRecovery, native_request_budget, _BorrowedJournal, _ProtectedPayload, _CapacityPending
+from demiflow.embeddings.stream_recovery import NativeEmbeddingRecovery
+for fn in [RunPromptJournal, NativePromptRecovery, native_request_budget, NativeEmbeddingRecovery, _BorrowedJournal, _ProtectedPayload, _CapacityPending, RunPromptJournal.check_recovery, RunPromptJournal.media_references, NativePromptRecovery.delivery_trace, NativePromptRecovery.bind_client]:
     result['public.' + fn.__qualname__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
 from demiflow import PipelineBundleRef
 buffer = io.BytesIO(); ProgramPickler(buffer, protocol=5).dump(PipelineBundleRef.load)
@@ -411,6 +412,7 @@ def test_changed_request_policy_cannot_keep_original_pin(original_carriers, monk
 
 
 @pytest.mark.parametrize('name', ['RunPromptJournal', 'NativePromptRecovery', 'native_request_budget',
+    'NativeEmbeddingRecovery', '_BorrowedJournal', '_ProtectedPayload', '_CapacityPending',
     'RunPromptJournal.check_recovery', 'RunPromptJournal.media_references',
     'NativePromptRecovery.delivery_trace', 'NativePromptRecovery.bind_client'])
 def test_original_model_journal_capture_remains_exact(original_carriers, name):
@@ -432,14 +434,16 @@ def test_original_model_journal_requires_actual_media_operation(original_carrier
         value = vars(value)[part]
     monkeypatch.setattr(value, '__code__', value.__code__.replace(co_consts=(*value.__code__.co_consts, 'changed')))
     raw, expected = original_carriers['public.RunPromptJournal']
-    assert describe(load_payload([base64.b64decode(raw)])) != expected
+    with pytest.raises(DataflowError, match='audited definition'):
+        load_payload([base64.b64decode(raw)])
 
 
 def test_original_model_journal_requires_bound_media_verifier(original_carriers, monkeypatch):
     from demiflow.execution.outputs import object_sink
     monkeypatch.setattr(object_sink, 'verify_object', lambda *args, **kwargs: None)
     raw, expected = original_carriers['public.RunPromptJournal']
-    assert describe(load_payload([base64.b64decode(raw)])) != expected
+    with pytest.raises(DataflowError, match='audited definition'):
+        load_payload([base64.b64decode(raw)])
 
 
 @pytest.mark.parametrize('descriptor', [property, staticmethod, classmethod])
@@ -449,7 +453,8 @@ def test_original_model_journal_requires_plain_method_slot(original_carriers, mo
     method = vars(ObjectSink)[name]
     monkeypatch.setattr(ObjectSink, name, descriptor(method))
     raw, expected = original_carriers['public.RunPromptJournal']
-    assert describe(load_payload([base64.b64decode(raw)])) != expected
+    with pytest.raises(DataflowError, match='audited definition'):
+        load_payload([base64.b64decode(raw)])
 
 
 @pytest.mark.parametrize('name,helper', [
@@ -495,3 +500,19 @@ def test_changed_unlink_cannot_impersonate_original_run_journal(original_carrier
     from demiflow.execution.recovery_sdk_v3 import authentic_source_global
     assert not authentic_source_global(RunJournal, 'demiflow.execution.run_journal')
     assert describe(RunJournal) != original_carriers['RunJournal'][1]
+
+
+@pytest.mark.parametrize('name', ['native_delivery_trace', 'native_response', '_stable_metadata'])
+def test_old_prompt_binding_requires_actual_response_projection(original_carriers, monkeypatch, name):
+    from demiflow.operator_llm import stream_recovery
+    fn = getattr(stream_recovery, name)
+    monkeypatch.setattr(fn, '__code__', fn.__code__.replace(co_consts=(*fn.__code__.co_consts, 'changed')))
+    with pytest.raises(DataflowError, match='audited definition'):
+        load_payload([base64.b64decode(original_carriers['public.NativePromptRecovery'][0])])
+
+
+def test_old_prompt_binding_requires_bound_response_projection(original_carriers, monkeypatch):
+    from demiflow.execution.operator_bindings import dataflow_model_journal
+    monkeypatch.setattr(dataflow_model_journal, 'native_response', lambda response, **kw: response)
+    with pytest.raises(DataflowError, match='audited definition'):
+        load_payload([base64.b64decode(original_carriers['public.NativePromptRecovery.bind_client'][0])])

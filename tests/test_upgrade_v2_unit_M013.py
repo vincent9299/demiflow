@@ -9,8 +9,8 @@ import pytest
 from demiflow.execution.run_context import RunContext
 from demiflow.operator_llm.errors import PromptBudgetExceededError
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
-from demiflow.operator_llm.stream_recovery import (
-    native_request_budget, CALL_RESERVATION, RunPromptJournal)
+from demiflow.operator_llm.stream_recovery import native_request_budget, CALL_RESERVATION
+from demiflow.execution.journal.prompt import RunPromptJournal
 
 
 def _request():

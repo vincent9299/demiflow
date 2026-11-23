@@ -12,6 +12,11 @@ from __future__ import annotations
 from demiflow.execution.contracts.dataflow_codec import private_embedding_rpc_id as _private_embedding_rpc_id
 
 import inspect
+import asyncio
+from demiflow.execution.row_scope import current_row_scope
+from demiflow.execution.journal.prompt import RunPromptJournal
+from demiflow.execution.contracts.errors import _CapacityPending
+from demiflow.operator_llm.stream_recovery import native_delivery_trace, native_response
 import json
 import math
 from contextvars import ContextVar
@@ -30,12 +35,8 @@ from demiflow.execution.contracts.dataflow import (
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
 from demiflow.operator_llm.journal import RequestRecord, canonical, request_key
-from demiflow.operator_llm.stream_recovery import (
-    CALL_RESERVATION,
-    NativePromptRecovery,
-    _BorrowedJournal,
-)
-from demiflow.embeddings.stream_recovery import NativeEmbeddingRecovery
+from demiflow.operator_llm.stream_recovery import CALL_RESERVATION
+
 
 _MAX_RECORD_BYTES = 16 * 1024**2
 
@@ -241,6 +242,163 @@ _PRIVATE_EMBEDDING_SCOPE = ContextVar('private_embedding_original_request_scope'
 
 
 
+
+
+class _BorrowedJournal:
+    """Clients drain their I/O pools; only the run closes the shared writer."""
+    def __init__(self, journal):
+        self.journal = journal
+
+    def __getattr__(self, name):
+        return getattr(self.journal, name)
+
+    def close(self):
+        pass
+
+
+class NativePromptRecovery:
+    def __init__(self, actor, action, node_id):
+        self.actor, self.action, self.node_id = actor, action, node_id
+        run = action.context
+        journal = getattr(run, '_native_prompt_journal', None)
+        if journal is None:
+            journal = run._native_prompt_journal = RunPromptJournal(run)
+            journal.check_recovery()
+        journal.stores.update(getattr(action, 'object_sinks', {}))
+        self.journal = journal
+        action.native_image_effects = True
+        predicate = getattr(actor, 'when', None)
+        self.semantic_owners = (() if predicate is None or inspect.isfunction(predicate) or inspect.isbuiltin(predicate)
+                                else (predicate,))
+        self.row_local = not self.semantic_owners
+        self.copy_inputs = predicate is not None
+
+    def delivery_trace(self, trace):
+        """Keep native call_output bound to its original provider execution.
+
+        The journal key includes this action/node/row occurrence. A lookup is
+        replay of that original call, not a new business result. Attempt-local
+        cache hits are observed BEFORE this projection by PromptActor; they
+        must not change a downstream row or its native commit digest.
+
+        Private journals and offline inputs never install this binding, and
+        retain their existing delivery semantics. Only trace-owned flags are
+        projected; response bodies and arbitrary user metadata are untouched.
+        """
+        if not getattr(self, '_native_delivery_bound', False):
+            return trace
+        return native_delivery_trace(trace)
+
+    def bind_client(self, client):
+        # Explicit request journals remain the authoritative caller-selected
+        # cache. They already persist model responses before returning them.
+        if getattr(client, 'journal', None) is not None:
+            return
+        if not hasattr(client, 'record'):
+            raise RecoveryContractError('Native asynchronous recovery needs a journal-capable transport')
+        client.journal = _BorrowedJournal(self.journal)
+        self.actor._runtime.coordinator._native_group_journal = True
+        bound = (128 * 1024 if client.model.provider else
+                 client.options.get('max_response_bytes', 8 * 1024**2) + 64 * 1024)
+        if bound > self.journal.max_record_bytes:
+            raise RecoveryContractError('Native response ceiling exceeds the admitted journal record budget')
+        record = client.record
+        from demiflow.operator_llm.client import _PreparedCall
+        def scoped(request):
+            if isinstance(request, _PreparedCall):
+                return request.source
+            from demiflow.execution.row_scope import current_row_scope
+            scope = current_row_scope()
+            if scope is None:
+                raise RecoveryContractError('Native model request lost its source occurrence')
+            return RequestRecord({**record(request), 'native_response_bytes': bound, 'native_occurrence': identity([
+                self.action.action_id, self.node_id, scope.occurrence])})
+        client.record = scoped
+        execute = client.execute
+        async def admitted(request):
+            while True:
+                self.action.context.check_stop()
+                try:
+                    return await execute(request)
+                except _CapacityPending:
+                    # The failed admission wrote no intent and made no HTTP
+                    # call. Release the journal pool slot so responses can save.
+                    await asyncio.sleep(.01)
+        client.execute = admitted
+        decode = client.decode
+        def saved(request, value, reused=False, refs=None):
+            if reused:
+                self.journal.media_references(value, register=True)
+            response = decode(request, value, reused, refs)
+            return native_response(response, provider=client.model.provider)
+        client.decode = saved
+        self._native_delivery_bound = True
+
+
+class NativeEmbeddingRecovery:
+    def __init__(self, actor, action, node_id):
+        self.actor, self.action, self.node_id = actor, action, node_id
+        run = action.context
+        if actor.options.get('sqlite_journal') is not None:
+            raise RecoveryContractError('Native embedding recovery cannot coexist with a private SQLite journal')
+        if actor.options['max_response_bytes'] + 64 * 1024 > min(16 * 1024**2, run.limits['max_control_bytes']):
+            raise RecoveryContractError('Native response ceiling exceeds the admitted journal record budget')
+        journal = getattr(run, '_native_prompt_journal', None)
+        if journal is None:
+            journal = run._native_prompt_journal = RunPromptJournal(run)
+            journal.check_recovery()
+        journal.stores.update(getattr(action, 'object_sinks', {}))
+        self.journal = journal
+        self.semantic_owners = ()
+        self.row_local = True
+        self.copy_inputs = False
+        self.inflight = {}
+        self._response_bound = None
+
+    def bind_actor(self):
+        # A private SQLite journal is a second budget authority; refuse it
+        # explicitly instead of silently dual-writing. The run owns the writer.
+        if self.actor._journal is not None:
+            raise RecoveryContractError('Native embedding recovery cannot coexist with a private SQLite journal')
+        bound = self.actor.options['max_response_bytes'] + 64 * 1024
+        if bound > self.journal.max_record_bytes:
+            raise RecoveryContractError('Native response ceiling exceeds the admitted journal record budget')
+        self._response_bound = bound
+        self.actor._journal = _BorrowedJournal(self.journal)
+
+    def scope_request(self, request, *, part=0):
+        scope = current_row_scope()
+        if scope is None:
+            raise RecoveryContractError('Native embedding request lost its source occurrence')
+        occurrence = scope.occurrence if part == 0 else identity([scope.occurrence, 'part', part])
+        return RequestRecord({**request, 'native_response_bytes': self._response_bound,
+            'native_occurrence': identity([self.action.action_id, self.node_id, occurrence])})
+
+    def verify_request_membership(self, request):
+        # A known batch occurrence can never silently acquire different input
+        # membership (e.g. a non-deterministic upstream or timed boundary).
+        # Bind through the existing run journal before lookup/send, not another
+        # effect ledger. Unknown history is never interpreted as a fresh request.
+        key = identity(['embedding-request-membership', request['native_occurrence']])
+        run = self.action.context
+        run.journal.bind_source(run.fence, key, {'request_key': request.request_key})
+
+    async def drain(self, *, timeout_s):
+        if type(timeout_s) not in (int, float) or not math.isfinite(timeout_s) or timeout_s <= 0:
+            raise ValueError('Native embedding drain timeout must be positive and finite')
+        current = asyncio.current_task()
+        tasks = [task for task in self.inflight.values() if task is not current]
+        if not tasks:
+            return
+        _, pending = await asyncio.wait(tasks, timeout=timeout_s)
+        if pending:
+            # Leave still-running tasks, the client and the journal untouched;
+            # the original failure/isolation path owns the hard deadline.
+            raise TimeoutError('Native embedding drain timed out with in-flight requests')
+        await asyncio.gather(*tasks, return_exceptions=True)
+        for key, task in list(self.inflight.items()):
+            if task.done():
+                self.inflight.pop(key, None)
 
 
 class RemotePromptRecovery(NativePromptRecovery):

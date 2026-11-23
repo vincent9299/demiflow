@@ -420,10 +420,9 @@ from demiflow.execution.kernels import model_state
 from demiflow.execution.operator_bindings import dataflow_model_journal as journal
 from demiflow.execution.recovery_contract import identity, RecoveryContractError
 from demiflow.operator_llm.journal import RequestRecord, request_key, canonical
-from demiflow.operator_llm.stream_recovery import (
-    CALL_RESERVATION, native_request_budget, NativePromptRecovery, _BorrowedJournal,
-)
-from demiflow.embeddings.stream_recovery import NativeEmbeddingRecovery
+from demiflow.operator_llm.stream_recovery import CALL_RESERVATION, native_request_budget
+from demiflow.execution.operator_bindings.dataflow_model_journal import NativePromptRecovery, _BorrowedJournal
+from demiflow.execution.operator_bindings.dataflow_model_journal import NativeEmbeddingRecovery
 from demiflow.operator_llm.runtime import (
     PromptActor, InProcessOperatorLLMCoordinator, AsyncOperatorLLMRuntime,
 )

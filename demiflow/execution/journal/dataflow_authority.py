@@ -589,7 +589,7 @@ class DriverJournalService:
     def _native_journal(self):
         if self._native is not None and hasattr(self._native, "native_journal"):
             return self._native.native_journal
-        from demiflow.operator_llm.stream_recovery import RunPromptJournal
+        from demiflow.execution.journal.prompt import RunPromptJournal
         run = self._action.context
         with self._lock:
             journal = getattr(run, '_native_prompt_journal', None)

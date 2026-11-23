@@ -65,7 +65,8 @@ from demiflow.execution.recovery_contract import (
 from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.operator_llm.journal import UncertainPromptCall
-from demiflow.operator_llm.stream_recovery import CALL_RESERVATION, RunPromptJournal
+from demiflow.operator_llm.stream_recovery import CALL_RESERVATION
+from demiflow.execution.journal.prompt import RunPromptJournal
 from demiflow.resources.capacity import LocalCapacityPool
 from demiflow.resources.process_unit import ManagedProcessUnit
 from demiflow.workbench.graph import model as graph_model

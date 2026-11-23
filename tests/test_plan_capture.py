@@ -147,8 +147,10 @@ def test_prompt_configuration_is_compiled_without_model_lifecycle(no_execution, 
     from test_map_prompt_async import PACK
     # The public API creates a passive declaration object. Its execution
     # lifecycle and transport acquisition must never run during capture.
-    for name in ('astart', 'aclose', '__call__', 'bind_execution', 'native_stream_recovery'):
+    for name in ('astart', 'aclose', '__call__'):
         monkeypatch.setattr(PromptActor, name, forbidden)
+    from demiflow.execution.operator_bindings import dataflow_model_journal
+    monkeypatch.setattr(dataflow_model_journal, 'bind_prompt_adapter', forbidden)
     monkeypatch.setattr(AsyncOperatorLLMRuntime, 'call_with_trace', forbidden)
     monkeypatch.setattr(AsyncOperatorLLMRuntime, 'transport_context', forbidden)
     pack = parse_prompt_pack(PACK)

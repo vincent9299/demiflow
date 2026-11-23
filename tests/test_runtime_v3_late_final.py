@@ -12,7 +12,7 @@ from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
 from demiflow.execution.dataflow_hosts import _EndpointBase
 from demiflow.execution.run_context import RunContext
-from demiflow.operator_llm.stream_recovery import RunPromptJournal
+from demiflow.execution.journal.prompt import RunPromptJournal
 
 
 @pytest.mark.parametrize('stop_when_complete', [False, True])

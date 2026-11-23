@@ -3,7 +3,7 @@ from demiflow import data
 from demiflow.execution.contracts.dataflow_failures import failure_payload, restore_failure
 from demiflow.execution.run_context import RunContext
 from demiflow.operator_llm.parser import parse_prompt_pack
-from demiflow.operator_llm.stream_recovery import _CapacityPending
+from demiflow.execution.contracts.errors import _CapacityPending
 from test_runtime_v3_native_execution import PACK, native_server
 from test_runtime_v3_native_rpc_replay import interrupted_run, service, event
 
@@ -41,7 +41,7 @@ def test_native_capacity_refusal_is_not_memoized_or_charged(tmp_path, monkeypatc
 
 
 def test_real_eight_concurrent_prompts_wait_for_original_response_capacity(tmp_path, native_server, monkeypatch):
-    from demiflow.operator_llm.stream_recovery import RunPromptJournal
+    from demiflow.execution.journal.prompt import RunPromptJournal
     import time
     from types import SimpleNamespace
     native_server.barrier = SimpleNamespace(wait=lambda timeout: time.sleep(.05))

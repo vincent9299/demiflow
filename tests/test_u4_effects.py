@@ -29,7 +29,7 @@ def _recovery_check(path):
     # check_recovery is the RunPromptJournal startup gate; build one over the same
     # DB a synchronous shard populated (the check is a read-only indexed query).
     from types import SimpleNamespace
-    from demiflow.operator_llm.stream_recovery import RunPromptJournal
+    from demiflow.execution.journal.prompt import RunPromptJournal
     run = SimpleNamespace(journal=SimpleNamespace(path=path),
                           limits={"max_requests": 1024, "max_control_bytes": 16 * 1024 ** 2})
     return RunPromptJournal(run)

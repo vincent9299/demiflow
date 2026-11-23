@@ -64,7 +64,8 @@ def test_nondeterministic_text_expansion_preserves_known_image_identity(tmp_path
 
 @pytest.mark.parametrize('confirmed_unsent', [True, False])
 def test_only_durably_confirmed_unsent_request_can_be_reserved_again(tmp_path, confirmed_unsent):
-    from demiflow.operator_llm.stream_recovery import RunPromptJournal, CALL_RESERVATION
+    from demiflow.execution.journal.prompt import RunPromptJournal
+    from demiflow.operator_llm.stream_recovery import CALL_RESERVATION
     from demiflow.operator_llm.journal import UncertainPromptCall
     request = {'payload': 'same occurrence', 'native_response_bytes': 4096}
     with pytest.raises(RuntimeError, match='lost owner'):
