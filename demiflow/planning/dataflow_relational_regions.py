@@ -86,3 +86,35 @@ def fuse_relational_regions(graph, stages, *, policy, bounds, hosts, snapshots=(
         used.update(members)
     return tuple(replacements[s.stage_id] if s.stage_id in replacements else s
                  for s in stages if s.stage_id in replacements or not any(o in used for o in s.occurrences))
+
+
+def place_key_exclusion(graph, snapshots, stages, *, policy, bounds, hosts):
+    """Admit the SQL process inside the stage that already owns a pinned left scan's anti join."""
+    from ..execution.contracts.relational_region import KEY_SQL_SUFFIX, SQL_CHILD_RSS, SQL_PARENT_WINDOW
+
+    fixed = {s.source_id for s in snapshots if s.kind == 'lance' and
+             type(s.immutable_identity.get('version')) is int}
+    exclusion = {n.occurrence_id for n in graph.nodes if n.kernel.kind == 'exclude_keys'
+                 and n.kernel.configuration.get('lance_key_source') in fixed}
+    if not exclusion or (policy.native_limits or {}).get('max_rss_bytes', SQL_CHILD_RSS) < SQL_CHILD_RSS:
+        return stages
+    result = []
+    for stage in stages:
+        if exclusion.isdisjoint(stage.occurrences):
+            result.append(stage)
+            continue
+        resident = stage.resident_bytes + SQL_CHILD_RSS + SQL_PARENT_WINDOW
+        cpu = max(1000, stage.profile.requests['cpu_millis'])
+        limits = stage.profile.limits or {}
+        if (resident > min(bounds.max_resident_bytes, limits.get('memory_bytes', resident))
+                or cpu > limits.get('cpu_millis', cpu)
+                or not any(resident <= h.logical_resources.get('memory_bytes', 0) and
+                           cpu <= h.logical_resources.get('cpu_millis', h.logical_resources.get('cpu', 0)*1000)
+                           for h in hosts)):
+            result.append(stage)
+            continue
+        profile = replace(stage.profile, requests={**stage.profile.requests,
+            'cpu_millis': cpu, 'memory_bytes': resident})
+        result.append(replace(stage, stage_id=stage.stage_id + KEY_SQL_SUFFIX,
+                              profile=profile, resident_bytes=resident))
+    return tuple(result)

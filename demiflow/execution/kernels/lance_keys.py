@@ -10,6 +10,68 @@ from .dataflow import _materialize_row, _output_record, _hash_id, _OutputBudget
 from .ordering import build_sort_runs, merge_sort_runs
 
 
+def _sql_survivors(left, right, keys, services):
+    from ...operators.relational import EXCLUDE_OFFSETS_SQL
+    from ..contracts.relational_region import KEY_SQL_SUFFIX, SQL_CHILD_RSS, SQL_PARENT_WINDOW
+    from .dataflow import _group_key
+
+    if not any(s.stage_id.endswith(KEY_SQL_SUFFIX) for s in services.assignment.stages):
+        return None
+    if services.query_region_offsets is None:
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'sealed key exclusion requires its SQL host')
+    # The two inputs are closed finite ports. Only their key bytes and ordered
+    # offsets enter the child. A speculative read never consumes the worker
+    # iterator used by the hash strategy; user callbacks have already finished.
+    sources = []
+    retained = 0
+    tables = {}
+    for name, port in (('lkeys', left), ('rkeys', right)):
+        scan = port.within_offset_budget(SQL_PARENT_WINDOW // 2048)
+        if scan is None:
+            return None
+        table = []
+        try:
+            for ordinal, record in enumerate(scan):
+                services.check_stop()
+                row = _materialize_row(record, services)
+                value = _group_key(row, keys).encode('utf-8')
+                key = None if any(row[f] is None for f in keys) else value
+                # Includes child input's simultaneous serialization, left
+                # provenance and the Python object tree of the bounded narrow row.
+                retained += 2048 + len(value) * 8
+                if name == 'lkeys':
+                    retained += record.encoded_bytes * 40
+                if retained > SQL_PARENT_WINDOW // 4:
+                    return None
+                table.append((key, ordinal))
+                if name == 'lkeys':
+                    sources.append(record)
+        finally:
+            scan.close()
+        tables[name] = table
+    pairs = services.query_region_offsets(EXCLUDE_OFFSETS_SQL, tables=tables, max_pairs=len(sources),
+        rss_bytes=SQL_CHILD_RSS, check_stop=services.check_stop)
+    return (sources[i] for i, in pairs)
+
+
+def _hydration_rows(schema, services, requested):
+    """Choose a bulk read before allocation. Variable-width values retain the sealed row ceiling."""
+    from ..dataflow_record_frames import resident_limit
+
+    bounds = services.bounds
+    width = 0
+    for field in schema:
+        try:
+            width += max(1, (field.type.bit_width + 7) // 8) + 1
+        except (ValueError, AttributeError):
+            # Variable-width or nested buffers cannot be bounded by the schema.
+            width = bounds.max_row_bytes
+            break
+    python_row = 256 + 128 * len(schema) + 8 * width
+    return max(1, min(requested, bounds.max_batch_bytes // max(1, width),
+                      resident_limit(bounds, services) // (2 * python_row)))
+
+
 def exclude_keys(left, right, *, spec, services):
     from .join_spool import join_pairs
     from ...lance.storage import open_lance_dataset
@@ -29,9 +91,12 @@ def exclude_keys(left, right, *, spec, services):
     schema_ref = schemas.put(schema)
     fragment_order = {int(f.fragment_id): i for i, f in enumerate(dataset.get_fragments())}
     keys = tuple(spec.configuration['on'])
-    pairs = join_pairs(left, right, left_keys=keys, right_keys=keys, how='anti', services=services)
+    survivors = _sql_survivors(left, right, keys, services)
+    if survivors is None:
+        pairs = join_pairs(left, right, left_keys=keys, right_keys=keys, how='anti', services=services)
+        survivors = (record for record, _ in pairs)
     def ids():
-        for record, _ in pairs:
+        for record in survivors:
             pos = record.source_position
             if pos.get('version') != version or type(pos.get('row_id')) is not int:
                 raise DataflowError('INCOMPATIBLE_HISTORY', 'Lance anti join lost pinned row identity')
@@ -46,7 +111,11 @@ def exclude_keys(left, right, *, spec, services):
     ordering = replace(spec, kind='SortOp', configuration=config)
     runs = build_sort_runs(ids(), spec=ordering, services=services)
     ordered = merge_sort_runs(runs, spec=ordering, services=services)
-    batch_rows = max(1, min(256, services.bounds.max_batch_bytes // services.bounds.max_row_bytes))
+    bulk = bool(spec.configuration.get('bulk_key_hydration'))
+    if bulk:
+        batch_rows = _hydration_rows(schema, services, min(query.get('batch_size') or 1024, 8192))
+    else:
+        batch_rows = max(1, min(256, services.bounds.max_batch_bytes // services.bounds.max_row_bytes))
     from ..dataflow_native_limits import limit_value
     batch_rows = limit_value(services, 'batch_rows', batch_rows)
     pending, sequence, budget = [], 0, _OutputBudget(spec, services, streaming=True)
@@ -61,22 +130,23 @@ def exclude_keys(left, right, *, spec, services):
             row = table.slice(index, 1)
             if row.nbytes > services.bounds.max_row_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'Lance payload hydration exceeds row budget')
-            yield original, row.to_pylist()[0]
-    for record in ordered:
-        pending.append(record)
-        if len(pending) < batch_rows:
-            continue
-        for original, row in hydrate(pending):
+            if not bulk:
+                yield original, row.to_pylist()[0]
+        if bulk:
+            yield from zip(batch, table.to_pylist(), strict=True)
+    def batches():
+        for record in ordered:
+            pending.append(record)
+            if len(pending) == batch_rows:
+                yield pending
+                pending.clear()
+        if pending:
+            yield pending
+
+    for batch in batches():
+        for original, row in hydrate(batch):
             out = _output_record(_hash_id([spec.configuration['occurrence_id'],original.record_id]),
                                  original.source_position, row, sequence, services)
-            out = clone_record(out, schema_ref=schema_ref)
-            budget.charge(out); sequence += 1
-            yield out
-        pending = []
-    if pending:
-        for original, row in hydrate(pending):
-            out = _output_record(_hash_id([spec.configuration['occurrence_id'],original.record_id]),
-                                 original.source_position, row, sequence, services)
-            out = clone_record(out, schema_ref=schema_ref)
-            budget.charge(out); sequence += 1
-            yield out
+            budget.charge(out)
+            sequence += 1
+            yield clone_record(out, schema_ref=schema_ref)

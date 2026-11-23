@@ -172,6 +172,9 @@
     "planning/dataflow_compile.py",
     "planning/dataflow_configuration.py"
    ],
+   "bulk_key_hydration": [
+    "execution/kernels/lance_keys.py"
+   ],
    "cache": [
     "execution/dataflow_models.py"
    ],
@@ -271,7 +274,8 @@
    ],
    "lance_key_source": [
     "execution/kernels/lance_keys.py",
-    "planning/dataflow_configuration.py"
+    "planning/dataflow_configuration.py",
+    "planning/dataflow_relational_regions.py"
    ],
    "limit": [
     "execution/kernels/operator.py",
@@ -497,6 +501,9 @@
   "written": {
    "actor_binding_version": [
     "planning/dataflow_shared.py"
+   ],
+   "bulk_key_hydration": [
+    "planning/dataflow_compile.py"
    ],
    "callable_scope": [
     "planning/dataflow_compile.py"

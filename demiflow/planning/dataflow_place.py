@@ -912,6 +912,9 @@ def compile_physical_dataflow(
     from .dataflow_graph_adapter import specialize_graph_stages, specialize_graph_exchanges
     stages = specialize_graph_stages(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
     stages = tuple(stage for stage in stages if not refs.intersection(stage.occurrences))
+    if _allow_offset_sql:
+        from .dataflow_relational_regions import place_key_exclusion
+        stages = place_key_exclusion(graph, snapshots, stages, policy=policy, bounds=bounds, hosts=hosts)
     jobs, values = physical_values(graph, stages)
     exchanges = plan_exchanges(graph, stages, policy=policy, bounds=bounds)
     exchanges = specialize_graph_exchanges(graph, stages, exchanges, bounds=bounds)
@@ -921,8 +924,8 @@ def compile_physical_dataflow(
         exchanges, residency = _select_budgeted_residency(
             graph, snapshots, stages, exchanges, hosts=hosts, bounds=bounds, policy=policy)
     except DataflowError as exc:
-        from ..execution.contracts.relational_region import SQL_PREFIX
-        if exc.code != 'RESOURCE_INFEASIBLE' or not any(s.stage_id.startswith(SQL_PREFIX) for s in stages):
+        from ..execution.contracts.relational_region import needs_native_offsets
+        if exc.code != 'RESOURCE_INFEASIBLE' or not any(needs_native_offsets(s) for s in stages):
             raise
         # A larger optional stage may not coexist with other mandatory
         # reservations. Retry only this fresh physical choice, before sealing.

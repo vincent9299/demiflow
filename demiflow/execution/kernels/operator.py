@@ -403,6 +403,14 @@ class _SpoolRecords:
             self._iterator = self.port._records()
         return next(self._iterator)
 
+    def within_offset_budget(self, maximum_rows):
+        """The closed port owns a repeatable immutable input, including any borrowed prefix."""
+        if self._iterator is not None or not self.port.eoi:
+            return None
+        if self.port._count > maximum_rows:
+            return None
+        return self.port._records()
+
     def for_join(self, fields):
         if self._iterator is not None:
             raise _err('INVALID_CONTRACT', 'cannot project a partially consumed spool')

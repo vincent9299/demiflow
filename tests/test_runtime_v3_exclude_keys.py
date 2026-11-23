@@ -44,3 +44,40 @@ def test_exclude_stream_total_may_exceed_individual_row_bound(tmp_path):
     lance.write_dataset(pa.Table.from_pylist(rows),uri,mode='create')
     with RunContext.start(tmp_path/'run',limits={'max_row_bytes':65536,'max_batch_bytes':262144}),data.local_execution():
         assert data.read_lance(uri).exclude_keys(data.from_items([{'k':'absent'}]),on='k').take_all()==rows
+
+
+def test_public_key_exclusion_uses_only_key_sql_and_bulk_hydrates_survivors(tmp_path, monkeypatch):
+    from demiflow.execution import datafusion
+    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.contracts.relational_region import KEY_SQL_SUFFIX
+
+    keys = [None, *range(256), 127]
+    source = str(tmp_path / 'fixed.lance')
+    lance.write_dataset(pa.table({'k': keys, 'n': range(len(keys))}), source)
+    probes, reads = [], []
+    query = datafusion.query_region_offsets
+    take = lance.LanceDataset._take_rows
+    def key_only(sql, **kwargs):
+        assert 'LEFT ANTI JOIN' in sql
+        assert all(k is None or type(k) is bytes for rows in kwargs['tables'].values() for k, i in rows)
+        probes.append(tuple(map(len, kwargs['tables'].values())))
+        return query(sql, **kwargs)
+    def selected_rows(dataset, ids, *, columns, **kwargs):
+        reads.append((len(ids), tuple(columns)))
+        return take(dataset, ids, columns=columns, **kwargs)
+    monkeypatch.setattr(datafusion, 'query_region_offsets', key_only)
+    monkeypatch.setattr(lance.LanceDataset, '_take_rows', selected_rows)
+    expected = [{'k': k, 'n': i} for i, k in enumerate(keys) if k not in (2, 20)]
+    for grant, uses_sql in ((64, False), (1024, True)):
+        probes.clear()
+        reads.clear()
+        with RunContext.start(tmp_path / str(grant), limits={'memory_bytes': grant << 20,
+                'max_row_bytes': 65536, 'max_batch_bytes': 2 << 20}) as run, data.local_execution(
+                workers=2, partitions=1, worker_mode='thread', memory_bytes=grant << 20):
+            result = data.read_lance(source, version=1, batch_size=8192).exclude_keys(
+                data.from_items([{'k': None}, {'k': 2}, {'k': 20}, {'k': 20}]), on='k').take_all()
+            stages = load_sealed_plan(run.directory, 'action-1', version='v3')['physical'].stages
+        assert result == expected
+        assert any(s.stage_id.endswith(KEY_SQL_SUFFIX) for s in stages) == uses_sql
+        assert probes == ([(258, 4)] if uses_sql else [])
+        assert reads == [(256, ('k', 'n'))]
