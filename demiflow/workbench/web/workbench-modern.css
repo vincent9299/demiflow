@@ -80,9 +80,6 @@
 .workbench .wb-actions>button:not(.primary):hover:not(:disabled),.workbench .wb-more>summary:hover{
   background:var(--op-soft);color:var(--op-ink);border-color:#d4d4d8;
 }
-.workbench .wb-actions>button:not(.primary)[aria-pressed=true]{
-  background:#f4f4f5;color:#09090b;border-color:#d4d4d8;font-weight:600;
-}
 .workbench .wb-actions>.wb-icon-action{
   display:inline-grid;place-items:center;width:30px;height:30px;padding:0;border-color:transparent;background:transparent;box-shadow:none;color:#71717a;
 }
@@ -145,11 +142,11 @@
 .op-heading h2{font-size:22px;font-weight:650;letter-spacing:-.025em;line-height:1.35;margin:3px 0 6px;overflow-wrap:anywhere;color:#09090b}
 .op-eyebrow{font-size:11px;font-weight:550;letter-spacing:.06em;text-transform:uppercase;color:#a1a1aa}
 .op-location{font:12px/1.6 var(--font-mono,ui-monospace,monospace);color:#71717a;overflow-wrap:anywhere}
-.op-browser .op-text-button,.flow-arguments .op-text-button{
+.op-browser .op-text-button{
   border:0;box-shadow:none;background:transparent;border-radius:6px;
   padding:5px 9px;color:#52525b;font-size:12px;font-weight:500;white-space:nowrap;
 }
-.op-browser .op-text-button:hover,.flow-arguments .op-text-button:hover{background:var(--op-soft);color:var(--op-ink)}
+.op-browser .op-text-button:hover{background:var(--op-soft);color:var(--op-ink)}
 .op-description{font-size:13.5px;line-height:1.7;color:#52525b;max-width:72ch}
 .op-tabs{display:flex;flex-wrap:wrap;gap:0 22px;margin:22px 0 18px;border-bottom:1px solid var(--op-line)}
 .op-tabs .op-text-button{border-radius:0;padding:8px 0;font-size:13px;color:#71717a}
@@ -177,23 +174,8 @@
 .op-version:hover{background:var(--op-soft)!important;color:#09090b}
 .op-version code{color:#71717a;font-family:var(--font-mono,monospace)}
 .op-history-notice{display:flex;gap:12px;align-items:center;font-size:12px;color:#b45309}
-.flow-arguments{max-width:740px;padding:24px 28px;margin:16px auto;background:#fff;border:0;border-radius:0}
-.flow-arguments>header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
-.flow-arguments h2{font-size:20px;font-weight:650;letter-spacing:-.02em;margin:4px 0}
-.flow-arguments form{display:grid;grid-template-columns:1fr 1fr;gap:20px}
-.flow-arguments label{display:flex;flex-direction:column;gap:6px;min-width:0;font-size:13px;color:#27272a;font-weight:500}
-.flow-arguments label:has(textarea){grid-column:1/-1}
-.flow-arguments input:not([type=checkbox]),.flow-arguments textarea{
-  width:100%;border:1px solid #e4e4e7;background:#fafafa;box-shadow:none;
-  border-radius:8px;padding:9px 11px;color:#09090b;font:13px/1.6 var(--font-mono,ui-monospace,monospace);
-}
-.flow-arguments input:not([type=checkbox]):focus,.flow-arguments textarea:focus{background:#fff;border-color:#18181b}
-.flow-arguments input[type=checkbox]{align-self:flex-start}
-.flow-arguments footer{display:flex;grid-column:1/-1;align-items:center;justify-content:space-between;border-top:1px solid var(--op-line);padding-top:16px}
-.flow-argument-status{font-size:12px;color:#71717a;overflow-wrap:anywhere}
-.flow-arguments footer button{border-radius:8px}
 @media(max-width:850px){.op-browser{grid-template-columns:var(--side-navigation-width,210px) minmax(0,1fr)}.op-viewer{padding:24px 20px}.op-heading h2{font-size:20px}.workbench .wb-selectors select{max-width:240px}}
-@media(max-width:600px){.op-browser{grid-template-columns:var(--side-navigation-width,150px) minmax(0,1fr);min-height:0}.op-tree{border-right:0;border-bottom:1px solid var(--op-line);max-height:290px;overflow:auto;padding:12px 6px}.op-tree-items{display:block}.op-viewer{padding:22px 14px}.op-heading{align-items:flex-start;gap:6px}.op-heading h2{font-size:19px}.op-heading-actions{flex-shrink:0}.flow-arguments{padding:18px 8px}.flow-arguments form{grid-template-columns:1fr}.workbench .wb-node-panel{border-left:0;padding-left:0;border-top:1px solid var(--op-line)}}
+@media(max-width:600px){.op-browser{grid-template-columns:var(--side-navigation-width,150px) minmax(0,1fr);min-height:0}.op-tree{border-right:0;border-bottom:1px solid var(--op-line);max-height:290px;overflow:auto;padding:12px 6px}.op-tree-items{display:block}.op-viewer{padding:22px 14px}.op-heading{align-items:flex-start;gap:6px}.op-heading h2{font-size:19px}.op-heading-actions{flex-shrink:0}.workbench .wb-node-panel{border-left:0;padding-left:0;border-top:1px solid var(--op-line)}}
 @media(prefers-reduced-motion:reduce){.op-tree-file>summary::before{transition:none}}
 
 /* Keep the directory and the selected definition independently readable. */
@@ -206,8 +188,6 @@
 .op-content .reading-source-nav{justify-content:flex-end;margin:0 0 8px}
 .op-content .reading-source-nav button{border:0;background:transparent;color:#71717a;box-shadow:none;font-size:12px}
 .op-content .forge-reader .reading-source-page,.op-content .forge-reader .reading-source-chunk{white-space:pre-wrap;overflow-wrap:anywhere;max-height:none}
-.flow-arguments label{align-items:stretch;text-align:left}
-.flow-arguments label>span,.flow-arguments label>small{text-align:left}
 @media(max-width:600px){.op-browser{height:auto;overflow:visible}.op-viewer{overflow:visible}}
 
 /* Shared definitions stay readable in both the catalog and pipeline inspector. */
