@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from demiflow.execution.dataflow_source_context import source_run_view
+from demiflow.execution.worker.dataflow_execution import source_run_view
 
 
 @pytest.mark.parametrize('native,expected', [

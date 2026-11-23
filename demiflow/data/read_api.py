@@ -82,7 +82,7 @@ def from_items(items: list[Any]) -> MaterializedDataset:
     such as one aggregate-analysis request. Prefer lazy external sources for
     external data. Do not collect an external Dataset and pass its rows back
     to ``from_items`` solely to write the same detail rows."""
-    from ..execution.input_runtime import prepare_public_items
+    from demiflow.execution.executors.base import prepare_public_items
     from .plan import LogicalPlan
     from .sources import MaterializedSource
     handle, executor = prepare_public_items(

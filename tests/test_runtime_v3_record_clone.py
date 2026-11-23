@@ -10,7 +10,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.contracts.dataflow import Record, BlockPartition, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_records import clone_record
+from demiflow.execution.contracts.dataflow import clone_record
 from demiflow.execution.run_context import RunContext
 from _worker_event_fixtures import emit, events
 

@@ -6,7 +6,7 @@ import pytest
 
 from demiflow import data
 from demiflow.data.plan import CallableSpec
-from demiflow.execution.dataflow_environment import native_environment_names,allocation_environment
+from demiflow.execution.hosts.environment import native_environment_names, allocation_environment
 from demiflow.execution.dataflow_model_factory import native_model_declaration,PromptFactory,RoutedPromptFactory,CacheFactory
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.operator_llm.parser import parse_prompt_pack

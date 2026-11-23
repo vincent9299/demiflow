@@ -55,7 +55,7 @@ def test_actual_lance_reader_restores_inside_shared_batch_and_validates_binding(
     from demiflow.data.sources import LanceSource
     from demiflow.lance.model import LanceScanSpec
     from demiflow.execution.sources.source_readers import LanceReader
-    from demiflow.execution.dataflow_records import clone_record
+    from demiflow.execution.contracts.dataflow import clone_record
     table = source_table(16)
     uri = str(tmp_path / 'source.lance')
     lance.write_dataset(table, uri)

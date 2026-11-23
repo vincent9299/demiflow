@@ -7,17 +7,22 @@ The shared artifact filesystem must support coherent POSIX flock/hardlink/fsync.
 """
 from __future__ import annotations
 
+from demiflow.execution.contracts.dataflow import ArtifactCommand
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.recovery_contract import identity
+from demiflow.execution.run_journal import ExecutionBudgetExceeded
+
 import fcntl
 import os
 import stat
 from pathlib import Path
 
-from ..contracts.dataflow_errors import DataflowError
-from ..recovery_contract import identifier
+
+from demiflow.execution.recovery_contract import identifier
 
 
 def staging_paths(root, store_id, reservation_id):
-    from .objects import _no_symlink
+    from demiflow.execution.storage.objects import _no_symlink
     identifier(store_id)
     identifier(reservation_id)
     directory = Path(root) / store_id / 'staging'
@@ -41,7 +46,7 @@ class StagingLease:
 
     @classmethod
     def create(cls, path):
-        from .objects import _sync_directory
+        from demiflow.execution.storage.objects import _sync_directory
         fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -71,7 +76,7 @@ class StagingLease:
             return None
 
     def remove(self):
-        from .objects import _sync_directory
+        from demiflow.execution.storage.objects import _sync_directory
         _same_inode(self.path, self.fd)
         self.path.unlink()
         _sync_directory(self.path.parent)
@@ -102,8 +107,8 @@ def recover_staging(action, *, bounds, max_items=1024):
     uniquely charged, including objects with historical/committed references.
     Legacy reservations lacking ownership evidence remain conservatively charged.
     """
-    from ..contracts.dataflow import ArtifactRef
-    from .objects import RunArtifactStore, _no_symlink, _sync_directory
+    from demiflow.execution.contracts.dataflow import ArtifactRef
+    from demiflow.execution.storage.objects import RunArtifactStore, _no_symlink, _sync_directory
     if type(max_items) is not int or not 0 < max_items <= 4096:
         raise ValueError('Recovery item limit must be in 1..4096')
     journal, fence = action.context.journal, action.context.fence
@@ -154,3 +159,31 @@ def recover_staging(action, *, bounds, max_items=1024):
     journal.dataflow_recovery_cursor(fence, value=cursor if scanned == max_items else '')
     return {'scanned': scanned, 'reconciled': reclaimed, 'unknown': unknown,
             'inspected_bytes': inspected_bytes, 'limit_reached': scanned == max_items}
+
+
+def grow_staging(journal, operation, *, reserved, required, maximum, spill_budget=None):
+    # Disk reservation only: this does not allocate a resident byte buffer.
+    # Start small and grow geometrically. Large disk grants amortize control
+    # round-trips in at most 8 MiB steps, also capped at 1/64 of the task grant
+    # (with the original 1 MiB step retained for small grants).
+    # Every unused byte is charged to the SAME original journal until settlement.
+    step = 1 << 20 if spill_budget is None else max(1 << 20, min(8 << 20, spill_budget // 64))
+    extent = min(maximum, max(required, reserved + min(max(reserved, 65536), step)))
+
+    def admit(size):
+        reply = journal.artifact(ArtifactCommand(identity([operation, 'grow', size]),
+            'grow_staging', None, operation, size))
+        if type(reply.charged_bytes) is not int or not size <= reply.charged_bytes <= maximum:
+            raise DataflowError('INVALID_CONTRACT', 'staging growth reply differs from its byte grant')
+        return reply.charged_bytes
+
+    try:
+        return admit(extent)
+    except ExecutionBudgetExceeded:
+        if extent == required:
+            raise
+        # Only an atomic, definite budget rejection can take this path. The
+        # failed transaction changed no charge. A smaller exact request avoids
+        # denying a write merely because optional growth headroom did not fit.
+        # Unknown/transport/fence failures propagate; they are never retried.
+        return admit(required)

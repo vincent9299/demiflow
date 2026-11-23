@@ -11,7 +11,7 @@ import uuid
 from .queue_contract import (QueueConfig, QueueLimits, ProducerSourceSpec, ProducerRef,
     QueueSnapshot, HistoryReadLimits, QueueIncomplete, QueueIdleTimeout,
     StaleQueueOwner, ArtifactDomainUnavailable, HistoryReadLimit, queue_config, task_message)
-from .queue_sql import QueueDatabase
+from demiflow.execution.native_queue.queue_sql import QueueDatabase
 from .recovery_contract import RecoveryContractError, document, identifier, identity
 
 

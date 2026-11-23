@@ -1,5 +1,5 @@
 import pytest
-from demiflow.execution.local_storage import require_local_storage
+from demiflow.execution.native_queue.queue_sql import require_local_storage
 
 
 @pytest.mark.parametrize('filesystem', ['nfs4', 'dpc'])

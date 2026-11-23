@@ -207,7 +207,7 @@ def test_declared_business_labels_are_compiler_facts_not_topology(no_execution):
 
 def test_lance_write_keeps_original_program_without_publication(no_execution, tmp_path):
     import pyarrow as pa
-    from demiflow.execution.lance_action import bind_lance_action
+    from demiflow.execution.executors.dataset_runtime import bind_lance_action
     target = tmp_path / 'untouched.lance'
 
     def entry():

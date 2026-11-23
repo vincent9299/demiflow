@@ -15,7 +15,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.contracts.dataflow import Record, ProducerCompletion
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_finite_input import validate_finite_members, borrowed_records
+from demiflow.execution.worker.finite_input import validate_finite_members, borrowed_records
 from demiflow.execution.storage.segments import FINITE_RECORDS_MEDIA
 from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _encode_record_document
 from demiflow.execution.exchange.dataflow_channels import route_record, seal_scope

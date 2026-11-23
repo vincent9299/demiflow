@@ -1,6 +1,6 @@
 """Key-only anti join, scan-order reconstruction, then pinned payload hydration."""
 from dataclasses import replace
-from ..dataflow_records import clone_record
+from demiflow.execution.contracts.dataflow import clone_record
 
 from ..contracts.dataflow_errors import DataflowError
 from ..record_schema import RecordSchemas

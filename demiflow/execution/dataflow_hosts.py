@@ -768,7 +768,7 @@ class RayHostEndpoint(_EndpointBase):
 
     def prepare(self, assignment: "WorkerAssignment", *, recovery_image=None) -> None:
         if self._assignment is None:
-            from .dataflow_environment import allocation_environment
+            from demiflow.execution.hosts.environment import allocation_environment
             environment = allocation_environment(assignment, store=self._services.store,
                                                  bounds=self._services.bounds)
             self._connector.stage_environment(self._allocation_id, environment)

@@ -1,17 +1,14 @@
-"""Own Dataset action lifetimes using the existing checked and unified engine.
-
-The executor remains the sole host owner. Each branch preserves its original
-checked arguments, observation source and completion contract; there is no
-generic completion policy or alternate execution mechanism here.
-"""
+"""Dataset runtime implementation."""
 from __future__ import annotations
 
-from typing import Any, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 
-from ..data import execution_contract as actions
-from ..data.execution_contract import normalize_batch_format as _batch_format
-from ..data.datasink import validate_write_result
-from ..observability import observe_action, observe_batches, observe_rows
+from typing import Any, Mapping
+from demiflow.data import execution_contract as actions
+from demiflow.data.execution_contract import normalize_batch_format as _batch_format
+from demiflow.data.datasink import validate_write_result
+from demiflow.observability import observe_action, observe_batches, observe_rows
 
 
 def execute_action(executor: actions.ExecutionPort, request: actions.ActionSpec) -> actions.ActionResult:
@@ -54,8 +51,8 @@ def execute_action(executor: actions.ExecutionPort, request: actions.ActionSpec)
 
 
 def _count(executor: actions.ExecutionPort, spec: actions.Count):
-    from .checked import action
-    from .dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.checked import action
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
     with action('count', spec.source, spec.plan, arguments={}) as checked, observe_action("count", spec.source, spec.plan, executor) as observer:
         request = make_action_request(executor, checked.source, checked.plan,
                                       kind="count", arguments={})
@@ -67,8 +64,8 @@ def _count(executor: actions.ExecutionPort, spec: actions.Count):
 
 
 def _materialize(executor: actions.ExecutionPort, spec: actions.Materialize):
-    from .checked import action
-    from .dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.checked import action
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
     with action("materialize", spec.source, spec.plan) as checked, observe_action("materialize", spec.source, spec.plan, executor) as observer:
         request = make_action_request(executor, checked.source, checked.plan,
                                       kind="materialize", arguments={})
@@ -85,8 +82,8 @@ def _materialize(executor: actions.ExecutionPort, spec: actions.Materialize):
 
 def _take(executor: actions.ExecutionPort, spec: actions.Take):
     maximum = spec.limit
-    from .checked import action
-    from .dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.checked import action
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
     with action("take", spec.source, spec.plan, arguments={"limit": maximum}) as checked, \
             observe_action("take", spec.source, spec.plan, executor) as observer:
         request = make_action_request(executor, checked.source, checked.plan,
@@ -99,8 +96,8 @@ def _take(executor: actions.ExecutionPort, spec: actions.Take):
 
 def _take_all(executor: actions.ExecutionPort, spec: actions.TakeAll):
     maximum, limit = spec.limit, spec.original_limit
-    from .checked import action
-    from .dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.checked import action
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
     with action("take_all", spec.source, spec.plan, arguments={"limit": limit}) as checked, \
             observe_action("take_all", spec.source, spec.plan, executor) as observer:
         request = make_action_request(executor, checked.source, checked.plan,
@@ -113,8 +110,8 @@ def _take_all(executor: actions.ExecutionPort, spec: actions.TakeAll):
 
 def _take_batch(executor: actions.ExecutionPort, spec: actions.TakeBatch):
     size, batch_format = spec.batch_size, spec.batch_format
-    from .checked import action
-    from .dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.checked import action
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
     with action("take_batch", spec.source, spec.plan,
                 arguments={"batch_size": size, "batch_format": batch_format}) as checked, \
             observe_action("take_batch", spec.source, spec.plan, executor) as observer:
@@ -131,8 +128,8 @@ def _take_batch(executor: actions.ExecutionPort, spec: actions.TakeBatch):
 
 def _require_columns(executor: actions.ExecutionPort, spec: actions.RequireColumns):
     columns, exact = spec.columns, spec.exact
-    from .checked import action
-    from .dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.checked import action
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
     arguments = dict(columns=columns, exact=exact)
     with action('require_columns', spec.source, spec.plan, arguments=arguments) as checked:
         request = make_action_request(executor, checked.source, checked.plan,
@@ -148,9 +145,9 @@ def _require_columns(executor: actions.ExecutionPort, spec: actions.RequireColum
 
 def _collect_summary(executor: actions.ExecutionPort, spec: actions.CollectSummary):
     max_rows, max_bytes = spec.max_rows, spec.max_bytes
-    from ..data.runtime_contract import check_size
-    from .checked import action
-    from .dataflow_api import make_action_request, run_dataset_action
+    from demiflow.data.runtime_contract import check_size
+    from demiflow.execution.checked import action
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
     arguments = dict(max_rows=max_rows, max_bytes=max_bytes)
     with action('collect_summary', spec.source, spec.plan, arguments=arguments) as checked:
         result, used = [], 0
@@ -181,9 +178,9 @@ def _collect_summary(executor: actions.ExecutionPort, spec: actions.CollectSumma
 def _aggregate(executor: actions.ExecutionPort, spec: actions.Aggregate):
     aggs = spec.aggregates
     names = [aggregate.name for aggregate in aggs]
-    from .checked import action
-    from .dataflow_api import make_action_request, run_dataset_action
-    from .contracts.dataflow import ActionProgram
+    from demiflow.execution.checked import action
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.contracts.dataflow import ActionProgram
     with action("aggregate", spec.source, spec.plan, arguments={"aggregates": names}) as checked, \
             observe_action(
                 "aggregate", spec.source, spec.plan, executor,
@@ -200,8 +197,8 @@ def _aggregate(executor: actions.ExecutionPort, spec: actions.Aggregate):
 
 
 def _iter_rows(executor: actions.ExecutionPort, spec: actions.IterRows):
-    from .checked import action
-    from .dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.checked import action
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
 
     def _scoped():
         with action("iter_rows", spec.source, spec.plan, arguments={}) as checked:
@@ -219,8 +216,8 @@ def _iter_batches(executor: actions.ExecutionPort, spec: actions.IterBatches):
     size, batch_format = spec.batch_size, spec.batch_format
     normalized_format = spec.normalized_format
     prefetch_batches, drop_last = spec.prefetch_batches, spec.drop_last
-    from .checked import action
-    from .dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.checked import action
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
 
     def _scoped():
         with action("iter_batches", spec.source, spec.plan,
@@ -242,8 +239,8 @@ def _iter_batches(executor: actions.ExecutionPort, spec: actions.IterBatches):
 
 def _schema(executor: actions.ExecutionPort, spec: actions.Schema):
     fetch_if_missing = spec.fetch_if_missing
-    from .checked import action
-    from .dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.checked import action
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
     with action("schema", spec.source, spec.plan,
                 arguments={"fetch_if_missing": fetch_if_missing}) as checked:
         request = make_action_request(executor, checked.source, checked.plan,
@@ -254,8 +251,8 @@ def _schema(executor: actions.ExecutionPort, spec: actions.Schema):
 
 def _columns(executor: actions.ExecutionPort, spec: actions.Columns):
     fetch_if_missing = spec.fetch_if_missing
-    from .checked import action
-    from .dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.checked import action
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
     with action("columns", spec.source, spec.plan,
                 arguments={"fetch_if_missing": fetch_if_missing}) as checked:
         request = make_action_request(executor, checked.source, checked.plan,
@@ -265,8 +262,8 @@ def _columns(executor: actions.ExecutionPort, spec: actions.Columns):
 
 
 def _size_bytes(executor: actions.ExecutionPort, spec: actions.SizeBytes):
-    from .checked import action
-    from .dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.checked import action
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
     with action("size_bytes", spec.source, spec.plan, arguments={}) as checked, \
             observe_action("size_bytes", spec.source, spec.plan, executor) as observer:
         request = make_action_request(executor, checked.source, checked.plan,
@@ -280,8 +277,8 @@ def _write_datasink(executor: actions.ExecutionPort, spec: actions.WriteDatasink
     datasink = spec.sink
     target = ""
     from dataclasses import asdict
-    from .checked import action
-    from .dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.checked import action
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
     native = spec.native_options
     arguments = {} if native is None else {"native_options": asdict(native)}
     with action('write_datasink', spec.source, spec.plan,
@@ -305,8 +302,8 @@ def _write_datasink(executor: actions.ExecutionPort, spec: actions.WriteDatasink
 def _write_file(executor: actions.ExecutionPort, spec: actions.WriteFile):
     format_name, path = spec.format, spec.path
     from dataclasses import asdict
-    from .checked import action
-    from .dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.checked import action
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
     options = dict(spec.options)
     native = spec.native_options
     arguments = {"format": format_name, "path": str(path), "options": options}
@@ -336,9 +333,9 @@ def _run_stream(executor: actions.ExecutionPort, spec: actions.RunStream):
     log_every, cancellation = spec.log_every, spec.cancellation
     stall_timeout, stop_file = spec.stall_timeout, spec.stop_file
     source_batch_size = spec.source_batch_size
-    from .checked import action
-    from .dataflow_api import make_action_request
-    from .dataflow_stream import run_stream_action
+    from demiflow.execution.checked import action
+    from demiflow.execution.dataflow_api import make_action_request
+    from demiflow.execution.dataflow_stream import run_stream_action
     arguments = dict(log_every=log_every, stall_timeout=stall_timeout,
                      stop_file=str(stop_file) if stop_file is not None else None,
                      source_batch_size=source_batch_size)
@@ -354,12 +351,11 @@ def _run_stream(executor: actions.ExecutionPort, spec: actions.RunStream):
 def _write_lance(executor: actions.ExecutionPort, request_spec: actions.WriteLance):
     spec, native_options = request_spec.spec, request_spec.native_options
     from dataclasses import asdict
-    from .checked import action
-    from .run_context import current_action
-    from .dataflow_api import make_action_request, run_dataset_action
-    from .contracts.dataflow import ActionProgram
+    from demiflow.execution.checked import action
+    from demiflow.execution.run_context import current_action
+    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.contracts.dataflow import ActionProgram
     arguments = {} if native_options is None else {'native_options': asdict(native_options)}
-    from .lance_action import _lance_action_binding, _consume_lance_action_binding
     binding = _lance_action_binding()
     if binding is not None:
         from demiflow.execution.contracts.dataflow import EXECUTION_LIMITS
@@ -368,7 +364,7 @@ def _write_lance(executor: actions.ExecutionPort, request_spec: actions.WriteLan
         'write_lance', request_spec.source, request_spec.plan, executor,
         sink_type='LanceWrite', sink_target=spec.uri,
     ) as observer:
-        from .plan_capture import current_capture
+        from demiflow.execution.plan_capture import current_capture
         if binding is not None and current_capture() is None:
             _consume_lance_action_binding(binding, current_action(), spec)
         request = make_action_request(executor, checked.source, checked.plan,
@@ -377,7 +373,7 @@ def _write_lance(executor: actions.ExecutionPort, request_spec: actions.WriteLan
         receipt = run_dataset_action(request)
         checked.receipt(receipt)
         if receipt.status == 'indeterminate':
-            from ..errors import LanceWriteError
+            from demiflow.errors import LanceWriteError
             raise LanceWriteError(receipt)
         observer.rows = int(receipt.written_rows or 0)
         observer.complete(result_target=spec.uri, write_receipt=receipt.to_dict(),
@@ -405,8 +401,8 @@ def _batch_row_count(batch: Any) -> int:
 
 def execute_guard(condition: bool, message: str) -> None:
     """Execute the public prerequisite without selecting a Dataset host."""
-    from ..data.flow_contract import normalize_guard
-    from .checked import action
+    from demiflow.data.flow_contract import normalize_guard
+    from demiflow.execution.checked import action
     arguments = normalize_guard({'condition': condition, 'message': message})
     if type(condition) is not bool:
         raise TypeError('require condition must be a bool')
@@ -414,3 +410,33 @@ def execute_guard(condition: bool, message: str) -> None:
         if not condition:
             raise ValueError(message)
         checked.value(None)
+
+
+_BINDING = ContextVar('demiflow_internal_lance_action_binding', default=None)
+
+
+@contextmanager
+def bind_lance_action(before_execute, *, max_rows_per_batch):
+    """Internal registration hook, before any worker/source activation.
+
+    No public Dataset option, new action, scheduler or commit authority lives
+    here. The hook receives the already-created original RunAction once.
+    """
+    if _BINDING.get() is not None:
+        raise RuntimeError('Nested Lance registration binding')
+    token = _BINDING.set((before_execute, max_rows_per_batch))
+    try:
+        yield
+    finally:
+        _BINDING.reset(token)
+
+
+def _lance_action_binding():
+    """Read the existing registration without exposing it through SDK requests."""
+    return _BINDING.get()
+
+
+def _consume_lance_action_binding(binding, action, spec):
+    # Clear before the callback: a nested write must not bind a second action.
+    _BINDING.set(None)
+    binding[0](action, spec)

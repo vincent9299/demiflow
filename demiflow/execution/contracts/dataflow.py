@@ -2098,3 +2098,18 @@ def sealed_execution_ceilings(graph):
 
 def validate_native_limits(value):
     _native_limits(value)
+
+
+def clone_record(record, **changes):
+    """Revalidate a copy; external replacement values keep normal DTO checks.
+
+    Only the original, bounded source-position document is thawed. Its tuples
+    are frozen JSON arrays, unlike business payload tuples whose type matters.
+    Do not broaden Record's public constructor to accept arbitrary objects.
+    """
+    from demiflow.execution.contracts.dataflow_codec import _thaw_json
+    if type(record) is not Record:
+        raise DataflowError('INVALID_CONTRACT', 'clone_record requires a validated Record')
+    if 'source_position' not in changes:
+        changes['source_position'] = _thaw_json(record.source_position)
+    return replace(record, **changes)

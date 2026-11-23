@@ -3,7 +3,7 @@
 This is output layout, not a second scheduler. A single admitted kernel may
 produce N logical blocks without claiming N concurrent resource allocations.
 """
-from ..dataflow_records import clone_record
+from demiflow.execution.contracts.dataflow import clone_record
 import hashlib
 
 from ..contracts.dataflow import BlockPartition, Record

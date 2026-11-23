@@ -312,7 +312,7 @@ def test_reducer_value_limits_reject_without_committed_output(tmp_path, bound):
 @pytest.mark.parametrize('value', [[(b'\xff', -0.0), [1, None]], 35, False, 0, [], {}, (), b'', ''])
 def test_record_codec_clone_and_state_preserve_top_level_values(value):
     from demiflow.execution.contracts.dataflow import Record, thaw_record_value
-    from demiflow.execution.dataflow_records import clone_record
+    from demiflow.execution.contracts.dataflow import clone_record
     from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _decode_payload
     from demiflow.execution import dataflow_record_frames as frames
     from demiflow.execution.contracts import state_codec

@@ -1007,7 +1007,7 @@ class WorkerGraphRunner:
                     if self._advance_join_probe(source, split_id, credit):
                         processed += 1
                         break
-                from ..dataflow_source_context import source_run_scope
+                from demiflow.execution.worker.dataflow_execution import source_run_scope
                 with source_run_scope(self.e._source_run):
                     if reader is self._batch_source:
                         self._advance_batch(source, split_id, credit)
@@ -1153,7 +1153,7 @@ class WorkerGraphRunner:
             spec = self._exchange[edge.edge_id]
             routed_input = record
             if spec.routing in ('hash', 'target') and record.inline is None:
-                from ..dataflow_records import clone_record
+                from demiflow.execution.contracts.dataflow import clone_record
                 from ..kernels.dataflow import _materialize_row, _row_bytes
                 row = _materialize_row(record, self.services)
                 routed_input = clone_record(record, inline=row, payload_ref=None,
@@ -1368,7 +1368,7 @@ class WorkerGraphRunner:
                     chunks.close()
                 del chunk
             elif record.inline is None:
-                from ..dataflow_records import clone_record
+                from demiflow.execution.contracts.dataflow import clone_record
                 from ..kernels.dataflow import _materialize_row, _row_bytes
                 row = _materialize_row(record, self.services)
                 record = clone_record(record, inline=row, payload_ref=None,
@@ -1380,7 +1380,7 @@ class WorkerGraphRunner:
                 if binding and binding['mode'] == 'sink':
                     from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
                     from ..row_scope import RowScope, set_row_scope
-                    from ..dataflow_records import clone_record
+                    from demiflow.execution.contracts.dataflow import clone_record
                     from ..kernels.dataflow import _row_bytes
                     if self._queue_finalizer is None:
                         self._queue_finalizer = AcquisitionCall('finalize')
@@ -1659,7 +1659,7 @@ class WorkerGraphRunner:
         edge = next(e for e in self.e._graph.edges if e.edge_id == spec.edge_id)
         kernel = self.e._kernels.get((edge.consumer, self.partition))
         if kernel is not None and kernel.accepts_finite_reference(edge.input_port):
-            from ..dataflow_finite_input import validate_finite_members
+            from demiflow.execution.worker.finite_input import validate_finite_members
             # All members are authenticated before mutating the kernel port.
             entries = validate_finite_members(self.e._finite_services, ref, spec, target=self.partition,
                                              frame_call=self._finite_frame_call)

@@ -4,7 +4,7 @@ import importlib.util
 from typing import Mapping
 from demiflow.execution.contracts import PipelineBundleRef, PipelineExecutionEnvironment, PipelineRunReadiness
 from demiflow.execution.contracts.target import PipelineExecutionTarget
-from demiflow.execution.environment import missing_required_environment_names, prompt_environment_names
+from demiflow.execution.hosts.environment import missing_required_environment_names, prompt_environment_names
 from demiflow.execution.requirements import read_candidate_requirements
 from demiflow.execution.hosts.python_environment import inspect_local_environment_cache, uses_embedded_current_runtime
 from demiflow.pipeline import discover_pipeline_definition

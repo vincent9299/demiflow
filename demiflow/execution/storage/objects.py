@@ -327,7 +327,7 @@ class RunArtifactStore:
                         if size > reserved:
                             # Admission precedes every write beyond the owned extent.
                             # Do not reserve an entire source/spill ceiling up front.
-                            from ..dataflow_staging_growth import grow_staging
+                            from demiflow.execution.storage.staging import grow_staging
                             reserved = grow_staging(self._journal, operation_id,
                                 reserved=reserved, required=size, maximum=max_bytes,
                                 spill_budget=self._bounds.max_spill_bytes)

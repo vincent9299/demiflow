@@ -15,7 +15,7 @@ from demiflow.execution.contracts import PipelineBundleRef, PipelineRunObservati
 from demiflow.execution.pipeline.driver import PipelineDriverRequest
 from demiflow.execution.requirements import PLATFORM_WHEEL_BUNDLE_DIRECTORY, FrozenRequirements, file_sha256, platform_wheel_paths, read_candidate_requirements, read_platform_requirements, render_effective_requirements, resolved_wheel_paths, write_effective_requirements
 from demiflow.execution.journal.observation import emit_observation, parse_pipeline_log_observation
-from demiflow.execution.environment import pipeline_environment_names, prompt_environment_names, select_pipeline_environment
+from demiflow.execution.hosts.environment import pipeline_environment_names, prompt_environment_names, select_pipeline_environment
 from demiflow.planning.policy import BUILT_IN_RULE_VERSION
 
 _MAX_LOG_BYTES = 1_000_000

@@ -13,6 +13,13 @@ signatures; no ImportError fallback or stub is provided.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+from types import MappingProxyType
+from demiflow.execution.recovery_contract import RecoveryContractError, RunRef
+from demiflow.execution.run_context import _ACTION, _CURRENT
+
 import hashlib
 import json
 import shutil
@@ -20,16 +27,11 @@ import tempfile
 import threading
 import time
 from collections import deque
-from pathlib import Path
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..contracts.dataflow import (
-        Bounds, CutContribution, CutRequest, ExchangeSpec, KernelSpec,
-        LoadedProgram, Record, RecoveryImage, RuntimeServices, SourceCursor,
-        SourcePoll, WorkerAssignment, WorkerControlMailbox, WorkerEvent,
-        WorkerStep,
-    )
+    from demiflow.execution.contracts.dataflow import Bounds, CutContribution, CutRequest, ExchangeSpec, KernelSpec, LoadedProgram, Record, RecoveryImage, RuntimeServices, SourceCursor, SourcePoll, WorkerAssignment, WorkerControlMailbox, WorkerEvent, WorkerStep
 
 _STATES = ("constructed", "loaded", "restored", "started", "draining", "cancelled", "closed")
 _EVENT_SCHEMA = "demiflow.dataflow_event.v3"
@@ -54,7 +56,7 @@ class _KernelServices:
 
 
 def _dataflow_error(code, message, *, retryable=False, context=None):
-    from ..contracts.dataflow_errors import DataflowError
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
     return DataflowError(code, message, retryable=retryable, context=context or {})
 
 
@@ -117,7 +119,7 @@ class DataflowWorkerExecutor:
     def _identity(self):
         assignment = self.assignment
         lease = assignment.lease
-        from ..contracts.dataflow_codec import runtime_scope_id
+        from demiflow.execution.contracts.dataflow_codec import runtime_scope_id
         return {
             "run_id": assignment.run_id,
             "attempt": assignment.attempt,
@@ -136,7 +138,7 @@ class DataflowWorkerExecutor:
                              assignment.lease.boot_id, kind, self._event_sequence)
 
     def _event(self, kind, *, payload=None, payload_ref=None, operation_id=None):
-        from ..contracts import dataflow as df
+        from demiflow.execution.contracts import dataflow as df
         ident = self._identity()
         return df.WorkerEvent(
             schema=_EVENT_SCHEMA, kind=kind,
@@ -157,7 +159,7 @@ class DataflowWorkerExecutor:
         return reply
 
     def _participant_ids(self):
-        from ..contracts.dataflow_codec import compute_participant_id
+        from demiflow.execution.contracts.dataflow_codec import compute_participant_id
         assignment = self.assignment
         ids = []
         for stage in assignment.stages:
@@ -177,7 +179,7 @@ class DataflowWorkerExecutor:
 
     # ---- B002 load ----
     def load(self, assignment: "WorkerAssignment") -> None:
-        from ..seal.plan import load_sealed_dataflow
+        from demiflow.execution.seal.plan import load_sealed_dataflow
         with self._control_lock:
             if self._state != "constructed":
                 raise _dataflow_error("INVALID_CONTRACT", "load requires a fresh executor",
@@ -241,7 +243,7 @@ class DataflowWorkerExecutor:
 
     def _prepare_factories(self, assignment, graph, physical):
         from dataclasses import replace
-        from ..contracts.dataflow import thaw_record_value
+        from demiflow.execution.contracts.dataflow import thaw_record_value
 
         if bool(graph.jobs) != (assignment.model_bindings is not None):
             raise _dataflow_error("INVALID_CONTRACT", "worker assignment version differs from sealed graph")
@@ -287,7 +289,7 @@ class DataflowWorkerExecutor:
 
     # ---- B003 restore ----
     def restore(self, image: "RecoveryImage | None") -> None:
-        from ..exchange.dataflow_channels import restore_channels
+        from demiflow.execution.exchange.dataflow_channels import restore_channels
         with self._control_lock:
             if self._state != "loaded":
                 raise _dataflow_error("INVALID_CONTRACT", "restore requires a loaded executor",
@@ -312,7 +314,7 @@ class DataflowWorkerExecutor:
                     if ref is None:
                         raise _dataflow_error("INVALID_CONTRACT", "missing buffer/channel ref",
                                               context={"channel_id": channel_id})
-                    from ..contracts.dataflow import ArtifactRef
+                    from demiflow.execution.contracts.dataflow import ArtifactRef
                     channel_refs[channel_id] = ArtifactRef(**dict(ref))
                 for ref in contribution.buffers:
                     if ref is None:
@@ -326,11 +328,11 @@ class DataflowWorkerExecutor:
 
     # ---- B004 start ----
     def start(self) -> None:
-        from ..dataflow_models import restore_actor_state
+        from demiflow.execution.dataflow_models import restore_actor_state
         from demiflow.execution.sources.snapshots import open_source_reader
-        from ..dataflow_source_context import source_run_scope, source_run_view
-        from ..exchange.dataflow_channels import open_channels
-        from ..kernels.dataflow import make_kernel
+        pass
+        from demiflow.execution.exchange.dataflow_channels import open_channels
+        from demiflow.execution.kernels.dataflow import make_kernel
         with self._control_lock:
             if self._state not in ("loaded", "restored"):
                 raise _dataflow_error("FENCED", "business input requires activation",
@@ -344,7 +346,7 @@ class DataflowWorkerExecutor:
             self._source_run = source_run_view(self._services, limits=facts['limits'])
             with source_run_scope(self._source_run):
                 assignment = self.assignment
-                from ..dataflow_shared import shared_actors
+                from demiflow.execution.dataflow_shared import shared_actors
                 shared = shared_actors(self._kernel_specs, self._services.programs, assignment, graph=self._graph)
                 if self._restored_states:
                     for group in set(shared.values()):
@@ -373,8 +375,8 @@ class DataflowWorkerExecutor:
                         self._kernels[(occ, partition)] = kernel
                 # Only an explicitly versioned sealed stage may bind this finite
                 # compute optimization. Old stages never infer a new region.
-                from ..contracts.relational_region import interpret_region
-                from ..kernels.relational_region import RelationalRegionRuntime
+                from demiflow.execution.contracts.relational_region import interpret_region
+                from demiflow.execution.kernels.relational_region import RelationalRegionRuntime
                 self._relational_regions = {}
                 for stage in assignment.stages:
                     region_plan = interpret_region(self._graph, stage)
@@ -410,12 +412,12 @@ class DataflowWorkerExecutor:
                                                    services=self._services)
                 self._admit_open = True
                 self._state = "started"
-                from .dataflow_graph_runner import WorkerGraphRunner
+                from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
                 self._runner = WorkerGraphRunner(self)
 
     def run(self):
         """Begin business work only after the host accepts its K3 assignment."""
-        from ..dataflow_source_context import source_run_scope
+        pass
         with source_run_scope(self._source_run):
             # The business thread and its async/thread calls copy this context.
             self._runner.start()
@@ -436,10 +438,10 @@ class DataflowWorkerExecutor:
             if self._state not in ('started', 'draining') or not hasattr(self, '_runner'):
                 raise _dataflow_error('FENCED', 'business step requires activation')
             if self._cancel_event.is_set():
-                from ..contracts.dataflow import WorkerStep
+                from demiflow.execution.contracts.dataflow import WorkerStep
                 return WorkerStep(processed=0, blocked=False, end_of_input=True, events=())
             runner = self._runner
-        from ..dataflow_source_context import source_run_scope
+        pass
         with source_run_scope(self._source_run):
             return runner.step(max_records=max_records, deadline_ms=deadline_ms)
 
@@ -453,7 +455,7 @@ class DataflowWorkerExecutor:
 
     # ---- B007 snapshot ----
     def snapshot(self, request):
-        from ..dataflow_source_context import source_run_scope
+        pass
         with source_run_scope(self._source_run):
             return self._runner.snapshot(request)
 
@@ -504,7 +506,7 @@ class DataflowWorkerExecutor:
     def close(self) -> None:
         if hasattr(self, "_runner"):
             self._runner.close()
-        from ..exchange.dataflow_channels import close_channels
+        from demiflow.execution.exchange.dataflow_channels import close_channels
         with self._control_lock:
             if self._closed:
                 return
@@ -524,7 +526,7 @@ class DataflowWorkerExecutor:
         final_bytes = 2
         for key, kernel in list(self._kernels.items()):
             try:
-                from ..dataflow_source_context import source_run_scope
+                pass
                 with source_run_scope(self._source_run):
                     kernel.close()
                     aclose = getattr(kernel, "aclose", None)
@@ -546,7 +548,7 @@ class DataflowWorkerExecutor:
                     if any(payload.get(field) is not None for field in (
                             'actor_lifecycle', 'callback_observations', 'output_handoff',
                             'prompt_usage', 'model_observations')):
-                        from ..contracts.dataflow_codec import encode_wire
+                        from demiflow.execution.contracts.dataflow_codec import encode_wire
                         import json
                         raw = encode_wire(self._event('progress', payload=payload),
                             type_name='WorkerEvent', bounds=self.assignment.bounds)
@@ -560,7 +562,7 @@ class DataflowWorkerExecutor:
                 errors.append(exc)  # Continue physical cleanup; preserve the first error.
         for split_id, reader in list(self._readers.items()):
             try:
-                from ..dataflow_source_context import source_run_scope, source_run_view
+                pass
                 view = getattr(self, '_source_run', None) or source_run_view(self._services)
                 with source_run_scope(view):
                     reader.close()
@@ -582,3 +584,53 @@ class DataflowWorkerExecutor:
             errors.append(exc)
         if errors:
             raise BaseExceptionGroup("worker cleanup failed", errors)
+
+
+@dataclass(frozen=True)
+class SourceRunView:
+    ref: RunRef
+    attempt: int
+    fence: str
+    limits: object
+    check_stop: object
+
+    def action(self, *args, **kwargs):
+        raise RecoveryContractError("Worker callbacks cannot create driver actions")
+
+
+def source_run_view(services, *, limits=None):
+    """Derive immutable run facts from this worker's existing authenticated ports."""
+    root = Path(services.store.root)
+    if root.name != '.dataflow-store' or not root.is_absolute():
+        raise RecoveryContractError("Source context requires the original run artifact root")
+    assignment = services.assignment
+    # Native ceilings are optional declarations, not the worker's grant. Read
+    # adapters still need the actual finite payload allowance when no optional
+    # native policy was requested. Intersect both authenticated inputs; never
+    # substitute a process-wide default or enlarge a declared ceiling.
+    limits = dict(limits or {})
+    for name, value in (services.constants.get('native_limits') or {}).items():
+        limits[name] = min(limits.get(name, value), value)
+    from demiflow.execution.dataflow_record_frames import resident_limit
+    for name, bound in (
+        ('memory_bytes', resident_limit(services.bounds, services)),
+        ('max_row_bytes', services.bounds.max_row_bytes),
+        ('max_batch_bytes', services.bounds.max_batch_bytes),
+    ):
+        limits[name] = min(limits.get(name, bound), bound)
+    return SourceRunView(
+        RunRef(str(root.parent), assignment.run_id), assignment.attempt,
+        assignment.fence, MappingProxyType(limits),
+        services.check_stop,
+    )
+
+
+@contextmanager
+def source_run_scope(view):
+    current_token = _CURRENT.set(view)
+    action_token = _ACTION.set(None)
+    try:
+        yield view
+    finally:
+        _ACTION.reset(action_token)
+        _CURRENT.reset(current_token)

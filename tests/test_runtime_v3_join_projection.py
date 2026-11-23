@@ -7,7 +7,7 @@ import pytest
 
 from demiflow.execution.contracts.dataflow import Record
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_finite_input import validate_finite_members
+from demiflow.execution.worker.finite_input import validate_finite_members
 from demiflow.execution.kernels.operator import _SpoolPort
 from demiflow.execution.kernels.join_spool import _EncodedJoinInput, join_pairs
 from demiflow.execution.contracts import state_codec
@@ -83,7 +83,7 @@ def test_projection_capability_cannot_change_binding_or_cross_store(tmp_path):
         with pytest.raises(DataflowError, match='full-scan proof'):
             list(port.records().for_join(('key',)))
         fresh = port_for(svc, seal, spec)
-        from demiflow.execution.dataflow_finite_input import borrowed_join_records
+        from demiflow.execution.worker.finite_input import borrowed_join_records
         proof = fresh._borrowed_proofs[0]
         foreign = SimpleNamespace(**{**vars(svc), 'store': object()})
         with pytest.raises(DataflowError, match='full-scan proof'):
@@ -97,7 +97,7 @@ def test_projection_capability_cannot_change_binding_or_cross_store(tmp_path):
 
 
 def test_projection_falls_back_when_same_row_window_cannot_hold_copies(tmp_path):
-    from demiflow.execution.dataflow_finite_input import borrowed_join_records
+    from demiflow.execution.worker.finite_input import borrowed_join_records
     with store_fixture(tmp_path) as (_, store, _):
         svc, spec = fixture(store)
         seal, _, expected = make_seal(svc, spec)

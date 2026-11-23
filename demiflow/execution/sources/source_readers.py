@@ -1227,7 +1227,7 @@ class ProducerReader(QueueReader):
         self._offset.setdefault('record_index', self._record_index)
 
     def next_record(self):
-        from demiflow.execution.dataflow_records import clone_record
+        from demiflow.execution.contracts.dataflow import clone_record
         from demiflow.execution.contracts.dataflow_codec import _thaw_json
         import json
         replaying = bool(self._replay_pending)

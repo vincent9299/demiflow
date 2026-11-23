@@ -15,7 +15,7 @@ from typing import Any, Mapping
 
 from demiflow.errors import PipelineRunCancelled, PipelineRunFailure, PipelineRunTimeout
 from demiflow.pipeline import discover_pipeline_definition
-from demiflow.execution.environment import pipeline_environment_names, prompt_environment_names, select_pipeline_environment
+from demiflow.execution.hosts.environment import pipeline_environment_names, prompt_environment_names, select_pipeline_environment
 from demiflow.execution.contracts import PipelineRunObservation, PipelineRunRequest, PipelineRunResult
 from demiflow.execution.pipeline.driver import PipelineDriverRequest
 from demiflow._compat.error_transport import make_error, validate_error

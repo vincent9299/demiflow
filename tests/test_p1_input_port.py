@@ -6,7 +6,7 @@ import pytest
 
 from demiflow.data.execution_contract import InputSpec, _current_executor, _use_executor
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.input_runtime import prepare_public_items
+from demiflow.execution.executors.base import prepare_public_items
 
 
 def test_managed_input_rejection_precedes_host_selection(monkeypatch):

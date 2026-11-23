@@ -253,7 +253,7 @@ class _SpoolPort:
     def adopt(self, entry):
         if self._eoi:
             raise _err('INVALID_CONTRACT', 'finite reference after port EOI', port=self.name)
-        from ..dataflow_finite_input import validate_borrowed_entry
+        from demiflow.execution.worker.finite_input import validate_borrowed_entry
         validate_borrowed_entry(self._services, entry)
         if len(self._borrowed) >= self._services.bounds.max_partitions:
             raise _err('BUDGET_EXCEEDED', 'borrowed port membership exceeds max_partitions')
@@ -264,7 +264,7 @@ class _SpoolPort:
         candidate = {'position':len(self._refs),'input':dict(entry)}
         state_codec.dumps(self._borrowed + [candidate], max_bytes=self._services.bounds.max_state_bytes)
         self._borrowed.append(candidate)
-        from ..dataflow_finite_input import _ValidatedFiniteEntry
+        from demiflow.execution.worker.finite_input import _ValidatedFiniteEntry
         if type(entry) is _ValidatedFiniteEntry:
             self._borrowed_proofs[len(self._borrowed)-1] = entry
         if not self._projection_metadata_fits():
@@ -279,7 +279,7 @@ class _SpoolPort:
         return 3 * len(raw) <= self._services.bounds.max_state_bytes
 
     def _join_records(self, fields):
-        from ..dataflow_finite_input import validate_finite_members, validate_borrowed_entry, _validated_entry
+        from demiflow.execution.worker.finite_input import validate_finite_members, validate_borrowed_entry, _validated_entry
         if not self._projection_metadata_fits():
             self._borrowed_proofs.clear()
             yield from self._records()
@@ -294,7 +294,7 @@ class _SpoolPort:
                 continue
             spec = validate_borrowed_entry(self._services, entry)
             verified = validate_finite_members(self._services, entry['seal_ref'], spec, target=entry['target'])
-            from ..dataflow_finite_input import _ValidatedFiniteEntry
+            from demiflow.execution.worker.finite_input import _ValidatedFiniteEntry
             if any(type(fresh) is not _ValidatedFiniteEntry for fresh in verified):
                 self._borrowed_proofs.clear()
                 yield from self._records()
@@ -307,7 +307,7 @@ class _SpoolPort:
         yield from self._records(join_keys=fields)
 
     def _records(self, *, join_keys=None):
-        from ..dataflow_finite_input import borrowed_records, borrowed_join_records
+        from demiflow.execution.worker.finite_input import borrowed_records, borrowed_join_records
         borrowed = iter(self._borrowed)
         pending = next(borrowed, None)
         member_index = 0
@@ -369,7 +369,7 @@ class _SpoolPort:
         borrowed = snap.get('borrowed', [])
         if type(borrowed) is not list or len(borrowed) > self._services.bounds.max_partitions:
             raise _err('CORRUPT_ARTIFACT', 'invalid borrowed input membership')
-        from ..dataflow_finite_input import validate_borrowed_entry
+        from demiflow.execution.worker.finite_input import validate_borrowed_entry
         previous = 0
         members = set()
         for item in borrowed:
@@ -965,7 +965,7 @@ class OperatorKernel:
         # The first narrow operator numbers logical INPUT batches. Filters and
         # expansions forward that provenance, so later callbacks do not regroup
         # survivors or multiply the task count by the number of emitted rows.
-        from ..dataflow_records import clone_record
+        from demiflow.execution.contracts.dataflow import clone_record
         from ..contracts.dataflow_codec import _thaw_json
         if self._task_origin:
             ordinal = self._task_frontier // self._task_rows

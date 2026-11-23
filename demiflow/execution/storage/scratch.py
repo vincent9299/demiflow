@@ -91,7 +91,7 @@ class KernelScratch:
         if end > self.maximum:
             raise DataflowError('BUDGET_EXCEEDED', 'Kernel scratch exceeds max_spill_bytes')
         if end > self.reserved:
-            from demiflow.execution.dataflow_staging_growth import grow_staging
+            from demiflow.execution.storage.staging import grow_staging
             self.reserved = grow_staging(self.store._journal, self.operation,
                 reserved=self.reserved, required=end, maximum=self.maximum,
                 spill_budget=self.store._bounds.max_spill_bytes)

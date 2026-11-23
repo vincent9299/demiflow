@@ -6,5 +6,5 @@ from .flow_contract import flow_api, normalize_guard, analyze_guard
           normalize=normalize_guard, analyze=analyze_guard)
 def require(condition: bool, message: str = 'Flow prerequisite failed') -> None:
     """Stop the Flow on a false condition; unlike assert, never optimized out."""
-    from ..execution.dataset_runtime import execute_guard
+    from demiflow.execution.executors.dataset_runtime import execute_guard
     return execute_guard(condition, message)

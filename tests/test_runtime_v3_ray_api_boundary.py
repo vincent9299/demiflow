@@ -85,7 +85,7 @@ def test_missing_declared_environment_is_not_cluster_fallback(ray_api_scope, mon
 
 def test_declaration_environment_does_not_run_user_hooks():
     from demiflow.data.plan import CallableSpec
-    from demiflow.execution.dataflow_environment import native_environment_names
+    from demiflow.execution.hosts.environment import native_environment_names
     class User:
         @property
         def required_environment_names(self):

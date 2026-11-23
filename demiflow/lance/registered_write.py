@@ -105,7 +105,7 @@ def write_registered_native(dataset, *, uri, relative_uri, schema, fingerprint,
     """
     from .storage import normalize_storage_options
     from ..errors import LanceWriteConflict
-    from ..execution.lance_action import bind_lance_action
+    from demiflow.execution.executors.dataset_runtime import bind_lance_action
     options = normalize_storage_options(storage_options)
     request = {'schema': _SCHEMA, 'relative_uri': relative_uri,
                'fingerprint': fingerprint, 'schema_hash': schema_hash(schema)}
