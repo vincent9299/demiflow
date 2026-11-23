@@ -183,3 +183,23 @@ def test_moduleless_business_callable_keeps_original_public_execution(tmp_path,m
     monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT',str(tmp_path/'resources'))
     with RunContext.start(tmp_path/'run'),data.local_execution(workers=1,worker_mode='process'):
         assert data.from_items([{'id':3}]).map(fn).take_all()==[{'id':4}]
+
+
+def test_large_business_helper_keeps_original_public_execution(tmp_path,monkeypatch):
+    import cloudpickle
+    from demiflow import data
+    from demiflow.execution.run_context import RunContext
+    # A normal generated lookup can exceed the separate SDK identity budget.
+    # Even an SDK-like name in a business module must stay ordinary cloudpickle.
+    context={'__name__':'business_lookup'}
+    table='A'*(1024*1024+5)
+    helper=eval('lambda i: '+repr(table)+'[i]',context)
+    helper.__name__=helper.__qualname__='finish_typed_batch'
+    context['helper']=helper
+    map_row=eval("lambda row: {'id':row['id'],'code':helper(row['id'])}",context)
+    restored=load_payload([cloudpickle.dumps(map_row)])
+    expected=[{'id':3,'code':'A'}]
+    assert restored({'id':3})==expected[0]
+    monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT',str(tmp_path/'resources'))
+    with RunContext.start(tmp_path/'run'),data.local_execution(workers=1,worker_mode='process'):
+        assert data.from_items([{'id':3}]).map(map_row).take_all()==expected

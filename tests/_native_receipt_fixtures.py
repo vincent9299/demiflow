@@ -4,13 +4,24 @@ from pathlib import Path
 import demiflow
 
 from demiflow.execution.contracts.dataflow import ArtifactRef, thaw_record_value
-from demiflow.execution.storage.streams import _ChunkStream
+if (Path(demiflow.__file__).parent / 'execution/storage/streams.py').is_file():
+    from demiflow.execution.storage.streams import _ChunkStream
+else:
+    from demiflow.execution.dataflow_handles import _ChunkStream
 if (Path(demiflow.__file__).parent / 'execution/storage/segments.py').is_file():
     from demiflow.execution.storage.segments import segment_refs
 else:
     from demiflow.execution.dataflow_segments import segment_refs
 from demiflow.execution.storage.objects import RunArtifactStore
-from demiflow.execution.contracts.record_codec import _decode_record_document, _decode_payload
+if (Path(demiflow.__file__).parent / 'execution/contracts/record_codec.py').is_file():
+    from demiflow.execution.contracts.record_codec import _decode_record_document, _decode_payload, is_arrow_record
+else:
+    from demiflow.execution.exchange.dataflow_bridge import _decode_record_document, _decode_payload
+    from demiflow.execution.arrow_payload import is_arrow_record
+if (Path(demiflow.__file__).parent / 'execution/storage/arrow_payload.py').is_file():
+    from demiflow.execution.storage.arrow_payload import ArrowBatchCache
+else:
+    from demiflow.execution.arrow_payload import ArrowBatchCache
 if (Path(demiflow.__file__).parent / 'execution/seal/sealed_plans.py').is_file():
     from demiflow.execution.seal.sealed_plans import load_sealed_plan
 else:
@@ -33,8 +44,6 @@ def committed_rows(run, action_id, fact, sink_id='materialize'):
         manifest = publication['manifest']
         assert manifest['total_rows'] == receipt['rows']
         result = []
-        from demiflow.execution.storage.arrow_payload import ArrowBatchCache
-        from demiflow.execution.contracts.record_codec import is_arrow_record
         arrow = ArrowBatchCache(store, bounds)
         for partition in manifest['partitions']:
             for leaf in segment_refs(store, ArtifactRef(**partition['data_ref']), bounds):

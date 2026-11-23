@@ -757,16 +757,18 @@ def native_pickle_function(code, globals, name, argdefs, closure):
 
     if type(code) is not CodeType or type(globals) is not dict:
         return None
-    digest = identity(code_record(code))
     for key, entry in LAYOUT_RELOCATIONS.items():
         variants = entry.get('by_value')
         if variants is None:
             continue
         original_name = entry['old_name']
-        if (digest not in variants and not (
-                globals.get('__name__') == entry['old_module']
-                and original_name in (code.co_name, code.co_qualname, name))):
+        # The identity encoder is a bounded SDK metadata codec, not a limit on
+        # ordinary cloudpickle business code. Only these two advertised SDK
+        # constructors enter it; all other factories keep the original path.
+        if (globals.get('__name__') != entry['old_module']
+                or original_name not in (code.co_name, code.co_qualname, name)):
             continue
+        digest = identity(code_record(code))
         recorded = variants.get(digest)
         if (recorded is None or code.co_name != original_name or code.co_qualname != original_name
                 or code.co_freevars or closure is not None or argdefs is not None or name is not None
