@@ -47,13 +47,20 @@ WARM_SANDBOX_SECONDS = 2400
 
 
 def effective_project_python(project):
-    """Resolve per-project configured read-only Python: None -> workbench default, '' -> disabled."""
+    """Return only explicitly configured per-project business Python; never inherit workbench env."""
     configured = project.get('python')
-    if configured == '':
-        return None
-    if configured:
-        return configured
-    return sys.executable if project.get('kind') == 'pipeline' else None
+    return configured.strip() if isinstance(configured, str) and configured.strip() else None
+
+
+def _select_auto_review_target(checked_entries):
+    """Pick the first checked Flow entry/params so auto_review doesn't fail on >16 KiB edits."""
+    for row in checked_entries or ():
+        if isinstance(row, dict) and isinstance(row.get('entry'), str) and row['entry']:
+            target = {'entry': row['entry']}
+            if isinstance(row.get('params'), str) and row['params']:
+                target['params'] = row['params']
+            return target
+    return {}
 
 
 def _has_code_changes(changes):
@@ -100,7 +107,8 @@ def _build_rework_prompt(pipeline_checks, review_report):
     return (header + '\n'.join(issues))[:8000]
 
 
-def sandbox_spec(deployment, project, session, turn, manifest, config, private_home, *, seconds=None):
+def sandbox_spec(deployment, project, session, turn, manifest, config, private_home, *, seconds=None,
+                 extra_read_paths=(), extra_runtime_paths=()):
     """Assemble only controller-declared scope; no provider-supplied path grants."""
     from demiflow.workbench.conversations.sandbox import SandboxSpec
     root = Path(project['root'])
@@ -108,7 +116,7 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
     notebook_op = turn.get('operation') in ('notebook_cell', 'notebook_cell_cli')
     sources = [] if notebook_op else [Path(source['canonical_path']) for source in manifest.get('sources', [])
                if source.get('origin') == 'authoritative_file']
-    read = [] if notebook_op else [root, *[path for path in sources if path.is_file()]]
+    read = [] if notebook_op else [root, *[path for path in sources if path.is_file()], *(Path(p) for p in extra_read_paths)]
     openssl = Path('/etc/ssl/openssl.cnf')
     if openssl.is_file(): read.append(openssl)
     direct_network = bool(deployment.mode == 'restricted' and getattr(deployment, 'direct_model', False))
@@ -125,7 +133,7 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
                 active_cred = cred_path
                 read.append(cred_path)
     writes = [] if readonly else [root / name for name in project['writes']]
-    protected = [] if notebook_op else [root / name for name in ('.git', '.forge', 'AGENTS.md', 'workspace.json', 'PIPELINE_SPEC.md')]
+    protected = [] if notebook_op else [root / name for name in ('.git', '.forge', '.venv', 'AGENTS.md', 'workspace.json', 'PIPELINE_SPEC.md')]
     protected.extend(path for path in sources if path.name in {'AGENTS.md', 'PIPELINE_SPEC.md'})
     if not notebook_op:
         protected.extend(root / name for name in project.get('protected', []))
@@ -151,8 +159,10 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
                 denied.append(cred)
     unique = lambda paths: tuple(sorted({str(path.absolute()) for path in paths}))
     duration = seconds if seconds is not None else max(.1, turn['created'] + deployment.limits.turn_seconds - time.time())
+    rt = tuple(sorted({*runtime_paths(config, project_python=None if notebook_op else effective_project_python(project)),
+                       *(str(Path(p).absolute()) for p in extra_runtime_paths)}))
     return SandboxSpec(read_paths=unique(read), write_paths=unique(writes),
-        runtime_paths=runtime_paths(config, project_python=None if notebook_op else effective_project_python(project)),
+        runtime_paths=rt,
         protected_paths=unique(protected), denied_paths=unique(denied), private_home=str(private_home),
         role='readonly' if readonly else 'developer',
         seconds=min(3600, max(.1, duration)), rss_bytes=deployment.limits.rss_bytes,
@@ -177,7 +187,7 @@ def automatic_approval(project, request, *, assurance):
     return False
 
 
-def _teardown_provider(process, transport, provider, model_broker, control_bridge):
+def _teardown_provider(process, transport, provider, model_broker, control_bridge, shims=None):
     """Cooperatively close and drain owned provider/broker/bridge resources."""
     reason = None
     if control_bridge is not None:
@@ -210,6 +220,9 @@ def _teardown_provider(process, transport, provider, model_broker, control_bridg
         except BaseException as exc:
             reason = reason or ('Model broker cleanup failed: ' + type(exc).__name__)
             drained = False
+    if shims is not None:
+        try: shims.close()
+        except BaseException: pass
     return drained, reason
 
 
@@ -345,7 +358,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
         except BlockingIOError:
             return False
 
-    process = transport = provider = model_broker = control_bridge = coding = None
+    process = transport = provider = model_broker = control_bridge = coding = shims = None
     effective_bound = None
     standby_spec = None
     confined = None
@@ -400,10 +413,17 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 for p in authoritative_source_paths(st_project)])
             st_session = dict(id=standby_info['session_id'], workspace=standby_info['workspace'],
                               provider=standby_info['provider'], policy_hash=standby_info['policy_hash'])
+            st_py = effective_project_python(st_project)
+            if st_guided:
+                from demiflow.workbench.conversations.sandbox_shims import SandboxShims
+                shims = SandboxShims(st_project, execution_mode=deployment.mode,
+                                     project_python=st_py, input_access=True)
             warm_sandbox_secs = min(3600, max(limits.turn_seconds, WARM_SANDBOX_SECONDS))
             standby_spec = (sandbox_spec(deployment, st_project, st_session,
                                          {'operation': st_operation, 'created': time.time()},
-                                         st_manifest, st_config, st_provider_home, seconds=warm_sandbox_secs)
+                                         st_manifest, st_config, st_provider_home, seconds=warm_sandbox_secs,
+                                         extra_read_paths=shims.read_paths if shims is not None else (),
+                                         extra_runtime_paths=shims.runtime_paths if shims is not None else ())
                             if deployment.mode == 'restricted' else None)
             warm_operation = st_operation
             standby_lease = None
@@ -424,9 +444,12 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         st_config = {**st_config, '_cell_bin': str(control_bridge.bin)}
                 else:
                     standby_lease = tempfile.TemporaryFile(dir=st_home)
-                st_py = None if st_notebook else effective_project_python(st_project)
+                if st_notebook:
+                    st_py = None
                 if st_py:
                     st_config = {**st_config, '_project_python': st_py}
+                if shims is not None:
+                    st_config = {**st_config, '_shim_bin': str(shims.bin)}
                 process = launch_provider(
                     mode=deployment.mode, adapter=st_adapter, config=st_config,
                     home=st_provider_home, root=st_cwd,
@@ -517,8 +540,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                             warm_ready = True
                             provider_opened = False
             except BaseException:
-                _teardown_provider(process, transport, provider, model_broker, control_bridge)
-                process = transport = provider = model_broker = control_bridge = None
+                _teardown_provider(process, transport, provider, model_broker, control_bridge, shims)
+                process = transport = provider = model_broker = control_bridge = shims = None
                 effective_bound = None
                 standby_spec = None
                 warm_ready = False
@@ -531,8 +554,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
             if standby_aborted:
                 if tid is None:
                     return
-                _teardown_provider(process, transport, provider, model_broker, control_bridge)
-                process = transport = provider = model_broker = control_bridge = None
+                _teardown_provider(process, transport, provider, model_broker, control_bridge, shims)
+                process = transport = provider = model_broker = control_bridge = shims = None
                 warm_ready = False
                 provider_opened = False
 
@@ -762,21 +785,25 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
 
                 turn_op = turn.get('operation', 'message')
                 if warm_ready and warm_operation != turn_op:
-                    _teardown_provider(process, transport, provider, model_broker, control_bridge)
-                    process = transport = provider = model_broker = control_bridge = None
+                    _teardown_provider(process, transport, provider, model_broker, control_bridge, shims)
+                    process = transport = provider = model_broker = control_bridge = shims = None
                     effective_bound = None
                     standby_spec = None
                     warm_ready = False
                     provider_opened = False
 
                 if warm_ready and not provider_opened:
-                    compatible = (not compact) and (warm_operation == turn_op)
+                    proj_py = effective_project_python(project)
+                    shims_ok = ((shims is None and not guided) or (shims is not None and shims.project_python == proj_py))
+                    compatible = (not compact) and (warm_operation == turn_op) and shims_ok
                     if compatible and deployment.mode == 'restricted':
                         provider_home = home / 'provider'
                         provider_home.mkdir(mode=0o700, exist_ok=True)
                         actual_spec = sandbox_spec(deployment, project, session, turn, manifest,
                             deployment.providers[session['provider']], provider_home,
-                            seconds=max(.1, sandbox_deadline - time.time()))
+                            seconds=max(.1, sandbox_deadline - time.time()),
+                            extra_read_paths=shims.read_paths if shims is not None else (),
+                            extra_runtime_paths=shims.runtime_paths if shims is not None else ())
                         if cell_cli and control_bridge is not None:
                             from dataclasses import replace
                             actual_spec = replace(actual_spec, runtime_paths=(*actual_spec.runtime_paths, str(control_bridge.bin)))
@@ -785,8 +812,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         compatible = _sandbox_compatible(standby_spec, actual_spec)
                         confined = standby_spec
                     if not compatible:
-                        _teardown_provider(process, transport, provider, model_broker, control_bridge)
-                        process = transport = provider = model_broker = control_bridge = None
+                        _teardown_provider(process, transport, provider, model_broker, control_bridge, shims)
+                        process = transport = provider = model_broker = control_bridge = shims = None
                         effective_bound = None
                         standby_spec = None
                         warm_ready = False
@@ -822,7 +849,6 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     else:
                         if acp:
                             provider.acknowledged = False
-                            provider.prompt = prompt
                         store.event(tid, 'provider.bound', dict(effective_bound or {}, warm_reused=True))
                         store.update(tid, delivery='prepared' if acp else 'acknowledged')
                         send_parent('notify')
@@ -839,9 +865,17 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     provider_home.mkdir(mode=0o700, exist_ok=True)
                     if broker_home is not None:
                         broker_home.mkdir(mode=0o700, parents=True, exist_ok=True)
+                    proj_py = effective_project_python(project)
+                    if guided:
+                        from demiflow.workbench.conversations.sandbox_shims import SandboxShims
+                        shims = SandboxShims(project, execution_mode=deployment.mode,
+                                             project_python=proj_py, input_access=input_access is not None)
                     warm_sandbox_secs = (min(3600, max(limits.turn_seconds, WARM_SANDBOX_SECONDS))
                                          if (parent_sock is not None and not compact) else None)
-                    confined = (sandbox_spec(deployment, project, session, turn, manifest, config, provider_home, seconds=warm_sandbox_secs)
+                    confined = (sandbox_spec(deployment, project, session, turn, manifest, config, provider_home,
+                                             seconds=warm_sandbox_secs,
+                                             extra_read_paths=shims.read_paths if shims is not None else (),
+                                             extra_runtime_paths=shims.runtime_paths if shims is not None else ())
                                 if deployment.mode == 'restricted' else None)
                     warm_operation = turn_op
                     provider_cwd = str(provider_home) if notebook else project['root']
@@ -858,9 +892,12 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                             config = model_broker.child_config
                         if cell_cli:
                             config = {**config, '_cell_bin': str(control_bridge.bin)}
-                    proj_py = None if notebook else effective_project_python(project)
+                    if notebook:
+                        proj_py = None
                     if proj_py:
                         config = {**config, '_project_python': proj_py}
+                    if shims is not None:
+                        config = {**config, '_shim_bin': str(shims.bin)}
                     process = launch_provider(mode=deployment.mode, adapter=adapter, config=config,
                         home=provider_home, root=provider_cwd, lease_fd=lease_fd, sandbox_spec=confined,
                         control_socket=control_bridge.path if control_bridge is not None else None,
@@ -1036,10 +1073,10 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
             drained = True
             author_process = process
             if not keep_warm:
-                drained, cleanup_err = _teardown_provider(process, transport, provider, model_broker, control_bridge)
+                drained, cleanup_err = _teardown_provider(process, transport, provider, model_broker, control_bridge, shims)
                 if cleanup_err and not reason:
                     reason = cleanup_err
-                process = transport = provider = model_broker = control_bridge = None
+                process = transport = provider = model_broker = control_bridge = shims = None
             try:
                 changes = []; revision = None
                 saved = store.turn(tid)
@@ -1055,19 +1092,20 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         final, reason = 'failed', 'Watched changes outside authorized scope; all contents preserved'
                         if keep_warm:
                             keep_warm = False
-                            drained, _ = _teardown_provider(process, transport, provider, model_broker, control_bridge)
-                            process = transport = provider = model_broker = control_bridge = None
+                            drained, _ = _teardown_provider(process, transport, provider, model_broker, control_bridge, shims)
+                            process = transport = provider = model_broker = control_bridge = shims = None
             except BaseException as exc:
                 final, reason = 'failed', ('Change observation incomplete: ' + type(exc).__name__ + ': ' + str(exc))[:2048]
                 if keep_warm:
                     keep_warm = False
-                    drained, _ = _teardown_provider(process, transport, provider, model_broker, control_bridge)
-                    process = transport = provider = model_broker = control_bridge = None
+                    drained, _ = _teardown_provider(process, transport, provider, model_broker, control_bridge, shims)
+                    process = transport = provider = model_broker = control_bridge = shims = None
 
             try:
                 result = dict(reason=reason, peaks=peaks, changed_files=len(changes), evidence='stale' if changes else 'missing',
                               cleanup='complete' if drained else 'unknown', provider_completed=completed)
                 result['execution_assurance'] = assurance
+                checked_entries = []
                 if (coding is not None and changes and drained and completed and final == 'completed'
                         and not saved['stop_at'] and saved['dispatch'] == saved['delivery'] == 'acknowledged'):
                     from demiflow.forge.pipeline_check import check_project, result as check_result
@@ -1078,6 +1116,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         if (sdk_identity(coding['catalog']) != coding['sdk_revision']
                                 or capture(project['root'], watched, exclude=excluded) != after):
                             reject('SDK or project source changed before checks could be reported', 'conflict')
+                        checked_entries = report.get('entries') or []
                         result['pipeline_checks'] = {key: report[key] for key in (
                             'status', 'native_flow', 'project_layout', 'catalog_id', 'rules_id', 'source_digest',
                             'source_count', 'check_digest')}
@@ -1098,12 +1137,12 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         and saved['dispatch'] == saved['delivery'] == 'acknowledged'):
                     if keep_warm:
                         keep_warm = False
-                        drained, cleanup_err = _teardown_provider(process, transport, provider, model_broker, control_bridge)
+                        drained, cleanup_err = _teardown_provider(process, transport, provider, model_broker, control_bridge, shims)
                         if cleanup_err and not reason:
                             reason = cleanup_err
-                        process = transport = provider = model_broker = control_bridge = None
+                        process = transport = provider = model_broker = control_bridge = shims = None
                     try:
-                        delivery_review.request({})
+                        delivery_review.request(_select_auto_review_target(checked_entries))
                         review_requested = True
                     except ValueError:
                         pass
@@ -1156,8 +1195,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 except BaseException: pass
                 if keep_warm:
                     keep_warm = False
-                    _teardown_provider(process, transport, provider, model_broker, control_bridge)
-                    process = transport = provider = model_broker = control_bridge = None
+                    _teardown_provider(process, transport, provider, model_broker, control_bridge, shims)
+                    process = transport = provider = model_broker = control_bridge = shims = None
 
             if lease_fd is not None:
                 os.close(lease_fd)
@@ -1194,8 +1233,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
         for leftover in parent_fds:
             try: os.close(leftover)
             except OSError: pass
-        if process is not None or transport is not None or model_broker is not None or control_bridge is not None:
-            _teardown_provider(process, transport, provider, model_broker, control_bridge)
+        if process is not None or transport is not None or model_broker is not None or control_bridge is not None or shims is not None:
+            _teardown_provider(process, transport, provider, model_broker, control_bridge, shims)
         if coding_fd is not None:
             try: os.close(coding_fd)
             except OSError: pass

@@ -380,6 +380,23 @@
       if (!activePath && !pane.hidden) renderEmptyState();
     }
 
+    function statusSvg(tone) {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 16 16');
+      svg.setAttribute('aria-hidden', 'true');
+      svg.classList.add('dev-forge-icon');
+      const d = ({
+        ok: 'M3.2 8.4l3.1 3.1 6.5-6.8',
+        warn: 'M8 4.2v4.6M8 11.4h.01',
+        bad: 'M4.5 4.5l7 7M11.5 4.5l-7 7',
+        muted: 'M4 8h.01M8 8h.01M12 8h.01',
+      })[tone] || 'M8 4.2v4.6M8 11.4h.01';
+      const path = document.createElementNS(svg.namespaceURI, 'path');
+      path.setAttribute('d', d);
+      svg.append(path);
+      return svg;
+    }
+
     function renderForgeStrip() {
       const items = [];
       const checkLabel = status => ({passed:'通过', failed:'发现问题', incomplete:'待核对', not_applicable:'不适用'})[status] || status;
@@ -391,7 +408,7 @@
         const lines = diags.map(d => [d.rule, d.path + (d.line ? ':' + d.line : ''), d.detail].filter(Boolean).join(' · '));
         const omitted = (c.diagnostic_count || 0) - lines.length;
         if (omitted > 0) lines.push('另有 ' + omitted + ' 项诊断');
-        items.push({key: 'native_flow', label: '原生数据流检查',
+        items.push({key: 'native_flow', short: '数据流', label: '原生数据流检查',
           text: onlyUnregisteredFl10 ? '变更流通过 (有未登记提示)' : checkLabel(c.status),
           tone: onlyUnregisteredFl10 ? 'ok' : checkTone(c.status),
           lines: lines.length ? lines : ['静态数据流与 SDK 契约检查通过。']});
@@ -399,7 +416,7 @@
       if (latestChecks.project_layout && latestChecks.project_layout.status !== 'not_applicable') {
         const c = latestChecks.project_layout;
         const lines = (c.diagnostics || []).map(d => [d.rule, d.path + (d.line ? ':' + d.line : ''), d.detail].filter(Boolean).join(' · '));
-        items.push({key: 'project_layout', label: '项目目录检查', text: checkLabel(c.status), tone: checkTone(c.status),
+        items.push({key: 'project_layout', short: '目录', label: '项目目录检查', text: checkLabel(c.status), tone: checkTone(c.status),
           lines: lines.length ? lines : ['业务目录与角色规范检查通过。']});
       }
       if (latestChecks.review) {
@@ -409,30 +426,25 @@
         const lines = latestChecks.reviewDetails.length
           ? latestChecks.reviewDetails
           : [r === 'passed' ? '独立只读评审通过。' : '点击聊天流中的「独立评审」查看完整记录。'];
-        items.push({key: 'review', label: '独立评审', text: rText, tone: rTone, lines});
+        items.push({key: 'review', short: '评审', label: '独立评审', text: rText, tone: rTone, lines});
       }
       forgeStrip.replaceChildren();
       forgeStrip.hidden = items.length === 0;
       if (!items.length) { forgeDetail.hidden = true; return; }
       if (activeCheckKey && !items.some(i => i.key === activeCheckKey)) activeCheckKey = null;
-      forgeStrip.append(node('span', 'dev-forge-strip-label', 'Forge 校验'));
+      forgeStrip.append(node('span', 'dev-forge-strip-label', 'Forge'));
       for (const item of items) {
-        const pill = node('button', 'dev-forge-pill dev-forge-' + item.tone + (activeCheckKey === item.key ? ' is-open' : ''), item.label + ' · ' + item.text);
+        const pill = node('button', 'dev-forge-pill dev-forge-' + item.tone + (activeCheckKey === item.key ? ' is-open' : ''));
         pill.type = 'button';
         pill.setAttribute('aria-expanded', String(activeCheckKey === item.key));
-        pill.title = '点击查看「' + item.label + '」详情';
+        pill.setAttribute('aria-label', item.label + '：' + item.text);
+        pill.title = item.label + ' · ' + item.text + '\n点击展开详情';
+        pill.append(statusSvg(item.tone), node('span', 'dev-forge-pill-text', item.short));
         pill.onclick = () => {
           activeCheckKey = activeCheckKey === item.key ? null : item.key;
           renderForgeStrip();
         };
         forgeStrip.append(pill);
-      }
-      if (typeof onRequestReview === 'function' && latestChecks.review !== 'running') {
-        const revBtn = node('button', 'dev-forge-trigger', '发起评审');
-        revBtn.type = 'button';
-        revBtn.title = '手动发起一次独立只读 Forge 评审';
-        revBtn.onclick = () => onRequestReview();
-        forgeStrip.append(revBtn);
       }
       const selected = items.find(i => i.key === activeCheckKey);
       forgeDetail.replaceChildren();
@@ -440,7 +452,7 @@
         const head = node('div', 'dev-forge-detail-head');
         head.append(node('strong', null, selected.label + ' · ' + selected.text));
         const headBtns = node('div', 'dev-forge-detail-actions');
-        if (typeof onRework === 'function' && selected.tone !== 'ok' && selected.lines.length) {
+        if (typeof onRework === 'function' && selected.tone === 'bad' && selected.lines.length) {
           const reworkBtn = node('button', 'dev-forge-rework', '带问题打回修改');
           reworkBtn.type = 'button';
           reworkBtn.onclick = () => {

@@ -708,8 +708,6 @@ class Handler(BaseHTTPRequestHandler):
                     row['permissions']={k:permissions[k] for k in console.PERMISSIONS}
                     row['capabilities']={k:permissions[k] for k in console.CAPABILITIES}
                     row['allow_runs']=row['permissions']['run_submit']
-                import sys as _sys
-                value['default_python'] = _sys.executable
                 self._send(value)
                 return
             endpoint, root, permissions = self.server.resolve(url.path)

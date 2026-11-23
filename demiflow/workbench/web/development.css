@@ -152,9 +152,11 @@ dialog pre{max-width:75vw;max-height:65vh;overflow:auto;white-space:pre-wrap;ove
 .dev-code-tab-close{border:0;background:none;color:#a1a1aa;font-size:14px;line-height:1;padding:3px 6px 3px 3px;cursor:pointer;border-radius:4px}
 .dev-code-tab-close:hover{color:#18181b;background:#ececef}
 
-.dev-forge-strip{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 12px;background:#fafafa;border-bottom:1px solid #ededf0;font-size:11.5px;flex:none}
-.dev-forge-strip-label{font-weight:600;color:#71717a;margin-right:2px}
-.dev-forge-pill{display:inline-flex;align-items:center;padding:1px 9px;border-radius:999px;font:inherit;font-weight:500;line-height:18px;cursor:pointer;transition:filter .12s,box-shadow .12s}
+.dev-forge-strip{display:flex;align-items:center;gap:5px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding:5px 12px;background:#fafafa;border-bottom:1px solid #ededf0;font-size:11.5px;flex:none}
+.dev-forge-strip::-webkit-scrollbar{display:none}
+.dev-forge-strip-label{font-weight:600;color:#71717a;margin-right:2px;flex:none}
+.dev-forge-pill{display:inline-flex;align-items:center;gap:4px;padding:1px 8px 1px 6px;border-radius:999px;font:inherit;font-weight:500;line-height:18px;cursor:pointer;white-space:nowrap;flex:none;transition:filter .12s,box-shadow .12s}
+.dev-forge-icon{width:12px;height:12px;flex:none;fill:none;stroke:currentColor;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
 .dev-forge-pill:hover{filter:brightness(.96)}
 .dev-forge-pill.is-open{box-shadow:0 0 0 1.5px rgba(24,24,27,.28)}
 .dev-forge-ok{background:#ecfdf5;color:#15803d;border:1px solid #bbf7d0}

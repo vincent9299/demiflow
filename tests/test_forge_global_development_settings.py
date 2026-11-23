@@ -239,7 +239,7 @@ def test_per_project_python_configuration_is_readonly_and_configurable(tmp_path)
     rp = runtime_paths({'executable': sys.executable}, project_python=str(custom_py))
     assert str(tmp_path / 'custom_venv') in rp
     assert str(venv_bin) in rp
-    # Verify DeepSeek & Codex prepend configured python bin to PATH.
+    # Verify DeepSeek & Codex prepend configured python bin and shim bin to PATH.
     dsh_home = tmp_path / 'dsh_home'; dsh_home.mkdir()
     _, dsh_env = DeepSeek.launch(
         {'executable': str(custom_py), 'model': 'deepseek-v4-flash', 'version': '0.2.1-rc.2', '_project_python': str(custom_py)},
@@ -251,6 +251,144 @@ def test_per_project_python_configuration_is_readonly_and_configurable(tmp_path)
         {'executable': str(custom_py), 'model': 'gpt-5', 'version': '0.1.0', '_project_python': str(custom_py)},
         cdx_home, str(proj))
     assert any(str(venv_bin) in arg and 'DEMIFLOW_PROJECT_PYTHON' in arg for arg in cdx_cmd)
+
+    # Unconfigured project must NEVER fall back to workbench sys.executable.
+    from demiflow.workbench.conversations.worker import effective_project_python, _select_auto_review_target
+    assert effective_project_python({'kind': 'pipeline'}) is None
+    assert effective_project_python({'kind': 'pipeline', 'python': None}) is None
+    assert effective_project_python({'kind': 'pipeline', 'python': ''}) is None
+    assert effective_project_python({'kind': 'pipeline', 'python': str(custom_py)}) == str(custom_py)
+
+    # Auto-review entry selector picks first checked flow entry & params.
+    assert _select_auto_review_target([]) == {}
+    assert _select_auto_review_target([
+        {'entry': 'flows/reference_delivery.py:run', 'params': 'parameters/reference_delivery.json', 'status': 'checked'}
+    ]) == {'entry': 'flows/reference_delivery.py:run', 'params': 'parameters/reference_delivery.json'}
+    assert _select_auto_review_target([{'entry': 'flows/a.py:run', 'params': None}]) == {'entry': 'flows/a.py:run'}
+
+
+def test_sandbox_shims_enforce_python_isolation_and_run_forge_cli_and_pytest_in_landlock(tmp_path, monkeypatch):
+    import os
+    import subprocess
+    import sys
+    from demiflow.workbench.conversations.sandbox import SandboxSpec, backend_readiness, launch_sandbox
+    from demiflow.workbench.conversations.sandbox_shims import SandboxShims
+
+    # Build a nested repo layout: repo/shared_mod.py (declared shared), repo/sibling/secret.txt (blocked),
+    # repo/pytest.ini (blocked parent ini), and repo/subpkg/my_pipe/ (the project root).
+    repo = tmp_path / 'repo'
+    (repo / 'sibling').mkdir(parents=True)
+    (repo / 'pytest.ini').write_text('[pytest]\naddopts = --strict-markers\n')
+    (repo / 'sibling/secret.txt').write_text('do-not-read')
+    (repo / 'shared_pkg').mkdir(parents=True)
+    (repo / 'shared_pkg/__init__.py').write_text('')
+    (repo / 'shared_pkg/helper.py').write_text('MAGIC = 42\n')
+    proj = repo / 'subpkg' / 'my_pipe'
+    (proj / 'flows').mkdir(parents=True)
+    (proj / 'operators').mkdir(parents=True)
+    (proj / 'tests').mkdir(parents=True)
+    (proj / 'flows/demo.py').write_text(
+        'from demiflow.data import from_items\n'
+        'def run():\n'
+        '    return from_items([{"id": 1}]).count()\n'
+    )
+    (proj / 'operators/calc.py').write_text(
+        'from shared_pkg.helper import MAGIC\n'
+        'import demiflow\n'
+        'def value(): return MAGIC + (1 if hasattr(demiflow, "__file__") else 0)\n'
+    )
+    (proj / 'tests/test_calc.py').write_text(
+        'from pathlib import Path\n'
+        'import pytest\n'
+        'from subpkg.my_pipe.operators.calc import value\n'
+        'def test_runs_in_sandbox(tmp_path):\n'
+        '    assert value() == 43\n'
+        '    (tmp_path / "ok.txt").write_text("ok")\n'
+        '    with pytest.raises(PermissionError):\n'
+        '        Path(__file__).resolve().parents[3].joinpath("sibling/secret.txt").read_text()\n'
+    )
+    (proj / 'data').mkdir(exist_ok=True)
+    (proj / 'parameters').mkdir(exist_ok=True)
+    (proj / 'parameters/demo.json').write_text(json.dumps({
+        'format': 'demiflow_forge_flow_parameters_v2', 'arguments': {},
+    }))
+    (proj / 'workspace.json').write_text(json.dumps({
+        'format': 'demiflow_forge_workspace_v3', 'name': 'my_pipe', 'id': 'w' + 'a' * 32,
+        'entries': {'flows/demo.py:run': ['parameters/demo.json']},
+        'platform': {'path': '.forge/platform/' + 'b' * 64 + '.json', 'digest': 'b' * 64},
+        'locations': {'data_dir': {'root': 'data', 'writable': False}}, 'audit': {'reports': [], 'change_scope': None},
+    }))
+    shared_cfg = tmp_path / 'shared-sources.json'
+    shared_cfg.write_text(json.dumps({
+        'format': 'demiflow_workbench_shared_sources_v1',
+        'workspaces': {
+            str(proj.resolve()): {
+                'shared_pkg': str((repo / 'shared_pkg/__init__.py').resolve()),
+                'shared_pkg.helper': str((repo / 'shared_pkg/helper.py').resolve()),
+            }
+        }
+    }))
+    monkeypatch.setenv('DEMIFLOW_WORKBENCH_SHARED_SOURCES', str(shared_cfg))
+
+    project_dict = {'root': str(proj), 'writes': ['operators', 'tests'], 'kind': 'pipeline'}
+
+    # 1. Without configured project Python: ONLY demiflow shim exists, no python/pytest!
+    shims_no_py = SandboxShims(project_dict, execution_mode='restricted', project_python=None, input_access=True)
+    try:
+        assert (shims_no_py.bin / 'demiflow').is_file()
+        assert not (shims_no_py.bin / 'python').exists()
+        assert not (shims_no_py.bin / 'pytest').exists()
+        assert shims_no_py.read_paths == ()
+        # Non-forge subcommand blocked.
+        bad = subprocess.run([str(shims_no_py.bin / 'demiflow'), 'run'], capture_output=True, text=True)
+        assert bad.returncode == 2
+        # forge review blocked in restricted mode.
+        rev = subprocess.run([str(shims_no_py.bin / 'demiflow'), 'forge', 'review'], capture_output=True, text=True)
+        assert rev.returncode == 2
+        # forge context reports personalized locations and unconfigured python=None.
+        ctx = subprocess.run(
+            [str(shims_no_py.bin / 'demiflow'), 'forge', 'context', '--root', str(proj), '--json'],
+            capture_output=True, text=True, check=True,
+        )
+        payload = json.loads(ctx.stdout)
+        assert payload['project']['locations'] == {'data_dir': {'root': 'data', 'writable': False}}
+        assert payload['environment']['python'] is None
+        assert payload['environment']['execution_mode'] == 'restricted'
+    finally:
+        shims_no_py.close()
+
+    # 2. With explicitly configured project Python: test inside real Landlock + seccomp sandbox!
+    if not backend_readiness()['available']:
+        pytest.skip('Linux Landlock/seccomp sandbox unavailable')
+    shims = SandboxShims(project_dict, execution_mode='restricted', project_python=sys.executable, input_access=True)
+    private_home = tmp_path / 'sandbox_home'
+    private_home.mkdir(mode=0o700)
+    (private_home / 'tmp').mkdir(mode=0o700)
+    try:
+        assert (shims.bin / 'python').is_file() and (shims.bin / 'pytest').is_file()
+        sdk_root = Path(__file__).resolve().parents[1]
+        spec = SandboxSpec(
+            read_paths=tuple(sorted({str(proj.resolve()), *(str(p) for p in shims.read_paths)})),
+            write_paths=(str((proj / 'tests').resolve()),),
+            runtime_paths=tuple(sorted({
+                '/usr', '/lib', '/lib64', sys.base_prefix, sys.prefix, str(sdk_root),
+                *(str(p) for p in shims.runtime_paths),
+            })),
+            protected_paths=(str((proj / 'workspace.json').resolve()),),
+            private_home=str(private_home),
+            role='developer',
+            seconds=30,
+        )
+        env = {'PATH': f'{shims.bin}:/usr/bin:/bin', 'LANG': 'C.UTF-8'}
+        proc = launch_sandbox(
+            ['/bin/sh', '-c', 'demiflow forge context --root . --json > /dev/null && demiflow forge check --root . --path flows/demo.py --json > /dev/null && pytest tests/test_calc.py'],
+            spec=spec, env=env, cwd=str(proj),
+        )
+        out, err = proc.communicate(timeout=30)
+        assert proc.returncode == 0, f'stdout={out.decode(errors="replace")}\nstderr={err.decode(errors="replace")}'
+        assert '1 passed' in out.decode(errors='replace')
+    finally:
+        shims.close()
 
 
 def call(server,body=None,token=None):

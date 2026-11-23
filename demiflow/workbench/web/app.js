@@ -907,7 +907,7 @@
       modeSelect.append(new Option('未配置（不继承平台环境）','disabled'),new Option('指定项目业务 Python 环境 (venv / conda)','custom'));
       const currentPy=typeof project.python==='string'?project.python.trim():'';
       modeSelect.value=currentPy?'custom':'disabled';
-      const pyInput=$('input',undefined,'project-python-input');pyInput.type='text';pyInput.setAttribute('aria-label','自定义 Python 解释器路径');
+      const pyInput=$('input',undefined,'project-python-input');pyInput.type='text';pyInput.setAttribute('aria-label','项目 Python 解释器路径');
       pyInput.placeholder='/path/to/project-venv/bin/python';pyInput.value=currentPy;
       const pyHint=$('p','','muted small project-python-hint');
       const pyMsg=$('p','','small project-python-msg');pyMsg.hidden=true;
@@ -915,7 +915,7 @@
         const m=modeSelect.value;
         pyInput.hidden=m!=='custom';
         pyHint.textContent=m==='custom'
-          ?'填写该业务项目独立的 venv / conda Python 绝对路径（同时用于开发测试与 Notebook 内核，Notebook 运行需安装 ipykernel；工作台以只读方式挂载）。'
+          ?'填写该业务项目独立的 venv / conda Python 绝对路径（同时用于开发测试与 Notebook 内核，Notebook 运行需安装 ipykernel；沙箱仅开放只读执行，自动支持导入纯 demiflow SDK）。'
           :'未配置时不继承工作台平台 Python，开发沙箱不挂载 Python，Notebook 内核也将等待配置项目 Python 后再启动。';
       };
       modeSelect.onchange=syncPyUi;syncPyUi();
@@ -927,7 +927,7 @@
         try{
           await api('project-python',{},{workspace_id:project.workspace_id,expected:projectDigest,python:payloadPy});
           await refreshProjects();
-          pyMsg.textContent='已保存。新发起的开发回合及重启后的 Notebook 内核将使用此环境。';pyMsg.dataset.tone='ok';pyMsg.hidden=false;
+          pyMsg.textContent=payloadPy?'已保存，新发起的开发回合及重启后的 Notebook 内核将使用此业务 Python 环境（只读）。':'已清除，开发回合与 Notebook 内核将不再使用业务 Python 环境。';pyMsg.dataset.tone='ok';pyMsg.hidden=false;
         }catch(err){
           pyMsg.textContent=err?.message||'保存失败';pyMsg.dataset.tone='error';pyMsg.hidden=false;
         }finally{savePy.disabled=false;}

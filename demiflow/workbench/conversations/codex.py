@@ -55,6 +55,9 @@ class Codex:
             shell = values['shell_environment_policy.set']
             shell.update(PATH=str(py_path.parent) + ':' + shell['PATH'],
                          DEMIFLOW_PROJECT_PYTHON=str(py_path))
+        if config.get('_shim_bin'):
+            shell = values['shell_environment_policy.set']
+            shell.update(PATH=str(config['_shim_bin']) + ':' + shell['PATH'])
         if config.get('_cell_bin'):
             shell = values['shell_environment_policy.set']
             shell.update(PATH=config['_cell_bin'] + ':' + shell['PATH'],
