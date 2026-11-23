@@ -1,22 +1,5 @@
-"""MVP-1 Local unified-Runtime runnable acceptance (S7/S9, fixed-source slice).
-
-The real-person-adjudicated MVP-1 scope: a fixed/iterable source -> map_async ->
-materialize -> take readback runs end-to-end through the platform-side unified
-Runtime (run_local_chain, one managed worker, single native commit authority),
-selected by the workbench entry ``local_execution(unified_chain=...)``. These
-tests drive the genuine workbench entry (RunContext + local_execution + bound
-public data API), prove unified results equal the legacy in-driver path, prove
-take/count read back the unified committed handle, and bind the R4 baseline:
-a real worker SIGKILL/resume recovers the acked prefix exactly once, and the
-chain seam shares the legacy bind_stages recovery gate whose production
-check_recovery fail-closes a persisted unknown paid effect (never auto-replayed).
-
-The default seam stays False here (S7 byte-neutral); S9 flips the workbench
-default under controlled scope after the internal-path regression adjudication.
-"""
-import json
+"""Public Local actions, persisted worker outputs and confirmed recovery effects."""
 import os
-import signal
 import sys
 
 import pytest
@@ -44,7 +27,7 @@ def _items(n=24):
     return [{"x": i} for i in range(n)]
 
 
-def _run_pipeline(root, *, unified):
+def _run_pipeline(root):
     # Local closure: cloudpickle serializes the map_async callable by value so the
     # independent managed worker need not import this test module (a module-level
     # function would serialize by reference and hang the worker's graph cut).
@@ -52,32 +35,23 @@ def _run_pipeline(root, *, unified):
         return {**row, "x": row["x"] * 2}
 
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
+        with data.local_execution(workers=1, partitions=1):
             handle = data.from_items(_items()).map_async(double, concurrency=1).materialize()
             rows = handle.take_all()
     return rows
 
 
-def _managed_worker_pids(resource_root):
-    units = resource_root / "units"
-    if not units.exists():
-        return set()
-    return {json.loads(p.read_text())["identity"]["pid"]
-            for p in units.glob("*/*/process.json")}
+def _managed_worker_pids(root):
+    from runtime_v3_owned_crash import process_records
+    return {record['identity']['pid'] for _, record in process_records(root).values()}
 
 
-def test_workbench_unified_real_pipeline_matches_legacy(tmp_path):
-    legacy = _run_pipeline(tmp_path / "legacy", unified=False)
-    unified = _run_pipeline(tmp_path / "unified", unified=True)
-    expected = [{"x": i * 2} for i in range(24)]
-    key = lambda r: r["x"]
-    assert sorted(legacy, key=key) == expected
-    assert sorted(unified, key=key) == expected
-    # The unified path supervised a genuine independent managed worker process;
-    # the legacy in-driver path provisions no managed worker host.
-    unified_pids = _managed_worker_pids(tmp_path / "unified-resources")
-    assert unified_pids and os.getpid() not in unified_pids
-    assert _managed_worker_pids(tmp_path / "legacy-resources") == set()
+def test_public_map_materialize_runs_in_a_worker(tmp_path):
+    root = tmp_path/'work'
+    rows = _run_pipeline(root)
+    assert sorted(rows, key=lambda row: row['x']) == [{'x': i * 2} for i in range(24)]
+    pids = _managed_worker_pids(root)
+    assert pids and os.getpid() not in pids
 
 
 def test_workbench_unified_take_and_count_read_back_committed_handle(tmp_path):
@@ -86,14 +60,14 @@ def test_workbench_unified_take_and_count_read_back_committed_handle(tmp_path):
 
     expected = [{"x": i * 2} for i in range(10)]
     with RunContext.start(tmp_path / "run", limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
+        with data.local_execution(workers=1, partitions=1):
             handle = data.from_items(_items(10)).map_async(double, concurrency=1).materialize()
             assert handle.count() == 10
             # take is bounded sampling: at most 3 committed rows, order not guaranteed.
             sampled = handle.take(3)
             assert len(sampled) <= 3 and all(row in expected for row in sampled)
             assert sorted(handle.take_all(), key=lambda r: r["x"]) == expected
-    assert _managed_worker_pids(tmp_path / "run-resources")
+    assert _managed_worker_pids(tmp_path / "run")
 
 
 def test_unified_readback_is_single_committed_handle_authority(tmp_path):
@@ -129,13 +103,12 @@ def test_workbench_unified_chain_kill_recovers_acked_prefix_exactly_once(tmp_pat
                                         materialize_action_id, process_records)
     # R4 "recovery correct" + "known_completed reuse" + "state equality", bound onto
     # the actual workbench entry. Same genuine worker SIGKILL after an acked cut as
-    # U2/F2, but selected through local_execution(unified_chain=True). The acked
+    # U2/F2, selected through public local_execution(). The acked
     # prefix cut is handed back to the resumed worker (DriverStreamTerminal
     # .restore_point) and reused unchanged: every pre-crash acked commit_id persists
     # with identical receipts. Exactly-once is the COMMIT authority's (the un-acked
     # suffix is legitimately reprocessed after a worker crash). The "unknown never
     # auto-replayed" half is bound by the recovery-gate test below.
-    from demiflow.execution.recovery_contract import RecoveryContractError
     driver_pid = os.getpid()
     crash_marker = tmp_path / "crashed-once"
 
@@ -217,8 +190,8 @@ def test_public_default_runs_in_managed_workers(tmp_path):
 
     expected = [{"x": i * 2} for i in range(12)]
     with RunContext.start(tmp_path / "default", limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
+        with data.local_execution(workers=1, partitions=1):
             rows = data.from_items(_items(12)).map_async(double, concurrency=1).materialize().take_all()
     assert sorted(rows, key=lambda r: r["x"]) == expected
-    default_pids = _managed_worker_pids(tmp_path / "default-resources")
+    default_pids = _managed_worker_pids(tmp_path / "default")
     assert default_pids and os.getpid() not in default_pids   # default -> unified worker

@@ -1,24 +1,12 @@
-"""MVP-2 segment 1 (A1) unified queue settlement carrier acceptance.
-
-The driver keeps the legacy queue lifecycle byte-unchanged (claim/lease/heartbeat,
-the single RawFetch acquisition and finalize_task); only the pure stateless maps
-suffix after RawFetch runs in an independent managed worker, correlated per task
-by its native delivery task_id. These tests drive the genuine workbench entry
-(RunContext + local_execution(unified_queue_chain=...) + bound public data API),
-prove the unified settlement equals the byte-unchanged legacy in-driver path,
-prove the worker constructs zero CommitCoordinator (guardrail 2, absolute) and
-that both commit scopes settle in the driver's single journal, and bind the
-default-OFF seam's eligibility fallbacks.
-"""
+"""Public queue claim, acquisition, settlement and worker resource recovery."""
 import json
 import os
-import signal
 import sys
 from dataclasses import asdict
 from pathlib import Path
 
 import pytest
-from runtime_v3_owned_crash import kill_owned_worker
+from runtime_v3_owned_crash import assert_released, kill_owned_worker, process_records
 
 import demiflow.data as data
 from demiflow.collect import FetchPolicy, HttpSource
@@ -49,7 +37,7 @@ def _config(tmp_path, name):
     return QueueConfig(backend='sqlite', queue_id=name, path=str(tmp_path / (name + '.sqlite')))
 
 
-def _settle(cfg, root, *, url, **exec_kwargs):
+def _settle(cfg, root, *, url):
     # Local closures: cloudpickle serializes the maps suffix by value so the
     # independent managed worker need not import this test module (a module-level
     # callable would serialize by reference and hang the worker's graph cut).
@@ -64,7 +52,7 @@ def _settle(cfg, root, *, url, **exec_kwargs):
         return 'downloaded' if status == 'ok' else 'failed'
 
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1, **exec_kwargs):
+        with data.local_execution(workers=1, partitions=1):
             ds = data.read_queue(cfg, pool='p', max_tasks=1, max_inflight=1, idle_timeout_s=.2).fetch(
                 store=LocalObjectStore(root / 'objects'), concurrency=1,
                 policy=FetchPolicy(max_object_bytes=131072, http=HttpSource(allow_private=True)))
@@ -79,7 +67,7 @@ def _settle(cfg, root, *, url, **exec_kwargs):
 def _business(row):
     # Strip only the run/path-specific identifiers (object-store URI, timestamp,
     # native commit refs, storage domain); every business and acquisition fact
-    # must be identical between the legacy and the unified carrier settlement.
+    # must be identical across interrupted and uninterrupted settlement.
     result = {k: v for k, v in row['result'].items()
               if k not in {'retrieved_at', 'acquisition_ref', 'storage_domain'}}
     if result.get('raw_ref'):
@@ -88,74 +76,40 @@ def _business(row):
                 label=row['label'], status=row['status'], verification=row['verification'])
 
 
-def _managed_worker_pids(resource_root):
-    import json
-    units = resource_root / "units"
-    if not units.exists():
-        return set()
-    return {json.loads(p.read_text())["identity"]["pid"]
-            for p in units.glob("*/*/process.json")}
+def _managed_worker_pids(root):
+    return {record['identity']['pid'] for _, record in process_records(root).values()}
 
 
-def _resources(root):
-    return root.with_name(root.name + "-resources")
-
-
-def test_unified_queue_carrier_matches_legacy_settlement(tmp_path):
-    legacy_cfg, unified_cfg = _config(tmp_path, 'legacy'), _config(tmp_path, 'unified')
-    legacy_root, unified_root = tmp_path / 'legacy', tmp_path / 'unified'
+def test_public_queue_settles_acquired_business_rows(tmp_path):
+    cfg, root = _config(tmp_path, 'one'), tmp_path/'run'
+    channel = QueueChannel(cfg)
     with origin_server() as (url, calls):
-        seed(QueueChannel(legacy_cfg), tmp_path / 'legacy-seed', url)
-        _settle(legacy_cfg, legacy_root, url=url, unified_queue_chain=False)
-        legacy_fetches = calls['/file']
-        seed(QueueChannel(unified_cfg), tmp_path / 'unified-seed', url)
-        _settle(unified_cfg, unified_root, url=url, unified_queue_chain=True)
-        unified_fetches = calls['/file'] - legacy_fetches
-    # Exactly one acquisition per run: the carrier never re-fetches the object.
-    assert legacy_fetches == 1 and unified_fetches == 1
-
-    legacy_channel, unified_channel = QueueChannel(legacy_cfg), QueueChannel(unified_cfg)
-    legacy_row, = data.read_queue_records(legacy_cfg, pool='p',
-                                          through=legacy_channel.snapshot('p'), results=True).take_all()
-    unified_row, = data.read_queue_records(unified_cfg, pool='p',
-                                           through=unified_channel.snapshot('p'), results=True).take_all()
-    assert _business(legacy_row) == _business(unified_row)
-    assert unified_row['result']['status'] == 'ok'
-    assert unified_row['business_accepted'] is False and unified_row['label'] == 'downloaded'
-    assert legacy_channel.state('p')['queue_drained'] and unified_channel.state('p')['queue_drained']
-    assert legacy_channel.state('p')['counts'] == unified_channel.state('p')['counts'] == {'done_ok': 1}
-
-    # The unified path supervised a genuine independent managed worker process;
-    # the byte-unchanged legacy in-driver path provisions no managed worker host.
-    unified_pids = _managed_worker_pids(_resources(unified_root))
-    assert unified_pids and os.getpid() not in unified_pids
-    assert _managed_worker_pids(_resources(legacy_root)) == set()
+        seed(channel, tmp_path/'seed', url)
+        _settle(cfg, root, url=url)
+        assert calls['/file'] == 1
+    row, = data.read_queue_records(cfg, pool='p', through=channel.snapshot('p'), results=True).take_all()
+    assert row['result']['status'] == 'ok'
+    assert row['business_accepted'] is False and row['label'] == 'downloaded'
+    assert row['verification']['status'] == 'verified'
+    assert channel.state('p')['queue_drained'] and channel.state('p')['counts'] == {'done_ok': 1}
 
 
-def test_seam_explicit_off_uses_legacy_in_driver(tmp_path):
-    cfg = _config(tmp_path, 'off')
-    root = tmp_path / 'run'
-    with origin_server() as (url, calls):
-        seed(QueueChannel(cfg), tmp_path / 'seed', url)
-        # Explicit unified_queue_chain=False: the byte-unchanged legacy path.
-        _settle(cfg, root, url=url, unified_queue_chain=False)
-    assert calls['/file'] == 1
-    assert QueueChannel(cfg).state('p')['queue_drained']
-    assert _managed_worker_pids(_resources(root)) == set()
+def test_old_queue_driver_selector_is_rejected_before_work():
+    with pytest.raises(TypeError, match='unified_queue_chain'):
+        with data.local_execution(unified_queue_chain=False):
+            pytest.fail('removed queue selector started a second runtime')
 
 
-def test_seam_default_on_uses_unified_carrier(tmp_path):
+def test_public_queue_runs_in_managed_worker(tmp_path):
     cfg = _config(tmp_path, 'default')
     root = tmp_path / 'run'
     with origin_server() as (url, calls):
         seed(QueueChannel(cfg), tmp_path / 'seed', url)
-        # No unified_queue_chain kwarg: the workbench default is now ON, so the
-        # by-value maps suffix runs on a genuine independent managed worker.
         _settle(cfg, root, url=url)
     assert calls['/file'] == 1
     assert QueueChannel(cfg).state('p')['queue_drained']
     assert QueueChannel(cfg).state('p')['counts'] == {'done_ok': 1}
-    pids = _managed_worker_pids(_resources(root))
+    pids = _managed_worker_pids(root)
     assert pids and os.getpid() not in pids
 
 
@@ -176,7 +130,7 @@ def test_both_commit_scopes_settle_in_driver_single_journal(tmp_path, monkeypatc
     root = tmp_path / 'run'
     with origin_server() as (url, calls):
         seed(QueueChannel(cfg), tmp_path / 'seed', url)
-        _settle(cfg, root, url=url, unified_queue_chain=True)
+        _settle(cfg, root, url=url)
     assert calls['/file'] == 1
     # Every CommitCoordinator construction happened in the driver process; the
     # managed worker (a separate pid) constructed none.
@@ -241,53 +195,36 @@ def _records_by_task(cfg, channel):
     return {r['queue_record']['task_id']: r for r in rows}
 
 
-def _settle_many(cfg, root, url, n, **exec_kwargs):
+def _settle_many(cfg, root, url, n):
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1, **exec_kwargs):
+        with data.local_execution(workers=1, partitions=1):
             _make_builder(n)(cfg, root, url).write_datasink(QueueResultSink(cfg, pool='p'))
 
 
-def test_unified_queue_carrier_matches_legacy_multi_task_settlement(tmp_path):
-    # Settlement slice (M06->M02->M07), not the full queue flow: N pre-populated
-    # tasks, each claimed -> validated -> exactly one RawFetch -> atomic finalize.
+def test_public_queue_settles_each_task_once(tmp_path):
     n = 4
-    legacy_cfg, unified_cfg = _config(tmp_path, 'mlegacy'), _config(tmp_path, 'munified')
-    legacy_root, unified_root = tmp_path / 'mlegacy', tmp_path / 'munified'
+    cfg, root = _config(tmp_path, 'many'), tmp_path/'run'
     with origin_server() as (url, calls):
-        legacy_channel, _ = _seed_tasks(legacy_cfg, tmp_path / 'mlegacy-seed', url, n)
-        _settle_many(legacy_cfg, legacy_root, url, n, unified_queue_chain=False)
-        legacy_fetches = calls['/file']
-        unified_channel, up = _seed_tasks(unified_cfg, tmp_path / 'munified-seed', url, n)
-        _settle_many(unified_cfg, unified_root, url, n, unified_queue_chain=True)
-        unified_fetches = calls['/file'] - legacy_fetches
-    # Exactly one acquisition per task per run; the carrier never re-fetches.
-    assert legacy_fetches == n and unified_fetches == n
-    legacy_rows, unified_rows = _records_by_task(legacy_cfg, legacy_channel), _records_by_task(unified_cfg, unified_channel)
-    # Per-record identity + business multiplicity: same N distinct ids, no dup/loss.
-    assert sorted(legacy_rows) == sorted(unified_rows) == ['t' + str(i) for i in range(n)]
-    for tid in legacy_rows:
-        assert _business(legacy_rows[tid]) == _business(unified_rows[tid])
-        assert unified_rows[tid]['result']['status'] == 'ok'
-        assert unified_rows[tid]['verification']['status'] == 'verified'
-    assert legacy_channel.state('p')['queue_drained'] and unified_channel.state('p')['queue_drained']
-    assert legacy_channel.state('p')['counts'] == unified_channel.state('p')['counts'] == {'done_ok': n}
-    # Each task's atomic final commit is acked (per-record sink commit).
-    with unified_channel.database.connection() as db:
-        for tid in unified_rows:
-            proof = unified_channel.completion(up.generation, tid)
+        channel, producer = _seed_tasks(cfg, tmp_path/'seed', url, n)
+        _settle_many(cfg, root, url, n)
+        assert calls['/file'] == n
+    rows = _records_by_task(cfg, channel)
+    assert sorted(rows) == ['t' + str(i) for i in range(n)]
+    with channel.database.connection() as db:
+        for task, row in rows.items():
+            assert row['result']['status'] == 'ok'
+            assert row['verification']['status'] == 'verified'
+            proof = channel.completion(producer.generation, task)
             assert db.execute('SELECT status FROM runtime_commits WHERE commit_id=?',
                               (proof['final_commit'],)).fetchone()[0] == 'acked'
-    unified_pids = _managed_worker_pids(_resources(unified_root))
-    assert unified_pids and os.getpid() not in unified_pids
-    assert _managed_worker_pids(_resources(legacy_root)) == set()
+    assert channel.state('p')['queue_drained'] and channel.state('p')['counts'] == {'done_ok': n}
 
 
 def test_unified_queue_carrier_kill_recover_per_record_equivalence(tmp_path):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from runtime_v3_owned_crash import (assert_worker_killed, assert_released,
-                                        materialize_action_id, process_records)
+    from runtime_v3_owned_crash import assert_worker_killed
     # R4: a genuine worker SIGKILL mid-transform, then resume the SAME run. The
-    # byte-unchanged legacy queue lifecycle re-claims the interrupted task; the
+    # queue lifecycle re-claims the interrupted task; the
     # acked RawFetch acquisition is reused (unknown paid effect never replayed);
     # a fresh stateless worker completes the suffix. Per-record equivalence is
     # checked against an uninterrupted unified run, not just total row count.
@@ -335,7 +272,7 @@ def test_unified_queue_carrier_kill_recover_per_record_equivalence(tmp_path):
         # known_completed reuse: the pre-crash settled task is not re-committed.
         assert channel.completion(p.generation, 't0') == t0_proof_before
         clean_channel, _ = _seed_tasks(clean_cfg, tmp_path / 'r4clean-seed', url, n)
-        _settle_many(clean_cfg, clean_root, url, n, unified_queue_chain=True)
+        _settle_many(clean_cfg, clean_root, url, n)
     recovered, clean = _records_by_task(cfg, channel), _records_by_task(clean_cfg, clean_channel)
     assert sorted(recovered) == sorted(clean) == ['t0', 't1', 't2']
     for tid in recovered:
@@ -357,13 +294,6 @@ def test_unified_queue_carrier_kill_recover_per_record_equivalence(tmp_path):
 
 # --- Segment 2: finite-resource release (worker quota + claim/lease) ---------
 
-_CAPACITY = {"cpu_millis": 4000, "memory_bytes": 4 * 1024 ** 3}
-
-
-def _capacity(resource_root):
-    from demiflow.resources.capacity import LocalCapacityPool
-    return LocalCapacityPool(resource_root / "capacity", capacity=_CAPACITY)
-
 
 def _pid_dead(pid):
     # A reaped or zombie child is not a live worker; only a running process leaks.
@@ -382,8 +312,7 @@ def _pid_dead(pid):
 
 def test_unified_queue_carrier_crash_resume_reclaims_quota_no_live_worker(tmp_path):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from runtime_v3_owned_crash import (assert_worker_killed, assert_released,
-                                        materialize_action_id, process_records)
+    from runtime_v3_owned_crash import assert_worker_killed
     n = 3
     cfg, root = _config(tmp_path, 'rq'), tmp_path / 'rqrun'
     driver_pid = os.getpid()
@@ -429,12 +358,11 @@ def test_unified_queue_carrier_crash_resume_reclaims_quota_no_live_worker(tmp_pa
 def _module_label(status):
     # Module-level UDF: under pytest its __module__ is this test module (not
     # '__main__'), so standard pickle succeeds and cloudpickle carries it BY
-    # REFERENCE. The managed worker cannot import the producer module, so S8.5
-    # must reject the whole suffix to the byte-unchanged legacy in-driver path.
+    # REFERENCE. The worker must run the imported function on the public path.
     return 'downloaded' if status == 'ok' else 'failed'
 
 
-def _settle_label_variant(cfg, root, *, url, label_fn, **exec_kwargs):
+def _settle_label_variant(cfg, root, *, url, label_fn):
     # Same business chain as _settle, but the final label map uses a supplied
     # callable so a by-reference (module-level) and a by-value (closure) suffix
     # can be driven through the identical settlement and compared.
@@ -446,7 +374,7 @@ def _settle_label_variant(cfg, root, *, url, label_fn, **exec_kwargs):
         return result['status']
 
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1, **exec_kwargs):
+        with data.local_execution(workers=1, partitions=1):
             ds = data.read_queue(cfg, pool='p', max_tasks=1, max_inflight=1, idle_timeout_s=.2).fetch(
                 store=LocalObjectStore(root / 'objects'), concurrency=1,
                 policy=FetchPolicy(max_object_bytes=131072, http=HttpSource(allow_private=True)))
@@ -458,13 +386,7 @@ def _settle_label_variant(cfg, root, *, url, label_fn, **exec_kwargs):
             assert ds.write_datasink(QueueResultSink(cfg, pool='p')) is None
 
 
-def test_by_reference_suffix_falls_back_to_legacy_without_hang(tmp_path):
-    # S8.5 empirical proof (intent-critical: artifact immutability/correctness).
-    # With the seam ON, a suffix holding a by-reference UDF is NOT admitted to the
-    # managed worker (which would hang on the graph cut unable to import the
-    # producer module); it falls back to the byte-unchanged legacy in-driver path,
-    # completes without hanging, and settles the SAME business facts as the
-    # by-value carrier. The test completing is itself the no-hang evidence.
+def test_module_function_and_closure_settle_through_managed_workers(tmp_path):
     ref_cfg, val_cfg = _config(tmp_path, 'byref'), _config(tmp_path, 'byval')
     ref_root, val_root = tmp_path / 'byref', tmp_path / 'byval'
 
@@ -473,21 +395,18 @@ def test_by_reference_suffix_falls_back_to_legacy_without_hang(tmp_path):
 
     with origin_server() as (url, calls):
         seed(QueueChannel(ref_cfg), tmp_path / 'byref-seed', url)
-        _settle_label_variant(ref_cfg, ref_root, url=url, label_fn=_module_label,
-                              unified_queue_chain=True)
+        _settle_label_variant(ref_cfg, ref_root, url=url, label_fn=_module_label)
         ref_fetches = calls['/file']
         seed(QueueChannel(val_cfg), tmp_path / 'byval-seed', url)
-        _settle_label_variant(val_cfg, val_root, url=url, label_fn=by_value_label,
-                              unified_queue_chain=True)
+        _settle_label_variant(val_cfg, val_root, url=url, label_fn=by_value_label)
         val_fetches = calls['/file'] - ref_fetches
     # Exactly one acquisition each: neither path re-fetches the object.
     assert ref_fetches == 1 and val_fetches == 1
-    # by-reference -> legacy in-driver: NO managed worker was provisioned.
-    assert _managed_worker_pids(_resources(ref_root)) == set()
-    # by-value -> unified carrier: a genuine independent managed worker ran.
-    val_pids = _managed_worker_pids(_resources(val_root))
+    ref_pids = _managed_worker_pids(ref_root)
+    assert ref_pids and os.getpid() not in ref_pids
+    val_pids = _managed_worker_pids(val_root)
     assert val_pids and os.getpid() not in val_pids
-    # The fallback is not a degraded result: identical business facts.
+    # Both supported callable forms must deliver identical business facts.
     ref_row, = data.read_queue_records(ref_cfg, pool='p',
                                        through=QueueChannel(ref_cfg).snapshot('p'), results=True).take_all()
     val_row, = data.read_queue_records(val_cfg, pool='p',
@@ -507,7 +426,7 @@ def test_by_reference_suffix_falls_back_to_legacy_without_hang(tmp_path):
 # boundary exactly as in the review probe.
 
 
-def _intermediate_settle(cfg, root, *, url, kind, **exec_kwargs):
+def _intermediate_settle(cfg, root, *, url, kind):
     def prefix(row):
         if kind == 'tuple':
             return {**row, 'temporary': (1, 2)}
@@ -526,7 +445,7 @@ def _intermediate_settle(cfg, root, *, url, kind, **exec_kwargs):
         return out
 
     with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode='thread', partitions=1, **exec_kwargs):
+        with data.local_execution(workers=1, partitions=1):
             ds = data.read_queue(cfg, pool='p', max_tasks=1, max_inflight=1, idle_timeout_s=.2)
             ds = ds.map(prefix).fetch(
                 store=LocalObjectStore(root / 'objects'), concurrency=1,
@@ -541,54 +460,25 @@ def _intermediate_row(cfg):
     return row
 
 
-def test_unified_queue_carrier_preserves_tuple_intermediate(tmp_path):
-    # N1: a legal tuple intermediate must stay a tuple across the worker boundary
-    # (not silently coerced to list) and the final business result must equal the
-    # byte-unchanged legacy in-driver path.
-    legacy_cfg, unified_cfg = _config(tmp_path, 'tlegacy'), _config(tmp_path, 'tunified')
-    legacy_root, unified_root = tmp_path / 'tlegacy', tmp_path / 'tunified'
+def _assert_intermediate_type(tmp_path, kind):
+    cfg, root = _config(tmp_path, kind), tmp_path/'run'
     with origin_server() as (url, calls):
-        seed(QueueChannel(legacy_cfg), tmp_path / 'tlegacy-seed', url)
-        _intermediate_settle(legacy_cfg, legacy_root, url=url, kind='tuple', unified_queue_chain=False)
-        legacy_fetches = calls['/file']
-        seed(QueueChannel(unified_cfg), tmp_path / 'tunified-seed', url)
-        _intermediate_settle(unified_cfg, unified_root, url=url, kind='tuple', unified_queue_chain=True)
-        unified_fetches = calls['/file'] - legacy_fetches
-    assert legacy_fetches == 1 and unified_fetches == 1
-    legacy_row, unified_row = _intermediate_row(legacy_cfg), _intermediate_row(unified_cfg)
-    assert legacy_row['intermediate_type'] == 'tuple'
-    assert unified_row['intermediate_type'] == 'tuple'
-    assert unified_row['label'] == legacy_row['label'] == 'downloaded'
-    assert unified_row['result']['status'] == legacy_row['result']['status'] == 'ok'
-    # The unified path really ran an independent managed worker (not a fallback).
-    pids = _managed_worker_pids(_resources(unified_root))
-    assert pids and os.getpid() not in pids
-    assert _managed_worker_pids(_resources(legacy_root)) == set()
-    assert QueueChannel(unified_cfg).state('p')['counts'] == {'done_ok': 1}
+        seed(QueueChannel(cfg), tmp_path/'seed', url)
+        _intermediate_settle(cfg, root, url=url, kind=kind)
+        assert calls['/file'] == 1
+    row = _intermediate_row(cfg)
+    assert row['intermediate_type'] == kind
+    assert row['label'] == 'downloaded' and row['result']['status'] == 'ok'
+    assert QueueChannel(cfg).state('p')['counts'] == {'done_ok': 1}
+    assert_released(root)
+
+
+def test_unified_queue_carrier_preserves_tuple_intermediate(tmp_path):
+    _assert_intermediate_type(tmp_path, 'tuple')
 
 
 def test_unified_queue_carrier_preserves_bytes_intermediate(tmp_path):
-    # N1: a legal bytes intermediate must succeed (no strict-JSON rejection after
-    # the acquisition already completed) and equal the legacy result.
-    legacy_cfg, unified_cfg = _config(tmp_path, 'blegacy'), _config(tmp_path, 'bunified')
-    legacy_root, unified_root = tmp_path / 'blegacy', tmp_path / 'bunified'
-    with origin_server() as (url, calls):
-        seed(QueueChannel(legacy_cfg), tmp_path / 'blegacy-seed', url)
-        _intermediate_settle(legacy_cfg, legacy_root, url=url, kind='bytes', unified_queue_chain=False)
-        legacy_fetches = calls['/file']
-        seed(QueueChannel(unified_cfg), tmp_path / 'bunified-seed', url)
-        _intermediate_settle(unified_cfg, unified_root, url=url, kind='bytes', unified_queue_chain=True)
-        unified_fetches = calls['/file'] - legacy_fetches
-    assert legacy_fetches == 1 and unified_fetches == 1
-    legacy_row, unified_row = _intermediate_row(legacy_cfg), _intermediate_row(unified_cfg)
-    assert legacy_row['intermediate_type'] == 'bytes'
-    assert unified_row['intermediate_type'] == 'bytes'
-    assert unified_row['label'] == legacy_row['label'] == 'downloaded'
-    pids = _managed_worker_pids(_resources(unified_root))
-    assert pids and os.getpid() not in pids
-    assert QueueChannel(unified_cfg).state('p')['counts'] == {'done_ok': 1}
-    # N3 success path: this-task quota fully released, no manual helper.
-    assert _capacity(_resources(unified_root)).snapshot()["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
+    _assert_intermediate_type(tmp_path, 'bytes')
 
 
 def test_unified_queue_carrier_business_error_raises_original_promptly(tmp_path, monkeypatch):
@@ -602,19 +492,13 @@ def test_unified_queue_carrier_business_error_raises_original_promptly(tmp_path,
         seed(QueueChannel(cfg), tmp_path / 'err-seed', url)
         start = time.monotonic()
         with pytest.raises(ValueError, match='review-business-invalid-input') as excinfo:
-            _intermediate_settle(cfg, root, url=url, kind='error', unified_queue_chain=True)
+            _intermediate_settle(cfg, root, url=url, kind='error')
         elapsed = time.monotonic() - start
     # Exact original business type preserved across the worker boundary — not a
     # wrapper, not a control TimeoutError (guardrail 3).
     assert type(excinfo.value) is ValueError
     assert elapsed < 30  # prompt: did not wait out the control timeout
     assert calls['/file'] == 1  # the acquisition completed before the business error
-    # The legacy in-driver path raises the identical original ValueError.
-    lcfg, lroot = _config(tmp_path, 'errl'), tmp_path / 'errlrun'
-    with origin_server() as (url, calls):
-        seed(QueueChannel(lcfg), tmp_path / 'errl-seed', url)
-        with pytest.raises(ValueError, match='review-business-invalid-input'):
-            _intermediate_settle(lcfg, lroot, url=url, kind='error', unified_queue_chain=False)
 
 
 def test_unified_queue_carrier_releases_quota_on_business_failure_no_helper(tmp_path, monkeypatch):
@@ -624,96 +508,58 @@ def test_unified_queue_carrier_releases_quota_on_business_failure_no_helper(tmp_
     with origin_server() as (url, calls):
         seed(QueueChannel(cfg), tmp_path / 'fail-seed', url)
         with pytest.raises(ValueError, match='review-business-invalid-input'):
-            _intermediate_settle(cfg, root, url=url, kind='error', unified_queue_chain=True)
-    res = _resources(root)
-    assert _capacity(res).snapshot()["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
-    assert _capacity(res).snapshot()["active"] == []
+            _intermediate_settle(cfg, root, url=url, kind='error')
+    res = root
+    assert_released(res)
     pids = _managed_worker_pids(res)
     assert pids and all(_pid_dead(pid) for pid in pids)
     assert not QueueChannel(cfg).state('p')['queue_drained']  # failure never manufactures ACK
 
 
-def test_unified_queue_carrier_scratch_bounded_across_many_rows(tmp_path):
-    # Guardrail 2 (finite-resource premise): the per-row DataRef scratch never
-    # accumulates. One row is in flight end-to-end (driver concurrency=1), so at
-    # most 2 live blocks ever coexist, and the unified terminal reclaims the whole
-    # scratch dir after the run regardless of row count (inodes do not grow with N).
-    import threading
-    import time
+def test_public_queue_releases_staging_throughout_settlement(tmp_path, monkeypatch):
+    from demiflow.execution.run_journal import RunJournal
+
+    # Inspect the owning store, both while the real acquisition is staging and
+    # after its last settlement. A defunct carrier directory proves no bound.
     n = 6
-    cfg, root = _config(tmp_path, 'bounded'), tmp_path / 'boundedrun'
-    segment_dir = root / 'queue-transform-segments'
-    scratch = segment_dir / 'segments'
-    peak = [0]
-    stop = threading.Event()
+    cfg, root = _config(tmp_path, 'bounded'), tmp_path/'run'
+    reservations = []
+    begin = RunJournal.begin_dataflow_staging
 
-    def sample():
-        while not stop.is_set():
-            try:
-                live = len(list(scratch.glob('*/*.pkl')))
-            except OSError:
-                live = 0
-            if live > peak[0]:
-                peak[0] = live
-            time.sleep(0.001)
+    def observe(self, fence, reservation_id, store_id, inode, size, *, ceiling):
+        charged = begin(self, fence, reservation_id, store_id, inode, size, ceiling=ceiling)
+        with self._connection() as db:
+            total, = db.execute(
+                "SELECT consumed FROM runtime_budgets WHERE name='artifact_staging_bytes'").fetchone()
+        reservations.append((charged, total, ceiling))
+        return charged
 
-    build = _make_builder(n)
+    monkeypatch.setattr(RunJournal, 'begin_dataflow_staging', observe)
     with origin_server() as (url, calls):
-        channel, _ = _seed_tasks(cfg, tmp_path / 'bounded-seed', url, n)
-        sampler = threading.Thread(target=sample, daemon=True)
-        sampler.start()
-        try:
-            with RunContext.start(root, limits=LIMITS):
-                with data.local_execution(workers=1, worker_mode='thread', partitions=1):
-                    build(cfg, root, url).write_datasink(QueueResultSink(cfg, pool='p'))
-        finally:
-            stop.set()
-            sampler.join(timeout=5)
-    assert calls['/file'] == n
+        channel, _ = _seed_tasks(cfg, tmp_path/'seed', url, n)
+        _settle_many(cfg, root, url, n)
+        assert calls['/file'] == n
     assert channel.state('p')['counts'] == {'done_ok': n}
-    # Bounded carriage: never more than 2 live blocks; scratch fully reclaimed.
-    assert peak[0] <= 2
-    assert not segment_dir.exists()
-    # A genuine independent managed worker ran the carrier (the data plane was used).
-    res = _resources(root)
-    pids = _managed_worker_pids(res)
-    assert pids and os.getpid() not in pids and all(_pid_dead(pid) for pid in pids)
-    assert _capacity(res).snapshot()['charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
+    assert reservations and all(0 < charged <= total <= ceiling for charged, total, ceiling in reservations)
+    with RunJournal(root)._connection() as db:
+        pending = db.execute(
+            'SELECT count(*) FROM runtime_dataflow_staging s LEFT JOIN runtime_dataflow_settlements d '
+            'ON d.reservation_id=s.reservation_id WHERE d.reservation_id IS NULL').fetchone()[0]
+        assert pending == 0
+    assert not list((root/'.dataflow-store').glob('*/staging/.pending-*'))
+    assert_released(root)
 
 
-def test_unified_queue_carrier_wide_row_hits_existing_byte_budget_both_paths(tmp_path):
-    # Guardrail 2 negative control: an over-budget intermediate trips the
-    # PRE-EXISTING native row byte ceiling (check_size, default 16 MiB) in the
-    # driver-side prefix map on BOTH paths, before acquisition and before the
-    # carrier stage — not a new carrier/strict-JSON failure. The legacy in-driver
-    # path raises the identical error type/message.
-    legacy_cfg, unified_cfg = _config(tmp_path, 'wlegacy'), _config(tmp_path, 'wunified')
-    legacy_root, unified_root = tmp_path / 'wlegacy', tmp_path / 'wunified'
-
-    def capture(cfg, root, url, **kw):
-        try:
-            _intermediate_settle(cfg, root, url=url, kind='wide', **kw)
-        except BaseException as exc:
-            return exc
-        raise AssertionError('over-budget wide row did not trip the native byte ceiling')
-
+def test_public_queue_wide_row_hits_byte_budget_before_fetch(tmp_path):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    cfg, root = _config(tmp_path, 'wide'), tmp_path/'run'
     with origin_server() as (url, calls):
-        seed(QueueChannel(legacy_cfg), tmp_path / 'wlegacy-seed', url)
-        legacy_exc = capture(legacy_cfg, legacy_root, url, unified_queue_chain=False)
-        legacy_fetches = calls['/file']
-        seed(QueueChannel(unified_cfg), tmp_path / 'wunified-seed', url)
-        unified_exc = capture(unified_cfg, unified_root, url, unified_queue_chain=True)
-        unified_fetches = calls['/file'] - legacy_fetches
-    # Same pre-existing ceiling error on both paths; trips before RawFetch.
-    assert 'Value byte budget exceeded' in str(legacy_exc)
-    assert 'Value byte budget exceeded' in str(unified_exc)
-    assert type(legacy_exc) is type(unified_exc)
-    assert legacy_fetches == 0 and unified_fetches == 0
-    # The unified terminal still releases the idle worker it had provisioned.
-    res = _resources(unified_root)
-    assert _capacity(res).snapshot()['charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
-    pids = _managed_worker_pids(res)
-    assert pids and all(_pid_dead(pid) for pid in pids)
+        seed(QueueChannel(cfg), tmp_path/'seed', url)
+        with pytest.raises(DataflowError, match='record string exceeds byte budget') as rejected:
+            _intermediate_settle(cfg, root, url=url, kind='wide')
+        assert rejected.value.code == 'BUDGET_EXCEEDED'
+        assert calls['/file'] == 0
+    assert_released(root)
 
 
 def test_unified_queue_carrier_unpicklable_business_error_fallback_conveys_type(tmp_path, monkeypatch):
@@ -733,9 +579,9 @@ def test_unified_queue_carrier_unpicklable_business_error_fallback_conveys_type(
     with origin_server() as (url, calls):
         seed(QueueChannel(cfg), tmp_path / 'unpick-seed', url)
         start = time.monotonic()
-        with pytest.raises(RecoveryContractError, match='ValueError: review-unpicklable-business') as excinfo:
+        with pytest.raises(ValueError, match='review-unpicklable-business') as excinfo:
             with RunContext.start(root, limits=LIMITS):
-                with data.local_execution(workers=1, worker_mode='thread', partitions=1):
+                with data.local_execution(workers=1, partitions=1):
                     ds = data.read_queue(cfg, pool='p', max_tasks=1, max_inflight=1, idle_timeout_s=.2).fetch(
                         store=LocalObjectStore(root / 'objects'), concurrency=1,
                         policy=FetchPolicy(max_object_bytes=131072, http=HttpSource(allow_private=True)))
@@ -745,8 +591,8 @@ def test_unified_queue_carrier_unpicklable_business_error_fallback_conveys_type(
     assert elapsed < 30  # prompt fallback, did not wait out the control timeout
     assert not isinstance(excinfo.value, TimeoutError)
     assert calls['/file'] == 1  # acquisition completed before the business error
-    res = _resources(root)
-    assert _capacity(res).snapshot()['charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
+    res = root
+    assert_released(res)
     pids = _managed_worker_pids(res)
     assert pids and all(_pid_dead(pid) for pid in pids)
 
@@ -765,10 +611,10 @@ def test_unified_queue_carrier_close_failure_does_not_mask_business_error(tmp_pa
     with origin_server() as (url, calls):
         seed(QueueChannel(cfg), tmp_path / 'closefail-seed', url)
         with pytest.raises(ValueError, match='review-business-invalid-input'):
-            _intermediate_settle(cfg, root, url=url, kind='error', unified_queue_chain=True)
+            _intermediate_settle(cfg, root, url=url, kind='error')
     assert calls['/file'] == 1
     # Backstop kill reaped the worker even though the protocol terminal failed.
-    pids = _managed_worker_pids(_resources(root))
+    pids = _managed_worker_pids(root)
     assert pids and all(_pid_dead(pid) for pid in pids)
 
 
