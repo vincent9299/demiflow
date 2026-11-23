@@ -31,6 +31,9 @@ from urllib.parse import urlparse
 
 GROUP_MEMBERS = 8
 GROUP_DISTANCE = 20
+# Records built with adapter.main_result/image_result (or decoded from typed
+# results of older receipts) carry this key; it never appears in output.
+TYPED = '__result_type__'
 _SPACES = re.compile(r'( |\t|\n)+', re.M | re.U)
 
 
@@ -112,8 +115,12 @@ def standard_record(item, engine):
 
 
 def identity(record):
-    """Key under which duplicate main results merge."""
-    if record['template'] == 'images.html':
+    """Key under which duplicate main results merge.
+
+    Plain image records match on template, full URL and image URL; typed records
+    and other plain records match on template, URL without scheme and image URL.
+    """
+    if record['template'] == 'images.html' and not record.get(TYPED):
         return ('images.html', record['url'], record['img_src'])
     parsed = record['parsed_url']
     if not parsed:
@@ -175,9 +182,10 @@ class Merger:
         for name in ('content', 'title'):
             if len(record[name] or '') > len(existing[name] or ''):
                 existing[name] = record[name]
-        for name, value in record.items():
-            if name not in existing and value != '':
-                existing[name] = value
+        if not existing.get(TYPED) and not record.get(TYPED):
+            for name, value in record.items():
+                if name not in existing and value != '':
+                    existing[name] = value
         existing['engines'].add(record['engine'] or '')
         mine, theirs = existing['parsed_url'], record['parsed_url']
         if mine and not mine.scheme.endswith('s') and theirs and theirs.scheme.endswith('s'):
@@ -261,8 +269,10 @@ class Merger:
 
     def payload(self):
         answers = sorted(self.answers, key=lambda r: r['template'])
-        return {'results': plain(self.ordered()), 'infoboxes': plain(self.infoboxes),
-                'answers': plain(answers), 'suggestions': sorted(self.suggestions),
+        def public(records):
+            return plain([{k: v for k, v in record.items() if k != TYPED} for record in records])
+        return {'results': public(self.ordered()), 'infoboxes': public(self.infoboxes),
+                'answers': public(answers), 'suggestions': sorted(self.suggestions),
                 'corrections': sorted(self.corrections), 'engine_data': plain(self.engine_data),
                 'paging': self.paging}
 

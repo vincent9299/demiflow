@@ -225,3 +225,401 @@ def bing_market(tag):
         if locale.territory in BING_TERRITORY_MARKETS:
             return BING_TERRITORY_MARKETS[locale.territory]
     return BING_LANGUAGE_MARKETS.get(locale.language)
+
+
+# Brave ``country`` and ``ui_lang`` cookies. Derived like the tables above from
+# the previous runtime's requests for 1135 language tags; ``brave_cookies``
+# reproduces all of them.
+BRAVE_COUNTRIES = frozenset((
+    'ar', 'at', 'au', 'be', 'br', 'ca', 'ch', 'cl', 'cn', 'de', 'dk', 'es', 'fi', 'fr', 'gb', 'hk', 'id', 'in',
+    'it', 'jp', 'kr', 'mx', 'my', 'nl', 'no', 'nz', 'ph', 'pl', 'pt', 'ru', 'sa', 'se', 'tr', 'tw', 'us', 'za'
+))
+BRAVE_UI_LANGUAGES = frozenset((
+    'az', 'bg', 'br', 'ca', 'cs', 'cy', 'da', 'de-de', 'el', 'en-ca', 'en-gb', 'en-in', 'en-us', 'es', 'et',
+    'eu', 'fi-fi', 'fr-ca', 'fr-fr', 'gl', 'hr', 'hu', 'id', 'it', 'ja-jp', 'ka', 'ko', 'lt', 'lv', 'ms', 'nb',
+    'nl', 'pl', 'pt-br', 'ro', 'ru', 'sk', 'sl', 'sq-al', 'sr', 'sr-latn', 'sv', 'sw-ke', 'th', 'tr', 'uk',
+    'vi', 'zh', 'zh-tw'
+))
+BRAVE_LANGUAGE_COUNTRIES = {
+    'aa': 'all', 'ab': 'all', 'af': 'all', 'agq': 'all', 'ak': 'all', 'am': 'all', 'an': 'all', 'ann': 'all',
+    'apc': 'all', 'ar': 'sa', 'arn': 'all', 'as': 'all', 'asa': 'all', 'ast': 'all', 'az': 'all', 'ba': 'all',
+    'bal': 'all', 'bas': 'all', 'be': 'all', 'bem': 'all', 'bew': 'all', 'bez': 'all', 'bg': 'all', 'bgc':
+    'all', 'bgn': 'all', 'bho': 'all', 'blo': 'all', 'blt': 'all', 'bm': 'all', 'bn': 'all', 'bo': 'all', 'br':
+    'all', 'brx': 'all', 'bs': 'all', 'bss': 'all', 'byn': 'all', 'ca': 'all', 'cad': 'all', 'cch': 'all',
+    'ccp': 'all', 'ce': 'all', 'ceb': 'all', 'cgg': 'all', 'cho': 'all', 'chr': 'all', 'cic': 'all', 'ckb':
+    'all', 'co': 'all', 'cop': 'all', 'cs': 'all', 'csw': 'all', 'cu': 'all', 'cv': 'all', 'cy': 'all', 'da':
+    'dk', 'dav': 'all', 'de': 'de', 'dje': 'all', 'doi': 'all', 'dsb': 'all', 'dua': 'all', 'dv': 'all', 'dyo':
+    'all', 'dz': 'all', 'ebu': 'all', 'ee': 'all', 'el': 'all', 'en': 'us', 'eo': 'all', 'es': 'es', 'et':
+    'all', 'eu': 'all', 'ewo': 'all', 'fa': 'all', 'ff': 'all', 'fi': 'fi', 'fil': 'ph', 'fo': 'all', 'fr':
+    'fr', 'frr': 'all', 'fur': 'all', 'fy': 'all', 'ga': 'all', 'gaa': 'all', 'gd': 'all', 'gez': 'all', 'gl':
+    'all', 'gn': 'all', 'gsw': 'ch', 'gu': 'all', 'guz': 'all', 'gv': 'all', 'ha': 'all', 'haw': 'all', 'he':
+    'all', 'hi': 'in', 'hnj': 'all', 'hr': 'all', 'hsb': 'all', 'ht': 'all', 'hu': 'all', 'hy': 'all', 'ia':
+    'all', 'id': 'id', 'ie': 'all', 'ig': 'all', 'ii': 'all', 'io': 'all', 'is': 'all', 'it': 'it', 'iu': 'all',
+    'ja': 'jp', 'jbo': 'all', 'jgo': 'all', 'jmc': 'all', 'jv': 'all', 'ka': 'all', 'kaa': 'all', 'kab': 'all',
+    'kaj': 'all', 'kam': 'all', 'kcg': 'all', 'kde': 'all', 'kea': 'all', 'ken': 'all', 'kgp': 'all', 'khq':
+    'all', 'ki': 'all', 'kk': 'all', 'kkj': 'all', 'kl': 'all', 'kln': 'all', 'km': 'all', 'kn': 'all', 'ko':
+    'kr', 'kok': 'all', 'kpe': 'all', 'ks': 'all', 'ksb': 'all', 'ksf': 'all', 'ksh': 'all', 'ku': 'all', 'kw':
+    'all', 'kxv': 'all', 'ky': 'all', 'la': 'all', 'lag': 'all', 'lb': 'all', 'lg': 'all', 'lij': 'all', 'lkt':
+    'all', 'lld': 'all', 'lmo': 'all', 'ln': 'all', 'lo': 'all', 'lrc': 'all', 'lt': 'all', 'ltg': 'all', 'lu':
+    'all', 'luo': 'all', 'luy': 'all', 'lv': 'all', 'mai': 'all', 'mas': 'all', 'mdf': 'all', 'mer': 'all',
+    'mfe': 'all', 'mg': 'all', 'mgh': 'all', 'mgo': 'all', 'mhn': 'all', 'mi': 'nz', 'mic': 'all', 'mk': 'all',
+    'ml': 'all', 'mn': 'all', 'mni': 'all', 'moh': 'all', 'mr': 'all', 'ms': 'my', 'mt': 'all', 'mua': 'all',
+    'mus': 'all', 'my': 'all', 'myv': 'all', 'mzn': 'all', 'naq': 'all', 'nb': 'no', 'nd': 'all', 'nds': 'all',
+    'ne': 'all', 'nl': 'nl', 'nmg': 'all', 'nn': 'no', 'nnh': 'all', 'no': 'all', 'nqo': 'all', 'nr': 'all',
+    'nso': 'all', 'nus': 'all', 'nv': 'all', 'ny': 'all', 'nyn': 'all', 'oc': 'all', 'om': 'all', 'or': 'all',
+    'os': 'all', 'osa': 'all', 'pa': 'all', 'pap': 'all', 'pcm': 'all', 'pis': 'all', 'pl': 'pl', 'prg': 'all',
+    'ps': 'all', 'pt': 'pt', 'qu': 'all', 'quc': 'all', 'raj': 'all', 'rhg': 'all', 'rif': 'all', 'rm': 'all',
+    'rn': 'all', 'ro': 'all', 'rof': 'all', 'ru': 'ru', 'rw': 'all', 'rwk': 'all', 'sa': 'all', 'sah': 'all',
+    'saq': 'all', 'sat': 'all', 'sbp': 'all', 'sc': 'all', 'scn': 'all', 'sd': 'all', 'sdh': 'all', 'se': 'all',
+    'seh': 'all', 'ses': 'all', 'sg': 'all', 'shi': 'all', 'shn': 'all', 'si': 'all', 'sid': 'all', 'sk': 'all',
+    'skr': 'all', 'sl': 'all', 'sma': 'all', 'smj': 'all', 'smn': 'all', 'sms': 'all', 'sn': 'all', 'so': 'all',
+    'sq': 'all', 'sr': 'all', 'ss': 'all', 'ssy': 'all', 'st': 'all', 'su': 'all', 'sv': 'se', 'sw': 'all',
+    'syr': 'all', 'szl': 'all', 'ta': 'all', 'te': 'all', 'teo': 'all', 'tg': 'all', 'th': 'all', 'ti': 'all',
+    'tig': 'all', 'tk': 'all', 'tn': 'all', 'to': 'all', 'tok': 'all', 'tpi': 'all', 'tr': 'tr', 'trv': 'all',
+    'trw': 'all', 'ts': 'all', 'tt': 'all', 'twq': 'all', 'tyv': 'all', 'tzm': 'all', 'ug': 'all', 'uk': 'all',
+    'ur': 'all', 'uz': 'all', 'vai': 'all', 've': 'all', 'vec': 'all', 'vi': 'all', 'vmw': 'all', 'vo': 'all',
+    'vun': 'all', 'wa': 'all', 'wae': 'all', 'wal': 'all', 'wbp': 'all', 'wo': 'all', 'xh': 'all', 'xnr': 'all',
+    'xog': 'all', 'yav': 'all', 'yi': 'all', 'yo': 'all', 'yrl': 'all', 'yue': 'all', 'za': 'all', 'zgh': 'all',
+    'zh': 'cn', 'zu': 'all'
+}
+BRAVE_LANGUAGE_UI = {
+    'aa': 'en-us', 'ab': 'en-us', 'af': 'en-us', 'agq': 'en-us', 'ak': 'en-us', 'am': 'en-us', 'an': 'en-us',
+    'ann': 'en-us', 'apc': 'en-us', 'ar': 'en-us', 'arn': 'en-us', 'as': 'en-us', 'asa': 'en-us', 'ast':
+    'en-us', 'az': 'az', 'ba': 'en-us', 'bal': 'en-us', 'bas': 'en-us', 'be': 'en-us', 'bem': 'en-us', 'bew':
+    'en-us', 'bez': 'en-us', 'bg': 'bg', 'bgc': 'en-us', 'bgn': 'en-us', 'bho': 'en-us', 'blo': 'en-us', 'blt':
+    'en-us', 'bm': 'en-us', 'bn': 'en-us', 'bo': 'en-us', 'br': 'br', 'brx': 'en-us', 'bs': 'en-us', 'bss':
+    'en-us', 'byn': 'en-us', 'ca': 'ca', 'cad': 'en-us', 'cch': 'en-us', 'ccp': 'en-us', 'ce': 'en-us', 'ceb':
+    'en-us', 'cgg': 'en-us', 'cho': 'en-us', 'chr': 'en-us', 'cic': 'en-us', 'ckb': 'en-us', 'co': 'en-us',
+    'cop': 'en-us', 'cs': 'cs', 'csw': 'en-us', 'cu': 'en-us', 'cv': 'en-us', 'cy': 'cy', 'da': 'da', 'dav':
+    'en-us', 'de': 'de-de', 'dje': 'en-us', 'doi': 'en-us', 'dsb': 'en-us', 'dua': 'en-us', 'dv': 'en-us',
+    'dyo': 'en-us', 'dz': 'en-us', 'ebu': 'en-us', 'ee': 'en-us', 'el': 'el', 'en': 'en-us', 'eo': 'en-us',
+    'es': 'es', 'et': 'et', 'eu': 'eu', 'ewo': 'en-us', 'fa': 'en-us', 'ff': 'en-us', 'fi': 'fi-fi', 'fil':
+    'en-us', 'fo': 'en-us', 'fr': 'fr-fr', 'frr': 'en-us', 'fur': 'en-us', 'fy': 'en-us', 'ga': 'en-us', 'gaa':
+    'en-us', 'gd': 'en-us', 'gez': 'en-us', 'gl': 'gl', 'gn': 'en-us', 'gsw': 'en-us', 'gu': 'en-us', 'guz':
+    'en-us', 'gv': 'en-us', 'ha': 'en-us', 'haw': 'en-us', 'he': 'en-us', 'hi': 'en-us', 'hnj': 'en-us', 'hr':
+    'hr', 'hsb': 'en-us', 'ht': 'en-us', 'hu': 'hu', 'hy': 'en-us', 'ia': 'en-us', 'id': 'id', 'ie': 'en-us',
+    'ig': 'en-us', 'ii': 'en-us', 'io': 'en-us', 'is': 'en-us', 'it': 'it', 'iu': 'en-us', 'ja': 'ja-jp', 'jbo':
+    'en-us', 'jgo': 'en-us', 'jmc': 'en-us', 'jv': 'en-us', 'ka': 'ka', 'kaa': 'en-us', 'kab': 'en-us', 'kaj':
+    'en-us', 'kam': 'en-us', 'kcg': 'en-us', 'kde': 'en-us', 'kea': 'en-us', 'ken': 'en-us', 'kgp': 'en-us',
+    'khq': 'en-us', 'ki': 'en-us', 'kk': 'en-us', 'kkj': 'en-us', 'kl': 'en-us', 'kln': 'en-us', 'km': 'en-us',
+    'kn': 'en-us', 'ko': 'ko', 'kok': 'en-us', 'kpe': 'en-us', 'ks': 'en-us', 'ksb': 'en-us', 'ksf': 'en-us',
+    'ksh': 'en-us', 'ku': 'en-us', 'kw': 'en-us', 'kxv': 'en-us', 'ky': 'en-us', 'la': 'en-us', 'lag': 'en-us',
+    'lb': 'en-us', 'lg': 'en-us', 'lij': 'en-us', 'lkt': 'en-us', 'lld': 'en-us', 'lmo': 'en-us', 'ln': 'en-us',
+    'lo': 'en-us', 'lrc': 'en-us', 'lt': 'lt', 'ltg': 'en-us', 'lu': 'en-us', 'luo': 'en-us', 'luy': 'en-us',
+    'lv': 'lv', 'mai': 'en-us', 'mas': 'en-us', 'mdf': 'en-us', 'mer': 'en-us', 'mfe': 'en-us', 'mg': 'en-us',
+    'mgh': 'en-us', 'mgo': 'en-us', 'mhn': 'en-us', 'mi': 'en-us', 'mic': 'en-us', 'mk': 'en-us', 'ml': 'en-us',
+    'mn': 'en-us', 'mni': 'en-us', 'moh': 'en-us', 'mr': 'en-us', 'ms': 'ms', 'mt': 'en-us', 'mua': 'en-us',
+    'mus': 'en-us', 'my': 'en-us', 'myv': 'en-us', 'mzn': 'en-us', 'naq': 'en-us', 'nb': 'nb', 'nd': 'en-us',
+    'nds': 'en-us', 'ne': 'en-us', 'nl': 'nl', 'nmg': 'en-us', 'nn': 'en-us', 'nnh': 'en-us', 'no': 'en-us',
+    'nqo': 'en-us', 'nr': 'en-us', 'nso': 'en-us', 'nus': 'en-us', 'nv': 'en-us', 'ny': 'en-us', 'nyn': 'en-us',
+    'oc': 'en-us', 'om': 'en-us', 'or': 'en-us', 'os': 'en-us', 'osa': 'en-us', 'pa': 'en-us', 'pap': 'en-us',
+    'pcm': 'en-us', 'pis': 'en-us', 'pl': 'pl', 'prg': 'en-us', 'ps': 'en-us', 'pt': 'pt-br', 'qu': 'en-us',
+    'quc': 'en-us', 'raj': 'en-us', 'rhg': 'en-us', 'rif': 'en-us', 'rm': 'en-us', 'rn': 'en-us', 'ro': 'ro',
+    'rof': 'en-us', 'ru': 'ru', 'rw': 'en-us', 'rwk': 'en-us', 'sa': 'en-us', 'sah': 'en-us', 'saq': 'en-us',
+    'sat': 'en-us', 'sbp': 'en-us', 'sc': 'en-us', 'scn': 'en-us', 'sd': 'en-us', 'sdh': 'en-us', 'se': 'en-us',
+    'seh': 'en-us', 'ses': 'en-us', 'sg': 'en-us', 'shi': 'en-us', 'shn': 'en-us', 'si': 'en-us', 'sid':
+    'en-us', 'sk': 'sk', 'skr': 'en-us', 'sl': 'sl', 'sma': 'en-us', 'smj': 'en-us', 'smn': 'en-us', 'sms':
+    'en-us', 'sn': 'en-us', 'so': 'en-us', 'sq': 'sq-al', 'sr': 'sr', 'ss': 'en-us', 'ssy': 'en-us', 'st':
+    'en-us', 'su': 'en-us', 'sv': 'sv', 'sw': 'sw-ke', 'syr': 'en-us', 'szl': 'en-us', 'ta': 'en-us', 'te':
+    'en-us', 'teo': 'en-us', 'tg': 'en-us', 'th': 'th', 'ti': 'en-us', 'tig': 'en-us', 'tk': 'en-us', 'tn':
+    'en-us', 'to': 'en-us', 'tok': 'en-us', 'tpi': 'en-us', 'tr': 'tr', 'trv': 'en-us', 'trw': 'en-us', 'ts':
+    'en-us', 'tt': 'en-us', 'twq': 'en-us', 'tyv': 'en-us', 'tzm': 'en-us', 'ug': 'en-us', 'uk': 'uk', 'ur':
+    'en-us', 'uz': 'en-us', 'vai': 'en-us', 've': 'en-us', 'vec': 'en-us', 'vi': 'vi', 'vmw': 'en-us', 'vo':
+    'en-us', 'vun': 'en-us', 'wa': 'en-us', 'wae': 'en-us', 'wal': 'en-us', 'wbp': 'en-us', 'wo': 'en-us', 'xh':
+    'en-us', 'xnr': 'en-us', 'xog': 'en-us', 'yav': 'en-us', 'yi': 'en-us', 'yo': 'en-us', 'yrl': 'en-us',
+    'yue': 'en-us', 'za': 'en-us', 'zgh': 'en-us', 'zh': 'zh', 'zu': 'en-us'
+}
+BRAVE_TERRITORY_UI = {
+    'BR': 'pt-br', 'CA': 'en-ca', 'DE': 'de-de', 'FI': 'fi-fi', 'FR': 'fr-fr', 'GB': 'en-gb', 'IN': 'en-in',
+    'KE': 'sw-ke', 'TW': 'zh-tw', 'US': 'en-us'
+}
+BRAVE_EXCEPTIONS = {
+    'az-AZ': ('all', 'en-us'), 'az-Arab': ('all', 'en-us'), 'az-Arab-IQ': ('all', 'en-us'), 'az-Arab-IR':
+    ('all', 'en-us'), 'az-Arab-TR': ('tr', 'en-us'), 'az-Cyrl': ('all', 'en-us'), 'az-Cyrl-AZ': ('all',
+    'en-us'), 'az-IQ': ('all', 'en-us'), 'az-IR': ('all', 'en-us'), 'az-Latn': ('all', 'en-us'), 'az-Latn-AZ':
+    ('all', 'en-us'), 'br-FR': ('fr', 'br'), 'ca-FR': ('fr', 'ca'), 'cy-GB': ('gb', 'cy'), 'en-Dsrt': ('all',
+    'en-us'), 'en-Shaw': ('all', 'en-us'), 'es-BR': ('br', 'es'), 'es-US': ('us', 'es'), 'hi-Latn': ('all',
+    'en-us'), 'ms-Arab': ('all', 'en-us'), 'ms-Arab-BN': ('all', 'en-us'), 'ms-Arab-MY': ('my', 'en-us'),
+    'sr-BA': ('all', 'en-us'), 'sr-Cyrl': ('all', 'en-us'), 'sr-Cyrl-BA': ('all', 'en-us'), 'sr-Cyrl-ME':
+    ('all', 'en-us'), 'sr-Cyrl-RS': ('all', 'en-us'), 'sr-Cyrl-XK': ('all', 'en-us'), 'sr-Latn': ('all',
+    'sr-latn'), 'sr-Latn-BA': ('all', 'sr-latn'), 'sr-Latn-ME': ('all', 'sr-latn'), 'sr-Latn-RS': ('all',
+    'sr-latn'), 'sr-Latn-XK': ('all', 'sr-latn'), 'sr-ME': ('all', 'sr-latn'), 'sr-RS': ('all', 'en-us'),
+    'sr-XK': ('all', 'en-us'), 'sv-FI': ('fi', 'sv'), 'trv-TW': ('all', 'en-us'), 'zh-CN': ('cn', 'en-us'),
+    'zh-HK': ('hk', 'zh-tw'), 'zh-Hans': ('all', 'en-us'), 'zh-Hans-CN': ('cn', 'en-us'), 'zh-Hans-HK': ('hk',
+    'en-us'), 'zh-Hans-MO': ('all', 'en-us'), 'zh-Hans-MY': ('my', 'en-us'), 'zh-Hans-SG': ('all', 'en-us'),
+    'zh-Hant': ('hk', 'zh-tw'), 'zh-Hant-HK': ('hk', 'zh-tw'), 'zh-Hant-MO': ('hk', 'zh-tw'), 'zh-Hant-MY':
+    ('my', 'zh-tw'), 'zh-Hant-TW': ('hk', 'zh-tw'), 'zh-Latn': ('all', 'en-us'), 'zh-Latn-CN': ('cn', 'en-us'),
+    'zh-MO': ('hk', 'zh-tw'), 'zh-MY': ('my', 'en-us'), 'zh-SG': ('all', 'en-us')
+}
+
+
+def brave_cookies(tag):
+    """Brave ``(country, ui_lang)`` cookie values for a request language."""
+    if not tag or tag == 'all':
+        return 'all', 'en-us'
+    if tag in BRAVE_EXCEPTIONS:
+        return BRAVE_EXCEPTIONS[tag]
+    locale = babel.Locale.parse(tag, sep='-')
+    territory = locale.territory.lower() if locale.territory else None
+    if territory in BRAVE_COUNTRIES:
+        country = territory
+    else:
+        country = BRAVE_LANGUAGE_COUNTRIES.get(locale.language, 'all')
+    own = locale.language + '-' + territory if territory else None
+    if own in BRAVE_UI_LANGUAGES and len(tag.split('-')) == 2:
+        ui = own
+    elif locale.territory in BRAVE_TERRITORY_UI:
+        ui = BRAVE_TERRITORY_UI[locale.territory]
+    else:
+        ui = BRAVE_LANGUAGE_UI.get(locale.language, 'en-us')
+    return country, ui
+
+
+# Qwant ``locale`` argument. Derived like the tables above from the previous
+# runtime's requests for 1135 language tags; ``qwant_locale`` reproduces all.
+QWANT_LOCALES = frozenset((
+    'bg_BG', 'ca_ES', 'cs_CZ', 'da_DK', 'de_AT', 'de_CH', 'de_DE', 'el_GR', 'en_AU', 'en_CA', 'en_GB', 'en_IE',
+    'en_MY', 'en_NZ', 'en_US', 'es_AR', 'es_CL', 'es_ES', 'es_MX', 'et_EE', 'fi_FI', 'fr_BE', 'fr_CA', 'fr_CH',
+    'fr_FR', 'he_IL', 'hu_HU', 'it_CH', 'it_IT', 'ko_KR', 'nb_NO', 'nl_BE', 'nl_NL', 'pl_PL', 'pt_PT', 'ro_RO',
+    'sv_SE', 'th_TH', 'zh_CN'
+))
+QWANT_LANGUAGE_LOCALES = {
+    'aa': 'en_US', 'ab': 'en_US', 'af': 'en_US', 'agq': 'en_US', 'ak': 'en_US', 'am': 'en_US', 'an': 'en_US',
+    'ann': 'en_US', 'apc': 'en_US', 'ar': 'en_US', 'arn': 'en_US', 'as': 'en_US', 'asa': 'en_US', 'ast':
+    'en_US', 'az': 'en_US', 'ba': 'en_US', 'bal': 'en_US', 'bas': 'en_US', 'be': 'en_US', 'bem': 'en_US', 'bew':
+    'en_US', 'bez': 'en_US', 'bg': 'bg_BG', 'bgc': 'en_US', 'bgn': 'en_US', 'bho': 'en_US', 'blo': 'en_US',
+    'blt': 'en_US', 'bm': 'en_US', 'bn': 'en_US', 'bo': 'en_US', 'br': 'en_US', 'brx': 'en_US', 'bs': 'en_US',
+    'bss': 'en_US', 'byn': 'en_US', 'ca': 'ca_ES', 'cad': 'en_US', 'cch': 'en_US', 'ccp': 'en_US', 'ce':
+    'en_US', 'ceb': 'en_US', 'cgg': 'en_US', 'cho': 'en_US', 'chr': 'en_US', 'cic': 'en_US', 'ckb': 'en_US',
+    'co': 'en_US', 'cop': 'en_US', 'cs': 'cs_CZ', 'csw': 'en_US', 'cu': 'en_US', 'cv': 'en_US', 'cy': 'en_US',
+    'da': 'da_DK', 'dav': 'en_US', 'de': 'de_DE', 'dje': 'en_US', 'doi': 'en_US', 'dsb': 'en_US', 'dua':
+    'en_US', 'dv': 'en_US', 'dyo': 'en_US', 'dz': 'en_US', 'ebu': 'en_US', 'ee': 'en_US', 'el': 'el_GR', 'en':
+    'en_US', 'eo': 'en_US', 'es': 'es_ES', 'et': 'et_EE', 'eu': 'en_US', 'ewo': 'en_US', 'fa': 'en_US', 'ff':
+    'en_US', 'fi': 'fi_FI', 'fil': 'en_US', 'fo': 'en_US', 'fr': 'fr_FR', 'frr': 'en_US', 'fur': 'en_US', 'fy':
+    'en_US', 'ga': 'en_US', 'gaa': 'en_US', 'gd': 'en_US', 'gez': 'en_US', 'gl': 'en_US', 'gn': 'en_US', 'gsw':
+    'en_US', 'gu': 'en_US', 'guz': 'en_US', 'gv': 'en_US', 'ha': 'en_US', 'haw': 'en_US', 'he': 'he_IL', 'hi':
+    'en_US', 'hnj': 'en_US', 'hr': 'en_US', 'hsb': 'en_US', 'ht': 'en_US', 'hu': 'hu_HU', 'hy': 'en_US', 'ia':
+    'en_US', 'id': 'en_US', 'ie': 'en_US', 'ig': 'en_US', 'ii': 'en_US', 'io': 'en_US', 'is': 'en_US', 'it':
+    'it_IT', 'iu': 'en_US', 'ja': 'en_US', 'jbo': 'en_US', 'jgo': 'en_US', 'jmc': 'en_US', 'jv': 'en_US', 'ka':
+    'en_US', 'kaa': 'en_US', 'kab': 'en_US', 'kaj': 'en_US', 'kam': 'en_US', 'kcg': 'en_US', 'kde': 'en_US',
+    'kea': 'en_US', 'ken': 'en_US', 'kgp': 'en_US', 'khq': 'en_US', 'ki': 'en_US', 'kk': 'en_US', 'kkj':
+    'en_US', 'kl': 'en_US', 'kln': 'en_US', 'km': 'en_US', 'kn': 'en_US', 'ko': 'ko_KR', 'kok': 'en_US', 'kpe':
+    'en_US', 'ks': 'en_US', 'ksb': 'en_US', 'ksf': 'en_US', 'ksh': 'en_US', 'ku': 'en_US', 'kw': 'en_US', 'kxv':
+    'en_US', 'ky': 'en_US', 'la': 'en_US', 'lag': 'en_US', 'lb': 'en_US', 'lg': 'en_US', 'lij': 'en_US', 'lkt':
+    'en_US', 'lld': 'en_US', 'lmo': 'en_US', 'ln': 'en_US', 'lo': 'en_US', 'lrc': 'en_US', 'lt': 'en_US', 'ltg':
+    'en_US', 'lu': 'en_US', 'luo': 'en_US', 'luy': 'en_US', 'lv': 'en_US', 'mai': 'en_US', 'mas': 'en_US',
+    'mdf': 'en_US', 'mer': 'en_US', 'mfe': 'en_US', 'mg': 'en_US', 'mgh': 'en_US', 'mgo': 'en_US', 'mhn':
+    'en_US', 'mi': 'en_US', 'mic': 'en_US', 'mk': 'en_US', 'ml': 'en_US', 'mn': 'en_US', 'mni': 'en_US', 'moh':
+    'en_US', 'mr': 'en_US', 'ms': 'en_US', 'mt': 'en_US', 'mua': 'en_US', 'mus': 'en_US', 'my': 'en_US', 'myv':
+    'en_US', 'mzn': 'en_US', 'naq': 'en_US', 'nb': 'nb_NO', 'nd': 'en_US', 'nds': 'en_US', 'ne': 'en_US', 'nl':
+    'nl_NL', 'nmg': 'en_US', 'nn': 'en_US', 'nnh': 'en_US', 'no': 'en_US', 'nqo': 'en_US', 'nr': 'en_US', 'nso':
+    'en_US', 'nus': 'en_US', 'nv': 'en_US', 'ny': 'en_US', 'nyn': 'en_US', 'oc': 'en_US', 'om': 'en_US', 'or':
+    'en_US', 'os': 'en_US', 'osa': 'en_US', 'pa': 'en_US', 'pap': 'en_US', 'pcm': 'en_US', 'pis': 'en_US', 'pl':
+    'pl_PL', 'prg': 'en_US', 'ps': 'en_US', 'pt': 'pt_PT', 'qu': 'en_US', 'quc': 'en_US', 'raj': 'en_US', 'rhg':
+    'en_US', 'rif': 'en_US', 'rm': 'en_US', 'rn': 'en_US', 'ro': 'ro_RO', 'rof': 'en_US', 'ru': 'en_US', 'rw':
+    'en_US', 'rwk': 'en_US', 'sa': 'en_US', 'sah': 'en_US', 'saq': 'en_US', 'sat': 'en_US', 'sbp': 'en_US',
+    'sc': 'en_US', 'scn': 'en_US', 'sd': 'en_US', 'sdh': 'en_US', 'se': 'en_US', 'seh': 'en_US', 'ses': 'en_US',
+    'sg': 'en_US', 'shi': 'en_US', 'shn': 'en_US', 'si': 'en_US', 'sid': 'en_US', 'sk': 'en_US', 'skr': 'en_US',
+    'sl': 'en_US', 'sma': 'en_US', 'smj': 'en_US', 'smn': 'en_US', 'sms': 'en_US', 'sn': 'en_US', 'so': 'en_US',
+    'sq': 'en_US', 'sr': 'en_US', 'ss': 'en_US', 'ssy': 'en_US', 'st': 'en_US', 'su': 'en_US', 'sv': 'sv_SE',
+    'sw': 'en_US', 'syr': 'en_US', 'szl': 'en_US', 'ta': 'en_US', 'te': 'en_US', 'teo': 'en_US', 'tg': 'en_US',
+    'th': 'th_TH', 'ti': 'en_US', 'tig': 'en_US', 'tk': 'en_US', 'tn': 'en_US', 'to': 'en_US', 'tok': 'en_US',
+    'tpi': 'en_US', 'tr': 'en_US', 'trv': 'en_US', 'trw': 'en_US', 'ts': 'en_US', 'tt': 'en_US', 'twq': 'en_US',
+    'tyv': 'en_US', 'tzm': 'en_US', 'ug': 'en_US', 'uk': 'en_US', 'ur': 'en_US', 'uz': 'en_US', 'vai': 'en_US',
+    've': 'en_US', 'vec': 'en_US', 'vi': 'en_US', 'vmw': 'en_US', 'vo': 'en_US', 'vun': 'en_US', 'wa': 'en_US',
+    'wae': 'en_US', 'wal': 'en_US', 'wbp': 'en_US', 'wo': 'en_US', 'xh': 'en_US', 'xnr': 'en_US', 'xog':
+    'en_US', 'yav': 'en_US', 'yi': 'en_US', 'yo': 'en_US', 'yrl': 'en_US', 'yue': 'en_US', 'za': 'en_US', 'zgh':
+    'en_US', 'zh': 'zh_CN', 'zu': 'en_US'
+}
+QWANT_TERRITORY_LOCALES = {
+    'AT': 'de_AT', 'AU': 'en_AU', 'BE': 'nl_BE', 'CA': 'en_CA', 'CH': 'de_CH', 'CL': 'es_CL', 'CN': 'zh_CN',
+    'CZ': 'cs_CZ', 'DE': 'de_DE', 'DK': 'da_DK', 'EE': 'et_EE', 'ES': 'es_ES', 'FI': 'fi_FI', 'FR': 'fr_FR',
+    'GB': 'en_GB', 'HU': 'hu_HU', 'IE': 'en_IE', 'IL': 'he_IL', 'IT': 'it_IT', 'NL': 'nl_NL', 'NO': 'nb_NO',
+    'NZ': 'en_NZ', 'PL': 'pl_PL', 'PT': 'pt_PT', 'RO': 'ro_RO', 'SE': 'sv_SE', 'TH': 'th_TH', 'US': 'en_US'
+}
+QWANT_EXCEPTIONS = {
+    'ca-ES-VALENCIA': 'es_ES', 'zh-HK': 'en_US', 'zh-Hans': 'en_US', 'zh-Hans-HK': 'en_US', 'zh-Hans-MO':
+    'en_US', 'zh-Hans-MY': 'en_US', 'zh-Hans-SG': 'en_US', 'zh-Hant': 'en_US', 'zh-Hant-HK': 'en_US',
+    'zh-Hant-MO': 'en_US', 'zh-Hant-MY': 'en_US', 'zh-Hant-TW': 'en_US', 'zh-Latn': 'en_US', 'zh-MO': 'en_US',
+    'zh-MY': 'en_US', 'zh-SG': 'en_US', 'zh-TW': 'en_US'
+}
+
+
+def qwant_locale(tag):
+    """Qwant locale (``en_US`` style) for a request language; ``en_US`` when none fits."""
+    if not tag or tag == 'all':
+        return 'en_US'
+    if tag in QWANT_EXCEPTIONS:
+        return QWANT_EXCEPTIONS[tag]
+    locale = babel.Locale.parse(tag, sep='-')
+    own = f'{locale.language}_{locale.territory}' if locale.territory else None
+    if own in QWANT_LOCALES and not locale.script:
+        return own
+    if locale.territory in QWANT_TERRITORY_LOCALES:
+        return QWANT_TERRITORY_LOCALES[locale.territory]
+    return QWANT_LANGUAGE_LOCALES.get(locale.language, 'en_US')
+
+
+# DuckDuckGo region (``l``/``ah``) and language (``ad``) values. Derived like the
+# tables above from the previous runtime's requests for 1135 language tags;
+# ``duckduckgo_locale`` reproduces all of them.
+DDG_REGIONS = frozenset((
+    'ar-es', 'at-de', 'au-en', 'be-fr', 'be-nl', 'bg-bg', 'br-pt', 'ca-en', 'ca-fr', 'ch-de', 'ch-fr', 'cl-es',
+    'cn-zh', 'co-es', 'cz-cs', 'de-de', 'dk-da', 'ee-et', 'es-ca', 'es-es', 'fi-fi', 'fr-fr', 'gr-el', 'hk-tzh',
+    'hr-hr', 'hu-hu', 'id-en', 'ie-en', 'il-en', 'in-en', 'is-is', 'it-it', 'jp-jp', 'kr-kr', 'lt-lt', 'lv-lv',
+    'mx-es', 'my-en', 'nl-nl', 'no-no', 'nz-en', 'pe-es', 'ph-en', 'pk-en', 'pl-pl', 'pt-pt', 'ro-ro', 'ru-ru',
+    'se-sv', 'sg-en', 'sk-sk', 'sl-sl', 'th-en', 'tr-tr', 'tw-tzh', 'ua-uk', 'uk-en', 'us-en', 'us-es', 'vn-en',
+    'wt-wt', 'xa-ar', 'za-en'
+))
+DDG_LANGUAGES = frozenset((
+    'af_ZA', 'ar_DZ', 'ar_EG', 'ar_SA', 'ast_ES', 'az_AZ', 'be_BY', 'bg_BG', 'bn_BD', 'bn_IN', 'br_FR', 'bs_BA',
+    'ca_ES', 'cs_CZ', 'cy_GB', 'da_DK', 'de_CH', 'de_DE', 'el_GR', 'en_AU', 'en_CA', 'en_GB', 'en_US', 'eo_XX',
+    'es_AR', 'es_CL', 'es_CO', 'es_CR', 'es_EC', 'es_ES', 'es_MX', 'es_PE', 'es_UY', 'es_VE', 'et_EE', 'eu_ES',
+    'fa_IR', 'fi_FI', 'fr_BE', 'fr_CA', 'fr_CH', 'fr_FR', 'ga_IE', 'gd_GB', 'gl_ES', 'he_IL', 'hi_IN', 'hr_HR',
+    'hu_HU', 'hy_AM', 'id_ID', 'is_IS', 'it_IT', 'ja_JP', 'kab_DZ', 'kn_IN', 'ko_KR', 'ku', 'kw_GB', 'lt_LT',
+    'lv_LV', 'ml_IN', 'mr_IN', 'ms_MY', 'nb_NO', 'nl_BE', 'nl_NL', 'nn_NO', 'pl_PL', 'pt_BR', 'pt_PT', 'ro_RO',
+    'ru_RU', 'sc_IT', 'si_LK', 'sk_SK', 'sl_SI', 'sq_AL', 'sr_RS', 'sv_SE', 'ta_IN', 'te_IN', 'th_TH', 'tl_PH',
+    'tr_TR', 'uk_UA', 'ur_PK', 'vi_VN', 'wt-wt', 'zh_CN', 'zh_TW'
+))
+DDG_LANGUAGE_REGIONS = {
+    'aa': 'wt-wt', 'ab': 'wt-wt', 'af': 'wt-wt', 'agq': 'wt-wt', 'ak': 'wt-wt', 'am': 'wt-wt', 'an': 'wt-wt',
+    'ann': 'wt-wt', 'apc': 'wt-wt', 'ar': 'xa-ar', 'arn': 'wt-wt', 'as': 'wt-wt', 'asa': 'wt-wt', 'ast':
+    'wt-wt', 'az': 'wt-wt', 'ba': 'wt-wt', 'bal': 'wt-wt', 'bas': 'wt-wt', 'be': 'wt-wt', 'bem': 'wt-wt', 'bew':
+    'wt-wt', 'bez': 'wt-wt', 'bg': 'bg-bg', 'bgc': 'wt-wt', 'bgn': 'wt-wt', 'bho': 'wt-wt', 'blo': 'wt-wt',
+    'blt': 'wt-wt', 'bm': 'wt-wt', 'bn': 'wt-wt', 'bo': 'wt-wt', 'br': 'wt-wt', 'brx': 'wt-wt', 'bs': 'wt-wt',
+    'bss': 'wt-wt', 'byn': 'wt-wt', 'ca': 'es-ca', 'cad': 'wt-wt', 'cch': 'wt-wt', 'ccp': 'wt-wt', 'ce':
+    'wt-wt', 'ceb': 'wt-wt', 'cgg': 'wt-wt', 'cho': 'wt-wt', 'chr': 'wt-wt', 'cic': 'wt-wt', 'ckb': 'wt-wt',
+    'co': 'wt-wt', 'cop': 'wt-wt', 'cs': 'cz-cs', 'csw': 'wt-wt', 'cu': 'wt-wt', 'cv': 'wt-wt', 'cy': 'wt-wt',
+    'da': 'dk-da', 'dav': 'wt-wt', 'de': 'de-de', 'dje': 'wt-wt', 'doi': 'wt-wt', 'dsb': 'wt-wt', 'dua':
+    'wt-wt', 'dv': 'wt-wt', 'dyo': 'wt-wt', 'dz': 'wt-wt', 'ebu': 'wt-wt', 'ee': 'wt-wt', 'el': 'gr-el', 'en':
+    'us-en', 'eo': 'wt-wt', 'es': 'es-es', 'et': 'ee-et', 'eu': 'wt-wt', 'ewo': 'wt-wt', 'fa': 'wt-wt', 'ff':
+    'wt-wt', 'fi': 'fi-fi', 'fil': 'wt-wt', 'fo': 'wt-wt', 'fr': 'fr-fr', 'frr': 'wt-wt', 'fur': 'wt-wt', 'fy':
+    'wt-wt', 'ga': 'wt-wt', 'gaa': 'wt-wt', 'gd': 'wt-wt', 'gez': 'wt-wt', 'gl': 'wt-wt', 'gn': 'wt-wt', 'gsw':
+    'wt-wt', 'gu': 'wt-wt', 'guz': 'wt-wt', 'gv': 'wt-wt', 'ha': 'wt-wt', 'haw': 'wt-wt', 'he': 'wt-wt', 'hi':
+    'wt-wt', 'hnj': 'wt-wt', 'hr': 'hr-hr', 'hsb': 'wt-wt', 'ht': 'wt-wt', 'hu': 'hu-hu', 'hy': 'wt-wt', 'ia':
+    'wt-wt', 'id': 'id-en', 'ie': 'wt-wt', 'ig': 'wt-wt', 'ii': 'wt-wt', 'io': 'wt-wt', 'is': 'is-is', 'it':
+    'it-it', 'iu': 'wt-wt', 'ja': 'jp-jp', 'jbo': 'wt-wt', 'jgo': 'wt-wt', 'jmc': 'wt-wt', 'jv': 'wt-wt', 'ka':
+    'wt-wt', 'kaa': 'wt-wt', 'kab': 'wt-wt', 'kaj': 'wt-wt', 'kam': 'wt-wt', 'kcg': 'wt-wt', 'kde': 'wt-wt',
+    'kea': 'wt-wt', 'ken': 'wt-wt', 'kgp': 'wt-wt', 'khq': 'wt-wt', 'ki': 'wt-wt', 'kk': 'wt-wt', 'kkj':
+    'wt-wt', 'kl': 'wt-wt', 'kln': 'wt-wt', 'km': 'wt-wt', 'kn': 'wt-wt', 'ko': 'kr-kr', 'kok': 'wt-wt', 'kpe':
+    'wt-wt', 'ks': 'wt-wt', 'ksb': 'wt-wt', 'ksf': 'wt-wt', 'ksh': 'wt-wt', 'ku': 'wt-wt', 'kw': 'wt-wt', 'kxv':
+    'wt-wt', 'ky': 'wt-wt', 'la': 'wt-wt', 'lag': 'wt-wt', 'lb': 'wt-wt', 'lg': 'wt-wt', 'lij': 'wt-wt', 'lkt':
+    'wt-wt', 'lld': 'wt-wt', 'lmo': 'wt-wt', 'ln': 'wt-wt', 'lo': 'wt-wt', 'lrc': 'wt-wt', 'lt': 'lt-lt', 'ltg':
+    'wt-wt', 'lu': 'wt-wt', 'luo': 'wt-wt', 'luy': 'wt-wt', 'lv': 'lv-lv', 'mai': 'wt-wt', 'mas': 'wt-wt',
+    'mdf': 'wt-wt', 'mer': 'wt-wt', 'mfe': 'wt-wt', 'mg': 'wt-wt', 'mgh': 'wt-wt', 'mgo': 'wt-wt', 'mhn':
+    'wt-wt', 'mi': 'wt-wt', 'mic': 'wt-wt', 'mk': 'wt-wt', 'ml': 'wt-wt', 'mn': 'wt-wt', 'mni': 'wt-wt', 'moh':
+    'wt-wt', 'mr': 'wt-wt', 'ms': 'wt-wt', 'mt': 'wt-wt', 'mua': 'wt-wt', 'mus': 'wt-wt', 'my': 'wt-wt', 'myv':
+    'wt-wt', 'mzn': 'wt-wt', 'naq': 'wt-wt', 'nb': 'no-no', 'nd': 'wt-wt', 'nds': 'wt-wt', 'ne': 'wt-wt', 'nl':
+    'nl-nl', 'nmg': 'wt-wt', 'nn': 'wt-wt', 'nnh': 'wt-wt', 'no': 'wt-wt', 'nqo': 'wt-wt', 'nr': 'wt-wt', 'nso':
+    'wt-wt', 'nus': 'wt-wt', 'nv': 'wt-wt', 'ny': 'wt-wt', 'nyn': 'wt-wt', 'oc': 'wt-wt', 'om': 'wt-wt', 'or':
+    'wt-wt', 'os': 'wt-wt', 'osa': 'wt-wt', 'pa': 'wt-wt', 'pap': 'wt-wt', 'pcm': 'wt-wt', 'pis': 'wt-wt', 'pl':
+    'pl-pl', 'prg': 'wt-wt', 'ps': 'wt-wt', 'pt': 'pt-pt', 'qu': 'wt-wt', 'quc': 'wt-wt', 'raj': 'wt-wt', 'rhg':
+    'wt-wt', 'rif': 'wt-wt', 'rm': 'wt-wt', 'rn': 'wt-wt', 'ro': 'ro-ro', 'rof': 'wt-wt', 'ru': 'ru-ru', 'rw':
+    'wt-wt', 'rwk': 'wt-wt', 'sa': 'wt-wt', 'sah': 'wt-wt', 'saq': 'wt-wt', 'sat': 'wt-wt', 'sbp': 'wt-wt',
+    'sc': 'wt-wt', 'scn': 'wt-wt', 'sd': 'wt-wt', 'sdh': 'wt-wt', 'se': 'wt-wt', 'seh': 'wt-wt', 'ses': 'wt-wt',
+    'sg': 'wt-wt', 'shi': 'wt-wt', 'shn': 'wt-wt', 'si': 'wt-wt', 'sid': 'wt-wt', 'sk': 'sk-sk', 'skr': 'wt-wt',
+    'sl': 'sl-sl', 'sma': 'wt-wt', 'smj': 'wt-wt', 'smn': 'wt-wt', 'sms': 'wt-wt', 'sn': 'wt-wt', 'so': 'wt-wt',
+    'sq': 'wt-wt', 'sr': 'wt-wt', 'ss': 'wt-wt', 'ssy': 'wt-wt', 'st': 'wt-wt', 'su': 'wt-wt', 'sv': 'se-sv',
+    'sw': 'wt-wt', 'syr': 'wt-wt', 'szl': 'wt-wt', 'ta': 'wt-wt', 'te': 'wt-wt', 'teo': 'wt-wt', 'tg': 'wt-wt',
+    'th': 'th-en', 'ti': 'wt-wt', 'tig': 'wt-wt', 'tk': 'wt-wt', 'tn': 'wt-wt', 'to': 'wt-wt', 'tok': 'wt-wt',
+    'tpi': 'wt-wt', 'tr': 'tr-tr', 'trv': 'wt-wt', 'trw': 'wt-wt', 'ts': 'wt-wt', 'tt': 'wt-wt', 'twq': 'wt-wt',
+    'tyv': 'wt-wt', 'tzm': 'wt-wt', 'ug': 'wt-wt', 'uk': 'ua-uk', 'ur': 'wt-wt', 'uz': 'wt-wt', 'vai': 'wt-wt',
+    've': 'wt-wt', 'vec': 'wt-wt', 'vi': 'vn-en', 'vmw': 'wt-wt', 'vo': 'wt-wt', 'vun': 'wt-wt', 'wa': 'wt-wt',
+    'wae': 'wt-wt', 'wal': 'wt-wt', 'wbp': 'wt-wt', 'wo': 'wt-wt', 'xh': 'wt-wt', 'xnr': 'wt-wt', 'xog':
+    'wt-wt', 'yav': 'wt-wt', 'yi': 'wt-wt', 'yo': 'wt-wt', 'yrl': 'wt-wt', 'yue': 'wt-wt', 'za': 'wt-wt', 'zgh':
+    'wt-wt', 'zh': 'cn-zh', 'zu': 'wt-wt'
+}
+DDG_LANGUAGE_CODES = {
+    'aa': 'en_US', 'ab': 'en_US', 'af': 'af_ZA', 'agq': 'en_US', 'ak': 'en_US', 'am': 'en_US', 'an': 'en_US',
+    'ann': 'en_US', 'apc': 'en_US', 'ar': 'ar_EG', 'arn': 'en_US', 'as': 'en_US', 'asa': 'en_US', 'ast':
+    'ast_ES', 'az': 'en_US', 'ba': 'en_US', 'bal': 'en_US', 'bas': 'en_US', 'be': 'be_BY', 'bem': 'en_US',
+    'bew': 'en_US', 'bez': 'en_US', 'bg': 'bg_BG', 'bgc': 'en_US', 'bgn': 'en_US', 'bho': 'en_US', 'blo':
+    'en_US', 'blt': 'en_US', 'bm': 'en_US', 'bn': 'bn_BD', 'bo': 'en_US', 'br': 'br_FR', 'brx': 'en_US', 'bs':
+    'en_US', 'bss': 'en_US', 'byn': 'en_US', 'ca': 'ca_ES', 'cad': 'en_US', 'cch': 'en_US', 'ccp': 'en_US',
+    'ce': 'en_US', 'ceb': 'en_US', 'cgg': 'en_US', 'cho': 'en_US', 'chr': 'en_US', 'cic': 'en_US', 'ckb':
+    'en_US', 'co': 'en_US', 'cop': 'en_US', 'cs': 'cs_CZ', 'csw': 'en_US', 'cu': 'en_US', 'cv': 'en_US', 'cy':
+    'cy_GB', 'da': 'da_DK', 'dav': 'en_US', 'de': 'de_DE', 'dje': 'en_US', 'doi': 'en_US', 'dsb': 'en_US',
+    'dua': 'en_US', 'dv': 'en_US', 'dyo': 'en_US', 'dz': 'en_US', 'ebu': 'en_US', 'ee': 'en_US', 'el': 'el_GR',
+    'en': 'en_US', 'eo': 'eo_XX', 'es': 'es_ES', 'et': 'et_EE', 'eu': 'eu_ES', 'ewo': 'en_US', 'fa': 'fa_IR',
+    'ff': 'en_US', 'fi': 'fi_FI', 'fil': 'tl_PH', 'fo': 'en_US', 'fr': 'fr_FR', 'frr': 'en_US', 'fur': 'en_US',
+    'fy': 'en_US', 'ga': 'ga_IE', 'gaa': 'en_US', 'gd': 'gd_GB', 'gez': 'en_US', 'gl': 'gl_ES', 'gn': 'en_US',
+    'gsw': 'en_US', 'gu': 'en_US', 'guz': 'en_US', 'gv': 'en_US', 'ha': 'en_US', 'haw': 'en_US', 'he': 'he_IL',
+    'hi': 'hi_IN', 'hnj': 'en_US', 'hr': 'hr_HR', 'hsb': 'en_US', 'ht': 'en_US', 'hu': 'hu_HU', 'hy': 'hy_AM',
+    'ia': 'en_US', 'id': 'id_ID', 'ie': 'en_US', 'ig': 'en_US', 'ii': 'en_US', 'io': 'en_US', 'is': 'is_IS',
+    'it': 'it_IT', 'iu': 'en_US', 'ja': 'ja_JP', 'jbo': 'en_US', 'jgo': 'en_US', 'jmc': 'en_US', 'jv': 'en_US',
+    'ka': 'en_US', 'kaa': 'en_US', 'kab': 'kab_DZ', 'kaj': 'en_US', 'kam': 'en_US', 'kcg': 'en_US', 'kde':
+    'en_US', 'kea': 'en_US', 'ken': 'en_US', 'kgp': 'en_US', 'khq': 'en_US', 'ki': 'en_US', 'kk': 'en_US',
+    'kkj': 'en_US', 'kl': 'en_US', 'kln': 'en_US', 'km': 'en_US', 'kn': 'kn_IN', 'ko': 'ko_KR', 'kok': 'en_US',
+    'kpe': 'en_US', 'ks': 'en_US', 'ksb': 'en_US', 'ksf': 'en_US', 'ksh': 'en_US', 'ku': 'ku', 'kw': 'kw_GB',
+    'kxv': 'en_US', 'ky': 'en_US', 'la': 'en_US', 'lag': 'en_US', 'lb': 'en_US', 'lg': 'en_US', 'lij': 'en_US',
+    'lkt': 'en_US', 'lld': 'en_US', 'lmo': 'en_US', 'ln': 'en_US', 'lo': 'en_US', 'lrc': 'en_US', 'lt': 'lt_LT',
+    'ltg': 'en_US', 'lu': 'en_US', 'luo': 'en_US', 'luy': 'en_US', 'lv': 'lv_LV', 'mai': 'en_US', 'mas':
+    'en_US', 'mdf': 'en_US', 'mer': 'en_US', 'mfe': 'en_US', 'mg': 'en_US', 'mgh': 'en_US', 'mgo': 'en_US',
+    'mhn': 'en_US', 'mi': 'en_US', 'mic': 'en_US', 'mk': 'en_US', 'ml': 'ml_IN', 'mn': 'en_US', 'mni': 'en_US',
+    'moh': 'en_US', 'mr': 'mr_IN', 'ms': 'ms_MY', 'mt': 'en_US', 'mua': 'en_US', 'mus': 'en_US', 'my': 'en_US',
+    'myv': 'en_US', 'mzn': 'en_US', 'naq': 'en_US', 'nb': 'nb_NO', 'nd': 'en_US', 'nds': 'en_US', 'ne': 'en_US',
+    'nl': 'nl_NL', 'nmg': 'en_US', 'nn': 'nn_NO', 'nnh': 'en_US', 'no': 'en_US', 'nqo': 'en_US', 'nr': 'en_US',
+    'nso': 'en_US', 'nus': 'en_US', 'nv': 'en_US', 'ny': 'en_US', 'nyn': 'en_US', 'oc': 'en_US', 'om': 'en_US',
+    'or': 'en_US', 'os': 'en_US', 'osa': 'en_US', 'pa': 'en_US', 'pap': 'en_US', 'pcm': 'en_US', 'pis': 'en_US',
+    'pl': 'pl_PL', 'prg': 'en_US', 'ps': 'en_US', 'pt': 'pt_PT', 'qu': 'en_US', 'quc': 'en_US', 'raj': 'en_US',
+    'rhg': 'en_US', 'rif': 'en_US', 'rm': 'en_US', 'rn': 'en_US', 'ro': 'ro_RO', 'rof': 'en_US', 'ru': 'ru_RU',
+    'rw': 'en_US', 'rwk': 'en_US', 'sa': 'en_US', 'sah': 'en_US', 'saq': 'en_US', 'sat': 'en_US', 'sbp':
+    'en_US', 'sc': 'sc_IT', 'scn': 'en_US', 'sd': 'en_US', 'sdh': 'en_US', 'se': 'en_US', 'seh': 'en_US', 'ses':
+    'en_US', 'sg': 'en_US', 'shi': 'en_US', 'shn': 'en_US', 'si': 'si_LK', 'sid': 'en_US', 'sk': 'sk_SK', 'skr':
+    'en_US', 'sl': 'sl_SI', 'sma': 'en_US', 'smj': 'en_US', 'smn': 'en_US', 'sms': 'en_US', 'sn': 'en_US', 'so':
+    'en_US', 'sq': 'sq_AL', 'sr': 'en_US', 'ss': 'en_US', 'ssy': 'en_US', 'st': 'en_US', 'su': 'en_US', 'sv':
+    'sv_SE', 'sw': 'en_US', 'syr': 'en_US', 'szl': 'en_US', 'ta': 'ta_IN', 'te': 'te_IN', 'teo': 'en_US', 'tg':
+    'en_US', 'th': 'th_TH', 'ti': 'en_US', 'tig': 'en_US', 'tk': 'en_US', 'tn': 'en_US', 'to': 'en_US', 'tok':
+    'en_US', 'tpi': 'en_US', 'tr': 'tr_TR', 'trv': 'en_US', 'trw': 'en_US', 'ts': 'en_US', 'tt': 'en_US', 'twq':
+    'en_US', 'tyv': 'en_US', 'tzm': 'en_US', 'ug': 'en_US', 'uk': 'uk_UA', 'ur': 'ur_PK', 'uz': 'en_US', 'vai':
+    'en_US', 've': 'en_US', 'vec': 'en_US', 'vi': 'vi_VN', 'vmw': 'en_US', 'vo': 'en_US', 'vun': 'en_US', 'wa':
+    'en_US', 'wae': 'en_US', 'wal': 'en_US', 'wbp': 'en_US', 'wo': 'en_US', 'xh': 'en_US', 'xnr': 'en_US',
+    'xog': 'en_US', 'yav': 'en_US', 'yi': 'en_US', 'yo': 'en_US', 'yrl': 'en_US', 'yue': 'en_US', 'za': 'en_US',
+    'zgh': 'en_US', 'zh': 'en_US', 'zu': 'en_US'
+}
+DDG_TERRITORY_REGIONS = {
+    'AT': 'at-de', 'AU': 'au-en', 'BE': 'be-nl', 'BR': 'br-pt', 'CA': 'ca-en', 'CH': 'ch-de', 'CL': 'cl-es',
+    'CN': 'cn-zh', 'CO': 'co-es', 'CZ': 'cz-cs', 'DE': 'de-de', 'DK': 'dk-da', 'EE': 'ee-et', 'ES': 'es-es',
+    'FI': 'fi-fi', 'FR': 'fr-fr', 'HK': 'hk-tzh', 'HU': 'hu-hu', 'ID': 'id-en', 'IE': 'ie-en', 'IN': 'in-en',
+    'IT': 'it-it', 'JP': 'jp-jp', 'KR': 'kr-kr', 'LV': 'lv-lv', 'NL': 'nl-nl', 'NO': 'no-no', 'NZ': 'nz-en',
+    'PE': 'pe-es', 'PH': 'ph-en', 'PK': 'pk-en', 'PL': 'pl-pl', 'PT': 'pt-pt', 'RO': 'ro-ro', 'RU': 'ru-ru',
+    'SE': 'se-sv', 'SG': 'sg-en', 'SK': 'sk-sk', 'TH': 'th-en', 'TR': 'tr-tr', 'TW': 'tw-tzh', 'UA': 'ua-uk',
+    'US': 'us-en', 'VN': 'vn-en', 'ZA': 'za-en'
+}
+DDG_EXCEPTIONS = {
+    'az-Latn': ('wt-wt', 'az_AZ'), 'az-Latn-AZ': ('wt-wt', 'az_AZ'), 'bs-Latn': ('wt-wt', 'bs_BA'),
+    'bs-Latn-BA': ('wt-wt', 'bs_BA'), 'cy-GB': ('uk-en', 'cy_GB'), 'en-Dsrt': ('wt-wt', 'en_US'), 'en-GB':
+    ('uk-en', 'en_GB'), 'en-HK': ('us-en', 'en_US'), 'en-SI': ('sl-sl', 'en_US'), 'en-Shaw': ('wt-wt', 'en_US'),
+    'en-Shaw-GB': ('uk-en', 'en_US'), 'ga-GB': ('uk-en', 'ga_IE'), 'gd-GB': ('uk-en', 'gd_GB'), 'hi-Latn':
+    ('wt-wt', 'en_US'), 'hi-Latn-IN': ('in-en', 'en_US'), 'kw-GB': ('uk-en', 'kw_GB'), 'ms-Arab': ('wt-wt',
+    'en_US'), 'ms-Arab-BN': ('wt-wt', 'en_US'), 'ms-Arab-MY': ('wt-wt', 'en_US'), 'sr-BA': ('wt-wt', 'sr_RS'),
+    'sr-Cyrl': ('wt-wt', 'sr_RS'), 'sr-Cyrl-BA': ('wt-wt', 'sr_RS'), 'sr-Cyrl-ME': ('wt-wt', 'sr_RS'),
+    'sr-Cyrl-RS': ('wt-wt', 'sr_RS'), 'sr-Cyrl-XK': ('wt-wt', 'sr_RS'), 'sr-XK': ('wt-wt', 'sr_RS'), 'trv-TW':
+    ('wt-wt', 'en_US'), 'yue-HK': ('wt-wt', 'en_US'), 'yue-Hant-HK': ('wt-wt', 'en_US'), 'zh-HK': ('hk-tzh',
+    'zh_TW'), 'zh-Hans': ('wt-wt', 'zh_CN'), 'zh-Hans-CN': ('cn-zh', 'zh_CN'), 'zh-Hans-HK': ('wt-wt', 'zh_CN'),
+    'zh-Hans-MO': ('wt-wt', 'zh_CN'), 'zh-Hans-MY': ('wt-wt', 'zh_CN'), 'zh-Hans-SG': ('sg-en', 'zh_CN'),
+    'zh-Hant': ('hk-tzh', 'zh_TW'), 'zh-Hant-HK': ('hk-tzh', 'zh_TW'), 'zh-Hant-MO': ('hk-tzh', 'zh_TW'),
+    'zh-Hant-MY': ('hk-tzh', 'zh_TW'), 'zh-Hant-TW': ('hk-tzh', 'zh_TW'), 'zh-Latn': ('wt-wt', 'en_US'),
+    'zh-MO': ('hk-tzh', 'zh_TW'), 'zh-MY': ('wt-wt', 'zh_CN'), 'zh-SG': ('sg-en', 'zh_CN')
+}
+
+
+def duckduckgo_locale(tag):
+    """DuckDuckGo ``(region, language)`` for a request language, e.g. ``('cn-zh', 'zh_CN')``."""
+    if not tag or tag == 'all':
+        return 'wt-wt', 'wt-wt'
+    if tag in DDG_EXCEPTIONS:
+        return DDG_EXCEPTIONS[tag]
+    locale = babel.Locale.parse(tag, sep='-')
+    two_part = len(tag.split('-')) == 2
+    territory = locale.territory
+    own = f'{territory.lower()}-{locale.language}' if territory else None
+    if own in DDG_REGIONS and two_part:
+        region = own
+    elif territory in DDG_TERRITORY_REGIONS:
+        region = DDG_TERRITORY_REGIONS[territory]
+    else:
+        region = DDG_LANGUAGE_REGIONS.get(locale.language, 'wt-wt')
+    code = f'{locale.language}_{territory}' if territory else None
+    language = code if code in DDG_LANGUAGES and two_part else DDG_LANGUAGE_CODES.get(locale.language, 'en_US')
+    return region, language

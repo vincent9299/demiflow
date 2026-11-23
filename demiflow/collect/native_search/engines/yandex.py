@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 
 from lxml import html
 
-from demiflow.collect.native_search.adapter import SourceCaptcha, extract_text
+from demiflow.collect.native_search.adapter import SourceCaptcha, extract_text, size_text
 
 about = {'website': 'https://yandex.com/', 'wikidata_id': 'Q5281', 'official_api_documentation': '?',
          'use_official_api': False, 'require_api_key': False, 'results': 'HTML'}
@@ -39,16 +39,6 @@ def request(query, params):
         params['url'] = f'{base_url_web}?{urlencode(web)}'
     elif search_type == 'images':
         params['url'] = f'{base_url_images}?{urlencode(images)}'
-
-
-def size_text(size, precision=2):
-    """File size on a 1024 base, e.g. ``1.50 MB`` (bytes keep a trailing space: ``512.00 B ``)."""
-    units = ['B ', 'KB', 'MB', 'GB', 'TB']
-    unit = 0
-    while size > 1024 and unit < len(units):
-        unit += 1
-        size = size / 1024.0
-    return '%.*f %s' % (precision, size, units[unit])
 
 
 def between(text, start, end):

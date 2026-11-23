@@ -16,7 +16,8 @@ from .errors import SourceAccessDenied, SourceCaptcha, SourceError, SourceRateLi
 from .worker_network import Request, get, head, multi_requests, post, request
 
 __all__ = ['Request', 'SourceAccessDenied', 'SourceCaptcha', 'SourceError', 'SourceRateLimited',
-           'ecma_unescape', 'extract_text', 'get', 'head', 'html_to_text', 'main_result', 'multi_requests',
+           'ecma_unescape', 'extract_text', 'get', 'head', 'html_to_text', 'image_result', 'main_result',
+           'multi_requests', 'size_text',
            'post', 'request', 'user_agent']
 
 _UNICODE_ESCAPE = re.compile(r'%u([0-9a-fA-F]{4})')
@@ -94,10 +95,34 @@ MAIN_RESULT_FIELDS = {'template': 'default.html', 'title': '', 'content': '', 'i
                       'close_group': False, 'positions': [], 'score': 0, 'category': ''}
 
 
-def main_result(url, **fields):
-    """A main result record with every standard field present (stored responses list them all)."""
-    unknown = set(fields) - set(MAIN_RESULT_FIELDS)
+IMAGE_RESULT_FIELDS = {**MAIN_RESULT_FIELDS, 'template': 'images.html', 'thumbnail_src': '', 'resolution': '',
+                       'img_format': '', 'source': '', 'filesize': '', 'formats': []}
+
+
+def _typed(kind, defaults, url, fields):
+    unknown = set(fields) - set(defaults)
     if unknown:
-        raise TypeError('Unknown main result fields: ' + ', '.join(sorted(unknown)))
-    return {'url': url, **{k: (list(v) if isinstance(v, list) else v) for k, v in MAIN_RESULT_FIELDS.items()},
-            **fields}
+        raise TypeError(f'Unknown {kind} fields: ' + ', '.join(sorted(unknown)))
+    from .results import TYPED
+    return {'url': url, **{k: (list(v) if isinstance(v, list) else v) for k, v in defaults.items()},
+            **fields, TYPED: kind}
+
+
+def main_result(url, **fields):
+    """A typed main result: every standard field present; duplicates match ignoring the URL scheme."""
+    return _typed('MainResult', MAIN_RESULT_FIELDS, url, fields)
+
+
+def image_result(url, img_src, **fields):
+    """A typed image result (``images.html``) with the image fields present."""
+    return _typed('Image', IMAGE_RESULT_FIELDS, url, {'img_src': img_src, **fields})
+
+
+def size_text(size, precision=2):
+    """File size on a 1024 base, e.g. ``1.50 MB`` (bytes keep a trailing space: ``512.00 B ``)."""
+    units = ['B ', 'KB', 'MB', 'GB', 'TB']
+    unit = 0
+    while size > 1024 and unit < len(units):
+        unit += 1
+        size = size / 1024.0
+    return '%.*f %s' % (precision, size, units[unit])

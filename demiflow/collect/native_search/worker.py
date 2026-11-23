@@ -70,6 +70,8 @@ def decode(value):
     if not isinstance(fields, dict):
         raise ValueError('Invalid result record')
     fields.pop('parsed_url', None)
+    from .results import TYPED
+    fields[TYPED] = cls
     return fields
 
 
