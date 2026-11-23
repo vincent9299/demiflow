@@ -1823,11 +1823,8 @@ class RunJournal:
             with self.publication_guard(fence):
                 for name, path in paths:
                     self._check_maintenance_deadline()
-                    if any(p.is_symlink() for p in (path, *path.parents)):
-                        raise RecoveryContractError('Orphan path contains a symlink')
-                    if path.exists():
-                        path.unlink()
-                        removed += 1
+                    from demiflow.execution.storage.gc import unlink_unprotected_artifact
+                    removed += unlink_unprotected_artifact(path)
                 with self.execution_guard(fence) as db:
                     db.executemany('DELETE FROM runtime_artifacts WHERE path=? AND protected=0', rows)
             after = rows[-1][0]

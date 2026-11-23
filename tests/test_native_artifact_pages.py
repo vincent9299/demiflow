@@ -123,3 +123,30 @@ target.write_bytes(pickle.dumps(result))
     assert not spill.exists()
     with pytest.raises(RuntimeError, match='released'):
         result.check_open()
+
+
+def test_orphan_unlink_failure_keeps_page_facts_and_retry_counts_actual_files(tmp_path, monkeypatch):
+    from pathlib import Path
+    with RunContext.start(tmp_path / 'paged-orphans') as run:
+        paths = []
+        for number in range(68):
+            path = run.directory / 'scratch' / f'{number:03}'
+            run.allocate_artifact(path, size=1, atomic=False)
+            path.parent.mkdir(exist_ok=True)
+            path.write_bytes(b'x')
+            paths.append(path)
+        unlink = Path.unlink
+        def fail_second_page(path, *args, **kwargs):
+            if path == paths[65]:
+                raise OSError('original orphan unlink failed')
+            return unlink(path, *args, **kwargs)
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, 'unlink', fail_second_page)
+            with pytest.raises(OSError, match='original orphan unlink failed'):
+                run.journal.clean_orphans(run.fence)
+        with run.journal._connection() as db:
+            remaining = db.execute('SELECT path FROM runtime_artifacts ORDER BY path').fetchall()
+        assert [row[0] for row in remaining] == [str(path.relative_to(run.directory)) for path in paths[64:]]
+        assert [path.exists() for path in paths] == [False] * 65 + [True] * 3
+        assert run.journal.clean_orphans(run.fence) == 3
+        assert run.journal.clean_orphans(run.fence) == 0

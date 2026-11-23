@@ -418,3 +418,24 @@ class _BatchSink:
 
     def abort(self, prepared, context):
         if self.native:self.native.abort(prepared['native'],context)
+
+
+def create_target_absent_binding(run_id, action_id, declaration, intent):
+    """Derive a create admission identity from native facts, without storage IO."""
+    from demiflow.errors import DemiflowError
+    from demiflow.execution.outputs.lance_sink import spec_from_identity
+    if (type(declaration) is not dict or declaration.get('kind') != 'write_table'
+            or type(intent) is not dict or intent.get('kind') != 'write_table'):
+        return None
+    try:
+        spec = spec_from_identity(declaration['sink'])
+        if (spec.mode != 'create' or spec.expected_version is not None
+                or intent.get('spec') != spec.to_dict()
+                or intent.get('request_hash') != spec.content_hash
+                or intent.get('operation_id') != identity([run_id, action_id, 1])):
+            return None
+    except (KeyError, TypeError, ValueError, DemiflowError, RecoveryContractError):
+        return None
+    return dict(kind='create-target-absent', action_id=action_id,
+                operation_id=intent['operation_id'], request_hash=spec.content_hash,
+                uri=spec.uri, mode='create')

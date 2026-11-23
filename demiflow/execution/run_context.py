@@ -33,27 +33,6 @@ def current_action():
     return _ACTION.get()
 
 
-def create_target_absent_binding(run_id, action_id, declaration, intent):
-    """Derive a create admission identity from native facts, without storage IO."""
-    from ..errors import DemiflowError
-    from demiflow.execution.outputs.lance_sink import spec_from_identity
-    if (type(declaration) is not dict or declaration.get('kind') != 'write_table'
-            or type(intent) is not dict or intent.get('kind') != 'write_table'):
-        return None
-    try:
-        spec = spec_from_identity(declaration['sink'])
-        if (spec.mode != 'create' or spec.expected_version is not None
-                or intent.get('spec') != spec.to_dict()
-                or intent.get('request_hash') != spec.content_hash
-                or intent.get('operation_id') != identity([run_id, action_id, 1])):
-            return None
-    except (KeyError, TypeError, ValueError, DemiflowError, RecoveryContractError):
-        return None
-    return dict(kind='create-target-absent', action_id=action_id,
-                operation_id=intent['operation_id'], request_hash=spec.content_hash,
-                uri=spec.uri, mode='create')
-
-
 def _open_runtime_lease(directory):
     descriptor = os.open(directory / '.runtime.lock',
                          os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
@@ -67,67 +46,12 @@ def _open_runtime_lease(directory):
 
 def _maintenance_snapshot(journal, expected_attempt, expected_revision, confirm_stopped,
                           *, terminal=False, action_id=None):
-    """Read native inputs without initializing or migrating historical journals."""
-    import json
-    from ..errors import ExecutionConflict
-    from demiflow.execution.journal.run_reader import read_run
-    from .recovery_contract import MAX_DOCUMENT_BYTES
+    """Check the caller's stop proof against the one original read snapshot."""
+    from demiflow.errors import ExecutionConflict
+    from demiflow.execution.journal.run_reader import read_maintenance_snapshot
     journal._check_maintenance_deadline()
-    with read_run(journal.directory, deadline=journal._maintenance_deadline) as reader:
-        state = reader.document('execution_state', 65536)
-        if (state is None or state.get('attempt') != expected_attempt
-                or expected_attempt is not None and type(state.get('attempt')) is not int
-                or expected_attempt is None and reader.has_table('attempts')
-                or journal.attempt is not None and journal.attempt != expected_attempt):
-            raise ExecutionConflict('Stopped execution attempt differs')
-        revision = state.get('revision')
-        if type(revision) is not int or revision < 0:
-            raise ExecutionConflict('Invalid stopped execution revision')
-        if (expected_revision is None and (terminal or state.get('status') not in
-                {'starting', 'running', 'stopping'}) or expected_revision is not None
-                and expected_revision != revision):
-            raise ExecutionConflict('Stopped execution revision differs or is required')
-        if terminal and state.get('status') not in {'succeeded', 'failed', 'cancelled', 'interrupted'}:
-            raise ExecutionConflict('Create absence admission requires a terminal attempt')
-
-        def document(table, column, where='', parameters=()):
-            if not reader.has_table(table):
-                return None
-            row = reader.db.execute('SELECT substr(CAST(' + column + ' AS BLOB),1,?) FROM ' +
-                table + where + ' LIMIT 1', (MAX_DOCUMENT_BYTES + 1, *parameters)).fetchone()
-            if row is None or row[0] is None:
-                return None
-            if not isinstance(row[0], bytes) or len(row[0]) > MAX_DOCUMENT_BYTES:
-                raise RecoveryContractError('Native maintenance input exceeds document budget')
-            value = json.loads(row[0])
-            if type(value) is not dict:
-                raise RecoveryContractError('Invalid native maintenance document')
-            return value
-
-        configuration = document('runtime_identity', 'document')
-        if configuration is None:
-            for table in ('runtime_owner', 'runtime_dataflow_gc'):
-                if reader.has_table(table) and reader.db.execute('SELECT 1 FROM ' + table + ' LIMIT 1').fetchone():
-                    raise ExecutionConflict('Native ownership or GC has no execution identity')
-        elif expected_attempt is None:
-            raise ExecutionConflict('Native maintenance requires an identified attempt')
-        binding = None
-        if action_id is not None and configuration is not None:
-            declaration = document('runtime_actions', 'declaration', ' WHERE action_id=?', (action_id,))
-            columns = {row[1] for row in reader.db.execute('PRAGMA table_info(action_events)')}
-            intent = (document('action_events', 'document',
-                " WHERE attempt=? AND action_id=? AND kind='intent'", (expected_attempt, action_id))
-                if 'attempt' in columns else None)
-            committed = reader.has_table('runtime_commits') and reader.db.execute(
-                'SELECT 1 FROM runtime_commits WHERE action_id=? LIMIT 1', (action_id,)).fetchone()
-            if not committed:
-                binding = create_target_absent_binding(configuration['run_id'], action_id, declaration, intent)
-            recorded = document('runtime_sources', 'document', ' WHERE action_id=?',
-                                (action_id + '-create-target-absent',))
-            if binding is not None and recorded is not None and recorded != binding:
-                raise RecoveryContractError('Fixed source binding differs')
-        else:
-            declaration = None
+    state, configuration, binding, declaration = read_maintenance_snapshot(journal,
+        expected_attempt, expected_revision, terminal=terminal, action_id=action_id)
     snapshot = {name: state.get(name) for name in (
         'attempt', 'revision', 'status', 'execution_stopped', 'reason')}
     if (type(snapshot['status']) is not str
@@ -204,8 +128,8 @@ def _maintenance_owner(journal, configuration, *, recover_resources=False, prese
             try:
                 journal._check_maintenance_deadline()
                 # Never release another owner's fence, including a partial claim.
-                with journal._connection() as db:
-                    own = db.execute('SELECT 1 FROM runtime_owner WHERE fence=?', (fence,)).fetchone()
+                from demiflow.execution.journal.run_reader import read_maintenance_owner
+                own = read_maintenance_owner(journal, fence)
                 if own:
                     journal.release_execution(fence)
             except BaseException as cleanup:
@@ -636,6 +560,7 @@ class RunContext:
         if intent is None and self.attempt > 1:
             history = self.journal.action_history([action_id], before_attempt=self.attempt, kinds=['intent'])
             intent = history[-1]['value'] if history else None
+        from demiflow.execution.outputs.lance_sink import create_target_absent_binding
         expected = create_target_absent_binding(self.ref.run_id, action_id, declaration, intent)
         # This cross-attempt fact grants replay admission, not permission to
         # overwrite. LanceSink.prepare must recheck absence at the actual write.

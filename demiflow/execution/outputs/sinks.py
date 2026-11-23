@@ -686,7 +686,7 @@ def make_native_terminal_sink(spec, *, request, services, publication_reserved_b
                 try:
                     inspect_lance(declaration.uri, None, declaration.storage_options)
                 except LanceResourceNotFound:
-                    from demiflow.execution.run_context import create_target_absent_binding
+                    from demiflow.execution.outputs.lance_sink import create_target_absent_binding
                     view = action.context.journal.execution_view(detail='summary', action_ids=[action.action_id])
                     intent = next((e['value'] for e in view['events'] if e['kind'] == 'intent'), None)
                     if intent is None and action.record['declaration']['kind'] == 'write_table':

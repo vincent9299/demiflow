@@ -465,6 +465,7 @@
    ],
    "run_id": [
     "execution/hosts/execution_recovery.py",
+    "execution/journal/run_reader.py",
     "execution/run_context.py",
     "execution/run_journal.py",
     "execution/worker/authority.py"

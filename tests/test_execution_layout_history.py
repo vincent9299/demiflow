@@ -34,7 +34,7 @@ CARRIERS = {
     'dataset_commit': ['DatasetCommit', 'UncertainDatasetCommit'],
     'target': ['PipelineExecutionTarget'],
     'package_loader': ['BundlePackages'],
-    'run_context': ['RunContext'],
+    'run_context': ['RunContext', 'create_target_absent_binding'],
     'checked': ['CheckedExecution'],
     'managed_native': ['NativeExecution'],
     'run_journal': ['RunJournal'],
@@ -132,8 +132,17 @@ def test_published_source_carrier_decodes_with_same_identity(original_carriers, 
     loaded = load_private_payload(OriginalStore(raw), ref) if private else load_payload([raw[:5], raw[5:]])
     assert describe(loaded) == expected
     # Loading old bytes never installs an old public module alias.
-    if loaded.__module__ != expected['module'] and expected['module'] not in {'demiflow.execution.contracts.pipeline', 'demiflow.execution.requirements'}:
-        assert expected['module'] not in sys.modules
+    if loaded.__module__ != expected['module']:
+        prior = sys.modules.get(expected['module'])
+        if prior is not None:
+            # A partially split owner may still contain other real definitions.
+            # It must be that actual file, never an alias to the moved owner.
+            expected_file = REPO / (expected['module'].replace('.', '/') + '.py')
+            assert expected_file.is_file()
+            assert Path(prior.__file__).resolve() == expected_file
+            assert prior is not sys.modules[loaded.__module__]
+        else:
+            assert expected['module'] not in sys.modules
 
 
 def test_changed_source_method_cannot_impersonate_published_carrier(original_carriers, monkeypatch):
@@ -475,3 +484,14 @@ def test_original_recovery_fact_requires_real_borrowed_connection(original_carri
         monkeypatch.setattr(_ReadonlyJournal, '_connection', foreign)
     with pytest.raises(DataflowError, match='audited definition'):
         load_payload([base64.b64decode(original_carriers['action_recovery_facts'][0])])
+
+
+def test_changed_unlink_cannot_impersonate_original_run_journal(original_carriers, monkeypatch):
+    from demiflow.execution.storage.gc import unlink_unprotected_artifact
+    monkeypatch.setattr(unlink_unprotected_artifact, '__code__',
+        unlink_unprotected_artifact.__code__.replace(
+            co_consts=(*unlink_unprotected_artifact.__code__.co_consts, 'changed-unlink')))
+    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.recovery_sdk_v3 import authentic_source_global
+    assert not authentic_source_global(RunJournal, 'demiflow.execution.run_journal')
+    assert describe(RunJournal) != original_carriers['RunJournal'][1]

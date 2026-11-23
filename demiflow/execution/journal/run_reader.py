@@ -1194,7 +1194,7 @@ def _latest_stream_lance_scope(journal, parent, node):
 
 def action_recovery_facts(directory, action_id, *, attempt=None, deadline=None):
     """Journal-only recovery eligibility; never proof that a target is absent."""
-    from demiflow.execution.run_context import create_target_absent_binding
+    from demiflow.execution.outputs.lance_sink import create_target_absent_binding
     _check_deadline(deadline)
     # The readonly protocol shares this single transaction for the entire fact.
     with read_run(directory, deadline=deadline) as reader:
@@ -1226,3 +1226,73 @@ def action_recovery_facts(directory, action_id, *, attempt=None, deadline=None):
                     recovery_restricted=native is not None and native['result'] is None and restricted is not None,
                     absence_eligible=binding is not None and journal.latest_execution_commit(action_id) is None,
                     absence_recorded=absence is not None)
+
+
+def read_maintenance_snapshot(journal, expected_attempt, expected_revision, *, terminal=False, action_id=None):
+    """Read one original maintenance snapshot without claiming or proving a stop."""
+    import json
+    from demiflow.errors import ExecutionConflict
+    from demiflow.execution.recovery_contract import MAX_DOCUMENT_BYTES
+    from demiflow.execution.outputs.lance_sink import create_target_absent_binding
+    with read_run(journal.directory, deadline=journal._maintenance_deadline) as reader:
+        state = reader.document('execution_state', 65536)
+        if (state is None or state.get('attempt') != expected_attempt
+                or expected_attempt is not None and type(state.get('attempt')) is not int
+                or expected_attempt is None and reader.has_table('attempts')
+                or journal.attempt is not None and journal.attempt != expected_attempt):
+            raise ExecutionConflict('Stopped execution attempt differs')
+        revision = state.get('revision')
+        if type(revision) is not int or revision < 0:
+            raise ExecutionConflict('Invalid stopped execution revision')
+        if (expected_revision is None and (terminal or state.get('status') not in
+                {'starting', 'running', 'stopping'}) or expected_revision is not None
+                and expected_revision != revision):
+            raise ExecutionConflict('Stopped execution revision differs or is required')
+        if terminal and state.get('status') not in {'succeeded', 'failed', 'cancelled', 'interrupted'}:
+            raise ExecutionConflict('Create absence admission requires a terminal attempt')
+
+        def document(table, column, where='', parameters=()):
+            if not reader.has_table(table):
+                return None
+            row = reader.db.execute('SELECT substr(CAST(' + column + ' AS BLOB),1,?) FROM ' +
+                table + where + ' LIMIT 1', (MAX_DOCUMENT_BYTES + 1, *parameters)).fetchone()
+            if row is None or row[0] is None:
+                return None
+            if not isinstance(row[0], bytes) or len(row[0]) > MAX_DOCUMENT_BYTES:
+                raise RecoveryContractError('Native maintenance input exceeds document budget')
+            value = json.loads(row[0])
+            if type(value) is not dict:
+                raise RecoveryContractError('Invalid native maintenance document')
+            return value
+
+        configuration = document('runtime_identity', 'document')
+        if configuration is None:
+            for table in ('runtime_owner', 'runtime_dataflow_gc'):
+                if reader.has_table(table) and reader.db.execute('SELECT 1 FROM ' + table + ' LIMIT 1').fetchone():
+                    raise ExecutionConflict('Native ownership or GC has no execution identity')
+        elif expected_attempt is None:
+            raise ExecutionConflict('Native maintenance requires an identified attempt')
+        binding = None
+        if action_id is not None and configuration is not None:
+            declaration = document('runtime_actions', 'declaration', ' WHERE action_id=?', (action_id,))
+            columns = {row[1] for row in reader.db.execute('PRAGMA table_info(action_events)')}
+            intent = (document('action_events', 'document',
+                " WHERE attempt=? AND action_id=? AND kind='intent'", (expected_attempt, action_id))
+                if 'attempt' in columns else None)
+            committed = reader.has_table('runtime_commits') and reader.db.execute(
+                'SELECT 1 FROM runtime_commits WHERE action_id=? LIMIT 1', (action_id,)).fetchone()
+            if not committed:
+                binding = create_target_absent_binding(configuration['run_id'], action_id, declaration, intent)
+            recorded = document('runtime_sources', 'document', ' WHERE action_id=?',
+                                (action_id + '-create-target-absent',))
+            if binding is not None and recorded is not None and recorded != binding:
+                raise RecoveryContractError('Fixed source binding differs')
+        else:
+            declaration = None
+    return state, configuration, binding, declaration
+
+
+def read_maintenance_owner(journal, fence):
+    """Return the existing fence owner fact, without claiming an owner."""
+    with journal._connection() as db:
+        return db.execute('SELECT 1 FROM runtime_owner WHERE fence=?', (fence,)).fetchone()

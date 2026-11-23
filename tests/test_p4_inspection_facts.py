@@ -150,7 +150,7 @@ def test_legacy_outputs_keep_implicit_attempt_and_reject_explicit_selector(tmp_p
 def test_old_absence_does_not_supply_a_new_attempt_intent(tmp_path):
     from test_p4_native_maintenance import native,create_action
     from test_p4_attempt_reservations import resume
-    from demiflow.execution.run_context import create_target_absent_binding
+    from demiflow.execution.outputs.lance_sink import create_target_absent_binding
     from demiflow.execution.journal.run_reader import action_recovery_facts
     journal=native(tmp_path)
     create_action(journal,tmp_path/'missing.lance')

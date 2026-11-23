@@ -513,3 +513,14 @@ def finish_run_gc(run):
     except Exception as exc:
         # Cleanup failures never overwrite a business/cancellation exception.
         run._published_gc_result = {'removed':0,'bytes':0,'blocked':str(exc)}
+
+
+def unlink_unprotected_artifact(path):
+    """Unlink a path already selected by the journal, inside its publication guard."""
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    if any(p.is_symlink() for p in (path, *path.parents)):
+        raise RecoveryContractError('Orphan path contains a symlink')
+    if path.exists():
+        path.unlink()
+        return 1
+    return 0
