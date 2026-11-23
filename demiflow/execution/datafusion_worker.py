@@ -44,6 +44,12 @@ def _region_offsets(request):
         context = SessionContext(config, RuntimeEnvBuilder().with_greedy_memory_pool(limit).with_disk_manager_disabled())
         selection = request.get('selection', False)
         for name, rows in request.pop('tables').items():
+            if isinstance(rows, pa.Table):
+                batches = rows.to_batches(max_chunksize=8192)
+                if not batches:
+                    batches = [pa.RecordBatch.from_arrays([pa.array([], type=f.type) for f in rows.schema], schema=rows.schema)]
+                context.register_record_batches(name, [batches])
+                continue
             if selection:
                 batches, start = [], 0
                 for keys in rows.chunks or [pa.array([], type=rows.type)]:

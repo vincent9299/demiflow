@@ -276,3 +276,81 @@ def place_key_exclusion(graph, snapshots, splits, stages, *, policy, bounds, hos
         result.append(replace(stage, stage_id=stage.stage_id + KEY_SQL_SUFFIX,
                               profile=profile, resident_bytes=resident))
     return tuple(result)
+
+
+def place_typed_join(graph, snapshots, splits, stages, *, policy, bounds, hosts):
+    """Choose original typed SQL from fixed source declarations, never source I/O."""
+    import base64
+    import pyarrow as pa
+    from ..execution.contracts.relational_region import TYPED_JOIN_SUFFIX, SQL_CHILD_RSS, SQL_PARENT_WINDOW
+
+    if (not policy.fusion or graph.jobs or len(graph.sources) != 2 or len(graph.terminals) != 1
+            or len(splits) != 2 or {s.source_id for s in splits} != set(graph.sources)
+            or any(s.locator.get('global_query') for s in splits)
+            or (policy.native_limits or {}).get('max_rss_bytes', SQL_CHILD_RSS) < SQL_CHILD_RSS):
+        return stages
+    nodes = {n.occurrence_id: n for n in graph.nodes}
+    joins = [n for n in graph.nodes if n.kernel.kind == 'join']
+    structural = {'SelectColumnsOp', 'DropColumnsOp', 'RenameColumnsOp', 'LimitOp'}
+    if (len(joins) != 1 or any(n.kind not in ('source', 'terminal') and n.kernel.kind not in
+            structural | {'join'} for n in graph.nodes) or any(n.kind != 'terminal' and n.kernel.effect != 'pure' for n in graph.nodes)):
+        return stages
+    incoming, outgoing = {}, {}
+    for edge in graph.edges:
+        incoming.setdefault(edge.consumer, []).append(edge)
+        outgoing.setdefault(edge.producer, []).append(edge)
+    if any(len(edges) != 1 for edges in outgoing.values()):
+        return stages
+    schemas = {}
+    for source in snapshots:
+        value = source.immutable_identity.get('declared_arrow_schema')
+        if (source.kind not in ('file', 'lance') or value is None or len(value) > bounds.max_control_bytes * 2
+                or source.kind == 'file' and source.immutable_identity.get('format') != 'csv'):
+            return stages
+        schema = pa.ipc.read_schema(pa.BufferReader(base64.b64decode(value, validate=True)))
+        if len(schema.names) != len(set(schema.names)):
+            return stages
+        schemas[source.source_id] = {field.name: field.type for field in schema}
+    # Only the paths before the join need a declared schema. After the join,
+    # original row operators retain their missing-column/error timing.
+    def columns(occ):
+        if occ in schemas:
+            return schemas[occ]
+        edges = incoming.get(occ, ())
+        if len(edges) != 1 or nodes[occ].kernel.kind not in structural:
+            return None
+        base = columns(edges[0].producer)
+        return None if base is None else _column_lineage(nodes[occ].kernel, base)
+    join = joins[0]
+    parents = {e.input_port: e.producer for e in incoming.get(join.occurrence_id, ())}
+    if set(parents) != {'left', 'right'}:
+        return stages
+    left, right = columns(parents['left']), columns(parents['right'])
+    cfg = join.kernel.configuration
+    lk, rk = tuple(cfg['on']), tuple(cfg.get('right_on') or cfg['on'])
+    def supported(dtype):
+        if (pa.types.is_null(dtype) or pa.types.is_string(dtype) or pa.types.is_large_string(dtype)
+                or pa.types.is_integer(dtype) or pa.types.is_floating(dtype) or pa.types.is_boolean(dtype)):
+            return True
+        if pa.types.is_list(dtype) or pa.types.is_large_list(dtype) or pa.types.is_fixed_size_list(dtype):
+            return supported(dtype.value_type)
+        return pa.types.is_struct(dtype) and all(supported(field.type) for field in dtype)
+    if (left is None or right is None or len(lk) != len(rk) or not lk
+            or any(k not in left or r not in right or left[k] != right[r] or not supported(left[k]) for k, r in zip(lk, rk))
+            or any(len(s.partitions) != 1 or s.replica_target != 1 or s.profile.limits or s.profile.requirements
+                   or set(s.profile.requests) - {'cpu_millis', 'memory_bytes'} for s in stages)):
+        return stages
+    resident = sum(s.resident_bytes for s in stages) + SQL_CHILD_RSS + SQL_PARENT_WINDOW
+    cpu = max(1000, *(s.profile.requests['cpu_millis'] for s in stages))
+    control = min(bounds.max_control_bytes, bounds.max_resident_bytes // 8)
+    if resident + control > bounds.max_resident_bytes or not any(
+            h.logical_resources.get('memory_bytes', 0) >= resident and
+            h.logical_resources.get('cpu_millis', h.logical_resources.get('cpu', 0) * 1000) >= cpu for h in hosts):
+        return stages
+    marker = stages[0].stage_id + TYPED_JOIN_SUFFIX
+    return (replace(stages[0], stage_id=marker, partitions=(marker + '-p0',),
+        occurrences=tuple(n.occurrence_id for n in graph.nodes),
+        profile=ResourceProfile(requests={'cpu_millis': cpu, 'memory_bytes': resident}),
+        replica_min=1, replica_target=1, replica_max=1, resident_bytes=resident,
+        output_bytes=sum(s.output_bytes for s in stages), state_bytes=sum(s.state_bytes for s in stages),
+        kernel_refs=tuple(dict.fromkeys(ref for s in stages for ref in s.kernel_refs))),)

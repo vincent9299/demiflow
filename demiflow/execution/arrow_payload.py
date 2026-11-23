@@ -278,9 +278,12 @@ def store_mapped_arrow(batch, bindings, schema_ref, services, *, retained_bytes)
     sizes = []
     for index in range(batch.num_rows):
         size = row_upper(batch, index)
-        if size is None or size > bounds.max_row_bytes:
+        if size is None:
             return None
-        sizes.append(mapped_row_bytes(batch, index, bounds.max_row_bytes))
+        exact = mapped_row_bytes(batch, index, bounds.max_row_bytes)
+        if exact > bounds.max_row_bytes:
+            return None
+        sizes.append(exact)
     members = [mapped_member(key, source.source_position) for key, source in bindings]
     header = json.dumps(dict(v=1, members=members, sizes=sizes, schema=schema_ref.digest,
                              count=batch.num_rows), sort_keys=True, separators=(',', ':')).encode()
@@ -302,6 +305,36 @@ def store_mapped_arrow(batch, bindings, schema_ref, services, *, retained_bytes)
         raise
     ref = put_arrow_batch(batch, header, estimate, MAPPED_ARROW_MEDIA, services.store)
     return records(ref)
+
+
+def publish_source_rows(batch, *, reader, position_at, retained_bytes):
+    """Share fixed-source columns under the original per-record identities and cursors."""
+    from types import SimpleNamespace
+    from .recovery_contract import identity
+    offset = 0
+    while offset < batch.num_rows:
+        reader._services.check_stop()
+        count = min(_MAX_ROWS, batch.num_rows - offset)
+        while True:
+            part = batch.slice(offset, count)
+            bindings = []
+            for index in range(count):
+                position = position_at(offset + index)
+                key = identity([reader._snapshot.source_id, reader._split.split_id, position])
+                bindings.append((key, SimpleNamespace(source_position=position, sequence=0)))
+            records = store_mapped_arrow(part, bindings, reader._schema_ref, reader._services,
+                                        retained_bytes=batch.get_total_buffer_size() + retained_bytes)
+            if records is not None:
+                for record in records:
+                    yield ArrowPayload(record.payload_ref, record.encoded_bytes)
+                break
+            if count == 1:
+                if part.nbytes > reader._services.bounds.max_row_bytes:
+                    raise DataflowError('BUDGET_EXCEEDED', 'source row exceeds max_row_bytes')
+                yield fallback_row(part, 0)
+                break
+            count //= 2
+        offset += count
 
 
 def _uncompressed_ipc(buffer, bounds):
@@ -355,6 +388,7 @@ class ArrowBatchCache:
     def __init__(self, store, bounds, *, services=None):
         self.store, self.bounds, self.services = store, bounds, services
         self.ref = self.batch = self.header = None
+        self._projection = None
         self._lock = threading.RLock()
 
     def close(self):
@@ -425,7 +459,7 @@ class ArrowBatchCache:
                     _fail('Arrow batch schema digest differs')
                 for i, size in enumerate(header['sizes']):
                     upper = row_upper(batch, i)
-                    if upper is None or upper > self.bounds.max_row_bytes:
+                    if upper is None or not mapped and upper > self.bounds.max_row_bytes:
                         _fail('Arrow row is outside its admitted type or byte bound')
                     expected_size = mapped_row_bytes(batch, i, self.bounds.max_row_bytes) if mapped else upper
                     if size != expected_size:
@@ -458,6 +492,36 @@ class ArrowBatchCache:
         if record.schema_ref is None or record.schema_ref.digest != header['schema']:
             _fail('Arrow record schema differs from batch binding')
         return batch, index
+
+    def project(self, record, indices, names, schemas):
+        """Persist a column projection, retaining the original authenticated members."""
+        from dataclasses import replace
+        with self._lock:
+            batch, index = self.locate(record)
+            key = (record.payload_ref, tuple(indices), tuple(names))
+            if self._projection is not None and self._projection[0] == key:
+                _, ref, sizes, schema_ref = self._projection
+            else:
+                import pyarrow as pa
+                projected = batch.select(indices).rename_columns(names)
+                if not len(projected.schema):
+                    return None  # Zero-column IPC cannot preserve a nonzero row count.
+                schema_ref = schemas.put(projected.schema)
+                mapped = record.payload_ref.media_type == MAPPED_ARROW_MEDIA
+                sizes = [mapped_row_bytes(projected, i, self.bounds.max_row_bytes) if mapped else row_upper(projected, i)
+                         for i in range(projected.num_rows)]
+                if any(size is None or size > self.bounds.max_row_bytes for size in sizes):
+                    return None
+                header = json.dumps({**self.header, 'schema': schema_ref.digest, 'sizes': sizes},
+                                    sort_keys=True, separators=(',', ':')).encode()
+                estimate = pa.ipc.get_record_batch_size(projected) + schema_ref.size_bytes + len(header) + 256
+                window = _window(self.bounds, self.services)
+                if (estimate > window or batch.get_total_buffer_size() + 8 * estimate + window >
+                        _resident_budget(self.bounds, self.services)):
+                    return None
+                ref = put_arrow_batch(projected, header, estimate, record.payload_ref.media_type, self.store)
+                self._projection = (key, ref, sizes, schema_ref)
+            return replace(record, payload_ref=ref, schema_ref=schema_ref, encoded_bytes=sizes[index])
 
     def row(self, record):
         with self._lock:

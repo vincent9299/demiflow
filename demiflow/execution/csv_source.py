@@ -10,9 +10,9 @@ def csv_spec(source):
     options = dict(source.options)
     if not options or set(options) - {'read_options', 'parse_options', 'convert_options'}:
         return None
-    read = options.get('read_options', pacsv.ReadOptions())
-    parse = options.get('parse_options', pacsv.ParseOptions())
-    convert = options.get('convert_options', pacsv.ConvertOptions())
+    read = options.get('read_options') or pacsv.ReadOptions()
+    parse = options.get('parse_options') or pacsv.ParseOptions()
+    convert = options.get('convert_options') or pacsv.ConvertOptions()
     if (len(source.paths) != 1 or read.column_names or read.autogenerate_column_names
             or read.skip_rows or read.skip_rows_after_names or read.encoding.lower() != 'utf8'
             or parse.invalid_row_handler or not parse.double_quote or parse.escape_char

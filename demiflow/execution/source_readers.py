@@ -548,6 +548,7 @@ class FileReader(_BaseReader):
                 field = pa.field('path', pa.string())
                 schema = schema.set(index, field) if index >= 0 else schema.append(field)
             self._schema_ref = self._schemas.put(schema)
+            ordinal = 0
             while True:
                 self._services.check_stop()
                 try:
@@ -560,6 +561,12 @@ class FileReader(_BaseReader):
                     if batch.get_total_buffer_size() + 2 * block_bytes > batch_window:
                         raise DataflowError('BUDGET_EXCEEDED',
                                             'CSV decoded buffers and input blocks exceed batch budget')
+                    if self._snapshot.immutable_identity.get('record_carrier_v1') == 'mapped_arrow':
+                        from .arrow_payload import publish_source_rows
+                        yield from publish_source_rows(batch, reader=self, retained_bytes=2 * block_bytes,
+                            position_at=lambda i: {'file_index':self._file_index, 'record_index':ordinal + i})
+                        ordinal += batch.num_rows
+                        continue
                     for index in range(batch.num_rows):
                         self._services.check_stop()
                         part = batch.slice(index, 1)
@@ -840,6 +847,13 @@ class LanceReader(_BaseReader):
                 batch = batch.select(columns)
             self._schema_ref = self._schemas.put(batch.schema)
             from .arrow_payload import publish_batch, ArrowPayload, fallback_row
+            if self._snapshot.immutable_identity.get('record_carrier_v1') == 'mapped_arrow':
+                from .arrow_payload import publish_source_rows
+                yield from publish_source_rows(batch, reader=self,
+                    retained_bytes=min(self._services.bounds.max_batch_bytes,
+                                       self._arrow_scan_rows * self._services.bounds.max_row_bytes),
+                    position_at=lambda i: {'version':self._version, 'fragment_id':fragment_id, 'row_offset':start + i})
+                return
             carrier = (publish_batch(batch, reader=self, fragment_id=fragment_id, start=start)
                        if (self.batch_carrier is not None or (batch.num_rows > 1 and
                            self._snapshot.immutable_identity.get('record_carrier_v1') == 'arrow_batch')) else None)
@@ -906,8 +920,8 @@ class LanceReader(_BaseReader):
         self._row_offset = row_offset + 1
         self._offset = {"version": self._version, "fragment_id": fragment_id,
                         "row_offset": row_offset + 1}
-        from .arrow_payload import ArrowPayload
-        if isinstance(row, ArrowPayload):
+        from .arrow_payload import ArrowPayload, ARROW_BATCH_MEDIA
+        if isinstance(row, ArrowPayload) and row.ref.media_type == ARROW_BATCH_MEDIA:
             from dataclasses import asdict
             self._offset['arrow_batch'] = asdict(row.ref)
         return row, position

@@ -15,6 +15,7 @@ KEY_BATCH_SUFFIXES = (KEY_BATCH_SQL_SUFFIX, KEY_BATCH_ARROW_SUFFIX)
 SQL_CHILD_RSS = 256 << 20
 SQL_PARENT_WINDOW = 64 << 20
 KEY_SET_WINDOW = 32 << 20
+TYPED_JOIN_SUFFIX = '-typed-join1'
 MAX_JOIN_DEPTH = 2
 REDUCER_MEMORY_FIELD = 'reducer_memory_v1'
 
@@ -87,7 +88,7 @@ def fixed_key_inputs(graph):
 
 
 def needs_native_offsets(stage):
-    return stage.stage_id.startswith(SQL_PREFIX) or stage.stage_id.endswith(KEY_SQL_SUFFIX)
+    return stage.stage_id.startswith(SQL_PREFIX) or stage.stage_id.endswith((KEY_SQL_SUFFIX, TYPED_JOIN_SUFFIX))
 
 
 def reducer_contract(spec):

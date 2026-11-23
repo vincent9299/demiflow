@@ -227,10 +227,19 @@ def query_region_offsets(sql, *, tables, max_pairs, rss_bytes, check_stop, selec
         raise DataflowError('INVALID_CONTRACT', 'invalid native relation query or bindings')
     if len(sql) >= wire_limit or len(sql.encode()) >= wire_limit:
         raise DataflowError('BUDGET_EXCEEDED', 'native relation SQL exceeds its memory window')
+    import pyarrow as pa
     input_bytes = 0
     for name, rows in tables.items():
         if type(name) is not str or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name):
             raise DataflowError('INVALID_CONTRACT', 'invalid native relation input name')
+        if isinstance(rows, pa.Table):
+            if (selection or len(rows.schema.names) != len(set(rows.schema.names))
+                    or 'off' not in rows.schema.names or rows.schema.field('off').type != pa.int64()):
+                raise DataflowError('INVALID_CONTRACT', 'native typed input needs unique columns and int64 offsets')
+            input_bytes += rows.get_total_buffer_size() + sum(512 * c.num_chunks for c in rows.columns)
+            if input_bytes + 4096 > wire_limit or len(rows) > wire_limit // 8:
+                raise DataflowError('BUDGET_EXCEEDED', 'native typed input exceeds its window')
+            continue
         if selection:
             if not isinstance(rows, pa.ChunkedArray) or not (
                     pa.types.is_binary(rows.type) or pa.types.is_integer(rows.type)

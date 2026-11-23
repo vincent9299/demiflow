@@ -488,9 +488,8 @@ class WorkerGraphRunner:
                     'partitions': [{'data_ref': value['ref'], 'rows': value['count'], 'bytes': size}]})
         for edge_id in self._closed_inputs:
             edge = next(e for e in self.e._graph.edges if e.edge_id == edge_id)
-            if edge.producer not in self.e._node_specs:
-                self._send('eoi', {'scope': 'input_satisfied', 'edge_id': edge_id,
-                                   'consumer_partition': self.partition})
+            self._send('eoi', {'scope': 'input_satisfied', 'edge_id': edge_id,
+                               'consumer_partition': self.partition})
         self._thread = threading.Thread(target=copy_context().run, args=(self._run,), name='dataflow-business', daemon=True)
         self._thread.start()
         from ...resources.capacity import track_owned_thread
@@ -1437,9 +1436,8 @@ class WorkerGraphRunner:
             self._closed_inputs.add(edge.edge_id)
             if edge.producer in self.e._node_specs:
                 self._close_output(edge.edge_id)
-            else:
-                self._send('eoi', {'scope': 'input_satisfied', 'edge_id': edge.edge_id,
-                                   'consumer_partition': self.partition})
+            self._send('eoi', {'scope': 'input_satisfied', 'edge_id': edge.edge_id,
+                               'consumer_partition': self.partition})
 
     def _close_output(self, edge_id):
         edge = next(e for e in self.e._graph.edges if e.edge_id == edge_id)

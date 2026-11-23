@@ -53,6 +53,106 @@ def _program(services: RuntimeServices, key: str, kind: str) -> Any:
 
 
 
+def typed_join_pairs(left, right, *, spec, services, retained_key):
+    """Compute with raw declared key columns; finite ports keep the fallback input."""
+    from ..contracts.relational_region import TYPED_JOIN_SUFFIX, SQL_CHILD_RSS, SQL_PARENT_WINDOW
+    from ..arrow_payload import ARROW_MEDIA_TYPES, batch_cache
+    from ...operators.relational_sql import typed_join_query, json_key_type
+    if not any(s.stage_id.endswith(TYPED_JOIN_SUFFIX) for s in services.assignment.stages):
+        return None
+    if services.query_region_offsets is None:
+        raise _err('UNSUPPORTED_CAPABILITY', 'sealed typed join requires its SQL host')
+    import pyarrow as pa
+    window = min(SQL_PARENT_WINDOW // 4, SQL_CHILD_RSS // 16)
+    columns = (tuple(spec.configuration['on']), tuple(spec.configuration.get('right_on') or spec.configuration['on']))
+    tables, inputs, types = {}, [], None
+    retained = 4096
+    cache = batch_cache(services.store, services.bounds, services=services)
+    from ..record_schema import RecordSchemas
+    schemas = RecordSchemas(services)
+    for name, port, fields in zip(('lkeys', 'rkeys'), (left, right), columns):
+        scan = port.within_offset_budget(window // 2048)
+        if scan is None:
+            return None
+        records, chunks, seen = [], [[] for _ in fields], set()
+        previous = None
+        first = run = 0
+        batch = None
+        def flush():
+            if batch is not None:
+                for parts, field in zip(chunks, fields):
+                    parts.append(batch.column(batch.schema.get_field_index(field)).slice(first, run))
+        try:
+            for record in scan:
+                services.check_stop()
+                if record.payload_ref is not None and record.payload_ref.media_type in ARROW_MEDIA_TYPES:
+                    current, index = cache.locate(record)
+                    schema = current.schema
+                    if any(field not in schema.names for field in fields):
+                        return None
+                    declared = tuple(schema.field(field).type for field in fields)
+                    retained += 2048
+                    if record.payload_ref not in seen:
+                        retained += current.get_total_buffer_size() + 1024 * len(fields)
+                        seen.add(record.payload_ref)
+                    if retained > window:
+                        return None
+                    if previous != record.payload_ref or index != first + run:
+                        flush()
+                        batch, first, run = current, index, 0
+                        previous = record.payload_ref
+                    run += 1
+                else:
+                    schema = schemas.read(record.schema_ref)
+                    if schema is None or any(field not in schema.names for field in fields):
+                        return None
+                    declared = tuple(schema.field(field).type for field in fields)
+                    retained += 2048 + 8 * record.encoded_bytes
+                    if retained > window:
+                        return None
+                    flush()
+                    previous, batch, run = None, None, 0
+                    row = _materialize_row(record, services)
+                    for parts, field, dtype in zip(chunks, fields, declared):
+                        parts.append(pa.array([row[field]], type=dtype))
+                    del row
+                if types is None:
+                    types = declared
+                if declared != types or not all(json_key_type(t) for t in declared):
+                    return None
+                records.append(record)
+            flush()
+        finally:
+            scan.close()
+        inputs.append(records)
+        if not records:
+            # Keep empty-source error/typing behavior on the original path.
+            return None
+        arrays = [pa.chunked_array(parts, type=dtype) for parts, dtype in zip(chunks, types)]
+        arrays.append(pa.chunked_array([pa.array(range(len(records)), type=pa.int64())]))
+        tables[name] = pa.table(arrays, names=[*('k' + str(i) for i in range(len(fields))), 'off'])
+    how = spec.configuration.get('how', 'inner')
+    # Prove a complete result bound before starting SQL. Once started, errors
+    # and cancellation propagate; there is no retry through another algorithm.
+    upper = len(inputs[0]) if how in ('semi', 'anti') else len(inputs[0]) * max(1, len(inputs[1]))
+    if upper * 256 + retained > SQL_PARENT_WINDOW or upper * 224 > SQL_CHILD_RSS // 16:
+        return None
+    sql, functions = typed_join_query(types, how)
+    pairs = services.query_region_offsets(sql, tables=tables, max_pairs=upper, rss_bytes=SQL_CHILD_RSS,
+                                         check_stop=services.check_stop, key_functions=functions)
+    retained_key(retained + len(pairs) * 256)
+    def output():
+        try:
+            for li, ri in pairs:
+                if type(li) is not int or not 0 <= li < len(inputs[0]) or (
+                        ri is not None and (type(ri) is not int or not 0 <= ri < len(inputs[1]))):
+                    raise _err('INTERNAL_PROTOCOL', 'typed join returned invalid input offsets')
+                yield inputs[0][li], inputs[1][ri] if ri is not None else None
+        finally:
+            retained_key(0)
+    return output()
+
+
 def join_partitions(
     left: Iterator[Record],
     right: Iterator[Record],
@@ -79,15 +179,19 @@ def join_partitions(
     from ..dataflow_publication_budget import REF_CARRIER
     stored = spec.configuration.get('output_carrier') == REF_CARRIER
     from .operator import _SpoolRecords
-    if type(left) is _SpoolRecords:
-        left = left.for_join(lk)
-    if type(right) is _SpoolRecords:
-        right = right.for_join(rk)
     key_bytes = [0]
-    pairs = join_pairs(iter(left), iter(right), left_keys=lk, right_keys=rk,
-                       how=how, services=services, bounded=stored,
-                       try_small_right=spec.configuration.get('small_right_index') is True,
-                       retained_key=lambda size: key_bytes.__setitem__(0, size))
+    retain_key = lambda size: key_bytes.__setitem__(0, size)
+    pairs = (typed_join_pairs(left, right, spec=spec, services=services, retained_key=retain_key)
+             if type(left) is _SpoolRecords and type(right) is _SpoolRecords else None)
+    if pairs is None:
+        if type(left) is _SpoolRecords:
+            left = left.for_join(lk)
+        if type(right) is _SpoolRecords:
+            right = right.for_join(rk)
+        pairs = join_pairs(iter(left), iter(right), left_keys=lk, right_keys=rk,
+                           how=how, services=services, bounded=stored,
+                           try_small_right=spec.configuration.get('small_right_index') is True,
+                           retained_key=retain_key)
     try:
         for sequence, (left_record, right_record) in enumerate(pairs):
             _check_stop(services)

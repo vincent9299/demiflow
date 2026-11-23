@@ -1247,7 +1247,17 @@ class DataflowExecution:
             if payload["scope"] == "input_satisfied":
                 spec = next((x for x in self._physical.exchanges if x.edge_id == payload["edge_id"]), None)
                 consumer = payload["consumer_partition"]
-                if spec is None or consumer not in lease.partition_ids or consumer not in spec.consumer_partitions:
+                if spec is None:
+                    # Internal edges have the same completion fact as transport
+                    # edges, with both ends owned by this one sealed assignment.
+                    edge = next((e for e in self._graph.edges if e.edge_id == payload['edge_id']), None)
+                    stage = next((s for s in endpoint._assignment.stages if edge is not None
+                                  and {edge.producer, edge.consumer} <= set(s.occurrences)), None)
+                    if stage is None or consumer not in lease.partition_ids or consumer not in stage.partitions:
+                        raise DataflowError('FENCED', 'internal input completion differs from sealed membership')
+                    self._satisfied_consumers.setdefault(edge.edge_id, set()).add(consumer)
+                    return
+                if consumer not in lease.partition_ids or consumer not in spec.consumer_partitions:
                     raise DataflowError("FENCED", "input completion differs from physical consumer membership")
                 done = self._satisfied_consumers.setdefault(spec.edge_id, set())
                 done.add(consumer)
@@ -1407,6 +1417,11 @@ class DataflowExecution:
             spec = next((x for x in self._physical.exchanges if x.edge_id == edge.edge_id), None)
             if spec is not None and set(spec.consumer_partitions) <= self._satisfied_consumers.get(edge.edge_id, set()):
                 continue
+            if spec is None:
+                stage = next((s for s in self._physical.stages
+                              if {edge.producer, edge.consumer} <= set(s.occurrences)), None)
+                if stage is not None and set(stage.partitions) <= self._satisfied_consumers.get(edge.edge_id, set()):
+                    continue
             if not self._source_demand_satisfied(edge.consumer):
                 return False
         return True

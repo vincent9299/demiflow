@@ -228,6 +228,14 @@ def snapshot_source(
         immutable = {"kind": "FileSource", "format": source.format,
                      "file_count": len(entries), "manifest_digest": manifest_ref.digest,
                      "options_digest": _options_digest(source.options)}
+        if source.format == 'csv':
+            from .csv_source import csv_spec
+            declared = csv_spec(source)
+            if declared is not None:
+                import pyarrow as pa
+                from .dataflow_schema import encode, KEY
+                immutable[KEY] = encode(pa.schema([(name, pa.string())
+                    for name in declared['columns']]), bounds=bounds)
     elif isinstance(source, SqlSource):
         kind, finite = "SqlSource", True
         snapshot_id = source.options.get("snapshot_id")

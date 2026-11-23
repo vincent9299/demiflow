@@ -346,6 +346,21 @@ def invoke_unary(
     if kind == 'LimitOp':
         yield record
         return
+    if kind in ('SelectColumnsOp', 'DropColumnsOp', 'RenameColumnsOp') and record.payload_ref is not None:
+        from ..arrow_payload import ARROW_MEDIA_TYPES, batch_cache
+        from ...operators.relational import project_columns
+        if record.payload_ref.media_type in ARROW_MEDIA_TYPES:
+            cache = batch_cache(services.store, services.bounds, services=services)
+            batch, _ = cache.locate(record)
+            projection = project_columns(batch.schema.names, kind, cfg)
+            if projection is not None:
+                if schemas is None:
+                    from ..record_schema import RecordSchemas
+                    schemas = RecordSchemas(services)
+                projected = cache.project(record, *projection, schemas)
+                if projected is not None:
+                    yield projected
+                    return
     low_memory = getattr(services, 'measured_workspace', False)
     output_record = _output_record
     if low_memory or state_bytes is not None:

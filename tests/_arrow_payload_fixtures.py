@@ -40,7 +40,9 @@ if not getattr(module, '_fixture_probe_installed', False):
     # Both original process workers and Ray Python workers inherit this owned
     # test PYTHONPATH. Driver patch covers the native sink and collection path.
     (directory / 'sitecustomize.py').write_text(script)
-    monkeypatch.setenv('PYTHONPATH', str(directory) + os.pathsep + os.environ.get('PYTHONPATH', ''))
+    test_root = Path(__file__).resolve().parent
+    monkeypatch.setenv('PYTHONPATH', os.pathsep.join((str(directory), str(test_root.parent),
+        str(test_root), os.environ.get('PYTHONPATH', ''))))
     from demiflow.execution import arrow_payload as module
     old = {name: getattr(module, name) for name in ('publish_batch','fallback_row')}
     for name, value in old.items():

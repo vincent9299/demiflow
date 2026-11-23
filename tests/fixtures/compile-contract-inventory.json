@@ -264,6 +264,7 @@
    ],
    "how": [
     "execution/contracts/relational_region.py",
+    "execution/kernels/relational.py",
     "execution/kernels/relational_region.py",
     "planning/dataflow_place.py"
    ],
@@ -376,6 +377,7 @@
     "execution/contracts/relational_region.py",
     "execution/kernels/lance_keys.py",
     "execution/kernels/operator.py",
+    "execution/kernels/relational.py",
     "execution/kernels/relational_region.py",
     "execution/worker/dataflow_graph_runner.py",
     "execution/worker/key_exclusion.py",
@@ -443,6 +445,7 @@
    ],
    "right_on": [
     "execution/kernels/operator.py",
+    "execution/kernels/relational.py",
     "execution/kernels/relational_region.py"
    ],
    "routes": [

@@ -912,12 +912,16 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
 
 def _join_arrow_snapshots(graph, snapshots, splits, stages):
     """Keep a fixed Lance probe columnar up to a co-located finite hash join."""
+    from .dataflow_compile import _plain
+    from ..execution.contracts.relational_region import TYPED_JOIN_SUFFIX
+    if len(stages) == 1 and stages[0].stage_id.endswith(TYPED_JOIN_SUFFIX):
+        return tuple(replace(source, immutable_identity={**_plain(source.immutable_identity),
+            'record_carrier_v1': 'mapped_arrow'}) for source in snapshots)
     # The probe reaches this one worker directly, in source order. A hash
     # exchange, a UDF, a fork or another consumer may need the original row.
     if (graph.jobs or len(graph.nodes) != 4 or len(graph.edges) != 3 or len(snapshots) != 2
             or len(splits) != 2 or len(stages) != 1 or len(stages[0].partitions) != 1):
         return snapshots
-    from .dataflow_compile import _plain
     nodes = _node_map(graph)
     for edge in graph.edges:
         join = nodes[edge.consumer].kernel
@@ -988,9 +992,10 @@ def compile_physical_dataflow(
     stages = specialize_graph_stages(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
     stages = tuple(stage for stage in stages if not refs.intersection(stage.occurrences))
     if _allow_offset_sql:
-        from .dataflow_relational_regions import place_key_exclusion, place_join_probe
+        from .dataflow_relational_regions import place_key_exclusion, place_join_probe, place_typed_join
         stages = place_join_probe(graph, snapshots, splits, stages, policy=policy, bounds=bounds, hosts=hosts)
         stages = place_key_exclusion(graph, snapshots, splits, stages, policy=policy, bounds=bounds, hosts=hosts)
+        stages = place_typed_join(graph, snapshots, splits, stages, policy=policy, bounds=bounds, hosts=hosts)
     jobs, values = physical_values(graph, stages)
     exchanges = plan_exchanges(graph, stages, policy=policy, bounds=bounds)
     exchanges = specialize_graph_exchanges(graph, stages, exchanges, bounds=bounds)

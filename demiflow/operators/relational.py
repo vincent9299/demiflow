@@ -221,3 +221,26 @@ def hash_join_pairs(spool, left, right, *, how, shift=JOIN_PARTITION_BITS):
             matches = ((offset, header) for offset, header in spool.entries(right)
                 if header[1] == lheader[1] and spool.key(offset, header) == key)
         yield from match_probe(spool, key, matches, how, spool.hold_probe_record, loffset, lheader)
+
+
+def project_columns(columns, kind, configuration):
+    """Resolve row-preserving column operations without decoding business values."""
+    from collections.abc import Mapping
+    if kind == 'SelectColumnsOp':
+        names = tuple(configuration['columns'])
+        if any(name not in columns for name in names) or len(names) != len(set(names)):
+            return None  # Let the original row path decide its error/collision semantics.
+        return tuple(columns.index(name) for name in names), names
+    if kind == 'DropColumnsOp':
+        removed = configuration['columns']
+        if any(name not in columns for name in removed):
+            return None
+        indices = tuple(i for i, name in enumerate(columns) if name not in removed)
+        return indices, tuple(columns[i] for i in indices)
+    if kind == 'RenameColumnsOp':
+        names = configuration['names']
+        names = tuple(names.get(name, name) for name in columns) if isinstance(names, Mapping) else tuple(names)
+        if len(names) != len(columns) or len(names) != len(set(names)):
+            return None
+        return tuple(range(len(columns))), names
+    return None

@@ -199,3 +199,26 @@ def offset_join_query(first, second, maximum):
         f'SELECT CAST(1 AS BIGINT), {ao}, {bo}, {co}, {ai}, {bi}, {ci} FROM {joined.view}')
     order = builder.order_sql(Relation(combined, None, ('phase', 'ai', 'bi', 'ci')))
     return builder.query(f'SELECT phase, ao, bo, co FROM {combined} ORDER BY {order} LIMIT {maximum + 1}')
+
+
+def typed_join_query(types, how):
+    """Original typed join templates over already-bound key columns and row offsets."""
+    import pyarrow as pa
+    from types import SimpleNamespace
+    if not types or how not in ('inner', 'left', 'semi', 'anti'):
+        raise ValueError('invalid typed join')
+    builder = RelationalSQL()
+    keys = tuple('k' + str(index) for index in range(len(types)))
+    schema = pa.schema([*zip(keys, types), ('off', pa.int64())])
+    left = builder.input_table('lkeys', schema)
+    right = builder.input_table('rkeys', schema)
+    source = SimpleNamespace(on=keys, right_on=keys, how=how)
+    if len(types) == 1 and (pa.types.is_string(types[0]) or pa.types.is_large_string(types[0])):
+        # Compare raw strings before the canonical-key UDF sees the surviving rows.
+        joined = builder.string_join(left, right, source)
+    else:
+        joined = builder.join(builder.keyed(left, keys), builder.keyed(right, keys), source)
+    lo = left.columns[-1].value
+    ro = right.columns[-1].value if how in ('inner', 'left') else 'CAST(NULL AS BIGINT)'
+    return (builder.query(f'SELECT {lo} AS lo, {ro} AS ro FROM {joined.view} '
+                          f'ORDER BY {builder.order_sql(joined)}'), builder.key_functions)
