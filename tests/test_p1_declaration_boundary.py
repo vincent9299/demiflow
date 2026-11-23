@@ -33,8 +33,8 @@ assert validate_relational_inputs(source, expected_inputs=2) is None
 forbidden = (
     'demiflow.execution.local_kernel', 'demiflow.execution.run_context', 'demiflow.execution.checked',
     'demiflow.execution.action_driver.dataflow', 'demiflow.execution.executors',
-    'demiflow.execution.package_loader', 'demiflow.execution.dataflow_api',
-    'demiflow.execution.dataflow_models',
+    'demiflow.execution.package_loader', 'demiflow.execution.executors.dataflow_api',
+    'demiflow.execution.operator_bindings.dataflow_models',
 )
 loaded = [name for name in sys.modules
           if any(name == prefix or name.startswith(prefix + '.') for prefix in forbidden)]
