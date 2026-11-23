@@ -21,6 +21,7 @@ from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace as NS
 
+import demiflow.execution.worker.mailbox as MAILBOX
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -1402,14 +1403,14 @@ def test_h046():
 
 
 def test_h047():
-    mb = HOSTS.ControlMailbox(bounds=BIG, check_stop=lambda: None)
+    mb = MAILBOX.ControlMailbox(bounds=BIG, check_stop=lambda: None)
     rt = CTRL.RayControlTransport(mb, bounds=BIG)
     assert rt._mailbox is mb and rt.store is None
     assert not hasattr(rt, '_journal') and not hasattr(rt, '_connection')
 
 
 def test_h048():
-    mb = HOSTS.ControlMailbox(bounds=BIG, check_stop=lambda: None)
+    mb = MAILBOX.ControlMailbox(bounds=BIG, check_stop=lambda: None)
     rt = CTRL.RayControlTransport(mb, bounds=BIG)
     ev = mk_event('op1')
 
@@ -1433,7 +1434,7 @@ def test_h048():
 
 
 def test_h061():
-    mb = HOSTS.ControlMailbox(bounds=Bounds(max_pending_events=2), check_stop=lambda: None)
+    mb = MAILBOX.ControlMailbox(bounds=Bounds(max_pending_events=2), check_stop=lambda: None)
     ths = []
 
     def req(e):
@@ -1455,7 +1456,7 @@ def test_h061():
 
 
 def test_h062():
-    mb = HOSTS.ControlMailbox(bounds=BIG, check_stop=lambda: None)
+    mb = MAILBOX.ControlMailbox(bounds=BIG, check_stop=lambda: None)
     with pytest.raises(DataflowError) as ei:
         mb.request(mk_event('timeout'), deadline_ms=50)
     assert ei.value.code == 'UNKNOWN_EFFECT'
@@ -1463,14 +1464,14 @@ def test_h062():
     def stopped():
         raise DataflowError('CANCELLED', 'stopped')
 
-    mb2 = HOSTS.ControlMailbox(bounds=BIG, check_stop=stopped)
+    mb2 = MAILBOX.ControlMailbox(bounds=BIG, check_stop=stopped)
     with pytest.raises(DataflowError) as ei:
         mb2.request(mk_event('c'), deadline_ms=100)
     assert ei.value.code == 'CANCELLED'
 
 
 def test_h063():
-    mb = HOSTS.ControlMailbox(bounds=BIG, check_stop=lambda: None)
+    mb = MAILBOX.ControlMailbox(bounds=BIG, check_stop=lambda: None)
     ths = []
 
     def req(e):
@@ -1497,7 +1498,7 @@ def test_h063():
 
 
 def test_h064():
-    mb = HOSTS.ControlMailbox(bounds=BIG, check_stop=lambda: None)
+    mb = MAILBOX.ControlMailbox(bounds=BIG, check_stop=lambda: None)
     result = {}
 
     def req():
@@ -1514,8 +1515,8 @@ def test_h064():
     mb.deliver(mk_reply('op1'))
     th.join(timeout=2)
     assert result['r'].status == 'ok'
-    mb2 = HOSTS.ControlMailbox(bounds=BIG, check_stop=lambda: None)
-    waiter = HOSTS._Waiter(oid('opX'), 'digest')
+    mb2 = MAILBOX.ControlMailbox(bounds=BIG, check_stop=lambda: None)
+    waiter = MAILBOX._Waiter(oid('opX'), 'digest')
     waiter.done = True
     waiter.reply = mk_reply('opX')
     mb2._pending[oid('opX')] = waiter
@@ -1525,7 +1526,7 @@ def test_h064():
 
 
 def test_h065():
-    mb = HOSTS.ControlMailbox(bounds=BIG, check_stop=lambda: None)
+    mb = MAILBOX.ControlMailbox(bounds=BIG, check_stop=lambda: None)
     errors = []
 
     def req():
