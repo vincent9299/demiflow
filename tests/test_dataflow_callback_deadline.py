@@ -60,7 +60,7 @@ def test_callback_cancel_translation_preserves_actual_outcome(returns):
 
 
 def test_callback_deadline_drains_only_its_shared_owner_invocation():
-    from demiflow.execution.dataflow_shared import SharedActor
+    from demiflow.execution.kernels.shared import SharedActor
     class Actor:
         async def __call__(self,row):
             await asyncio.sleep(.12 if row=='long' else 10)

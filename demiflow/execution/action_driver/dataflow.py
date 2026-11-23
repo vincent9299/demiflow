@@ -479,7 +479,7 @@ class DataflowExecution:
             from ..seal.plan import load_dataflow, verify_action_programs
             graph, physical, sealed = load_dataflow(self._action.context.directory,
                 self._action.action_id, store=self._store, bounds=self._bounds)
-            from ..dataflow_shared import validate_shared_actor_binding
+            from demiflow.execution.seal.program_identity import validate_shared_actor_binding
             validate_shared_actor_binding(self._request, graph, bounds=physical.bounds)
             from ..dataflow_schema import validate_literal_schema_replay
             validate_literal_schema_replay(self._request, graph, bounds=self._bounds)

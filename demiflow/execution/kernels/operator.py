@@ -441,7 +441,7 @@ def _exceeds_record_batch(records, services):
     maximum = services.bounds.max_batch_bytes
     if sum(record.encoded_bytes for record in records) <= maximum:
         return False
-    from demiflow.execution.kernels.arrow_payload import batch_cache
+    from demiflow.execution.storage.arrow_payload import batch_cache
     from demiflow.execution.contracts.record_codec import ARROW_BATCH_MEDIA
     from demiflow.execution.contracts.record_codec import mapped_row_bytes
     total = 0
@@ -468,7 +468,7 @@ class OperatorKernel:
         self.observations = CallbackObservations()
         self._services = services
         self._finite_services = services if finite_services is None else finite_services
-        from demiflow.execution.record_schema import RecordSchemas
+        from demiflow.execution.storage.record_schema import RecordSchemas
         self._schemas = RecordSchemas(services)
         self._partition_id = partition_id
         self._occurrence = _occurrence(spec)
@@ -592,10 +592,10 @@ class OperatorKernel:
                     # resident serialized copy of the whole program.
                     if program is None:
                         raise _err('INVALID_CONTRACT', 'task kernel requires a staged program')
-                    from demiflow.execution.kernels.task_scope import task_uses_function_slots
+                    from demiflow.execution.compiler_support.operator_policy import task_uses_function_slots
                     self._task_function_slots = task_uses_function_slots(program.value)
                     if self._measured_task:
-                        from demiflow.execution.kernels.task_scope import task_has_measurable_state
+                        from demiflow.execution.compiler_support.operator_policy import task_has_measurable_state
                         if self._shared_actor is not None or not task_has_measurable_state(program.value):
                             raise _err('INVALID_CONTRACT', 'elastic state needs a private measurable task')
                 # A restored task constructs only if its snapshot has a live
@@ -625,7 +625,8 @@ class OperatorKernel:
     def _create_instance(self, slot):
         from dataclasses import replace
         from demiflow.data.plan import CallableSpec
-        from demiflow.execution.kernels.task_scope import clone_resident_callable, function_residency_kind
+        from demiflow.execution.kernels.task_scope import clone_resident_callable
+        from demiflow.execution.compiler_support.operator_policy import function_residency_kind
 
         declaration = self._program.value if self._program is not None else None
         if self._task_rows and self._shared_actor is None and not self._task_function_slots:
@@ -721,7 +722,7 @@ class OperatorKernel:
         if self._measured_task:
             self._admit_task_workspace(self._task_state_bytes() + self._restore_workspace_bytes())
         if self._spec.state != 'none':
-            from demiflow.execution.operator_policy import classify_operator_state
+            from demiflow.execution.compiler_support.operator_policy import classify_operator_state
             owner = self._state_owner(instance)
             policy = classify_operator_state(owner, phase='instance')
             if policy.mode == 'function' and not self._measured_task:
@@ -1455,7 +1456,8 @@ class OperatorKernel:
         if instance is None or self._spec.state == "none":
             return None
         owner = self._state_owner(instance)
-        from demiflow.execution.operator_policy import classify_operator_state, snapshot_auto_state
+        from demiflow.execution.compiler_support.operator_policy import classify_operator_state
+        from demiflow.execution.kernels.operator_state import snapshot_auto_state
         policy = classify_operator_state(owner, phase="instance")
         snapshot = getattr(owner, "__demiflow_snapshot__", None)
         if snapshot is not None:
@@ -1647,7 +1649,7 @@ class OperatorKernel:
             self._admit_task_workspace(self._restore_workspace_bytes() + self._task_state_bytes()
                                        + json_copy_workspace(fields))
         if mode == "plain_json":
-            from demiflow.execution.operator_policy import restore_auto_state
+            from demiflow.execution.kernels.operator_state import restore_auto_state
             restore_auto_state(owner, state["value"], max_bytes=self._services.bounds.max_state_bytes, occurrence=self._occurrence)
         elif mode == 'function_slots_v1':
             from demiflow.execution.kernels.task_scope import restore_resident_function

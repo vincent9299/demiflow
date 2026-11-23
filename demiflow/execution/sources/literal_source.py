@@ -85,7 +85,7 @@ def stage_literal(source, reference, *, source_id, store, bounds):
     index = 0
     pending = None
     from demiflow.data.sources import ItemsSource
-    from demiflow.execution.record_schema import RecordSchemas
+    from demiflow.execution.storage.record_schema import RecordSchemas
     schemas = RecordSchemas(store=store, bounds=bounds)
     source_rows = ((row, None) for row in source.items) if type(source) is ItemsSource else source.handle.typed_rows()
     rows_per_segment = min(1024, bounds.max_pending_events)

@@ -116,7 +116,7 @@ def compile_operator_spec(callable_spec, *, logical_node_id, occurrence_id,
     if not adapter and not inspect.isfunction(target) and not inspect.isclass(target):
         # A hookless plain-data instance is platform-adaptable (auto_json) only
         # under shared_colocated; the same C04 policy gates precheck and compile.
-        from ..operator_policy import classify_operator_state
+        from demiflow.execution.compiler_support.operator_policy import classify_operator_state
         policy = classify_operator_state(target, phase="instance", ownership=ownership)
         if policy.mode == "auto_json" and ownership == "shared_colocated":
             adapter = True

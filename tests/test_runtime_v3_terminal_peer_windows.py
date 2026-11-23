@@ -55,7 +55,7 @@ def test_result_batch_uses_one_ack_and_replays_original_record_positions(tmp_pat
     from demiflow.execution.contracts.record_codec import decode_document
     from demiflow.execution.dataflow_replay import PublishedRecordReader
     from demiflow.execution.outputs.arrow_rows import pack_result
-    from demiflow.execution.record_schema import RecordSchemas
+    from demiflow.execution.storage.record_schema import RecordSchemas
     from demiflow.execution.worker.terminal_blocks import TerminalBlocks
 
     from test_runtime_v3_artifact_accounting import store_fixture

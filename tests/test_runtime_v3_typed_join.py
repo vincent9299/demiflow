@@ -33,7 +33,7 @@ def test_original_string_join_uses_raw_columns_after_structural_chain(tmp_path, 
         else:
             right = csv_table(tmp_path/'right.csv', ['j','r'], [('x','a'), ('x','b'), ('','blank')])
         return left.join(right, on="key", right_on="j", how=how)
-    from demiflow.execution import arrow_payload
+    from demiflow.execution.sources import arrow_payload
     monkeypatch.setattr(arrow_payload, 'fallback_row', lambda *a, **k: pytest.fail('qualified typed source lost original batch'))
     queries = []
     original = host.query_region_offsets
@@ -73,7 +73,7 @@ def test_fixed_typed_lance_join_keeps_original_sql_when_right_payload_exceeds_in
         if name == 'right':
             columns['body'] = ['r' * 2048] * len(keys)
         lance.write_dataset(pa.table(columns), str(tmp_path/name))
-    from demiflow.execution import arrow_payload
+    from demiflow.execution.sources import arrow_payload
     monkeypatch.setattr(arrow_payload, 'fallback_row', lambda *a, **k: pytest.fail('qualified typed source lost original batch'))
     queries = []
     original = host.query_region_offsets
@@ -202,9 +202,9 @@ def test_csv_shared_batch_cursor_and_projection_keep_authenticated_occurrences(t
     from dataclasses import replace
     from demiflow.data.sources import FileSource
     from demiflow.execution.sources.source_readers import FileReader
-    from demiflow.execution.kernels.arrow_payload import ArrowBatchCache
+    from demiflow.execution.storage.arrow_payload import ArrowBatchCache
     from demiflow.execution.contracts.record_codec import is_arrow_record
-    from demiflow.execution.record_schema import RecordSchemas
+    from demiflow.execution.storage.record_schema import RecordSchemas
     from test_runtime_v3_s import FakeStore, make_bounds, make_snapshot, first_split, make_services, drain
     path = tmp_path/'rows.csv'
     path.write_text('k,v\na,1\nb,2\nc,3\nd,4\n')

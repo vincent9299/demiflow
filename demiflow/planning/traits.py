@@ -73,7 +73,7 @@ def unified_operation_traits(op):
         # keeps that adapter instead of dropping it for not being a class. A
         # plain-data instance has the same shared owner as its auto_json adapter;
         # precheck enforces concurrency 1 before any actor starts.
-        from ..execution.operator_policy import classify_operator_state
+        from demiflow.execution.compiler_support.operator_policy import classify_operator_state
         target = callable_spec.target
         if callable_spec.is_class:
             policy = classify_operator_state(target, phase="declaration")

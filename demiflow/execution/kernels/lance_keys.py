@@ -3,7 +3,7 @@ from dataclasses import replace
 from demiflow.execution.contracts.dataflow import clone_record
 
 from ..contracts.dataflow_errors import DataflowError
-from ..record_schema import RecordSchemas
+from demiflow.execution.storage.record_schema import RecordSchemas
 from .dataflow import _materialize_row, _output_record, _hash_id, _OutputBudget
 from .ordering import build_sort_runs, merge_sort_runs
 

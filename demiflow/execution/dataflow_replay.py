@@ -41,7 +41,7 @@ class PublishedRecordReader:
     def _read_frames(self, publication):
         from itertools import groupby
         from demiflow.execution.storage.segments import ARROW_STREAM_MEDIA, tree_refs, SEGMENTS_MEDIA
-        from demiflow.execution.record_schema import RecordSchemas
+        from demiflow.execution.storage.record_schema import RecordSchemas
         from demiflow.execution.outputs.arrow_rows import PublishedArrowRows
         schemas = None
         schema_ref = publication['manifest'].get('schema_ref')

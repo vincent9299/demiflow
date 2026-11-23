@@ -175,7 +175,7 @@ def compile_routed_prompt(operation, declaration, *, program_ref, bounds):
         'max_requests': max_requests,
         'catch': [c.__module__ + '.' + c.__qualname__ for c in operation.catch]}
     configuration['node_id'] = identity(['routed-prompt', configuration])
-    from demiflow.execution.kernels.task_scope import function_residency_kind
+    from demiflow.execution.compiler_support.operator_policy import function_residency_kind
     state = 'nonrecoverable' if any('private_journal' in model.configuration for model in models.values()) else 'none'
     for child in children.values():
         predicate = child.constructor_args[1].get('when')

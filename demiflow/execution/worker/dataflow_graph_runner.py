@@ -233,7 +233,7 @@ class WorkerGraphRunner:
                 blocks.retain_columns(manifest['columns'])
                 self._terminal_columns = manifest["columns"]
                 self._terminal_non_mapping_values = non_mapping_values
-                from demiflow.execution.record_schema import RecordSchemas
+                from demiflow.execution.storage.record_schema import RecordSchemas
                 self._terminal_schema_ref = (_artifact_from_json(manifest['schema_ref'])
                                             if manifest.get('schema_ref') is not None else None)
                 RecordSchemas(self.services).read(self._terminal_schema_ref)
@@ -385,7 +385,7 @@ class WorkerGraphRunner:
         self._restore_terminal()
         if self._terminal_spec is not None and not self._restored_terminal:
             from demiflow.execution.dataflow_schema import terminal_schema
-            from demiflow.execution.record_schema import RecordSchemas
+            from demiflow.execution.storage.record_schema import RecordSchemas
             occurrence = next(occ for occ, node in self.e._node_specs.items() if node.kind == 'terminal')
             schema = terminal_schema(self.e._graph, self.e._physical,
                 terminal=occurrence, bounds=self.bounds)
@@ -849,7 +849,7 @@ class WorkerGraphRunner:
             self._finish_source_split(split_id, source)
             return
         if self._terminal_schema_ref is None:
-            from demiflow.execution.record_schema import RecordSchemas
+            from demiflow.execution.storage.record_schema import RecordSchemas
             self._terminal_schema_ref = RecordSchemas(self.services).put(batch.schema)
             self._set_terminal_columns(batch.schema, schema=True)
         self._terminal_blocks.append_arrow_batch(batch)
@@ -874,7 +874,7 @@ class WorkerGraphRunner:
         from demiflow.execution.contracts.dataflow import sealed_execution_ceilings
         from demiflow.execution.contracts.record_codec import admit_workspace
         from demiflow.execution.outputs.arrow_rows import pack_result, validate_row_sizes
-        from demiflow.execution.record_schema import RecordSchemas
+        from demiflow.execution.storage.record_schema import RecordSchemas
         caps = sealed_execution_ceilings(self.e._graph)
         row_budget = min(self.bounds.max_row_bytes, producer.kernel.output_bound_bytes or self.bounds.max_row_bytes)
         validate_row_sizes(batch, row_budget)
@@ -1346,7 +1346,7 @@ class WorkerGraphRunner:
                     # Cross-partition totals remain the driver's responsibility.
                     raise ValueError(f'Dataset contains more than the take_all limit of {maximum} rows')
             from demiflow.execution.contracts.record_codec import is_arrow_record
-            from demiflow.execution.kernels.arrow_payload import batch_cache
+            from demiflow.execution.storage.arrow_payload import batch_cache
             if is_arrow_record(record):
                 # Actual worker delivery uses the transfer codec directly.
                 # Authenticate and bind the shared payload before accepting its
@@ -1407,7 +1407,7 @@ class WorkerGraphRunner:
                 if isinstance(record.inline, Mapping):
                     self._set_terminal_columns(record.inline, row=record.inline, sort=True)
                 elif record.schema_ref is not None:
-                    from demiflow.execution.record_schema import RecordSchemas
+                    from demiflow.execution.storage.record_schema import RecordSchemas
                     self._set_terminal_columns(RecordSchemas(self.services).read(record.schema_ref), schema=True)
             raw = self._frame_call(encode_document, record, self.bounds)
             size, chunks = self._frame_call(frame_parts, record, self.bounds, raw=raw)

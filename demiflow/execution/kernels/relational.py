@@ -45,7 +45,7 @@ def typed_join_pairs(left, right, *, spec, services, retained_key):
     """Compute with raw declared key columns; finite ports keep the fallback input."""
     from demiflow.execution.contracts.relational_region import TYPED_JOIN_SUFFIX, SQL_CHILD_RSS, SQL_PARENT_WINDOW
     from demiflow.execution.contracts.record_codec import ARROW_MEDIA_TYPES
-    from demiflow.execution.kernels.arrow_payload import batch_cache
+    from demiflow.execution.storage.arrow_payload import batch_cache
     from demiflow.operators.relational_sql import typed_join_query, json_key_type
     if not any(s.stage_id.endswith(TYPED_JOIN_SUFFIX) for s in services.assignment.stages):
         return None
@@ -57,7 +57,7 @@ def typed_join_pairs(left, right, *, spec, services, retained_key):
     tables, inputs, types = {}, [], None
     retained = 4096
     cache = batch_cache(services.store, services.bounds, services=services)
-    from demiflow.execution.record_schema import RecordSchemas
+    from demiflow.execution.storage.record_schema import RecordSchemas
     schemas = RecordSchemas(services)
     for name, port, fields in zip(('lkeys', 'rkeys'), (left, right), columns):
         scan = port.within_offset_budget(window // 2048)

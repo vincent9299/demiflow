@@ -305,7 +305,7 @@ def combine_prepared_sinks(refs, *, sink_id: str, services: DriverServices):
         raise DataflowError("BUDGET_EXCEEDED", "Prepared sink partition count exceeds budget")
     partitions, seen = {}, set()
     total_rows, total_bytes, columns = 0, 0, None
-    from demiflow.execution.record_schema import RecordSchemas
+    from demiflow.execution.storage.record_schema import RecordSchemas
     schemas = RecordSchemas(services)
     schema_ref, declared_schema = None, None
     non_mapping_values = column_drift = schema_drift = False
@@ -406,8 +406,8 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
     from demiflow.execution.contracts.record_codec import decode_frame, decode_document, line_limit, read_chunk_bytes, admit_workspace, metadata_bytes, raw_workspace, _typed_shape, _json_shape
     from demiflow.execution.storage.streams import frame_stream, read_document
     from demiflow.execution.contracts.dataflow import thaw_record_value
-    from demiflow.execution.record_schema import RecordSchemas
-    from demiflow.execution.kernels.arrow_payload import ArrowBatchCache
+    from demiflow.execution.storage.record_schema import RecordSchemas
+    from demiflow.execution.storage.arrow_payload import ArrowBatchCache
     from demiflow.execution.contracts.record_codec import is_arrow_record
     from demiflow.data.runtime_contract import check_size
     schemas = RecordSchemas(store=store, bounds=bounds)

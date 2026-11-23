@@ -440,7 +440,7 @@ class TerminalBlocks:
         from demiflow.execution.storage.streams import frame_stream
         from demiflow.execution.storage.streams import read_document
         from demiflow.execution.kernels.dataflow import _materialize_row
-        from demiflow.execution.kernels.arrow_payload import ArrowBatchCache
+        from demiflow.execution.storage.arrow_payload import ArrowBatchCache
         from demiflow.execution.contracts.record_codec import is_arrow_record
         index_bytes = 0
         stream = None

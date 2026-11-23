@@ -50,7 +50,8 @@ class RoutedPromptFactory:
 class CacheFactory:
     def __new__(cls, declaration, directory, version, options, synchronous):
         from ..data.result_cache import CachedMap, CachedSyncMap
-        from .kernels.task_scope import function_residency_kind, clone_resident_function
+        from demiflow.execution.compiler_support.operator_policy import function_residency_kind
+        from demiflow.execution.kernels.task_scope import clone_resident_function
         fn = declaration.instantiate()
         actor = (CachedSyncMap if synchronous else CachedMap)(fn, directory, version, **options)
         if actor.validate_runtime_state() is not None:

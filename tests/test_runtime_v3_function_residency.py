@@ -10,9 +10,8 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.kernels.task_scope import (
-    function_residency_kind, snapshot_resident_function, restore_resident_function,
-)
+from demiflow.execution.compiler_support.operator_policy import function_residency_kind
+from demiflow.execution.kernels.task_scope import snapshot_resident_function, restore_resident_function
 
 
 def identity(row):

@@ -7,7 +7,7 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution.kernels.arrow_payload import ArrowBatchCache
+from demiflow.execution.storage.arrow_payload import ArrowBatchCache
 from demiflow.execution.contracts.record_codec import is_arrow_record, row_upper
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.run_context import RunContext

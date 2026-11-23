@@ -5,7 +5,7 @@ import pytest
 
 from demiflow import data
 from demiflow.data.plan import CallableSpec
-from demiflow.execution.kernels.task_scope import owned_factory_declaration
+from demiflow.execution.compiler_support.operator_policy import owned_factory_declaration
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
@@ -77,7 +77,7 @@ def test_factory_classification_never_iterates_unknown_constructor_mapping():
 
 def test_measurable_factory_does_not_invoke_business_descriptors():
     from unittest.mock import PropertyMock
-    from demiflow.execution.kernels.task_scope import task_has_measurable_state
+    from demiflow.execution.compiler_support.operator_policy import task_has_measurable_state
     descriptor = PropertyMock(side_effect=AssertionError('passive query executed a descriptor'))
     class Factory:
         __getattribute__ = descriptor

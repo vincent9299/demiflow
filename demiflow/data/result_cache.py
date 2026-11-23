@@ -38,8 +38,9 @@ def _state_owner(value):
 
 def _state_policy(value):
     """Retain function bindings at the existing native function-state boundary."""
-    from ..execution.operator_policy import classify_operator_state
-    from ..execution.kernels.task_scope import function_residency_kind, snapshot_resident_function
+    from demiflow.execution.compiler_support.operator_policy import classify_operator_state
+    from demiflow.execution.compiler_support.operator_policy import function_residency_kind
+    from demiflow.execution.kernels.task_scope import snapshot_resident_function
     owner = _state_owner(value)
     if owner is None:
         return owner, 'none', None
@@ -172,7 +173,7 @@ class CacheCall:
 
     def validate_runtime_state(self, concurrency=1):
         from ..execution.recovery_contract import RecoveryContractError
-        from ..execution.kernels.task_scope import _resident_slots
+        from demiflow.execution.compiler_support.operator_policy import _resident_slots
         restriction = None
         functions, mutable = set(), set()
         cells, owned_cells = {}, set()
@@ -205,7 +206,7 @@ class CacheCall:
         return restriction
 
     async def snapshot_state(self):
-        from ..execution.operator_policy import snapshot_auto_state
+        from demiflow.execution.kernels.operator_state import snapshot_auto_state
         from ..execution.kernels.task_scope import snapshot_resident_function
         result = {}
         restriction = self.validate_runtime_state()
@@ -238,7 +239,7 @@ class CacheCall:
         return result
 
     async def restore_state(self, state):
-        from ..execution.operator_policy import restore_auto_state
+        from demiflow.execution.kernels.operator_state import restore_auto_state
         from ..execution.recovery_contract import RecoveryContractError
         from ..execution.contracts.dataflow_errors import DataflowError
         from ..execution.kernels.task_scope import restore_resident_function

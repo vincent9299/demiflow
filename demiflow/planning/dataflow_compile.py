@@ -289,7 +289,7 @@ def compile_kernel_spec(
     if isinstance(declaration, CallableSpec):
         import functools
         import types
-        from ..execution.operator_policy import classify_operator_state
+        from demiflow.execution.compiler_support.operator_policy import classify_operator_state
         target = declaration.target
         if (type(target) is types.MethodWrapperType and target.__name__ == '__call__'
                 and type(target.__self__) is functools.partial):
@@ -300,7 +300,7 @@ def compile_kernel_spec(
         state = {"function": "none", "factory": "auto_json", "auto_json": "auto_json",
                  "hooks": "adapter", "unsupported": "nonrecoverable"}[policy.mode]
         if policy.mode == 'function':
-            from ..execution.kernels.task_scope import function_residency_kind
+            from demiflow.execution.compiler_support.operator_policy import function_residency_kind
             state = function_residency_kind(declaration.target, call_args=declaration.call_args,
                                             call_kwargs=declaration.call_kwargs)
         elif model_kind == 'cache':
@@ -779,7 +779,7 @@ class _Capture:
                     runtime_contract=getattr(callable_spec, 'runtime_contract', None))
             if isinstance(operation, NativeOperation):
                 callable_spec = operation.factory
-            from ..execution.kernels.task_scope import TASK_KINDS
+            from demiflow.execution.contracts.dataflow_kinds import TASK_KINDS
             if kernel.kind in TASK_KINDS and not kernel.configuration.get('streaming_map'):
                 task_rows = self.defaults.task_batch_rows
                 state = kernel.state

@@ -173,7 +173,7 @@ def _materialize_row(record: Record, services: RuntimeServices, *, measured=Fals
     if record.inline is not None:
         return thaw_record_value(record.inline)
     from demiflow.execution.contracts.record_codec import is_arrow_record
-    from demiflow.execution.kernels.arrow_payload import materialize_arrow_row
+    from demiflow.execution.storage.arrow_payload import materialize_arrow_row
     if is_arrow_record(record):
         return materialize_arrow_row(record, services)
     ref = record.payload_ref
@@ -351,7 +351,7 @@ def invoke_unary(
         return
     if kind in ('SelectColumnsOp', 'DropColumnsOp', 'RenameColumnsOp') and record.payload_ref is not None:
         from demiflow.execution.contracts.record_codec import ARROW_MEDIA_TYPES
-        from demiflow.execution.kernels.arrow_payload import batch_cache
+        from demiflow.execution.storage.arrow_payload import batch_cache
         from demiflow.operators.relational import project_columns
         if record.payload_ref.media_type in ARROW_MEDIA_TYPES:
             cache = batch_cache(services.store, services.bounds, services=services)
@@ -359,7 +359,7 @@ def invoke_unary(
             projection = project_columns(batch.schema.names, kind, cfg)
             if projection is not None:
                 if schemas is None:
-                    from demiflow.execution.record_schema import RecordSchemas
+                    from demiflow.execution.storage.record_schema import RecordSchemas
                     schemas = RecordSchemas(services)
                 projected = cache.project(record, *projection, schemas)
                 if projected is not None:
@@ -379,7 +379,7 @@ def invoke_unary(
     position = record.source_position
     sequence = record.sequence
     if schemas is None:
-        from demiflow.execution.record_schema import RecordSchemas
+        from demiflow.execution.storage.record_schema import RecordSchemas
         schemas = RecordSchemas(services)
 
     if kind in ("MapOp", "BoundMapOp") and not cfg.get("streaming_map"):
@@ -591,7 +591,7 @@ def _callback_table(records, services, *, zero_copy):
     """Reassemble the original business batch from validated, consecutive IPC slices."""
     import pyarrow as pa
     from demiflow.execution.contracts.record_codec import _resident_budget
-    from demiflow.execution.kernels.arrow_payload import batch_cache
+    from demiflow.execution.storage.arrow_payload import batch_cache
     cache = batch_cache(services.store, services.bounds, services=services)
     limit = min(services.bounds.max_batch_bytes,
                 _resident_budget(services.bounds, getattr(services, 'assignment', None)))
@@ -709,7 +709,7 @@ def invoke_batch(
     input_bytes = sum(_input_row_bytes(record) for record in records)
     budget = _OutputBudget(spec, services)
     if schemas is None:
-        from demiflow.execution.record_schema import RecordSchemas
+        from demiflow.execution.storage.record_schema import RecordSchemas
         schemas = RecordSchemas(services)
     schema = schemas.read(records[0].schema_ref) if records else None
     if any(record.schema_ref != records[0].schema_ref for record in records):

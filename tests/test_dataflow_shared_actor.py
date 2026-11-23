@@ -329,7 +329,7 @@ def test_mandatory_shared_placement_is_acyclic_and_preserves_requests(shape):
 @pytest.mark.parametrize('state', [None, {'mode': 'hooks', 'value': {}},
     {'mode': 'shared_owner', 'owner': 'wrong'}])
 def test_shared_restore_rejects_missing_or_wrong_alias(state):
-    from demiflow.execution.dataflow_shared import SharedActor
+    from demiflow.execution.kernels.shared import SharedActor
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     actor = SharedActor({'owner': 'a', 'members': ['a', 'b'], 'state_owner': 'b'}, object())
     with pytest.raises(DataflowError, match='Shared actor'):
@@ -368,7 +368,7 @@ def test_recipe_alias_validation_checks_both_directions(tmp_path, original_share
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.dataflow_api import _CompileContext
     from demiflow.execution.run_context import RunAction
-    from demiflow.execution.dataflow_shared import validate_shared_actor_binding
+    from demiflow.execution.seal.program_identity import validate_shared_actor_binding
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     action = RunAction(_CompileContext(), 'alias-history', {})
@@ -393,7 +393,7 @@ def test_recipe_alias_validation_checks_both_directions(tmp_path, original_share
 
 def test_unversioned_history_is_not_reinterpreted():
     from types import SimpleNamespace
-    from demiflow.execution.dataflow_shared import validate_shared_actor_binding
+    from demiflow.execution.seal.program_identity import validate_shared_actor_binding
     # No new marker => no capture or interpretation of a new recipe at all.
     class Refuse:
         def __getattribute__(self, name):
@@ -413,7 +413,7 @@ def test_alias_admission_never_reads_source_or_constructs_factory(tmp_path, monk
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.dataflow_api import _CompileContext
     from demiflow.execution.run_context import RunAction
-    from demiflow.execution.dataflow_shared import validate_shared_actor_binding
+    from demiflow.execution.seal.program_identity import validate_shared_actor_binding
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     calls = []
@@ -464,7 +464,7 @@ def test_passive_actor_relation_matches_multi_input_occurrences(tmp_path, monkey
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.dataflow_api import _CompileContext
     from demiflow.execution.run_context import RunAction
-    from demiflow.execution.dataflow_shared import validate_shared_actor_binding
+    from demiflow.execution.seal.program_identity import validate_shared_actor_binding
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     action = RunAction(_CompileContext(), 'alias-multi-input', {})

@@ -10,6 +10,8 @@ modules that cannot import execution.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import math
 import re
 from collections.abc import Mapping as _RuntimeMapping
@@ -2120,3 +2122,17 @@ def stage_resident_bytes(assignment):
     stages = getattr(assignment, 'stages', ())
     return (sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes'])
                 for stage in stages) if stages else None)
+
+
+def shared_binding(configuration, occurrence):
+    value = configuration.get('shared_actor')
+    if value is None:
+        return None
+    if (not isinstance(value, Mapping) or set(value) != {'owner', 'members', 'state_owner'}
+            or not isinstance(value['members'], (tuple, list)) or len(value['members']) < 2
+            or any(type(o) is not str for o in value['members'])
+            or len(set(value['members'])) != len(value['members'])
+            or occurrence not in value['members'] or value['owner'] != value['members'][0]
+            or value['state_owner'] != value['members'][-1]):
+        raise DataflowError('INVALID_CONTRACT', 'Invalid shared actor occurrence binding')
+    return {'owner': value['owner'], 'members': list(value['members']), 'state_owner': value['state_owner']}

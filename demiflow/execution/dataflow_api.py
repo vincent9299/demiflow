@@ -356,7 +356,7 @@ def _run_dataset_action(request: ActionRequest, *, after_prepare=None) -> object
             return collect_rows(handle, limit=arguments.get("limit"), bounds=bounds,
                                 verify_complete=True)
         if request.kind == "take_batch":
-            from .record_schema import RecordSchemas
+            from demiflow.execution.storage.record_schema import RecordSchemas
             schemas, seen = RecordSchemas(handle.services), []
             def receive_schema(ref):
                 schema = schemas.read(ref)

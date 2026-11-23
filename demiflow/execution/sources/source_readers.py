@@ -66,7 +66,7 @@ class _BaseReader:
         self._lease_ref: ArtifactRef | None = None
         self._closed = False
         self._opened = False
-        from demiflow.execution.record_schema import RecordSchemas
+        from demiflow.execution.storage.record_schema import RecordSchemas
         self._schemas = RecordSchemas(services)
         self._schema_ref = None
 
@@ -546,7 +546,7 @@ class FileReader(_BaseReader):
                         raise DataflowError('BUDGET_EXCEEDED',
                                             'CSV decoded buffers and input blocks exceed batch budget')
                     if self._snapshot.immutable_identity.get('record_carrier_v1') == 'mapped_arrow':
-                        from demiflow.execution.arrow_payload import publish_source_rows
+                        from demiflow.execution.sources.arrow_payload import publish_source_rows
                         yield from publish_source_rows(batch, reader=self, retained_bytes=2 * block_bytes,
                             position_at=lambda i: {'file_index':self._file_index, 'record_index':ordinal + i})
                         ordinal += batch.num_rows
@@ -667,7 +667,7 @@ class LanceReader(_BaseReader):
         self._rows = self._iter_rows()
         prefix = None
         if saved is not None:
-            from demiflow.execution.kernels.arrow_payload import ArrowBatchCache
+            from demiflow.execution.storage.arrow_payload import ArrowBatchCache
             from demiflow.execution.contracts.record_codec import ArrowPayload
             ref = ArtifactRef(**saved)
             cache = ArrowBatchCache(self._services.store, self._services.bounds, services=self._services)
@@ -778,7 +778,7 @@ class LanceReader(_BaseReader):
         aggregate = 32 + sum(len(json.dumps(f.name).encode()) + 8 + _value_upper(col)
                              for f, col in zip(piece.schema, piece.columns))
         if aggregate > bounds.max_row_bytes:
-            from demiflow.execution.arrow_payload import fallback_row
+            from demiflow.execution.sources.arrow_payload import fallback_row
             for index in range(size):
                 if row_upper(piece, index) > bounds.max_row_bytes:
                     _encoded_size(fallback_row(piece, index), max_bytes=bounds.max_row_bytes)
@@ -831,11 +831,11 @@ class LanceReader(_BaseReader):
             if columns and exact.projection:
                 batch = batch.select(columns)
             self._schema_ref = self._schemas.put(batch.schema)
-            from demiflow.execution.arrow_payload import publish_batch
+            from demiflow.execution.sources.arrow_payload import publish_batch
             from demiflow.execution.contracts.record_codec import ArrowPayload
-            from demiflow.execution.arrow_payload import fallback_row
+            from demiflow.execution.sources.arrow_payload import fallback_row
             if self._snapshot.immutable_identity.get('record_carrier_v1') == 'mapped_arrow':
-                from demiflow.execution.arrow_payload import publish_source_rows
+                from demiflow.execution.sources.arrow_payload import publish_source_rows
                 yield from publish_source_rows(batch, reader=self,
                     retained_bytes=min(self._services.bounds.max_batch_bytes,
                                        self._arrow_scan_rows * self._services.bounds.max_row_bytes),
@@ -860,7 +860,7 @@ class LanceReader(_BaseReader):
                 # A scanner may admit just one worst-case row per fetch. Group
                 # its *actual* small buffers before creating an IPC artifact.
                 from demiflow.execution.contracts.record_codec import _MAX_ROWS as ARROW_MAX_ROWS
-                from demiflow.execution.arrow_payload import compact_scan_batches
+                from demiflow.execution.sources.arrow_payload import compact_scan_batches
                 target = limit_value(self._services, 'batch_rows', self._plan.query.batch_size or ARROW_MAX_ROWS)
                 yield from compact_scan_batches(batches, services=self._services, target_rows=target)
             else:

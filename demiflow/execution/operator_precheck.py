@@ -14,7 +14,7 @@ import inspect
 
 from .contracts.errors import ProtocolError
 from .contracts.operator import _adapter_present
-from .operator_policy import classify_operator_state
+from demiflow.execution.compiler_support.operator_policy import classify_operator_state
 
 
 def precheck_operator_state(callable_spec, traits):

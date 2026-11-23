@@ -195,3 +195,6 @@ def operator_rows() -> tuple:
 def traits_of(entry: str) -> Mapping[str, tuple]:
     """kind -> (state, effect, resource role, mergeable) for the operators declared through ``entry``."""
     return MappingProxyType({record.name: record.traits for record in _RECORDS if record.entry == entry})
+
+
+TASK_KINDS = kinds_with('task')

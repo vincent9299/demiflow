@@ -347,7 +347,7 @@ class DataflowWorkerExecutor:
             self._source_run = source_run_view(self._services, limits=facts['limits'])
             with source_run_scope(self._source_run):
                 assignment = self.assignment
-                from demiflow.execution.dataflow_shared import shared_actors
+                from demiflow.execution.kernels.shared import shared_actors
                 shared = shared_actors(self._kernel_specs, self._services.programs, assignment, graph=self._graph)
                 if self._restored_states:
                     for group in set(shared.values()):

@@ -284,7 +284,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
         if declaration.occurrence_id in declarations:
             raise DataflowError("INVALID_CONTRACT", "Duplicate program declaration occurrence")
         declarations[declaration.occurrence_id] = declaration
-    from ..dataflow_shared import shared_binding
+    from demiflow.execution.contracts.dataflow import shared_binding
     shared_payloads = {}
     for node in graph.nodes:
         binding = shared_binding(node.kernel.configuration, node.occurrence_id)
@@ -334,7 +334,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
         # Unserializable constructors still use the existing attempt-only path;
         # ordinary shared functions/instances must retain their live identity.
         thread_stream = bool(config.get('streaming_map') and config.get('execution') == 'thread')
-        from ..kernels.task_scope import owned_factory_declaration
+        from demiflow.execution.compiler_support.operator_policy import owned_factory_declaration
         owned_factory = (worker_mode == 'thread' and thread_stream
                          and owned_factory_declaration(declaration.callable_spec))
         force_live = bool(worker_mode == 'thread' and (live_iterator
@@ -352,7 +352,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
             node = replace(node, kernel=replace(node.kernel, state='nonrecoverable',
                 configuration={**_plain(config), 'thread_attempt': True}))
         elif config.get('task_batch_rows') and not config.get('shared_actor'):
-            from ..kernels.task_scope import task_uses_function_slots
+            from demiflow.execution.compiler_support.operator_policy import task_uses_function_slots
             if not task_uses_function_slots(_program_value(declaration)):
                 node = replace(node, kernel=replace(node.kernel, configuration={
                     **thaw_json(config), 'task_load_bytes': manifest['payload_ref']['size_bytes']}))
@@ -398,7 +398,7 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
                        occurrence_id=manifest['occurrence_id'])
     else:
         payload_ref = _artifact_from_json(manifest["payload_ref"])
-        from ..dataflow_shared import shared_binding
+        from demiflow.execution.contracts.dataflow import shared_binding
         binding = shared_binding(manifest, manifest['occurrence_id'])
         cached = shared_cache.get(binding['owner']) if binding and shared_cache is not None else None
         if cached is not None and (cached[0] != payload_ref or cached[1] != binding):

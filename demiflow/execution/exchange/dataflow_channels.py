@@ -163,7 +163,7 @@ def resolve_record(encoded, *, store, bounds):
     if ref.store_id != store.store_id:
         _fail("INVALID_CONTRACT", "record ref belongs to a different store domain")
     from demiflow.execution.contracts.record_codec import is_arrow_record
-    from demiflow.execution.kernels.arrow_payload import batch_cache
+    from demiflow.execution.storage.arrow_payload import batch_cache
     if is_arrow_record(skeleton):
         batch_cache(store, bounds).locate(skeleton)
         return skeleton

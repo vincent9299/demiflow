@@ -8,7 +8,7 @@ from collections import deque
 from collections.abc import Mapping
 
 from .contracts.dataflow_errors import DataflowError
-from demiflow.execution.record_schema import RecordSchemas
+from demiflow.execution.storage.record_schema import RecordSchemas
 from demiflow.execution.contracts.record_schema import encode_schema
 
 KEY = 'declared_arrow_schema'

@@ -317,7 +317,7 @@ def codec_window(kernel, operation, bounds):
         measured = kernel.state == 'none'
         if not measured and 'task_batch_rows' in kernel.configuration and operation is not None:
             from .dataflow_configuration import TASK_KINDS
-            from ..execution.kernels.task_scope import task_has_measurable_state
+            from demiflow.execution.compiler_support.operator_policy import task_has_measurable_state
             measured = (kernel.kind in TASK_KINDS
                         and task_has_measurable_state(getattr(operation, 'callable', None)))
         baseline = bounds.max_batch_bytes + bounds.max_row_bytes

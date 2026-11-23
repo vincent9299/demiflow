@@ -6,8 +6,8 @@ import functools
 import threading
 
 from .recovery_contract import document, RecoveryContractError
-from .operator_policy import (classify_operator_state, snapshot_auto_state,
-                              restore_auto_state, _json_fields)
+from demiflow.execution.compiler_support.operator_policy import classify_operator_state, _json_fields
+from demiflow.execution.kernels.operator_state import snapshot_auto_state, restore_auto_state
 
 
 def runtime_resource_state(owner):

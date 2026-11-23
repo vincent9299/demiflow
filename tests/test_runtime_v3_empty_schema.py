@@ -128,7 +128,7 @@ def test_combined_schema_conflict_rejected_and_legacy_missing_field_preserved():
     # Component check for the original sink-combine authority. No alternate
     # publication or row execution is introduced by this store-boundary fixture.
     from test_runtime_v3_k import services
-    from demiflow.execution.record_schema import RecordSchemas
+    from demiflow.execution.storage.record_schema import RecordSchemas
     from demiflow.execution.dataflow_sinks import combine_prepared_sinks, _artifact_json, RECORDS_MEDIA, MANIFEST_MEDIA
     from demiflow.execution.recovery_contract import document
     from demiflow.execution.contracts.dataflow_errors import DataflowError

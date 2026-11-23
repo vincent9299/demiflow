@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 import demiflow
 
-from demiflow.execution.operator_policy import (
-    snapshot_auto_state, restore_auto_state, AUTO_STATE_SCHEMA)
+from demiflow.execution.kernels.operator_state import snapshot_auto_state, restore_auto_state
+from demiflow.execution.compiler_support.operator_policy import AUTO_STATE_SCHEMA
 from demiflow.execution.recovery_contract import RecoveryContractError
 
 assert Path(demiflow.__file__).resolve().is_relative_to(Path(__file__).resolve().parents[1])

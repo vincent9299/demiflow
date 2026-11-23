@@ -19,7 +19,7 @@ def terminal_scalar(stream, *, spec, services, schema_ref=None):
     if kind not in ('schema', 'columns', 'size_bytes', 'collect_summary'):
         return None
     rows, size, schema = 0, 0, None
-    from demiflow.execution.record_schema import RecordSchemas
+    from demiflow.execution.storage.record_schema import RecordSchemas
     schemas = RecordSchemas(services)
     schema = schemas.read(schema_ref)
     stream.flush()

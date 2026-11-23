@@ -62,7 +62,7 @@ def _record_row(record: "Record", handle: "ActionHandle") -> "Row":
         return thaw_record_value(record.inline)
     if record.payload_ref is not None:
         from demiflow.execution.contracts.record_codec import is_arrow_record
-        from demiflow.execution.kernels.arrow_payload import batch_cache
+        from demiflow.execution.storage.arrow_payload import batch_cache
         if is_arrow_record(record):
             return batch_cache(handle.services.store, handle.bounds).row(record)
         ref = record.payload_ref
@@ -208,7 +208,7 @@ def iterate_batches(
     size = batch_size if batch_size is not None else _DEFAULT_BATCH_SIZE
 
     def gen():
-        from .record_schema import RecordSchemas
+        from demiflow.execution.storage.record_schema import RecordSchemas
         schemas = RecordSchemas(handle.services)
         rows_iter = handle.rows()
         batch: list = []
@@ -424,7 +424,7 @@ class TerminalSubscription:
                     if records:
                         break
                     from .outputs.arrow_rows import PublishedArrowRows
-                    from .record_schema import RecordSchemas
+                    from demiflow.execution.storage.record_schema import RecordSchemas
                     from .contracts.dataflow import ArtifactRef
                     header = self._queue[0]
                     if self._live_arrow is None:

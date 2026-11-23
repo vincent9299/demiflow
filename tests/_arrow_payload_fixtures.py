@@ -7,8 +7,8 @@ def install_arrow_probe(tmp_path, monkeypatch, *, forbid_rows=True):
     directory = Path(tmp_path) / 'arrow-probe'
     directory.mkdir()
     path = Path(tmp_path) / 'arrow-events.jsonl'
-    script = '''from demiflow.execution import arrow_payload as module
-from demiflow.execution.kernels.arrow_payload import ArrowBatchCache
+    script = '''from demiflow.execution.sources import arrow_payload as module
+from demiflow.execution.storage.arrow_payload import ArrowBatchCache
 from _worker_event_fixtures import emit
 if not getattr(module, '_fixture_probe_installed', False):
     module._fixture_probe_installed = True
@@ -44,8 +44,8 @@ if not getattr(module, '_fixture_probe_installed', False):
     test_root = Path(__file__).resolve().parent
     monkeypatch.setenv('PYTHONPATH', os.pathsep.join((str(directory), str(test_root.parent),
         str(test_root), os.environ.get('PYTHONPATH', ''))))
-    from demiflow.execution import arrow_payload as module
-    from demiflow.execution.kernels.arrow_payload import ArrowBatchCache
+    from demiflow.execution.sources import arrow_payload as module
+    from demiflow.execution.storage.arrow_payload import ArrowBatchCache
     old = {name: getattr(module, name) for name in ('publish_batch','fallback_row')}
     for name, value in old.items():
         monkeypatch.setattr(module, name, value)

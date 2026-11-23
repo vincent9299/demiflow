@@ -158,7 +158,7 @@ def test_duplicate_declared_keys_keep_original_row_admission(tmp_path):
 
 def test_projected_scratch_preserves_original_schema_provenance_and_document_bytes(tmp_path):
     import pyarrow as pa
-    from demiflow.execution.record_schema import RecordSchemas
+    from demiflow.execution.storage.record_schema import RecordSchemas
     from demiflow.execution.kernels.join_spool import project_join_document, _Spool
     from demiflow.execution.contracts.record_codec import _encode_record_document
     with store_fixture(tmp_path) as (_, store, _):

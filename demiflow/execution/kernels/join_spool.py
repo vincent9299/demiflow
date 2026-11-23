@@ -160,7 +160,7 @@ class _Spool:
             row = {field: thaw_record_value(record.inline[field]) for field in fields}
         elif (build_filter is not None or probe_filter is not None) and record.payload_ref is not None:
             from demiflow.execution.contracts.record_codec import is_arrow_record
-            from demiflow.execution.kernels.arrow_payload import batch_cache
+            from demiflow.execution.storage.arrow_payload import batch_cache
             if is_arrow_record(record):
                 cache = batch_cache(self.services.store, self.services.bounds, services=self.services)
                 batch, index = cache.locate(record)

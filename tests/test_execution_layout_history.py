@@ -57,6 +57,8 @@ from demiflow import data
 from demiflow.data.guards import require
 for fn in [data.from_items, data.read_legacy_queue_records, require]:
     result['public.' + fn.__name__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
+from demiflow import Dataset
+result['public.Dataset'] = [base64.b64encode(pickle.dumps(Dataset, protocol=5)).decode(), describe(Dataset)]
 from demiflow import PipelineBundleRef
 buffer = io.BytesIO(); ProgramPickler(buffer, protocol=5).dump(PipelineBundleRef.load)
 result['bundle_loader'] = base64.b64encode(buffer.getvalue()).decode()
@@ -172,3 +174,21 @@ def test_original_public_bound_bundle_loader_executes(original_carriers, tmp_pat
     ref = loader(tmp_path)
     assert ref.verify() == tmp_path.resolve()
     assert ref.module_key == 'p_' + ref.content_digest.removeprefix('sha256:')[:24]
+
+
+@pytest.mark.parametrize('private', [False, True])
+def test_published_whole_dataset_class_keeps_all_audited_method_pins(original_carriers, private):
+    encoded, expected = original_carriers['public.Dataset']
+    raw = base64.b64decode(encoded)
+    ref = SimpleNamespace(size_bytes=len(raw), digest=hashlib.sha256(raw).hexdigest())
+    loaded = load_private_payload(OriginalStore(raw), ref) if private else load_payload([raw])
+    assert describe(loaded) == expected
+
+
+def test_changed_dataset_prompt_method_is_not_normalized_to_old_code(original_carriers, monkeypatch):
+    from demiflow import Dataset
+    method = Dataset.map_prompt_async
+    before = describe(Dataset)
+    monkeypatch.setattr(method, '__code__', method.__code__.replace(co_consts=(*method.__code__.co_consts, 'changed')))
+    after = describe(Dataset)
+    assert after != before

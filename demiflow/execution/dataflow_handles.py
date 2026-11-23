@@ -457,7 +457,7 @@ class StoredMaterializedHandle:
             self._rows = rows
             self._schema = manifest.get("columns")
             if manifest.get('schema_ref') is not None:
-                from demiflow.execution.record_schema import RecordSchemas
+                from demiflow.execution.storage.record_schema import RecordSchemas
                 self._declared_schema_ref = _artifact_ref(manifest['schema_ref'])
                 self._declared_schema = RecordSchemas(store=store, bounds=self._bounds).read(self._declared_schema_ref)
                 store.retain(self._declared_schema_ref, owner=owner)
@@ -614,7 +614,7 @@ class StoredMaterializedHandle:
         self._bounds = state["bounds"]
         self._manifest_ref, self._blocks = state["manifest"], state["blocks"]
         self._rows, self._schema = state["rows"], state["schema"]
-        from demiflow.execution.record_schema import RecordSchemas
+        from demiflow.execution.storage.record_schema import RecordSchemas
         self._declared_schema_ref = state.get('schema_ref')
         self._declared_schema = RecordSchemas(store=self._store,
             bounds=self._bounds).read(self._declared_schema_ref)
@@ -649,10 +649,10 @@ class StoredMaterializedHandle:
         return self._iter_rows(with_schema=True)
 
     def _iter_rows(self, *, with_schema=False) -> Iterator[object]:
-        from demiflow.execution.record_schema import RecordSchemas
+        from demiflow.execution.storage.record_schema import RecordSchemas
         schemas = RecordSchemas(store=self._store, bounds=self._bounds) if with_schema else None
         count = 0
-        from demiflow.execution.kernels.arrow_payload import ArrowBatchCache
+        from demiflow.execution.storage.arrow_payload import ArrowBatchCache
         from demiflow.execution.contracts.record_codec import is_arrow_record
         arrow = ArrowBatchCache(self._store, self._bounds)
         from demiflow.execution.storage.segments import segment_refs

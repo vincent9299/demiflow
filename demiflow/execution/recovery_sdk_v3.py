@@ -338,7 +338,7 @@ def class_method_pins(cls, methods):
     module = sys.modules.get('demiflow.data.dataset')
     if module is None or cls is not vars(module).get('Dataset'):
         return methods
-    for name in (*_RELATIONAL_METHODS, 'checkpoint', 'map_async', 'batch_map', 'enqueue', 'save_lance'):
+    for name in (*_RELATIONAL_METHODS, *(key.removeprefix('Dataset.') for key in _DATASET_METHODS)):
         fn = vars(cls).get(name)
         if type(fn) is FunctionType and fn.__globals__ is vars(module):
             methods[name] = _method_pin(fn, methods[name])
@@ -421,7 +421,7 @@ _LAYOUT_SOURCE_TYPES = {'demiflow.execution.pipeline.package_loader.pipeline_bun
                                                                                                         '15864c89112752aeb587ddb71aedf94e871c79cfdc49d23ba56d55a7e10060e2']}},
  'demiflow.execution.sources.literal_source.LiteralSourceReference': {'old_module': 'demiflow.execution.literal_source',
                                                                       'old_source': '8348d18a5138ba595f97c105efdd67c8a8c34f64c2336ea1edb56efb4c1f9ee3',
-                                                                      'source': 'a211bf7b0a4ea694507cd3fb3756197b9bb8d95ce8e91741d6d2cb3d74499d5b',
+                                                                      'source': '2ab78c36e7b1c667941b74a03ea3fb84bd93cf189a56db5fcb014fa6e6c93751',
                                                                       'methods': {'__init__': ['15d22ac1354664b437c9f6bcd1491af3f8a745abb1b561d9eaf10bf3aa3afb82',
                                                                                                '15d22ac1354664b437c9f6bcd1491af3f8a745abb1b561d9eaf10bf3aa3afb82'],
                                                                                   '__repr__': ['67deaf69a2f6a014e3d72d57980f0891fb4525004ae6aee457d30e6039a467fc',
