@@ -162,3 +162,25 @@ def test_fixed_key_scan_resumes_a_real_partial_source_cut(tmp_path, monkeypatch)
             workers=2,partitions=1,worker_mode='thread',memory_bytes=1024<<20):
         assert rows() == []
         assert run.attempt == 2
+
+
+def test_ineligible_exclusion_keeps_ordinary_finite_input_fallback(tmp_path, monkeypatch):
+    from demiflow.execution.kernels import join_spool, lance_keys
+    left = str(tmp_path/'left.lance')
+    lance.write_dataset(pa.table({'k': [1,2,2,None], 'body': ['a','b','c','d']}), left)
+    seen = []
+    original = join_spool.join_pairs
+    def fallback(*args, **kwargs):
+        seen.append(kwargs['how'])
+        return original(*args, **kwargs)
+    def unexpected(*args, **kwargs):
+        raise AssertionError('a non-pinned right source must use the regular ports')
+    monkeypatch.setattr(lance_keys.BatchKeySelection, 'append', unexpected)
+    monkeypatch.setattr(join_spool, 'join_pairs', fallback)
+    with RunContext.start(tmp_path/'run', limits={'memory_bytes':64<<20, 'max_row_bytes':65536,
+            'max_batch_bytes':2<<20}), data.local_execution(workers=2,partitions=1,
+            worker_mode='thread',memory_bytes=64<<20):
+        right = data.from_items([{'k':1}, {'k':None}])
+        assert list(data.read_lance(left,version=1).exclude_keys(right,on='k').iter_rows()) == [
+            {'k':2,'body':'b'}, {'k':2,'body':'c'}, {'k':None,'body':'d'}]
+    assert seen == ['anti']
