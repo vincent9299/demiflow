@@ -134,7 +134,7 @@
     return svg;
   }
 
-  function filePanel({layout, filesHost, toggle, api, iconButton, onReference, onShowFilesTab, onBadgeChange}) {
+  function filePanel({layout, filesHost, toggle, api, iconButton, onReference, onRework, onRequestReview, onShowFilesTab, onBadgeChange}) {
     let disposed = false;
     let levels = Object.create(null), expanded = [], treeLoaded = false, projectRootPath = '';
     let gitChanges = [], gitBranch = '', gitIsRepo = false;
@@ -427,15 +427,33 @@
         };
         forgeStrip.append(pill);
       }
+      if (typeof onRequestReview === 'function' && latestChecks.review !== 'running') {
+        const revBtn = node('button', 'dev-forge-trigger', '发起评审');
+        revBtn.type = 'button';
+        revBtn.title = '手动发起一次独立只读 Forge 评审';
+        revBtn.onclick = () => onRequestReview();
+        forgeStrip.append(revBtn);
+      }
       const selected = items.find(i => i.key === activeCheckKey);
       forgeDetail.replaceChildren();
       if (selected) {
         const head = node('div', 'dev-forge-detail-head');
         head.append(node('strong', null, selected.label + ' · ' + selected.text));
+        const headBtns = node('div', 'dev-forge-detail-actions');
+        if (typeof onRework === 'function' && selected.tone !== 'ok' && selected.lines.length) {
+          const reworkBtn = node('button', 'dev-forge-rework', '带问题打回修改');
+          reworkBtn.type = 'button';
+          reworkBtn.onclick = () => {
+            const prompt = '请针对以下 Forge「' + selected.label + '」诊断逐项排查修复，并运行项目 pytest 验证：\n' + selected.lines.map(l => '- ' + l).join('\n');
+            onRework(prompt);
+          };
+          headBtns.append(reworkBtn);
+        }
         const closeDetail = node('button', 'dev-forge-detail-close', '收起');
         closeDetail.type = 'button';
         closeDetail.onclick = () => { activeCheckKey = null; renderForgeStrip(); };
-        head.append(closeDetail);
+        headBtns.append(closeDetail);
+        head.append(headBtns);
         const list = node('ul', 'dev-forge-detail-list');
         for (const line of selected.lines) list.append(node('li', null, line));
         forgeDetail.append(head, list);

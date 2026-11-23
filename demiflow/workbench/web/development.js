@@ -261,8 +261,21 @@ SOFTWARE.
       }
       box.focus();
     };
+    const sendGuidedMessage=text=>{
+      if(!text||!state.composer)return;
+      const box=state.composer.input;
+      box.value=text;
+      box.dispatchEvent(new Event('input',{bubbles:true}));
+      if(!state.composer.send.disabled&&!running(state.session)&&!state.sending){
+        state.composer.form.requestSubmit();
+      }else{
+        box.focus();
+      }
+    };
     state.files=DevelopmentNavigation.filePanel({layout,filesHost:filesPane,toggle:filesToggle,api,iconButton,
       onReference:insertReference,
+      onRework:prompt=>sendGuidedMessage(prompt),
+      onRequestReview:()=>sendGuidedMessage('请调用 request_pipeline_review 对当前会话的源码改动发起独立只读评审，无需修改代码。'),
       onShowFilesTab:()=>{sidebarOpen(true);setSidebarTab('files');},
       onBadgeChange:count=>{filesBadge.textContent=String(count);filesBadge.hidden=!count;}});
     const status=el('p','正在读取开发能力…','development-status');status.setAttribute('role','status');status.setAttribute('aria-live','polite');
@@ -532,7 +545,8 @@ SOFTWARE.
         const payload={session_id:state.session.id,submission_id:submission.id,text:message};
         let started=null;
         if(submission.after)await api(submission.steer?'dev-steer':'dev-enqueue',{}, {...payload,turn_id:submission.after});
-        else started=await api('dev-turn-start',{}, {...payload,expected_revision:state.session.revision});
+        else started=await api('dev-turn-start',{}, {...payload,expected_revision:state.session.revision,
+          ...(capabilities.backend!=='existing_http'?{auto_review:composer.autoReview}:{})});
         state.submission=null;
         if(drafts.get(draftKey)===message&&(draftRevisions.get(draftKey)||0)===sentDraftRevision){
           drafts.delete(draftKey);draftRevisions.delete(draftKey);saveDrafts(true);
