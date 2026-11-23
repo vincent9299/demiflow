@@ -150,6 +150,7 @@ POST_FIELDS = {
     'project-register': ({'root'}, {'name'}),
     'project-remove': ({'workspace_id', 'expected'}, set()),
     'project-permissions': ({'workspace_id', 'expected', 'run_submit', 'run_control', 'attach'}, set()),
+    'project-python': ({'workspace_id', 'expected', 'python'}, set()),
     'flow-register': ({'entry'}, {'params'}),
     'project-check': (set(), set()),
     'audit-check': ({'kind', 'expected_policy'}, {'digest'}),
@@ -629,6 +630,10 @@ class Handler(BaseHTTPRequestHandler):
         for key, value in request.items():
             if name == 'plan-preview' and key == 'params' and value is None:
                 continue  # Explicitly use the entry's default arguments.
+            if name == 'project-python' and key == 'python':
+                if value is not None and (type(value) is not str or len(value.encode()) > 2048):
+                    raise ForgeError('Invalid python field', code='invalid_request')
+                continue
             if key in {'expected_attempt', 'attempt'}:
                 if value is not None and (type(value) is not int or not 1 <= value <= 32):
                     raise ForgeError('Invalid attempt', code='invalid_request')
@@ -698,6 +703,8 @@ class Handler(BaseHTTPRequestHandler):
                     row['permissions']={k:permissions[k] for k in console.PERMISSIONS}
                     row['capabilities']={k:permissions[k] for k in console.CAPABILITIES}
                     row['allow_runs']=row['permissions']['run_submit']
+                import sys as _sys
+                value['default_python'] = _sys.executable
                 self._send(value)
                 return
             endpoint, root, permissions = self.server.resolve(url.path)
@@ -912,7 +919,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ForgeError('当前服务尚未安装可配置的本地开发代理。', code='operation_rejected')
                 with self._work(): value = self.server.development_settings.save(request)
                 self._send(value); return
-            if self.path in {'/api/project-create', '/api/project-register', '/api/project-remove', '/api/project-permissions','/api/project-capabilities'}:
+            if self.path in {'/api/project-create', '/api/project-register', '/api/project-remove', '/api/project-permissions','/api/project-capabilities','/api/project-python'}:
                 if self.server.registry is None:
                     raise ForgeError('Project management requires a console registry', code='operation_rejected')
                 request = self._body(self.path.removeprefix('/api/'))
@@ -940,9 +947,13 @@ class Handler(BaseHTTPRequestHandler):
                     action = {'/api/project-create': console.create, '/api/project-register': console.add,
                               '/api/project-remove': console.remove,
                               '/api/project-permissions': console.set_permissions,
-                              '/api/project-capabilities':console.set_capabilities}[self.path]
+                              '/api/project-capabilities':console.set_capabilities,
+                              '/api/project-python': console.set_python}[self.path]
                     value = action(self.server.registry, **request, **({'analysis_service':self.server.analysis or self.server.notebooks}
                         if self.path=='/api/project-capabilities' else {}))
+                    if self.path == '/api/project-python' and self.server.development_settings is not None:
+                        with self.server.development_settings.service.lock:
+                            self.server.development_settings.bindings.clear()
                 self._send(value)
                 return
             endpoint, root, permissions = self.server.resolve(self.path)

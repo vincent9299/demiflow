@@ -58,6 +58,7 @@ exports.apply = async function(ctx, config) {
       const plain={};
       for(const name of ['provider','model','reasoningEffort','messages','system','tools','toolHistory','temperature','maxTokens','stop','sessionId','purpose'])
         if(options[name]!==undefined) plain[name]=options[name];
+      if(config.reasoningEffort) plain.reasoningEffort=config.reasoningEffort;
       yield* exchange('stream',plain,options.signal);
     }
   }

@@ -14,12 +14,21 @@ from demiflow.resources.process_observation import UNIT_ENV
 from demiflow.workbench.conversations.common import reject
 
 
-def runtime_paths(config):
+def runtime_paths(config, *, project_python=None):
     paths = [Path('/usr'), Path('/lib'), Path('/lib64'), Path(sys.base_prefix), Path(sys.prefix),
              Path(__file__).resolve().parents[3]]
     executable = Path(config['executable']).resolve()
     paths.append(executable.parent.parent if executable.name == 'bin.js' or executable.suffix == '.js' else executable)
     if config.get('node'): paths.append(Path(config['node']).resolve())
+    if project_python:
+        py = Path(project_python)
+        if py.is_absolute():
+            paths.append(py.parent)
+            if py.parent.name in {'bin', 'Scripts'} and py.parent.parent not in {Path('/'), Path('/usr')}:
+                paths.append(py.parent.parent)
+            resolved = py.resolve()
+            if resolved.parent.name in {'bin', 'Scripts'} and resolved.parent.parent not in {Path('/'), Path('/usr')}:
+                paths.append(resolved.parent.parent)
     return tuple(sorted({str(path.absolute()) for path in paths}))
 
 

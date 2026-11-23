@@ -6,6 +6,7 @@ import os
 import re
 from pathlib import Path
 import secrets
+import sys
 from urllib.parse import urlsplit
 
 from .common import digest, read_file, reject, root_identity, safe_path, strict_json, text, wire
@@ -199,15 +200,24 @@ class GlobalSettings:
                 matches=[p for p in self.service.deployment.projects.values() if p['identity']==identity]
                 if len(matches)>1: reject('项目存在多个开发范围，请保留原登记身份。','conflict')
                 explicit=matches[0] if matches else None
-            if self.value is None and workspace in self.service.deployment.projects and explicit is self.service.deployment.projects[workspace] and explicit['identity']==identity:
+            configured_python = row.get('python')
+            if configured_python and not (Path(configured_python).is_file() and os.access(configured_python, os.X_OK)):
+                configured_python = ''
+            if (self.value is None and configured_python is None and workspace in self.service.deployment.projects
+                    and explicit is self.service.deployment.projects[workspace]
+                    and explicit['identity'] == identity):
                 return self.service.deployment,self.service.policy_hash,self.service.config_path
             effective=self.value or dict(provider=next(iter(self.templates)),config=next(iter(self.templates.values())))
-            cache_key=(workspace,digest(identity),digest(self.value))
+            cache_key=(workspace,digest(identity),digest(self.value),configured_python)
             if cache_key not in self.bindings:
                 if len(self.bindings)>=128: reject('自动项目绑定超过预算。','resource_limit')
                 if explicit and explicit['identity']==identity:
                     project=copy.deepcopy(explicit);project.pop('identity',None)
                 else: project=automatic_project(root)
+                if configured_python is not None:
+                    project['python'] = configured_python
+                else:
+                    project.pop('python', None)
                 value=copy.deepcopy(self.service.deployment.value)
                 value['projects']={workspace:project};value['providers']={effective['provider']:effective['config']}
                 deployment=Deployment(value)
